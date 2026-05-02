@@ -21,8 +21,8 @@ export class ExpenseCategoriesController {
 
   @Get()
   @RequirePermissions('expenses.view')
-  findAll(@Query() query: QueryExpenseCategoryDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryExpenseCategoryDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

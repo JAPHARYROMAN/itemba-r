@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateFarmFieldDto } from './dto/create-farm-field.dto';
 import { UpdateFarmFieldDto } from './dto/update-farm-field.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class FarmFieldsService {
@@ -16,10 +17,10 @@ export class FarmFieldsService {
     return field;
   }
 
-  async findAll(farmId?: string, companyId?: string, page = 1, limit = 20) {
+  async findAll(farmId?: string, companyId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
     if (farmId) where.farmId = farmId;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await this.prisma.$transaction([
       this.prisma.farmField.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { name: 'asc' }, include: { farm: { select: { name: true, farmCode: true } }, sizeUnit: { select: { symbol: true } } } }),
       this.prisma.farmField.count({ where }),

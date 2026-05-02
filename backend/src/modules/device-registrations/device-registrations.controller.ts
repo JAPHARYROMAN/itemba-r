@@ -20,8 +20,8 @@ export class DeviceRegistrationsController {
 
   @Get()
   @RequirePermissions('devices.view')
-  findAll(@Query() query: QueryDeviceRegistrationDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryDeviceRegistrationDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

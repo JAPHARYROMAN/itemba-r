@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class LaunchBlockersService {
@@ -30,7 +31,7 @@ export class LaunchBlockersService {
     return record;
   }
 
-  async findAll(query: any) {
+  async findAll(query: any, user?: any) {
     const { page = 1, pageSize = 20, status, severity, blockerType, moduleName, companyId, assignedToId } = query;
     const skip = (Number(page) - 1) * Number(pageSize);
     const where: any = { deletedAt: null };
@@ -38,7 +39,7 @@ export class LaunchBlockersService {
     if (severity) where.severity = severity;
     if (blockerType) where.blockerType = blockerType;
     if (moduleName) where.moduleName = moduleName;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (assignedToId) where.assignedToId = assignedToId;
     const [data, total] = await Promise.all([
       this.prisma.launchBlocker.findMany({ where, skip, take: Number(pageSize), orderBy: { createdAt: 'desc' } }),

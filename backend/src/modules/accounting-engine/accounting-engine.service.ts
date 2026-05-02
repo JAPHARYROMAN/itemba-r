@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class AccountingEngineService {
@@ -9,10 +10,10 @@ export class AccountingEngineService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async getSummary(query: any) {
+  async getSummary(query: any, user?: any) {
     const { companyId } = query;
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
 
     const [pendingCloses, openLocks, pendingAdjustments, pendingPostingRuns] = await Promise.all([
       this.prisma.accountingPeriodClose.count({ where: { ...where, status: 'PENDING' } }),

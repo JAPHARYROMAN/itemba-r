@@ -21,7 +21,7 @@ export class ItembaDashboardController {
   cockpit(
     @Query('companyId') companyId: string,
     @Query('divisionId') divisionId?: string,
-    @CurrentUser() user?: AuthUser,
+    @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
     return this.service.cockpit({ companyId, divisionId }, user);
   }

@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateBOQItemDto } from './dto/create-boq-item.dto';
 import { UpdateBOQItemDto } from './dto/update-boq-item.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class BOQItemsService {
@@ -21,10 +22,10 @@ export class BOQItemsService {
     return item;
   }
 
-  async findAll(projectId?: string, companyId?: string, page = 1, limit = 50) {
+  async findAll(projectId?: string, companyId?: string, page = 1, limit = 50, user?: any) {
     const where: any = { deletedAt: null };
     if (projectId) where.projectId = projectId;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await this.prisma.$transaction([
       this.prisma.bOQItem.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { boqCode: 'asc' }, include: { unit: { select: { symbol: true } } } }),
       this.prisma.bOQItem.count({ where }),

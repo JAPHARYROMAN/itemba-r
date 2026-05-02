@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class TenantsService {
@@ -14,9 +15,9 @@ export class TenantsService {
     return item;
   }
 
-  async findAll(companyId?: string, status?: string, tenantType?: string, search?: string, page = 1, limit = 20) {
+  async findAll(companyId?: string, status?: string, tenantType?: string, search?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
     if (tenantType) where.tenantType = tenantType;
     if (search) {

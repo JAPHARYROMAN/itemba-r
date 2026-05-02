@@ -3,6 +3,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateAllowanceTypeDto } from './dto/create-allowance-type.dto';
 import { UpdateAllowanceTypeDto } from './dto/update-allowance-type.dto';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class AllowanceTypesService {
@@ -17,7 +18,7 @@ export class AllowanceTypesService {
     const { page = 1, limit = 20, search, companyId } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (search) where.name = { contains: search, mode: 'insensitive' };
     const [data, total] = await Promise.all([
       this.prisma.allowanceType.findMany({

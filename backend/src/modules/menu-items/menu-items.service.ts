@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto';
 import { UpdateMenuItemDto } from './dto/update-menu-item.dto';
 import { MenuItemType } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class MenuItemsService {
@@ -19,9 +20,9 @@ export class MenuItemsService {
     return item;
   }
 
-  async findAll(companyId?: string, hospitalityFacilityId?: string, menuCategoryId?: string, isActive?: boolean, itemType?: MenuItemType, page = 1, limit = 20) {
+  async findAll(companyId?: string, hospitalityFacilityId?: string, menuCategoryId?: string, isActive?: boolean, itemType?: MenuItemType, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (hospitalityFacilityId) where.hospitalityFacilityId = hospitalityFacilityId;
     if (menuCategoryId) where.menuCategoryId = menuCategoryId;
     if (isActive !== undefined) where.isActive = isActive;

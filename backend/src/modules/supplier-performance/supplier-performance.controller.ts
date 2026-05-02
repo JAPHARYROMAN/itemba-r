@@ -9,8 +9,8 @@ export class SupplierPerformanceController {
 
   @Get()
   @RequirePermissions('supplier_performance.list')
-  findAll(@Query() query: any) {
-    return this.service.findAll(query);
+  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

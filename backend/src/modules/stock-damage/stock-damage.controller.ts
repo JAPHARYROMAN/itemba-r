@@ -22,8 +22,8 @@ export class StockDamageController {
   @Get()
   @RequirePermissions('stock_damage.view')
   @ApiOperation({ summary: 'List stock damage records' })
-  findAll(@Query() query: QueryStockDamageDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryStockDamageDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

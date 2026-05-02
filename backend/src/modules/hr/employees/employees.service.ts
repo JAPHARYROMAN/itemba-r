@@ -3,6 +3,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 const SENSITIVE_FIELDS = ['baseSalary', 'bankAccountNumber', 'bankName', 'bankBranch', 'tin', 'nssfNumber', 'nhifNumber'];
 
@@ -11,7 +12,7 @@ function hasSensitivePermission(user: any): boolean {
   return perms.includes('employees.sensitive.view') || perms.includes('payroll.sensitive.view');
 }
 
-function stripSensitive(employee: any, user: any): any {
+function stripSensitive(employee: any, user?: any): any {
   if (hasSensitivePermission(user)) return employee;
   const result = { ...employee };
   for (const f of SENSITIVE_FIELDS) delete result[f];
@@ -41,7 +42,7 @@ export class EmployeesService {
     } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (branchId) where.branchId = branchId;
     if (departmentId) where.departmentId = departmentId;
     if (positionId) where.positionId = positionId;

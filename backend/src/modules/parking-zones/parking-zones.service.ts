@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateParkingZoneDto } from './dto/create-parking-zone.dto';
 import { UpdateParkingZoneDto } from './dto/update-parking-zone.dto';
 import { ParkingZoneStatus, ParkingZoneVehicleType } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class ParkingZonesService {
@@ -33,10 +34,10 @@ export class ParkingZonesService {
     status?: ParkingZoneStatus,
     vehicleType?: ParkingZoneVehicleType,
     page = 1,
-    limit = 20,
+    limit = 20, user?: any,
   ) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (facilityId) where.facilityId = facilityId;
     if (status) where.status = status;
     if (vehicleType) where.vehicleType = vehicleType;

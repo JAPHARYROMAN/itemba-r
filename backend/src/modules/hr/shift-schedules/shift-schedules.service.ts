@@ -3,6 +3,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateShiftScheduleDto } from './dto/create-shift-schedule.dto';
 import { UpdateShiftScheduleDto } from './dto/update-shift-schedule.dto';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class ShiftSchedulesService {
@@ -17,7 +18,7 @@ export class ShiftSchedulesService {
     const { page = 1, limit = 20, employeeId, shiftId, companyId, dateFrom, dateTo } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (employeeId) where.employeeId = employeeId;
     if (shiftId) where.workShiftId = shiftId;
     if (dateFrom || dateTo) {

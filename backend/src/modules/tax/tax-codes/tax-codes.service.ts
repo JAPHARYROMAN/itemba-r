@@ -3,6 +3,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateTaxCodeDto } from './dto/create-tax-code.dto';
 import { UpdateTaxCodeDto } from './dto/update-tax-code.dto';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class TaxCodesService {
@@ -17,7 +18,7 @@ export class TaxCodesService {
     const { page = 1, limit = 20, companyId, taxTypeId, appliesTo, status } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (taxTypeId) where.taxTypeId = taxTypeId;
     if (appliesTo) where.appliesTo = appliesTo;
     if (status) where.status = status;

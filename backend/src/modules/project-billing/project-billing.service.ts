@@ -5,6 +5,7 @@ import { SalesOrdersService } from '../sales-orders/sales-orders.service';
 import { CreateProjectBillingDto } from './dto/create-project-billing.dto';
 import { UpdateProjectBillingDto } from './dto/update-project-billing.dto';
 import { ProjectBillingStatus } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 const CONSTRUCTION_PRODUCT_CODE = 'CONST-SVC';
 const CONSTRUCTION_CATEGORY_NAME = 'Construction Services';
@@ -34,10 +35,10 @@ export class ProjectBillingService {
     return billing;
   }
 
-  async findAll(projectId?: string, companyId?: string, page = 1, limit = 20) {
+  async findAll(projectId?: string, companyId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
     if (projectId) where.projectId = projectId;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await this.prisma.$transaction([
       this.prisma.projectBilling.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { billingDate: 'desc' }, include: { project: { select: { projectName: true, projectCode: true } } } }),
       this.prisma.projectBilling.count({ where }),

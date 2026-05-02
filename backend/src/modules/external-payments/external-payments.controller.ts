@@ -11,9 +11,13 @@ export class ExternalPaymentsController {
 
   @Get()
   @RequirePermissions('external_payments.view')
-  findAll(@Query() query: QueryExternalPaymentDto, @Request() req: any) {
+  findAll(
+    @Query() query: QueryExternalPaymentDto,
+    @Request() req: any,
+    @CurrentUser() user: AuthUser,
+  ) {
     const hasSensitive = (req.user?.permissions ?? []).includes('external_payments.sensitive.view');
-    return this.service.findAll(query, hasSensitive);
+    return this.service.findAll(query, hasSensitive, user);
   }
 
   @Get(':id')

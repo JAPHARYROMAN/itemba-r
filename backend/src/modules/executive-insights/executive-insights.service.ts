@@ -3,6 +3,7 @@ import { InsightStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateExecutiveInsightDto } from './dto/create-executive-insight.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class ExecutiveInsightsService {
@@ -15,8 +16,7 @@ export class ExecutiveInsightsService {
     const { page = 1, limit = 20, companyId, insightType, severity, status } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
-    else if (user.companyId) where.companyId = user.companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (insightType) where.insightType = insightType;
     if (severity) where.severity = severity;
     if (status) where.status = status;

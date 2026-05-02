@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 function hasPermission(user: any, perm: string): boolean {
   return Array.isArray(user?.permissions) && user.permissions.includes(perm);
@@ -38,11 +39,11 @@ export class ErrorLogsService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: any, user: any) {
+  async findAll(query: any, user?: any) {
     const { page = 1, limit = 20, companyId, userId, errorType, severity, status, module } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = {};
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (userId) where.userId = userId;
     if (errorType) where.errorType = errorType;
     if (severity) where.severity = severity;

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class DocumentTemplatesService {
@@ -9,11 +10,11 @@ export class DocumentTemplatesService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: any) {
+  async findAll(query: any, user?: any) {
     const { companyId, templateType, isActive, page = 1, limit = 20 } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (templateType) where.templateType = templateType;
     if (isActive !== undefined) where.isActive = isActive === 'true' || isActive === true;
     const [items, total] = await Promise.all([

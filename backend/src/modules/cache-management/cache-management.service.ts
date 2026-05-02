@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class CacheManagementService {
@@ -10,12 +11,12 @@ export class CacheManagementService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: any) {
+  async findAll(query: any, user?: any) {
     const { page = 1, pageSize = 20, cacheType, companyId } = query;
     const skip = (Number(page) - 1) * Number(pageSize);
     const where: any = {};
     if (cacheType) where.cacheType = cacheType;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
 
     const [data, total] = await Promise.all([
       this.prisma.cacheEntry.findMany({

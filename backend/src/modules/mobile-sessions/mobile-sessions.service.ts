@@ -3,6 +3,7 @@ import { AuditSeverity, MobileSessionStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { QueryMobileSessionDto } from './dto/query-mobile-session.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 const SAFE_SELECT = {
   id: true,
@@ -29,13 +30,13 @@ export class MobileSessionsService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: QueryMobileSessionDto) {
+  async findAll(query: QueryMobileSessionDto, user?: any) {
     const { page = 1, limit = 20, userId, deviceId, companyId, status } = query;
     const skip = (page - 1) * limit;
     const where: any = {};
     if (userId) where.userId = userId;
     if (deviceId) where.deviceId = deviceId;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
 
     const [data, total] = await Promise.all([

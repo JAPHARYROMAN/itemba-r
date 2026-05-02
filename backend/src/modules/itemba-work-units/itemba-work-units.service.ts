@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateItembaWorkUnitDto } from './dto/create-itemba-work-unit.dto';
 import { UpdateItembaWorkUnitDto } from './dto/update-itemba-work-unit.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class ItembaWorkUnitsService {
@@ -25,9 +26,9 @@ export class ItembaWorkUnitsService {
     return unit;
   }
 
-  async findAll(companyId?: string, divisionId?: string, page = 1, limit = 20) {
+  async findAll(companyId?: string, divisionId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (divisionId) where.divisionId = divisionId;
     const [data, total] = await this.prisma.$transaction([
       this.prisma.itembaWorkUnit.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { createdAt: 'desc' }, include: { company: { select: { name: true } }, division: { select: { name: true } } } }),

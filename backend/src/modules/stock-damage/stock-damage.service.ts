@@ -5,6 +5,7 @@ import { InventoryMovementsService } from '../inventory-movements/inventory-move
 import { CreateStockDamageDto } from './dto/create-stock-damage.dto';
 import { UpdateStockDamageDto } from './dto/update-stock-damage.dto';
 import { QueryStockDamageDto } from './dto/query-stock-damage.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class StockDamageService {
@@ -52,11 +53,11 @@ export class StockDamageService {
     return record;
   }
 
-  async findAll(query: QueryStockDamageDto) {
+  async findAll(query: QueryStockDamageDto, user?: any) {
     const { page = 1, limit = 20, companyId, branchId, status, productId } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (branchId) where.branchId = branchId;
     if (status) where.status = status;
     if (productId) where.productId = productId;

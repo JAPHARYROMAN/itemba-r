@@ -4,7 +4,15 @@ export { auditFor } from './audit-action.helper';
 export type { AuditVerb } from './audit-action.helper';
 export { PermissionCacheService } from './permission-cache.service';
 export type { CachedAuthPayload } from './permission-cache.service';
-export { CompanyScopeService } from './company-scope.service';
+export {
+  CompanyScopeService,
+  accessibleCompanyIdsFromUser,
+  applyCompanyScopeWhere,
+  assertCanAccessCompanyFromUser,
+  companyWhereForUser,
+  isGroupScopedUser,
+} from './company-scope.service';
+export type { CompanyScopedWhere } from './company-scope.service';
 export { AccountingControlService } from './accounting-control.service';
 export { PetroleumShiftControlService } from './petroleum-shift-control.service';
 export { StagedImportValidationService } from './staged-import-validation.service';

@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CreateFarmInputApplicationDto } from './dto/create-farm-input-application.dto';
 import { UpdateFarmInputApplicationDto } from './dto/update-farm-input-application.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class FarmInputApplicationsService {
@@ -22,11 +23,11 @@ export class FarmInputApplicationsService {
     return application;
   }
 
-  async findAll(cropSeasonId?: string, farmId?: string, companyId?: string, page = 1, limit = 20) {
+  async findAll(cropSeasonId?: string, farmId?: string, companyId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
     if (cropSeasonId) where.cropSeasonId = cropSeasonId;
     if (farmId) where.farmId = farmId;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await this.prisma.$transaction([
       this.prisma.farmInputApplication.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { applicationDate: 'desc' }, include: { product: { select: { name: true, sku: true } }, unit: { select: { symbol: true } } } }),
       this.prisma.farmInputApplication.count({ where }),

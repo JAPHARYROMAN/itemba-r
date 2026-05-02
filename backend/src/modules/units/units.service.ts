@@ -11,6 +11,7 @@ import { QueryUnitDto } from './dto/query-unit.dto';
 import { CreateUnitConversionDto } from './dto/create-unit-conversion.dto';
 import { UpdateUnitConversionDto } from './dto/update-unit-conversion.dto';
 import { AuditSeverity } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class UnitsService {
@@ -21,12 +22,12 @@ export class UnitsService {
 
   // ─── Units ───────────────────────────────────────────────────────────────
 
-  async findAllUnits(query: QueryUnitDto) {
+  async findAllUnits(query: QueryUnitDto, user?: any) {
     const { page = 1, limit = 20, companyId, status, unitType, search } = query;
     const skip = (page - 1) * limit;
 
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
     if (unitType) where.unitType = unitType;
     if (search) {
@@ -151,12 +152,12 @@ export class UnitsService {
 
   // ─── Unit Conversions ────────────────────────────────────────────────────
 
-  async findAllConversions(query: QueryUnitDto) {
+  async findAllConversions(query: QueryUnitDto, user?: any) {
     const { page = 1, limit = 20, companyId } = query;
     const skip = (page - 1) * limit;
 
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
 
     const [data, total] = await Promise.all([
       this.prisma.unitConversion.findMany({

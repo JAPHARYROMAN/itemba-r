@@ -21,8 +21,8 @@ export class IntegrationConnectionsController {
 
   @Get()
   @RequirePermissions('integration_connections.view')
-  findAll(@Query() query: QueryIntegrationConnectionDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryIntegrationConnectionDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

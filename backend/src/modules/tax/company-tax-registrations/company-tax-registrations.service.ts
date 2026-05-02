@@ -3,6 +3,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateCompanyTaxRegistrationDto } from './dto/create-company-tax-registration.dto';
 import { UpdateCompanyTaxRegistrationDto } from './dto/update-company-tax-registration.dto';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class CompanyTaxRegistrationsService {
@@ -17,7 +18,7 @@ export class CompanyTaxRegistrationsService {
     const { page = 1, limit = 20, companyId, status, registrationType } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
     if (registrationType) where.registrationType = registrationType;
     const [data, total] = await Promise.all([

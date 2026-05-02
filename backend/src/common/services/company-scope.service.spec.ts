@@ -1,6 +1,10 @@
 import { ForbiddenException } from '@nestjs/common';
 import { AccessLevel } from '@prisma/client';
-import { CompanyScopeService } from './company-scope.service';
+import {
+  applyCompanyScopeWhere,
+  companyWhereForUser,
+  CompanyScopeService,
+} from './company-scope.service';
 import { AuthUser } from '../decorators/current-user.decorator';
 
 const prisma = {
@@ -74,7 +78,39 @@ describe('CompanyScopeService', () => {
     ]);
 
     await expect(
-      service.assertCanAccessCompany(user({ companyId: null, companyAccess: undefined }), 'company-3'),
+      service.assertCanAccessCompany(
+        user({ companyId: null, companyAccess: undefined }),
+        'company-3',
+      ),
     ).resolves.toBeUndefined();
+  });
+
+  it('builds a multi-company filter from the authenticated user payload', () => {
+    expect(
+      companyWhereForUser(
+        user({
+          companyAccess: [
+            { companyId: 'company-2', accessLevel: AccessLevel.READ },
+            { companyId: 'company-3', accessLevel: AccessLevel.WRITE },
+          ],
+        }),
+      ),
+    ).toEqual({ companyId: { in: ['company-1', 'company-2', 'company-3'] } });
+  });
+
+  it('rejects an explicit query override outside the user company scope', () => {
+    expect(() => companyWhereForUser(user(), 'company-2')).toThrow(ForbiddenException);
+  });
+
+  it('mutates an existing where object with the safe company scope', () => {
+    const where: Record<string, unknown> = { deletedAt: null, status: 'ACTIVE' };
+
+    applyCompanyScopeWhere(where, user(), null);
+
+    expect(where).toEqual({
+      deletedAt: null,
+      status: 'ACTIVE',
+      companyId: { in: ['company-1'] },
+    });
   });
 });

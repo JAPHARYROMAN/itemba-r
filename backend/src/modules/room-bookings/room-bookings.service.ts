@@ -5,6 +5,7 @@ import { FoliosService } from '../folios/folios.service';
 import { CreateRoomBookingDto } from './dto/create-room-booking.dto';
 import { UpdateRoomBookingDto } from './dto/update-room-booking.dto';
 import { RoomBookingStatus, RoomStatus } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class RoomBookingsService {
@@ -32,9 +33,9 @@ export class RoomBookingsService {
     return booking;
   }
 
-  async findAll(companyId?: string, hospitalityFacilityId?: string, guestId?: string, roomId?: string, status?: RoomBookingStatus, page = 1, limit = 20) {
+  async findAll(companyId?: string, hospitalityFacilityId?: string, guestId?: string, roomId?: string, status?: RoomBookingStatus, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (hospitalityFacilityId) where.hospitalityFacilityId = hospitalityFacilityId;
     if (guestId) where.guestId = guestId;
     if (roomId) where.roomId = roomId;

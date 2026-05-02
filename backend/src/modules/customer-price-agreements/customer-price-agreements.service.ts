@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateCustomerPriceAgreementDto } from './dto/create-customer-price-agreement.dto';
 import { UpdateCustomerPriceAgreementDto } from './dto/update-customer-price-agreement.dto';
 import { QueryCustomerPriceAgreementDto } from './dto/query-customer-price-agreement.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class CustomerPriceAgreementsService {
@@ -39,11 +40,11 @@ export class CustomerPriceAgreementsService {
     return record;
   }
 
-  async findAll(query: QueryCustomerPriceAgreementDto) {
+  async findAll(query: QueryCustomerPriceAgreementDto, user?: any) {
     const { page = 1, limit = 20, companyId, customerId, status } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (customerId) where.customerId = customerId;
     if (status) where.status = status;
 

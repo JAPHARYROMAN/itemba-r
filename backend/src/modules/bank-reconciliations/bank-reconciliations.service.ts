@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 /**
  * JournalEntry.referenceType values that should win disambiguation when
@@ -40,11 +41,11 @@ export class BankReconciliationsService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: any) {
+  async findAll(query: any, user?: any) {
     const { companyId, bankAccountId, status, page = 1, limit = 20 } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (bankAccountId) where.bankAccountId = bankAccountId;
     if (status) where.status = status;
     const [items, total] = await Promise.all([

@@ -5,6 +5,7 @@ import { CreateBusinessLicenseDto } from './dto/create-business-license.dto';
 import { UpdateBusinessLicenseDto } from './dto/update-business-license.dto';
 import { RenewBusinessLicenseDto } from './dto/renew-business-license.dto';
 import { BusinessLicenseStatus, BusinessLicenseType } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class BusinessLicensesService {
@@ -27,9 +28,9 @@ export class BusinessLicensesService {
     return license;
   }
 
-  async findAll(companyId?: string, divisionId?: string, licensedBusinessUnitId?: string, status?: BusinessLicenseStatus, licenseType?: BusinessLicenseType, search?: string, page = 1, limit = 20) {
+  async findAll(companyId?: string, divisionId?: string, licensedBusinessUnitId?: string, status?: BusinessLicenseStatus, licenseType?: BusinessLicenseType, search?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (divisionId) where.divisionId = divisionId;
     if (licensedBusinessUnitId) where.licensedBusinessUnitId = licensedBusinessUnitId;
     if (status) where.status = status;
@@ -67,7 +68,7 @@ export class BusinessLicensesService {
     return license;
   }
 
-  async findExpiring(companyId?: string, daysAhead = 30) {
+  async findExpiring(companyId?: string, daysAhead = 30, user?: any) {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() + daysAhead);
     const where: any = {
@@ -75,7 +76,7 @@ export class BusinessLicensesService {
       status: { not: BusinessLicenseStatus.CANCELLED },
       expiryDate: { lte: cutoff, gte: new Date() },
     };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     return this.prisma.businessLicense.findMany({
       where,
       orderBy: { expiryDate: 'asc' },

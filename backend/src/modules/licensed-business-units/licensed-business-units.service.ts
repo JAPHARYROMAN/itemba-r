@@ -5,7 +5,7 @@ import { CreateLicensedBusinessUnitDto } from './dto/create-licensed-business-un
 import { UpdateLicensedBusinessUnitDto } from './dto/update-licensed-business-unit.dto';
 import { AccessLevel, BusinessUnitStatus, Prisma } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { CompanyScopeService } from '../../common/services';
+import { CompanyScopeService, applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class LicensedBusinessUnitsService {
@@ -39,7 +39,7 @@ export class LicensedBusinessUnitsService {
       deletedAt: null,
       ...(accessibleCompanyIds && { companyId: { in: accessibleCompanyIds } }),
     };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (divisionId) where.divisionId = divisionId;
     if (status) where.status = status;
     if (search) where.OR = [

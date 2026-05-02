@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CreatePackageMovementDto } from './dto/create-package-movement.dto';
 import { QueryPackageMovementDto } from './dto/query-package-movement.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class PackageMovementsService {
@@ -97,11 +98,11 @@ export class PackageMovementsService {
     return record;
   }
 
-  async findAll(query: QueryPackageMovementDto) {
+  async findAll(query: QueryPackageMovementDto, user?: any) {
     const { page = 1, limit = 20, companyId, customerId, returnablePackageId, movementType } = query;
     const skip = (page - 1) * limit;
     const where: any = {};
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (customerId) where.customerId = customerId;
     if (returnablePackageId) where.returnablePackageId = returnablePackageId;
     if (movementType) where.movementType = movementType;

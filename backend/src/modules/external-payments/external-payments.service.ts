@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateExternalPaymentDto } from './dto/create-external-payment.dto';
 import { QueryExternalPaymentDto } from './dto/query-external-payment.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class ExternalPaymentsService {
@@ -40,11 +41,11 @@ export class ExternalPaymentsService {
     return base;
   }
 
-  async findAll(query: QueryExternalPaymentDto, includeSensitive: boolean) {
+  async findAll(query: QueryExternalPaymentDto, includeSensitive: boolean, user?: any) {
     const { page = 1, limit = 20, companyId, providerId, status, paymentContextType } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (providerId) where.providerId = providerId;
     if (status) where.status = status;
     if (paymentContextType) where.paymentContextType = paymentContextType;

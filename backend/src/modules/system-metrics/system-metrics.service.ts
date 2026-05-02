@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class SystemMetricsService {
@@ -10,12 +11,12 @@ export class SystemMetricsService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: any) {
+  async findAll(query: any, user?: any) {
     const { page = 1, limit = 20, metricType, companyId, dateFrom, dateTo } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = {};
     if (metricType) where.metricType = metricType;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (dateFrom || dateTo) {
       where.recordedAt = {};
       if (dateFrom) where.recordedAt.gte = new Date(dateFrom);

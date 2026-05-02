@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateRouteDto } from './dto/create-route.dto';
 import { UpdateRouteDto } from './dto/update-route.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class RoutesService {
@@ -16,9 +17,9 @@ export class RoutesService {
     return route;
   }
 
-  async findAll(companyId?: string, page = 1, limit = 20) {
+  async findAll(companyId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await this.prisma.$transaction([
       this.prisma.route.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { name: 'asc' } }),
       this.prisma.route.count({ where }),

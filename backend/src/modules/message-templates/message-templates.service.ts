@@ -5,6 +5,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateMessageTemplateDto } from './dto/create-message-template.dto';
 import { UpdateMessageTemplateDto } from './dto/update-message-template.dto';
 import { QueryMessageTemplateDto } from './dto/query-message-template.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class MessageTemplatesService {
@@ -13,11 +14,11 @@ export class MessageTemplatesService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: QueryMessageTemplateDto) {
+  async findAll(query: QueryMessageTemplateDto, user?: any) {
     const { page = 1, limit = 20, companyId, channel, templateType, status } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (channel) where.channel = channel;
     if (templateType) where.templateType = templateType;
     if (status) where.status = status;

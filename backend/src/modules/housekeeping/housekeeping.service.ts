@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateHousekeepingTaskDto } from './dto/create-housekeeping-task.dto';
 import { UpdateHousekeepingTaskDto } from './dto/update-housekeeping-task.dto';
 import { HousekeepingTaskStatus, HousekeepingTaskType, RoomStatus } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class HousekeepingService {
@@ -25,9 +26,9 @@ export class HousekeepingService {
     return task;
   }
 
-  async findAll(companyId?: string, hospitalityFacilityId?: string, roomId?: string, status?: HousekeepingTaskStatus, taskType?: HousekeepingTaskType, page = 1, limit = 20) {
+  async findAll(companyId?: string, hospitalityFacilityId?: string, roomId?: string, status?: HousekeepingTaskStatus, taskType?: HousekeepingTaskType, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (hospitalityFacilityId) where.hospitalityFacilityId = hospitalityFacilityId;
     if (roomId) where.roomId = roomId;
     if (status) where.status = status;

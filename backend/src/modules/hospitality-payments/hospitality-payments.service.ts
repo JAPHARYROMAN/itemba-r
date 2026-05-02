@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateHospitalityPaymentDto } from './dto/create-hospitality-payment.dto';
 import { HospitalityPaymentContextType, RestaurantOrderPaymentStatus } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class HospitalityPaymentsService {
@@ -63,9 +64,9 @@ export class HospitalityPaymentsService {
     return payment;
   }
 
-  async findAll(companyId?: string, roomBookingId?: string, restaurantOrderId?: string, paymentContextType?: string, page = 1, limit = 20) {
+  async findAll(companyId?: string, roomBookingId?: string, restaurantOrderId?: string, paymentContextType?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (roomBookingId) where.roomBookingId = roomBookingId;
     if (restaurantOrderId) where.restaurantOrderId = restaurantOrderId;
     if (paymentContextType) where.paymentContextType = paymentContextType;

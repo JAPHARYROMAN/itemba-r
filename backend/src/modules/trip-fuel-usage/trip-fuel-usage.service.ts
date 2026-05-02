@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateTripFuelUsageDto } from './dto/create-trip-fuel-usage.dto';
 import { UpdateTripFuelUsageDto } from './dto/update-trip-fuel-usage.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class TripFuelUsageService {
@@ -20,9 +21,9 @@ export class TripFuelUsageService {
     return this.prisma.tripFuelUsage.findMany({ where: { tripId, deletedAt: null }, orderBy: { fuelDate: 'desc' } });
   }
 
-  async findAll(companyId?: string, page = 1, limit = 20) {
+  async findAll(companyId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await this.prisma.$transaction([
       this.prisma.tripFuelUsage.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { fuelDate: 'desc' } }),
       this.prisma.tripFuelUsage.count({ where }),

@@ -142,7 +142,7 @@ describe('Job worker data exports (e2e)', () => {
     expect(queuedJob.status).toBe(BackgroundJobStatus.QUEUED);
     expect(queuedJob.companyId).toBe(companyId);
 
-    const drain = await worker.drainOnce(1);
+    const drain = await worker.drainOnce(1, { jobId: queuedJob.id });
     expect(drain.skipped).toBe(false);
     expect(drain.leased).toBe(1);
     expect(drain.settled).toEqual([{ jobId: queuedJob.id, status: 'fulfilled' }]);

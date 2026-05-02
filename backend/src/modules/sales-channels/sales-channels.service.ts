@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateSalesChannelDto } from './dto/create-sales-channel.dto';
 import { UpdateSalesChannelDto } from './dto/update-sales-channel.dto';
 import { QuerySalesChannelDto } from './dto/query-sales-channel.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class SalesChannelsService {
@@ -33,11 +34,11 @@ export class SalesChannelsService {
     return record;
   }
 
-  async findAll(query: QuerySalesChannelDto) {
+  async findAll(query: QuerySalesChannelDto, user?: any) {
     const { page = 1, limit = 20, companyId, branchId, channelType, isActive } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (branchId) where.branchId = branchId;
     if (channelType) where.channelType = channelType;
     if (isActive !== undefined) where.isActive = isActive;

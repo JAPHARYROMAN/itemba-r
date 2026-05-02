@@ -5,6 +5,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateDeviceRegistrationDto } from './dto/create-device-registration.dto';
 import { UpdateDeviceRegistrationDto } from './dto/update-device-registration.dto';
 import { QueryDeviceRegistrationDto } from './dto/query-device-registration.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 const SAFE_SELECT = {
   id: true,
@@ -32,12 +33,12 @@ export class DeviceRegistrationsService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: QueryDeviceRegistrationDto) {
+  async findAll(query: QueryDeviceRegistrationDto, user?: any) {
     const { page = 1, limit = 20, userId, companyId, deviceType, status } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
     if (userId) where.userId = userId;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (deviceType) where.deviceType = deviceType;
     if (status) where.status = status;
 

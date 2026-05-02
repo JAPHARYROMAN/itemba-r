@@ -9,7 +9,7 @@ export class AccountingEngineController {
 
   @Get('summary')
   @RequirePermissions('accounting_engine.dashboard')
-  getSummary(@Query() query: any) {
-    return this.service.getSummary(query);
+  getSummary(@Query() query: any, @CurrentUser() user: AuthUser) {
+    return this.service.getSummary(query, user);
   }
 }

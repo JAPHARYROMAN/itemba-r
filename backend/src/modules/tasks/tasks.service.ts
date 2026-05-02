@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class TasksService {
@@ -12,8 +13,7 @@ export class TasksService {
     const { page = 1, limit = 20, companyId, status, assignedToId, taskType, priority } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
-    else if (user.companyId) where.companyId = user.companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
     if (assignedToId) where.assignedToId = assignedToId;
     if (taskType) where.taskType = taskType;

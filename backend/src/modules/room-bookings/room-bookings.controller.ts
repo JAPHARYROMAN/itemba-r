@@ -28,9 +28,9 @@ export class RoomBookingsController {
     @Query('roomId') roomId?: string,
     @Query('status') status?: RoomBookingStatus,
     @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
-    return this.service.findAll(companyId, hospitalityFacilityId, guestId, roomId, status, page ? +page : 1, limit ? +limit : 20);
+    return this.service.findAll(companyId, hospitalityFacilityId, guestId, roomId, status, page ? +page : 1, limit ? +limit : 20, user);
   }
 
   @Get(':id')

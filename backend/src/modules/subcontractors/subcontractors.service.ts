@@ -2,8 +2,10 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { CreateSubcontractorDto } from './dto/create-subcontractor.dto';
 import { UpdateSubcontractorDto } from './dto/update-subcontractor.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -16,6 +18,7 @@ export class SubcontractorsService {
     private prisma: PrismaService,
     private audit: AuditLogsService,
     private codes: EntityCodeGeneratorService,
+    private postingEngine: PostingEngineService,
   ) {}
 
   async create(dto: CreateSubcontractorDto, userId: string) {
@@ -28,10 +31,10 @@ export class SubcontractorsService {
     return sub;
   }
 
-  async findAll(projectId?: string, companyId?: string, page = 1, limit = 20) {
+  async findAll(projectId?: string, companyId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
     if (projectId) where.projectId = projectId;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await this.prisma.$transaction([
       this.prisma.subcontractorRecord.findMany({
         where, skip: (page - 1) * limit, take: limit, orderBy: { createdAt: 'desc' },
@@ -120,38 +123,31 @@ export class SubcontractorsService {
       let journalEntryId: string | null = null;
       if (subcontractorCostId && accountsPayableId) {
         const journalNumber = await this.codes.next({ entityType: 'JournalEntry', companyId: sub.companyId, tx });
-        const je = await tx.journalEntry.create({
-          data: {
-            journalNumber,
-            companyId: sub.companyId,
-            transactionDate: new Date(),
-            description: `Subcontractor claim — ${sub.name}${sub.project ? ` (${sub.project.projectName})` : ''}`,
-            referenceType: 'SubcontractorClaim',
-            referenceId: payable.id,
-            status: 'DRAFT',
-            totalDebit: amount,
-            totalCredit: amount,
-            createdById: userId,
-            lines: {
-              create: [
-                {
-                  accountId: subcontractorCostId,
-                  description: `Subcontractor work — ${dto.description}`,
-                  debit: amount,
-                  credit: 0,
-                  companyId: sub.companyId,
-                },
-                {
-                  accountId: accountsPayableId,
-                  description: `Payable to ${sub.name}`,
-                  debit: 0,
-                  credit: amount,
-                  companyId: sub.companyId,
-                },
-              ],
+        const je = await this.postingEngine.postLines({
+          journalNumber,
+          companyId: sub.companyId,
+          transactionDate: new Date(),
+          description: `Subcontractor claim — ${sub.name}${sub.project ? ` (${sub.project.projectName})` : ''}`,
+          referenceType: 'SubcontractorClaim',
+          referenceId: payable.id,
+          status: 'DRAFT',
+          userId,
+          moduleName: 'subcontractor_claim',
+          lines: [
+            {
+              accountId: subcontractorCostId,
+              description: `Subcontractor work — ${dto.description}`,
+              debit: amount,
+              credit: 0,
             },
-          },
-        });
+            {
+              accountId: accountsPayableId,
+              description: `Payable to ${sub.name}`,
+              debit: 0,
+              credit: amount,
+            },
+          ],
+        }, tx);
         journalEntryId = je.id;
         await tx.payable.update({ where: { id: payable.id }, data: { journalEntryId } });
       } else {
@@ -280,38 +276,31 @@ export class SubcontractorsService {
         const bankId = accounts.find((a) => a.accountCode === '1010')?.id;
         if (accountsPayableId && bankId) {
           const journalNumber = await this.codes.next({ entityType: 'JournalEntry', companyId: sub.companyId, tx });
-          const je = await tx.journalEntry.create({
-            data: {
-              journalNumber,
-              companyId: sub.companyId,
-              transactionDate: new Date(),
-              description: `Subcontractor payment — ${sub.name} (${targetPayable.payableNumber})`,
-              referenceType: 'SubcontractorPayment',
-              referenceId: targetPayable.id,
-              status: 'DRAFT',
-              totalDebit: amount,
-              totalCredit: amount,
-              createdById: userId,
-              lines: {
-                create: [
-                  {
-                    accountId: accountsPayableId,
-                    description: `Settle ${targetPayable.payableNumber}`,
-                    debit: amount,
-                    credit: 0,
-                    companyId: sub.companyId,
-                  },
-                  {
-                    accountId: bankId,
-                    description: `Cash paid to ${sub.name}${dto.reference ? ` (ref ${dto.reference})` : ''}`,
-                    debit: 0,
-                    credit: amount,
-                    companyId: sub.companyId,
-                  },
-                ],
+          const je = await this.postingEngine.postLines({
+            journalNumber,
+            companyId: sub.companyId,
+            transactionDate: new Date(),
+            description: `Subcontractor payment — ${sub.name} (${targetPayable.payableNumber})`,
+            referenceType: 'SubcontractorPayment',
+            referenceId: targetPayable.id,
+            status: 'DRAFT',
+            userId,
+            moduleName: 'subcontractor_payment',
+            lines: [
+              {
+                accountId: accountsPayableId,
+                description: `Settle ${targetPayable.payableNumber}`,
+                debit: amount,
+                credit: 0,
               },
-            },
-          });
+              {
+                accountId: bankId,
+                description: `Cash paid to ${sub.name}${dto.reference ? ` (ref ${dto.reference})` : ''}`,
+                debit: 0,
+                credit: amount,
+              },
+            ],
+          }, tx);
           journalEntryId = je.id;
         } else {
           this.logger.warn(

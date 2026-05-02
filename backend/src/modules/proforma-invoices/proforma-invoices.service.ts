@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateProformaInvoiceDto } from './dto/create-proforma-invoice.dto';
 import { UpdateProformaInvoiceDto } from './dto/update-proforma-invoice.dto';
 import { QueryProformaInvoiceDto } from './dto/query-proforma-invoice.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 function calcLines(lines: any[]) {
   let subtotal = 0, totalDiscount = 0, totalTax = 0;
@@ -85,11 +86,11 @@ export class ProformaInvoicesService {
     return this.findOne(record.id);
   }
 
-  async findAll(query: QueryProformaInvoiceDto) {
+  async findAll(query: QueryProformaInvoiceDto, user?: any) {
     const { page = 1, limit = 20, companyId, status, customerId } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
     if (customerId) where.customerId = customerId;
 

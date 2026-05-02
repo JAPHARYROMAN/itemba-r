@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateConstructionProjectDto } from './dto/create-construction-project.dto';
 import { UpdateConstructionProjectDto } from './dto/update-construction-project.dto';
 import { ConstructionProjectStatus } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class ConstructionProjectsService {
@@ -19,9 +20,9 @@ export class ConstructionProjectsService {
     return project;
   }
 
-  async findAll(companyId?: string, status?: ConstructionProjectStatus, page = 1, limit = 20) {
+  async findAll(companyId?: string, status?: ConstructionProjectStatus, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
     const [data, total] = await this.prisma.$transaction([
       this.prisma.constructionProject.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { createdAt: 'desc' }, include: { company: { select: { name: true } }, division: { select: { name: true } }, projectManager: { select: { fullName: true } } } }),

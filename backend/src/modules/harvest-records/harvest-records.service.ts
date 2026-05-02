@@ -2,9 +2,11 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { CreateHarvestRecordDto } from './dto/create-harvest-record.dto';
 import { UpdateHarvestRecordDto } from './dto/update-harvest-record.dto';
 import { HarvestRecordStatus, InventoryMovementType } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -21,6 +23,7 @@ export class HarvestRecordsService {
     private prisma: PrismaService,
     private audit: AuditLogsService,
     private codes: EntityCodeGeneratorService,
+    private postingEngine: PostingEngineService,
   ) {}
 
   async create(dto: CreateHarvestRecordDto, userId: string) {
@@ -32,11 +35,11 @@ export class HarvestRecordsService {
     return harvest;
   }
 
-  async findAll(cropSeasonId?: string, farmId?: string, companyId?: string, page = 1, limit = 20) {
+  async findAll(cropSeasonId?: string, farmId?: string, companyId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
     if (cropSeasonId) where.cropSeasonId = cropSeasonId;
     if (farmId) where.farmId = farmId;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await this.prisma.$transaction([
       this.prisma.harvestRecord.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { harvestDate: 'desc' }, include: { farm: { select: { name: true } }, cropSeason: { select: { seasonName: true } }, unit: { select: { symbol: true } } } }),
       this.prisma.harvestRecord.count({ where }),
@@ -178,38 +181,31 @@ export class HarvestRecordsService {
         const cropIncomeId = accounts.find((a) => a.accountCode === '4200')?.id;
         if (inventoryAssetId && cropIncomeId) {
           const journalNumber = await this.codes.next({ entityType: 'JournalEntry', companyId: h.companyId, tx });
-          const je = await tx.journalEntry.create({
-            data: {
-              journalNumber,
-              companyId: h.companyId,
-              transactionDate: h.harvestDate,
-              description: `Harvest ${h.harvestNumber} — ${h.farm.name}`,
-              referenceType: 'HarvestRecord',
-              referenceId: id,
-              status: 'DRAFT',
-              totalDebit: totalValue,
-              totalCredit: totalValue,
-              createdById: userId,
-              lines: {
-                create: [
-                  {
-                    accountId: inventoryAssetId,
-                    description: `Harvested produce — ${h.product?.name ?? 'crop'}`,
-                    debit: totalValue,
-                    credit: 0,
-                    companyId: h.companyId,
-                  },
-                  {
-                    accountId: cropIncomeId,
-                    description: `Production income — ${h.harvestNumber}`,
-                    debit: 0,
-                    credit: totalValue,
-                    companyId: h.companyId,
-                  },
-                ],
+          const je = await this.postingEngine.postLines({
+            journalNumber,
+            companyId: h.companyId,
+            transactionDate: h.harvestDate,
+            description: `Harvest ${h.harvestNumber} — ${h.farm.name}`,
+            referenceType: 'HarvestRecord',
+            referenceId: id,
+            status: 'DRAFT',
+            userId,
+            moduleName: 'harvest_records',
+            lines: [
+              {
+                accountId: inventoryAssetId,
+                description: `Harvested produce — ${h.product?.name ?? 'crop'}`,
+                debit: totalValue,
+                credit: 0,
               },
-            },
-          });
+              {
+                accountId: cropIncomeId,
+                description: `Production income — ${h.harvestNumber}`,
+                debit: 0,
+                credit: totalValue,
+              },
+            ],
+          }, tx);
           journalEntryId = je.id;
         } else {
           this.logger.warn(

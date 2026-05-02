@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateAuditEvidencePackDto } from './dto/create-audit-evidence-pack.dto';
 import { UpdateAuditEvidencePackDto } from './dto/update-audit-evidence-pack.dto';
 import { CreateAuditEvidencePackItemDto } from './dto/create-audit-evidence-pack-item.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class AuditEvidencePacksService {
@@ -18,7 +19,7 @@ export class AuditEvidencePacksService {
     const { page = 1, limit = 20, companyId, packType, status } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (packType) where.packType = packType;
     if (status) where.status = status;
     const [data, total] = await Promise.all([

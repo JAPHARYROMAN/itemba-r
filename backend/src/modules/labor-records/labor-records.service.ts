@@ -5,6 +5,7 @@ import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code
 import { CreateLaborRecordDto } from './dto/create-labor-record.dto';
 import { UpdateLaborRecordDto } from './dto/update-labor-record.dto';
 import { LaborPaymentStatus } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class LaborRecordsService {
@@ -23,9 +24,9 @@ export class LaborRecordsService {
     return record;
   }
 
-  async findAll(companyId?: string, divisionId?: string, paymentStatus?: LaborPaymentStatus, page = 1, limit = 20) {
+  async findAll(companyId?: string, divisionId?: string, paymentStatus?: LaborPaymentStatus, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (divisionId) where.divisionId = divisionId;
     if (paymentStatus) where.paymentStatus = paymentStatus;
     const [data, total] = await this.prisma.$transaction([

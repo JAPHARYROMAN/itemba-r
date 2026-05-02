@@ -28,9 +28,9 @@ export class HousekeepingController {
     @Query('status') status?: HousekeepingTaskStatus,
     @Query('taskType') taskType?: HousekeepingTaskType,
     @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
-    return this.service.findAll(companyId, hospitalityFacilityId, roomId, status, taskType, page ? +page : 1, limit ? +limit : 20);
+    return this.service.findAll(companyId, hospitalityFacilityId, roomId, status, taskType, page ? +page : 1, limit ? +limit : 20, user);
   }
 
   @Get(':id')

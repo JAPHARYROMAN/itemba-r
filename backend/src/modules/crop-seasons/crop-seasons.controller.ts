@@ -17,8 +17,8 @@ export class CropSeasonsController {
   create(@Body() dto: CreateCropSeasonDto, @CurrentUser() user: AuthUser) { return this.service.create(dto, user.id); }
 
   @Get() @RequirePermissions('crop_seasons.view')
-  findAll(@Query('farmId') farmId?: string, @Query('companyId') companyId?: string, @Query('status') status?: CropSeasonStatus, @Query('page') page?: string, @Query('limit') limit?: string) {
-    return this.service.findAll(farmId, companyId, status, page ? +page : 1, limit ? +limit : 20);
+  findAll(@Query('farmId') farmId?: string, @Query('companyId') companyId?: string, @Query('status') status?: CropSeasonStatus, @Query('page') page?: string, @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser) {
+    return this.service.findAll(farmId, companyId, status, page ? +page : 1, limit ? +limit : 20, user);
   }
 
   @Get(':id') @RequirePermissions('crop_seasons.view')

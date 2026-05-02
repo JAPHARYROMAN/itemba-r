@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class PerformanceTracesService {
@@ -10,7 +11,7 @@ export class PerformanceTracesService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: any) {
+  async findAll(query: any, user?: any) {
     const {
       page = 1,
       pageSize = 20,
@@ -24,7 +25,7 @@ export class PerformanceTracesService {
     const where: any = {};
     if (traceType) where.traceType = traceType;
     if (status) where.status = status;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (minDurationMs || maxDurationMs) {
       where.durationMs = {};
       if (minDurationMs) where.durationMs.gte = Number(minDurationMs);

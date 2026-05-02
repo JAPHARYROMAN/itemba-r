@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CreateEquipmentUsageDto } from './dto/create-equipment-usage.dto';
 import { UpdateEquipmentUsageDto } from './dto/update-equipment-usage.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class EquipmentUsageService {
@@ -22,9 +23,9 @@ export class EquipmentUsageService {
     return usage;
   }
 
-  async findAll(companyId?: string, divisionId?: string, page = 1, limit = 20) {
+  async findAll(companyId?: string, divisionId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (divisionId) where.divisionId = divisionId;
     const [data, total] = await this.prisma.$transaction([
       this.prisma.equipmentUsage.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { usageDate: 'desc' }, include: { company: { select: { name: true } }, division: { select: { name: true } }, fixedAsset: { select: { name: true } } } }),

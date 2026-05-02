@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class ComplianceCalendarService {
@@ -14,7 +15,7 @@ export class ComplianceCalendarService {
     const { page = 1, limit = 20, companyId, status, priority } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
     if (priority) where.priority = priority;
     const [data, total] = await Promise.all([
@@ -34,7 +35,7 @@ export class ComplianceCalendarService {
       status: { notIn: ['COMPLETED', 'CANCELLED', 'WAIVED'] },
       ...this.companyFilter(user),
     };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await Promise.all([
       this.prisma.complianceObligation.findMany({ where, skip, take: Number(limit), orderBy: { dueDate: 'asc' } }),
       this.prisma.complianceObligation.count({ where }),
@@ -52,7 +53,7 @@ export class ComplianceCalendarService {
       dueDate: { gte: today, lte: in90Days },
       ...this.companyFilter(user),
     };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await Promise.all([
       this.prisma.complianceObligation.findMany({ where, skip, take: Number(limit), orderBy: { dueDate: 'asc' } }),
       this.prisma.complianceObligation.count({ where }),

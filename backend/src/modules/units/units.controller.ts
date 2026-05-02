@@ -25,8 +25,8 @@ export class UnitsController {
 
   @Get('units')
   @RequirePermissions('units.view')
-  findAllUnits(@Query() query: QueryUnitDto) {
-    return this.service.findAllUnits(query);
+  findAllUnits(@Query() query: QueryUnitDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAllUnits(query, user);
   }
 
   @Get('units/:id')
@@ -61,8 +61,8 @@ export class UnitsController {
 
   @Get('unit-conversions')
   @RequirePermissions('units.view')
-  findAllConversions(@Query() query: QueryUnitDto) {
-    return this.service.findAllConversions(query);
+  findAllConversions(@Query() query: QueryUnitDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAllConversions(query, user);
   }
 
   @Post('unit-conversions')

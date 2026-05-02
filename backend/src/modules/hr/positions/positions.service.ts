@@ -3,6 +3,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreatePositionDto } from './dto/create-position.dto';
 import { UpdatePositionDto } from './dto/update-position.dto';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class PositionsService {
@@ -17,7 +18,7 @@ export class PositionsService {
     const { page = 1, limit = 20, search, companyId, departmentId } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (departmentId) where.departmentId = departmentId;
     if (search) where.name = { contains: search, mode: 'insensitive' };
     const [data, total] = await Promise.all([

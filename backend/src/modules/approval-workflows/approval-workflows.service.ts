@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateApprovalWorkflowDto } from './dto/create-approval-workflow.dto';
 import { UpdateApprovalWorkflowDto } from './dto/update-approval-workflow.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class ApprovalWorkflowsService {
@@ -12,8 +13,7 @@ export class ApprovalWorkflowsService {
     const { page = 1, limit = 20, companyId, entityType, isActive } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
-    else if (user.companyId) where.companyId = user.companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (entityType) where.entityType = entityType;
     if (isActive !== undefined) where.isActive = isActive === 'true';
     const [data, total] = await Promise.all([

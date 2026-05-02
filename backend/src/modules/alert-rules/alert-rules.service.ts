@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateAlertRuleDto } from './dto/create-alert-rule.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class AlertRulesService {
@@ -11,8 +12,7 @@ export class AlertRulesService {
     const { page = 1, limit = 20, companyId, alertType, isActive } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
-    else if (user.companyId) where.companyId = user.companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (alertType) where.alertType = alertType;
     if (isActive !== undefined) where.isActive = isActive === 'true';
     const [data, total] = await Promise.all([

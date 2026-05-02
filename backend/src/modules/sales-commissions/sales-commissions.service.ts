@@ -6,6 +6,7 @@ import {
   SalesCommissionBasisDto,
 } from './dto/create-sales-commission.dto';
 import { UpdateSalesCommissionDto } from './dto/update-sales-commission.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 /**
  * Sales-commission lifecycle:
@@ -37,7 +38,7 @@ export class SalesCommissionsService {
     const { page = 1, limit = 20, employeeId, salesOrderId, status, companyId } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (employeeId) where.employeeId = employeeId;
     if (salesOrderId) where.salesOrderId = salesOrderId;
     if (status) where.status = status;

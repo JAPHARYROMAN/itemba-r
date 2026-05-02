@@ -3,6 +3,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateTaxFilingPeriodDto } from './dto/create-tax-filing-period.dto';
 import { UpdateTaxFilingPeriodDto } from './dto/update-tax-filing-period.dto';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class TaxFilingPeriodsService {
@@ -17,7 +18,7 @@ export class TaxFilingPeriodsService {
     const { page = 1, limit = 20, companyId, taxTypeId, status, filingFrequency } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (taxTypeId) where.taxTypeId = taxTypeId;
     if (status) where.status = status;
     if (filingFrequency) where.filingFrequency = filingFrequency;

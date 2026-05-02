@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateApprovalRequestDto } from './dto/create-approval-request.dto';
 import { ApprovalActionDto } from './dto/approval-action.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class ApprovalRequestsService {
@@ -12,8 +13,7 @@ export class ApprovalRequestsService {
     const { page = 1, limit = 20, companyId, entityType, status, requestedById } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
-    else if (user.companyId) where.companyId = user.companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (entityType) where.entityType = entityType;
     if (status) where.status = status;
     if (requestedById) where.requestedById = requestedById;

@@ -28,9 +28,9 @@ export class ParkingRatesController {
     @Query('status') status?: ParkingRateStatus,
     @Query('rateType') rateType?: ParkingRateType,
     @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
-    return this.service.findAll(companyId, facilityId, zoneId, status, rateType, page ? +page : 1, limit ? +limit : 20);
+    return this.service.findAll(companyId, facilityId, zoneId, status, rateType, page ? +page : 1, limit ? +limit : 20, user);
   }
 
   @Get(':id')

@@ -16,8 +16,8 @@ export class AgricultureActivitiesController {
   create(@Body() dto: CreateAgricultureActivityDto, @CurrentUser() user: AuthUser) { return this.service.create(dto, user.id); }
 
   @Get() @RequirePermissions('agriculture_activities.view')
-  findAll(@Query('farmId') farmId?: string, @Query('cropSeasonId') cropSeasonId?: string, @Query('companyId') companyId?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
-    return this.service.findAll(farmId, cropSeasonId, companyId, page ? +page : 1, limit ? +limit : 20);
+  findAll(@Query('farmId') farmId?: string, @Query('cropSeasonId') cropSeasonId?: string, @Query('companyId') companyId?: string, @Query('page') page?: string, @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser) {
+    return this.service.findAll(farmId, cropSeasonId, companyId, page ? +page : 1, limit ? +limit : 20, user);
   }
 
   @Get(':id') @RequirePermissions('agriculture_activities.view')

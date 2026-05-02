@@ -5,6 +5,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateIntegrationMappingDto } from './dto/create-integration-mapping.dto';
 import { UpdateIntegrationMappingDto } from './dto/update-integration-mapping.dto';
 import { QueryIntegrationMappingDto } from './dto/query-integration-mapping.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class IntegrationMappingsService {
@@ -13,11 +14,11 @@ export class IntegrationMappingsService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: QueryIntegrationMappingDto) {
+  async findAll(query: QueryIntegrationMappingDto, user?: any) {
     const { page = 1, limit = 20, companyId, providerId, connectionId, internalEntityType, externalEntityType, status } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (providerId) where.providerId = providerId;
     if (connectionId) where.connectionId = connectionId;
     if (internalEntityType) where.internalEntityType = internalEntityType;

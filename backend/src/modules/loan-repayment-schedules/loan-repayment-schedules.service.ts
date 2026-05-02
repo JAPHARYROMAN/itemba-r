@@ -5,6 +5,8 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountingControlService } from '../../common/services/accounting-control.service';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 /**
  * Loan repayment scheduling and payment posting.
@@ -30,13 +32,14 @@ export class LoanRepaymentSchedulesService {
     private readonly accountingControl: AccountingControlService,
     private readonly accountResolver: AccountResolverService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly postingEngine: PostingEngineService,
   ) {}
 
-  async findAll(query: any) {
+  async findAll(query: any, user?: any) {
     const { companyId, loanId, status, page = 1, limit = 50 } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (loanId) where.loanDebtId = loanId;
     if (status) where.status = status;
     const [items, total] = await Promise.all([
@@ -196,51 +199,37 @@ export class LoanRepaymentSchedulesService {
       );
 
       const journalNumber = await this.codes.next({ entityType: 'LoanJournal', companyId: schedule.companyId, tx });
-      const je = await tx.journalEntry.create({
-        data: {
-          journalNumber,
-          companyId: schedule.companyId,
-          transactionDate: paymentDate,
-          description: `Loan repayment installment #${schedule.installmentNumber}`,
-          totalDebit: amount,
-          totalCredit: amount,
-          status: 'POSTED',
-          createdById: user.id,
-          postedById: user.id,
-          postedAt: new Date(),
-          referenceType: 'LoanRepaymentSchedule',
-          referenceId: schedule.id,
-        },
-      });
-
-      await tx.journalEntryLine.createMany({
-        data: [
+      const je = await this.postingEngine.postLines({
+        journalNumber,
+        companyId: schedule.companyId,
+        transactionDate: paymentDate,
+        description: `Loan repayment installment #${schedule.installmentNumber}`,
+        referenceType: 'LoanRepaymentSchedule',
+        referenceId: schedule.id,
+        status: 'POSTED',
+        userId: user.id,
+        moduleName: 'loan_repayment',
+        lines: [
           {
-            journalEntryId: je.id,
-            companyId: schedule.companyId,
             accountId: principalAccount.id,
             description: 'Principal portion',
             debit: principalPortion,
             credit: 0,
           },
           {
-            journalEntryId: je.id,
-            companyId: schedule.companyId,
             accountId: interestAccount.id,
             description: 'Interest portion',
             debit: interestPortion,
             credit: 0,
           },
           {
-            journalEntryId: je.id,
-            companyId: schedule.companyId,
             accountId: cashAccount.id,
             description: 'Cash paid',
             debit: 0,
             credit: amount,
           },
         ],
-      });
+      }, tx);
 
       const repaymentPaymentNumber = await this.codes.next({ entityType: 'LoanRepaymentPayment', companyId: schedule.companyId, tx });
       const payment = await tx.loanRepaymentPayment.create({

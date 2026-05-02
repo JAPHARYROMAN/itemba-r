@@ -5,6 +5,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountingControlService } from '../../common/services/accounting-control.service';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 /**
  * Depreciation engine.
@@ -32,11 +33,11 @@ export class DepreciationService {
     private readonly codes: EntityCodeGeneratorService,
   ) {}
 
-  async findAll(query: any) {
+  async findAll(query: any, user?: any) {
     const { companyId, assetId, page = 1, limit = 20 } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (assetId) where.fixedAssetId = assetId;
     const [items, total] = await Promise.all([
       this.prisma.depreciationSchedule.findMany({

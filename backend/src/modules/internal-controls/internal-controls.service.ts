@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateInternalControlDto } from './dto/create-internal-control.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class InternalControlsService {
@@ -11,8 +12,7 @@ export class InternalControlsService {
     const { page = 1, limit = 20, companyId, controlType, isActive, enforcementLevel } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
-    else if (user.companyId) where.companyId = user.companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (controlType) where.controlType = controlType;
     if (isActive !== undefined) where.isActive = isActive === 'true';
     if (enforcementLevel) where.enforcementLevel = enforcementLevel;

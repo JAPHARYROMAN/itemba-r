@@ -22,22 +22,22 @@ export class ProductBatchesController {
   @Get()
   @RequirePermissions('product_batches.view')
   @ApiOperation({ summary: 'List product batches' })
-  findAll(@Query() query: QueryProductBatchDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryProductBatchDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get('expiring')
   @RequirePermissions('product_batches.view')
   @ApiOperation({ summary: 'Batches expiring within 30 days' })
-  findExpiring(@Query('companyId') companyId?: string) {
-    return this.service.findExpiring(companyId);
+  findExpiring(@Query('companyId') companyId?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser) {
+    return this.service.findExpiring(companyId, user);
   }
 
   @Get('expired')
   @RequirePermissions('product_batches.view')
   @ApiOperation({ summary: 'Expired batches' })
-  findExpired(@Query('companyId') companyId?: string) {
-    return this.service.findExpired(companyId);
+  findExpired(@Query('companyId') companyId?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser) {
+    return this.service.findExpired(companyId, user);
   }
 
   @Get('product/:productId')

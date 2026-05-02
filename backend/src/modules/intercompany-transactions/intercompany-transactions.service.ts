@@ -8,6 +8,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountingControlService } from '../../common/services/accounting-control.service';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { CreateIntercompanyTransactionDto } from './dto/create-intercompany-transaction.dto';
 import { UpdateIntercompanyTransactionDto } from './dto/update-intercompany-transaction.dto';
 import { QueryIntercompanyTransactionDto } from './dto/query-intercompany-transaction.dto';
@@ -22,6 +23,7 @@ export class IntercompanyTransactionsService {
     private readonly accountingControl: AccountingControlService,
     private readonly accountResolver: AccountResolverService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly postingEngine: PostingEngineService,
   ) {}
 
   async findAll(query: QueryIntercompanyTransactionDto) {
@@ -244,77 +246,57 @@ export class IntercompanyTransactionsService {
       const fromJeNumber = await this.codes.next({ entityType: 'JournalEntry', companyId: existing.fromCompanyId, tx });
       const toJeNumber = await this.codes.next({ entityType: 'JournalEntry', companyId: existing.toCompanyId, tx });
 
-      const fromJe = await tx.journalEntry.create({
-        data: {
-          journalNumber: fromJeNumber,
-          companyId: existing.fromCompanyId,
-          transactionDate: date,
-          description: `IC Transaction: ${desc}`,
-          totalDebit: amount,
-          totalCredit: amount,
-          status: 'POSTED',
-          createdById: userId,
-          postedById: userId,
-          postedAt: new Date(),
-        },
-      });
-
-      await tx.journalEntryLine.createMany({
-        data: [
+      const fromJe = await this.postingEngine.postLines({
+        journalNumber: fromJeNumber,
+        companyId: existing.fromCompanyId,
+        transactionDate: date,
+        description: `IC Transaction: ${desc}`,
+        referenceType: 'InterCompanyTransaction',
+        referenceId: id,
+        status: 'POSTED',
+        userId,
+        moduleName: 'intercompany',
+        lines: [
           {
-            journalEntryId: fromJe.id,
             accountId: fromArAccount.id,
             description: `IC Receivable: ${desc}`,
             debit: amount,
             credit: 0,
-            companyId: existing.fromCompanyId,
           },
           {
-            journalEntryId: fromJe.id,
             accountId: fromCashAccount.id,
             description: `IC Cash: ${desc}`,
             debit: 0,
             credit: amount,
-            companyId: existing.fromCompanyId,
           },
         ],
-      });
+      }, tx);
 
-      const toJe = await tx.journalEntry.create({
-        data: {
-          journalNumber: toJeNumber,
-          companyId: existing.toCompanyId,
-          transactionDate: date,
-          description: `IC Transaction: ${desc}`,
-          totalDebit: amount,
-          totalCredit: amount,
-          status: 'POSTED',
-          createdById: userId,
-          postedById: userId,
-          postedAt: new Date(),
-        },
-      });
-
-      await tx.journalEntryLine.createMany({
-        data: [
+      const toJe = await this.postingEngine.postLines({
+        journalNumber: toJeNumber,
+        companyId: existing.toCompanyId,
+        transactionDate: date,
+        description: `IC Transaction: ${desc}`,
+        referenceType: 'InterCompanyTransaction',
+        referenceId: id,
+        status: 'POSTED',
+        userId,
+        moduleName: 'intercompany',
+        lines: [
           {
-            journalEntryId: toJe.id,
             accountId: toCashAccount.id,
             description: `IC Cash received: ${desc}`,
             debit: amount,
             credit: 0,
-            companyId: existing.toCompanyId,
           },
           {
-            journalEntryId: toJe.id,
             accountId: toApAccount.id,
             description: `IC Payable: ${desc}`,
             debit: 0,
             credit: amount,
-            companyId: existing.toCompanyId,
           },
         ],
-      });
+      }, tx);
 
       return tx.interCompanyTransaction.update({
         where: { id },

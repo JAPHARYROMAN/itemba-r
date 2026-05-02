@@ -22,7 +22,7 @@ export class LogisticsDashboardController {
     @Query('companyId') companyId?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
-    @CurrentUser() user?: AuthUser,
+    @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
     return this.service.getReportTripProfitability(companyId, from, to, user);
   }

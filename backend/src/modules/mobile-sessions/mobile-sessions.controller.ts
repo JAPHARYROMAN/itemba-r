@@ -10,8 +10,8 @@ export class MobileSessionsController {
 
   @Get()
   @RequirePermissions('mobile_sessions.view')
-  findAll(@Query() query: QueryMobileSessionDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryMobileSessionDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

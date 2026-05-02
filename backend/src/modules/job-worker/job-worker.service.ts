@@ -88,15 +88,16 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
    * It executes the same stale recovery, leasing and handler path as the timer
    * loop without enabling the background polling loop.
    */
-  async drainOnce(batch = POLL_BATCH): Promise<JobDrainResult> {
+  async drainOnce(batch = POLL_BATCH, filter: JobDrainFilter = {}): Promise<JobDrainResult> {
     if (this.running) {
       return { leased: 0, skipped: true, settled: [] };
     }
     this.running = true;
     try {
-      const scheduledBackups = await this.enqueueDueBackupRuns(batch);
+      const scheduledBackups =
+        filter.jobId || filter.queueName ? 0 : await this.enqueueDueBackupRuns(batch);
       await this.recoverStale();
-      const leased = await this.leaseJobs(batch);
+      const leased = await this.leaseJobs(batch, filter);
       // Run leased jobs in parallel. Worker tick stays responsive even when
       // one handler is slow.
       const settled = await Promise.allSettled(
@@ -142,7 +143,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
    * a single transaction with FOR UPDATE SKIP LOCKED. Multiple workers can run
    * concurrently — each will grab a disjoint set of rows.
    */
-  private async leaseJobs(batch: number): Promise<LeasedJob[]> {
+  private async leaseJobs(batch: number, filter: JobDrainFilter = {}): Promise<LeasedJob[]> {
     const registered = this.registry.registeredTypes();
     if (registered.length === 0) return [];
 
@@ -152,6 +153,8 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
          WHERE status IN ('QUEUED', 'RETRYING')
            AND ("scheduledAt" IS NULL OR "scheduledAt" <= NOW())
            AND "jobType"::text IN (${Prisma.join(registered)})
+           ${filter.jobId ? Prisma.sql`AND id = ${filter.jobId}` : Prisma.empty}
+           ${filter.queueName ? Prisma.sql`AND "queueName" = ${filter.queueName}` : Prisma.empty}
            AND NOT EXISTS (
              SELECT 1 FROM job_queue_configs jqc
               WHERE jqc."queueName" = background_jobs."queueName"
@@ -175,7 +178,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
   private async runJob(job: LeasedJob): Promise<void> {
     const handler = this.registry.get(job.jobType);
     if (!handler) {
-      // Should not happen — leaseJobs filters by registered types — but guard.
+      // Should not happen; leaseJobs filters by registered types, but guard anyway.
       this.logger.warn(`No handler for ${job.jobType}, requeueing job ${job.id}`);
       await this.prisma.backgroundJob.update({
         where: { id: job.id },
@@ -329,6 +332,11 @@ type LeasedJob = {
   correlationId: string | null;
   attempts: number;
   maxAttempts: number;
+};
+
+type JobDrainFilter = {
+  jobId?: string;
+  queueName?: string;
 };
 
 type JobDrainResult = {

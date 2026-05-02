@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { CompanyScopeService } from '../../common/services';
+import { CompanyScopeService, applyCompanyScopeWhere } from '../../common/services';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { QueryApiRequestLogDto } from './dto/query-api-request-log.dto';
@@ -29,7 +29,7 @@ export class ApiRequestLogsService {
     if (apiKeyId) where.apiKeyId = apiKeyId;
     if (statusCode !== undefined) where.statusCode = statusCode;
     if (rateLimited !== undefined) where.rateLimited = rateLimited;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
 
     const [data, total] = await Promise.all([
       this.prisma.apiRequestLog.findMany({

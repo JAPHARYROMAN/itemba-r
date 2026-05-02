@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class HrReportsService {
@@ -14,7 +15,7 @@ export class HrReportsService {
     const { page = 1, limit = 50, companyId, divisionId, departmentId, status, search } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (divisionId) where.divisionId = divisionId;
     if (departmentId) where.departmentId = departmentId;
     if (status) where.status = status;
@@ -44,7 +45,7 @@ export class HrReportsService {
     const { companyId, divisionId, employeeId, dateFrom, dateTo, page = 1, limit = 50 } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (divisionId) where.employee = { divisionId };
     if (employeeId) where.employeeId = employeeId;
     if (dateFrom || dateTo) {
@@ -86,7 +87,7 @@ export class HrReportsService {
     const { companyId, payrollPeriodId, status, page = 1, limit = 20 } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (payrollPeriodId) where.payrollPeriodId = payrollPeriodId;
     if (status) where.status = status;
 
@@ -120,7 +121,7 @@ export class HrReportsService {
     const { companyId, divisionId, leaveTypeId, status, dateFrom, dateTo, page = 1, limit = 50 } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (divisionId) where.employee = { divisionId };
     if (leaveTypeId) where.leaveTypeId = leaveTypeId;
     if (status) where.status = status;

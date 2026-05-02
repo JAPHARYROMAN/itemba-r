@@ -21,8 +21,8 @@ export class PackageMovementsController {
   @Get()
   @RequirePermissions('package_movements.view')
   @ApiOperation({ summary: 'List package movements' })
-  findAll(@Query() query: QueryPackageMovementDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryPackageMovementDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get('balances/customer/:customerId')

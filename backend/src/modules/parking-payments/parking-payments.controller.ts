@@ -24,8 +24,15 @@ export class ParkingPaymentsController {
     @Query('parkingSessionId') parkingSessionId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
-    return this.service.findAll(companyId, parkingSessionId, page ? +page : 1, limit ? +limit : 20);
+    return this.service.findAll(
+      companyId,
+      parkingSessionId,
+      page ? +page : 1,
+      limit ? +limit : 20,
+      user,
+    );
   }
 
   @Get(':id')

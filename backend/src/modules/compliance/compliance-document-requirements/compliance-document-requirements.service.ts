@@ -3,6 +3,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateComplianceDocumentRequirementDto } from './dto/create-compliance-document-requirement.dto';
 import { UpdateComplianceDocumentRequirementDto } from './dto/update-compliance-document-requirement.dto';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class ComplianceDocumentRequirementsService {
@@ -17,7 +18,7 @@ export class ComplianceDocumentRequirementsService {
     const { page = 1, limit = 20, companyId, requirementType, status } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (requirementType) where.requirementType = requirementType;
     if (status) where.status = status;
     const [data, total] = await Promise.all([

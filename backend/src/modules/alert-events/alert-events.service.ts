@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AlertType, NotificationPriority } from '@prisma/client';
 import { CreateAlertEventDto } from './dto/create-alert-event.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class AlertEventsService {
@@ -41,8 +42,7 @@ export class AlertEventsService {
     const { page = 1, limit = 20, companyId, alertType, status, priority } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = {};
-    if (companyId) where.companyId = companyId;
-    else if (user.companyId) where.companyId = user.companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (alertType) where.alertType = alertType;
     if (status) where.status = status;
     if (priority) where.priority = priority;

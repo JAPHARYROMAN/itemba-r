@@ -23,8 +23,8 @@ export class PriceListsController {
   @Get()
   @RequirePermissions('price_lists.view')
   @ApiOperation({ summary: 'List price lists' })
-  findAll(@Query() query: QueryPriceListDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryPriceListDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

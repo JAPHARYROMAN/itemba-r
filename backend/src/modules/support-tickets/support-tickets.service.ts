@@ -3,6 +3,7 @@ import { AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class SupportTicketsService {
@@ -35,7 +36,7 @@ export class SupportTicketsService {
     return record;
   }
 
-  async findAll(query: any) {
+  async findAll(query: any, user?: any) {
     const {
       page = 1,
       pageSize = 20,
@@ -50,7 +51,7 @@ export class SupportTicketsService {
     if (status) where.status = status;
     if (priority) where.priority = priority;
     if (ticketType) where.ticketType = ticketType;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (assignedToId) where.assignedToId = assignedToId;
     const [data, total] = await Promise.all([
       this.prisma.supportTicket.findMany({

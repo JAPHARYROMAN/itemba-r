@@ -5,6 +5,7 @@ import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code
 import { CreateDeliveryNoteDto } from './dto/create-delivery-note.dto';
 import { UpdateDeliveryNoteDto, DeliverDto } from './dto/update-delivery-note.dto';
 import { QueryDeliveryNoteDto } from './dto/query-delivery-note.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class DeliveryNotesService {
@@ -61,11 +62,11 @@ export class DeliveryNotesService {
     return this.findOne(record.id);
   }
 
-  async findAll(query: QueryDeliveryNoteDto) {
+  async findAll(query: QueryDeliveryNoteDto, user?: any) {
     const { page = 1, limit = 20, companyId, branchId, status, customerId } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (branchId) where.branchId = branchId;
     if (status) where.status = status;
     if (customerId) where.customerId = customerId;

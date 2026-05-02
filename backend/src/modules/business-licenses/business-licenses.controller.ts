@@ -18,9 +18,9 @@ export class BusinessLicensesController {
   @RequirePermissions('business_licenses.view')
   findExpiring(
     @Query('companyId') companyId?: string,
-    @Query('daysAhead') daysAhead?: string,
+    @Query('daysAhead') daysAhead?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
-    return this.service.findExpiring(companyId, daysAhead ? +daysAhead : 30);
+    return this.service.findExpiring(companyId, daysAhead ? +daysAhead : 30, user);
   }
 
   @Get()
@@ -33,9 +33,9 @@ export class BusinessLicensesController {
     @Query('licenseType') licenseType?: BusinessLicenseType,
     @Query('search') search?: string,
     @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
-    return this.service.findAll(companyId, divisionId, licensedBusinessUnitId, status, licenseType, search, page ? +page : 1, limit ? +limit : 20);
+    return this.service.findAll(companyId, divisionId, licensedBusinessUnitId, status, licenseType, search, page ? +page : 1, limit ? +limit : 20, user);
   }
 
   @Get(':id')

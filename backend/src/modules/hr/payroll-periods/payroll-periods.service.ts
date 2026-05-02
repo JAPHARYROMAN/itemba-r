@@ -3,6 +3,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreatePayrollPeriodDto } from './dto/create-payroll-period.dto';
 import { UpdatePayrollPeriodDto } from './dto/update-payroll-period.dto';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class PayrollPeriodsService {
@@ -17,7 +18,7 @@ export class PayrollPeriodsService {
     const { page = 1, limit = 20, companyId, status } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
     const [data, total] = await Promise.all([
       this.prisma.payrollPeriod.findMany({

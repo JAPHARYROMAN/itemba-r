@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class SecurityEventsService {
@@ -10,7 +11,7 @@ export class SecurityEventsService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: any) {
+  async findAll(query: any, user?: any) {
     const { page = 1, limit = 20, eventType, severity, status, userId, companyId, dateFrom, dateTo } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = {};
@@ -18,7 +19,7 @@ export class SecurityEventsService {
     if (severity) where.severity = severity;
     if (status) where.status = status;
     if (userId) where.userId = userId;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (dateFrom || dateTo) {
       where.createdAt = {};
       if (dateFrom) where.createdAt.gte = new Date(dateFrom);

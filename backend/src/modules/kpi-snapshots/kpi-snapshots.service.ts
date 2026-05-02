@@ -3,6 +3,7 @@ import { Prisma, AnalyticsRunType, AnalyticsRunStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { GenerateSnapshotDto } from './dto/generate-snapshot.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class KpiSnapshotsService {
@@ -63,8 +64,7 @@ export class KpiSnapshotsService {
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = {};
     if (kpiIndicatorId) where.kpiIndicatorId = kpiIndicatorId;
-    if (companyId) where.companyId = companyId;
-    else if (user.companyId) where.companyId = user.companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (periodType) where.periodType = periodType;
     if (from || to) {
       where.snapshotDate = {};

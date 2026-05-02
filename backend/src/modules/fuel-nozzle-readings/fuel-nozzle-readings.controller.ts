@@ -18,16 +18,20 @@ export class FuelNozzleReadingsController {
     @Query('branchId') branchId?: string,
     @Query('companyId') companyId?: string,
     @Query('status') status?: string,
+    @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
-    return this.service.findAll({
-      page: page ? Number(page) : undefined,
-      limit: limit ? Number(limit) : undefined,
-      shiftId,
-      nozzleId,
-      branchId,
-      companyId,
-      status,
-    });
+    return this.service.findAll(
+      {
+        page: page ? Number(page) : undefined,
+        limit: limit ? Number(limit) : undefined,
+        shiftId,
+        nozzleId,
+        branchId,
+        companyId,
+        status,
+      },
+      user,
+    );
   }
 
   @Get(':id')

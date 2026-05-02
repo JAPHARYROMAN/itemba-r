@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateCropDto } from './dto/create-crop.dto';
 import { UpdateCropDto } from './dto/update-crop.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class CropsService {
@@ -16,9 +17,9 @@ export class CropsService {
     return crop;
   }
 
-  async findAll(companyId?: string, page = 1, limit = 50) {
+  async findAll(companyId?: string, page = 1, limit = 50, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await this.prisma.$transaction([
       this.prisma.crop.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { name: 'asc' } }),
       this.prisma.crop.count({ where }),

@@ -3,7 +3,7 @@ import { AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { CompanyScopeService } from '../../common/services';
+import { CompanyScopeService, applyCompanyScopeWhere } from '../../common/services';
 import { CreateBankAccountDto } from './dto/create-bank-account.dto';
 import { UpdateBankAccountDto } from './dto/update-bank-account.dto';
 import { QueryBankAccountDto } from './dto/query-bank-account.dto';
@@ -22,7 +22,7 @@ export class BankAccountsService {
     const skip = (page - 1) * limit;
 
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (groupId) where.groupId = groupId;
     if (accountType) where.accountType = accountType;
     if (currency) where.currency = currency;

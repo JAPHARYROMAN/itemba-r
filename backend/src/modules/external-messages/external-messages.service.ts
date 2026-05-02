@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateExternalMessageDto } from './dto/create-external-message.dto';
 import { QueryExternalMessageDto } from './dto/query-external-message.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class ExternalMessagesService {
@@ -12,11 +13,11 @@ export class ExternalMessagesService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: QueryExternalMessageDto) {
+  async findAll(query: QueryExternalMessageDto, user?: any) {
     const { page = 1, limit = 20, companyId, channel, status, providerId } = query;
     const skip = (page - 1) * limit;
     const where: any = {};
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (channel) where.channel = channel;
     if (status) where.status = status;
     if (providerId) where.providerId = providerId;

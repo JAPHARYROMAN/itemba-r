@@ -8,6 +8,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateExpenseCategoryDto } from './dto/create-expense-category.dto';
 import { UpdateExpenseCategoryDto } from './dto/update-expense-category.dto';
 import { QueryExpenseCategoryDto } from './dto/query-expense-category.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class ExpenseCategoriesService {
@@ -16,12 +17,12 @@ export class ExpenseCategoriesService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: QueryExpenseCategoryDto) {
+  async findAll(query: QueryExpenseCategoryDto, user?: any) {
     const { page = 1, limit = 20, companyId, isActive, search } = query;
     const skip = (page - 1) * limit;
 
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (isActive !== undefined) where.isActive = isActive;
     if (search) {
       where.OR = [

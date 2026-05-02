@@ -16,8 +16,8 @@ export class BOQItemsController {
   create(@Body() dto: CreateBOQItemDto, @CurrentUser() user: AuthUser) { return this.service.create(dto, user.id); }
 
   @Get() @RequirePermissions('boq.view')
-  findAll(@Query('projectId') projectId?: string, @Query('companyId') companyId?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
-    return this.service.findAll(projectId, companyId, page ? +page : 1, limit ? +limit : 50);
+  findAll(@Query('projectId') projectId?: string, @Query('companyId') companyId?: string, @Query('page') page?: string, @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser) {
+    return this.service.findAll(projectId, companyId, page ? +page : 1, limit ? +limit : 50, user);
   }
 
   @Get(':id') @RequirePermissions('boq.view')

@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { applyCompanyScopeWhere } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 /**
  * TaxAnomalyDetectionService — Sprint C4.
@@ -38,15 +40,15 @@ export class TaxAnomalyDetectionService {
     companyId?: string;
     severities?: Severity[];
     categories?: string[];
-  } = {}): Promise<AnomalyScanResult> {
+  } = {}, user: any = undefined as unknown as AuthUser): Promise<AnomalyScanResult> {
     const checks = await Promise.all([
-      this.checkPartyHygiene(query.companyId),
-      this.checkOverdueFilings(query.companyId),
-      this.checkUpcomingFilings(query.companyId),
-      this.checkPostedPayrollWithoutStatutoryLines(query.companyId),
-      this.checkConfirmedOrdersWithZeroTax(query.companyId),
-      this.checkMissingTaxLedgerEntries(query.companyId),
-      this.checkLockedReturnsStillDraft(query.companyId),
+      this.checkPartyHygiene(query.companyId, user),
+      this.checkOverdueFilings(query.companyId, user),
+      this.checkUpcomingFilings(query.companyId, user),
+      this.checkPostedPayrollWithoutStatutoryLines(query.companyId, user),
+      this.checkConfirmedOrdersWithZeroTax(query.companyId, user),
+      this.checkMissingTaxLedgerEntries(query.companyId, user),
+      this.checkLockedReturnsStillDraft(query.companyId, user),
     ]);
 
     let anomalies = checks.flat();
@@ -78,10 +80,10 @@ export class TaxAnomalyDetectionService {
   // ── A1 — Party hygiene ───────────────────────────────────────────────────
   // VAT-registered company => suppliers and customers should carry TIN at
   // minimum. Missing VRN is a softer signal (not every party is VAT-registered).
-  private async checkPartyHygiene(companyId?: string): Promise<Anomaly[]> {
+  private async checkPartyHygiene(companyId?: string, user?: any): Promise<Anomaly[]> {
     const out: Anomaly[] = [];
     const where: any = { deletedAt: null, status: 'ACTIVE' };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
 
     const [customersMissingTin, suppliersMissingTin] = await Promise.all([
       this.prisma.customer.findMany({
@@ -124,13 +126,13 @@ export class TaxAnomalyDetectionService {
   }
 
   // ── A2 — Overdue filings ─────────────────────────────────────────────────
-  private async checkOverdueFilings(companyId?: string): Promise<Anomaly[]> {
+  private async checkOverdueFilings(companyId?: string, user?: any): Promise<Anomaly[]> {
     const where: any = {
       deletedAt: null,
       status: 'OPEN',
       dueDate: { lt: new Date() },
     };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const periods = await this.prisma.taxFilingPeriod.findMany({
       where,
       include: { taxType: { select: { taxTypeCode: true, name: true } } },
@@ -151,7 +153,7 @@ export class TaxAnomalyDetectionService {
   }
 
   // ── A3 — Upcoming filings (next 7 days) ──────────────────────────────────
-  private async checkUpcomingFilings(companyId?: string): Promise<Anomaly[]> {
+  private async checkUpcomingFilings(companyId?: string, user?: any): Promise<Anomaly[]> {
     const now = new Date();
     const in7 = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
     const where: any = {
@@ -159,7 +161,7 @@ export class TaxAnomalyDetectionService {
       status: 'OPEN',
       dueDate: { gte: now, lt: in7 },
     };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const periods = await this.prisma.taxFilingPeriod.findMany({
       where,
       include: { taxType: { select: { name: true } } },
@@ -181,9 +183,9 @@ export class TaxAnomalyDetectionService {
   // ── A4 — Posted payroll with no statutory lines ──────────────────────────
   // A POSTED payroll run that produced zero PayrollStatutoryLine entries is
   // almost always a misconfiguration — at least PAYE/NSSF should have fired.
-  private async checkPostedPayrollWithoutStatutoryLines(companyId?: string): Promise<Anomaly[]> {
+  private async checkPostedPayrollWithoutStatutoryLines(companyId?: string, user?: any): Promise<Anomaly[]> {
     const where: any = { deletedAt: null, status: 'POSTED' };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
 
     const runs = await this.prisma.payrollRun.findMany({
       where,
@@ -226,7 +228,7 @@ export class TaxAnomalyDetectionService {
   // Heuristic: any confirmed sales order this month whose total `taxAmount`
   // is zero. Flagged MEDIUM because zero tax is sometimes legitimate
   // (zero-rated exports, exempt supplies). Operator should confirm.
-  private async checkConfirmedOrdersWithZeroTax(companyId?: string): Promise<Anomaly[]> {
+  private async checkConfirmedOrdersWithZeroTax(companyId?: string, user?: any): Promise<Anomaly[]> {
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
     const where: any = {
       deletedAt: null,
@@ -236,7 +238,7 @@ export class TaxAnomalyDetectionService {
       // Only flag orders large enough to matter — under 100k TZS isn't worth the noise.
       subtotal: { gte: 100_000 },
     };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
 
     const orders = await this.prisma.salesOrder.findMany({
       where,
@@ -267,7 +269,7 @@ export class TaxAnomalyDetectionService {
   // Sales orders confirmed this month with non-zero taxAmount but no
   // TaxTransaction rows. Either C2 is disabled or the order was confirmed
   // before the auto-apply landed.
-  private async checkMissingTaxLedgerEntries(companyId?: string): Promise<Anomaly[]> {
+  private async checkMissingTaxLedgerEntries(companyId?: string, user?: any): Promise<Anomaly[]> {
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
     const where: any = {
       deletedAt: null,
@@ -275,7 +277,7 @@ export class TaxAnomalyDetectionService {
       orderDate: { gte: monthStart },
       taxAmount: { gt: 0 },
     };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
 
     const orders = await this.prisma.salesOrder.findMany({
       where,
@@ -314,13 +316,13 @@ export class TaxAnomalyDetectionService {
   }
 
   // ── A7 — Filing periods past due with returns still in DRAFT ─────────────
-  private async checkLockedReturnsStillDraft(companyId?: string): Promise<Anomaly[]> {
+  private async checkLockedReturnsStillDraft(companyId?: string, user?: any): Promise<Anomaly[]> {
     const where: any = {
       deletedAt: null,
       status: 'DRAFT',
       taxFilingPeriod: { dueDate: { lt: new Date() }, deletedAt: null },
     };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
 
     const returns = await this.prisma.taxReturn.findMany({
       where,

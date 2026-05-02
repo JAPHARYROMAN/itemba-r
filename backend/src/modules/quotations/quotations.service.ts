@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateQuotationDto } from './dto/create-quotation.dto';
 import { UpdateQuotationDto } from './dto/update-quotation.dto';
 import { QueryQuotationDto } from './dto/query-quotation.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 function calcLines(lines: any[]) {
   let subtotal = 0, totalDiscount = 0, totalTax = 0;
@@ -85,11 +86,11 @@ export class QuotationsService {
     return this.findOne(record.id);
   }
 
-  async findAll(query: QueryQuotationDto) {
+  async findAll(query: QueryQuotationDto, user?: any) {
     const { page = 1, limit = 20, companyId, status, customerId, quotationType } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
     if (customerId) where.customerId = customerId;
     if (quotationType) where.quotationType = quotationType;

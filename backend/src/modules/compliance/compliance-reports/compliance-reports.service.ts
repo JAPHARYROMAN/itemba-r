@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class ComplianceReportsService {
@@ -13,7 +14,7 @@ export class ComplianceReportsService {
   async getObligationsSummary(user: any, query: any) {
     const { companyId, startDate, endDate } = query;
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (startDate || endDate) {
       where.dueDate = {};
       if (startDate) where.dueDate.gte = new Date(startDate);
@@ -30,7 +31,7 @@ export class ComplianceReportsService {
   async getTaxTransactionsSummary(user: any, query: any) {
     const { companyId, startDate, endDate } = query;
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (startDate || endDate) {
       where.transactionDate = {};
       if (startDate) where.transactionDate.gte = new Date(startDate);
@@ -48,8 +49,7 @@ export class ComplianceReportsService {
   async getDocumentStatusSummary(user: any, query: any) {
     const { companyId } = query;
     const where: any = {};
-    if (companyId) where.companyId = companyId;
-    else if (user.role?.scope !== 'GROUP') where.companyId = user.companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const statuses = await this.prisma.complianceDocumentStatus.groupBy({
       by: ['status', 'companyId'],
       where,

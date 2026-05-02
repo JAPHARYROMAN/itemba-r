@@ -9,8 +9,8 @@ export class CustomerSegmentsController {
 
   @Get()
   @RequirePermissions('customer_segments.list')
-  findAll(@Query() query: any) {
-    return this.service.findAll(query);
+  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

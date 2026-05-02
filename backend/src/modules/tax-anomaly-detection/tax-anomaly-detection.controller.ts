@@ -2,6 +2,7 @@ import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { TaxAnomalyDetectionService, Severity } from './tax-anomaly-detection.service';
 
 /**
@@ -21,6 +22,7 @@ export class TaxAnomalyDetectionController {
     @Query('companyId') companyId?: string,
     @Query('severity') severity?: string | string[],
     @Query('category') category?: string | string[],
+    @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
     const severities = severity
       ? (Array.isArray(severity) ? severity : [severity]).filter(Boolean) as Severity[]
@@ -28,6 +30,6 @@ export class TaxAnomalyDetectionController {
     const categories = category
       ? (Array.isArray(category) ? category : [category]).filter(Boolean) as string[]
       : undefined;
-    return this.service.scan({ companyId, severities, categories });
+    return this.service.scan({ companyId, severities, categories }, user);
   }
 }

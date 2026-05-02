@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { UpdateNozzleReadingDto } from './dto/update-nozzle-reading.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class FuelNozzleReadingsService {
@@ -10,15 +11,18 @@ export class FuelNozzleReadingsService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: {
-    page?: number;
-    limit?: number;
-    shiftId?: string;
-    nozzleId?: string;
-    branchId?: string;
-    companyId?: string;
-    status?: string;
-  }) {
+  async findAll(
+    query: {
+      page?: number;
+      limit?: number;
+      shiftId?: string;
+      nozzleId?: string;
+      branchId?: string;
+      companyId?: string;
+      status?: string;
+    },
+    user?: any,
+  ) {
     const { page = 1, limit = 20, shiftId, nozzleId, branchId, companyId, status } = query;
     const skip = (page - 1) * limit;
 
@@ -26,7 +30,7 @@ export class FuelNozzleReadingsService {
     if (shiftId) where.fuelShiftId = shiftId;
     if (nozzleId) where.nozzleId = nozzleId;
     if (branchId) where.branchId = branchId;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
 
     const [data, total] = await Promise.all([

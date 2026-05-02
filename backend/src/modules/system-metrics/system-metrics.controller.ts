@@ -9,8 +9,8 @@ export class SystemMetricsController {
 
   @Get()
   @RequirePermissions('system_metrics.view')
-  findAll(@Query() query: any) {
-    return this.service.findAll(query);
+  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Post()

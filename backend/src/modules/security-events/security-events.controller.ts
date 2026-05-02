@@ -9,8 +9,8 @@ export class SecurityEventsController {
 
   @Get()
   @RequirePermissions('security_events.view')
-  findAll(@Query() query: any) {
-    return this.service.findAll(query);
+  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

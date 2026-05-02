@@ -6,6 +6,7 @@ import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code
 import { CreateTripDto } from './dto/create-trip.dto';
 import { UpdateTripDto } from './dto/update-trip.dto';
 import { TripStatus } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 const LOGISTICS_PRODUCT_CODE = 'TRANSPORT-SVC';
 const LOGISTICS_CATEGORY_NAME = 'Transport Services';
@@ -30,9 +31,9 @@ export class TripsService {
     return trip;
   }
 
-  async findAll(companyId?: string, status?: TripStatus, page = 1, limit = 20) {
+  async findAll(companyId?: string, status?: TripStatus, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
     const [data, total] = await this.prisma.$transaction([
       this.prisma.trip.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { tripDate: 'desc' }, include: { vehicle: { select: { vehicleCode: true, registrationNumber: true } }, driver: { select: { fullName: true, driverCode: true } }, route: { select: { name: true } } } }),

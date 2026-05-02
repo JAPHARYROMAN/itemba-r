@@ -2,9 +2,11 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { CreateProjectMaterialIssueDto } from './dto/create-project-material-issue.dto';
 import { UpdateProjectMaterialIssueDto } from './dto/update-project-material-issue.dto';
 import { MaterialIssueStatus, InventoryMovementType } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -16,6 +18,7 @@ export class ProjectMaterialIssuesService {
     private prisma: PrismaService,
     private audit: AuditLogsService,
     private codes: EntityCodeGeneratorService,
+    private postingEngine: PostingEngineService,
   ) {}
 
   async create(dto: CreateProjectMaterialIssueDto, userId: string) {
@@ -35,10 +38,10 @@ export class ProjectMaterialIssuesService {
     return issue;
   }
 
-  async findAll(projectId?: string, companyId?: string, page = 1, limit = 20) {
+  async findAll(projectId?: string, companyId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
     if (projectId) where.projectId = projectId;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await this.prisma.$transaction([
       this.prisma.projectMaterialIssue.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { issueDate: 'desc' }, include: { project: { select: { projectName: true, projectCode: true } }, lines: true } }),
       this.prisma.projectMaterialIssue.count({ where }),
@@ -156,38 +159,31 @@ export class ProjectMaterialIssuesService {
         const inventoryAssetId = accounts.find((a) => a.accountCode === '1200')?.id;
         if (materialsExpenseId && inventoryAssetId) {
           const journalNumber = await this.codes.next({ entityType: 'JournalEntry', companyId: issue.companyId, tx });
-          const je = await tx.journalEntry.create({
-            data: {
-              journalNumber,
-              companyId: issue.companyId,
-              transactionDate: issue.issueDate,
-              description: `Material issue ${issue.issueNumber} — ${issue.project.projectName}`,
-              referenceType: 'ProjectMaterialIssue',
-              referenceId: id,
-              status: 'DRAFT',
-              totalDebit: totalCost,
-              totalCredit: totalCost,
-              createdById: userId,
-              lines: {
-                create: [
-                  {
-                    accountId: materialsExpenseId,
-                    description: `Materials issued to ${issue.project.projectName}`,
-                    debit: totalCost,
-                    credit: 0,
-                    companyId: issue.companyId,
-                  },
-                  {
-                    accountId: inventoryAssetId,
-                    description: `Inventory consumed for project`,
-                    debit: 0,
-                    credit: totalCost,
-                    companyId: issue.companyId,
-                  },
-                ],
+          const je = await this.postingEngine.postLines({
+            journalNumber,
+            companyId: issue.companyId,
+            transactionDate: issue.issueDate,
+            description: `Material issue ${issue.issueNumber} — ${issue.project.projectName}`,
+            referenceType: 'ProjectMaterialIssue',
+            referenceId: id,
+            status: 'DRAFT',
+            userId,
+            moduleName: 'project_material_issues',
+            lines: [
+              {
+                accountId: materialsExpenseId,
+                description: `Materials issued to ${issue.project.projectName}`,
+                debit: totalCost,
+                credit: 0,
               },
-            },
-          });
+              {
+                accountId: inventoryAssetId,
+                description: `Inventory consumed for project`,
+                debit: 0,
+                credit: totalCost,
+              },
+            ],
+          }, tx);
           journalEntryId = je.id;
         }
       }

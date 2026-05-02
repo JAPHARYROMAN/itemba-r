@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateDataQualityIssueDto } from './dto/create-data-quality-issue.dto';
 import { DataQualityCheckRunnerService } from './data-quality-check-runner.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class DataQualityService {
@@ -17,8 +18,7 @@ export class DataQualityService {
     const { page = 1, limit = 20, companyId, entityType, issueType, severity, status } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = {};
-    if (companyId) where.companyId = companyId;
-    else if (user.companyId) where.companyId = user.companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (entityType) where.entityType = entityType;
     if (issueType) where.issueType = issueType;
     if (severity) where.severity = severity;

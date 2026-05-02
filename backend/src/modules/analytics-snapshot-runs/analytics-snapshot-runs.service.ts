@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { AnalyticsRunStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class AnalyticsSnapshotRunsService {
@@ -16,8 +17,7 @@ export class AnalyticsSnapshotRunsService {
     const where: any = {};
     if (runType) where.runType = runType;
     if (status) where.status = status;
-    if (companyId) where.companyId = companyId;
-    else if (user.companyId) where.companyId = user.companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await Promise.all([
       this.prisma.analyticsSnapshotRun.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' } }),
       this.prisma.analyticsSnapshotRun.count({ where }),

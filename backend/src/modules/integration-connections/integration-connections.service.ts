@@ -5,7 +5,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateIntegrationConnectionDto } from './dto/create-integration-connection.dto';
 import { UpdateIntegrationConnectionDto } from './dto/update-integration-connection.dto';
 import { QueryIntegrationConnectionDto } from './dto/query-integration-connection.dto';
-import { EncryptionService } from '../../common/services';
+import { EncryptionService, applyCompanyScopeWhere } from '../../common/services';
 
 /** Fields that must never be sent to the frontend */
 const SAFE_SELECT = {
@@ -38,11 +38,11 @@ export class IntegrationConnectionsService {
     private readonly encryption: EncryptionService,
   ) {}
 
-  async findAll(query: QueryIntegrationConnectionDto) {
+  async findAll(query: QueryIntegrationConnectionDto, user?: any) {
     const { page = 1, limit = 20, companyId, providerId, status, environment } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (providerId) where.providerId = providerId;
     if (status) where.status = status;
     if (environment) where.environment = environment;

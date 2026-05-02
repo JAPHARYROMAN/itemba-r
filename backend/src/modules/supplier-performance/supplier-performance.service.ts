@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class SupplierPerformanceService {
@@ -9,11 +10,11 @@ export class SupplierPerformanceService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: any) {
+  async findAll(query: any, user?: any) {
     const { companyId, supplierId, page = 1, limit = 20 } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (supplierId) where.supplierId = supplierId;
     const [items, total] = await Promise.all([
       this.prisma.supplierPerformanceProfile.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' } }),

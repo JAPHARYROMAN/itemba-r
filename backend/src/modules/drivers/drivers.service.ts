@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateDriverDto } from './dto/create-driver.dto';
 import { UpdateDriverDto } from './dto/update-driver.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class DriversService {
@@ -18,9 +19,9 @@ export class DriversService {
     return driver;
   }
 
-  async findAll(companyId?: string, page = 1, limit = 20) {
+  async findAll(companyId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await this.prisma.$transaction([
       this.prisma.driverProfile.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { createdAt: 'desc' }, include: { assignedVehicle: { select: { vehicleCode: true, registrationNumber: true } } } }),
       this.prisma.driverProfile.count({ where }),

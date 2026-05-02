@@ -16,8 +16,8 @@ export class VehicleMaintenanceController {
   create(@Body() dto: CreateVehicleMaintenanceDto, @CurrentUser() user: AuthUser) { return this.service.create(dto, user.id); }
 
   @Get() @RequirePermissions('vehicle_maintenance.view')
-  findAll(@Query('companyId') companyId?: string, @Query('vehicleId') vehicleId?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
-    return this.service.findAll(companyId, vehicleId, page ? +page : 1, limit ? +limit : 20);
+  findAll(@Query('companyId') companyId?: string, @Query('vehicleId') vehicleId?: string, @Query('page') page?: string, @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser) {
+    return this.service.findAll(companyId, vehicleId, page ? +page : 1, limit ? +limit : 20, user);
   }
 
   @Get(':id') @RequirePermissions('vehicle_maintenance.view')

@@ -22,8 +22,8 @@ export class QuotationsController {
   @Get()
   @RequirePermissions('quotations.view')
   @ApiOperation({ summary: 'List quotations' })
-  findAll(@Query() query: QueryQuotationDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryQuotationDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

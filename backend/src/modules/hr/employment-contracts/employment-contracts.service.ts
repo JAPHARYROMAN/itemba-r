@@ -3,6 +3,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateEmploymentContractDto } from './dto/create-employment-contract.dto';
 import { UpdateEmploymentContractDto } from './dto/update-employment-contract.dto';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class EmploymentContractsService {
@@ -17,7 +18,7 @@ export class EmploymentContractsService {
     const { page = 1, limit = 20, employeeId, companyId, status } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (employeeId) where.employeeId = employeeId;
     if (status) where.status = status;
     const [data, total] = await Promise.all([

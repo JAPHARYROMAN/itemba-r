@@ -27,9 +27,9 @@ export class ParkingZonesController {
     @Query('status') status?: ParkingZoneStatus,
     @Query('vehicleType') vehicleType?: ParkingZoneVehicleType,
     @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
-    return this.service.findAll(companyId, facilityId, status, vehicleType, page ? +page : 1, limit ? +limit : 20);
+    return this.service.findAll(companyId, facilityId, status, vehicleType, page ? +page : 1, limit ? +limit : 20, user);
   }
 
   @Get(':id')

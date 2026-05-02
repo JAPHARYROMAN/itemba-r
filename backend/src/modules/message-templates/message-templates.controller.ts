@@ -21,8 +21,8 @@ export class MessageTemplatesController {
 
   @Get()
   @RequirePermissions('message_templates.view')
-  findAll(@Query() query: QueryMessageTemplateDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryMessageTemplateDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

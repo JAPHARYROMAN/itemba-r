@@ -22,8 +22,8 @@ export class SalesChannelsController {
   @Get()
   @RequirePermissions('sales_channels.view')
   @ApiOperation({ summary: 'List sales channels' })
-  findAll(@Query() query: QuerySalesChannelDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QuerySalesChannelDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

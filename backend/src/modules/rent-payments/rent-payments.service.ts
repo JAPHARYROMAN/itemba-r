@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateRentPaymentDto } from './dto/create-rent-payment.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class RentPaymentsService {
@@ -58,9 +59,9 @@ export class RentPaymentsService {
     return payment;
   }
 
-  async findAll(companyId?: string, rentInvoiceId?: string, tenantId?: string, page = 1, limit = 20) {
+  async findAll(companyId?: string, rentInvoiceId?: string, tenantId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (rentInvoiceId) where.rentInvoiceId = rentInvoiceId;
     if (tenantId) where.tenantId = tenantId;
     const [data, total] = await this.prisma.$transaction([

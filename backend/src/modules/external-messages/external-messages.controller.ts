@@ -11,8 +11,8 @@ export class ExternalMessagesController {
 
   @Get()
   @RequirePermissions('external_messages.view')
-  findAll(@Query() query: QueryExternalMessageDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryExternalMessageDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

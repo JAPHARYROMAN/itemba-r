@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateProductBatchDto } from './dto/create-product-batch.dto';
 import { UpdateProductBatchDto } from './dto/update-product-batch.dto';
 import { QueryProductBatchDto } from './dto/query-product-batch.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class ProductBatchesService {
@@ -52,11 +53,11 @@ export class ProductBatchesService {
     return record;
   }
 
-  async findAll(query: QueryProductBatchDto) {
+  async findAll(query: QueryProductBatchDto, user?: any) {
     const { page = 1, limit = 20, companyId, productId, status, inventoryLocationId } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (productId) where.productId = productId;
     if (status) where.status = status;
     if (inventoryLocationId) where.inventoryLocationId = inventoryLocationId;
@@ -68,17 +69,17 @@ export class ProductBatchesService {
     return { data, total, page, limit };
   }
 
-  async findExpiring(companyId?: string) {
+  async findExpiring(companyId?: string, user?: any) {
     const cutoff = new Date(Date.now() + 30 * 24 * 3600 * 1000);
     const where: any = { status: 'ACTIVE', expiryDate: { lte: cutoff, not: null }, deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     return this.prisma.productBatch.findMany({ where, orderBy: { expiryDate: 'asc' } });
   }
 
-  async findExpired(companyId?: string) {
+  async findExpired(companyId?: string, user?: any) {
     const now = new Date();
     const where: any = { expiryDate: { lt: now }, status: { in: ['ACTIVE', 'EXPIRED'] }, deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     return this.prisma.productBatch.findMany({ where, orderBy: { expiryDate: 'asc' } });
   }
 

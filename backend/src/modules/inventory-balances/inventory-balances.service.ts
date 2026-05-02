@@ -1,17 +1,18 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueryInventoryBalanceDto } from './dto/query-inventory-balance.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class InventoryBalancesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(query: QueryInventoryBalanceDto) {
+  async findAll(query: QueryInventoryBalanceDto, user?: any) {
     const { page = 1, limit = 20, companyId, productId, locationId, lowStock } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (productId) where.productId = productId;
     if (locationId) where.inventoryLocationId = locationId;
     if (lowStock) where.quantityOnHand = { lte: 0 };

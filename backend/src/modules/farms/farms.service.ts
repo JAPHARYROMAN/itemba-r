@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateFarmDto } from './dto/create-farm.dto';
 import { UpdateFarmDto } from './dto/update-farm.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class FarmsService {
@@ -16,9 +17,9 @@ export class FarmsService {
     return farm;
   }
 
-  async findAll(companyId?: string, divisionId?: string, page = 1, limit = 20) {
+  async findAll(companyId?: string, divisionId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (divisionId) where.divisionId = divisionId;
     const [data, total] = await this.prisma.$transaction([
       this.prisma.farm.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { createdAt: 'desc' }, include: { company: { select: { name: true } }, division: { select: { name: true } }, sizeUnit: { select: { symbol: true } }, manager: { select: { fullName: true } } } }),

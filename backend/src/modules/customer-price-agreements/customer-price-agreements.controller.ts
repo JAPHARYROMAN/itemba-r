@@ -22,8 +22,8 @@ export class CustomerPriceAgreementsController {
   @Get()
   @RequirePermissions('customer_price_agreements.view')
   @ApiOperation({ summary: 'List customer price agreements' })
-  findAll(@Query() query: QueryCustomerPriceAgreementDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryCustomerPriceAgreementDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

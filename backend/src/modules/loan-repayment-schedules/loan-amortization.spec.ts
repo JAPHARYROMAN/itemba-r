@@ -9,6 +9,7 @@ describe('LoanRepaymentSchedulesService — amortization math', () => {
     {} as any,
     {} as any,
     {} as any,
+    {} as any,
   );
 
   // Reach into the private method for direct testing.

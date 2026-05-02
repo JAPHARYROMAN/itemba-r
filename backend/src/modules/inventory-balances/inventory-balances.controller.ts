@@ -2,6 +2,7 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { InventoryBalancesService } from './inventory-balances.service';
 import { QueryInventoryBalanceDto } from './dto/query-inventory-balance.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('inventory-balances')
 export class InventoryBalancesController {
@@ -9,8 +10,8 @@ export class InventoryBalancesController {
 
   @Get()
   @RequirePermissions('inventory.view')
-  findAll(@Query() query: QueryInventoryBalanceDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryInventoryBalanceDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   /** Live stock heatmap — per-location grouping with OUT/LOW/OK counts. */

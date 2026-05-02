@@ -29,9 +29,9 @@ export class RestaurantOrdersController {
     @Query('status') status?: RestaurantOrderStatus,
     @Query('orderType') orderType?: RestaurantOrderType,
     @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
-    return this.service.findAll(companyId, hospitalityFacilityId, tableId, guestId, status, orderType, page ? +page : 1, limit ? +limit : 20);
+    return this.service.findAll(companyId, hospitalityFacilityId, tableId, guestId, status, orderType, page ? +page : 1, limit ? +limit : 20, user);
   }
 
   @Get(':id')

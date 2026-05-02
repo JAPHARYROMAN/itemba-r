@@ -22,8 +22,8 @@ export class DeliveryNotesController {
   @Get()
   @RequirePermissions('delivery_notes.view')
   @ApiOperation({ summary: 'List delivery notes' })
-  findAll(@Query() query: QueryDeliveryNoteDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryDeliveryNoteDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

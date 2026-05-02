@@ -5,6 +5,7 @@ import { CreatePriceListDto } from './dto/create-price-list.dto';
 import { UpdatePriceListDto } from './dto/update-price-list.dto';
 import { QueryPriceListDto } from './dto/query-price-list.dto';
 import { CreatePriceListItemStandaloneDto, UpdatePriceListItemDto } from './dto/price-list-item.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class PriceListsService {
@@ -53,11 +54,11 @@ export class PriceListsService {
     return this.findOne(record.id);
   }
 
-  async findAll(query: QueryPriceListDto) {
+  async findAll(query: QueryPriceListDto, user?: any) {
     const { page = 1, limit = 20, companyId, priceListType, status } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (priceListType) where.priceListType = priceListType;
     if (status) where.status = status;
 

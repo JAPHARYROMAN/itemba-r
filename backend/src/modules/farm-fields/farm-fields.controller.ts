@@ -16,8 +16,8 @@ export class FarmFieldsController {
   create(@Body() dto: CreateFarmFieldDto, @CurrentUser() user: AuthUser) { return this.service.create(dto, user.id); }
 
   @Get() @RequirePermissions('farm_fields.view')
-  findAll(@Query('farmId') farmId?: string, @Query('companyId') companyId?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
-    return this.service.findAll(farmId, companyId, page ? +page : 1, limit ? +limit : 20);
+  findAll(@Query('farmId') farmId?: string, @Query('companyId') companyId?: string, @Query('page') page?: string, @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser) {
+    return this.service.findAll(farmId, companyId, page ? +page : 1, limit ? +limit : 20, user);
   }
 
   @Get(':id') @RequirePermissions('farm_fields.view')

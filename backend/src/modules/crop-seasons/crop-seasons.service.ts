@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateCropSeasonDto } from './dto/create-crop-season.dto';
 import { UpdateCropSeasonDto } from './dto/update-crop-season.dto';
 import { CropSeasonStatus } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class CropSeasonsService {
@@ -19,10 +20,10 @@ export class CropSeasonsService {
     return season;
   }
 
-  async findAll(farmId?: string, companyId?: string, status?: CropSeasonStatus, page = 1, limit = 20) {
+  async findAll(farmId?: string, companyId?: string, status?: CropSeasonStatus, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
     if (farmId) where.farmId = farmId;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
     const [data, total] = await this.prisma.$transaction([
       this.prisma.cropSeason.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { createdAt: 'desc' }, include: { farm: { select: { name: true } }, field: { select: { name: true } }, crop: { select: { name: true, cropType: true } } } }),

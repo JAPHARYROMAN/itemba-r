@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateParkingPaymentDto } from './dto/create-parking-payment.dto';
 import { ParkingPaymentStatus } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class ParkingPaymentsService {
@@ -67,9 +68,9 @@ export class ParkingPaymentsService {
     return payment;
   }
 
-  async findAll(companyId?: string, parkingSessionId?: string, page = 1, limit = 20) {
+  async findAll(companyId?: string, parkingSessionId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (parkingSessionId) where.parkingSessionId = parkingSessionId;
     const [data, total] = await this.prisma.$transaction([
       this.prisma.parkingPayment.findMany({

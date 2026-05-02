@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateParkingSessionDto } from './dto/create-parking-session.dto';
 import { UpdateParkingSessionDto } from './dto/update-parking-session.dto';
 import { ParkingSessionStatus, ParkingPaymentStatus, ParkingRateType } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 interface CloseSessionInput {
   exitTime?: string;
@@ -46,10 +47,10 @@ export class ParkingSessionsService {
     status?: ParkingSessionStatus,
     paymentStatus?: ParkingPaymentStatus,
     page = 1,
-    limit = 20,
+    limit = 20, user?: any,
   ) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (facilityId) where.facilityId = facilityId;
     if (zoneId) where.zoneId = zoneId;
     if (status) where.status = status;

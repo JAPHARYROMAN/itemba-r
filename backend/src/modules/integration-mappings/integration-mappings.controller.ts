@@ -21,8 +21,8 @@ export class IntegrationMappingsController {
 
   @Get()
   @RequirePermissions('integration_mappings.view')
-  findAll(@Query() query: QueryIntegrationMappingDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryIntegrationMappingDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

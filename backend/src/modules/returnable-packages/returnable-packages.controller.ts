@@ -22,15 +22,15 @@ export class ReturnablePackagesController {
   @Get()
   @RequirePermissions('returnable_packages.view')
   @ApiOperation({ summary: 'List returnable packages' })
-  findAll(@Query() query: QueryReturnablePackageDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryReturnablePackageDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get('balances')
   @RequirePermissions('returnable_packages.view')
   @ApiOperation({ summary: 'List customer package balances' })
-  getBalances(@Query() query: QueryReturnablePackageDto) {
-    return this.service.getBalances(query);
+  getBalances(@Query() query: QueryReturnablePackageDto, @CurrentUser() user: AuthUser) {
+    return this.service.getBalances(query, user);
   }
 
   @Get(':id')

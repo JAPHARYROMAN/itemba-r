@@ -21,9 +21,9 @@ export class RentInvoicesController {
     @Query('leaseAgreementId') leaseAgreementId?: string,
     @Query('status') status?: string,
     @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
-    return this.service.findAll(companyId, propertyId, tenantId, leaseAgreementId, status, page ? +page : 1, limit ? +limit : 20);
+    return this.service.findAll(companyId, propertyId, tenantId, leaseAgreementId, status, page ? +page : 1, limit ? +limit : 20, user);
   }
 
   @Get(':id')

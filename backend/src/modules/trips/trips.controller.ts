@@ -17,8 +17,8 @@ export class TripsController {
   create(@Body() dto: CreateTripDto, @CurrentUser() user: AuthUser) { return this.service.create(dto, user.id); }
 
   @Get() @RequirePermissions('trips.view')
-  findAll(@Query('companyId') companyId?: string, @Query('status') status?: TripStatus, @Query('page') page?: string, @Query('limit') limit?: string) {
-    return this.service.findAll(companyId, status, page ? +page : 1, limit ? +limit : 20);
+  findAll(@Query('companyId') companyId?: string, @Query('status') status?: TripStatus, @Query('page') page?: string, @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser) {
+    return this.service.findAll(companyId, status, page ? +page : 1, limit ? +limit : 20, user);
   }
 
   @Get(':id') @RequirePermissions('trips.view')

@@ -3,6 +3,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateTaxRateDto } from './dto/create-tax-rate.dto';
 import { UpdateTaxRateDto } from './dto/update-tax-rate.dto';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class TaxRatesService {
@@ -17,7 +18,7 @@ export class TaxRatesService {
     const { page = 1, limit = 20, companyId, taxTypeId, status } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (taxTypeId) where.taxTypeId = taxTypeId;
     if (status) where.status = status;
     const [data, total] = await Promise.all([
@@ -31,7 +32,7 @@ export class TaxRatesService {
     const { taxTypeId, companyId } = query;
     const where: any = { deletedAt: null, status: 'ACTIVE' };
     if (taxTypeId) where.taxTypeId = taxTypeId;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     return this.prisma.taxRate.findFirst({ where, orderBy: { effectiveFrom: 'desc' } });
   }
 

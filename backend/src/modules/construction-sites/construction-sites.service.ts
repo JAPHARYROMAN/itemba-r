@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateConstructionSiteDto } from './dto/create-construction-site.dto';
 import { UpdateConstructionSiteDto } from './dto/update-construction-site.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class ConstructionSitesService {
@@ -16,10 +17,10 @@ export class ConstructionSitesService {
     return site;
   }
 
-  async findAll(projectId?: string, companyId?: string, page = 1, limit = 20) {
+  async findAll(projectId?: string, companyId?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
     if (projectId) where.projectId = projectId;
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await this.prisma.$transaction([
       this.prisma.constructionSite.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { createdAt: 'desc' }, include: { project: { select: { projectName: true, projectCode: true } }, siteManager: { select: { fullName: true } } } }),
       this.prisma.constructionSite.count({ where }),

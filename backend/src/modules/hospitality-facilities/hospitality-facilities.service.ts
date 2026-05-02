@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateHospitalityFacilityDto } from './dto/create-hospitality-facility.dto';
 import { UpdateHospitalityFacilityDto } from './dto/update-hospitality-facility.dto';
 import { HospitalityFacilityStatus } from '@prisma/client';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class HospitalityFacilitiesService {
@@ -19,9 +20,9 @@ export class HospitalityFacilitiesService {
     return facility;
   }
 
-  async findAll(companyId?: string, divisionId?: string, status?: HospitalityFacilityStatus, search?: string, page = 1, limit = 20) {
+  async findAll(companyId?: string, divisionId?: string, status?: HospitalityFacilityStatus, search?: string, page = 1, limit = 20, user?: any) {
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (divisionId) where.divisionId = divisionId;
     if (status) where.status = status;
     if (search) where.OR = [

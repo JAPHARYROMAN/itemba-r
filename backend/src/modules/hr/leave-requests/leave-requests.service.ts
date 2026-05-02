@@ -3,6 +3,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
 import { UpdateLeaveRequestDto } from './dto/update-leave-request.dto';
+import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class LeaveRequestsService {
@@ -17,7 +18,7 @@ export class LeaveRequestsService {
     const { page = 1, limit = 20, employeeId, companyId, status, leaveTypeId } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (employeeId) where.employeeId = employeeId;
     if (status) where.status = status;
     if (leaveTypeId) where.leaveTypeId = leaveTypeId;

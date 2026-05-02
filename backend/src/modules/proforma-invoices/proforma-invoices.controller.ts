@@ -22,8 +22,8 @@ export class ProformaInvoicesController {
   @Get()
   @RequirePermissions('proformas.view')
   @ApiOperation({ summary: 'List proforma invoices' })
-  findAll(@Query() query: QueryProformaInvoiceDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryProformaInvoiceDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

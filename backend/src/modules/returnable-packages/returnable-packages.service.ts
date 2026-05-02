@@ -4,6 +4,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateReturnablePackageDto } from './dto/create-returnable-package.dto';
 import { UpdateReturnablePackageDto } from './dto/update-returnable-package.dto';
 import { QueryReturnablePackageDto } from './dto/query-returnable-package.dto';
+import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class ReturnablePackagesService {
@@ -45,11 +46,11 @@ export class ReturnablePackagesService {
     return record;
   }
 
-  async getBalances(query: QueryReturnablePackageDto) {
+  async getBalances(query: QueryReturnablePackageDto, user?: any) {
     const { page = 1, limit = 100, companyId } = query;
     const skip = (page - 1) * limit;
     const where: any = {};
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
 
     const [data, total] = await Promise.all([
       this.prisma.customerPackageBalance.findMany({
@@ -80,11 +81,11 @@ export class ReturnablePackagesService {
     return { data: rows, total, page, limit };
   }
 
-  async findAll(query: QueryReturnablePackageDto) {
+  async findAll(query: QueryReturnablePackageDto, user?: any) {
     const { page = 1, limit = 20, companyId, packageType, status } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
+    applyCompanyScopeWhere(where, user, companyId);
     if (packageType) where.packageType = packageType;
     if (status) where.status = status;
 
