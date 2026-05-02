@@ -1,9 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { backendList } from '@/lib/api-client';
 
 const STATUS_COLORS: Record<string, string> = {
-  PENDING: 'bg-yellow-100 text-yellow-700',
+  DRAFT: 'bg-gray-100 text-gray-600',
+  REQUESTED: 'bg-yellow-100 text-yellow-700',
+  APPROVED: 'bg-indigo-100 text-indigo-700',
   RUNNING: 'bg-blue-100 text-blue-700',
   COMPLETED: 'bg-green-100 text-green-700',
   FAILED: 'bg-red-100 text-red-700',
@@ -15,9 +18,8 @@ export default function ArchiveJobsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/backend/archive-jobs')
-      .then(r => r.json())
-      .then(res => setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []))
+    backendList<any>('data-archive-jobs')
+      .then(setData)
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -47,20 +49,32 @@ export default function ArchiveJobsPage() {
             </thead>
             <tbody>
               {data.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No archive jobs found</td></tr>
-              ) : data.map((row: any) => (
-                <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs">{row.jobNumber}</td>
-                  <td className="px-4 py-3">{row.category ?? '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[row.status] ?? 'bg-gray-100 text-gray-600'}`}>{row.status}</span>
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
+                    No archive jobs found
                   </td>
-                  <td className="px-4 py-3">{row.recordsEvaluated ?? 0}</td>
-                  <td className="px-4 py-3">{row.recordsArchived ?? 0}</td>
-                  <td className="px-4 py-3">{row.recordsDeleted ?? 0}</td>
-                  <td className="px-4 py-3 text-gray-400">{row.startedAt ? new Date(row.startedAt).toLocaleString() : '—'}</td>
                 </tr>
-              ))}
+              ) : (
+                data.map((row: any) => (
+                  <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
+                    <td className="px-4 py-3 font-mono text-xs">{row.archiveJobNumber}</td>
+                    <td className="px-4 py-3">{row.dataCategory ?? '—'}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[row.status] ?? 'bg-gray-100 text-gray-600'}`}
+                      >
+                        {row.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">{row.recordsEvaluated ?? 0}</td>
+                    <td className="px-4 py-3">{row.recordsArchived ?? 0}</td>
+                    <td className="px-4 py-3">{row.recordsDeleted ?? 0}</td>
+                    <td className="px-4 py-3 text-gray-400">
+                      {row.startedAt ? new Date(row.startedAt).toLocaleString() : '—'}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

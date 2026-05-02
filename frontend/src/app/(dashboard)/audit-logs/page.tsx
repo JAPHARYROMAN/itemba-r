@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/hooks/use-auth';
+import { backendGet, backendPage } from '@/lib/api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -183,21 +184,14 @@ export default function AuditLogsPage() {
 
   const abortRef = useRef<AbortController | null>(null);
 
-  async function apiFetch(path: string) {
-    const res = await fetch(`/api/backend/${path}`);
-    if (!res.ok) return null;
-    const json = (await res.json()) as { data: unknown };
-    return json.data;
-  }
-
   useEffect(() => {
     if (!canView) return;
-    void apiFetch('companies?limit=100').then((d) => {
-      if (d) setCompanies((d as { data: Company[] }).data ?? []);
-    });
-    void apiFetch('audit-logs/entity-types').then((d) => {
-      if (d) setEntityTypes(d as string[]);
-    });
+    void backendPage<Company>('companies', { query: { limit: 100 } })
+      .then((page) => setCompanies(page.data))
+      .catch(() => {});
+    void backendGet<string[]>('audit-logs/entity-types')
+      .then((types) => setEntityTypes(Array.isArray(types) ? types : []))
+      .catch(() => {});
   }, [canView]);
 
   useEffect(() => {
@@ -206,24 +200,24 @@ export default function AuditLogsPage() {
     abortRef.current = new AbortController();
     const { signal } = abortRef.current;
 
-    const params = new URLSearchParams();
-    if (search) params.set('search', search);
-    if (companyId) params.set('companyId', companyId);
-    if (action) params.set('action', action);
-    if (entityType) params.set('entityType', entityType);
-    if (severity) params.set('severity', severity);
-    if (dateFrom) params.set('dateFrom', dateFrom);
-    if (dateTo) params.set('dateTo', dateTo);
-    params.set('page', String(page));
-    params.set('limit', '50');
-
     setLoading(true);
     (async () => {
       try {
-        const res = await fetch(`/api/backend/audit-logs?${params.toString()}`, { signal });
-        if (!res.ok) return;
-        const json = (await res.json()) as { data: PagedResult };
-        setResult(json.data);
+        const logs = await backendPage<AuditLog>('audit-logs', {
+          signal,
+          query: {
+            search,
+            companyId,
+            action,
+            entityType,
+            severity,
+            dateFrom,
+            dateTo,
+            page,
+            limit: 50,
+          },
+        });
+        setResult(logs);
       } catch {
         /* aborted */
       } finally {

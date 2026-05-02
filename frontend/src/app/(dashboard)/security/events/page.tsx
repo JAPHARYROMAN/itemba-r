@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { backendPage, backendPatch } from '@/lib/api-client';
 
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-100 text-red-700',
@@ -24,17 +25,9 @@ export default function SecurityEventsPage() {
   const [status, setStatus] = useState('');
 
   const load = useCallback(() => {
-    const params = new URLSearchParams();
-    if (severity) params.set('severity', severity);
-    if (status) params.set('status', status);
     setLoading(true);
-    fetch(`/api/backend/security-events?${params}`)
-      .then((r) => r.json())
-      .then((res) =>
-        setData(
-          Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : [],
-        ),
-      )
+    backendPage<any>('security-events', { query: { severity, status } })
+      .then((page) => setData(page.data))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [severity, status]);
@@ -44,7 +37,7 @@ export default function SecurityEventsPage() {
   }, [load]);
 
   async function handleAction(id: string, action: 'review' | 'resolve') {
-    await fetch(`/api/backend/security-events/${id}/${action}`, { method: 'POST' }).catch(() => {});
+    await backendPatch(`security-events/${id}/${action}`).catch(() => {});
     load();
   }
 

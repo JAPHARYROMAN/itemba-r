@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { backendGet } from '@/lib/api-client';
 
 const HEALTH_COLORS: Record<string, string> = {
   HEALTHY: 'bg-green-50 border-green-200 text-green-700',
@@ -20,24 +21,32 @@ const LOG_SEVERITY_COLORS: Record<string, string> = {
 export default function MonitoringDashboardPage() {
   const [healthChecks, setHealthChecks] = useState<any[]>([]);
   const [errorLogs, setErrorLogs] = useState<any[]>([]);
+  const [readiness, setReadiness] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/backend/monitoring/dashboard')
-      .then(r => r.json())
-      .then(res => {
-        const d = res?.data ?? res;
+    backendGet<any>('monitoring/dashboard')
+      .then((d) => {
         setHealthChecks(Array.isArray(d.healthChecks) ? d.healthChecks : []);
         setErrorLogs(Array.isArray(d.recentErrors) ? d.recentErrors : []);
+        setReadiness(d.operationalReadiness ?? null);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
   const quickLinks = [
-    { label: 'Health Checks', href: '/monitoring/health-checks', desc: 'Run and view system health checks' },
+    {
+      label: 'Health Checks',
+      href: '/monitoring/health-checks',
+      desc: 'Run and view system health checks',
+    },
     { label: 'Error Logs', href: '/monitoring/error-logs', desc: 'Review and resolve error logs' },
-    { label: 'System Metrics', href: '/monitoring/metrics', desc: 'View system performance metrics' },
+    {
+      label: 'System Metrics',
+      href: '/monitoring/metrics',
+      desc: 'View system performance metrics',
+    },
   ];
 
   return (
@@ -51,15 +60,51 @@ export default function MonitoringDashboardPage() {
         <div className="text-center py-10 text-gray-500">Loading...</div>
       ) : (
         <>
+          {readiness && (
+            <div className="mb-8 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-800">Operational Readiness</h2>
+                  <p className="text-sm text-gray-500">
+                    Current gate status: {String(readiness.status).toUpperCase()}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className="text-3xl font-bold text-gray-900">
+                    {readiness.readinessScore ?? 0}%
+                  </div>
+                  <div className="text-xs text-gray-500">readiness score</div>
+                </div>
+              </div>
+              {Array.isArray(readiness.blockers) && readiness.blockers.length > 0 && (
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  {readiness.blockers.slice(0, 4).map((blocker: any) => (
+                    <div
+                      key={`${blocker.category}-${blocker.metric}`}
+                      className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700"
+                    >
+                      <span className="font-semibold">{blocker.category}:</span> {blocker.message}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {healthChecks.length > 0 && (
             <div className="mb-8">
               <h2 className="text-lg font-semibold text-gray-800 mb-3">System Health</h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                 {healthChecks.map((hc: any) => (
-                  <div key={hc.id} className={`rounded-xl border p-4 ${HEALTH_COLORS[hc.status] ?? 'bg-gray-50 border-gray-200 text-gray-500'}`}>
+                  <div
+                    key={hc.id}
+                    className={`rounded-xl border p-4 ${HEALTH_COLORS[hc.status] ?? 'bg-gray-50 border-gray-200 text-gray-500'}`}
+                  >
                     <div className="font-semibold text-sm">{hc.name}</div>
                     <div className="text-xs mt-1 opacity-80">{hc.status}</div>
-                    {hc.responseTimeMs != null && <div className="text-xs mt-0.5 opacity-60">{hc.responseTimeMs}ms</div>}
+                    {hc.responseTimeMs != null && (
+                      <div className="text-xs mt-0.5 opacity-60">{hc.responseTimeMs}ms</div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -68,7 +113,9 @@ export default function MonitoringDashboardPage() {
 
           {errorLogs.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-8">
-              <div className="px-5 py-4 border-b border-gray-100 font-semibold text-gray-800">Recent Error Logs</div>
+              <div className="px-5 py-4 border-b border-gray-100 font-semibold text-gray-800">
+                Recent Error Logs
+              </div>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
@@ -85,10 +132,18 @@ export default function MonitoringDashboardPage() {
                       <td className="px-4 py-2">{log.module ?? '—'}</td>
                       <td className="px-4 py-2">{log.errorType ?? '—'}</td>
                       <td className="px-4 py-2">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${LOG_SEVERITY_COLORS[log.severity] ?? 'bg-gray-100 text-gray-600'}`}>{log.severity}</span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-medium ${LOG_SEVERITY_COLORS[log.severity] ?? 'bg-gray-100 text-gray-600'}`}
+                        >
+                          {log.severity}
+                        </span>
                       </td>
-                      <td className="px-4 py-2 max-w-[280px] truncate text-gray-600">{log.message}</td>
-                      <td className="px-4 py-2 text-gray-400">{log.createdAt ? new Date(log.createdAt).toLocaleString() : '—'}</td>
+                      <td className="px-4 py-2 max-w-[280px] truncate text-gray-600">
+                        {log.message}
+                      </td>
+                      <td className="px-4 py-2 text-gray-400">
+                        {log.createdAt ? new Date(log.createdAt).toLocaleString() : '—'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -97,8 +152,12 @@ export default function MonitoringDashboardPage() {
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {quickLinks.map(link => (
-              <Link key={link.href} href={link.href} className="block bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow">
+            {quickLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="block bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow"
+              >
                 <div className="font-semibold text-gray-900 mb-1">{link.label}</div>
                 <div className="text-sm text-gray-500">{link.desc}</div>
               </Link>

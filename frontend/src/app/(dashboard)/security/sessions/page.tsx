@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { backendList, backendPatch } from '@/lib/api-client';
 
 const STATUS_COLORS: Record<string, string> = {
   ACTIVE: 'bg-green-100 text-green-700',
@@ -14,17 +15,20 @@ export default function ActiveSessionsPage() {
 
   function load() {
     setLoading(true);
-    fetch('/api/backend/active-sessions')
-      .then(r => r.json())
-      .then(res => setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []))
+    backendList<any>('active-sessions')
+      .then(setData)
       .catch(() => {})
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   async function revoke(id: string) {
-    await fetch(`/api/backend/active-sessions/${id}/revoke`, { method: 'POST' }).catch(() => {});
+    await backendPatch(`active-sessions/${id}/revoke`, { revokeReason: 'ADMIN_REVOKED' }).catch(
+      () => {},
+    );
     load();
   }
 
@@ -55,26 +59,45 @@ export default function ActiveSessionsPage() {
             </thead>
             <tbody>
               {data.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">No sessions found</td></tr>
-              ) : data.map((row: any) => (
-                <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs">{row.sessionCode}</td>
-                  <td className="px-4 py-3">{row.user?.name ?? row.userId}</td>
-                  <td className="px-4 py-3">{row.sessionType}</td>
-                  <td className="px-4 py-3 font-mono text-xs">{row.ipAddress ?? '—'}</td>
-                  <td className="px-4 py-3 text-xs">{row.deviceInfo ?? '—'}</td>
-                  <td className="px-4 py-3 text-gray-400">{row.startedAt ? new Date(row.startedAt).toLocaleString() : '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[row.status] ?? 'bg-gray-100 text-gray-600'}`}>{row.status}</span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-400">{row.lastActivityAt ? new Date(row.lastActivityAt).toLocaleString() : '—'}</td>
-                  <td className="px-4 py-3">
-                    {row.status === 'ACTIVE' && (
-                      <button onClick={() => revoke(row.id)} className="px-2 py-1 rounded text-xs bg-red-100 text-red-700 hover:bg-red-200">Revoke</button>
-                    )}
+                <tr>
+                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
+                    No sessions found
                   </td>
                 </tr>
-              ))}
+              ) : (
+                data.map((row: any) => (
+                  <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
+                    <td className="px-4 py-3 font-mono text-xs">{row.sessionCode}</td>
+                    <td className="px-4 py-3">{row.user?.name ?? row.userId}</td>
+                    <td className="px-4 py-3">{row.sessionType}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{row.ipAddress ?? '—'}</td>
+                    <td className="px-4 py-3 text-xs">{row.deviceSummary ?? '—'}</td>
+                    <td className="px-4 py-3 text-gray-400">
+                      {row.startedAt ? new Date(row.startedAt).toLocaleString() : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[row.status] ?? 'bg-gray-100 text-gray-600'}`}
+                      >
+                        {row.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-400">
+                      {row.lastActivityAt ? new Date(row.lastActivityAt).toLocaleString() : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      {row.status === 'ACTIVE' && (
+                        <button
+                          onClick={() => revoke(row.id)}
+                          className="px-2 py-1 rounded text-xs bg-red-100 text-red-700 hover:bg-red-200"
+                        >
+                          Revoke
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

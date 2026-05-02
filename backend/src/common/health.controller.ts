@@ -1,29 +1,33 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { PrismaService } from '../prisma/prisma.service';
+import { MonitoringService } from '../modules/monitoring/monitoring.service';
 import { Public } from './decorators/public.decorator';
 
 @ApiTags('health')
 @Controller('health')
 export class HealthController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly monitoring: MonitoringService) {}
 
   @Public()
   @Get()
   async check() {
-    let db = 'down';
-    try {
-      await this.prisma.$queryRaw`SELECT 1`;
-      db = 'up';
-    } catch {
-      db = 'down';
-    }
+    return this.monitoring.getPublicHealth();
+  }
+
+  @Public()
+  @Get('live')
+  live() {
     return {
-      status: db === 'up' ? 'ok' : 'degraded',
+      status: 'ok',
       service: 'itemba-r-api',
-      version: '0.1.0',
-      database: db,
       uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
     };
+  }
+
+  @Public()
+  @Get('ready')
+  async ready() {
+    return this.monitoring.getPublicHealth();
   }
 }

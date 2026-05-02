@@ -1,18 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { backendList } from '@/lib/api-client';
 
 export default function RetentionPoliciesPage() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/backend/retention-policies')
-      .then(r => r.json())
-      .then(res => {
-        const d = res.data;
-        setData(Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : []);
-      })
+    backendList<any>('retention-policies')
+      .then(setData)
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -43,31 +40,45 @@ export default function RetentionPoliciesPage() {
             </thead>
             <tbody>
               {data.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No retention policies found</td></tr>
-              ) : data.map((row: any) => (
-                <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs">{row.policyCode}</td>
-                  <td className="px-4 py-3 font-medium">{row.name}</td>
-                  <td className="px-4 py-3">{row.category ?? '—'}</td>
-                  <td className="px-4 py-3">{row.retentionDays ?? '—'}</td>
-                  <td className="px-4 py-3">{row.archiveAfterDays != null ? `${row.archiveAfterDays}d` : '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${row.deletionAllowed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
-                      {row.deletionAllowed ? 'Yes' : 'No'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${row.legalHold ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-500'}`}>
-                      {row.legalHold ? 'Yes' : 'No'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${row.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                      {row.isActive ? 'Active' : 'Inactive'}
-                    </span>
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                    No retention policies found
                   </td>
                 </tr>
-              ))}
+              ) : (
+                data.map((row: any) => (
+                  <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
+                    <td className="px-4 py-3 font-mono text-xs">{row.retentionPolicyCode}</td>
+                    <td className="px-4 py-3 font-medium">{row.name}</td>
+                    <td className="px-4 py-3">{row.dataCategory ?? '—'}</td>
+                    <td className="px-4 py-3">{row.retentionDays ?? '—'}</td>
+                    <td className="px-4 py-3">
+                      {row.archiveAfterDays != null ? `${row.archiveAfterDays}d` : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium ${row.deletionAllowed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}
+                      >
+                        {row.deletionAllowed ? 'Yes' : 'No'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium ${row.legalHold ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-500'}`}
+                      >
+                        {row.legalHold ? 'Yes' : 'No'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium ${row.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
+                      >
+                        {row.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

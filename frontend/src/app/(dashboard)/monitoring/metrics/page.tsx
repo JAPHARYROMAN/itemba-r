@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { backendPage } from '@/lib/api-client';
 
 export default function SystemMetricsPage() {
   const [data, setData] = useState<any[]>([]);
@@ -8,16 +9,9 @@ export default function SystemMetricsPage() {
   const [metricType, setMetricType] = useState('');
 
   const load = useCallback(() => {
-    const params = new URLSearchParams();
-    if (metricType) params.set('metricType', metricType);
     setLoading(true);
-    fetch(`/api/backend/system-metrics?${params}`)
-      .then((r) => r.json())
-      .then((res) =>
-        setData(
-          Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : [],
-        ),
-      )
+    backendPage<any>('system-metrics', { query: { metricType } })
+      .then((page) => setData(page.data))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [metricType]);

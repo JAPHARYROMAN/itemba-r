@@ -1,12 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { backendPage, backendPatch } from '@/lib/api-client';
 
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-100 text-red-700',
-  ERROR: 'bg-red-100 text-red-600',
-  WARNING: 'bg-yellow-100 text-yellow-700',
-  INFO: 'bg-blue-100 text-blue-700',
+  HIGH: 'bg-orange-100 text-orange-700',
+  MEDIUM: 'bg-yellow-100 text-yellow-700',
+  LOW: 'bg-blue-100 text-blue-700',
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -23,17 +24,9 @@ export default function ErrorLogsPage() {
   const [severity, setSeverity] = useState('');
 
   const load = useCallback(() => {
-    const params = new URLSearchParams();
-    if (status) params.set('status', status);
-    if (severity) params.set('severity', severity);
     setLoading(true);
-    fetch(`/api/backend/error-logs?${params}`)
-      .then((r) => r.json())
-      .then((res) =>
-        setData(
-          Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : [],
-        ),
-      )
+    backendPage<any>('error-logs', { query: { status, severity } })
+      .then((page) => setData(page.data))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [severity, status]);
@@ -43,7 +36,7 @@ export default function ErrorLogsPage() {
   }, [load]);
 
   async function handleAction(id: string, action: string) {
-    await fetch(`/api/backend/error-logs/${id}/${action}`, { method: 'POST' }).catch(() => {});
+    await backendPatch(`error-logs/${id}/${action}`).catch(() => {});
     load();
   }
 
@@ -71,7 +64,7 @@ export default function ErrorLogsPage() {
           className="border rounded-lg px-3 py-2 text-sm"
         >
           <option value="">All Severities</option>
-          {['CRITICAL', 'ERROR', 'WARNING', 'INFO'].map((s) => (
+          {['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((s) => (
             <option key={s}>{s}</option>
           ))}
         </select>

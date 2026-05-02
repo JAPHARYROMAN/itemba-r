@@ -11,4 +11,10 @@ export class MonitoringController {
   dashboard() {
     return this.service.getDashboard();
   }
+
+  @Get('readiness')
+  @RequirePermissions('monitoring.dashboard.view')
+  readiness() {
+    return this.service.getOperationalReadiness();
+  }
 }
