@@ -20,7 +20,7 @@ const LIST_INCLUDE = {
       status: true,
     },
   },
-  branch: { select: { id: true, name: true, branchCode: true } },
+  branch: { select: { id: true, name: true, code: true } },
   cashAccount: { select: { id: true, accountName: true, accountType: true } },
   company: { select: { id: true, name: true, code: true } },
 } as const;
@@ -163,6 +163,7 @@ export class FuelShiftCollectionsService {
     const collectorById = new Map(collectors.map((u) => [u.id, u]));
     const data = rows.map((r) => ({
       ...r,
+      branch: r.branch ? { ...r.branch, branchCode: r.branch.code } : null,
       collectedBy: r.collectedById ? collectorById.get(r.collectedById) ?? null : null,
     }));
 

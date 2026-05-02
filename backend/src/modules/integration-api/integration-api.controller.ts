@@ -96,7 +96,7 @@ export class IntegrationApiController {
   @RequireApiScope('payments.read')
   async listPayments(@Query() query: any, @Req() req: Request) {
     const { companyId } = this.requireBoundCompany(req);
-    return this.externalPayments.findAll({ ...query, companyId }, false);
+    return this.externalPayments.findAll({ ...query, companyId }, false, (req as any).user);
   }
 
   // ─── Messaging ─────────────────────────────────────────────────────────

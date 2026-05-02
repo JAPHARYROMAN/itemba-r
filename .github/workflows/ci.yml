@@ -210,7 +210,7 @@ jobs:
           done
           cat ../frontend-smoke.log
           exit 1
-      - name: Smoke static dashboard routes
+      - name: Smoke frontend page routes
         env:
           FRONTEND_BASE_URL: http://localhost:3009
         run: npm run smoke:routes

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { AccountingLockStatus, PeriodCloseStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { applyCompanyScopeWhere } from '../../common/services';
@@ -16,8 +17,10 @@ export class AccountingEngineService {
     applyCompanyScopeWhere(where, user, companyId);
 
     const [pendingCloses, openLocks, pendingAdjustments, pendingPostingRuns] = await Promise.all([
-      this.prisma.accountingPeriodClose.count({ where: { ...where, status: 'PENDING' } }),
-      this.prisma.accountingLock.count({ where: { ...where, isReleased: false } }),
+      this.prisma.accountingPeriodClose.count({
+        where: { ...where, status: { in: [PeriodCloseStatus.DRAFT, PeriodCloseStatus.REVIEWING] } },
+      }),
+      this.prisma.accountingLock.count({ where: { ...where, status: AccountingLockStatus.ACTIVE } }),
       this.prisma.auditAdjustment.count({ where: { ...where, status: { in: ['DRAFT', 'SUBMITTED'] } } }),
       this.prisma.postingRun.count({ where: { ...where, status: 'DRAFT' } }),
     ]);

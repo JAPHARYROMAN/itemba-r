@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { PayrollRunStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { applyCompanyScopeWhere } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -184,7 +185,7 @@ export class TaxAnomalyDetectionService {
   // A POSTED payroll run that produced zero PayrollStatutoryLine entries is
   // almost always a misconfiguration — at least PAYE/NSSF should have fired.
   private async checkPostedPayrollWithoutStatutoryLines(companyId?: string, user?: any): Promise<Anomaly[]> {
-    const where: any = { deletedAt: null, status: 'POSTED' };
+    const where: any = { deletedAt: null, status: { in: [PayrollRunStatus.APPROVED, PayrollRunStatus.PAID] } };
     applyCompanyScopeWhere(where, user, companyId);
 
     const runs = await this.prisma.payrollRun.findMany({

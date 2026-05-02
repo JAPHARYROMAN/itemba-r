@@ -43,7 +43,9 @@ export class ExternalPaymentsService {
 
   async findAll(query: QueryExternalPaymentDto, includeSensitive: boolean, user?: any) {
     const { page = 1, limit = 20, companyId, providerId, status, paymentContextType } = query;
-    const skip = (page - 1) * limit;
+    const pageNumber = Number(page) || 1;
+    const limitNumber = Number(limit) || 20;
+    const skip = (pageNumber - 1) * limitNumber;
     const where: any = { deletedAt: null };
     applyCompanyScopeWhere(where, user, companyId);
     if (providerId) where.providerId = providerId;
@@ -56,11 +58,17 @@ export class ExternalPaymentsService {
         select: this.buildSelect(includeSensitive),
         orderBy: { initiatedAt: 'desc' },
         skip,
-        take: limit,
+        take: limitNumber,
       }),
       this.prisma.externalPayment.count({ where }),
     ]);
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return {
+      data,
+      total,
+      page: pageNumber,
+      limit: limitNumber,
+      totalPages: Math.ceil(total / limitNumber),
+    };
   }
 
   async findOne(id: string, includeSensitive: boolean, companyId?: string) {

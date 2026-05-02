@@ -16,10 +16,12 @@ export class BusinessAutomationService {
 
   async getSummary(query: any = {}, user: AuthUser) {
     const { companyId } = query;
-    const where: any = {
+    const companyWhere = (await this.companyScope.companyWhereFor(user, companyId)) as any;
+    const ruleWhere: any = {
       deletedAt: null,
-      ...((await this.companyScope.companyWhereFor(user, companyId)) as any),
+      ...companyWhere,
     };
+    const runWhere: any = { ...companyWhere };
 
     const todayStart = startOfDay(new Date());
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -45,54 +47,54 @@ export class BusinessAutomationService {
       latestFailedRuns,
       upcomingRules,
     ] = await Promise.all([
-      this.prisma.automationRule.count({ where }),
-      this.prisma.automationRule.count({ where: { ...where, status: 'ACTIVE' } }),
-      this.prisma.automationRule.count({ where: { ...where, status: 'INACTIVE' } }),
-      this.prisma.automationRule.count({ where: { ...where, status: 'PAUSED' } }),
+      this.prisma.automationRule.count({ where: ruleWhere }),
+      this.prisma.automationRule.count({ where: { ...ruleWhere, status: 'ACTIVE' } }),
+      this.prisma.automationRule.count({ where: { ...ruleWhere, status: 'INACTIVE' } }),
+      this.prisma.automationRule.count({ where: { ...ruleWhere, status: 'PAUSED' } }),
       this.prisma.automationRule.count({
-        where: { ...where, status: 'ERROR' },
+        where: { ...ruleWhere, status: 'ERROR' },
       }),
       this.prisma.automationRule.count({
-        where: { ...where, status: 'ACTIVE', nextRunAt: { lte: new Date() } },
+        where: { ...ruleWhere, status: 'ACTIVE', nextRunAt: { lte: new Date() } },
       }),
       this.prisma.automationRun.count({
-        where: { ...where, createdAt: { gte: todayStart } },
+        where: { ...runWhere, createdAt: { gte: todayStart } },
       }),
-      this.prisma.automationRun.count({ where: { ...where, createdAt: { gte: sevenDaysAgo } } }),
+      this.prisma.automationRun.count({ where: { ...runWhere, createdAt: { gte: sevenDaysAgo } } }),
       this.prisma.automationRun.count({
-        where: { ...where, status: 'COMPLETED', createdAt: { gte: sevenDaysAgo } },
-      }),
-      this.prisma.automationRun.count({
-        where: { ...where, status: 'FAILED', createdAt: { gte: sevenDaysAgo } },
+        where: { ...runWhere, status: 'COMPLETED', createdAt: { gte: sevenDaysAgo } },
       }),
       this.prisma.automationRun.count({
-        where: { ...where, status: 'REQUESTED', createdAt: { gte: sevenDaysAgo } },
+        where: { ...runWhere, status: 'FAILED', createdAt: { gte: sevenDaysAgo } },
+      }),
+      this.prisma.automationRun.count({
+        where: { ...runWhere, status: 'REQUESTED', createdAt: { gte: sevenDaysAgo } },
       }),
       this.prisma.automationRun.aggregate({
-        where: { ...where, createdAt: { gte: sevenDaysAgo } },
+        where: { ...runWhere, createdAt: { gte: sevenDaysAgo } },
         _sum: { recordsProcessed: true, recordsCreated: true, recordsFailed: true },
       }),
       this.prisma.automationRun.aggregate({
-        where: { ...where, status: 'FAILED', createdAt: { gte: sevenDaysAgo } },
+        where: { ...runWhere, status: 'FAILED', createdAt: { gte: sevenDaysAgo } },
         _sum: { recordsFailed: true },
       }),
       this.prisma.automationRule.groupBy({
         by: ['automationType'],
-        where,
+        where: ruleWhere,
         _count: { _all: true },
       }),
       this.prisma.automationRule.groupBy({
         by: ['status'],
-        where,
+        where: ruleWhere,
         _count: { _all: true },
       }),
       this.prisma.automationRun.groupBy({
         by: ['status'],
-        where: { ...where, createdAt: { gte: sevenDaysAgo } },
+        where: { ...runWhere, createdAt: { gte: sevenDaysAgo } },
         _count: { _all: true },
       }),
       this.prisma.automationRun.findMany({
-        where,
+        where: runWhere,
         select: {
           id: true,
           automationRunNumber: true,
@@ -111,7 +113,7 @@ export class BusinessAutomationService {
         take: 10,
       }),
       this.prisma.automationRun.findMany({
-        where: { ...where, status: 'FAILED' },
+        where: { ...runWhere, status: 'FAILED' },
         select: {
           id: true,
           automationRunNumber: true,
@@ -123,7 +125,7 @@ export class BusinessAutomationService {
         take: 8,
       }),
       this.prisma.automationRule.findMany({
-        where: { ...where, status: 'ACTIVE', nextRunAt: { not: null } },
+        where: { ...ruleWhere, status: 'ACTIVE', nextRunAt: { not: null } },
         select: {
           id: true,
           automationRuleCode: true,
