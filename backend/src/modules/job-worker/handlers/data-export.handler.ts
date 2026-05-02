@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { DataExportType, Prisma } from '@prisma/client';
+import { DataExportStatus, DataExportType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { DataExportsService } from '../../data-exports/data-exports.service';
 import { JobContext, JobHandlerRegistry, JobResult } from '../job-handler.registry';
@@ -54,14 +54,28 @@ export class DataExportJobHandler implements OnModuleInit {
     const exportLogId = ctx.payload.exportLogId as string | undefined;
     if (!exportLogId) throw new Error('payload.exportLogId is required');
 
+    const exportLog = await this.prisma.dataExportLog.findUnique({
+      where: { id: exportLogId },
+    });
+    if (!exportLog) throw new Error(`DataExportLog ${exportLogId} not found`);
+    if (
+      exportLog.status === DataExportStatus.COMPLETED &&
+      exportLog.fileName &&
+      exportLog.filePath
+    ) {
+      return {
+        data: {
+          fileName: exportLog.fileName,
+          filePath: exportLog.filePath,
+          skipped: true,
+          reason: 'export already completed',
+        },
+      };
+    }
+
     await this.exports.markRunning(exportLogId);
 
     try {
-      const exportLog = await this.prisma.dataExportLog.findUnique({
-        where: { id: exportLogId },
-      });
-      if (!exportLog) throw new Error(`DataExportLog ${exportLogId} not found`);
-
       const exportDir = process.env.EXPORTS_DIR ?? path.join(process.cwd(), 'uploads', 'exports');
       await fs.mkdir(exportDir, { recursive: true });
 

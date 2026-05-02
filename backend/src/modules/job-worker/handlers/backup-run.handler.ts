@@ -1,6 +1,6 @@
 import { execFile } from 'child_process';
-import { createHash } from 'crypto';
-import { promises as fs } from 'fs';
+import { createHash, randomUUID } from 'crypto';
+import { createReadStream, promises as fs } from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
@@ -42,8 +42,7 @@ export class BackupRunJobHandler implements OnModuleInit {
       (ctx.payload.backupRunId as string | undefined) ?? ctx.correlationId ?? null;
     if (!backupRunId) throw new Error('payload.backupRunId is required');
 
-    const backupsDir =
-      process.env.BACKUPS_DIR ?? path.join(process.cwd(), 'uploads', 'backups');
+    const backupsDir = process.env.BACKUPS_DIR ?? path.join(process.cwd(), 'uploads', 'backups');
     await fs.mkdir(backupsDir, { recursive: true });
 
     const databaseUrl = process.env.DATABASE_URL;
@@ -57,18 +56,35 @@ export class BackupRunJobHandler implements OnModuleInit {
         backupJobId: true,
         backupRunNumber: true,
         backupType: true,
+        status: true,
+        filePath: true,
+        fileSizeBytes: true,
+        checksum: true,
         metadata: true,
       },
     });
     if (!backupRun) throw new Error(`BackupRun ${backupRunId} not found`);
+    if (backupRun.status === 'COMPLETED' && backupRun.filePath && backupRun.checksum) {
+      return {
+        data: {
+          fileName: path.basename(backupRun.filePath),
+          filePath: backupRun.filePath,
+          sizeBytes: Number(backupRun.fileSizeBytes ?? 0),
+          checksum: backupRun.checksum,
+          skipped: true,
+          reason: 'backup run already completed',
+        },
+      };
+    }
 
     await this.prisma.backupRun.update({
       where: { id: backupRunId },
       data: { status: 'RUNNING', startedAt },
     });
 
-    const fileName = `backup-${backupRunId}-${Date.now()}.sql`;
-    const filePath = path.join(backupsDir, fileName);
+    const fileName = this.safeBackupFileName(backupRun.backupRunNumber);
+    const filePath = this.resolveBackupPath(backupsDir, fileName);
+    const tempFilePath = this.resolveBackupPath(backupsDir, `${fileName}.tmp-${randomUUID()}`);
 
     try {
       // pg_dump is invoked via execFile (no shell) so DATABASE_URL is not
@@ -80,12 +96,13 @@ export class BackupRunJobHandler implements OnModuleInit {
           '--no-owner',
           '--no-privileges',
           '--format=plain',
-          `--file=${filePath}`,
+          `--file=${tempFilePath}`,
           `--dbname=${databaseUrl}`,
         ],
         { env: process.env, timeout: 30 * 60_000 },
       );
 
+      await fs.rename(tempFilePath, filePath);
       const stat = await fs.stat(filePath);
       const checksum = await this.fileSha256(filePath);
 
@@ -134,13 +151,38 @@ export class BackupRunJobHandler implements OnModuleInit {
         })
         .catch(() => undefined);
       // Best-effort cleanup of partial file
+      await fs.unlink(tempFilePath).catch(() => undefined);
       await fs.unlink(filePath).catch(() => undefined);
       throw err;
     }
   }
 
   private async fileSha256(filePath: string): Promise<string> {
-    const data = await fs.readFile(filePath);
-    return createHash('sha256').update(data).digest('hex');
+    const hash = createHash('sha256');
+    await new Promise<void>((resolve, reject) => {
+      const stream = createReadStream(filePath);
+      stream.on('data', (chunk) => hash.update(chunk));
+      stream.on('error', reject);
+      stream.on('end', resolve);
+    });
+    return hash.digest('hex');
+  }
+
+  private safeBackupFileName(backupRunNumber: string): string {
+    const normalized = backupRunNumber
+      .replace(/[^A-Za-z0-9._-]/g, '_')
+      .replace(/^\.+/, '')
+      .slice(0, 120);
+    return `backup-${normalized || 'run'}.sql`;
+  }
+
+  private resolveBackupPath(backupsDir: string, fileName: string): string {
+    const root = path.resolve(backupsDir);
+    const filePath = path.resolve(root, fileName);
+    const relative = path.relative(root, filePath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error('Resolved backup file path escapes BACKUPS_DIR');
+    }
+    return filePath;
   }
 }

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import * as path from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DataExportsService } from '../data-exports/data-exports.service';
+import { BackupRunJobHandler } from './handlers/backup-run.handler';
 import { DataExportJobHandler } from './handlers/data-export.handler';
 import { JobHandlerRegistry } from './job-handler.registry';
 import { JobWorkerService } from './job-worker.service';
@@ -208,6 +209,181 @@ describe('JobWorkerService queue policy and scheduled backups', () => {
     );
   });
 
+  it('moves stale running jobs to retrying and increments attempts', async () => {
+    const staleJob = {
+      id: 'job-stale-A',
+      jobType: 'DATA_EXPORT',
+      queueName: 'data-exports',
+      companyId: 'company-A',
+      payload: { exportLogId: 'export-A' },
+      correlationId: 'export-A',
+      attempts: 0,
+      maxAttempts: 3,
+    };
+    const prisma = {
+      backgroundJob: {
+        findMany: jest.fn().mockResolvedValue([staleJob]),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      jobQueueConfig: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            { queueName: 'data-exports', retryAttempts: 3, retryBackoffSeconds: 1 },
+          ]),
+      },
+      dataExportLog: { update: jest.fn() },
+    };
+    const service = serviceFor(prisma);
+
+    await expect(service.recoverStale()).resolves.toBe(1);
+
+    expect(prisma.backgroundJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'job-stale-A' },
+        data: expect.objectContaining({
+          status: 'RETRYING',
+          attempts: 1,
+          startedAt: null,
+          errorMessage: 'Worker lease expired before completion',
+        }),
+      }),
+    );
+    expect(prisma.dataExportLog.update).not.toHaveBeenCalled();
+  });
+
+  it('dead-letters stale jobs on their final attempt and marks related exports failed', async () => {
+    const staleJob = {
+      id: 'job-stale-final',
+      jobType: 'DATA_EXPORT',
+      queueName: 'data-exports',
+      companyId: 'company-A',
+      payload: { exportLogId: 'export-A' },
+      correlationId: 'export-A',
+      attempts: 2,
+      maxAttempts: 3,
+    };
+    const prisma = {
+      backgroundJob: {
+        findMany: jest.fn().mockResolvedValue([staleJob]),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      jobQueueConfig: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            { queueName: 'data-exports', retryAttempts: 3, retryBackoffSeconds: 1 },
+          ]),
+      },
+      dataExportLog: { update: jest.fn().mockResolvedValue({}) },
+    };
+    const service = serviceFor(prisma);
+
+    await expect(service.recoverStale()).resolves.toBe(1);
+
+    expect(prisma.backgroundJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'job-stale-final' },
+        data: expect.objectContaining({
+          status: 'DEAD_LETTER',
+          attempts: 3,
+          scheduledAt: null,
+        }),
+      }),
+    );
+    expect(prisma.dataExportLog.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'export-A' },
+        data: expect.objectContaining({
+          status: 'FAILED',
+          notes: 'Worker lease expired before completion',
+        }),
+      }),
+    );
+  });
+
+  it('enforces configured queue concurrency while leasing candidates', async () => {
+    const candidateRows = [
+      { id: 'job-A', queueName: 'data-exports' },
+      { id: 'job-B', queueName: 'data-exports' },
+    ];
+    const leasedRows = candidateRows.map((row) => ({
+      ...row,
+      jobType: 'DATA_EXPORT',
+      companyId: 'company-A',
+      payload: {},
+      correlationId: null,
+      attempts: 0,
+      maxAttempts: 3,
+    }));
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValueOnce([{ id: 'job-A' }, { id: 'job-B' }]),
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      backgroundJob: {
+        findMany: jest.fn().mockResolvedValueOnce(candidateRows).mockResolvedValueOnce(leasedRows),
+        groupBy: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      jobQueueConfig: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ queueName: 'data-exports', concurrency: 1, isActive: true }]),
+      },
+    };
+    const prisma = { $transaction: jest.fn((callback: any) => callback(tx)) };
+    const registry = new JobHandlerRegistry();
+    registry.register('DATA_EXPORT', async () => ({}));
+    const service = serviceFor(prisma, registry);
+
+    await expect(service.leaseJobs(5)).resolves.toHaveLength(1);
+
+    expect(tx.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ['job-A'] } },
+      }),
+    );
+  });
+
+  it('fails a timed-out handler through the retry path', async () => {
+    const registry = new JobHandlerRegistry();
+    registry.register('DATA_EXPORT', () => new Promise(() => undefined));
+    const prisma = {
+      jobQueueConfig: {
+        findUnique: jest.fn().mockResolvedValue({
+          queueName: 'data-exports',
+          isActive: true,
+          retryAttempts: 2,
+          retryBackoffSeconds: 1,
+          timeoutSeconds: 0.001,
+        }),
+      },
+      backgroundJob: { update: jest.fn().mockResolvedValue({}) },
+    };
+    const service = serviceFor(prisma, registry);
+
+    await service.runJob({
+      id: 'job-timeout',
+      jobType: 'DATA_EXPORT',
+      queueName: 'data-exports',
+      companyId: null,
+      payload: {},
+      correlationId: null,
+      attempts: 0,
+      maxAttempts: 3,
+    });
+
+    expect(prisma.backgroundJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'job-timeout' },
+        data: expect.objectContaining({
+          status: 'RETRYING',
+          attempts: 1,
+          errorMessage: expect.stringContaining('exceeded timeout'),
+        }),
+      }),
+    );
+  });
+
   it('enqueues due scheduled backup jobs as backup runs and worker jobs', async () => {
     const tx = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: 'backup-job-A' }]),
@@ -296,6 +472,39 @@ describe('DataExportJobHandler artifact safety', () => {
 
     expect(() => helper.resolveExportPath(exportDir, '../escape.json')).toThrow(
       'Resolved export file path escapes EXPORTS_DIR',
+    );
+  });
+});
+
+type BackupPathHelper = {
+  safeBackupFileName(backupRunNumber: string): string;
+  resolveBackupPath(backupsDir: string, fileName: string): string;
+};
+
+describe('BackupRunJobHandler artifact safety', () => {
+  function createHelper(): BackupPathHelper {
+    return new BackupRunJobHandler(
+      {} as PrismaService,
+      {} as JobHandlerRegistry,
+    ) as unknown as BackupPathHelper;
+  }
+
+  it('sanitizes backup run numbers before using them as artifact filenames', () => {
+    const helper = createHelper();
+    const fileName = helper.safeBackupFileName('../unsafe\\backup:name');
+
+    expect(fileName).toBe('backup-_unsafe_backup_name.sql');
+    expect(fileName).not.toContain('/');
+    expect(fileName).not.toContain('\\');
+    expect(fileName).not.toContain(':');
+  });
+
+  it('rejects backup artifact paths that escape the configured backup directory', () => {
+    const helper = createHelper();
+    const backupsDir = path.join(process.cwd(), 'tmp', 'backups');
+
+    expect(() => helper.resolveBackupPath(backupsDir, '../escape.sql')).toThrow(
+      'Resolved backup file path escapes BACKUPS_DIR',
     );
   });
 });

@@ -9,6 +9,8 @@ import { JobContext, JobHandlerRegistry } from './job-handler.registry';
 const POLL_INTERVAL_MS = 2_000; // baseline poll cadence
 const POLL_BATCH = 5; // jobs leased per tick
 const STALE_AFTER_MS = 5 * 60_000; // running jobs older than this are reclaimed
+const STALE_RECOVERY_BATCH = 100;
+const DEFAULT_CANDIDATE_MULTIPLIER = 10;
 
 /**
  * BackgroundJob worker.
@@ -96,7 +98,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     try {
       const scheduledBackups =
         filter.jobId || filter.queueName ? 0 : await this.enqueueDueBackupRuns(batch);
-      await this.recoverStale();
+      const recoveredStale = await this.recoverStale();
       const leased = await this.leaseJobs(batch, filter);
       // Run leased jobs in parallel. Worker tick stays responsive even when
       // one handler is slow.
@@ -110,6 +112,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
         leased: leased.length,
         skipped: false,
         scheduledBackups,
+        recoveredStale,
         settled: settled.map((result, index) =>
           result.status === 'fulfilled'
             ? { jobId: leased[index].id, status: result.status }
@@ -130,12 +133,49 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
    * Mark RUNNING jobs that haven't progressed in STALE_AFTER_MS as QUEUED so
    * they can be retried. This recovers from worker crashes mid-handler.
    */
-  private async recoverStale(): Promise<void> {
+  private async recoverStale(): Promise<number> {
     const cutoff = new Date(Date.now() - STALE_AFTER_MS);
-    await this.prisma.backgroundJob.updateMany({
+    const staleJobs = await this.prisma.backgroundJob.findMany({
       where: { status: 'RUNNING', startedAt: { lt: cutoff } },
-      data: { status: 'QUEUED' },
+      orderBy: { startedAt: 'asc' },
+      take: STALE_RECOVERY_BATCH,
     });
+    if (staleJobs.length === 0) return 0;
+
+    const queueNames = Array.from(new Set(staleJobs.map((job) => job.queueName)));
+    const configs = await this.prisma.jobQueueConfig.findMany({
+      where: { queueName: { in: queueNames } },
+      select: { queueName: true, retryAttempts: true, retryBackoffSeconds: true },
+    });
+    const configByQueue = new Map(configs.map((config) => [config.queueName, config]));
+    const message = 'Worker lease expired before completion';
+
+    for (const job of staleJobs) {
+      const queueConfig = configByQueue.get(job.queueName);
+      const nextAttempts = job.attempts + 1;
+      const maxAttempts = this.maxAttemptsFor(job, queueConfig);
+      const isFinal = nextAttempts >= maxAttempts;
+      await this.prisma.backgroundJob.update({
+        where: { id: job.id },
+        data: {
+          status: isFinal ? 'DEAD_LETTER' : 'RETRYING',
+          attempts: nextAttempts,
+          failedAt: new Date(),
+          startedAt: null,
+          scheduledAt: isFinal
+            ? null
+            : new Date(
+                Date.now() + this.retryBackoffMs(nextAttempts, queueConfig?.retryBackoffSeconds),
+              ),
+          errorMessage: message,
+        },
+      });
+      if (isFinal) {
+        await this.markRelatedWorkFailed(job, message);
+      }
+    }
+
+    return staleJobs.length;
   }
 
   /**
@@ -148,30 +188,94 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     if (registered.length === 0) return [];
 
     return this.prisma.$transaction(async (tx) => {
+      const candidateLimit = Math.max(batch, batch * DEFAULT_CANDIDATE_MULTIPLIER);
       const candidates = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        SELECT id FROM background_jobs
-         WHERE status IN ('QUEUED', 'RETRYING')
-           AND ("scheduledAt" IS NULL OR "scheduledAt" <= NOW())
-           AND "jobType"::text IN (${Prisma.join(registered)})
-           ${filter.jobId ? Prisma.sql`AND id = ${filter.jobId}` : Prisma.empty}
-           ${filter.queueName ? Prisma.sql`AND "queueName" = ${filter.queueName}` : Prisma.empty}
-           AND NOT EXISTS (
-             SELECT 1 FROM job_queue_configs jqc
-              WHERE jqc."queueName" = background_jobs."queueName"
-                AND jqc."isActive" = false
-           )
-         ORDER BY priority DESC, "createdAt" ASC
-         LIMIT ${batch}
-         FOR UPDATE SKIP LOCKED
+         SELECT background_jobs.id FROM background_jobs
+          LEFT JOIN job_queue_configs jqc
+            ON jqc."queueName" = background_jobs."queueName"
+         WHERE background_jobs.status IN ('QUEUED', 'RETRYING')
+           AND (background_jobs."scheduledAt" IS NULL OR background_jobs."scheduledAt" <= NOW())
+           AND background_jobs."jobType"::text IN (${Prisma.join(registered)})
+           ${filter.jobId ? Prisma.sql`AND background_jobs.id = ${filter.jobId}` : Prisma.empty}
+           ${
+             filter.queueName
+               ? Prisma.sql`AND background_jobs."queueName" = ${filter.queueName}`
+               : Prisma.empty
+           }
+           AND COALESCE(jqc."isActive", true) = true
+         ORDER BY background_jobs.priority DESC, background_jobs."createdAt" ASC
+         LIMIT ${candidateLimit}
+         FOR UPDATE OF background_jobs SKIP LOCKED
       `);
       if (candidates.length === 0) return [];
-      const ids = candidates.map((c) => c.id);
+
+      const candidateIds = candidates.map((c) => c.id);
+      const candidateRows = await tx.backgroundJob.findMany({
+        where: { id: { in: candidateIds } },
+        select: { id: true, queueName: true },
+      });
+      const rowById = new Map(candidateRows.map((row) => [row.id, row]));
+      const orderedCandidates = candidateIds
+        .map((id) => rowById.get(id))
+        .filter((row): row is { id: string; queueName: string } => Boolean(row));
+
+      const queueNames = Array.from(new Set(orderedCandidates.map((row) => row.queueName))).sort();
+      for (const queueName of queueNames) {
+        await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${queueName}))`);
+      }
+
+      const [configs, runningCounts] = await Promise.all([
+        tx.jobQueueConfig.findMany({
+          where: { queueName: { in: queueNames } },
+          select: { queueName: true, concurrency: true, isActive: true },
+        }),
+        tx.backgroundJob.groupBy({
+          by: ['queueName'],
+          where: { queueName: { in: queueNames }, status: 'RUNNING' },
+          _count: { _all: true },
+        }),
+      ]);
+
+      const configByQueue = new Map(configs.map((config) => [config.queueName, config]));
+      const runningByQueue = new Map(
+        runningCounts.map((count) => [count.queueName, count._count._all]),
+      );
+      const remainingByQueue = new Map<string, number>();
+      for (const queueName of queueNames) {
+        const config = configByQueue.get(queueName);
+        if (config && !config.isActive) {
+          remainingByQueue.set(queueName, 0);
+          continue;
+        }
+        const configuredConcurrency = Math.max(1, config?.concurrency ?? batch);
+        const running = runningByQueue.get(queueName) ?? 0;
+        remainingByQueue.set(queueName, Math.max(0, configuredConcurrency - running));
+      }
+
+      const ids: string[] = [];
+      for (const row of orderedCandidates) {
+        const remaining = remainingByQueue.get(row.queueName) ?? 0;
+        if (remaining <= 0) continue;
+        ids.push(row.id);
+        remainingByQueue.set(row.queueName, remaining - 1);
+        if (ids.length >= batch) break;
+      }
+      if (ids.length === 0) return [];
+
+      const startedAt = new Date();
       await tx.backgroundJob.updateMany({
         where: { id: { in: ids } },
-        data: { status: 'RUNNING', startedAt: new Date() },
+        data: {
+          status: 'RUNNING',
+          startedAt,
+          completedAt: null,
+          failedAt: null,
+          errorMessage: null,
+        },
       });
       const rows = await tx.backgroundJob.findMany({ where: { id: { in: ids } } });
-      return rows as LeasedJob[];
+      const leasedById = new Map(rows.map((row) => [row.id, row as LeasedJob]));
+      return ids.map((id) => leasedById.get(id)).filter((row): row is LeasedJob => Boolean(row));
     });
   }
 
@@ -208,7 +312,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     };
 
     try {
-      const result = await handler(ctx);
+      const result = await this.withTimeout(handler(ctx), this.handlerTimeoutMs(queueConfig), job);
       await this.prisma.backgroundJob.update({
         where: { id: job.id },
         data: {
@@ -221,7 +325,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const nextAttempts = job.attempts + 1;
-      const maxAttempts = Math.max(1, queueConfig?.retryAttempts ?? job.maxAttempts);
+      const maxAttempts = this.maxAttemptsFor(job, queueConfig);
       const isFinal = nextAttempts >= maxAttempts;
       const backoffMs = this.retryBackoffMs(nextAttempts, queueConfig?.retryBackoffSeconds);
       this.logger.error(
@@ -237,7 +341,109 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
           scheduledAt: isFinal ? null : new Date(Date.now() + backoffMs),
         },
       });
+      if (isFinal) {
+        await this.markRelatedWorkFailed(job, message);
+      }
     }
+  }
+
+  private handlerTimeoutMs(queueConfig?: { timeoutSeconds?: number | null } | null): number | null {
+    const configuredSeconds =
+      queueConfig?.timeoutSeconds ??
+      Number(this.config.get<string>('JOB_WORKER_DEFAULT_TIMEOUT_SECONDS', '0'));
+    if (!Number.isFinite(configuredSeconds) || configuredSeconds <= 0) return null;
+    return Math.max(1, configuredSeconds * 1000);
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number | null,
+    job: Pick<LeasedJob, 'id' | 'jobType'>,
+  ): Promise<T> {
+    if (!timeoutMs) return promise;
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Job ${job.id} (${job.jobType}) exceeded timeout of ${Math.ceil(
+                    timeoutMs / 1000,
+                  )}s`,
+                ),
+              ),
+            timeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+
+  private maxAttemptsFor(
+    job: Pick<LeasedJob, 'maxAttempts'>,
+    queueConfig?: { retryAttempts?: number | null } | null,
+  ): number {
+    return Math.max(1, queueConfig?.retryAttempts ?? job.maxAttempts);
+  }
+
+  private async markRelatedWorkFailed(
+    job: Pick<LeasedJob, 'jobType' | 'payload' | 'correlationId'>,
+    message: string,
+  ): Promise<void> {
+    const payload = this.payloadObject(job.payload);
+    const errorMessage = message.slice(0, 4000);
+
+    if (job.jobType === 'DATA_EXPORT') {
+      const exportLogId =
+        typeof payload.exportLogId === 'string' ? payload.exportLogId : job.correlationId;
+      if (exportLogId) {
+        await this.prisma.dataExportLog
+          .update({
+            where: { id: exportLogId },
+            data: { status: 'FAILED', completedAt: new Date(), notes: errorMessage },
+          })
+          .catch(() => undefined);
+      }
+      return;
+    }
+
+    if (job.jobType === 'BACKUP_RUN') {
+      const backupRunId =
+        typeof payload.backupRunId === 'string' ? payload.backupRunId : job.correlationId;
+      if (backupRunId) {
+        await this.prisma.backupRun
+          .update({
+            where: { id: backupRunId },
+            data: { status: 'FAILED', completedAt: new Date(), errorMessage },
+          })
+          .catch(() => undefined);
+      }
+      return;
+    }
+
+    if (job.jobType === 'CUSTOM' && payload.kind === 'RESTORE_TEST') {
+      const restoreTestId =
+        typeof payload.restoreTestId === 'string' ? payload.restoreTestId : job.correlationId;
+      if (restoreTestId) {
+        await this.prisma.restoreTest
+          .update({
+            where: { id: restoreTestId },
+            data: { status: 'FAILED', completedAt: new Date(), issuesFound: errorMessage },
+          })
+          .catch(() => undefined);
+      }
+    }
+  }
+
+  private payloadObject(payload: Prisma.JsonValue | null): Record<string, unknown> {
+    return payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : {};
   }
 
   private async enqueueDueBackupRuns(batch: number): Promise<number> {
@@ -343,6 +549,7 @@ type JobDrainResult = {
   leased: number;
   skipped: boolean;
   scheduledBackups?: number;
+  recoveredStale?: number;
   settled: Array<
     { jobId: string; status: 'fulfilled' } | { jobId: string; status: 'rejected'; reason: string }
   >;
