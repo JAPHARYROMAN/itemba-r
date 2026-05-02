@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { backendList } from '@/lib/api-client';
 
 const STATUS_COLORS: Record<string, string> = {
   ACTIVE: 'bg-green-100 text-green-700',
@@ -13,9 +14,8 @@ export default function BackupJobsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/backend/backup-jobs')
-      .then(r => r.json())
-      .then(res => setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []))
+    backendList<any>('/backup-jobs')
+      .then(setData)
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -49,7 +49,7 @@ export default function BackupJobsPage() {
                 <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No backup jobs found</td></tr>
               ) : data.map((row: any) => (
                 <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs">{row.jobCode}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{row.backupJobCode}</td>
                   <td className="px-4 py-3 font-medium">{row.name}</td>
                   <td className="px-4 py-3">{row.backupType}</td>
                   <td className="px-4 py-3 font-mono text-xs">{row.schedule ?? '—'}</td>

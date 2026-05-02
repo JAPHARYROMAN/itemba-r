@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { DataExportsService } from '../data-exports/data-exports.service';
 import { DataExportJobHandler } from './handlers/data-export.handler';
 import { JobHandlerRegistry } from './job-handler.registry';
+import { JobWorkerService } from './job-worker.service';
 
 /**
  * P0-06 regression — JobWorker behavior: handler registration, retry math,
@@ -118,6 +119,150 @@ describe('JobWorker activation gate (P0-06 regression)', () => {
       const enabled = ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase());
       expect(enabled).toBe(false);
     }
+  });
+});
+
+describe('JobWorkerService queue policy and scheduled backups', () => {
+  function serviceFor(prisma: any, registry = new JobHandlerRegistry()) {
+    return new JobWorkerService(
+      prisma as PrismaService,
+      registry,
+      new ConfigService({ JOB_WORKER_ENABLED: 'false' }),
+    ) as any;
+  }
+
+  it('uses queue retryAttempts to dead-letter a failed job deterministically', async () => {
+    const registry = new JobHandlerRegistry();
+    registry.register('DATA_EXPORT', async () => {
+      throw new Error('export failed');
+    });
+    const prisma = {
+      jobQueueConfig: {
+        findUnique: jest.fn().mockResolvedValue({
+          queueName: 'data-exports',
+          isActive: true,
+          retryAttempts: 2,
+          retryBackoffSeconds: 5,
+        }),
+      },
+      backgroundJob: { update: jest.fn().mockResolvedValue({}) },
+    };
+    const service = serviceFor(prisma, registry);
+
+    await service.runJob({
+      id: 'job-A',
+      jobType: 'DATA_EXPORT',
+      queueName: 'data-exports',
+      companyId: null,
+      payload: {},
+      correlationId: null,
+      attempts: 1,
+      maxAttempts: 5,
+    });
+
+    expect(prisma.backgroundJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'job-A' },
+        data: expect.objectContaining({
+          status: 'DEAD_LETTER',
+          attempts: 2,
+          scheduledAt: null,
+          errorMessage: 'export failed',
+        }),
+      }),
+    );
+  });
+
+  it('does not execute jobs from a paused queue config', async () => {
+    const handler = jest.fn().mockResolvedValue({});
+    const registry = new JobHandlerRegistry();
+    registry.register('DATA_EXPORT', handler);
+    const prisma = {
+      jobQueueConfig: {
+        findUnique: jest.fn().mockResolvedValue({
+          queueName: 'data-exports',
+          isActive: false,
+        }),
+      },
+      backgroundJob: { update: jest.fn().mockResolvedValue({}) },
+    };
+    const service = serviceFor(prisma, registry);
+
+    await service.runJob({
+      id: 'job-A',
+      jobType: 'DATA_EXPORT',
+      queueName: 'data-exports',
+      companyId: null,
+      payload: {},
+      correlationId: null,
+      attempts: 0,
+      maxAttempts: 3,
+    });
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(prisma.backgroundJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'job-A' },
+        data: { status: 'QUEUED' },
+      }),
+    );
+  });
+
+  it('enqueues due scheduled backup jobs as backup runs and worker jobs', async () => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'backup-job-A' }]),
+      backupJob: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'backup-job-A',
+            backupJobCode: 'BJ-A',
+            backupType: 'DATABASE',
+            schedule: 'DAILY',
+            scheduleConfig: {},
+          },
+        ]),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      backupRun: {
+        create: jest.fn().mockResolvedValue({
+          id: 'backup-run-A',
+          backupRunNumber: 'BR-SCH-A',
+        }),
+      },
+      backgroundJob: { create: jest.fn().mockResolvedValue({ id: 'job-A' }) },
+    };
+    const prisma = { $transaction: jest.fn((callback: any) => callback(tx)) };
+    const service = serviceFor(prisma);
+
+    await expect(service.enqueueDueBackupRuns(5)).resolves.toBe(1);
+
+    expect(tx.backupRun.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          backupJobId: 'backup-job-A',
+          backupType: 'DATABASE',
+          status: 'REQUESTED',
+          metadata: expect.objectContaining({ scheduled: true, backupJobCode: 'BJ-A' }),
+        }),
+      }),
+    );
+    expect(tx.backgroundJob.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          jobType: 'BACKUP_RUN',
+          queueName: 'backups',
+          payload: { backupRunId: 'backup-run-A', scheduled: true },
+          correlationId: 'backup-run-A',
+          idempotencyKey: 'BACKUP_RUN:BR-SCH-A',
+        }),
+      }),
+    );
+    expect(tx.backupJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'backup-job-A' },
+        data: { nextRunAt: expect.any(Date) },
+      }),
+    );
   });
 });
 

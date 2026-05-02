@@ -1,7 +1,9 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { computeNextBackupRunAt } from './backup-schedule';
 import { JobContext, JobHandlerRegistry } from './job-handler.registry';
 
 const POLL_INTERVAL_MS = 2_000; // baseline poll cadence
@@ -92,6 +94,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     }
     this.running = true;
     try {
+      const scheduledBackups = await this.enqueueDueBackupRuns(batch);
       await this.recoverStale();
       const leased = await this.leaseJobs(batch);
       // Run leased jobs in parallel. Worker tick stays responsive even when
@@ -105,6 +108,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       return {
         leased: leased.length,
         skipped: false,
+        scheduledBackups,
         settled: settled.map((result, index) =>
           result.status === 'fulfilled'
             ? { jobId: leased[index].id, status: result.status }
@@ -148,6 +152,11 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
          WHERE status IN ('QUEUED', 'RETRYING')
            AND ("scheduledAt" IS NULL OR "scheduledAt" <= NOW())
            AND "jobType"::text IN (${Prisma.join(registered)})
+           AND NOT EXISTS (
+             SELECT 1 FROM job_queue_configs jqc
+              WHERE jqc."queueName" = background_jobs."queueName"
+                AND jqc."isActive" = false
+           )
          ORDER BY priority DESC, "createdAt" ASC
          LIMIT ${batch}
          FOR UPDATE SKIP LOCKED
@@ -168,6 +177,17 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     if (!handler) {
       // Should not happen — leaseJobs filters by registered types — but guard.
       this.logger.warn(`No handler for ${job.jobType}, requeueing job ${job.id}`);
+      await this.prisma.backgroundJob.update({
+        where: { id: job.id },
+        data: { status: 'QUEUED' },
+      });
+      return;
+    }
+
+    const queueConfig = await this.prisma.jobQueueConfig.findUnique({
+      where: { queueName: job.queueName },
+    });
+    if (queueConfig && !queueConfig.isActive) {
       await this.prisma.backgroundJob.update({
         where: { id: job.id },
         data: { status: 'QUEUED' },
@@ -198,8 +218,9 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const nextAttempts = job.attempts + 1;
-      const isFinal = nextAttempts >= job.maxAttempts;
-      const backoffMs = Math.min(60_000, 2 ** Math.min(nextAttempts, 6) * 1000);
+      const maxAttempts = Math.max(1, queueConfig?.retryAttempts ?? job.maxAttempts);
+      const isFinal = nextAttempts >= maxAttempts;
+      const backoffMs = this.retryBackoffMs(nextAttempts, queueConfig?.retryBackoffSeconds);
       this.logger.error(
         `Job ${job.id} (${job.jobType}) failed on attempt ${nextAttempts}: ${message}`,
       );
@@ -215,11 +236,94 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       });
     }
   }
+
+  private async enqueueDueBackupRuns(batch: number): Promise<number> {
+    return this.prisma.$transaction(async (tx) => {
+      const candidates = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id FROM backup_jobs
+         WHERE "deletedAt" IS NULL
+           AND status = 'ACTIVE'
+           AND schedule <> 'MANUAL'
+           AND ("nextRunAt" IS NULL OR "nextRunAt" <= NOW())
+         ORDER BY COALESCE("nextRunAt", "createdAt") ASC
+         LIMIT ${batch}
+         FOR UPDATE SKIP LOCKED
+      `);
+      if (candidates.length === 0) return 0;
+
+      const ids = candidates.map((candidate) => candidate.id);
+      const jobs = await tx.backupJob.findMany({
+        where: { id: { in: ids } },
+        select: {
+          id: true,
+          backupJobCode: true,
+          backupType: true,
+          schedule: true,
+          scheduleConfig: true,
+        },
+      });
+
+      const now = new Date();
+      for (const job of jobs) {
+        const backupRunNumber = this.makeRunNumber('BR-SCH');
+        const run = await tx.backupRun.create({
+          data: {
+            backupRunNumber,
+            backupJobId: job.id,
+            backupType: job.backupType,
+            status: 'REQUESTED',
+            metadata: {
+              scheduled: true,
+              backupJobCode: job.backupJobCode,
+              enqueuedAt: now.toISOString(),
+            },
+          },
+          select: { id: true, backupRunNumber: true },
+        });
+
+        await tx.backgroundJob.create({
+          data: {
+            jobNumber: this.makeRunNumber('JOB-BR'),
+            jobType: 'BACKUP_RUN',
+            queueName: 'backups',
+            status: 'QUEUED',
+            priority: 'NORMAL',
+            payload: { backupRunId: run.id, scheduled: true },
+            correlationId: run.id,
+            idempotencyKey: `BACKUP_RUN:${run.backupRunNumber}`,
+          },
+        });
+
+        await tx.backupJob.update({
+          where: { id: job.id },
+          data: {
+            nextRunAt: computeNextBackupRunAt(job.schedule, now, job.scheduleConfig),
+          },
+        });
+      }
+
+      return jobs.length;
+    });
+  }
+
+  private retryBackoffMs(nextAttempts: number, configuredBackoffSeconds?: number | null): number {
+    if (configuredBackoffSeconds && configuredBackoffSeconds > 0) {
+      return Math.min(60 * 60_000, configuredBackoffSeconds * 1000 * 2 ** (nextAttempts - 1));
+    }
+    return Math.min(60_000, 2 ** Math.min(nextAttempts, 6) * 1000);
+  }
+
+  private makeRunNumber(prefix: string): string {
+    return `${prefix}-${Date.now().toString(36).toUpperCase()}-${randomUUID()
+      .slice(0, 8)
+      .toUpperCase()}`;
+  }
 }
 
 type LeasedJob = {
   id: string;
   jobType: any;
+  queueName: string;
   companyId: string | null;
   payload: Prisma.JsonValue | null;
   correlationId: string | null;
@@ -230,6 +334,7 @@ type LeasedJob = {
 type JobDrainResult = {
   leased: number;
   skipped: boolean;
+  scheduledBackups?: number;
   settled: Array<
     { jobId: string; status: 'fulfilled' } | { jobId: string; status: 'rejected'; reason: string }
   >;

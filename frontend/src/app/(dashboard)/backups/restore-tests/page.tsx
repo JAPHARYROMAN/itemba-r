@@ -1,12 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { backendList } from '@/lib/api-client';
 
 const STATUS_COLORS: Record<string, string> = {
   PASSED: 'bg-green-100 text-green-700',
   FAILED: 'bg-red-100 text-red-700',
-  PENDING: 'bg-yellow-100 text-yellow-700',
-  IN_PROGRESS: 'bg-blue-100 text-blue-700',
+  PLANNED: 'bg-yellow-100 text-yellow-700',
+  RUNNING: 'bg-blue-100 text-blue-700',
+  CANCELLED: 'bg-gray-100 text-gray-500',
 };
 
 export default function RestoreTestsPage() {
@@ -14,9 +16,8 @@ export default function RestoreTestsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/backend/restore-tests')
-      .then(r => r.json())
-      .then(res => setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []))
+    backendList<any>('/restore-tests')
+      .then(setData)
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -48,13 +49,13 @@ export default function RestoreTestsPage() {
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No restore tests found</td></tr>
               ) : data.map((row: any) => (
                 <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs">{row.testNumber}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{row.restoreTestNumber}</td>
                   <td className="px-4 py-3 text-gray-500">{row.testDate ? new Date(row.testDate).toLocaleDateString() : '—'}</td>
-                  <td className="px-4 py-3">{row.restoreType ?? '—'}</td>
+                  <td className="px-4 py-3">{row.testType ?? '—'}</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[row.status] ?? 'bg-gray-100 text-gray-600'}`}>{row.status}</span>
                   </td>
-                  <td className="px-4 py-3">{row.testedBy?.name ?? row.testedByUserId ?? '—'}</td>
+                  <td className="px-4 py-3">{row.testedById ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-500 max-w-[300px] truncate">{row.resultSummary ?? '—'}</td>
                 </tr>
               ))}

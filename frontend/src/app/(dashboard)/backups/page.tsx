@@ -2,23 +2,24 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { backendGet } from '@/lib/api-client';
 
 const STATUS_COLORS: Record<string, string> = {
-  SUCCESS: 'bg-green-100 text-green-700',
+  COMPLETED: 'bg-green-100 text-green-700',
   FAILED: 'bg-red-100 text-red-700',
   RUNNING: 'bg-blue-100 text-blue-700',
-  PENDING: 'bg-yellow-100 text-yellow-700',
+  REQUESTED: 'bg-yellow-100 text-yellow-700',
   CANCELLED: 'bg-gray-100 text-gray-500',
 };
 
 interface BackupJobLite { id: string; name: string; status: string }
 interface BackupRunLite {
   id: string;
-  runNumber?: string;
-  backupJob?: { id: string; name: string } | null;
+  backupRunNumber?: string;
+  backupJobId?: string | null;
   status: string;
   startedAt?: string | null;
-  durationSeconds?: number | null;
+  durationMs?: number | null;
 }
 
 export default function BackupDashboardPage() {
@@ -28,10 +29,8 @@ export default function BackupDashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/backend/backups/dashboard')
-      .then(r => r.json())
-      .then(res => {
-        const d = res?.data ?? res;
+    backendGet<any>('/backups/dashboard')
+      .then(d => {
         setActiveJobs(Array.isArray(d?.activeJobs) ? d.activeJobs : []);
         setRuns(Array.isArray(d?.recentRuns) ? d.recentRuns : []);
         setFailedRunsLast7Days(typeof d?.failedRunsLast7Days === 'number' ? d.failedRunsLast7Days : 0);
@@ -40,8 +39,8 @@ export default function BackupDashboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const successfulRunsRecent = runs.filter(r => r.status === 'SUCCESS').length;
-  const lastSuccessfulRun = runs.find(r => r.status === 'SUCCESS' && r.startedAt);
+  const successfulRunsRecent = runs.filter(r => r.status === 'COMPLETED').length;
+  const lastSuccessfulRun = runs.find(r => r.status === 'COMPLETED' && r.startedAt);
 
   const statCards = [
     { label: 'Active Backup Jobs', value: activeJobs.length, color: 'bg-blue-50 text-blue-700 border-blue-200' },
@@ -93,13 +92,13 @@ export default function BackupDashboardPage() {
                 <tbody>
                   {runs.map((run: any) => (
                     <tr key={run.id} className="border-t border-gray-100 hover:bg-gray-50">
-                      <td className="px-4 py-2 font-mono text-xs">{run.runNumber}</td>
-                      <td className="px-4 py-2">{run.backupJob?.name ?? '—'}</td>
+                      <td className="px-4 py-2 font-mono text-xs">{run.backupRunNumber}</td>
+                      <td className="px-4 py-2">{run.backupJobId ?? '—'}</td>
                       <td className="px-4 py-2">
                         <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[run.status] ?? 'bg-gray-100 text-gray-600'}`}>{run.status}</span>
                       </td>
                       <td className="px-4 py-2 text-gray-400">{run.startedAt ? new Date(run.startedAt).toLocaleString() : '—'}</td>
-                      <td className="px-4 py-2">{run.durationSeconds ? `${run.durationSeconds}s` : '—'}</td>
+                      <td className="px-4 py-2">{run.durationMs ? `${(run.durationMs / 1000).toFixed(1)}s` : '—'}</td>
                     </tr>
                   ))}
                 </tbody>

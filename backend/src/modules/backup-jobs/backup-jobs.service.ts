@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { AuditSeverity } from '@prisma/client';
+import { AuditSeverity, BackupSchedule } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { computeNextBackupRunAt } from '../job-worker/backup-schedule';
 
 const SAFE_SELECT = {
   id: true,
@@ -50,17 +51,27 @@ export class BackupJobsService {
   }
 
   async create(dto: any, userId: string) {
+    const schedule = dto.schedule ?? BackupSchedule.MANUAL;
+    const scheduleConfig = dto.scheduleConfig ?? {};
+    const nextRunAt =
+      dto.nextRunAt !== undefined
+        ? dto.nextRunAt
+          ? new Date(dto.nextRunAt)
+          : null
+        : computeNextBackupRunAt(schedule, new Date(), scheduleConfig);
+
     const record = await this.prisma.backupJob.create({
       data: {
         backupJobCode: 'BJ-' + Date.now(),
         name: dto.name,
         backupType: dto.backupType,
-        schedule: dto.schedule ?? 'MANUAL',
-        scheduleConfig: dto.scheduleConfig ?? {},
+        schedule,
+        scheduleConfig,
         storageTarget: dto.storageTarget,
         storageConfigEncrypted: dto.storageConfigEncrypted ?? '',
         retentionDays: dto.retentionDays ?? 30,
         status: dto.status ?? 'ACTIVE',
+        nextRunAt,
         createdById: userId,
       },
       select: SAFE_SELECT,
@@ -71,18 +82,32 @@ export class BackupJobsService {
 
   async update(id: string, dto: any, userId: string) {
     const existing = await this.findOne(id);
+    const schedule = dto.schedule ?? existing.schedule;
+    const scheduleConfig = dto.scheduleConfig ?? existing.scheduleConfig;
+    const shouldRecalculateNextRunAt =
+      dto.nextRunAt === undefined &&
+      (dto.schedule !== undefined || dto.scheduleConfig !== undefined || dto.status === 'ACTIVE');
+    const nextRunAt =
+      dto.nextRunAt !== undefined
+        ? dto.nextRunAt
+          ? new Date(dto.nextRunAt)
+          : null
+        : shouldRecalculateNextRunAt
+          ? computeNextBackupRunAt(schedule, new Date(), scheduleConfig as any)
+          : undefined;
+
     const record = await this.prisma.backupJob.update({
       where: { id },
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
-        ...(dto.schedule !== undefined && { schedule: dto.schedule }),
-        ...(dto.scheduleConfig !== undefined && { scheduleConfig: dto.scheduleConfig }),
+        ...(dto.schedule !== undefined && { schedule }),
+        ...(dto.scheduleConfig !== undefined && { scheduleConfig }),
         ...(dto.storageTarget !== undefined && { storageTarget: dto.storageTarget }),
         ...(dto.storageConfigEncrypted !== undefined && { storageConfigEncrypted: dto.storageConfigEncrypted }),
         ...(dto.retentionDays !== undefined && { retentionDays: dto.retentionDays }),
         ...(dto.status !== undefined && { status: dto.status }),
         ...(dto.lastRunAt !== undefined && { lastRunAt: new Date(dto.lastRunAt) }),
-        ...(dto.nextRunAt !== undefined && { nextRunAt: new Date(dto.nextRunAt) }),
+        ...(nextRunAt !== undefined && { nextRunAt }),
       },
       select: SAFE_SELECT,
     });

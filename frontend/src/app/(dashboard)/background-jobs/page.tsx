@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { backendGet, backendPage, backendPut } from '@/lib/api-client';
 
 const STATUS_COLORS: Record<string, string> = {
   QUEUED: 'bg-blue-100 text-blue-700',
@@ -22,13 +23,13 @@ export default function BackgroundJobsPage() {
   const fetchJobs = useCallback(() => {
     setLoading(true);
     Promise.all([
-      fetch(`/api/backend/background-jobs?page=${page}&limit=${limit}`).then(r => r.json()),
-      fetch('/api/backend/background-jobs/stats').then(r => r.json()),
+      backendPage<any>('/background-jobs', { query: { page, pageSize: limit } }),
+      backendGet<Record<string, number>>('/background-jobs/stats'),
     ])
       .then(([jobsRes, statsRes]) => {
-        setJobs(Array.isArray(jobsRes.data?.data) ? jobsRes.data.data : Array.isArray(jobsRes.data) ? jobsRes.data : Array.isArray(jobsRes.jobs) ? jobsRes.jobs : []);
-        setTotal(jobsRes.data?.total ?? jobsRes.total ?? jobsRes.meta?.total ?? 0);
-        const s = statsRes.data ?? statsRes;
+        setJobs(jobsRes.data);
+        setTotal(jobsRes.total);
+        const s = statsRes;
         setStats({ queued: s.queued ?? s.QUEUED ?? 0, running: s.running ?? s.RUNNING ?? 0, failed: s.failed ?? s.FAILED ?? 0, deadLetter: s.deadLetter ?? s.DEAD_LETTER ?? 0 });
       })
       .catch(() => {})
@@ -38,12 +39,12 @@ export default function BackgroundJobsPage() {
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
 
   async function retryJob(id: string) {
-    await fetch(`/api/backend/background-jobs/${id}/retry`, { method: 'PUT' });
+    await backendPut(`/background-jobs/${id}/retry`);
     fetchJobs();
   }
 
   async function cancelJob(id: string) {
-    await fetch(`/api/backend/background-jobs/${id}/cancel`, { method: 'PUT' });
+    await backendPut(`/background-jobs/${id}/cancel`);
     fetchJobs();
   }
 

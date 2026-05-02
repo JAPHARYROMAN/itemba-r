@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -58,12 +58,33 @@ export class BackupRunsService {
   }
 
   async create(dto: any, userId: string) {
+    let backupType = dto.backupType;
+    if (dto.backupJobId) {
+      const job = await this.prisma.backupJob.findFirst({
+        where: { id: dto.backupJobId, deletedAt: null },
+        select: { id: true, backupType: true, status: true },
+      });
+      if (!job) throw new NotFoundException('Backup job not found');
+      if (job.status !== 'ACTIVE') {
+        throw new BadRequestException(`Backup job is ${job.status}; only ACTIVE jobs can run.`);
+      }
+      if (backupType && backupType !== job.backupType) {
+        throw new BadRequestException('backupType must match the selected backup job');
+      }
+      backupType = job.backupType;
+    }
+
+    if (!backupType) {
+      throw new BadRequestException('backupType is required when backupJobId is not supplied');
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
+      const backupRunNumber = `BR-${Date.now().toString(36).toUpperCase()}`;
       const record = await tx.backupRun.create({
         data: {
-          backupRunNumber: 'BR-' + Date.now(),
+          backupRunNumber,
           backupJobId: dto.backupJobId,
-          backupType: dto.backupType,
+          backupType,
           status: 'REQUESTED',
           triggeredById: userId,
           metadata: dto.metadata ?? {},
@@ -83,7 +104,7 @@ export class BackupRunsService {
           priority: 'NORMAL',
           payload: { backupRunId: (record as any).id },
           correlationId: (record as any).id,
-          idempotencyKey: (record as any).backupRunNumber,
+          idempotencyKey: `BACKUP_RUN:${backupRunNumber}`,
         },
       });
       return record;

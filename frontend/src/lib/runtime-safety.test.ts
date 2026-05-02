@@ -18,15 +18,26 @@ const HARDENED_OPERATION_PAGES = [
   'src/app/(dashboard)/operations/units/page.tsx',
 ];
 
+const HARDENED_JOB_BACKUP_PAGES = [
+  'src/app/(dashboard)/background-jobs/page.tsx',
+  'src/app/(dashboard)/background-jobs/queues/page.tsx',
+  'src/app/(dashboard)/backups/page.tsx',
+  'src/app/(dashboard)/backups/jobs/page.tsx',
+  'src/app/(dashboard)/backups/runs/page.tsx',
+  'src/app/(dashboard)/backups/restore-tests/page.tsx',
+];
+
 describe('frontend runtime safety', () => {
-  it('keeps hardened operations pages on the safe backend client', () => {
-    const offenders = HARDENED_OPERATION_PAGES.flatMap((relativePath) => {
-      const source = readFileSync(resolve(process.cwd(), relativePath), 'utf8');
-      const issues: string[] = [];
-      if (/\bfetch\s*\(/.test(source)) issues.push('raw fetch');
-      if (/\.json\s*\(/.test(source)) issues.push('response json parse');
-      return issues.map((issue) => `${relativePath}: ${issue}`);
-    });
+  it('keeps hardened pages on the safe backend client', () => {
+    const offenders = [...HARDENED_OPERATION_PAGES, ...HARDENED_JOB_BACKUP_PAGES].flatMap(
+      (relativePath) => {
+        const source = readFileSync(resolve(process.cwd(), relativePath), 'utf8');
+        const issues: string[] = [];
+        if (/\bfetch\s*\(/.test(source)) issues.push('raw fetch');
+        if (/\.json\s*\(/.test(source)) issues.push('response json parse');
+        return issues.map((issue) => `${relativePath}: ${issue}`);
+      },
+    );
 
     expect(offenders).toEqual([]);
   });

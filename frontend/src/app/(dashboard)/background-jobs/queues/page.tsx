@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { backendList, backendPut } from '@/lib/api-client';
 
 export default function JobQueuesPage() {
   const [queues, setQueues] = useState<any[]>([]);
@@ -8,9 +9,8 @@ export default function JobQueuesPage() {
 
   const fetchQueues = useCallback(() => {
     setLoading(true);
-    fetch('/api/backend/job-queue-configs')
-      .then(r => r.json())
-      .then(res => setQueues(res.data ?? res.queues ?? res ?? []))
+    backendList<any>('/job-queue-configs')
+      .then(setQueues)
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -19,7 +19,7 @@ export default function JobQueuesPage() {
 
   async function toggleQueue(id: string, isActive: boolean) {
     const endpoint = isActive ? 'deactivate' : 'activate';
-    await fetch(`/api/backend/job-queue-configs/${id}/${endpoint}`, { method: 'PUT' });
+    await backendPut(`/job-queue-configs/${id}/${endpoint}`);
     fetchQueues();
   }
 

@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { backendList } from '@/lib/api-client';
 
 const STATUS_COLORS: Record<string, string> = {
-  SUCCESS: 'bg-green-100 text-green-700',
+  COMPLETED: 'bg-green-100 text-green-700',
   FAILED: 'bg-red-100 text-red-700',
   RUNNING: 'bg-blue-100 text-blue-700',
-  PENDING: 'bg-yellow-100 text-yellow-700',
+  REQUESTED: 'bg-yellow-100 text-yellow-700',
   CANCELLED: 'bg-gray-100 text-gray-500',
 };
 
@@ -15,9 +16,8 @@ export default function BackupRunsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/backend/backup-runs')
-      .then(r => r.json())
-      .then(res => setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []))
+    backendList<any>('/backup-runs')
+      .then(setData)
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -51,14 +51,14 @@ export default function BackupRunsPage() {
                 <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No backup runs found</td></tr>
               ) : data.map((row: any) => (
                 <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs">{row.runNumber}</td>
-                  <td className="px-4 py-3">{row.backupJob?.name ?? '—'}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{row.backupRunNumber}</td>
+                  <td className="px-4 py-3">{row.backupJobId ?? '—'}</td>
                   <td className="px-4 py-3">{row.backupType ?? '—'}</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[row.status] ?? 'bg-gray-100 text-gray-600'}`}>{row.status}</span>
                   </td>
                   <td className="px-4 py-3 text-gray-400">{row.startedAt ? new Date(row.startedAt).toLocaleString() : '—'}</td>
-                  <td className="px-4 py-3">{row.durationSeconds != null ? `${row.durationSeconds}s` : '—'}</td>
+                  <td className="px-4 py-3">{row.durationMs != null ? `${(row.durationMs / 1000).toFixed(1)}s` : '—'}</td>
                   <td className="px-4 py-3">{row.fileSizeBytes != null ? `${(row.fileSizeBytes / 1024 / 1024).toFixed(1)} MB` : '—'}</td>
                   <td className="px-4 py-3 text-red-600 text-xs max-w-[200px] truncate">{row.errorMessage ?? '—'}</td>
                 </tr>

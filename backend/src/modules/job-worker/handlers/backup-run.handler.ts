@@ -50,6 +50,18 @@ export class BackupRunJobHandler implements OnModuleInit {
     if (!databaseUrl) throw new Error('DATABASE_URL is not set');
 
     const startedAt = new Date();
+    const backupRun = await this.prisma.backupRun.findUnique({
+      where: { id: backupRunId },
+      select: {
+        id: true,
+        backupJobId: true,
+        backupRunNumber: true,
+        backupType: true,
+        metadata: true,
+      },
+    });
+    if (!backupRun) throw new Error(`BackupRun ${backupRunId} not found`);
+
     await this.prisma.backupRun.update({
       where: { id: backupRunId },
       data: { status: 'RUNNING', startedAt },
@@ -78,16 +90,35 @@ export class BackupRunJobHandler implements OnModuleInit {
       const checksum = await this.fileSha256(filePath);
 
       const durationMs = Date.now() - startedAt.getTime();
-      await this.prisma.backupRun.update({
-        where: { id: backupRunId },
-        data: {
-          status: 'COMPLETED',
-          completedAt: new Date(),
-          durationMs,
-          filePath,
-          fileSizeBytes: BigInt(stat.size),
-          checksum,
-        },
+      const completedAt = new Date();
+      await this.prisma.$transaction(async (tx) => {
+        await tx.backupRun.update({
+          where: { id: backupRunId },
+          data: {
+            status: 'COMPLETED',
+            completedAt,
+            durationMs,
+            filePath,
+            fileSizeBytes: BigInt(stat.size),
+            checksum,
+            metadata: {
+              ...(backupRun.metadata &&
+              typeof backupRun.metadata === 'object' &&
+              !Array.isArray(backupRun.metadata)
+                ? (backupRun.metadata as Record<string, unknown>)
+                : {}),
+              backupType: backupRun.backupType,
+              checksumAlgorithm: 'sha256',
+              artifactFormat: 'pg_dump/plain-sql',
+            },
+          },
+        });
+        if (backupRun.backupJobId) {
+          await tx.backupJob.update({
+            where: { id: backupRun.backupJobId },
+            data: { lastRunAt: completedAt },
+          });
+        }
       });
       return { data: { fileName, filePath, sizeBytes: stat.size, checksum } };
     } catch (err) {
