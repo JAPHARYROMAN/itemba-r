@@ -1,0 +1,185 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { CompanyScopeService } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { CreateDebtDto } from './dto/create-debt.dto';
+import { UpdateDebtDto } from './dto/update-debt.dto';
+import { QueryDebtDto } from './dto/query-debt.dto';
+import { AccessLevel, DebtStatus, Prisma } from '@prisma/client';
+
+@Injectable()
+export class DebtsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogs: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
+  ) {}
+
+  async findAll(query: QueryDebtDto, user: AuthUser) {
+    const { page = 1, limit = 20, companyId, status, riskLevel, search, dueBefore } = query;
+    const skip = (page - 1) * limit;
+    const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
+    const where: Prisma.DebtWhereInput = { deletedAt: null };
+    if (companyId) {
+      await this.companyScope.assertCanAccessCompany(user, companyId);
+      where.companyId = companyId;
+    } else if (accessibleIds !== null) {
+      where.companyId = { in: accessibleIds };
+    }
+    if (status) where.status = status;
+    if (riskLevel) where.riskLevel = riskLevel;
+    if (dueBefore) where.dueDate = { lte: new Date(dueBefore) };
+    if (search) {
+      where.OR = [
+        { creditorName: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { invoiceNumber: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    const [data, total] = await Promise.all([
+      this.prisma.debt.findMany({
+        where,
+        include: { company: { select: { id: true, name: true, code: true } } },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.debt.count({ where }),
+    ]);
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  async findOne(id: string, user?: AuthUser) {
+    const record = await this.prisma.debt.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        company: { select: { id: true, name: true, code: true } },
+        documents: { where: { deletedAt: null } },
+      },
+    });
+    if (!record) throw new NotFoundException('Debt not found');
+    if (user) {
+      await this.companyScope.assertCanAccessCompany(user, record.companyId);
+      await this.auditLogs.log({
+        action: 'debt.view', entityType: 'Debt', entityId: id,
+        userId: user.id, companyId: record.companyId,
+        metadata: { creditorName: record.creditorName },
+      });
+    }
+    return record;
+  }
+
+  async create(dto: CreateDebtDto, user: AuthUser) {
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    const createdById = user.id;
+    const record = await this.prisma.debt.create({
+      data: {
+        companyId: dto.companyId,
+        creditorName: dto.creditorName,
+        creditorContact: dto.creditorContact,
+        amount: parseFloat(dto.amount),
+        amountPaid: dto.amountPaid ? parseFloat(dto.amountPaid) : 0,
+        currency: dto.currency,
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+        description: dto.description,
+        invoiceNumber: dto.invoiceNumber,
+        status: dto.status,
+        riskLevel: dto.riskLevel,
+        notes: dto.notes,
+        createdById,
+      },
+    });
+    await this.auditLogs.log({
+      action: 'debt.create', entityType: 'Debt', entityId: record.id,
+      userId: createdById, companyId: record.companyId, newValue: record as any,
+    });
+    return record;
+  }
+
+  async update(id: string, dto: UpdateDebtDto, user: AuthUser) {
+    const existing = await this.findOne(id);
+    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
+    const actorId = user.id;
+    const record = await this.prisma.debt.update({
+      where: { id },
+      data: {
+        ...(dto.creditorName && { creditorName: dto.creditorName }),
+        ...(dto.creditorContact !== undefined && { creditorContact: dto.creditorContact }),
+        ...(dto.amount && { amount: parseFloat(dto.amount) }),
+        ...(dto.amountPaid !== undefined && { amountPaid: dto.amountPaid ? parseFloat(dto.amountPaid) : 0 }),
+        ...(dto.dueDate !== undefined && { dueDate: dto.dueDate ? new Date(dto.dueDate) : null }),
+        ...(dto.description && { description: dto.description }),
+        ...(dto.invoiceNumber !== undefined && { invoiceNumber: dto.invoiceNumber }),
+        ...(dto.status && { status: dto.status }),
+        ...(dto.riskLevel && { riskLevel: dto.riskLevel }),
+        ...(dto.notes !== undefined && { notes: dto.notes }),
+      },
+    });
+    await this.auditLogs.log({
+      action: 'debt.update', entityType: 'Debt', entityId: id,
+      userId: actorId, companyId: record.companyId,
+      oldValue: existing as any, newValue: record as any,
+    });
+    return record;
+  }
+
+  async remove(id: string, user: AuthUser) {
+    const existing = await this.findOne(id);
+    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
+    const actorId = user.id;
+    await this.prisma.debt.update({ where: { id }, data: { deletedAt: new Date() } });
+    await this.auditLogs.log({
+      action: 'debt.delete', entityType: 'Debt', entityId: id,
+      userId: actorId, companyId: existing.companyId, oldValue: existing as any,
+    });
+    return { success: true };
+  }
+
+  async getSummary(user: AuthUser) {
+    const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
+    const scope: Prisma.DebtWhereInput =
+      accessibleIds === null ? {} : { companyId: { in: accessibleIds } };
+    const base: Prisma.DebtWhereInput = { deletedAt: null, ...scope };
+    const outstanding: Prisma.DebtWhereInput = { ...base, status: DebtStatus.OUTSTANDING };
+
+    const [totalCount, outstandingCount, overdueCount, highRiskCount, totalAmount, totalOutstanding] = await Promise.all([
+      this.prisma.debt.count({ where: base }),
+      this.prisma.debt.count({ where: outstanding }),
+      this.prisma.debt.count({ where: { ...outstanding, dueDate: { lt: new Date() } } }),
+      this.prisma.debt.count({ where: { ...base, riskLevel: { in: ['HIGH', 'CRITICAL'] } } }),
+      this.prisma.debt.aggregate({ where: base, _sum: { amount: true } }),
+      this.prisma.debt.aggregate({ where: outstanding, _sum: { amount: true } }),
+    ]);
+    return {
+      totalCount, outstandingCount, overdueCount, highRiskCount,
+      totalAmount: totalAmount._sum.amount ?? 0,
+      totalOutstandingAmount: totalOutstanding._sum.amount ?? 0,
+    };
+  }
+
+  async getOverdue(user: AuthUser) {
+    const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
+    const where: Prisma.DebtWhereInput = {
+      deletedAt: null,
+      status: DebtStatus.OUTSTANDING,
+      dueDate: { lt: new Date() },
+      ...(accessibleIds === null ? {} : { companyId: { in: accessibleIds } }),
+    };
+    return this.prisma.debt.findMany({
+      where,
+      include: { company: { select: { id: true, name: true, code: true } } },
+      orderBy: { dueDate: 'asc' },
+    });
+  }
+
+  async getAuditHistory(id: string, user: AuthUser) {
+    await this.findOne(id, user);
+    return this.prisma.auditLog.findMany({
+      where: { entityType: 'Debt', entityId: id },
+      include: { user: { select: { id: true, fullName: true, email: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+  }
+}

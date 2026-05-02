@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+node_modules.corrupt-*/
+**/node_modules.corrupt-*/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+.turbo/
+.cache/
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Local agent/app state
+.claude/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+.nyc_output/
+
+# Prisma
+apps/api/prisma/migrations/dev.db*
+
+# Local uploads (dev file storage)
+apps/api/uploads/
+
+# Docker volumes
+.docker-data/

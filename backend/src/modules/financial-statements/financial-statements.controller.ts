@@ -1,0 +1,27 @@
+import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
+import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { FinancialStatementsService } from './financial-statements.service';
+
+@Controller('financial-statements')
+export class FinancialStatementsController {
+  constructor(private readonly service: FinancialStatementsService) {}
+
+  @Get()
+  @RequirePermissions('financial_statements.list')
+  findAll(@Query() query: any) {
+    return this.service.findAll(query);
+  }
+
+  @Get(':id')
+  @RequirePermissions('financial_statements.view')
+  findOne(@Param('id') id: string) {
+    return this.service.findOne(id);
+  }
+
+  @Post('generate')
+  @RequirePermissions('financial_statements.generate')
+  generate(@Body() dto: any, @CurrentUser() user: AuthUser) {
+    return this.service.generate(dto, user);
+  }
+}

@@ -1,0 +1,16 @@
+﻿import { IsString, IsOptional, IsEnum, IsUUID, IsNumber } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { StockDamageType } from '@prisma/client';
+
+export class CreateStockDamageDto {
+  @ApiProperty() @IsUUID() companyId!: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() branchId?: string;
+  @ApiProperty() @IsUUID() inventoryLocationId!: string;
+  @ApiProperty() @IsUUID() productId!: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() batchId?: string;
+  @ApiProperty() @IsNumber() quantity!: number;
+  @ApiProperty() @IsUUID() unitId!: string;
+  @ApiProperty({ enum: StockDamageType }) @IsEnum(StockDamageType) damageType!: StockDamageType;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() estimatedValue?: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() notes?: string;
+}

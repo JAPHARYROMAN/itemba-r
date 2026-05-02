@@ -1,0 +1,267 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { AccessLevel, Prisma } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { CompanyScopeService } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { CreateFuelShiftCollectionDto } from './dto/create-fuel-shift-collection.dto';
+import { UpdateFuelShiftCollectionDto } from './dto/update-fuel-shift-collection.dto';
+import { QueryFuelShiftCollectionDto } from './dto/query-fuel-shift-collection.dto';
+
+// `collectedById` references a User but the schema does not declare a typed
+// relation, so we cannot include it as a Prisma relation. The list path
+// resolves the names in a single batched lookup after the main query.
+const LIST_INCLUDE = {
+  fuelShift: {
+    select: {
+      id: true,
+      shiftNumber: true,
+      shiftDate: true,
+      status: true,
+    },
+  },
+  branch: { select: { id: true, name: true, branchCode: true } },
+  cashAccount: { select: { id: true, accountName: true, accountType: true } },
+  company: { select: { id: true, name: true, code: true } },
+} as const;
+
+@Injectable()
+export class FuelShiftCollectionsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogs: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
+  ) {}
+
+  async create(dto: CreateFuelShiftCollectionDto, user: AuthUser) {
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+
+    const record = await this.prisma.fuelShiftCollection.create({
+      data: {
+        fuelShiftId: dto.fuelShiftId,
+        companyId: dto.companyId,
+        branchId: dto.branchId,
+        collectionType: dto.collectionType,
+        amount: dto.amount,
+        reference: dto.reference,
+        collectedById: dto.collectedById,
+        cashAccountId: dto.cashAccountId,
+        notes: dto.notes,
+      },
+    });
+
+    await this.auditLogs.log({
+      action: 'FUEL_SHIFT_COLLECTION_CREATE',
+      entityType: 'FuelShiftCollection',
+      entityId: record.id,
+      userId: user.id,
+      companyId: record.companyId,
+      newValue: record as any,
+    });
+
+    return record;
+  }
+
+  /**
+   * List collections with filtering. The petroleum/collections page is the
+   * primary consumer — every filter on that page maps to one of the DTO
+   * fields here, plus the date range hits `createdAt` (when the collection
+   * was recorded). Results include enough relation data that the table can
+   * render rows without per-row fetches.
+   *
+   * Returns:
+   *   - data: collection rows + relations
+   *   - total: matching row count (for pagination)
+   *   - totals: aggregate sum per `collectionType` and grand total, scoped
+   *             to the SAME `where` so the stats card stays consistent with
+   *             the page-1 view.
+   */
+  async findAll(query: QueryFuelShiftCollectionDto, user: AuthUser) {
+    const {
+      page = 1,
+      limit = 20,
+      shiftId,
+      companyId,
+      branchId,
+      collectionType,
+      cashAccountId,
+      collectedById,
+      dateFrom,
+      dateTo,
+      search,
+    } = query;
+    const skip = (page - 1) * limit;
+
+    // CompanyScopeService.companyWhereFor returns a Prisma where shape that is
+    // structurally compatible with any model carrying a `companyId`. The
+    // helper's return type is pinned to `BankAccountWhereInput` for legacy
+    // reasons; cast to an `unknown` first so the spread typechecks.
+    const where: Prisma.FuelShiftCollectionWhereInput = {
+      ...((await this.companyScope.companyWhereFor(user, companyId)) as unknown as Prisma.FuelShiftCollectionWhereInput),
+    };
+    if (shiftId) where.fuelShiftId = shiftId;
+    if (branchId) where.branchId = branchId;
+    if (collectionType) where.collectionType = collectionType;
+    if (cashAccountId) where.cashAccountId = cashAccountId;
+    if (collectedById) where.collectedById = collectedById;
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom);
+      if (dateTo) {
+        // dateTo is inclusive — push the timestamp to end-of-day so an
+        // operator filtering "2026-05-01..2026-05-01" sees that day's rows.
+        const end = new Date(dateTo);
+        end.setHours(23, 59, 59, 999);
+        where.createdAt.lte = end;
+      }
+    }
+    if (search) {
+      where.OR = [
+        { reference: { contains: search, mode: 'insensitive' } },
+        { notes: { contains: search, mode: 'insensitive' } },
+        { fuelShift: { shiftNumber: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [rows, total, totalsByType, grandTotal] = await Promise.all([
+      this.prisma.fuelShiftCollection.findMany({
+        where,
+        include: LIST_INCLUDE,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.fuelShiftCollection.count({ where }),
+      this.prisma.fuelShiftCollection.groupBy({
+        by: ['collectionType'],
+        where,
+        _sum: { amount: true },
+        _count: { id: true },
+      }),
+      this.prisma.fuelShiftCollection.aggregate({
+        where,
+        _sum: { amount: true },
+      }),
+    ]);
+
+    // Batched user lookup for the `collectedById` field — the schema does
+    // not declare a typed relation, so we resolve names in one round-trip
+    // after the main query rather than per row.
+    const collectorIds = Array.from(
+      new Set(
+        rows
+          .map((r) => r.collectedById)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+    const collectors = collectorIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: collectorIds } },
+          select: { id: true, fullName: true, email: true },
+        })
+      : [];
+    const collectorById = new Map(collectors.map((u) => [u.id, u]));
+    const data = rows.map((r) => ({
+      ...r,
+      collectedBy: r.collectedById ? collectorById.get(r.collectedById) ?? null : null,
+    }));
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      totals: {
+        amount: Number(grandTotal._sum.amount ?? 0),
+        byType: totalsByType.map((t) => ({
+          collectionType: t.collectionType,
+          count: t._count.id,
+          amount: Number(t._sum.amount ?? 0),
+        })),
+      },
+    };
+  }
+
+  async findOne(id: string, user?: AuthUser) {
+    const record = await this.prisma.fuelShiftCollection.findUnique({
+      where: { id },
+      include: LIST_INCLUDE,
+    });
+    if (!record) throw new NotFoundException('Fuel shift collection not found');
+    if (user) await this.companyScope.assertCanAccessCompany(user, record.companyId);
+    return record;
+  }
+
+  async findByShift(shiftId: string, user: AuthUser) {
+    // Cheap guard: load one row and assert access on its company. If the
+    // shift has no collections yet, fall back to the shift itself for the
+    // access check so an empty list still respects company scope.
+    const sample = await this.prisma.fuelShiftCollection.findFirst({
+      where: { fuelShiftId: shiftId },
+      select: { companyId: true },
+    });
+    if (sample) {
+      await this.companyScope.assertCanAccessCompany(user, sample.companyId);
+    } else {
+      const shift = await this.prisma.fuelShift.findUnique({
+        where: { id: shiftId },
+        select: { companyId: true },
+      });
+      if (!shift) throw new NotFoundException('Fuel shift not found');
+      await this.companyScope.assertCanAccessCompany(user, shift.companyId);
+    }
+    return this.prisma.fuelShiftCollection.findMany({
+      where: { fuelShiftId: shiftId },
+      include: LIST_INCLUDE,
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async update(id: string, dto: UpdateFuelShiftCollectionDto, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
+
+    const record = await this.prisma.fuelShiftCollection.update({
+      where: { id },
+      data: {
+        ...(dto.collectionType !== undefined && { collectionType: dto.collectionType }),
+        ...(dto.amount !== undefined && { amount: dto.amount }),
+        ...(dto.reference !== undefined && { reference: dto.reference }),
+        ...(dto.collectedById !== undefined && { collectedById: dto.collectedById }),
+        ...(dto.cashAccountId !== undefined && { cashAccountId: dto.cashAccountId }),
+        ...(dto.notes !== undefined && { notes: dto.notes }),
+      },
+    });
+
+    await this.auditLogs.log({
+      action: 'FUEL_SHIFT_COLLECTION_UPDATE',
+      entityType: 'FuelShiftCollection',
+      entityId: id,
+      userId: user.id,
+      companyId: existing.companyId,
+      oldValue: existing as any,
+      newValue: record as any,
+    });
+
+    return record;
+  }
+
+  async remove(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
+
+    await this.prisma.fuelShiftCollection.delete({ where: { id } });
+
+    await this.auditLogs.log({
+      action: 'FUEL_SHIFT_COLLECTION_DELETE',
+      entityType: 'FuelShiftCollection',
+      entityId: id,
+      userId: user.id,
+      companyId: existing.companyId,
+      oldValue: existing as any,
+    });
+
+    return { success: true };
+  }
+}

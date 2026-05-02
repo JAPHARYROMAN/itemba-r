@@ -1,0 +1,143 @@
+# ITEMBA-R Staging Environment
+# Usage: docker compose -f docker-compose.staging.yml up -d
+# Note: Copy .env.staging.example to .env.staging and fill in staging values
+
+name: itemba-r-staging
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: itemba_r_postgres_staging
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-itemba_r_staging}
+      POSTGRES_USER: ${POSTGRES_USER:-itemba_staging}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    networks:
+      - itemba_staging_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-itemba_staging} -d ${POSTGRES_DB:-itemba_r_staging}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: itemba_r_redis_staging
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    volumes:
+      - redis_staging_data:/data
+    networks:
+      - itemba_staging_network
+    healthcheck:
+      test: ['CMD-SHELL', 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: sh -c 'redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"'
+
+  backend-migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: migration
+    container_name: itemba_r_backend_migrate_staging
+    restart: "no"
+    environment:
+      NODE_ENV: staging
+      DATABASE_URL: postgresql://${POSTGRES_USER:-itemba_staging}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-itemba_r_staging}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      TWO_FACTOR_ENCRYPTION_KEY: ${TWO_FACTOR_ENCRYPTION_KEY:?TWO_FACTOR_ENCRYPTION_KEY is required}
+      REFRESH_TOKEN_PEPPER: ${REFRESH_TOKEN_PEPPER:?REFRESH_TOKEN_PEPPER is required}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - itemba_staging_network
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: production
+    container_name: itemba_r_backend_staging
+    restart: unless-stopped
+    environment:
+      NODE_ENV: staging
+      DATABASE_URL: postgresql://${POSTGRES_USER:-itemba_staging}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-itemba_r_staging}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      TWO_FACTOR_ENCRYPTION_KEY: ${TWO_FACTOR_ENCRYPTION_KEY:?TWO_FACTOR_ENCRYPTION_KEY is required}
+      REFRESH_TOKEN_PEPPER: ${REFRESH_TOKEN_PEPPER:?REFRESH_TOKEN_PEPPER is required}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY is required}
+      PORT: 3001
+      FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
+      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      JOB_WORKER_ENABLED: ${JOB_WORKER_ENABLED:-true}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@staging.itemba-r.co.tz}
+      LOG_LEVEL: debug
+    ports:
+      - "3001:3001"
+    depends_on:
+      backend-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks:
+      - itemba_staging_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/api/v1/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: runner
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+    container_name: itemba_r_frontend_staging
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      # Server-side internal URL — Docker bridge, includes API prefix.
+      BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:3001/api/v1}
+      # Browser-public URL (used only by client-side code that needs absolute URLs).
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - itemba_staging_network
+    healthcheck:
+      test: ["CMD-SHELL", 'wget -qO- "http://$$(hostname):3000/login" >/dev/null || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_staging_data:
+  redis_staging_data:
+
+networks:
+  itemba_staging_network:
+    driver: bridge

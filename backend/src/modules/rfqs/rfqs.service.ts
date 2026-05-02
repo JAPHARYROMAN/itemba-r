@@ -1,0 +1,68 @@
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+
+@Injectable()
+export class RfqsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogs: AuditLogsService,
+  ) {}
+
+  async findAll(query: any) {
+    const { companyId, status, page = 1, limit = 20 } = query;
+    const skip = (Number(page) - 1) * Number(limit);
+    const where: any = { deletedAt: null };
+    if (companyId) where.companyId = companyId;
+    if (status) where.status = status;
+    const [items, total] = await Promise.all([
+      this.prisma.requestForQuotation.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' }, include: { rfqSuppliers: true } }),
+      this.prisma.requestForQuotation.count({ where }),
+    ]);
+    return { items, total, page: Number(page), limit: Number(limit) };
+  }
+
+  async findOne(id: string) {
+    const item = await this.prisma.requestForQuotation.findFirst({ where: { id, deletedAt: null }, include: { rfqSuppliers: true } });
+    if (!item) throw new NotFoundException('RFQ not found');
+    return item;
+  }
+
+  async create(dto: any, user: any) {
+    const { rfqSuppliers, suppliers, ...rest } = dto;
+    const suppliersToCreate = rfqSuppliers ?? suppliers;
+    const item = await this.prisma.requestForQuotation.create({
+      data: {
+        ...rest,
+        status: 'DRAFT',
+        createdById: user.id,
+        rfqSuppliers: suppliersToCreate ? { create: suppliersToCreate } : undefined,
+      },
+      include: { rfqSuppliers: true },
+    });
+    await this.auditLogs.log({ action: 'CREATE', entityType: 'RequestForQuotation', entityId: item.id, userId: user.id, companyId: item.companyId });
+    return item;
+  }
+
+  async update(id: string, dto: any, user: any) {
+    const existing = await this.findOne(id);
+    const updated = await this.prisma.requestForQuotation.update({ where: { id }, data: dto });
+    await this.auditLogs.log({ action: 'UPDATE', entityType: 'RequestForQuotation', entityId: id, userId: user.id, oldValue: existing, newValue: updated });
+    return updated;
+  }
+
+  async send(id: string, dto: any, user: any) {
+    const existing = await this.findOne(id);
+    if (existing.status !== 'DRAFT') throw new BadRequestException('Only DRAFT RFQs can be sent');
+    if (dto.supplierIds?.length) {
+      await Promise.all(
+        dto.supplierIds.map((supplierId: string) =>
+          this.prisma.rFQSupplier.upsert({ where: { id: '' }, create: { rfqId: id, supplierId }, update: { supplierId } }),
+        ),
+      );
+    }
+    const updated = await this.prisma.requestForQuotation.update({ where: { id }, data: { status: 'SENT' } });
+    await this.auditLogs.log({ action: 'SEND', entityType: 'RequestForQuotation', entityId: id, userId: user.id });
+    return updated;
+  }
+}

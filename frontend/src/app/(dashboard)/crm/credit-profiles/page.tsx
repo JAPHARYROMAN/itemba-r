@@ -1,0 +1,70 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+
+export default function CreditProfilesPage() {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/backend/customer-credit-profiles')
+      .then(r => r.json())
+      .then(res => setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="p-6">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Customer Credit Profiles</h1>
+        <p className="text-gray-500 mt-1">Manage customer credit limits and risk ratings</p>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-10 text-gray-500">Loading...</div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
+                <th className="px-4 py-3">Company</th>
+                <th className="px-4 py-3">Customer</th>
+                <th className="px-4 py-3">Credit Limit</th>
+                <th className="px-4 py-3">Currency</th>
+                <th className="px-4 py-3">Risk Rating</th>
+                <th className="px-4 py-3">Credit Status</th>
+                <th className="px-4 py-3">Outstanding</th>
+                <th className="px-4 py-3">Overdue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.length === 0 ? (
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No records found</td></tr>
+              ) : data.map((row: any) => (
+                <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
+                  <td className="px-4 py-3">{row.companyId}</td>
+                  <td className="px-4 py-3 font-medium">{row.customerId}</td>
+                  <td className="px-4 py-3">{row.creditLimit}</td>
+                  <td className="px-4 py-3">{row.currency}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${row.riskRating === 'HIGH' ? 'bg-red-100 text-red-700' : row.riskRating === 'MEDIUM' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>
+                      {row.riskRating}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${row.creditStatus === 'ACTIVE' ? 'bg-green-100 text-green-700' : row.creditStatus === 'BLOCKED' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {row.creditStatus}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 font-medium">{row.currentOutstanding}</td>
+                  <td className="px-4 py-3 font-medium text-red-600">{row.overdueAmount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

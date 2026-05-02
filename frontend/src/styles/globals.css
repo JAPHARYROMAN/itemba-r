@@ -1,0 +1,436 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   AURORA DESIGN SYSTEM — CSS Variables
+   ITEMBA-R Group Digital Governance Platform
+   ───────────────────────────────────────────────────────────────────────────── */
+/* ─── Light Mode Tokens ─────────────────────────────────────────────────────── */
+:root {
+  color-scheme: light;
+
+  /* Backgrounds */
+  --aurora-bg: #f8fafc;
+  --aurora-bg-subtle: #f1f5f9;
+  --aurora-bg-muted: #e2e8f0;
+  --aurora-card: #ffffff;
+  --aurora-card-elevated: #ffffff;
+  --aurora-overlay: rgba(0, 0, 0, 0.5);
+
+  /* Text */
+  --aurora-text: #0f172a;
+  --aurora-text-secondary: #475569;
+  --aurora-text-muted: #94a3b8;
+  --aurora-text-disabled: #cbd5e1;
+
+  /* Borders */
+  --aurora-border: #e2e8f0;
+  --aurora-border-strong: #cbd5e1;
+  --aurora-border-focus: #3b82f6;
+
+  /* Primary */
+  --aurora-primary: #2563eb;
+  --aurora-primary-hover: #1d4ed8;
+  --aurora-primary-subtle: #eff6ff;
+  --aurora-primary-text: #1e40af;
+
+  /* Status Colors */
+  --aurora-success: #10b981;
+  --aurora-success-bg: #d1fae5;
+  --aurora-success-text: #065f46;
+  --aurora-warning: #f59e0b;
+  --aurora-warning-bg: #fef3c7;
+  --aurora-warning-text: #92400e;
+  --aurora-danger: #ef4444;
+  --aurora-danger-bg: #fee2e2;
+  --aurora-danger-text: #991b1b;
+  --aurora-info: #06b6d4;
+  --aurora-info-bg: #cffafe;
+  --aurora-info-text: #164e63;
+  --aurora-restricted: #8b5cf6;
+  --aurora-restricted-bg: #ede9fe;
+  --aurora-restricted-text: #4c1d95;
+
+  /* Shadows */
+  --aurora-shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+  --aurora-shadow: 0 4px 12px -2px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.04);
+  --aurora-shadow-lg: 0 10px 30px -4px rgb(0 0 0 / 0.1), 0 4px 8px -4px rgb(0 0 0 / 0.06);
+  --aurora-shadow-command: 0 20px 60px -10px rgb(0 0 0 / 0.3), 0 4px 16px -4px rgb(0 0 0 / 0.2);
+
+  /* Radius */
+  --aurora-radius-sm: 0.375rem;
+  --aurora-radius: 0.625rem;
+  --aurora-radius-lg: 0.875rem;
+  --aurora-radius-xl: 1.25rem;
+
+  /* Motion */
+  --aurora-duration-fast: 100ms;
+  --aurora-duration: 200ms;
+  --aurora-duration-slow: 350ms;
+  --aurora-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --aurora-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --aurora-ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  /* Sidebar (always dark) */
+  --sidebar-bg: #080c14;
+  --sidebar-border: #1e2535;
+  --sidebar-text: #94a3b8;
+  --sidebar-text-high: #e2e8f0;
+  --sidebar-hover: rgba(255, 255, 255, 0.04);
+  --sidebar-active: rgba(59, 130, 246, 0.12);
+  --sidebar-active-border: #3b82f6;
+  --sidebar-icon: #64748b;
+  --sidebar-icon-active: #3b82f6;
+  --sidebar-section: #475569;
+}
+
+/* ─── Dark Mode Tokens ──────────────────────────────────────────────────────── */
+.dark {
+  color-scheme: dark;
+
+  /* Backgrounds */
+  --aurora-bg: #09111f;
+  --aurora-bg-subtle: #0f1a2e;
+  --aurora-bg-muted: #162035;
+  --aurora-card: #111827;
+  --aurora-card-elevated: #1a2236;
+  --aurora-overlay: rgba(0, 0, 0, 0.7);
+
+  /* Text */
+  --aurora-text: #f1f5f9;
+  --aurora-text-secondary: #94a3b8;
+  --aurora-text-muted: #64748b;
+  --aurora-text-disabled: #334155;
+
+  /* Borders */
+  --aurora-border: #1e2d40;
+  --aurora-border-strong: #2d3f55;
+  --aurora-border-focus: #3b82f6;
+
+  /* Primary */
+  --aurora-primary: #3b82f6;
+  --aurora-primary-hover: #60a5fa;
+  --aurora-primary-subtle: #1e3a5f;
+  --aurora-primary-text: #93c5fd;
+
+  /* Status Colors */
+  --aurora-success: #10b981;
+  --aurora-success-bg: #064e3b;
+  --aurora-success-text: #6ee7b7;
+  --aurora-warning: #f59e0b;
+  --aurora-warning-bg: #451a03;
+  --aurora-warning-text: #fcd34d;
+  --aurora-danger: #ef4444;
+  --aurora-danger-bg: #450a0a;
+  --aurora-danger-text: #fca5a5;
+  --aurora-info: #06b6d4;
+  --aurora-info-bg: #083344;
+  --aurora-info-text: #67e8f9;
+  --aurora-restricted: #8b5cf6;
+  --aurora-restricted-bg: #2e1065;
+  --aurora-restricted-text: #c4b5fd;
+
+  /* Shadows */
+  --aurora-shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.2);
+  --aurora-shadow: 0 4px 12px -2px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+  --aurora-shadow-lg: 0 10px 30px -4px rgb(0 0 0 / 0.5), 0 4px 8px -4px rgb(0 0 0 / 0.4);
+  --aurora-shadow-command: 0 20px 60px -10px rgb(0 0 0 / 0.7), 0 4px 16px -4px rgb(0 0 0 / 0.5);
+}
+
+/* ─── Base Styles ────────────────────────────────────────────────────────────── */
+html,
+body {
+  height: 100%;
+  font-family:
+    'Inter',
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--aurora-bg);
+  color: var(--aurora-text);
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--aurora-bg-muted);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--aurora-text-muted);
+}
+
+/* ─── Focus Ring ─────────────────────────────────────────────────────────────── */
+*:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--aurora-bg),
+    0 0 0 4px var(--aurora-primary);
+}
+
+/* ─── Selection ──────────────────────────────────────────────────────────────── */
+::selection {
+  background-color: var(--aurora-primary-subtle);
+  color: var(--aurora-primary-text);
+}
+
+/* ─── Reduced Motion ─────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ─── Aurora Utility Classes ─────────────────────────────────────────────────── */
+@layer utilities {
+  .aurora-card {
+    background-color: var(--aurora-card);
+    border: 1px solid var(--aurora-border);
+    border-radius: var(--aurora-radius);
+    box-shadow: var(--aurora-shadow-sm);
+  }
+
+  .aurora-card-elevated {
+    background-color: var(--aurora-card-elevated);
+    border: 1px solid var(--aurora-border);
+    border-radius: var(--aurora-radius);
+    box-shadow: var(--aurora-shadow);
+  }
+
+  .aurora-surface {
+    background-color: var(--aurora-bg);
+    color: var(--aurora-text);
+  }
+
+  .aurora-border {
+    border-color: var(--aurora-border);
+  }
+
+  .aurora-text {
+    color: var(--aurora-text);
+  }
+
+  .aurora-text-muted {
+    color: var(--aurora-text-muted);
+  }
+
+  .aurora-text-secondary {
+    color: var(--aurora-text-secondary);
+  }
+
+  /* Money display */
+  .aurora-money {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+    font-feature-settings: 'tnum';
+  }
+
+  /* Metric numbers */
+  .aurora-metric {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  /* Skeleton shimmer */
+  .aurora-skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--aurora-bg-muted) 25%,
+      var(--aurora-bg-subtle) 50%,
+      var(--aurora-bg-muted) 75%
+    );
+    background-size: 200% 100%;
+    animation: auroraSkeleton 1.5s ease-in-out infinite;
+  }
+
+  /* Smooth transition */
+  .aurora-transition {
+    transition: all var(--aurora-duration) var(--aurora-ease);
+  }
+
+  /* Sidebar always uses dark vars */
+  .sidebar-dark {
+    background-color: var(--sidebar-bg);
+    border-color: var(--sidebar-border);
+    color: var(--sidebar-text);
+  }
+}
+
+@keyframes auroraSkeleton {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* ─── Table Base ──────────────────────────────────────────────────────────────── */
+.aurora-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.aurora-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--aurora-text-muted);
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--aurora-border);
+  white-space: nowrap;
+}
+
+.aurora-table td {
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid var(--aurora-border);
+  color: var(--aurora-text);
+  vertical-align: middle;
+}
+
+.aurora-table tr:last-child td {
+  border-bottom: none;
+}
+
+.aurora-table tbody tr {
+  transition: background-color 120ms ease;
+}
+
+.aurora-table tbody tr:hover {
+  background-color: var(--aurora-bg-subtle);
+}
+
+/* ─── Form Base ───────────────────────────────────────────────────────────────── */
+.aurora-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background-color: var(--aurora-card);
+  border: 1px solid var(--aurora-border);
+  border-radius: var(--aurora-radius-sm);
+  color: var(--aurora-text);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  transition:
+    border-color var(--aurora-duration-fast) var(--aurora-ease),
+    box-shadow var(--aurora-duration-fast) var(--aurora-ease);
+  outline: none;
+}
+
+.aurora-input::placeholder {
+  color: var(--aurora-text-muted);
+}
+
+.aurora-input:focus {
+  border-color: var(--aurora-border-focus);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.aurora-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--aurora-bg-subtle);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Dark-mode bridge for legacy Tailwind neutral classes.
+
+   Many pages (especially in operations/) hardcode `bg-white`, `bg-gray-50`,
+   `text-slate-500`, `border-zinc-200`, etc. directly. Those resolve to literal
+   light values that don't flip when the theme switches to dark, which produces
+   the "text appears transparent" effect (light text on light card, dark text
+   on dark card).
+
+   Rather than touch hundreds of pages, this section maps the most common
+   legacy classes to the theme tokens whenever the document is in dark mode.
+   The rules are scoped under `.dark` so light mode is unaffected.
+
+   New code should prefer `style={{ background: 'var(--aurora-card)', ... }}`
+   or the `aurora-*` utility classes — these overrides exist for legacy code
+   and will be removed once all pages migrate.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Backgrounds */
+.dark .bg-white,
+.dark .hover\:bg-white:hover {
+  background-color: var(--aurora-card) !important;
+}
+.dark .bg-gray-50,
+.dark .bg-slate-50,
+.dark .bg-zinc-50,
+.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-zinc-50:hover {
+  background-color: var(--aurora-bg-subtle) !important;
+}
+.dark .bg-gray-100,
+.dark .bg-slate-100,
+.dark .bg-zinc-100,
+.dark .hover\:bg-gray-100:hover,
+.dark .hover\:bg-slate-100:hover,
+.dark .hover\:bg-zinc-100:hover {
+  background-color: var(--aurora-bg-muted) !important;
+}
+
+/* Text */
+.dark .text-slate-900,
+.dark .text-slate-800,
+.dark .text-zinc-900,
+.dark .text-zinc-800,
+.dark .text-gray-900,
+.dark .text-gray-800 {
+  color: var(--aurora-text) !important;
+}
+.dark .text-slate-700,
+.dark .text-slate-600,
+.dark .text-zinc-700,
+.dark .text-zinc-600,
+.dark .text-gray-700,
+.dark .text-gray-600 {
+  color: var(--aurora-text-secondary) !important;
+}
+.dark .text-slate-500,
+.dark .text-slate-400,
+.dark .text-zinc-500,
+.dark .text-zinc-400,
+.dark .text-gray-500,
+.dark .text-gray-400 {
+  color: var(--aurora-text-muted) !important;
+}
+
+/* Borders & dividers */
+.dark .border-slate-100,
+.dark .border-slate-200,
+.dark .border-zinc-100,
+.dark .border-zinc-200,
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .divide-slate-100 > * + *,
+.dark .divide-slate-200 > * + *,
+.dark .divide-zinc-100 > * + *,
+.dark .divide-zinc-200 > * + *,
+.dark .divide-gray-100 > * + *,
+.dark .divide-gray-200 > * + * {
+  border-color: var(--aurora-border) !important;
+}

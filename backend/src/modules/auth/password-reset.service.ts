@@ -1,0 +1,244 @@
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import * as argon2 from 'argon2';
+import * as crypto from 'crypto';
+import * as nodemailer from 'nodemailer';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+
+const RESET_TOKEN_TTL_MINUTES = 30;
+
+@Injectable()
+export class PasswordResetService {
+  private readonly logger = new Logger(PasswordResetService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditLogsService,
+    private readonly config: ConfigService,
+  ) {}
+
+  /**
+   * Request a password reset. Always returns the same generic response
+   * regardless of whether the email exists — prevents user enumeration.
+   */
+  async requestReset(
+    email: string,
+    meta?: { ipAddress?: string; userAgent?: string },
+  ): Promise<{ message: string }> {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+
+    if (user && user.status === 'ACTIVE') {
+      // Generate a cryptographically random token
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = await argon2.hash(rawToken);
+      const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60_000);
+
+      // Invalidate existing reset tokens for this user
+      await this.prisma.passwordResetToken.updateMany({
+        where: { userId: user.id, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+
+      await this.prisma.passwordResetToken.create({
+        data: { userId: user.id, tokenHash, expiresAt },
+      });
+
+      // Log the event
+      await this.logSecurityEvent('PASSWORD_RESET_REQUESTED', user.id, meta);
+      await this.audit.log({
+        action: 'PASSWORD_RESET_REQUESTED',
+        entityType: 'User',
+        entityId: user.id,
+        userId: user.id,
+        ipAddress: meta?.ipAddress,
+        userAgent: meta?.userAgent,
+      });
+
+      // Attempt to send email (non-blocking — dev works without SMTP)
+      await this.sendResetEmail(user.email, user.fullName, rawToken);
+    }
+
+    // Always return the same message (no user enumeration)
+    return {
+      message: 'If an account with that email exists, a password reset link has been sent.',
+    };
+  }
+
+  /**
+   * Complete a password reset with a valid token.
+   */
+  async resetPassword(
+    rawToken: string,
+    newPassword: string,
+    meta?: { ipAddress?: string; userAgent?: string },
+  ): Promise<{ message: string }> {
+    // Find unexpired, unused tokens
+    const candidates = await this.prisma.passwordResetToken.findMany({
+      where: { usedAt: null, expiresAt: { gt: new Date() } },
+      include: { user: true },
+    });
+
+    let matched: (typeof candidates)[0] | null = null;
+    for (const t of candidates) {
+      if (await argon2.verify(t.tokenHash, rawToken)) {
+        matched = t;
+        break;
+      }
+    }
+
+    if (!matched) {
+      throw new BadRequestException('Invalid or expired password reset token.');
+    }
+
+    const user = matched.user;
+    if (!user || user.status !== 'ACTIVE') {
+      throw new BadRequestException('Invalid or expired password reset token.');
+    }
+
+    // Validate password policy (minimum 8 characters)
+    if (newPassword.length < 8) {
+      throw new BadRequestException('Password must be at least 8 characters long.');
+    }
+
+    // Check password history (last 5 passwords)
+    const history = await this.prisma.passwordHistory.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+    });
+
+    for (const h of history) {
+      if (await argon2.verify(h.passwordHash, newPassword)) {
+        throw new BadRequestException('You cannot reuse a recent password.');
+      }
+    }
+
+    const newHash = await argon2.hash(newPassword);
+
+    // Mark token as used (single-use)
+    await this.prisma.passwordResetToken.update({
+      where: { id: matched.id },
+      data: { usedAt: new Date() },
+    });
+
+    // Update password and save to history
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash: newHash,
+        passwordChangedAt: new Date(),
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+
+    await this.prisma.passwordHistory.create({
+      data: { userId: user.id, passwordHash: newHash },
+    });
+
+    // Invalidate all existing refresh tokens AND active sessions: a password
+    // reset must drop every authenticated surface the user had.
+    const now = new Date();
+    await this.prisma.refreshToken.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: now, revokedReason: 'PASSWORD_RESET' },
+    });
+    await this.prisma.activeSession.updateMany({
+      where: { userId: user.id, revokedAt: null, status: 'ACTIVE' },
+      data: { revokedAt: now, status: 'REVOKED' },
+    });
+
+    await this.logSecurityEvent('PASSWORD_RESET_COMPLETED', user.id, meta);
+    await this.audit.log({
+      action: 'PASSWORD_RESET_COMPLETED',
+      entityType: 'User',
+      entityId: user.id,
+      userId: user.id,
+      ipAddress: meta?.ipAddress,
+      userAgent: meta?.userAgent,
+    });
+
+    return { message: 'Password reset successfully. Please log in with your new password.' };
+  }
+
+  // ─── Email ────────────────────────────────────────────────────────────────
+
+  private async sendResetEmail(email: string, name: string, rawToken: string): Promise<void> {
+    const smtpHost = this.config.get<string>('SMTP_HOST');
+    const smtpUser = this.config.get<string>('SMTP_USER');
+    const smtpPass = this.config.get<string>('SMTP_PASS');
+    const appUrl = this.config.get<string>('APP_URL', 'http://localhost:3009');
+
+    if (!smtpHost || !smtpUser || !smtpPass) {
+      // Dev mode: log the reset link, never crash
+      this.logger.warn(
+        `[DEV] Password reset requested for ${email}. ` +
+        `Reset token (not for production logs): ${rawToken.substring(0, 8)}... ` +
+        `Full reset URL: ${appUrl}/auth/reset-password?token=${rawToken}`,
+      );
+      return;
+    }
+
+    try {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: this.config.get<number>('SMTP_PORT', 587),
+        secure: this.config.get<boolean>('SMTP_SECURE', false),
+        auth: { user: smtpUser, pass: smtpPass },
+      });
+
+      const resetUrl = `${appUrl}/auth/reset-password?token=${rawToken}`;
+
+      await transporter.sendMail({
+        from: this.config.get<string>('SMTP_FROM', `"ITEMBA-R" <no-reply@itemba.local>`),
+        to: email,
+        subject: 'ITEMBA-R — Password Reset Request',
+        html: `
+          <p>Hello ${name},</p>
+          <p>A password reset was requested for your ITEMBA-R account.</p>
+          <p>
+            <a href="${resetUrl}" style="padding:10px 20px;background:#2563eb;color:white;border-radius:6px;text-decoration:none;">
+              Reset Password
+            </a>
+          </p>
+          <p>This link expires in ${RESET_TOKEN_TTL_MINUTES} minutes.</p>
+          <p>If you did not request this, you can safely ignore this email.</p>
+          <hr/>
+          <p style="font-size:12px;color:#666">ITEMBA-R Enterprise Platform</p>
+        `,
+      });
+    } catch (err) {
+      // Log but don't throw — email failure should not break the reset flow
+      this.logger.error('Failed to send password reset email', err);
+    }
+  }
+
+  // ─── Security Event helper ────────────────────────────────────────────────
+
+  private async logSecurityEvent(
+    eventType: string,
+    userId: string,
+    meta?: { ipAddress?: string; userAgent?: string },
+  ) {
+    try {
+      await this.prisma.securityEvent.create({
+        data: {
+          eventNumber: `SE-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`,
+          eventType: eventType as any,
+          severity: 'MEDIUM',
+          status: 'OPEN',
+          userId,
+          ipAddress: meta?.ipAddress,
+          userAgent: meta?.userAgent,
+        },
+      });
+    } catch {
+      // Non-blocking
+    }
+  }
+}

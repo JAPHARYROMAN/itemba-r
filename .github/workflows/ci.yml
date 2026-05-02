@@ -1,0 +1,309 @@
+name: ITEMBA-R CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  prisma-validate:
+    name: Prisma — Schema Validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Validate Prisma schema
+        run: npx prisma validate --schema=../database/prisma/schema.prisma
+
+  backend-lint-typecheck:
+    name: Backend — Lint & Type Check
+    runs-on: ubuntu-latest
+    needs: prisma-validate
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate --schema=../database/prisma/schema.prisma
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Format check
+        run: npm run format:check
+      - name: Lint
+        run: npm run lint
+
+  frontend-lint-typecheck:
+    name: Frontend — Lint & Type Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Format check
+        run: npm run format:check
+      - name: Lint
+        run: npm run lint
+
+  backend-build:
+    name: Backend — Build
+    runs-on: ubuntu-latest
+    needs: backend-lint-typecheck
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate --schema=../database/prisma/schema.prisma
+      - name: Build
+        run: npm run build
+
+  backend-test:
+    name: Backend — Test
+    runs-on: ubuntu-latest
+    needs: backend-lint-typecheck
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate --schema=../database/prisma/schema.prisma
+      - name: Run tests (missing suites must fail the build)
+        run: npm run test:ci
+
+  backend-e2e:
+    name: Backend — E2E Smoke
+    runs-on: ubuntu-latest
+    needs: backend-lint-typecheck
+    defaults:
+      run:
+        working-directory: ./backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: itemba_r_test
+          POSTGRES_USER: itemba
+          POSTGRES_PASSWORD: '1618'
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U itemba -d itemba_r_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://itemba:1618@localhost:5432/itemba_r_test?schema=public
+      JWT_ACCESS_SECRET: local-ci-jwt-access-secret-32chars-minimum
+      JWT_REFRESH_SECRET: local-ci-jwt-refresh-secret-32chars-minimum
+      TWO_FACTOR_ENCRYPTION_KEY: local-ci-two-factor-key-32chars-minimum
+      REFRESH_TOKEN_PEPPER: local-ci-refresh-token-pepper-32chars-minimum
+      APP_ENCRYPTION_KEY: local-ci-app-encryption-key-32chars-minimum
+      THROTTLE_LIMIT: '100000'
+      THROTTLE_TTL: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate --schema=../database/prisma/schema.prisma
+      - name: Apply Prisma migrations
+        run: npx prisma migrate deploy --schema=../database/prisma/schema.prisma
+      - name: Run e2e smoke tests
+        run: npm run test:e2e:ci
+
+  frontend-test:
+    name: Frontend — Test
+    runs-on: ubuntu-latest
+    needs: frontend-lint-typecheck
+    defaults:
+      run:
+        working-directory: ./frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Run tests
+        run: npm run test:ci
+
+  frontend-build:
+    name: Frontend — Build
+    runs-on: ubuntu-latest
+    needs: frontend-lint-typecheck
+    defaults:
+      run:
+        working-directory: ./frontend
+    env:
+      BACKEND_INTERNAL_URL: http://localhost:3001/api/v1
+      NEXT_PUBLIC_API_URL: http://localhost:3001/api/v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Start production frontend
+        run: |
+          npm run start > ../frontend-smoke.log 2>&1 &
+          echo $! > ../frontend-smoke.pid
+      - name: Wait for production frontend
+        run: |
+          for i in {1..45}; do
+            if curl -fsS http://localhost:3009/login > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat ../frontend-smoke.log
+          exit 1
+      - name: Smoke static dashboard routes
+        env:
+          FRONTEND_BASE_URL: http://localhost:3009
+        run: npm run smoke:routes
+      - name: Stop production frontend
+        if: always()
+        run: |
+          if [ -f ../frontend-smoke.pid ]; then
+            kill "$(cat ../frontend-smoke.pid)" || true
+          fi
+
+  unsafe-patterns:
+    name: Static — Unsafe Pattern Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Scan for known unsafe patterns
+        run: node scripts/check-unsafe-patterns.mjs
+
+  deployment-validate:
+    name: Deployment — Compose Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Validate production and staging compose gates
+        run: npm run verify:deploy
+
+  docker-backend:
+    name: Docker — Backend Image
+    runs-on: ubuntu-latest
+    needs: [backend-build, backend-test, backend-e2e, unsafe-patterns, deployment-validate]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        # Build context is the repo root so the Prisma schema (database/prisma/)
+        # is reachable from the Dockerfile. Image is tagged with both the commit
+        # SHA and `latest` so deploys can pin to a specific build.
+        run: |
+          docker build \
+            -t itemba-r-backend:${{ github.sha }} \
+            -t itemba-r-backend:latest \
+            -f backend/Dockerfile .
+      # ── Registry push (opt-in) ─────────────────────────────────────────────
+      # Set DOCKER_REGISTRY (e.g. ghcr.io/your-org) in repo secrets to enable.
+      # The job no-ops when the secret is unset so forks still build cleanly.
+      - name: Push to registry (if configured)
+        if: ${{ env.DOCKER_REGISTRY != '' }}
+        env:
+          DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY }}
+          DOCKER_REGISTRY_USER: ${{ secrets.DOCKER_REGISTRY_USER }}
+          DOCKER_REGISTRY_PASSWORD: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+        run: |
+          echo "$DOCKER_REGISTRY_PASSWORD" | docker login "$DOCKER_REGISTRY" \
+            -u "$DOCKER_REGISTRY_USER" --password-stdin
+          docker tag itemba-r-backend:${{ github.sha }} \
+            "$DOCKER_REGISTRY/itemba-r-backend:${{ github.sha }}"
+          docker tag itemba-r-backend:${{ github.sha }} \
+            "$DOCKER_REGISTRY/itemba-r-backend:latest"
+          docker push "$DOCKER_REGISTRY/itemba-r-backend:${{ github.sha }}"
+          docker push "$DOCKER_REGISTRY/itemba-r-backend:latest"
+
+  docker-frontend:
+    name: Docker — Frontend Image
+    runs-on: ubuntu-latest
+    needs: [frontend-build, frontend-test, unsafe-patterns, deployment-validate]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL=http://localhost:3001/api/v1 \
+            -t itemba-r-frontend:${{ github.sha }} \
+            -t itemba-r-frontend:latest \
+            ./frontend
+      - name: Push to registry (if configured)
+        if: ${{ env.DOCKER_REGISTRY != '' }}
+        env:
+          DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY }}
+          DOCKER_REGISTRY_USER: ${{ secrets.DOCKER_REGISTRY_USER }}
+          DOCKER_REGISTRY_PASSWORD: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+        run: |
+          echo "$DOCKER_REGISTRY_PASSWORD" | docker login "$DOCKER_REGISTRY" \
+            -u "$DOCKER_REGISTRY_USER" --password-stdin
+          docker tag itemba-r-frontend:${{ github.sha }} \
+            "$DOCKER_REGISTRY/itemba-r-frontend:${{ github.sha }}"
+          docker tag itemba-r-frontend:${{ github.sha }} \
+            "$DOCKER_REGISTRY/itemba-r-frontend:latest"
+          docker push "$DOCKER_REGISTRY/itemba-r-frontend:${{ github.sha }}"
+          docker push "$DOCKER_REGISTRY/itemba-r-frontend:latest"

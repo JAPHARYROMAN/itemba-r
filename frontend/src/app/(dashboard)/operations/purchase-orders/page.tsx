@@ -1,0 +1,1160 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import {
+  Card,
+  PageHeader,
+  PageToolbar,
+  StatCard,
+  StatusBadge,
+  Modal,
+  Btn,
+  PageSpinner,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+} from '@/components/ui';
+import {
+  backendDelete,
+  backendList,
+  backendPage,
+  backendPatch,
+  backendPost,
+} from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
+
+interface Company {
+  id: string;
+  name: string;
+  code: string;
+}
+interface Supplier {
+  id: string;
+  name: string;
+  supplierCode?: string | null;
+  supplierType: string;
+}
+interface Product {
+  id: string;
+  name: string;
+  productCode?: string | null;
+}
+interface InventoryLocation {
+  id: string;
+  name: string;
+  locationCode: string;
+}
+interface Unit {
+  id: string;
+  name: string;
+  symbol: string;
+}
+
+interface PurchaseOrderLine {
+  id?: string;
+  productId: string;
+  description: string;
+  qty: number;
+  unitId: string;
+  unitPrice: number;
+  discount: number;
+  tax: number;
+  inventoryLocationId: string;
+  batchNumber: string;
+  expiryDate: string;
+}
+
+interface PurchaseOrder {
+  id: string;
+  orderNumber?: string;
+  orderDate: string;
+  dueDate?: string | null;
+  supplierId?: string | null;
+  supplierName?: string | null;
+  purchaseType: string;
+  totalAmount: number;
+  outstandingAmount: number;
+  status: string;
+  paymentStatus: string;
+  currency: string;
+  notes?: string | null;
+  companyId: string;
+  company?: { name: string } | null;
+  supplier?: { name: string } | null;
+  lines?: PurchaseOrderLine[];
+}
+
+interface PurchaseOrderForm {
+  companyId: string;
+  supplierId: string;
+  supplierName: string;
+  purchaseType: string;
+  orderDate: string;
+  dueDate: string;
+  currency: string;
+  notes: string;
+  lines: PurchaseOrderLine[];
+}
+
+interface Paginated<T> {
+  data: T[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
+
+const emptyPaginated = <T,>(): Paginated<T> => ({ data: [], total: 0, page: 1, totalPages: 1 });
+
+const PURCHASE_TYPES = [
+  'CASH_PURCHASE',
+  'CREDIT_PURCHASE',
+  'STOCK_PURCHASE',
+  'SERVICE_PURCHASE',
+  'ASSET_PURCHASE',
+  'INTERNAL_COMPANY',
+  'OTHER',
+];
+const PURCHASE_STATUSES = [
+  'DRAFT',
+  'CONFIRMED',
+  'PARTIALLY_RECEIVED',
+  'RECEIVED',
+  'CANCELLED',
+  'CLOSED',
+];
+const PAYMENT_STATUSES = ['UNPAID', 'PARTIALLY_PAID', 'PAID'];
+const CURRENCIES = ['TZS', 'USD', 'EUR'];
+
+const BLANK_LINE = (): PurchaseOrderLine => ({
+  productId: '',
+  description: '',
+  qty: 1,
+  unitId: '',
+  unitPrice: 0,
+  discount: 0,
+  tax: 0,
+  inventoryLocationId: '',
+  batchNumber: '',
+  expiryDate: '',
+});
+const blankForm = (): PurchaseOrderForm => ({
+  companyId: '',
+  supplierId: '',
+  supplierName: '',
+  purchaseType: 'CASH_PURCHASE',
+  orderDate: new Date().toISOString().slice(0, 10),
+  dueDate: '',
+  currency: 'TZS',
+  notes: '',
+  lines: [BLANK_LINE()],
+});
+
+function fmtMoney(n: number, ccy = 'TZS') {
+  return `${ccy} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)}`;
+}
+
+function lineTotal(l: PurchaseOrderLine) {
+  const sub = (Number(l.qty) || 0) * (Number(l.unitPrice) || 0);
+  return sub - (Number(l.discount) || 0) + (Number(l.tax) || 0);
+}
+
+function PurchaseOrderModal({
+  mode,
+  initial,
+  companies,
+  onClose,
+  onSaved,
+}: {
+  mode: 'create' | 'edit';
+  initial?: PurchaseOrder;
+  companies: Company[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState<PurchaseOrderForm>(() =>
+    initial
+      ? {
+          companyId: initial.companyId,
+          supplierId: initial.supplierId ?? '',
+          supplierName: initial.supplierName ?? '',
+          purchaseType: initial.purchaseType,
+          orderDate: initial.orderDate.slice(0, 10),
+          dueDate: initial.dueDate?.slice(0, 10) ?? '',
+          currency: initial.currency,
+          notes: initial.notes ?? '',
+          lines: initial.lines?.length
+            ? initial.lines.map((line: any) => ({
+                id: line.id,
+                productId: line.productId ?? '',
+                description: line.description ?? '',
+                qty: Number(line.qty ?? line.quantity ?? 1),
+                unitId: line.unitId ?? '',
+                unitPrice: Number(line.unitPrice ?? line.unitCost ?? 0),
+                discount: Number(line.discount ?? line.discountAmount ?? 0),
+                tax: Number(line.tax ?? line.taxAmount ?? 0),
+                inventoryLocationId: line.inventoryLocationId ?? '',
+                batchNumber: line.batchNumber ?? '',
+                expiryDate: line.expiryDate?.slice(0, 10) ?? '',
+              }))
+            : [BLANK_LINE()],
+        }
+      : blankForm(),
+  );
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [locations, setLocations] = useState<InventoryLocation[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    backendList<Unit>('/units', { query: { limit: 200 } })
+      .then((rows) => {
+        if (!cancelled) setUnits(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setUnits([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!form.companyId) {
+      setSuppliers([]);
+      setProducts([]);
+      setLocations([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.allSettled([
+      backendList<Supplier>('/suppliers', { query: { companyId: form.companyId, limit: 200 } }),
+      backendList<Product>('/products', { query: { companyId: form.companyId, limit: 200 } }),
+      backendList<InventoryLocation>('/inventory-locations', {
+        query: { companyId: form.companyId, limit: 200 },
+      }),
+    ]).then(([supplierResult, productResult, locationResult]) => {
+      if (cancelled) return;
+      setSuppliers(supplierResult.status === 'fulfilled' ? supplierResult.value : []);
+      setProducts(productResult.status === 'fulfilled' ? productResult.value : []);
+      setLocations(locationResult.status === 'fulfilled' ? locationResult.value : []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
+
+  const setField = <K extends keyof PurchaseOrderForm>(k: K, v: PurchaseOrderForm[K]) =>
+    setForm((f) => ({ ...f, [k]: v }));
+  const setLine = (i: number, patch: Partial<PurchaseOrderLine>) =>
+    setForm((f) => ({
+      ...f,
+      lines: f.lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
+    }));
+  const addLine = () => setForm((f) => ({ ...f, lines: [...f.lines, BLANK_LINE()] }));
+  const removeLine = (i: number) =>
+    setForm((f) => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }));
+
+  const totals = form.lines.reduce(
+    (acc, l) => {
+      const sub = (Number(l.qty) || 0) * (Number(l.unitPrice) || 0);
+      return {
+        sub: acc.sub + sub,
+        disc: acc.disc + (Number(l.discount) || 0),
+        tax: acc.tax + (Number(l.tax) || 0),
+      };
+    },
+    { sub: 0, disc: 0, tax: 0 },
+  );
+  const total = totals.sub - totals.disc + totals.tax;
+
+  const handleSubmit = async () => {
+    if (!form.companyId) {
+      setError('Company is required');
+      return;
+    }
+    if (!form.supplierId && !form.supplierName.trim()) {
+      setError('Supplier or name required');
+      return;
+    }
+    if (!form.lines.length) {
+      setError('Add at least one line');
+      return;
+    }
+    if (form.lines.some((l) => !l.productId || !l.unitId || !l.inventoryLocationId)) {
+      setError('Each line needs product, unit, and location');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const body: Record<string, unknown> = {
+        companyId: form.companyId,
+        purchaseType: form.purchaseType,
+        orderDate: form.orderDate,
+        currency: form.currency,
+        lines: form.lines.map((l) => {
+          const out: Record<string, unknown> = {
+            productId: l.productId,
+            description: l.description,
+            quantity: Number(l.qty) || 0,
+            unitId: l.unitId,
+            unitCost: Number(l.unitPrice) || 0,
+            discountAmount: Number(l.discount) || 0,
+            taxAmount: Number(l.tax) || 0,
+            inventoryLocationId: l.inventoryLocationId,
+          };
+          if (l.batchNumber) out.batchNumber = l.batchNumber;
+          if (l.expiryDate) out.expiryDate = l.expiryDate;
+          return out;
+        }),
+      };
+      if (form.supplierId) body.supplierId = form.supplierId;
+      if (form.supplierName) body.supplierName = form.supplierName;
+      if (form.dueDate) body.dueDate = form.dueDate;
+      if (form.notes) body.notes = form.notes;
+      if (mode === 'create') {
+        await backendPost('/purchase-orders', body);
+      } else {
+        await backendPatch(`/purchase-orders/${initial!.id}`, body);
+      }
+      onSaved();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={mode === 'create' ? 'Create Purchase Order' : 'Edit Purchase Order'}
+      size="2xl"
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn variant="primary" onClick={handleSubmit} loading={saving}>
+            {mode === 'create' ? 'Create Draft' : 'Save Changes'}
+          </Btn>
+        </>
+      }
+    >
+      {error && (
+        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+      <div className="space-y-4">
+        <div className="grid grid-cols-3 gap-3">
+          <FormSelect
+            label="Company"
+            required
+            value={form.companyId}
+            onChange={(e) => {
+              setField('companyId', e.target.value);
+              setField('supplierId', '');
+            }}
+            placeholder="Select company"
+            disabled={mode === 'edit'}
+          >
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </FormSelect>
+          <FormSelect
+            label="Purchase Type"
+            required
+            value={form.purchaseType}
+            onChange={(e) => setField('purchaseType', e.target.value)}
+          >
+            {PURCHASE_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t.replace(/_/g, ' ')}
+              </option>
+            ))}
+          </FormSelect>
+          <FormSelect
+            label="Currency"
+            required
+            value={form.currency}
+            onChange={(e) => setField('currency', e.target.value)}
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </FormSelect>
+          <FormSelect
+            label="Supplier"
+            value={form.supplierId}
+            onChange={(e) => setField('supplierId', e.target.value)}
+            placeholder="Use name below"
+          >
+            {suppliers.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+                {s.supplierCode ? ` (${s.supplierCode})` : ''}
+              </option>
+            ))}
+          </FormSelect>
+          <FormInput
+            label="Supplier Name"
+            value={form.supplierName}
+            onChange={(e) => setField('supplierName', e.target.value)}
+            placeholder="If no supplier selected"
+          />
+          <FormInput
+            label="Order Date"
+            required
+            type="date"
+            value={form.orderDate}
+            onChange={(e) => setField('orderDate', e.target.value)}
+          />
+          <FormInput
+            label="Due Date"
+            type="date"
+            value={form.dueDate}
+            onChange={(e) => setField('dueDate', e.target.value)}
+          />
+          <div className="col-span-2">
+            <FormTextarea
+              label="Notes"
+              rows={2}
+              value={form.notes}
+              onChange={(e) => setField('notes', e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+              Line Items
+            </h4>
+            <Btn variant="secondary" size="xs" onClick={addLine}>
+              + Add Line
+            </Btn>
+          </div>
+          <div
+            className="overflow-x-auto rounded-lg border"
+            style={{ borderColor: 'var(--aurora-border)' }}
+          >
+            <table className="w-full text-xs">
+              <thead>
+                <tr
+                  className="text-left uppercase bg-gray-50"
+                  style={{ color: 'var(--aurora-text-muted)' }}
+                >
+                  <th className="px-2 py-2">Product</th>
+                  <th className="px-2 py-2">Description</th>
+                  <th className="px-2 py-2">Qty</th>
+                  <th className="px-2 py-2">Unit</th>
+                  <th className="px-2 py-2">Price</th>
+                  <th className="px-2 py-2">Discount</th>
+                  <th className="px-2 py-2">Tax</th>
+                  <th className="px-2 py-2">Location</th>
+                  <th className="px-2 py-2">Batch</th>
+                  <th className="px-2 py-2">Expiry</th>
+                  <th className="px-2 py-2 text-right">Total</th>
+                  <th className="px-2 py-2"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {form.lines.map((line, i) => (
+                  <tr key={i}>
+                    <td className="px-1 py-1">
+                      <select
+                        value={line.productId}
+                        onChange={(e) => setLine(i, { productId: e.target.value })}
+                        className="w-28 text-xs border rounded px-1 py-1"
+                        style={{
+                          borderColor: 'var(--aurora-border)',
+                          background: 'var(--aurora-card)',
+                          color: 'var(--aurora-text)',
+                        }}
+                      >
+                        <option value="">Select…</option>
+                        {products.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
+                        type="text"
+                        value={line.description}
+                        onChange={(e) => setLine(i, { description: e.target.value })}
+                        className="w-28 text-xs border rounded px-1 py-1"
+                        style={{
+                          borderColor: 'var(--aurora-border)',
+                          background: 'var(--aurora-card)',
+                          color: 'var(--aurora-text)',
+                        }}
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
+                        type="number"
+                        value={line.qty}
+                        onChange={(e) => setLine(i, { qty: Number(e.target.value) })}
+                        className="w-14 text-xs border rounded px-1 py-1"
+                        style={{
+                          borderColor: 'var(--aurora-border)',
+                          background: 'var(--aurora-card)',
+                          color: 'var(--aurora-text)',
+                        }}
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <select
+                        value={line.unitId}
+                        onChange={(e) => setLine(i, { unitId: e.target.value })}
+                        className="w-14 text-xs border rounded px-1 py-1"
+                        style={{
+                          borderColor: 'var(--aurora-border)',
+                          background: 'var(--aurora-card)',
+                          color: 'var(--aurora-text)',
+                        }}
+                      >
+                        <option value="">…</option>
+                        {units.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.symbol}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
+                        type="number"
+                        value={line.unitPrice}
+                        onChange={(e) => setLine(i, { unitPrice: Number(e.target.value) })}
+                        className="w-20 text-xs border rounded px-1 py-1"
+                        style={{
+                          borderColor: 'var(--aurora-border)',
+                          background: 'var(--aurora-card)',
+                          color: 'var(--aurora-text)',
+                        }}
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
+                        type="number"
+                        value={line.discount}
+                        onChange={(e) => setLine(i, { discount: Number(e.target.value) })}
+                        className="w-14 text-xs border rounded px-1 py-1"
+                        style={{
+                          borderColor: 'var(--aurora-border)',
+                          background: 'var(--aurora-card)',
+                          color: 'var(--aurora-text)',
+                        }}
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
+                        type="number"
+                        value={line.tax}
+                        onChange={(e) => setLine(i, { tax: Number(e.target.value) })}
+                        className="w-14 text-xs border rounded px-1 py-1"
+                        style={{
+                          borderColor: 'var(--aurora-border)',
+                          background: 'var(--aurora-card)',
+                          color: 'var(--aurora-text)',
+                        }}
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <select
+                        value={line.inventoryLocationId}
+                        onChange={(e) => setLine(i, { inventoryLocationId: e.target.value })}
+                        className="w-24 text-xs border rounded px-1 py-1"
+                        style={{
+                          borderColor: 'var(--aurora-border)',
+                          background: 'var(--aurora-card)',
+                          color: 'var(--aurora-text)',
+                        }}
+                      >
+                        <option value="">…</option>
+                        {locations.map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {l.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
+                        type="text"
+                        value={line.batchNumber}
+                        onChange={(e) => setLine(i, { batchNumber: e.target.value })}
+                        className="w-20 text-xs border rounded px-1 py-1"
+                        style={{
+                          borderColor: 'var(--aurora-border)',
+                          background: 'var(--aurora-card)',
+                          color: 'var(--aurora-text)',
+                        }}
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
+                        type="date"
+                        value={line.expiryDate}
+                        onChange={(e) => setLine(i, { expiryDate: e.target.value })}
+                        className="w-32 text-xs border rounded px-1 py-1"
+                        style={{
+                          borderColor: 'var(--aurora-border)',
+                          background: 'var(--aurora-card)',
+                          color: 'var(--aurora-text)',
+                        }}
+                      />
+                    </td>
+                    <td className="px-2 py-1 text-right tabular-nums font-medium">
+                      {lineTotal(line).toFixed(2)}
+                    </td>
+                    <td className="px-1 py-1 text-right">
+                      {form.lines.length > 1 && (
+                        <Btn variant="ghost" size="xs" onClick={() => removeLine(i)}>
+                          ×
+                        </Btn>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="bg-gray-50">
+                <tr>
+                  <td colSpan={10} className="px-2 py-1 text-right font-medium">
+                    Subtotal
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums">{totals.sub.toFixed(2)}</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td colSpan={10} className="px-2 py-1 text-right font-medium">
+                    Discount
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums text-red-600">
+                    -{totals.disc.toFixed(2)}
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td colSpan={10} className="px-2 py-1 text-right font-medium">
+                    Tax
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums">+{totals.tax.toFixed(2)}</td>
+                  <td></td>
+                </tr>
+                <tr
+                  className="font-semibold border-t"
+                  style={{ borderColor: 'var(--aurora-border)' }}
+                >
+                  <td colSpan={10} className="px-2 py-2 text-right">
+                    Total ({form.currency})
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums">{total.toFixed(2)}</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function DeleteConfirm({
+  order,
+  onClose,
+  onConfirmed,
+}: {
+  order: PurchaseOrder;
+  onClose: () => void;
+  onConfirmed: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const handleDelete = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await backendDelete(`/purchase-orders/${order.id}`);
+      onConfirmed();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Delete Order"
+      size="md"
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn variant="danger" onClick={handleDelete} loading={saving}>
+            Delete
+          </Btn>
+        </>
+      }
+    >
+      {error && (
+        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+      <p className="text-sm" style={{ color: 'var(--aurora-text)' }}>
+        Delete order <strong>{order.orderNumber ?? order.id}</strong>?
+      </p>
+    </Modal>
+  );
+}
+
+export default function PurchaseOrdersPage() {
+  const { hasPermission } = useAuth();
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [data, setData] = useState<Paginated<PurchaseOrder> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [filterSearch, setFilterSearch] = useState('');
+  const [filterCompany, setFilterCompany] = useState('');
+  const [filterType, setFilterType] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterPayment, setFilterPayment] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
+  const [page, setPage] = useState(1);
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<PurchaseOrder | null>(null);
+  const [deleting, setDeleting] = useState<PurchaseOrder | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionError, setActionError] = useState('');
+  const [loadError, setLoadError] = useState('');
+
+  const canView = hasPermission('purchases.view');
+  const canCreate = hasPermission('purchases.create');
+  const canConfirm = hasPermission('purchases.confirm');
+  const canReceive = hasPermission('purchases.receive');
+  const canCancel = hasPermission('purchases.cancel');
+
+  useEffect(() => {
+    let cancelled = false;
+    backendList<Company>('/companies', { query: { limit: 200 } })
+      .then((rows) => {
+        if (!cancelled) setCompanies(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCompanies([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const load = useCallback(async () => {
+    if (!canView) return;
+    setLoading(true);
+    setLoadError('');
+    try {
+      const query: Record<string, string | number> = { page, limit: 20 };
+      if (filterSearch.trim()) query.search = filterSearch.trim();
+      if (filterCompany) query.companyId = filterCompany;
+      if (filterType) query.purchaseType = filterType;
+      if (filterStatus) query.status = filterStatus;
+      if (filterPayment) query.paymentStatus = filterPayment;
+      if (filterDateFrom) query.dateFrom = filterDateFrom;
+      if (filterDateTo) query.dateTo = filterDateTo;
+      setData(await backendPage<PurchaseOrder>('/purchase-orders', { query }));
+    } catch (err: unknown) {
+      setData(emptyPaginated<PurchaseOrder>());
+      setLoadError(err instanceof Error ? err.message : 'Failed to load purchase orders');
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    canView,
+    page,
+    filterSearch,
+    filterCompany,
+    filterType,
+    filterStatus,
+    filterPayment,
+    filterDateFrom,
+    filterDateTo,
+  ]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const doAction = async (id: string, action: 'confirm' | 'receive' | 'cancel') => {
+    setActionLoading(`${id}:${action}`);
+    setActionError('');
+    try {
+      await backendPatch(`/purchase-orders/${id}/${action}`);
+      await load();
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  if (!canView) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Purchase Orders" subtitle="Supplier orders" />
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Access Restricted</p>
+        </div>
+      </div>
+    );
+  }
+
+  const filterSelectCls =
+    'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
+  const filterStyle = {
+    borderColor: 'var(--aurora-border)',
+    background: 'var(--aurora-card)',
+    color: 'var(--aurora-text)',
+  } as const;
+
+  const stats = {
+    confirmed: data?.data.filter((o) => o.status === 'CONFIRMED').length ?? 0,
+    received:
+      data?.data.filter((o) => o.status === 'RECEIVED' || o.status === 'PARTIALLY_RECEIVED')
+        .length ?? 0,
+    cost: data?.data.reduce((acc, o) => acc + Number(o.totalAmount || 0), 0) ?? 0,
+  };
+
+  return (
+    <div className="p-6 space-y-6">
+      {creating && (
+        <PurchaseOrderModal
+          mode="create"
+          companies={companies}
+          onClose={() => setCreating(false)}
+          onSaved={() => {
+            setCreating(false);
+            load();
+          }}
+        />
+      )}
+      {editing && (
+        <PurchaseOrderModal
+          mode="edit"
+          initial={editing}
+          companies={companies}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
+      {deleting && (
+        <DeleteConfirm
+          order={deleting}
+          onClose={() => setDeleting(null)}
+          onConfirmed={() => {
+            setDeleting(null);
+            load();
+          }}
+        />
+      )}
+
+      <PageHeader
+        title="Purchase Orders"
+        subtitle="Supplier orders, receiving, and procurement spend"
+      />
+
+      <div className="grid grid-cols-4 gap-3">
+        <StatCard label="Total Orders" value={data?.total ?? 0} />
+        <StatCard label="Confirmed (page)" value={stats.confirmed} />
+        <StatCard label="Received (page)" value={stats.received} />
+        <StatCard label="Total Cost (page)" value={fmtMoney(stats.cost)} />
+      </div>
+
+      {loadError && (
+        <div
+          role="alert"
+          className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
+          {loadError}
+        </div>
+      )}
+      {actionError && (
+        <div
+          role="alert"
+          className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
+          {actionError}
+        </div>
+      )}
+
+      <PageToolbar
+        search={filterSearch}
+        onSearch={(v) => {
+          setFilterSearch(v);
+          setPage(1);
+        }}
+        searchPlaceholder="Order # or supplier…"
+        filters={
+          <>
+            <select
+              value={filterCompany}
+              onChange={(e) => {
+                setFilterCompany(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
+              <option value="">All Companies</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filterType}
+              onChange={(e) => {
+                setFilterType(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
+              <option value="">All Types</option>
+              {PURCHASE_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t.replace(/_/g, ' ')}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filterStatus}
+              onChange={(e) => {
+                setFilterStatus(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
+              <option value="">All Status</option>
+              {PURCHASE_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s.replace(/_/g, ' ')}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filterPayment}
+              onChange={(e) => {
+                setFilterPayment(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
+              <option value="">All Payments</option>
+              {PAYMENT_STATUSES.map((p) => (
+                <option key={p} value={p}>
+                  {p.replace(/_/g, ' ')}
+                </option>
+              ))}
+            </select>
+            <input
+              type="date"
+              value={filterDateFrom}
+              onChange={(e) => {
+                setFilterDateFrom(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+            />
+            <input
+              type="date"
+              value={filterDateTo}
+              onChange={(e) => {
+                setFilterDateTo(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+            />
+          </>
+        }
+        actions={
+          canCreate ? (
+            <Btn variant="primary" onClick={() => setCreating(true)}>
+              + New Order
+            </Btn>
+          ) : null
+        }
+      />
+
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[1100px]">
+            <thead>
+              <tr
+                className="text-left text-xs uppercase bg-gray-50"
+                style={{ color: 'var(--aurora-text-muted)' }}
+              >
+                <th className="px-4 py-3">Number</th>
+                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">Supplier</th>
+                <th className="px-4 py-3">Type</th>
+                <th className="px-4 py-3 text-right">Total</th>
+                <th className="px-4 py-3 text-right">Outstanding</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Payment</th>
+                <th className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {loading ? (
+                <tr>
+                  <td colSpan={9}>
+                    <PageSpinner />
+                  </td>
+                </tr>
+              ) : !data?.data.length ? (
+                <tr>
+                  <td
+                    colSpan={9}
+                    className="px-4 py-10 text-center text-sm"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
+                    No orders
+                  </td>
+                </tr>
+              ) : (
+                data.data.map((o) => (
+                  <tr key={o.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-mono text-xs">
+                      {o.orderNumber ?? o.id.slice(0, 8)}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {new Date(o.orderDate).toLocaleDateString('en-GB')}
+                    </td>
+                    <td className="px-4 py-3">
+                      {o.supplier?.name ?? o.supplierName ?? (
+                        <span className="italic" style={{ color: 'var(--aurora-text-muted)' }}>
+                          —
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs">{o.purchaseType.replace(/_/g, ' ')}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {fmtMoney(o.totalAmount, o.currency)}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {fmtMoney(o.outstandingAmount, o.currency)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge value={o.status} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge value={o.paymentStatus} />
+                    </td>
+                    <td className="px-4 py-3 text-right space-x-1">
+                      {o.status === 'DRAFT' && canCreate && (
+                        <Btn variant="ghost" size="xs" onClick={() => setEditing(o)}>
+                          Edit
+                        </Btn>
+                      )}
+                      {o.status === 'DRAFT' && canConfirm && (
+                        <Btn
+                          variant="primary"
+                          size="xs"
+                          loading={actionLoading === `${o.id}:confirm`}
+                          onClick={() => doAction(o.id, 'confirm')}
+                        >
+                          Confirm
+                        </Btn>
+                      )}
+                      {(o.status === 'CONFIRMED' || o.status === 'PARTIALLY_RECEIVED') &&
+                        canReceive && (
+                          <Btn
+                            variant="success"
+                            size="xs"
+                            loading={actionLoading === `${o.id}:receive`}
+                            onClick={() => doAction(o.id, 'receive')}
+                          >
+                            Receive
+                          </Btn>
+                        )}
+                      {(o.status === 'CONFIRMED' || o.status === 'RECEIVED') && canCancel && (
+                        <Btn
+                          variant="danger"
+                          size="xs"
+                          loading={actionLoading === `${o.id}:cancel`}
+                          onClick={() => doAction(o.id, 'cancel')}
+                        >
+                          Cancel
+                        </Btn>
+                      )}
+                      {o.status === 'DRAFT' && canCreate && (
+                        <Btn variant="ghost" size="xs" onClick={() => setDeleting(o)}>
+                          Delete
+                        </Btn>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        {data && data.totalPages > 1 && (
+          <div
+            className="px-5 py-3 border-t flex items-center justify-between"
+            style={{ borderColor: 'var(--aurora-border)' }}
+          >
+            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              Page {data.page} of {data.totalPages} · {data.total} total
+            </span>
+            <div className="flex gap-2">
+              <Btn
+                variant="secondary"
+                size="xs"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                Previous
+              </Btn>
+              <Btn
+                variant="secondary"
+                size="xs"
+                disabled={page >= data.totalPages}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next
+              </Btn>
+            </div>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}

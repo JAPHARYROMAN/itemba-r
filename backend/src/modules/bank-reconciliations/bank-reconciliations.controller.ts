@@ -1,0 +1,87 @@
+import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common';
+import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { BankReconciliationsService } from './bank-reconciliations.service';
+
+@Controller('bank-reconciliations')
+export class BankReconciliationsController {
+  constructor(private readonly service: BankReconciliationsService) {}
+
+  @Get()
+  @RequirePermissions('bank_reconciliations.list')
+  findAll(@Query() query: any) {
+    return this.service.findAll(query);
+  }
+
+  @Get(':id')
+  @RequirePermissions('bank_reconciliations.view')
+  findOne(@Param('id') id: string) {
+    return this.service.findOne(id);
+  }
+
+  @Post()
+  @RequirePermissions('bank_reconciliations.create')
+  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+    return this.service.create(dto, user);
+  }
+
+  @Put(':id')
+  @RequirePermissions('bank_reconciliations.update')
+  update(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+    return this.service.update(id, dto, user);
+  }
+
+  @Get(':id/lines')
+  @RequirePermissions('bank_reconciliations.view')
+  getLines(@Param('id') id: string) {
+    return this.service.getLines(id);
+  }
+
+  @Post(':id/lines')
+  @RequirePermissions('bank_reconciliations.update')
+  addLine(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+    return this.service.addLine(id, dto, user);
+  }
+
+  @Post(':id/run-matching')
+  @RequirePermissions('bank_reconciliations.update')
+  runMatching(
+    @Param('id') id: string,
+    @Body() body: { dateWindowDays?: number; amountToleranceCents?: number },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.runMatching(id, user, body ?? {});
+  }
+
+  @Post(':id/match')
+  @RequirePermissions('bank_reconciliations.update')
+  manualMatch(
+    @Param('id') id: string,
+    @Body() body: { statementLineId: string; journalEntryLineId: string },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.manualMatch(id, body.statementLineId, body.journalEntryLineId, user);
+  }
+
+  @Post(':id/unmatch')
+  @RequirePermissions('bank_reconciliations.update')
+  unmatch(
+    @Param('id') id: string,
+    @Body() body: { statementLineId: string },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.unmatch(id, body.statementLineId, user);
+  }
+
+  @Post(':id/approve')
+  @RequirePermissions('bank_reconciliations.approve')
+  approve(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.approve(id, user);
+  }
+
+  @Post(':id/close')
+  @RequirePermissions('bank_reconciliations.close')
+  close(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.close(id, user);
+  }
+}

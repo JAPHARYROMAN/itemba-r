@@ -1,0 +1,59 @@
+# Root .dockerignore — applies to all builds whose context is the repo root
+# (currently: backend image). Keep this list tight; build context size affects
+# layer cache and image build time.
+
+# VCS / IDE
+.git
+.gitignore
+.gitattributes
+.github
+.vscode
+.idea
+.editorconfig
+
+# Local-only secrets and env files (each image gets env at runtime)
+.env
+.env.*
+!.env.example
+!.env.production.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+!backend/.env.production.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+!frontend/.env.production.example
+
+# Build artifacts and caches
+**/node_modules
+**/node_modules.corrupt-*
+**/dist
+**/build
+**/.next
+**/.turbo
+**/.cache
+**/coverage
+**/.eslintcache
+**/.tsbuildinfo
+
+# Logs / runtime artifacts
+**/*.log
+**/logs
+**/uploads
+**/storage
+/backups
+backend/backups
+frontend/backups
+
+# OS noise
+**/.DS_Store
+Thumbs.db
+
+# Dev-only assets that don't belong in any image
+docker-compose*.yml
+README.md
+README.md.new
+.env.example.new
+docs
+scripts/load-tests

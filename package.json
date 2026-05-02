@@ -1,0 +1,21 @@
+{
+  "name": "itemba-r",
+  "private": true,
+  "scripts": {
+    "verify": "pwsh -File scripts/build-all.ps1",
+    "verify:backend": "pwsh -File scripts/build-all.ps1 -SkipFrontend",
+    "verify:frontend": "pwsh -File scripts/build-all.ps1 -SkipBackend",
+    "verify:migrate": "pwsh -File scripts/build-all.ps1 -Migrate",
+    "verify:local": "pwsh -File scripts/build-all.ps1 -SkipInstall",
+    "verify:backend:local": "pwsh -File scripts/build-all.ps1 -SkipFrontend -SkipInstall",
+    "verify:backend:locked": "pwsh -File scripts/build-all.ps1 -SkipFrontend -SkipInstall -SkipPrismaGenerate",
+    "verify:frontend:local": "pwsh -File scripts/build-all.ps1 -SkipBackend -SkipInstall",
+    "verify:deploy": "node scripts/validate-deployment.mjs"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0"
+  }
+}

@@ -1,0 +1,30 @@
+# Frontend Docker build context hygiene.
+
+# VCS / IDE
+.git
+.github
+.vscode
+.idea
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and build artifacts
+node_modules
+node_modules.corrupt-*
+.next
+out
+dist
+build
+coverage
+.turbo
+.cache
+*.tsbuildinfo
+
+# Logs / OS noise
+*.log
+logs
+.DS_Store
+Thumbs.db
