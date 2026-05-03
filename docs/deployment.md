@@ -11,23 +11,21 @@ ITEMBA-R is a multi-company enterprise management platform. This guide covers de
 
 ## Environment Variables
 
-### Backend
-Copy `backend/.env.example` to `backend/.env` and configure:
+### Compose deployment
+Copy `.env.production.example` to `.env.production` or `.env.staging.example` to `.env.staging`
+and configure every deployment secret before starting Compose.
 
 | Variable | Required | Description |
 |---|---|---|
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `JWT_ACCESS_SECRET` | Yes | JWT access-token signing secret (min 64 chars) |
+| `POSTGRES_PASSWORD` | Yes | PostgreSQL password used by the app database |
+| `REDIS_PASSWORD` | Yes | Redis password; Redis starts with `--requirepass` |
+| `JWT_ACCESS_SECRET` | Yes | JWT access-token signing secret |
 | `JWT_REFRESH_SECRET` | Yes | Refresh token signing secret |
-| `PORT` | No | Server port (default: 3001) |
-| `NODE_ENV` | No | Environment (development/staging/production/test) |
-| `CORS_ORIGIN` | Yes in staging/prod | Public frontend origin allowed by backend CORS |
-
-### Frontend
-Copy `frontend/.env.example` to `frontend/.env.local` and configure:
-
-| Variable | Required | Description |
-|---|---|---|
+| `TWO_FACTOR_ENCRYPTION_KEY` | Yes | TOTP/2FA encryption key |
+| `REFRESH_TOKEN_PEPPER` | Yes | Refresh-token hash pepper |
+| `APP_ENCRYPTION_KEY` | Yes | Field-level application encryption key |
+| `FRONTEND_URL` | Yes | Public frontend origin |
+| `CORS_ORIGIN` | Yes | Public frontend origin allowed by backend CORS |
 | `BACKEND_INTERNAL_URL` | Yes | Server-side backend URL used by Next.js API routes; must include `/api/v1` |
 | `NEXT_PUBLIC_API_URL` | Yes | Browser-public backend API URL; most browser calls should still use `/api/backend/*` |
 
@@ -56,6 +54,7 @@ Run the full verification pipeline from the repository root:
 
 ```bash
 npm run verify
+npm run verify:deploy
 ```
 
 For local Windows environments where Prisma's query engine DLL is locked by a running process, use:
@@ -66,6 +65,17 @@ npm run verify:frontend:local
 ```
 
 The verification pipeline validates the Prisma schema, typechecks backend and frontend code, and builds both applications.
+`npm run verify:deploy` validates the staging and production env contract, required secret fail-fast
+behavior, Compose shape, migration service dependency, and runtime healthcheck definitions.
+
+To rehearse the production Compose runtime locally, use the guarded smoke script:
+
+```bash
+npm run smoke:deploy -- --allow-local
+```
+
+The smoke script creates disposable Compose volumes, applies migrations through `backend-migrate`,
+waits for backend readiness, verifies the frontend login route, and then removes the stack.
 
 ## Production Deployment
 
@@ -73,29 +83,33 @@ The verification pipeline validates the Prisma schema, typechecks backend and fr
 # 1. Configure production environment values
 # Required at minimum:
 # POSTGRES_PASSWORD, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, REDIS_PASSWORD,
-# CORS_ORIGIN, BACKEND_INTERNAL_URL, NEXT_PUBLIC_API_URL
+# TWO_FACTOR_ENCRYPTION_KEY, REFRESH_TOKEN_PEPPER, APP_ENCRYPTION_KEY,
+# FRONTEND_URL, CORS_ORIGIN, BACKEND_INTERNAL_URL, NEXT_PUBLIC_API_URL
 
-# 2. Deploy with Docker Compose
-docker-compose -f docker-compose.production.yml up -d
+# 2. Validate deployment contract
+npm run verify:deploy
 
-# 3. Run migrations (first deploy only)
-docker exec itemba_r_backend_prod npx prisma migrate deploy --schema=../database/prisma/schema.prisma
+# 3. Deploy with Docker Compose. The backend-migrate service applies migrations
+# before the backend is allowed to start.
+docker compose --env-file .env.production -f docker-compose.production.yml up -d --build
 
-# 4. Run seed (first deploy only)
+# 4. Run seed only when intentionally bootstrapping a fresh environment
 docker exec itemba_r_backend_prod npm run db:seed
 ```
 
 ## Health Checks
-- Backend: `GET /api/v1/health`
+- Backend readiness: `GET /api/v1/health/ready`
+- Frontend: `GET /login`
 - PostgreSQL: `pg_isready` check built into Docker healthcheck
+- Redis: authenticated `redis-cli ping` check built into Docker healthcheck
 
 ## Rollback
 1. In the Deployment → Releases UI, click Rollback on the failed release
 2. Re-deploy the previous release tag:
    ```bash
-   docker-compose -f docker-compose.production.yml down
+   docker compose --env-file .env.production -f docker-compose.production.yml down
    # Update image tags in compose file or .env
-   docker-compose -f docker-compose.production.yml up -d
+   docker compose --env-file .env.production -f docker-compose.production.yml up -d
    ```
 3. If schema rollback needed, restore from backup before migrating
 

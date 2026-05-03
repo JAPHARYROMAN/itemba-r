@@ -10,7 +10,9 @@
     "verify:backend:local": "pwsh -File scripts/build-all.ps1 -SkipFrontend -SkipInstall",
     "verify:backend:locked": "pwsh -File scripts/build-all.ps1 -SkipFrontend -SkipInstall -SkipPrismaGenerate",
     "verify:frontend:local": "pwsh -File scripts/build-all.ps1 -SkipBackend -SkipInstall",
-    "verify:deploy": "node scripts/validate-deployment.mjs"
+    "verify:env": "node scripts/validate-env-contract.mjs",
+    "verify:deploy": "node scripts/validate-env-contract.mjs && node scripts/validate-deployment.mjs",
+    "smoke:deploy": "node scripts/smoke-compose-deployment.mjs"
   },
   "devDependencies": {
     "prisma": "^5.22.0"

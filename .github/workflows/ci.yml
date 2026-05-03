@@ -159,6 +159,50 @@ jobs:
       - name: Run e2e smoke tests
         run: npm run test:e2e:ci
 
+  migration-rehearsal:
+    name: Migration — Rehearsal
+    runs-on: ubuntu-latest
+    needs: prisma-validate
+    defaults:
+      run:
+        working-directory: ./backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: itemba_r_migration_rehearsal
+          POSTGRES_USER: itemba
+          POSTGRES_PASSWORD: '1618'
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U itemba -d itemba_r_migration_rehearsal"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://itemba:1618@localhost:5432/itemba_r_migration_rehearsal?schema=public
+      JWT_ACCESS_SECRET: migration-rehearsal-jwt-access-secret-40
+      JWT_REFRESH_SECRET: migration-rehearsal-jwt-refresh-secret-40
+      TWO_FACTOR_ENCRYPTION_KEY: migration-rehearsal-two-factor-secret-40
+      REFRESH_TOKEN_PEPPER: migration-rehearsal-refresh-pepper-secret-40
+      APP_ENCRYPTION_KEY: migration-rehearsal-app-encryption-secret-40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate --schema=../database/prisma/schema.prisma
+      - name: Apply Prisma migrations
+        run: npx prisma migrate deploy --schema=../database/prisma/schema.prisma
+      - name: Verify migration status
+        run: npx prisma migrate status --schema=../database/prisma/schema.prisma
+
   frontend-test:
     name: Frontend — Test
     runs-on: ubuntu-latest
@@ -244,10 +288,31 @@ jobs:
       - name: Validate production and staging compose gates
         run: npm run verify:deploy
 
+  deployment-runtime-smoke:
+    name: Deployment — Runtime Smoke
+    runs-on: ubuntu-latest
+    needs:
+      - backend-build
+      - backend-test
+      - backend-e2e
+      - frontend-build
+      - frontend-test
+      - unsafe-patterns
+      - deployment-validate
+      - migration-rehearsal
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Boot production compose and smoke health routes
+        run: npm run smoke:deploy
+
   docker-backend:
     name: Docker — Backend Image
     runs-on: ubuntu-latest
-    needs: [backend-build, backend-test, backend-e2e, unsafe-patterns, deployment-validate]
+    needs: [deployment-runtime-smoke]
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
@@ -282,7 +347,7 @@ jobs:
   docker-frontend:
     name: Docker — Frontend Image
     runs-on: ubuntu-latest
-    needs: [frontend-build, frontend-test, unsafe-patterns, deployment-validate]
+    needs: [deployment-runtime-smoke]
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4

@@ -226,6 +226,11 @@ function assertDeploymentShape(target, config) {
   );
   assert(
     target,
+    frontend.build?.args?.BACKEND_INTERNAL_URL,
+    'frontend build receives BACKEND_INTERNAL_URL',
+  );
+  assert(
+    target,
     frontend.environment?.BACKEND_INTERNAL_URL,
     'frontend has internal backend URL',
   );
@@ -238,6 +243,30 @@ function assertDeploymentShape(target, config) {
   for (const serviceName of ['postgres', 'redis', 'backend', 'frontend']) {
     assert(target, services[serviceName].healthcheck?.test, `${serviceName} has a healthcheck`);
   }
+
+  const backendHealthcheck = flatten(backend.healthcheck?.test);
+  assert(
+    target,
+    backendHealthcheck.includes('node -e') && backendHealthcheck.includes('fetch('),
+    'backend healthcheck uses Node fetch',
+  );
+  assert(
+    target,
+    backendHealthcheck.includes('/api/v1/health/ready'),
+    'backend healthcheck probes the readiness endpoint',
+  );
+
+  const frontendHealthcheck = flatten(frontend.healthcheck?.test);
+  assert(
+    target,
+    frontendHealthcheck.includes('node -e') && frontendHealthcheck.includes('fetch('),
+    'frontend healthcheck uses Node fetch',
+  );
+  assert(
+    target,
+    frontendHealthcheck.includes('127.0.0.1:3000/login'),
+    'frontend healthcheck probes the login route',
+  );
 }
 
 function flatten(value) {

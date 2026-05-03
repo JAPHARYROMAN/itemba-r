@@ -11,7 +11,8 @@ Use this checklist before deploying to production.
 
 ### Database
 - [ ] Prisma schema validated: `npx prisma validate --schema=database/prisma/schema.prisma`
-- [ ] Migration tested on staging database
+- [ ] Migration tested on a disposable database with `npx prisma migrate deploy`
+- [ ] `backend-migrate` Compose service completed successfully before backend startup
 - [ ] Migration is backwards-compatible (no data-destroying changes)
 - [ ] Seed data verified on staging
 
@@ -36,7 +37,8 @@ Use this checklist before deploying to production.
 ### Docker
 - [ ] Backend Docker image builds successfully
 - [ ] Frontend Docker image builds successfully
-- [ ] `docker-compose.production.yml` tested on staging
+- [ ] `npm run verify:deploy` passes
+- [ ] Production Compose smoke passes in CI, or locally with `npm run smoke:deploy -- --allow-local`
 
 ## Deployment
 
@@ -44,13 +46,14 @@ Use this checklist before deploying to production.
 1. Create a Deployment Release record in ITEMBA-R (Deployment → Releases → New Release)
 2. Set `environment = STAGING`, run final checks
 3. If staging passes, create a PRODUCTION release record
-4. Run: `docker-compose -f docker-compose.production.yml pull && docker-compose -f docker-compose.production.yml up -d`
-5. Run migrations: `docker exec itemba_r_backend_prod npx prisma migrate deploy --schema=../database/prisma/schema.prisma`
-6. Mark release as Deployed in ITEMBA-R UI
-7. Monitor error logs for 15 minutes post-deployment
+4. Run: `npm run verify:deploy`
+5. Run: `docker compose --env-file .env.production -f docker-compose.production.yml pull && docker compose --env-file .env.production -f docker-compose.production.yml up -d`
+6. Confirm `backend-migrate` exited successfully and backend/frontend are healthy
+7. Mark release as Deployed in ITEMBA-R UI
+8. Monitor error logs for 15 minutes post-deployment
 
 ### Health Verification
-- [ ] Backend health check responds: `GET /api/v1/health`
+- [ ] Backend readiness check responds: `GET /api/v1/health/ready`
 - [ ] Frontend loads correctly
 - [ ] Login works
 - [ ] Key dashboard loads (Executive, Finance, Petroleum)
@@ -72,9 +75,9 @@ Use this checklist before deploying to production.
 
 ### Rollback Steps
 1. Mark release as ROLLED_BACK in ITEMBA-R UI
-2. `docker-compose -f docker-compose.production.yml down`
+2. `docker compose --env-file .env.production -f docker-compose.production.yml down`
 3. Restore previous image tags
-4. `docker-compose -f docker-compose.production.yml up -d`
+4. `docker compose --env-file .env.production -f docker-compose.production.yml up -d`
 5. If schema changes were made, restore from latest backup
 6. Verify health check passes
 
@@ -82,6 +85,7 @@ Use this checklist before deploying to production.
 
 | Service | Production Port | Health Check |
 |---|---|---|
-| Backend API | 3001 | `GET /api/v1/health` |
-| Frontend | 3000 | HTTP 200 on `/` |
+| Backend API | 3001 | `GET /api/v1/health/ready` |
+| Frontend | 3000 | HTTP 200 on `/login` |
 | PostgreSQL | 5432 | `pg_isready` |
+| Redis | 6379 | authenticated `redis-cli ping` |
