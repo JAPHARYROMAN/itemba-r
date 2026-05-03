@@ -1,13 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Body,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { UnitsService } from './units.service';
 import { CreateUnitDto } from './dto/create-unit.dto';
 import { UpdateUnitDto } from './dto/update-unit.dto';
@@ -31,30 +22,26 @@ export class UnitsController {
 
   @Get('units/:id')
   @RequirePermissions('units.view')
-  findOneUnit(@Param('id') id: string) {
-    return this.service.findOneUnit(id);
+  findOneUnit(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOneUnit(id, user);
   }
 
   @Post('units')
   @RequirePermissions('units.manage')
   createUnit(@Body() dto: CreateUnitDto, @CurrentUser() user: AuthUser) {
-    return this.service.createUnit(dto, user.id);
+    return this.service.createUnit(dto, user);
   }
 
   @Patch('units/:id')
   @RequirePermissions('units.manage')
-  updateUnit(
-    @Param('id') id: string,
-    @Body() dto: UpdateUnitDto,
-    @CurrentUser() user: AuthUser,
-  ) {
-    return this.service.updateUnit(id, dto, user.id);
+  updateUnit(@Param('id') id: string, @Body() dto: UpdateUnitDto, @CurrentUser() user: AuthUser) {
+    return this.service.updateUnit(id, dto, user);
   }
 
   @Delete('units/:id')
   @RequirePermissions('units.manage')
   removeUnit(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.removeUnit(id, user.id);
+    return this.service.removeUnit(id, user);
   }
 
   // ─── Unit Conversions ────────────────────────────────────────────────────
@@ -67,11 +54,8 @@ export class UnitsController {
 
   @Post('unit-conversions')
   @RequirePermissions('units.manage')
-  createConversion(
-    @Body() dto: CreateUnitConversionDto,
-    @CurrentUser() user: AuthUser,
-  ) {
-    return this.service.createConversion(dto, user.id);
+  createConversion(@Body() dto: CreateUnitConversionDto, @CurrentUser() user: AuthUser) {
+    return this.service.createConversion(dto, user);
   }
 
   @Patch('unit-conversions/:id')
@@ -81,12 +65,12 @@ export class UnitsController {
     @Body() dto: UpdateUnitConversionDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.updateConversion(id, dto, user.id);
+    return this.service.updateConversion(id, dto, user);
   }
 
   @Delete('unit-conversions/:id')
   @RequirePermissions('units.manage')
   removeConversion(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.removeConversion(id, user.id);
+    return this.service.removeConversion(id, user);
   }
 }

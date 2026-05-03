@@ -1,23 +1,21 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateUnitDto } from './dto/create-unit.dto';
 import { UpdateUnitDto } from './dto/update-unit.dto';
 import { QueryUnitDto } from './dto/query-unit.dto';
 import { CreateUnitConversionDto } from './dto/create-unit-conversion.dto';
 import { UpdateUnitConversionDto } from './dto/update-unit-conversion.dto';
-import { AuditSeverity } from '@prisma/client';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { AccessLevel, AuditSeverity } from '@prisma/client';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
 
 @Injectable()
 export class UnitsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   // ─── Units ───────────────────────────────────────────────────────────────
@@ -50,31 +48,31 @@ export class UnitsService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findOneUnit(id: string) {
+  async findOneUnit(id: string, user: AuthUser, minimumAccess: AccessLevel = AccessLevel.READ) {
     const record = await this.prisma.unitOfMeasure.findFirst({
       where: { id, deletedAt: null },
     });
     if (!record) throw new NotFoundException('Unit of measure not found');
+    await this.companyScope.assertCanAccessCompany(user, record.companyId, minimumAccess);
     return record;
   }
 
-  async createUnit(dto: CreateUnitDto, userId: string) {
+  async createUnit(dto: CreateUnitDto, user: AuthUser) {
+    const companyId = await this.resolveWriteCompanyId(user, dto.companyId);
     const where: any = { deletedAt: null };
-    if (dto.companyId) where.companyId = dto.companyId;
+    if (companyId) where.companyId = companyId;
     else where.companyId = null;
 
     const existing = await this.prisma.unitOfMeasure.findFirst({
       where: { ...where, OR: [{ name: dto.name }, { symbol: dto.symbol }] },
     });
     if (existing) {
-      throw new BadRequestException(
-        'A unit with this name or symbol already exists',
-      );
+      throw new BadRequestException('A unit with this name or symbol already exists');
     }
 
     const record = await this.prisma.unitOfMeasure.create({
       data: {
-        companyId: dto.companyId ?? null,
+        companyId,
         name: dto.name,
         symbol: dto.symbol,
         unitType: dto.unitType,
@@ -88,7 +86,7 @@ export class UnitsService {
       action: 'UNIT_CREATE',
       entityType: 'UnitOfMeasure',
       entityId: record.id,
-      userId,
+      userId: user.id,
       companyId: record.companyId ?? undefined,
       newValue: record as any,
     });
@@ -96,8 +94,8 @@ export class UnitsService {
     return record;
   }
 
-  async updateUnit(id: string, dto: UpdateUnitDto, userId: string) {
-    const existing = await this.findOneUnit(id);
+  async updateUnit(id: string, dto: UpdateUnitDto, user: AuthUser) {
+    const existing = await this.findOneUnit(id, user, AccessLevel.WRITE);
     if (existing.isSystemUnit) {
       throw new BadRequestException('System units cannot be modified');
     }
@@ -117,7 +115,7 @@ export class UnitsService {
       action: 'UNIT_UPDATE',
       entityType: 'UnitOfMeasure',
       entityId: id,
-      userId,
+      userId: user.id,
       companyId: record.companyId ?? undefined,
       oldValue: existing as any,
       newValue: record as any,
@@ -126,8 +124,8 @@ export class UnitsService {
     return record;
   }
 
-  async removeUnit(id: string, userId: string) {
-    const existing = await this.findOneUnit(id);
+  async removeUnit(id: string, user: AuthUser) {
+    const existing = await this.findOneUnit(id, user, AccessLevel.WRITE);
     if (existing.isSystemUnit) {
       throw new BadRequestException('System units cannot be deleted');
     }
@@ -141,7 +139,7 @@ export class UnitsService {
       action: 'UNIT_DELETE',
       entityType: 'UnitOfMeasure',
       entityId: id,
-      userId,
+      userId: user.id,
       companyId: existing.companyId ?? undefined,
       oldValue: existing as any,
       severity: AuditSeverity.HIGH,
@@ -176,7 +174,11 @@ export class UnitsService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findOneConversion(id: string) {
+  async findOneConversion(
+    id: string,
+    user: AuthUser,
+    minimumAccess: AccessLevel = AccessLevel.READ,
+  ) {
     const record = await this.prisma.unitConversion.findFirst({
       where: { id, deletedAt: null },
       include: {
@@ -185,33 +187,32 @@ export class UnitsService {
       },
     });
     if (!record) throw new NotFoundException('Unit conversion not found');
+    await this.companyScope.assertCanAccessCompany(user, record.companyId, minimumAccess);
     return record;
   }
 
-  async createConversion(dto: CreateUnitConversionDto, userId: string) {
+  async createConversion(dto: CreateUnitConversionDto, user: AuthUser) {
     if (dto.fromUnitId === dto.toUnitId) {
-      throw new BadRequestException(
-        'fromUnitId and toUnitId must be different',
-      );
+      throw new BadRequestException('fromUnitId and toUnitId must be different');
     }
+    const companyId = await this.resolveWriteCompanyId(user, dto.companyId);
+    await this.assertUnitsUsableByCompany([dto.fromUnitId, dto.toUnitId], companyId);
 
     const existing = await this.prisma.unitConversion.findFirst({
       where: {
         deletedAt: null,
         fromUnitId: dto.fromUnitId,
         toUnitId: dto.toUnitId,
-        companyId: dto.companyId ?? null,
+        companyId,
       },
     });
     if (existing) {
-      throw new BadRequestException(
-        'A conversion between these units already exists',
-      );
+      throw new BadRequestException('A conversion between these units already exists');
     }
 
     const record = await this.prisma.unitConversion.create({
       data: {
-        companyId: dto.companyId ?? null,
+        companyId,
         fromUnitId: dto.fromUnitId,
         toUnitId: dto.toUnitId,
         conversionFactor: dto.conversionFactor,
@@ -224,7 +225,7 @@ export class UnitsService {
       action: 'UNIT_CONVERSION_CREATE',
       entityType: 'UnitConversion',
       entityId: record.id,
-      userId,
+      userId: user.id,
       companyId: record.companyId ?? undefined,
       newValue: record as any,
     });
@@ -232,12 +233,8 @@ export class UnitsService {
     return record;
   }
 
-  async updateConversion(
-    id: string,
-    dto: UpdateUnitConversionDto,
-    userId: string,
-  ) {
-    const existing = await this.findOneConversion(id);
+  async updateConversion(id: string, dto: UpdateUnitConversionDto, user: AuthUser) {
+    const existing = await this.findOneConversion(id, user, AccessLevel.WRITE);
 
     const record = await this.prisma.unitConversion.update({
       where: { id },
@@ -254,7 +251,7 @@ export class UnitsService {
       action: 'UNIT_CONVERSION_UPDATE',
       entityType: 'UnitConversion',
       entityId: id,
-      userId,
+      userId: user.id,
       companyId: record.companyId ?? undefined,
       oldValue: existing as any,
       newValue: record as any,
@@ -263,8 +260,8 @@ export class UnitsService {
     return record;
   }
 
-  async removeConversion(id: string, userId: string) {
-    const existing = await this.findOneConversion(id);
+  async removeConversion(id: string, user: AuthUser) {
+    const existing = await this.findOneConversion(id, user, AccessLevel.WRITE);
 
     await this.prisma.unitConversion.update({
       where: { id },
@@ -275,12 +272,53 @@ export class UnitsService {
       action: 'UNIT_CONVERSION_DELETE',
       entityType: 'UnitConversion',
       entityId: id,
-      userId,
+      userId: user.id,
       companyId: existing.companyId ?? undefined,
       oldValue: existing as any,
       severity: AuditSeverity.HIGH,
     });
 
     return { success: true };
+  }
+
+  private async resolveWriteCompanyId(
+    user: AuthUser,
+    requestedCompanyId?: string,
+  ): Promise<string | null> {
+    if (requestedCompanyId) {
+      await this.companyScope.assertCanAccessCompany(user, requestedCompanyId, AccessLevel.WRITE);
+      return requestedCompanyId;
+    }
+
+    if (this.companyScope.isGroupScoped(user)) return null;
+
+    const companyIds = await this.companyScope.accessibleCompanyIds(user);
+    if (companyIds?.length === 1) return companyIds[0];
+
+    throw new BadRequestException(
+      'companyId is required when the user does not have exactly one accessible company',
+    );
+  }
+
+  private async assertUnitsUsableByCompany(unitIds: string[], companyId: string | null) {
+    const uniqueIds = Array.from(new Set(unitIds));
+    const units = await this.prisma.unitOfMeasure.findMany({
+      where: { id: { in: uniqueIds }, deletedAt: null, status: 'ACTIVE' },
+      select: { id: true, companyId: true },
+    });
+
+    const validIds = new Set(
+      units
+        .filter((unit) =>
+          companyId
+            ? unit.companyId === null || unit.companyId === companyId
+            : unit.companyId === null,
+        )
+        .map((unit) => unit.id),
+    );
+
+    if (validIds.size !== uniqueIds.length) {
+      throw new BadRequestException('Unit conversion units must belong to the target company');
+    }
   }
 }

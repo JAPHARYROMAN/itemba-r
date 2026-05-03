@@ -1,11 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueryInventoryBalanceDto } from './dto/query-inventory-balance.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
 
 @Injectable()
 export class InventoryBalancesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly companyScope: CompanyScopeService,
+  ) {}
 
   async findAll(query: QueryInventoryBalanceDto, user?: any) {
     const { page = 1, limit = 20, companyId, productId, locationId, lowStock } = query;
@@ -35,7 +39,7 @@ export class InventoryBalancesService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser) {
     const record = await this.prisma.inventoryBalance.findUnique({
       where: { id },
       include: {
@@ -45,6 +49,7 @@ export class InventoryBalancesService {
       },
     });
     if (!record) throw new NotFoundException('Inventory balance not found');
+    await this.companyScope.assertCanAccessCompany(user, record.companyId);
     return record;
   }
 
@@ -57,9 +62,13 @@ export class InventoryBalancesService {
    * single configurable knob; future work can replace it with a `Product.reorderPoint`
    * field without breaking the response shape.
    */
-  async liveStock(query: { companyId: string; branchId?: string; lowThreshold?: number; search?: string }) {
+  async liveStock(
+    query: { companyId?: string; branchId?: string; lowThreshold?: number; search?: string },
+    user: AuthUser,
+  ) {
     const lowThreshold = Number(query.lowThreshold ?? 10);
-    const where: any = { companyId: query.companyId };
+    const where: any = {};
+    Object.assign(where, await this.companyScope.companyWhereFor(user, query.companyId));
     if (query.branchId) {
       where.inventoryLocation = { branchId: query.branchId };
     }
@@ -105,18 +114,21 @@ export class InventoryBalancesService {
     });
 
     // Per-location grouping for the heatmap UI.
-    const locationMap = new Map<string, {
-      locationId: string;
-      locationName: string;
-      locationCode: string;
-      branchId: string | null;
-      itemCount: number;
-      out: number;
-      low: number;
-      ok: number;
-      totalValue: number;
-      items: typeof annotated;
-    }>();
+    const locationMap = new Map<
+      string,
+      {
+        locationId: string;
+        locationName: string;
+        locationCode: string;
+        branchId: string | null;
+        itemCount: number;
+        out: number;
+        low: number;
+        ok: number;
+        totalValue: number;
+        items: typeof annotated;
+      }
+    >();
     for (const item of annotated) {
       const lid = item.location.id;
       const entry = locationMap.get(lid) ?? {
@@ -155,8 +167,8 @@ export class InventoryBalancesService {
     return {
       lowThreshold,
       totals,
-      locations: Array.from(locationMap.values()).sort((a, b) =>
-        b.out + b.low - (a.out + a.low) || a.locationName.localeCompare(b.locationName),
+      locations: Array.from(locationMap.values()).sort(
+        (a, b) => b.out + b.low - (a.out + a.low) || a.locationName.localeCompare(b.locationName),
       ),
     };
   }

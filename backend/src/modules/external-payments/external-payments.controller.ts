@@ -22,26 +22,26 @@ export class ExternalPaymentsController {
 
   @Get(':id')
   @RequirePermissions('external_payments.view')
-  findOne(@Param('id') id: string, @Request() req: any) {
+  findOne(@Param('id') id: string, @Request() req: any, @CurrentUser() user: AuthUser) {
     const hasSensitive = (req.user?.permissions ?? []).includes('external_payments.sensitive.view');
-    return this.service.findOne(id, hasSensitive);
+    return this.service.findOne(id, hasSensitive, user);
   }
 
   @Post()
   @RequirePermissions('external_payments.create')
   create(@Body() dto: CreateExternalPaymentDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Post(':id/confirm')
   @RequirePermissions('external_payments.confirm')
   confirm(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.confirm(id, user.id);
+    return this.service.confirm(id, user);
   }
 
   @Post(':id/reverse')
   @RequirePermissions('external_payments.reverse')
   reverse(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.reverse(id, user.id);
+    return this.service.reverse(id, user);
   }
 }

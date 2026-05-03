@@ -1,16 +1,18 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { AuditSeverity, ExternalPaymentStatus } from '@prisma/client';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { AccessLevel, AuditSeverity, ExternalPaymentStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateExternalPaymentDto } from './dto/create-external-payment.dto';
 import { QueryExternalPaymentDto } from './dto/query-external-payment.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
 
 @Injectable()
 export class ExternalPaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   private buildSelect(includeSensitive: boolean) {
@@ -71,16 +73,35 @@ export class ExternalPaymentsService {
     };
   }
 
-  async findOne(id: string, includeSensitive: boolean, companyId?: string) {
+  async findOne(id: string, includeSensitive: boolean, user: AuthUser) {
     const record = await this.prisma.externalPayment.findFirst({
-      where: { id, deletedAt: null, ...(companyId ? { companyId } : {}) },
+      where: { id, deletedAt: null },
+      select: this.buildSelect(includeSensitive),
+    });
+    if (!record) throw new NotFoundException('External payment not found');
+    await this.companyScope.assertCanAccessCompany(user, record.companyId);
+    return record;
+  }
+
+  async findOneForCompany(id: string, includeSensitive: boolean, companyId: string) {
+    const record = await this.prisma.externalPayment.findFirst({
+      where: { id, deletedAt: null, companyId },
       select: this.buildSelect(includeSensitive),
     });
     if (!record) throw new NotFoundException('External payment not found');
     return record;
   }
 
-  async create(dto: CreateExternalPaymentDto, userId: string) {
+  async create(dto: CreateExternalPaymentDto, user: AuthUser) {
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    return this.createTrusted(dto, user.id);
+  }
+
+  async createForCompany(dto: CreateExternalPaymentDto, userId: string, companyId: string) {
+    return this.createTrusted({ ...dto, companyId }, userId);
+  }
+
+  private async createTrusted(dto: CreateExternalPaymentDto, userId: string) {
     if (dto.idempotencyKey) {
       const replay = await this.prisma.externalPayment.findFirst({
         where: {
@@ -129,17 +150,37 @@ export class ExternalPaymentsService {
     return record;
   }
 
-  async confirm(id: string, userId: string, companyId?: string) {
+  async confirm(id: string, user: AuthUser) {
     const record = await this.prisma.externalPayment.findFirst({
-      where: { id, deletedAt: null, ...(companyId ? { companyId } : {}) },
+      where: { id, deletedAt: null },
     });
     if (!record) throw new NotFoundException('External payment not found');
-    if (record.status !== ExternalPaymentStatus.INITIATED && record.status !== ExternalPaymentStatus.PENDING) {
+    await this.companyScope.assertCanAccessCompany(user, record.companyId, AccessLevel.WRITE);
+    return this.confirmTrusted(record, user.id);
+  }
+
+  async confirmForCompany(id: string, userId: string, companyId: string) {
+    const record = await this.prisma.externalPayment.findFirst({
+      where: { id, deletedAt: null, companyId },
+    });
+    if (!record) throw new NotFoundException('External payment not found');
+    return this.confirmTrusted(record, userId);
+  }
+
+  private async confirmTrusted(
+    record: Awaited<ReturnType<PrismaService['externalPayment']['findFirst']>>,
+    userId: string,
+  ) {
+    if (!record) throw new NotFoundException('External payment not found');
+    if (
+      record.status !== ExternalPaymentStatus.INITIATED &&
+      record.status !== ExternalPaymentStatus.PENDING
+    ) {
       throw new BadRequestException('Payment cannot be confirmed in its current status');
     }
 
     const updated = await this.prisma.externalPayment.update({
-      where: { id },
+      where: { id: record.id },
       data: {
         status: ExternalPaymentStatus.SUCCESS,
         confirmedById: userId,
@@ -151,7 +192,7 @@ export class ExternalPaymentsService {
     await this.auditLogs.log({
       action: 'EXTERNAL_PAYMENT_CONFIRMED',
       entityType: 'ExternalPayment',
-      entityId: id,
+      entityId: record.id,
       userId,
       companyId: record.companyId,
       severity: AuditSeverity.MEDIUM,
@@ -160,17 +201,34 @@ export class ExternalPaymentsService {
     return updated;
   }
 
-  async reverse(id: string, userId: string, companyId?: string) {
+  async reverse(id: string, user: AuthUser) {
     const record = await this.prisma.externalPayment.findFirst({
-      where: { id, deletedAt: null, ...(companyId ? { companyId } : {}) },
+      where: { id, deletedAt: null },
     });
+    if (!record) throw new NotFoundException('External payment not found');
+    await this.companyScope.assertCanAccessCompany(user, record.companyId, AccessLevel.WRITE);
+    return this.reverseTrusted(record, user.id);
+  }
+
+  async reverseForCompany(id: string, userId: string, companyId: string) {
+    const record = await this.prisma.externalPayment.findFirst({
+      where: { id, deletedAt: null, companyId },
+    });
+    if (!record) throw new NotFoundException('External payment not found');
+    return this.reverseTrusted(record, userId);
+  }
+
+  private async reverseTrusted(
+    record: Awaited<ReturnType<PrismaService['externalPayment']['findFirst']>>,
+    userId: string,
+  ) {
     if (!record) throw new NotFoundException('External payment not found');
     if (record.status !== ExternalPaymentStatus.SUCCESS) {
       throw new BadRequestException('Only successful payments can be reversed');
     }
 
     const updated = await this.prisma.externalPayment.update({
-      where: { id },
+      where: { id: record.id },
       data: { status: ExternalPaymentStatus.REVERSED },
       select: this.buildSelect(false),
     });
@@ -178,7 +236,7 @@ export class ExternalPaymentsService {
     await this.auditLogs.log({
       action: 'EXTERNAL_PAYMENT_REVERSED',
       entityType: 'ExternalPayment',
-      entityId: id,
+      entityId: record.id,
       userId,
       companyId: record.companyId,
       severity: AuditSeverity.HIGH,

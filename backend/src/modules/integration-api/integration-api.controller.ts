@@ -74,22 +74,21 @@ export class IntegrationApiController {
     const { apiKey, companyId } = this.requireBoundCompany(req);
     // Force the payment's company to match the key's company — never trust
     // the body to assert which tenant the payment belongs to.
-    const safeDto = { ...dto, companyId };
-    return this.externalPayments.create(safeDto, apiKey.apiClientId ?? apiKey.id);
+    return this.externalPayments.createForCompany(dto, apiKey.apiClientId ?? apiKey.id, companyId);
   }
 
   @Post('payments/:id/confirm')
   @RequireApiScope('payments.write')
   async confirmPayment(@Param('id') id: string, @Req() req: Request) {
     const { apiKey, companyId } = this.requireBoundCompany(req);
-    return this.externalPayments.confirm(id, apiKey.apiClientId ?? apiKey.id, companyId);
+    return this.externalPayments.confirmForCompany(id, apiKey.apiClientId ?? apiKey.id, companyId);
   }
 
   @Get('payments/:id')
   @RequireApiScope('payments.read')
   async getPayment(@Param('id') id: string, @Req() req: Request) {
     const { companyId } = this.requireBoundCompany(req);
-    return this.externalPayments.findOne(id, false, companyId);
+    return this.externalPayments.findOneForCompany(id, false, companyId);
   }
 
   @Get('payments')

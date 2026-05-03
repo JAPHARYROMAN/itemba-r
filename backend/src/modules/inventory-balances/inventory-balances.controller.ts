@@ -19,21 +19,25 @@ export class InventoryBalancesController {
   @RequirePermissions('inventory.view')
   live(
     @Query('companyId') companyId: string,
+    @CurrentUser() user: AuthUser,
     @Query('branchId') branchId?: string,
     @Query('lowThreshold') lowThreshold?: string,
     @Query('search') search?: string,
   ) {
-    return this.service.liveStock({
-      companyId,
-      branchId,
-      lowThreshold: lowThreshold ? Number(lowThreshold) : undefined,
-      search,
-    });
+    return this.service.liveStock(
+      {
+        companyId,
+        branchId,
+        lowThreshold: lowThreshold ? Number(lowThreshold) : undefined,
+        search,
+      },
+      user,
+    );
   }
 
   @Get(':id')
   @RequirePermissions('inventory.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 }
