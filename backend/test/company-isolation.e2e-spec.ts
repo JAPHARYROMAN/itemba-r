@@ -658,8 +658,8 @@ describe('Company Isolation (e2e)', () => {
   }, 120000);
 
   afterAll(async () => {
-    await cleanupTestData();
-    await app.close();
+    if (prisma) await cleanupTestData();
+    if (app) await app.close();
   });
 
   async function ensurePermissions(codes: string[]): Promise<Permission[]> {

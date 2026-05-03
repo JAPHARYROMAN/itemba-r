@@ -12,14 +12,12 @@ describe('Finance Module (e2e)', () => {
   }, 60000);
 
   afterAll(async () => {
-    await app.close();
+    if (app) await app.close();
   });
 
   describe('Accounts (unauthenticated)', () => {
     it('should deny GET /api/v1/chart-of-accounts without token', async () => {
-      await request(app.getHttpServer())
-        .get('/api/v1/chart-of-accounts')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/v1/chart-of-accounts').expect(401);
     });
 
     it('should deny POST /api/v1/chart-of-accounts without token', async () => {
@@ -32,18 +30,13 @@ describe('Finance Module (e2e)', () => {
 
   describe('Journal Entries (unauthenticated)', () => {
     it('should deny GET /api/v1/journal-entries without token', async () => {
-      await request(app.getHttpServer())
-        .get('/api/v1/journal-entries')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/v1/journal-entries').expect(401);
     });
   });
 
   describe('Financial Reports (unauthenticated)', () => {
     it('should deny accounting-engine summary without token', async () => {
-      await request(app.getHttpServer())
-        .get('/api/v1/accounting-engine/summary')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/v1/accounting-engine/summary').expect(401);
     });
   });
 });
-

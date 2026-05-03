@@ -12,38 +12,28 @@ describe('Payroll Module (e2e)', () => {
   }, 60000);
 
   afterAll(async () => {
-    await app.close();
+    if (app) await app.close();
   });
 
   describe('Payroll Runs (unauthenticated)', () => {
     it('should deny GET /api/v1/hr/payroll-runs without token', async () => {
-      await request(app.getHttpServer())
-        .get('/api/v1/hr/payroll-runs')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/v1/hr/payroll-runs').expect(401);
     });
 
     it('should deny POST /api/v1/hr/payroll-runs without token', async () => {
-      await request(app.getHttpServer())
-        .post('/api/v1/hr/payroll-runs')
-        .send({})
-        .expect(401);
+      await request(app.getHttpServer()).post('/api/v1/hr/payroll-runs').send({}).expect(401);
     });
   });
 
   describe('Employees (unauthenticated)', () => {
     it('should deny GET /api/v1/hr/employees without token', async () => {
-      await request(app.getHttpServer())
-        .get('/api/v1/hr/employees')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/v1/hr/employees').expect(401);
     });
   });
 
   describe('Payroll Entries (unauthenticated)', () => {
     it('should deny GET /api/v1/hr/payroll-entries without token', async () => {
-      await request(app.getHttpServer())
-        .get('/api/v1/hr/payroll-entries')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/v1/hr/payroll-entries').expect(401);
     });
   });
 });
-

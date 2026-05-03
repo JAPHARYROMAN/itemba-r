@@ -60,7 +60,7 @@ describe('Authentication (e2e)', () => {
   }, 120000);
 
   afterAll(async () => {
-    if (testUserId) {
+    if (prisma && testUserId) {
       await prisma.refreshToken.deleteMany({ where: { userId: testUserId } });
       await prisma.passwordResetToken.deleteMany({ where: { userId: testUserId } });
       await prisma.twoFactorBackupCode.deleteMany({ where: { userId: testUserId } });
@@ -71,7 +71,7 @@ describe('Authentication (e2e)', () => {
       await prisma.securityEvent.deleteMany({ where: { userId: testUserId } });
       await prisma.user.delete({ where: { id: testUserId } });
     }
-    await app.close();
+    if (app) await app.close();
   });
 
   // ─── A. Login ─────────────────────────────────────────────────────────────
@@ -108,10 +108,7 @@ describe('Authentication (e2e)', () => {
     });
 
     it('missing fields returns 400', async () => {
-      await request(app.getHttpServer())
-        .post('/api/v1/auth/login')
-        .send({})
-        .expect(400);
+      await request(app.getHttpServer()).post('/api/v1/auth/login').send({}).expect(400);
     });
 
     it('invalid email format returns 400', async () => {
@@ -174,6 +171,7 @@ describe('Authentication (e2e)', () => {
     });
 
     afterAll(async () => {
+      if (!prisma || !testUserId) return;
       // Ensure account is unlocked for subsequent tests
       await prisma.user.update({
         where: { id: testUserId },
