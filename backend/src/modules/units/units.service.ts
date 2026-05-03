@@ -59,9 +59,7 @@ export class UnitsService {
 
   async createUnit(dto: CreateUnitDto, user: AuthUser) {
     const companyId = await this.resolveWriteCompanyId(user, dto.companyId);
-    const where: any = { deletedAt: null };
-    if (companyId) where.companyId = companyId;
-    else where.companyId = null;
+    const where: any = { deletedAt: null, companyId: companyId ?? null };
 
     const existing = await this.prisma.unitOfMeasure.findFirst({
       where: { ...where, OR: [{ name: dto.name }, { symbol: dto.symbol }] },
