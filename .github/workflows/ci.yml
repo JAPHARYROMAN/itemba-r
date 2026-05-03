@@ -8,6 +8,7 @@ on:
 
 env:
   NODE_VERSION: '20'
+  DATABASE_URL: postgresql://itemba:1618@localhost:5432/itemba_r_ci_placeholder?schema=public
 
 jobs:
   prisma-validate:
