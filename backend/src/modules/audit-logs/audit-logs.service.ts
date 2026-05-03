@@ -133,6 +133,14 @@ function redactValue(value: unknown, depth = 0): unknown {
   if (value === null || value === undefined) return value;
   if (Array.isArray(value)) return value.map((v) => redactValue(v, depth + 1));
   if (typeof value === 'object') {
+    if (value instanceof Date) return value.toISOString();
+
+    const toJSON = (value as { toJSON?: () => unknown }).toJSON;
+    if (typeof toJSON === 'function') {
+      const jsonValue = toJSON.call(value);
+      if (jsonValue !== value) return redactValue(jsonValue, depth + 1);
+    }
+
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       out[k] = shouldRedactKey(k) ? REDACTED_PLACEHOLDER : redactValue(v, depth + 1);

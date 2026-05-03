@@ -116,13 +116,18 @@ async function assertTcpReachable(host, port) {
 }
 
 function run(command, commandArgs, env = {}) {
-  const executable = process.platform === 'win32' ? `${command}.cmd` : command;
-  const result = spawnSync(executable, commandArgs, {
+  const useShell = process.platform === 'win32';
+  const result = spawnSync(command, commandArgs, {
     cwd: backendDir,
     env: { ...process.env, ...env },
     stdio: 'inherit',
+    shell: useShell,
     windowsHide: true,
   });
+
+  if (result.error) {
+    fail(`Failed to run ${command} ${commandArgs.join(' ')}: ${result.error.message}`);
+  }
 
   if (result.status !== 0) {
     process.exit(result.status ?? 1);

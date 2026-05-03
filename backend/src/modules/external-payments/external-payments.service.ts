@@ -97,11 +97,15 @@ export class ExternalPaymentsService {
     return this.createTrusted(dto, user.id);
   }
 
-  async createForCompany(dto: CreateExternalPaymentDto, userId: string, companyId: string) {
-    return this.createTrusted({ ...dto, companyId }, userId);
+  async createForCompany(dto: CreateExternalPaymentDto, actorId: string, companyId: string) {
+    return this.createTrusted({ ...dto, companyId }, null, { integrationActorId: actorId });
   }
 
-  private async createTrusted(dto: CreateExternalPaymentDto, userId: string) {
+  private async createTrusted(
+    dto: CreateExternalPaymentDto,
+    userId: string | null,
+    metadata?: Record<string, unknown>,
+  ) {
     if (dto.idempotencyKey) {
       const replay = await this.prisma.externalPayment.findFirst({
         where: {
@@ -131,7 +135,7 @@ export class ExternalPaymentsService {
         currency: dto.currency ?? 'TZS',
         paymentMethod: dto.paymentMethod,
         status: ExternalPaymentStatus.INITIATED,
-        initiatedById: userId,
+        initiatedById: userId ?? null,
         idempotencyKey: dto.idempotencyKey,
       },
       select: this.buildSelect(false),
@@ -141,9 +145,10 @@ export class ExternalPaymentsService {
       action: 'EXTERNAL_PAYMENT_CREATED',
       entityType: 'ExternalPayment',
       entityId: record.id,
-      userId,
+      userId: userId ?? undefined,
       companyId: record.companyId,
       newValue: record as any,
+      metadata,
       severity: AuditSeverity.MEDIUM,
     });
 
@@ -159,17 +164,18 @@ export class ExternalPaymentsService {
     return this.confirmTrusted(record, user.id);
   }
 
-  async confirmForCompany(id: string, userId: string, companyId: string) {
+  async confirmForCompany(id: string, actorId: string, companyId: string) {
     const record = await this.prisma.externalPayment.findFirst({
       where: { id, deletedAt: null, companyId },
     });
     if (!record) throw new NotFoundException('External payment not found');
-    return this.confirmTrusted(record, userId);
+    return this.confirmTrusted(record, null, { integrationActorId: actorId });
   }
 
   private async confirmTrusted(
     record: Awaited<ReturnType<PrismaService['externalPayment']['findFirst']>>,
-    userId: string,
+    userId: string | null,
+    metadata?: Record<string, unknown>,
   ) {
     if (!record) throw new NotFoundException('External payment not found');
     if (
@@ -183,7 +189,7 @@ export class ExternalPaymentsService {
       where: { id: record.id },
       data: {
         status: ExternalPaymentStatus.SUCCESS,
-        confirmedById: userId,
+        confirmedById: userId ?? null,
         confirmedAt: new Date(),
       },
       select: this.buildSelect(false),
@@ -193,8 +199,9 @@ export class ExternalPaymentsService {
       action: 'EXTERNAL_PAYMENT_CONFIRMED',
       entityType: 'ExternalPayment',
       entityId: record.id,
-      userId,
+      userId: userId ?? undefined,
       companyId: record.companyId,
+      metadata,
       severity: AuditSeverity.MEDIUM,
     });
 
@@ -210,17 +217,18 @@ export class ExternalPaymentsService {
     return this.reverseTrusted(record, user.id);
   }
 
-  async reverseForCompany(id: string, userId: string, companyId: string) {
+  async reverseForCompany(id: string, actorId: string, companyId: string) {
     const record = await this.prisma.externalPayment.findFirst({
       where: { id, deletedAt: null, companyId },
     });
     if (!record) throw new NotFoundException('External payment not found');
-    return this.reverseTrusted(record, userId);
+    return this.reverseTrusted(record, null, { integrationActorId: actorId });
   }
 
   private async reverseTrusted(
     record: Awaited<ReturnType<PrismaService['externalPayment']['findFirst']>>,
-    userId: string,
+    userId: string | null,
+    metadata?: Record<string, unknown>,
   ) {
     if (!record) throw new NotFoundException('External payment not found');
     if (record.status !== ExternalPaymentStatus.SUCCESS) {
@@ -237,8 +245,9 @@ export class ExternalPaymentsService {
       action: 'EXTERNAL_PAYMENT_REVERSED',
       entityType: 'ExternalPayment',
       entityId: record.id,
-      userId,
+      userId: userId ?? undefined,
       companyId: record.companyId,
+      metadata,
       severity: AuditSeverity.HIGH,
     });
 
