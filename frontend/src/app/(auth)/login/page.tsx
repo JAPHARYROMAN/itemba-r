@@ -33,7 +33,17 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+    <main className="min-h-screen flex items-center justify-center bg-slate-50 p-6 relative">
+      {/* Permanent address — links to the public group website */}
+      <a
+        href="https://itembagrouptz.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="absolute bottom-4 left-6 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+      >
+        Permanent address: itembagrouptz.com
+      </a>
+
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="flex items-center gap-3 mb-8 justify-center">
