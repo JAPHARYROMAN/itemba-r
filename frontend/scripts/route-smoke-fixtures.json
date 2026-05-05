@@ -12,8 +12,13 @@
   "/hr/payroll-runs/[id]/payslips": "/hr/payroll-runs/e2e-payroll-run/payslips",
   "/hr/payslips/[id]": "/hr/payslips/e2e-payslip",
   "/logistics/trips/[id]": "/logistics/trips/e2e-trip",
+  "/operations/sales-orders/[id]/print": "/operations/sales-orders/e2e-sales-order/print",
   "/petroleum/fuel-shifts/[id]": "/petroleum/fuel-shifts/e2e-shift",
   "/support/tickets/[id]": "/support/tickets/e2e-ticket",
   "/training/courses/[id]": "/training/courses/e2e-course",
-  "/westsides/customers/[id]": "/westsides/customers/e2e-customer"
+  "/westsides/customers/[id]": "/westsides/customers/e2e-customer",
+  "/westsides/customers/[id]/print": "/westsides/customers/e2e-customer/print",
+  "/westsides/delivery-notes/[id]/print": "/westsides/delivery-notes/e2e-delivery-note/print",
+  "/westsides/proforma-invoices/[id]/print": "/westsides/proforma-invoices/e2e-proforma-invoice/print",
+  "/westsides/quotations/[id]/print": "/westsides/quotations/e2e-quotation/print"
 }

@@ -1,5 +1,7 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { DashboardService } from './dashboard.service';
 
 @ApiTags('dashboard')
@@ -9,12 +11,12 @@ export class DashboardController {
   constructor(private readonly service: DashboardService) {}
 
   /**
-   * Full executive summary — aggregates all groups, companies, and governance
-   * data into a single payload. Sensitive financial figures are included in the
-   * response; the frontend is responsible for hiding them based on user permissions.
+   * Full executive summary. Sensitive figures are scoped and permission-gated
+   * on the backend because this payload is used by both dashboard surfaces.
    */
   @Get('executive-summary')
-  getExecutiveSummary() {
-    return this.service.getExecutiveSummary();
+  @RequirePermissions('group-control.view')
+  getExecutiveSummary(@CurrentUser() user: AuthUser, @Query('companyId') companyId?: string) {
+    return this.service.getExecutiveSummary(user, companyId);
   }
 }

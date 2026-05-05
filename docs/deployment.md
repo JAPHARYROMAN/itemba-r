@@ -29,6 +29,90 @@ and configure every deployment secret before starting Compose.
 | `BACKEND_INTERNAL_URL` | Yes | Server-side backend URL used by Next.js API routes; must include `/api/v1` |
 | `NEXT_PUBLIC_API_URL` | Yes | Browser-public backend API URL; most browser calls should still use `/api/backend/*` |
 
+### Public domain and email
+
+Production and staging must use public HTTPS origins, not localhost.
+
+Recommended public names:
+
+| Environment | Frontend | Backend API |
+|---|---|---|
+| Staging | `https://staging.itembagrouptz.com` | `https://api-staging.itembagrouptz.com/api/v1` |
+| Production | `https://app.itembagrouptz.com` | `https://api.itembagrouptz.com/api/v1` |
+
+Set the environment values like this:
+
+```env
+FRONTEND_URL=https://staging.itembagrouptz.com
+CORS_ORIGIN=https://staging.itembagrouptz.com
+NEXT_PUBLIC_API_URL=https://api-staging.itembagrouptz.com/api/v1
+BACKEND_INTERNAL_URL=http://backend:3001/api/v1
+SMTP_FROM=info@itembagrouptz.com
+```
+
+`BACKEND_INTERNAL_URL` intentionally stays on the Docker network name. It is used only by
+Next.js server routes and should not be changed to the public domain.
+
+Before go-live, validate the real env file:
+
+```bash
+npm run verify:public-env -- staging
+npm run verify:domain-dns -- staging
+npm run verify:public-env -- production
+npm run verify:domain-dns -- production
+```
+
+The validator fails if public URLs still use localhost, plain HTTP, IP addresses, missing
+`/api/v1`, or placeholder/personal sender domains.
+The DNS validator checks public host records, inbound MX, SPF, and DMARC.
+
+DNS requirements:
+
+| Record | Purpose |
+|---|---|
+| `A`/`AAAA` or `CNAME` for `staging.itembagrouptz.com` | Staging frontend |
+| `A`/`AAAA` or `CNAME` for `api-staging.itembagrouptz.com` | Staging backend API |
+| `A`/`AAAA` or `CNAME` for `app.itembagrouptz.com` | Production frontend |
+| `A`/`AAAA` or `CNAME` for `api.itembagrouptz.com` | Production backend API |
+| `MX` | Domain mailbox receiving |
+| `TXT` SPF | Authorizes mail sending providers |
+| `TXT` DKIM | Signs outbound domain email |
+| `TXT` DMARC | Sets domain email policy and reporting |
+
+Minimum DMARC record to add in Cloudflare before production email:
+
+| Field | Value |
+|---|---|
+| Type | `TXT` |
+| Name | `_dmarc` |
+| Content | `v=DMARC1; p=none; rua=mailto:info@itembagrouptz.com; adkim=s; aspf=s` |
+| TTL | `Auto` |
+
+Start with `p=none` while configuring outbound SMTP and DKIM. After test email passes
+and provider alignment is confirmed, tighten the policy to `quarantine` or `reject`.
+
+Email service choices:
+
+- Use a domain mailbox provider for human mailboxes and low-volume application SMTP.
+  Zoho Mail is a practical low-cost option and supports custom-domain mailboxes plus SMTP.
+- Use Microsoft 365 if the organization wants Outlook, Exchange, Office apps, and stronger
+  admin controls in one subscription.
+- Cloudflare Email Routing is useful for inbound aliases only; it does not provide outbound
+  SMTP, so it cannot satisfy the app's smoke email gate by itself.
+
+When a transactional provider is selected, add that provider's SPF include and DKIM
+records in Cloudflare, then set these values in `.env.staging`/`.env.production`:
+
+```env
+SMTP_HOST=<provider smtp host>
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=<provider smtp username>
+SMTP_PASS=<provider smtp password or api key>
+SMTP_FROM=info@itembagrouptz.com
+EXTERNAL_SMOKE_EMAIL_TO=<real mailbox for smoke receipt>
+```
+
 ## Development Setup
 
 ```bash

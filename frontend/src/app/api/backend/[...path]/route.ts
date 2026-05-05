@@ -57,20 +57,34 @@ const refreshInFlight = new Map<
 >();
 
 function requestOriginAllowed(req: NextRequest): boolean {
-  const expectedOrigin = req.nextUrl.origin;
+  const allowedOrigins = new Set([req.nextUrl.origin]);
+  const host = firstHeaderValue(req.headers.get('x-forwarded-host') ?? req.headers.get('host'));
+  const proto = firstHeaderValue(req.headers.get('x-forwarded-proto'));
+
+  if (host && proto) {
+    allowedOrigins.add(`${proto}://${host}`);
+  }
+
   const origin = req.headers.get('origin');
-  if (origin) return origin === expectedOrigin;
+  if (origin) return allowedOrigins.has(origin);
 
   const referer = req.headers.get('referer');
   if (referer) {
     try {
-      return new URL(referer).origin === expectedOrigin;
+      return allowedOrigins.has(new URL(referer).origin);
     } catch {
       return false;
     }
   }
 
   return process.env.NODE_ENV !== 'production';
+}
+
+function firstHeaderValue(value: string | null): string {
+  return value
+    ?.split(',')[0]
+    ?.trim()
+    .toLowerCase() ?? '';
 }
 
 function csrfTokenValid(req: NextRequest): boolean {
@@ -112,18 +126,21 @@ async function refreshAccessTokenSingleFlight(
 async function forwardToBackend(
   pathSegments: string[],
   req: NextRequest,
-  body: string | undefined,
+  body: BodyInit | undefined,
   accessToken: string,
 ): Promise<Response> {
   const url = new URL(`${BACKEND}/${pathSegments.join('/')}`);
   req.nextUrl.searchParams.forEach((value, key) => url.searchParams.set(key, value));
 
+  const contentType = req.headers.get('content-type');
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+  };
+  if (body) headers['Content-Type'] = contentType ?? 'application/json';
+
   const init: RequestInit = {
     method: req.method,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-    },
+    headers,
     cache: 'no-store',
   };
   if (req.method !== 'GET' && req.method !== 'HEAD' && body) {
@@ -153,7 +170,10 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
   }
 
   // Read body once — we may need it twice (initial call + retry after refresh).
-  const body = req.method !== 'GET' && req.method !== 'HEAD' ? await req.text() : undefined;
+  const body =
+    req.method !== 'GET' && req.method !== 'HEAD'
+      ? await req.arrayBuffer().then((buffer) => (buffer.byteLength ? buffer : undefined))
+      : undefined;
 
   // First attempt with the current access token (if any).
   let backendRes: Response | null = null;
@@ -190,8 +210,14 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
     return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
   }
 
-  const json = await backendRes.json().catch(() => ({}));
-  const res = NextResponse.json(json, { status: backendRes.status });
+  const contentType = backendRes.headers.get('content-type') ?? '';
+  const isJson = contentType.toLowerCase().includes('application/json');
+  const res = isJson
+    ? NextResponse.json(await backendRes.json().catch(() => ({})), { status: backendRes.status })
+    : new NextResponse(backendRes.body, {
+        status: backendRes.status,
+        headers: passthroughHeaders(backendRes.headers),
+      });
 
   if (rotated) {
     res.cookies.set('itemba_access', rotated.accessToken, {
@@ -211,6 +237,15 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
   }
 
   return res;
+}
+
+function passthroughHeaders(headers: Headers) {
+  const nextHeaders = new Headers();
+  for (const name of ['content-type', 'content-disposition', 'content-length', 'cache-control']) {
+    const value = headers.get(name);
+    if (value) nextHeaders.set(name, value);
+  }
+  return nextHeaders;
 }
 
 export const GET = handler;

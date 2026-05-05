@@ -18,7 +18,11 @@ services:
     networks:
       - itemba_staging_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-itemba_staging} -d ${POSTGRES_DB:-itemba_r_staging}"]
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${POSTGRES_USER:-itemba_staging} -d ${POSTGRES_DB:-itemba_r_staging}',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -46,7 +50,7 @@ services:
       dockerfile: backend/Dockerfile
       target: migration
     container_name: itemba_r_backend_migrate_staging
-    restart: "no"
+    restart: 'no'
     environment:
       NODE_ENV: staging
       DATABASE_URL: postgresql://${POSTGRES_USER:-itemba_staging}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-itemba_r_staging}
@@ -84,15 +88,34 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      STORAGE_LOCAL_PATH: ${STORAGE_LOCAL_PATH:-/app/storage}
+      BACKUP_STORAGE_PATH: ${BACKUP_STORAGE_PATH:-/app/backups}
+      BACKUPS_DIR: ${BACKUPS_DIR:-/app/backups}
       JOB_WORKER_ENABLED: ${JOB_WORKER_ENABLED:-true}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@staging.itemba-r.co.tz}
+      AT_API_KEY: ${AT_API_KEY:-}
+      AT_USERNAME: ${AT_USERNAME:-}
+      AT_SENDER_ID: ${AT_SENDER_ID:-}
+      MPESA_CONSUMER_KEY: ${MPESA_CONSUMER_KEY:-}
+      MPESA_CONSUMER_SECRET: ${MPESA_CONSUMER_SECRET:-}
+      MPESA_SHORTCODE: ${MPESA_SHORTCODE:-}
+      MPESA_PASSKEY: ${MPESA_PASSKEY:-}
+      TIGOPESA_USERNAME: ${TIGOPESA_USERNAME:-}
+      TIGOPESA_PASSWORD: ${TIGOPESA_PASSWORD:-}
+      AIRTEL_CLIENT_ID: ${AIRTEL_CLIENT_ID:-}
+      AIRTEL_CLIENT_SECRET: ${AIRTEL_CLIENT_SECRET:-}
       LOG_LEVEL: debug
     ports:
-      - "3001:3001"
+      - '3001:3001'
+    volumes:
+      - backend_staging_storage:/app/storage
+      - backend_staging_backups:/app/backups
     depends_on:
       backend-migrate:
         condition: service_completed_successfully
@@ -103,8 +126,8 @@ services:
     healthcheck:
       test:
         [
-          "CMD-SHELL",
-          "node -e \"fetch('http://127.0.0.1:3001/api/v1/health/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
+          'CMD-SHELL',
+          'node -e "fetch(''http://127.0.0.1:3001/api/v1/health/ready'').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
         ]
       interval: 30s
       timeout: 10s
@@ -127,7 +150,7 @@ services:
       # Browser-public URL (used only by client-side code that needs absolute URLs).
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
     ports:
-      - "3000:3000"
+      - '3000:3000'
     depends_on:
       backend:
         condition: service_healthy
@@ -136,8 +159,8 @@ services:
     healthcheck:
       test:
         [
-          "CMD-SHELL",
-          "node -e \"fetch('http://127.0.0.1:3000/login').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
+          'CMD-SHELL',
+          'node -e "fetch(''http://127.0.0.1:3000/login'').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
         ]
       interval: 30s
       timeout: 10s
@@ -146,6 +169,8 @@ services:
 volumes:
   postgres_staging_data:
   redis_staging_data:
+  backend_staging_storage:
+  backend_staging_backups:
 
 networks:
   itemba_staging_network:

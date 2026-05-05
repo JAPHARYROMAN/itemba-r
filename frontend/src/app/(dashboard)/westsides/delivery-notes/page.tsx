@@ -1,14 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { DocumentPreviewLink } from '@/components/documents';
 import { Card, PageHeader } from '@/components/ui';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface DeliveryNote {
   id: string;
-  dnNumber: string;
-  dnDate: string;
+  dnNumber?: string;
+  deliveryNoteNumber?: string;
+  dnDate?: string;
+  deliveryDate?: string;
   customerName?: string;
   salesOrderNumber?: string;
   driverName?: string;
@@ -229,8 +232,8 @@ export default function DeliveryNotesPage() {
                     const actions = STATUS_ACTIONS[dn.status] ?? [];
                     return (
                       <tr key={dn.id} className="hover:bg-slate-50">
-                        <td className={`${tdCls} font-medium`}>{dn.dnNumber}</td>
-                        <td className={tdCls}>{fmtDate(dn.dnDate)}</td>
+                        <td className={`${tdCls} font-medium`}>{dn.deliveryNoteNumber ?? dn.dnNumber ?? dn.id.slice(0, 8)}</td>
+                        <td className={tdCls}>{fmtDate(dn.deliveryDate ?? dn.dnDate ?? new Date().toISOString())}</td>
                         <td className={tdCls}>{dn.customerName ?? '—'}</td>
                         <td className={tdCls}>{dn.salesOrderNumber ?? '—'}</td>
                         <td className={tdCls}>{dn.driverName ?? '—'}</td>
@@ -238,6 +241,7 @@ export default function DeliveryNotesPage() {
                         <td className={tdCls}><Badge status={dn.status} /></td>
                         <td className="px-4 py-2">
                           <div className="flex items-center gap-2">
+                            <DocumentPreviewLink href={`/westsides/delivery-notes/${dn.id}/print`} />
                             <button onClick={() => { setEditing(dn); setModalOpen(true); }} className="text-xs text-indigo-600 hover:text-indigo-800">Edit</button>
                             {actions.map((a) => (
                               <button

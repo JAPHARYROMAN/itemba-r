@@ -241,6 +241,8 @@ export class SystemHealthService {
   private async checkStorageHealth(endpointOrTarget?: string | null): Promise<CheckResult> {
     const target =
       endpointOrTarget ??
+      process.env.STORAGE_LOCAL_PATH ??
+      process.env.LOCAL_STORAGE_PATH ??
       process.env.BACKUP_STORAGE_PATH ??
       process.env.EXPORT_STORAGE_PATH ??
       process.cwd();

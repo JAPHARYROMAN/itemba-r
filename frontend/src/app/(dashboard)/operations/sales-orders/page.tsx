@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { DocumentPreviewLink } from '@/components/documents';
 import {
   Card,
   PageHeader,
@@ -76,6 +77,7 @@ interface SalesOrderLine {
 
 interface SalesOrder {
   id: string;
+  salesOrderNumber?: string;
   orderNumber?: string;
   orderDate: string;
   dueDate?: string | null;
@@ -1157,7 +1159,7 @@ export default function SalesOrdersPage() {
                 data.data.map((o) => (
                   <tr key={o.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono text-xs">
-                      {o.orderNumber ?? o.id.slice(0, 8)}
+                      {o.salesOrderNumber ?? o.orderNumber ?? o.id.slice(0, 8)}
                     </td>
                     <td className="px-4 py-3 text-xs">
                       {new Date(o.orderDate).toLocaleDateString('en-GB')}
@@ -1183,6 +1185,7 @@ export default function SalesOrdersPage() {
                       <StatusBadge value={o.paymentStatus} />
                     </td>
                     <td className="px-4 py-3 text-right space-x-1">
+                      <DocumentPreviewLink href={`/operations/sales-orders/${o.id}/print`} />
                       {o.status === 'DRAFT' && canCreate && (
                         <Btn variant="ghost" size="xs" onClick={() => setEditing(o)}>
                           Edit

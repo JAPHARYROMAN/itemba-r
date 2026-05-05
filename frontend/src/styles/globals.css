@@ -434,3 +434,140 @@ body {
 .dark .divide-gray-200 > * + * {
   border-color: var(--aurora-border) !important;
 }
+
+/* Auth pages are a fixed light brand surface, even when the dashboard theme is dark. */
+.auth-light,
+.dark .auth-light {
+  color-scheme: light;
+  background: #f7f8f6 !important;
+  color: #020617 !important;
+}
+
+.dark .auth-light .bg-white {
+  background-color: #ffffff !important;
+}
+
+.dark .auth-light .border-slate-200 {
+  border-color: #e2e8f0 !important;
+}
+
+.dark .auth-light .border-slate-300 {
+  border-color: #cbd5e1 !important;
+}
+
+.dark .auth-light .text-slate-950 {
+  color: #020617 !important;
+}
+
+.dark .auth-light .text-slate-800 {
+  color: #1e293b !important;
+}
+
+.dark .auth-light .text-slate-600 {
+  color: #475569 !important;
+}
+
+.dark .auth-light .text-slate-500 {
+  color: #64748b !important;
+}
+
+.dark .auth-light input,
+.dark .auth-light textarea,
+.dark .auth-light select {
+  background-color: #ffffff !important;
+  color: #020617 !important;
+  caret-color: #020617;
+}
+
+.auth-light input::placeholder,
+.auth-light textarea::placeholder {
+  color: #64748b;
+  opacity: 1;
+}
+
+.auth-light input:-webkit-autofill,
+.auth-light input:-webkit-autofill:hover,
+.auth-light input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #020617;
+  box-shadow: 0 0 0 1000px #ffffff inset;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Document print surfaces */
+.document-print-root .document-page {
+  background: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.document-print-root .document-page .text-slate-950,
+.document-print-root .document-page .text-slate-900,
+.document-print-root .document-page .text-slate-800 {
+  color: #0f172a !important;
+}
+
+.document-print-root .document-page .text-slate-700,
+.document-print-root .document-page .text-slate-600 {
+  color: #475569 !important;
+}
+
+.document-print-root .document-page .text-slate-500 {
+  color: #64748b !important;
+}
+
+.document-print-root .document-page .bg-white {
+  background: #ffffff !important;
+}
+
+.document-print-root .document-page .bg-slate-50 {
+  background: #f8fafc !important;
+}
+
+.document-print-root .document-table th,
+.document-print-root .document-table td {
+  border-color: #e2e8f0;
+}
+
+@page {
+  size: A4;
+  margin: 12mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+  }
+
+  body:has(.document-print-root) aside,
+  body:has(.document-print-root) header,
+  body:has(.document-print-root) .document-no-print {
+    display: none !important;
+  }
+
+  body:has(.document-print-root) main {
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  body:has(.document-print-root) .document-print-root {
+    min-height: auto !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  body:has(.document-print-root) .document-page {
+    width: auto !important;
+    min-height: auto !important;
+    max-width: none !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+  }
+
+  .document-section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

@@ -8,6 +8,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { Modal } from '@/components/aurora/overlays/Modal';
 import { FormInput } from '@/components/aurora/forms/FormInput';
 import { FormSelect } from '@/components/aurora/forms/FormSelect';
+import { FormTextarea } from '@/components/aurora/forms/FormTextarea';
 
 const STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'Active' },
@@ -43,6 +44,8 @@ interface Branch {
   code: string;
   type: string;
   location: string | null;
+  address: string | null;
+  phone: string | null;
   isActive: boolean;
 }
 
@@ -108,7 +111,8 @@ function StatusBadge({ status }: { status: string }) {
 
 const BRANCH_TYPE_ICONS: Record<string, string> = {
   BRANCH: '🏪', SITE: '🏗️', PROJECT: '📋', FARM: '🌾',
-  WAREHOUSE: '🏭', FUEL_STATION: '⛽', OFFICE: '🏢', OTHER: '📍',
+  WAREHOUSE: '🏭', FUEL_STATION: '⛽', OFFICE: '🏢',
+  PARKING_FACILITY: '🅿️', HOSPITALITY_FACILITY: '🏨', OTHER: '📍',
 };
 
 const DIVISION_TYPE_COLORS: Record<string, string> = {
@@ -118,6 +122,10 @@ const DIVISION_TYPE_COLORS: Record<string, string> = {
   CONSTRUCTION: 'bg-amber-50 border-amber-200 text-amber-800',
   BEVERAGES: 'bg-purple-50 border-purple-200 text-purple-800',
   HARDWARE_BUILDING: 'bg-slate-50 border-slate-200 text-slate-800',
+  TRUCK_PARKING: 'bg-cyan-50 border-cyan-200 text-cyan-800',
+  RENTAL_SHOPS: 'bg-pink-50 border-pink-200 text-pink-800',
+  HOSPITALITY: 'bg-indigo-50 border-indigo-200 text-indigo-800',
+  REAL_ESTATE: 'bg-teal-50 border-teal-200 text-teal-800',
   OTHER: 'bg-gray-50 border-gray-200 text-gray-800',
 };
 
@@ -137,10 +145,14 @@ export default function CompanyDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'divisions' | 'documents' | 'profile'>('overview');
   const [editOpen, setEditOpen] = useState(false);
+  const [deletingCompany, setDeletingCompany] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  async function loadCompany() {
+  async function loadCompany(options: { showLoading?: boolean } = {}) {
     if (!id) return;
-    setLoading(true);
+    const showLoading = options.showLoading ?? !company;
+    if (showLoading) setLoading(true);
+    setError(null);
     try {
       const res = await fetch(`/api/backend/companies/${id}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -149,7 +161,7 @@ export default function CompanyDetailPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load company');
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }
 
@@ -190,6 +202,30 @@ export default function CompanyDetailPage() {
     { id: 'profile', label: 'Legal Profile' },
   ] as const;
 
+  async function deleteCompany() {
+    const targetCompany = company;
+    if (!targetCompany) return;
+    if (!confirm(`Archive company ${targetCompany.name}? Its divisions and branches/stations will also be archived.`)) return;
+    setDeletingCompany(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/backend/companies/${targetCompany.id}`, { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const message =
+          (Array.isArray(json?.message) && json.message.join(', ')) ||
+          json?.message ||
+          `HTTP ${res.status}`;
+        throw new Error(message);
+      }
+      router.push('/companies');
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Failed to archive company');
+    } finally {
+      setDeletingCompany(false);
+    }
+  }
+
   return (
     <>
       <main className="p-6 flex-1 bg-slate-50 min-h-screen">
@@ -225,6 +261,16 @@ export default function CompanyDetailPage() {
                 Edit Company
               </button>
             )}
+            {hasPermission('companies.delete') && (
+              <button
+                type="button"
+                onClick={deleteCompany}
+                disabled={deletingCompany}
+                className="px-3 py-1.5 text-sm border border-red-200 rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+              >
+                {deletingCompany ? 'Archiving...' : 'Archive Company'}
+              </button>
+            )}
             {/* Link to Group Control for sensitive records */}
             {hasPermission('bank-accounts.read') && (
               <Link
@@ -236,6 +282,12 @@ export default function CompanyDetailPage() {
             )}
           </div>
         </div>
+
+        {deleteError && (
+          <Card className="p-3 mb-5 border-red-200 bg-red-50 text-sm text-red-700">
+            {deleteError}
+          </Card>
+        )}
 
         {/* Summary Metric Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
@@ -278,7 +330,7 @@ export default function CompanyDetailPage() {
         {/* Tab Content */}
         {activeTab === 'overview' && <OverviewTab company={company} />}
         {activeTab === 'divisions' && (
-          <DivisionsTab divisions={company.divisions} onChanged={loadCompany} />
+          <DivisionsTab companyId={company.id} divisions={company.divisions} onChanged={loadCompany} />
         )}
         {activeTab === 'documents' && <DocumentsTab documents={company.documents} companyId={company.id} />}
         {activeTab === 'profile' && (
@@ -297,7 +349,7 @@ export default function CompanyDetailPage() {
             onClose={() => setEditOpen(false)}
             onSaved={() => {
               setEditOpen(false);
-              void loadCompany();
+              void loadCompany({ showLoading: false });
             }}
           />
         )}
@@ -556,71 +608,377 @@ function ProfileRow({ label, value, mono }: { label: string; value: React.ReactN
 
 // ── Divisions Tab ─────────────────────────────────────────────────────────────
 
-function DivisionsTab({ divisions, onChanged }: { divisions: Division[]; onChanged: () => void }) {
+function DivisionsTab({
+  companyId,
+  divisions,
+  onChanged,
+}: {
+  companyId: string;
+  divisions: Division[];
+  onChanged: () => void;
+}) {
   const { hasPermission } = useAuth();
+  const canCreateDivision = hasPermission('divisions.create');
+  const canUpdateDivision = hasPermission('divisions.update');
+  const canDeleteDivision = hasPermission('divisions.delete');
   const canCreateBranch = hasPermission('branches.create');
+  const canUpdateBranch = hasPermission('branches.update');
+  const canDeleteBranch = hasPermission('branches.delete');
+  const [selectedDivisionId, setSelectedDivisionId] = useState<string | null>(divisions[0]?.id ?? null);
+  const [addingDivision, setAddingDivision] = useState(false);
+  const [editingDivision, setEditingDivision] = useState<Division | null>(null);
   const [addingForDivision, setAddingForDivision] = useState<Division | null>(null);
+  const [editingBranch, setEditingBranch] = useState<{ division: Division; branch: Branch } | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  if (divisions.length === 0) return (
-    <Card className="p-8 text-center">
-      <div className="text-slate-400 text-sm">No divisions configured for this company.</div>
-    </Card>
-  );
+  useEffect(() => {
+    if (divisions.length === 0) {
+      setSelectedDivisionId(null);
+      return;
+    }
+    if (!selectedDivisionId || !divisions.some((division) => division.id === selectedDivisionId)) {
+      setSelectedDivisionId(divisions[0].id);
+    }
+  }, [divisions, selectedDivisionId]);
+
+  const selectedDivision = divisions.find((division) => division.id === selectedDivisionId) ?? divisions[0] ?? null;
+
+  async function setDivisionActive(division: Division, isActive: boolean) {
+    if (!isActive && !confirm(`Deactivate division ${division.name}? Its active branches/stations will also be deactivated.`)) return;
+    setBusyAction(`division:${division.id}:active`);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/backend/divisions/${division.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(apiErrorMessage(json, res.status));
+      onChanged();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to update division status');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function archiveDivision(division: Division) {
+    if (!confirm(`Archive division ${division.name}? Its branches/stations will also be archived.`)) return;
+    setBusyAction(`division:${division.id}:delete`);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/backend/divisions/${division.id}`, { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(apiErrorMessage(json, res.status));
+      if (selectedDivisionId === division.id) setSelectedDivisionId(null);
+      onChanged();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to archive division');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function setBranchActive(branch: Branch, isActive: boolean) {
+    setBusyAction(`branch:${branch.id}:active`);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/backend/branches/${branch.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(apiErrorMessage(json, res.status));
+      onChanged();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to update branch status');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function archiveBranch(branch: Branch) {
+    if (!confirm(`Archive branch/station ${branch.name}?`)) return;
+    setBusyAction(`branch:${branch.id}:delete`);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/backend/branches/${branch.id}`, { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(apiErrorMessage(json, res.status));
+      onChanged();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to archive branch');
+    } finally {
+      setBusyAction(null);
+    }
+  }
 
   return (
     <>
-      <div className="space-y-4">
-        {divisions.map((div) => (
-          <Card key={div.id} className="p-5">
-            <div className="flex items-start justify-between gap-4 mb-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-semibold text-slate-900">{div.name}</h3>
-                  <span className={`text-xs px-2 py-0.5 rounded border font-medium ${DIVISION_TYPE_COLORS[div.type] ?? DIVISION_TYPE_COLORS.OTHER}`}>
-                    {div.type.replace('_', ' ')}
-                  </span>
-                </div>
-                <div className="text-xs font-mono text-slate-400 mt-0.5">{div.code}</div>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="text-sm text-slate-500">{div._count.branches} branch{div._count.branches !== 1 ? 'es' : ''}</div>
-                {canCreateBranch && (
-                  <button
-                    type="button"
-                    onClick={() => setAddingForDivision(div)}
-                    className="px-3 py-1 text-xs border border-slate-200 rounded-md text-slate-700 hover:bg-slate-50 transition-colors"
-                  >
-                    + Add Branch
-                  </button>
-                )}
-              </div>
+      <div className="space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Divisions and branches</h2>
+            <p className="text-sm text-slate-500">Registry structure for operating divisions, branches, stations, and sites.</p>
+          </div>
+          {canCreateDivision && (
+            <button
+              type="button"
+              onClick={() => setAddingDivision(true)}
+              className="self-start sm:self-auto px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              + Add Division
+            </button>
+          )}
+        </div>
+
+        {actionError && (
+          <div role="alert" className="text-sm rounded-lg p-3 border border-red-200 bg-red-50 text-red-700">
+            {actionError}
+          </div>
+        )}
+
+        {divisions.length === 0 ? (
+          <Card className="p-8 text-center">
+            <div className="text-slate-400 text-sm">No divisions configured for this company.</div>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)] gap-5">
+            <div className="space-y-3">
+              {divisions.map((division) => {
+                const selected = selectedDivision?.id === division.id;
+                return (
+                  <Card key={division.id} className={`p-4 transition-colors ${selected ? 'border-blue-300 bg-blue-50/60' : ''}`}>
+                    <div className="flex items-start gap-3">
+                      <button
+                        type="button"
+                        data-testid={`division-select-${division.code}`}
+                        onClick={() => setSelectedDivisionId(division.id)}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-semibold text-slate-900">{division.name}</h3>
+                          <span className={`text-xs px-2 py-0.5 rounded border font-medium ${DIVISION_TYPE_COLORS[division.type] ?? DIVISION_TYPE_COLORS.OTHER}`}>
+                            {enumLabel(division.type)}
+                          </span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${division.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                            {division.isActive ? 'Active' : 'Inactive'}
+                          </span>
+                        </div>
+                        <div className="text-xs font-mono text-slate-400 mt-0.5">{division.code}</div>
+                        {division.description && (
+                          <p className="text-sm text-slate-600 mt-2 line-clamp-2">{division.description}</p>
+                        )}
+                        <div className="mt-3 text-xs text-slate-500">
+                          {division._count.branches} branch{division._count.branches !== 1 ? 'es' : ''}
+                        </div>
+                      </button>
+                      <div className="flex shrink-0 flex-col gap-1.5">
+                        <button
+                          type="button"
+                          data-testid={`division-view-${division.code}`}
+                          onClick={() => setSelectedDivisionId(division.id)}
+                          className="px-2.5 py-1 text-xs border border-slate-200 rounded-md text-slate-700 hover:bg-white transition-colors"
+                        >
+                          View
+                        </button>
+                        {canUpdateDivision && (
+                          <>
+                            <button
+                              type="button"
+                              data-testid={`division-edit-${division.code}`}
+                              onClick={() => setEditingDivision(division)}
+                              className="px-2.5 py-1 text-xs border border-slate-200 rounded-md text-slate-700 hover:bg-white transition-colors"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              data-testid={`division-toggle-${division.code}`}
+                              onClick={() => setDivisionActive(division, !division.isActive)}
+                              disabled={busyAction === `division:${division.id}:active`}
+                              className="px-2.5 py-1 text-xs border border-slate-200 rounded-md text-slate-700 hover:bg-white disabled:opacity-50 transition-colors"
+                            >
+                              {busyAction === `division:${division.id}:active`
+                                ? 'Saving'
+                                : division.isActive
+                                  ? 'Deactivate'
+                                  : 'Activate'}
+                            </button>
+                          </>
+                        )}
+                        {canDeleteDivision && (
+                          <button
+                            type="button"
+                            data-testid={`division-archive-${division.code}`}
+                            onClick={() => archiveDivision(division)}
+                            disabled={busyAction === `division:${division.id}:delete`}
+                            className="px-2.5 py-1 text-xs border border-red-200 rounded-md text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                          >
+                            {busyAction === `division:${division.id}:delete` ? 'Archiving' : 'Archive'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
             </div>
 
-            {div.description && (
-              <p className="text-sm text-slate-600 mb-3">{div.description}</p>
-            )}
-
-            {div.branches.length > 0 && (
-              <div className="border-t border-slate-100 pt-3">
-                <div className="text-xs text-slate-400 mb-2 uppercase tracking-wide font-medium">Branches / Sites</div>
-                <div className="flex flex-wrap gap-2">
-                  {div.branches.map((branch) => (
-                    <div key={branch.id} className="flex items-center gap-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md px-2.5 py-1">
-                      <span>{BRANCH_TYPE_ICONS[branch.type] ?? '📍'}</span>
-                      <span className="font-medium text-slate-700">{branch.name}</span>
-                      {branch.location && <span className="text-slate-400">· {branch.location}</span>}
-                      {!branch.isActive && <span className="text-slate-400">(inactive)</span>}
+            <Card className="overflow-hidden">
+              {selectedDivision ? (
+                <>
+                  <div className="p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-semibold text-slate-900">{selectedDivision.name}</h3>
+                        <span className={`text-xs px-2 py-0.5 rounded border font-medium ${DIVISION_TYPE_COLORS[selectedDivision.type] ?? DIVISION_TYPE_COLORS.OTHER}`}>
+                          {enumLabel(selectedDivision.type)}
+                        </span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${selectedDivision.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                          {selectedDivision.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                      <div className="text-xs font-mono text-slate-400 mt-0.5">{selectedDivision.code}</div>
+                      {selectedDivision.description && (
+                        <p className="text-sm text-slate-600 mt-2">{selectedDivision.description}</p>
+                      )}
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </Card>
-        ))}
+                    {canCreateBranch && (
+                      <button
+                        type="button"
+                        data-testid="add-branch-button"
+                        onClick={() => setAddingForDivision(selectedDivision)}
+                        className="self-start px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 transition-colors"
+                      >
+                        + Add Branch
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="px-4 py-3 text-left font-medium">Code</th>
+                          <th className="px-4 py-3 text-left font-medium">Branch / Station</th>
+                          <th className="px-4 py-3 text-left font-medium">Type</th>
+                          <th className="px-4 py-3 text-left font-medium">Location</th>
+                          <th className="px-4 py-3 text-left font-medium">Contact</th>
+                          <th className="px-4 py-3 text-left font-medium">Status</th>
+                          <th className="px-4 py-3 text-right font-medium">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {selectedDivision.branches.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                              No branches, stations, or sites configured for this division.
+                            </td>
+                          </tr>
+                        ) : (
+                          selectedDivision.branches.map((branch) => (
+                            <tr key={branch.id} data-testid={`branch-row-${branch.code}`} className="hover:bg-slate-50">
+                              <td className="px-4 py-3 font-mono text-xs text-slate-500 whitespace-nowrap">{branch.code}</td>
+                              <td className="px-4 py-3">
+                                <div className="font-medium text-slate-900">{branch.name}</div>
+                                {branch.address && <div className="text-xs text-slate-500">{branch.address}</div>}
+                              </td>
+                              <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
+                                <span className="mr-1.5">{BRANCH_TYPE_ICONS[branch.type] ?? '📍'}</span>
+                                {enumLabel(branch.type)}
+                              </td>
+                              <td className="px-4 py-3 text-slate-600">{branch.location || '—'}</td>
+                              <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{branch.phone || '—'}</td>
+                              <td className="px-4 py-3">
+                                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${branch.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                                  {branch.isActive ? 'Active' : 'Inactive'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex justify-end gap-2">
+                                  {canUpdateBranch && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        data-testid={`branch-edit-${branch.code}`}
+                                        onClick={() => setEditingBranch({ division: selectedDivision, branch })}
+                                        className="text-xs text-blue-600 hover:underline"
+                                      >
+                                        Edit
+                                      </button>
+                                      <button
+                                        type="button"
+                                        data-testid={`branch-toggle-${branch.code}`}
+                                        onClick={() => setBranchActive(branch, !branch.isActive)}
+                                        disabled={busyAction === `branch:${branch.id}:active` || (!branch.isActive && !selectedDivision.isActive)}
+                                        title={!branch.isActive && !selectedDivision.isActive ? 'Activate the parent division first' : undefined}
+                                        className="text-xs text-slate-600 hover:underline disabled:opacity-50"
+                                      >
+                                        {busyAction === `branch:${branch.id}:active`
+                                          ? 'Saving'
+                                          : branch.isActive
+                                            ? 'Deactivate'
+                                            : 'Activate'}
+                                      </button>
+                                    </>
+                                  )}
+                                  {canDeleteBranch && (
+                                    <button
+                                      type="button"
+                                      data-testid={`branch-archive-${branch.code}`}
+                                      onClick={() => archiveBranch(branch)}
+                                      disabled={busyAction === `branch:${branch.id}:delete`}
+                                      className="text-xs text-red-600 hover:underline disabled:opacity-50"
+                                    >
+                                      {busyAction === `branch:${branch.id}:delete` ? 'Archiving' : 'Archive'}
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <div className="p-8 text-center text-sm text-slate-400">No division selected.</div>
+              )}
+            </Card>
+          </div>
+        )}
       </div>
 
+      {addingDivision && (
+        <DivisionEditorModal
+          companyId={companyId}
+          onClose={() => setAddingDivision(false)}
+          onSaved={() => {
+            setAddingDivision(false);
+            onChanged();
+          }}
+        />
+      )}
+
+      {editingDivision && (
+        <DivisionEditorModal
+          companyId={companyId}
+          division={editingDivision}
+          onClose={() => setEditingDivision(null)}
+          onSaved={() => {
+            setEditingDivision(null);
+            onChanged();
+          }}
+        />
+      )}
+
       {addingForDivision && (
-        <AddBranchModal
+        <BranchEditorModal
           division={addingForDivision}
           onClose={() => setAddingForDivision(null)}
           onSaved={() => {
@@ -629,11 +987,51 @@ function DivisionsTab({ divisions, onChanged }: { divisions: Division[]; onChang
           }}
         />
       )}
+
+      {editingBranch && (
+        <BranchEditorModal
+          division={editingBranch.division}
+          branch={editingBranch.branch}
+          onClose={() => setEditingBranch(null)}
+          onSaved={() => {
+            setEditingBranch(null);
+            onChanged();
+          }}
+        />
+      )}
     </>
   );
 }
 
-// ── Add Branch Modal ──────────────────────────────────────────────────────────
+function apiErrorMessage(json: Record<string, unknown>, status: number) {
+  const message = json?.message;
+  if (Array.isArray(message)) return message.join(', ');
+  if (typeof message === 'string' && message.trim()) return message;
+  return `HTTP ${status}`;
+}
+
+function enumLabel(value: string) {
+  return value
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+// ── Division / Branch Modals ─────────────────────────────────────────────────
+
+const DIVISION_TYPES: Array<{ value: string; label: string }> = [
+  { value: 'PETROLEUM', label: 'Petroleum' },
+  { value: 'LOGISTICS', label: 'Logistics' },
+  { value: 'AGRICULTURE', label: 'Agriculture' },
+  { value: 'CONSTRUCTION', label: 'Construction' },
+  { value: 'BEVERAGES', label: 'Beverages' },
+  { value: 'HARDWARE_BUILDING', label: 'Hardware Building' },
+  { value: 'TRUCK_PARKING', label: 'Truck Parking' },
+  { value: 'RENTAL_SHOPS', label: 'Rental Shops' },
+  { value: 'HOSPITALITY', label: 'Hospitality' },
+  { value: 'REAL_ESTATE', label: 'Real Estate' },
+  { value: 'OTHER', label: 'Other' },
+];
 
 const BRANCH_TYPES: Array<{ value: string; label: string }> = [
   { value: 'BRANCH', label: 'Branch' },
@@ -648,23 +1046,23 @@ const BRANCH_TYPES: Array<{ value: string; label: string }> = [
   { value: 'OTHER', label: 'Other' },
 ];
 
-function AddBranchModal({
+function DivisionEditorModal({
+  companyId,
   division,
   onClose,
   onSaved,
 }: {
-  division: Division;
+  companyId: string;
+  division?: Division;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  // Default the type to FUEL_STATION when adding under a PETROLEUM division —
-  // that's the most common case for Mwanjalisi Oil. Otherwise default to BRANCH.
-  const defaultType = division.type === 'PETROLEUM' ? 'FUEL_STATION' : 'BRANCH';
+  const editing = !!division;
   const [form, setForm] = useState({
-    name: '',
-    code: '',
-    type: defaultType,
-    location: '',
+    name: division?.name ?? '',
+    code: division?.code ?? '',
+    type: division?.type ?? 'OTHER',
+    description: division?.description ?? '',
   });
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -678,29 +1076,23 @@ function AddBranchModal({
     }
     setSubmitting(true);
     try {
-      const payload = {
-        divisionId: division.id,
+      const payload: Record<string, string | undefined> = {
         name: form.name.trim(),
         code: form.code.trim(),
         type: form.type,
-        location: form.location.trim() || undefined,
+        description: form.description.trim() || undefined,
       };
-      const res = await fetch('/api/backend/branches', {
-        method: 'POST',
+      if (!editing) payload.companyId = companyId;
+      const res = await fetch(editing ? `/api/backend/divisions/${division!.id}` : '/api/backend/divisions', {
+        method: editing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const message =
-          (Array.isArray(json?.message) && json.message.join(', ')) ||
-          json?.message ||
-          `HTTP ${res.status}`;
-        throw new Error(message);
-      }
+      if (!res.ok) throw new Error(apiErrorMessage(json, res.status));
       onSaved();
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : 'Failed to create branch');
+      setSubmitError(e instanceof Error ? e.message : 'Failed to save division');
     } finally {
       setSubmitting(false);
     }
@@ -710,58 +1102,46 @@ function AddBranchModal({
     <Modal
       open={true}
       onClose={() => (submitting ? undefined : onClose())}
-      title={`Add Branch to ${division.name}`}
-      description="A branch is a physical location — a fuel station, warehouse, project site, office, etc. Each operations record (shifts, deliveries, dips) is scoped to a branch."
+      title={editing ? `Edit Division - ${division!.name}` : 'Add Division'}
+      description="Create or update the operating division that branches, stations, and sites belong to."
       size="md"
     >
       <form onSubmit={onSubmit} className="p-5 space-y-4">
         <FormInput
-          label="Branch Name"
+          label="Division Name"
           required
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
-          placeholder="e.g. Mwanjalisi Sinza Station"
+          placeholder="e.g. Petroleum Division"
         />
         <FormInput
           label="Code"
           required
           value={form.code}
           onChange={(e) => setForm({ ...form, code: e.target.value })}
-          help="Short identifier — used in document numbering and reports."
-          placeholder="e.g. SNZ-01"
+          placeholder="e.g. PET"
         />
         <FormSelect
           label="Type"
           required
           value={form.type}
           onChange={(e) => setForm({ ...form, type: e.target.value })}
-          options={BRANCH_TYPES}
+          options={DIVISION_TYPES}
         />
-        <FormInput
-          label="Location"
-          value={form.location}
-          onChange={(e) => setForm({ ...form, location: e.target.value })}
-          placeholder="e.g. Sinza, Dar es Salaam"
+        <FormTextarea
+          label="Description"
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+          placeholder="Short description for this division"
         />
 
         {submitError && (
-          <div
-            role="alert"
-            className="text-sm rounded-lg p-3 border"
-            style={{
-              color: 'var(--aurora-danger)',
-              borderColor: 'var(--aurora-danger)',
-              background: 'var(--aurora-danger-bg, #fef2f2)',
-            }}
-          >
+          <div role="alert" className="text-sm rounded-lg p-3 border border-red-200 bg-red-50 text-red-700">
             {submitError}
           </div>
         )}
 
-        <div
-          className="flex justify-end gap-2 pt-2 border-t"
-          style={{ borderColor: 'var(--aurora-border)' }}
-        >
+        <div className="flex justify-end gap-2 pt-2 border-t" style={{ borderColor: 'var(--aurora-border)' }}>
           <button
             type="button"
             onClick={onClose}
@@ -775,7 +1155,152 @@ function AddBranchModal({
             disabled={submitting}
             className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            {submitting ? 'Creating…' : 'Create Branch'}
+            {submitting ? 'Saving...' : editing ? 'Save Division' : 'Create Division'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function defaultBranchTypeForDivision(divisionType: string) {
+  if (divisionType === 'PETROLEUM') return 'FUEL_STATION';
+  if (divisionType === 'TRUCK_PARKING') return 'PARKING_FACILITY';
+  if (divisionType === 'HOSPITALITY') return 'HOSPITALITY_FACILITY';
+  if (divisionType === 'LOGISTICS') return 'WAREHOUSE';
+  return 'BRANCH';
+}
+
+function BranchEditorModal({
+  division,
+  branch,
+  onClose,
+  onSaved,
+}: {
+  division: Division;
+  branch?: Branch;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const editing = !!branch;
+  const [form, setForm] = useState({
+    name: branch?.name ?? '',
+    code: branch?.code ?? '',
+    type: branch?.type ?? defaultBranchTypeForDivision(division.type),
+    location: branch?.location ?? '',
+    address: branch?.address ?? '',
+    phone: branch?.phone ?? '',
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitError(null);
+    if (!form.name.trim() || !form.code.trim()) {
+      setSubmitError('Name and code are required.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const payload: Record<string, string | undefined> = {
+        name: form.name.trim(),
+        code: form.code.trim(),
+        type: form.type,
+        location: form.location.trim() || undefined,
+        address: form.address.trim() || undefined,
+        phone: form.phone.trim() || undefined,
+      };
+      if (!editing) payload.divisionId = division.id;
+      const res = await fetch(editing ? `/api/backend/branches/${branch!.id}` : '/api/backend/branches', {
+        method: editing ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(apiErrorMessage(json, res.status));
+      onSaved();
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : 'Failed to save branch');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={true}
+      onClose={() => (submitting ? undefined : onClose())}
+      title={editing ? `Edit Branch - ${branch!.name}` : `Add Branch to ${division.name}`}
+      description="Create or update a branch, station, site, warehouse, or office under this division."
+      size="md"
+    >
+      <form onSubmit={onSubmit} className="p-5 space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <FormInput
+            label="Branch Name"
+            required
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            placeholder="e.g. Tunduma Main Station"
+            className="sm:col-span-2"
+          />
+          <FormInput
+            label="Code"
+            required
+            value={form.code}
+            onChange={(e) => setForm({ ...form, code: e.target.value })}
+            placeholder="e.g. TDM-01"
+          />
+          <FormSelect
+            label="Type"
+            required
+            value={form.type}
+            onChange={(e) => setForm({ ...form, type: e.target.value })}
+            options={BRANCH_TYPES}
+          />
+          <FormInput
+            label="Location"
+            value={form.location}
+            onChange={(e) => setForm({ ...form, location: e.target.value })}
+            placeholder="e.g. Tunduma, Songwe"
+          />
+          <FormInput
+            label="Phone"
+            type="tel"
+            value={form.phone}
+            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          />
+          <FormInput
+            label="Address"
+            value={form.address}
+            onChange={(e) => setForm({ ...form, address: e.target.value })}
+            placeholder="Street, ward, or plot details"
+            className="sm:col-span-2"
+          />
+        </div>
+
+        {submitError && (
+          <div role="alert" className="text-sm rounded-lg p-3 border border-red-200 bg-red-50 text-red-700">
+            {submitError}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2 border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {submitting ? 'Saving...' : editing ? 'Save Branch' : 'Create Branch'}
           </button>
         </div>
       </form>

@@ -67,7 +67,29 @@ export class CustomersService {
     const record = await this.prisma.customer.findFirst({
       where: { id, deletedAt: null },
       include: {
-        company: { select: { id: true, name: true, code: true } },
+        company: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            phone: true,
+            email: true,
+            website: true,
+            logoUrl: true,
+            group: { select: { name: true, code: true, address: true, phone: true, email: true, website: true } },
+            profile: {
+              select: {
+                registeredName: true,
+                tradingName: true,
+                brelaRegNumber: true,
+                tin: true,
+                vrn: true,
+                registeredAddress: true,
+                postalAddress: true,
+              },
+            },
+          },
+        },
         division: true,
         branch: true,
       },
@@ -218,8 +240,30 @@ export class CustomersService {
     const customer = await this.prisma.customer.findFirst({
       where: { id, deletedAt: null },
       include: {
-        company: { select: { id: true, name: true, code: true } },
-        branch: { select: { id: true, name: true } },
+        company: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            phone: true,
+            email: true,
+            website: true,
+            logoUrl: true,
+            group: { select: { name: true, code: true, address: true, phone: true, email: true, website: true } },
+            profile: {
+              select: {
+                registeredName: true,
+                tradingName: true,
+                brelaRegNumber: true,
+                tin: true,
+                vrn: true,
+                registeredAddress: true,
+                postalAddress: true,
+              },
+            },
+          },
+        },
+        branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
       },
     });
     if (!customer) throw new NotFoundException('Customer not found');
@@ -281,9 +325,9 @@ export class CustomersService {
         orderBy: { _sum: { lineTotal: 'desc' } },
         take: 5,
       }),
-      // Last 10 receivable settlements (closed receivables — proxy for "paid").
+      // Last 10 receivable settlements (paid receivables).
       this.prisma.receivable.findMany({
-        where: { companyId: customer.companyId, customerId: id, status: 'CLOSED' as any, deletedAt: null },
+        where: { companyId: customer.companyId, customerId: id, status: 'PAID', deletedAt: null },
         orderBy: { updatedAt: 'desc' },
         take: 10,
         select: {

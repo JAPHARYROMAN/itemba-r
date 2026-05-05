@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { DocumentPreviewLink } from '@/components/documents';
 import { Btn, Card, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
 
@@ -191,7 +192,10 @@ export default function WestsidesCustomersPage() {
                     <td className={`${tdCls} text-right tabular-nums`}>TZS {fmt(c.creditLimit)}</td>
                     <td className={`${tdCls} text-right tabular-nums`}>TZS {fmt(c.currentBalance)}</td>
                     <td className={tdCls}>
-                      <Link href={`/westsides/customers/${c.id}`} className="text-brand-600 hover:underline text-sm font-medium">Open 360° →</Link>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link href={`/westsides/customers/${c.id}`} className="text-brand-600 hover:underline text-sm font-medium">Open 360° →</Link>
+                        <DocumentPreviewLink href={`/westsides/customers/${c.id}/print`} />
+                      </div>
                     </td>
                   </tr>
                 ))}

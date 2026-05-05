@@ -33,7 +33,16 @@ export class DivisionsService {
         _count: { select: { branches: true } },
         branches: {
           where: { deletedAt: null },
-          select: { id: true, name: true, code: true, type: true, location: true, isActive: true },
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            type: true,
+            location: true,
+            address: true,
+            phone: true,
+            isActive: true,
+          },
           orderBy: { name: 'asc' },
         },
       },
@@ -68,11 +77,32 @@ export class DivisionsService {
     if (dto.companyId !== undefined && dto.companyId !== existing.companyId) {
       await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     }
+    if (dto.isActive === false) {
+      const [, division] = await this.prisma.$transaction([
+        this.prisma.branch.updateMany({
+          where: { divisionId: id, deletedAt: null },
+          data: { isActive: false },
+        }),
+        this.prisma.division.update({ where: { id }, data: dto }),
+      ]);
+      return division;
+    }
     return this.prisma.division.update({ where: { id }, data: dto });
   }
 
   async remove(id: string, user: AuthUser) {
     await this.findOne(id, user, AccessLevel.WRITE);
-    return this.prisma.division.update({ where: { id }, data: { deletedAt: new Date() } });
+    const now = new Date();
+    const [, division] = await this.prisma.$transaction([
+      this.prisma.branch.updateMany({
+        where: { divisionId: id, deletedAt: null },
+        data: { deletedAt: now, isActive: false },
+      }),
+      this.prisma.division.update({
+        where: { id },
+        data: { deletedAt: now, isActive: false },
+      }),
+    ]);
+    return division;
   }
 }

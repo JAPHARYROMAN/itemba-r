@@ -131,7 +131,30 @@ export class SalesOrdersService {
     const record = await this.prisma.salesOrder.findFirst({
       where: { id, deletedAt: null },
       include: {
-        company: { select: { id: true, name: true, code: true } },
+        company: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            phone: true,
+            email: true,
+            website: true,
+            logoUrl: true,
+            group: { select: { name: true, code: true, address: true, phone: true, email: true, website: true } },
+            profile: {
+              select: {
+                registeredName: true,
+                tradingName: true,
+                brelaRegNumber: true,
+                tin: true,
+                vrn: true,
+                registeredAddress: true,
+                postalAddress: true,
+              },
+            },
+          },
+        },
+        branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
         customer: { select: { id: true, name: true } },
         createdBy: { select: { id: true, fullName: true } },
         confirmedBy: { select: { id: true, fullName: true } },

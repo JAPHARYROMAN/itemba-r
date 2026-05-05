@@ -29,8 +29,8 @@ export class ProformaInvoicesController {
   @Get(':id')
   @RequirePermissions('proformas.view')
   @ApiOperation({ summary: 'Get proforma invoice with lines' })
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Patch(':id/send')

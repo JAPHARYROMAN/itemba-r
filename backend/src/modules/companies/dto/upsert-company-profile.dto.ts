@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsDateString, IsEnum, IsDecimal } from 'class-validator';
+import { IsOptional, IsString, IsEnum, IsDecimal } from 'class-validator';
 import { CompanyStatus, CurrencyCode } from '@prisma/client';
 
 export class UpsertCompanyProfileDto {
@@ -8,7 +8,7 @@ export class UpsertCompanyProfileDto {
   @IsString() tin!: string;
   @IsOptional() @IsString() vrn?: string;
   @IsOptional() @IsString() businessLicenseNumber?: string;
-  @IsOptional() @IsDateString() incorporationDate?: string;
+  @IsOptional() @IsString() incorporationDate?: string;
   @IsString() registeredAddress!: string;
   @IsOptional() @IsString() postalAddress?: string;
   @IsOptional() @IsString() taxOffice?: string;

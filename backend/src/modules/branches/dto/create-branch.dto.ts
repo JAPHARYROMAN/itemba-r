@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
 import { BranchType } from '@prisma/client';
 
 export class CreateBranchDto {
@@ -7,4 +7,7 @@ export class CreateBranchDto {
   @IsString() code!: string;
   @IsEnum(BranchType) type!: BranchType;
   @IsOptional() @IsString() location?: string;
+  @IsOptional() @IsString() address?: string;
+  @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
 }

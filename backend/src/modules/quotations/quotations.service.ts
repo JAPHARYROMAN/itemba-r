@@ -102,10 +102,44 @@ export class QuotationsService {
     return { data, total, page, limit };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: any) {
+    const where: any = { id, deletedAt: null };
+    if (user) applyCompanyScopeWhere(where, user);
     const record = await this.prisma.quotation.findFirst({
-      where: { id, deletedAt: null },
-      include: { lines: true },
+      where,
+      include: {
+        company: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            phone: true,
+            email: true,
+            website: true,
+            logoUrl: true,
+            group: { select: { name: true, code: true, address: true, phone: true, email: true, website: true } },
+            profile: {
+              select: {
+                registeredName: true,
+                tradingName: true,
+                brelaRegNumber: true,
+                tin: true,
+                vrn: true,
+                registeredAddress: true,
+                postalAddress: true,
+              },
+            },
+          },
+        },
+        branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
+        customer: { select: { id: true, name: true, customerCode: true, phone: true, email: true, address: true, contactPerson: true } },
+        lines: {
+          include: {
+            product: { select: { id: true, name: true, sku: true, productCode: true } },
+            unit: { select: { id: true, name: true, symbol: true } },
+          },
+        },
+      },
     });
     if (!record) throw new NotFoundException('Quotation not found');
     return record;

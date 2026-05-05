@@ -1,10 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
+import { AuthShell } from '@/components/auth/AuthShell';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('admin@itemba.local');
-  const [password, setPassword] = useState('ChangeMe!123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -23,82 +26,91 @@ export default function LoginPage() {
         setError(data?.message ?? 'Login failed');
         return;
       }
-      // Redirect to dashboard — auth context will bootstrap from /api/auth/me
       window.location.href = '/dashboard';
     } catch {
-      setError('Network error — please try again.');
+      setError('Network error. Please try again.');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
-      <div className="w-full max-w-md">
-        {/* Logo */}
-        <div className="flex items-center gap-3 mb-8 justify-center">
-          <div className="w-11 h-11 rounded-lg bg-blue-600 text-white font-bold flex items-center justify-center text-lg select-none">
-            IR
-          </div>
-          <div>
-            <div className="text-xl font-bold text-slate-900">ITEMBA-R</div>
-            <div className="text-xs text-slate-500">Group Digital Governance</div>
-          </div>
-        </div>
-
-        {/* Card */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
-          <h1 className="text-xl font-semibold text-slate-900 mb-1">Sign in</h1>
-          <p className="text-sm text-slate-500 mb-6">Use your organisational credentials.</p>
-
-          <form onSubmit={handleSubmit} noValidate>
-            <div className="mb-4">
-              <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1">
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            <div className="mb-4">
-              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            {error && (
-              <div className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              style={{ opacity: loading ? 0.6 : 1 }}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-md transition-colors"
-            >
-              {loading ? 'Signing in…' : 'Sign in'}
-            </button>
-          </form>
-        </div>
+    <AuthShell
+      eyebrow="Secure workspace"
+      title="Sign in to the Itemba operating system."
+      subtitle="Access company records, approvals, documents, dashboards, and branch workflows from one controlled workspace."
+      footer={
+        <>
+          Need an account?{' '}
+          <Link href="/signup" className="font-semibold text-emerald-700 hover:text-emerald-800">
+            Request access
+          </Link>
+        </>
+      }
+    >
+      <div className="mb-7">
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Welcome back</div>
+        <h2 className="mt-3 text-2xl font-semibold text-slate-950">Account sign in</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          Use the email and password assigned to your Itemba Group user profile.
+        </p>
       </div>
-    </main>
+
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        <div>
+          <label htmlFor="email" className="block text-sm font-medium text-slate-800">
+            Email address
+          </label>
+          <input
+            id="email"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            placeholder="name@itembagrouptz.com"
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+          />
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <label htmlFor="password" className="block text-sm font-medium text-slate-800">
+              Password
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowPassword((value) => !value)}
+              className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+            >
+              {showPassword ? 'Hide' : 'Show'}
+            </button>
+          </div>
+          <input
+            id="password"
+            type={showPassword ? 'text' : 'password'}
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+          />
+        </div>
+
+        {error && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full rounded-md bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {loading ? 'Signing in...' : 'Sign in'}
+        </button>
+      </form>
+    </AuthShell>
   );
 }

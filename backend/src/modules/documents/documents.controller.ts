@@ -99,11 +99,13 @@ export class DocumentsController {
     @CurrentUser() user: AuthUser,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
+    @Query('inline') inline?: string,
   ) {
     const sf = await this.service.download(id, user, req.ip);
+    const disposition = inline === '1' || inline === 'true' ? 'inline' : 'attachment';
     res.set({
       'Content-Type': sf.doc.mimeType,
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(sf.doc.fileName)}"`,
+      'Content-Disposition': `${disposition}; filename="${encodeURIComponent(sf.doc.fileName)}"`,
     });
     return sf;
   }

@@ -45,7 +45,7 @@ export class CompaniesService {
         take: limit,
         orderBy: { name: 'asc' },
         include: {
-          group: { select: { id: true, name: true, code: true } },
+          group: { select: { id: true, name: true, code: true, address: true, phone: true, email: true, website: true } },
           profile: {
             select: {
               registeredName: true,
@@ -77,7 +77,7 @@ export class CompaniesService {
     const company = await this.prisma.company.findFirst({
       where: { id, deletedAt: null },
       include: {
-        group: { select: { id: true, name: true, code: true } },
+        group: { select: { id: true, name: true, code: true, address: true, phone: true, email: true, website: true } },
         profile: true,
         divisions: {
           where: { deletedAt: null },
@@ -93,6 +93,8 @@ export class CompaniesService {
                 code: true,
                 type: true,
                 location: true,
+                address: true,
+                phone: true,
                 isActive: true,
               },
             },
@@ -134,7 +136,19 @@ export class CompaniesService {
 
   async remove(id: string, user: AuthUser) {
     await this.findOne(id, user, AccessLevel.MANAGE);
-    return this.prisma.company.update({ where: { id }, data: { deletedAt: new Date() } });
+    const now = new Date();
+    const [, , company] = await this.prisma.$transaction([
+      this.prisma.branch.updateMany({
+        where: { deletedAt: null, division: { companyId: id } },
+        data: { deletedAt: now, isActive: false },
+      }),
+      this.prisma.division.updateMany({
+        where: { companyId: id, deletedAt: null },
+        data: { deletedAt: now, isActive: false },
+      }),
+      this.prisma.company.update({ where: { id }, data: { deletedAt: now } }),
+    ]);
+    return company;
   }
 
   // ── Legal Profile ──────────────────────────────────────────────────────────

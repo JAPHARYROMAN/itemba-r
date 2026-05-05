@@ -37,8 +37,8 @@ async function bootstrap() {
     }),
   );
 
-  // Order matters: Prisma filter runs before the generic HTTP filter.
-  app.useGlobalFilters(new PrismaExceptionFilter(), new HttpExceptionFilter());
+  // Order matters: Nest checks global filters in reverse registration order.
+  app.useGlobalFilters(new HttpExceptionFilter(), new PrismaExceptionFilter());
   app.useGlobalInterceptors(new LoggingInterceptor(), new TransformInterceptor());
 
   if (!isProd) {

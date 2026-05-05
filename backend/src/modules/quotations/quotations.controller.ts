@@ -29,8 +29,8 @@ export class QuotationsController {
   @Get(':id')
   @RequirePermissions('quotations.view')
   @ApiOperation({ summary: 'Get quotation with lines' })
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Patch(':id/send')

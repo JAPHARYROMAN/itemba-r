@@ -139,6 +139,37 @@ async function requestJson<T>(url: string, opts: FetchOpts = {}): Promise<T> {
   return unwrapApiPayload<T>(json);
 }
 
+async function requestFormData<T>(
+  url: string,
+  formData: FormData,
+  opts: Omit<FetchOpts, 'body'> = {},
+): Promise<T> {
+  const { token, headers, query: _query, ...rest } = opts;
+  const method = (rest.method ?? 'POST').toUpperCase();
+  const csrfToken =
+    typeof window !== 'undefined' && UNSAFE_METHODS.has(method) && url.startsWith(BACKEND_PROXY_URL)
+      ? readCookie('itemba_csrf')
+      : undefined;
+
+  const res = await fetch(url, {
+    ...rest,
+    method,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+      ...headers,
+    },
+    body: formData,
+    cache: rest.cache ?? 'no-store',
+  });
+
+  const json = await parseJson(res);
+  if (!res.ok) {
+    throw new ApiError(messageFromPayload(json, `Request failed: ${res.status}`), res.status, json);
+  }
+  return unwrapApiPayload<T>(json);
+}
+
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export async function apiFetch<T>(path: string, opts: FetchOpts = {}): Promise<T> {
@@ -174,6 +205,14 @@ export function backendPut<T>(path: string, body?: unknown, opts: FetchOpts = {}
 
 export function backendPatch<T>(path: string, body?: unknown, opts: FetchOpts = {}) {
   return backendFetch<T>(path, { ...opts, method: 'PATCH', body });
+}
+
+export function backendUpload<T>(path: string, formData: FormData, opts: Omit<FetchOpts, 'body'> = {}) {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return requestFormData<T>(`${BACKEND_PROXY_URL}${withQuery(normalizedPath, opts.query)}`, formData, {
+    ...opts,
+    method: opts.method ?? 'POST',
+  });
 }
 
 export function backendDelete<T>(path: string, opts: FetchOpts = {}) {

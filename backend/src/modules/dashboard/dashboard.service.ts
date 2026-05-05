@@ -1,16 +1,28 @@
 import { Injectable } from '@nestjs/common';
 import { AuditSeverity } from '@prisma/client';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { CompanyScopedWhere, CompanyScopeService } from '../../common/services';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly companyScope: CompanyScopeService,
+  ) {}
 
-  async getExecutiveSummary() {
+  async getExecutiveSummary(user: AuthUser, companyId?: string) {
+    const scope = await this.companyScope.companyWhereFor(user, companyId);
+    const companyWhere = companyEntityWhere(scope, { deletedAt: null });
+    const branchWhere = branchEntityWhere(scope, { deletedAt: null });
+    const scopedDeletedWhere = scopedWhere(scope, { deletedAt: null });
     const now = new Date();
-    const in30 = new Date(now); in30.setDate(now.getDate() + 30);
-    const in60 = new Date(now); in60.setDate(now.getDate() + 60);
-    const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+    const in30 = new Date(now);
+    in30.setDate(now.getDate() + 30);
+    const in60 = new Date(now);
+    in60.setDate(now.getDate() + 60);
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
 
     const [
       // ── Overview ──────────────────────────────────────────────────────
@@ -65,76 +77,109 @@ export class DashboardService {
       alertHighRiskLoans,
     ] = await Promise.all([
       // Overview
-      this.prisma.company.count({ where: { deletedAt: null } }),
-      this.prisma.division.count({ where: { deletedAt: null } }),
-      this.prisma.branch.count({ where: { deletedAt: null } }),
-      this.prisma.user.count({ where: { deletedAt: null, status: 'ACTIVE' } }),
+      this.prisma.company.count({ where: companyWhere }),
+      this.prisma.division.count({ where: scopedDeletedWhere }),
+      this.prisma.branch.count({ where: branchWhere }),
+      this.prisma.user.count({ where: scopedWhere(scope, { deletedAt: null, status: 'ACTIVE' }) }),
 
       // Bank accounts
-      this.prisma.bankAccount.count({ where: { deletedAt: null } }),
-      this.prisma.bankAccount.count({ where: { deletedAt: null, isActive: true } }),
+      this.prisma.bankAccount.count({ where: scopedDeletedWhere }),
+      this.prisma.bankAccount.count({
+        where: scopedWhere(scope, { deletedAt: null, isActive: true }),
+      }),
 
       // Loans
-      this.prisma.loan.count({ where: { deletedAt: null, status: 'ACTIVE' } }),
+      this.prisma.loan.count({ where: scopedWhere(scope, { deletedAt: null, status: 'ACTIVE' }) }),
       this.prisma.loan.aggregate({
-        where: { deletedAt: null, status: 'ACTIVE' },
+        where: scopedWhere(scope, { deletedAt: null, status: 'ACTIVE' }),
         _sum: { outstandingBalance: true },
       }),
       this.prisma.loan.count({
-        where: { deletedAt: null, status: 'ACTIVE', maturityDate: { lt: now } },
+        where: scopedWhere(scope, {
+          deletedAt: null,
+          status: 'ACTIVE',
+          maturityDate: { lt: now },
+        }),
       }),
 
       // Debts
-      this.prisma.debt.count({ where: { deletedAt: null, status: 'OUTSTANDING' } }),
+      this.prisma.debt.count({
+        where: scopedWhere(scope, { deletedAt: null, status: 'OUTSTANDING' }),
+      }),
       this.prisma.debt.aggregate({
-        where: { deletedAt: null, status: 'OUTSTANDING' },
+        where: scopedWhere(scope, { deletedAt: null, status: 'OUTSTANDING' }),
         _sum: { amount: true },
       }),
 
       // Contracts
-      this.prisma.contract.count({ where: { deletedAt: null, status: 'ACTIVE' } }),
       this.prisma.contract.count({
-        where: { deletedAt: null, status: 'ACTIVE', endDate: { gte: now, lte: in30 } },
+        where: scopedWhere(scope, { deletedAt: null, status: 'ACTIVE' }),
       }),
       this.prisma.contract.count({
-        where: { deletedAt: null, status: 'ACTIVE', endDate: { gte: now, lte: in60 } },
+        where: scopedWhere(scope, {
+          deletedAt: null,
+          status: 'ACTIVE',
+          endDate: { gte: now, lte: in30 },
+        }),
       }),
-      this.prisma.contract.count({ where: { deletedAt: null, status: 'PENDING_APPROVAL' } }),
+      this.prisma.contract.count({
+        where: scopedWhere(scope, {
+          deletedAt: null,
+          status: 'ACTIVE',
+          endDate: { gte: now, lte: in60 },
+        }),
+      }),
+      this.prisma.contract.count({
+        where: scopedWhere(scope, { deletedAt: null, status: 'PENDING_APPROVAL' }),
+      }),
 
       // Fixed assets
-      this.prisma.fixedAsset.count({ where: { deletedAt: null, status: 'ACTIVE' } }),
+      this.prisma.fixedAsset.count({
+        where: scopedWhere(scope, { deletedAt: null, status: 'ACTIVE' }),
+      }),
       this.prisma.fixedAsset.aggregate({
-        where: { deletedAt: null, status: 'ACTIVE' },
+        where: scopedWhere(scope, { deletedAt: null, status: 'ACTIVE' }),
         _sum: { currentBookValue: true },
       }),
       this.prisma.fixedAsset.count({
-        where: { deletedAt: null, collateralStatus: 'USED_AS_COLLATERAL' },
+        where: scopedWhere(scope, { deletedAt: null, collateralStatus: 'USED_AS_COLLATERAL' }),
       }),
       this.prisma.fixedAsset.count({
-        where: { deletedAt: null, status: 'ACTIVE', insuranceStatus: 'NOT_INSURED' },
+        where: scopedWhere(scope, {
+          deletedAt: null,
+          status: 'ACTIVE',
+          insuranceStatus: 'NOT_INSURED',
+        }),
       }),
       this.prisma.fixedAsset.count({
-        where: { deletedAt: null, status: 'DISPOSED' },
+        where: scopedWhere(scope, { deletedAt: null, status: 'DISPOSED' }),
       }),
 
       // Documents
-      this.prisma.document.count({ where: { deletedAt: null } }),
-      this.prisma.document.count({ where: { deletedAt: null, isConfidential: true } }),
+      this.prisma.document.count({ where: scopedDeletedWhere }),
       this.prisma.document.count({
-        where: {
+        where: scopedWhere(scope, { deletedAt: null, isConfidential: true }),
+      }),
+      this.prisma.document.count({
+        where: scopedWhere(scope, {
           deletedAt: null,
           expiryDate: { gte: now, lte: in60 },
           status: { not: 'ARCHIVED' },
-        },
+        }),
       }),
 
       // Audit logs
-      this.prisma.auditLog.count({ where: { createdAt: { gte: yesterday } } }),
+      this.prisma.auditLog.count({ where: scopedWhere(scope, { createdAt: { gte: yesterday } }) }),
       this.prisma.auditLog.count({
-        where: { createdAt: { gte: yesterday }, severity: AuditSeverity.CRITICAL },
+        where: scopedWhere(scope, {
+          createdAt: { gte: yesterday },
+          severity: AuditSeverity.CRITICAL,
+        }),
       }),
       this.prisma.auditLog.findMany({
-        where: { severity: { in: [AuditSeverity.CRITICAL, AuditSeverity.HIGH] } },
+        where: scopedWhere(scope, {
+          severity: { in: [AuditSeverity.CRITICAL, AuditSeverity.HIGH] },
+        }),
         orderBy: { createdAt: 'desc' },
         take: 8,
         include: {
@@ -145,7 +190,7 @@ export class DashboardService {
 
       // Companies with divisions
       this.prisma.company.findMany({
-        where: { deletedAt: null },
+        where: companyWhere,
         select: {
           id: true,
           name: true,
@@ -163,18 +208,35 @@ export class DashboardService {
 
       // Alerts: contracts expiring in 60 days
       this.prisma.contract.findMany({
-        where: { deletedAt: null, status: 'ACTIVE', endDate: { gte: now, lte: in60 } },
-        select: { id: true, title: true, endDate: true, counterpartyName: true, contractType: true },
+        where: scopedWhere(scope, {
+          deletedAt: null,
+          status: 'ACTIVE',
+          endDate: { gte: now, lte: in60 },
+        }),
+        select: {
+          id: true,
+          title: true,
+          endDate: true,
+          counterpartyName: true,
+          contractType: true,
+        },
         orderBy: { endDate: 'asc' },
         take: 10,
       }),
 
       // Alerts: loans maturing within 60 days
       this.prisma.loan.findMany({
-        where: { deletedAt: null, status: 'ACTIVE', maturityDate: { gte: now, lte: in60 } },
+        where: scopedWhere(scope, {
+          deletedAt: null,
+          status: 'ACTIVE',
+          maturityDate: { gte: now, lte: in60 },
+        }),
         select: {
-          id: true, lenderName: true, maturityDate: true,
-          outstandingBalance: true, currency: true,
+          id: true,
+          lenderName: true,
+          maturityDate: true,
+          outstandingBalance: true,
+          currency: true,
         },
         orderBy: { maturityDate: 'asc' },
         take: 10,
@@ -182,10 +244,11 @@ export class DashboardService {
 
       // Alerts: expiring documents in 60 days
       this.prisma.document.findMany({
-        where: {
-          deletedAt: null, status: { not: 'ARCHIVED' },
+        where: scopedWhere(scope, {
+          deletedAt: null,
+          status: { not: 'ARCHIVED' },
           expiryDate: { gte: now, lte: in60 },
-        },
+        }),
         select: { id: true, title: true, category: true, expiryDate: true },
         orderBy: { expiryDate: 'asc' },
         take: 10,
@@ -193,10 +256,14 @@ export class DashboardService {
 
       // Alerts: high-risk loans
       this.prisma.loan.findMany({
-        where: { deletedAt: null, status: 'ACTIVE', riskLevel: 'HIGH' },
+        where: scopedWhere(scope, { deletedAt: null, status: 'ACTIVE', riskLevel: 'HIGH' }),
         select: {
-          id: true, lenderName: true, riskLevel: true,
-          outstandingBalance: true, currency: true, maturityDate: true,
+          id: true,
+          lenderName: true,
+          riskLevel: true,
+          outstandingBalance: true,
+          currency: true,
+          maturityDate: true,
         },
         orderBy: { outstandingBalance: 'desc' },
         take: 5,
@@ -251,12 +318,12 @@ export class DashboardService {
       },
       companies,
       alerts: {
-        expiringContracts: alertContracts.map(c => ({
+        expiringContracts: alertContracts.map((c) => ({
           ...c,
           daysLeft: daysUntil(c.endDate ? new Date(c.endDate) : null),
         })),
         upcomingMaturities: alertLoans,
-        expiringDocuments: alertDocuments.map(d => ({
+        expiringDocuments: alertDocuments.map((d) => ({
           ...d,
           daysLeft: daysUntil(d.expiryDate ? new Date(d.expiryDate) : null),
         })),
@@ -265,4 +332,22 @@ export class DashboardService {
       recentActivity,
     };
   }
+}
+
+function scopedWhere(scope: CompanyScopedWhere, where: Record<string, unknown> = {}) {
+  return { ...where, ...scope };
+}
+
+function companyEntityWhere(scope: CompanyScopedWhere, where: Record<string, unknown> = {}) {
+  if (scope.companyId !== undefined) {
+    return { ...where, id: scope.companyId };
+  }
+  return scopedWhere(scope, where);
+}
+
+function branchEntityWhere(scope: CompanyScopedWhere, where: Record<string, unknown> = {}) {
+  if (scope.companyId !== undefined) {
+    return { ...where, division: { companyId: scope.companyId } };
+  }
+  return scopedWhere(scope, where);
 }

@@ -283,8 +283,15 @@ export default function DashboardPage() {
       return;
     }
 
+    if (!canViewControl) {
+      setData(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     void loadSummary();
-  }, [authLoading, user, loadSummary]);
+  }, [authLoading, user, canViewControl, loadSummary]);
 
   const now = new Date();
   const greeting =
@@ -397,7 +404,7 @@ export default function DashboardPage() {
             variant="secondary"
             onClick={loadSummary}
             loading={loading && Boolean(data)}
-            disabled={authLoading || !user}
+            disabled={authLoading || !user || !canViewControl}
           >
             Refresh
           </AuroraButton>
@@ -424,7 +431,10 @@ export default function DashboardPage() {
                     >
                       {item.label}
                     </p>
-                    <p className="mt-2 aurora-metric text-2xl" style={{ color: 'var(--aurora-text)' }}>
+                    <p
+                      className="mt-2 aurora-metric text-2xl"
+                      style={{ color: 'var(--aurora-text)' }}
+                    >
                       {item.value}
                     </p>
                     <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
@@ -446,6 +456,9 @@ export default function DashboardPage() {
           description={`Failed to load: ${error}`}
           className="mx-6 mt-6"
         />
+      )}
+      {!loading && !error && user && !canViewControl && (
+        <RestrictedDataState requiredPermission="group-control.view" className="mx-6 mt-6" />
       )}
 
       {data && (

@@ -203,9 +203,35 @@ function assertDeploymentShape(target, config) {
     'CORS_ORIGIN',
     'REDIS_PASSWORD',
     'JOB_WORKER_ENABLED',
+    'STORAGE_LOCAL_PATH',
+    'BACKUP_STORAGE_PATH',
+    'BACKUPS_DIR',
   ]) {
     assert(target, backend.environment?.[envKey], `backend has ${envKey}`);
   }
+
+  for (const envKey of [
+    'SMTP_HOST',
+    'SMTP_PORT',
+    'SMTP_SECURE',
+    'SMTP_USER',
+    'SMTP_PASS',
+    'SMTP_FROM',
+    'AT_API_KEY',
+    'AT_USERNAME',
+    'MPESA_CONSUMER_KEY',
+    'MPESA_CONSUMER_SECRET',
+  ]) {
+    assert(
+      target,
+      Object.prototype.hasOwnProperty.call(backend.environment ?? {}, envKey),
+      `backend declares optional external integration env ${envKey}`,
+    );
+  }
+
+  const backendVolumes = (backend.volumes ?? []).map((volume) => volume.target ?? '');
+  assert(target, backendVolumes.includes('/app/storage'), 'backend mounts persistent file storage');
+  assert(target, backendVolumes.includes('/app/backups'), 'backend mounts persistent backups');
 
   assert(target, redis.environment?.REDIS_PASSWORD, 'redis has password environment');
   assert(
@@ -229,16 +255,8 @@ function assertDeploymentShape(target, config) {
     frontend.build?.args?.BACKEND_INTERNAL_URL,
     'frontend build receives BACKEND_INTERNAL_URL',
   );
-  assert(
-    target,
-    frontend.environment?.BACKEND_INTERNAL_URL,
-    'frontend has internal backend URL',
-  );
-  assert(
-    target,
-    frontend.environment?.NEXT_PUBLIC_API_URL,
-    'frontend has public API URL',
-  );
+  assert(target, frontend.environment?.BACKEND_INTERNAL_URL, 'frontend has internal backend URL');
+  assert(target, frontend.environment?.NEXT_PUBLIC_API_URL, 'frontend has public API URL');
 
   for (const serviceName of ['postgres', 'redis', 'backend', 'frontend']) {
     assert(target, services[serviceName].healthcheck?.test, `${serviceName} has a healthcheck`);

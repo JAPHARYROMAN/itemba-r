@@ -55,7 +55,8 @@ COPY --from=builder /app/database/prisma /app/database/prisma
 
 COPY --from=builder /app/backend/dist ./dist
 
-RUN chown -R app:app /app
+RUN mkdir -p /app/storage /app/backups /app/backend/uploads \
+ && chown -R app:app /app
 
 USER app
 EXPOSE 3001

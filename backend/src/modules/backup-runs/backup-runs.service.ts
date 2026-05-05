@@ -23,6 +23,16 @@ function buildSelect(canDownload: boolean) {
   };
 }
 
+function serializeBackupRun(record: Record<string, any>) {
+  return {
+    ...record,
+    fileSizeBytes:
+      record.fileSizeBytes === null || record.fileSizeBytes === undefined
+        ? record.fileSizeBytes
+        : record.fileSizeBytes.toString(),
+  };
+}
+
 function hasPermission(user: any, perm: string): boolean {
   return Array.isArray(user?.permissions) && user.permissions.includes(perm);
 }
@@ -44,17 +54,26 @@ export class BackupRunsService {
     const canDownload = hasPermission(user, 'backup_runs.download');
 
     const [data, total] = await Promise.all([
-      this.prisma.backupRun.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' }, select: buildSelect(canDownload) }),
+      this.prisma.backupRun.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
+        select: buildSelect(canDownload),
+      }),
       this.prisma.backupRun.count({ where }),
     ]);
-    return { data, total, page: Number(page), limit: Number(limit) };
+    return { data: data.map(serializeBackupRun), total, page: Number(page), limit: Number(limit) };
   }
 
   async findOne(id: string, user: any) {
     const canDownload = hasPermission(user, 'backup_runs.download');
-    const record = await this.prisma.backupRun.findFirst({ where: { id }, select: buildSelect(canDownload) });
+    const record = await this.prisma.backupRun.findFirst({
+      where: { id },
+      select: buildSelect(canDownload),
+    });
     if (!record) throw new NotFoundException('Backup run not found');
-    return record;
+    return serializeBackupRun(record);
   }
 
   async create(dto: any, userId: string) {

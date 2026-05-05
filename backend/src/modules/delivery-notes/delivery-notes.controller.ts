@@ -29,8 +29,8 @@ export class DeliveryNotesController {
   @Get(':id')
   @RequirePermissions('delivery_notes.view')
   @ApiOperation({ summary: 'Get delivery note with lines' })
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Patch(':id/dispatch')

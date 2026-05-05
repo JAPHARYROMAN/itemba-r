@@ -68,13 +68,17 @@ const dynamicRoutes = pageRoutes.filter((route) => routeKind(route) === 'dynamic
 const dynamicFixtures = loadDynamicFixtures();
 
 const missingFixtures = dynamicRoutes.filter((route) => !dynamicFixtures.has(route));
-const unusedFixtures = [...dynamicFixtures.keys()].filter((route) => !dynamicRoutes.includes(route));
+const unusedFixtures = [...dynamicFixtures.keys()].filter(
+  (route) => !dynamicRoutes.includes(route),
+);
 const invalidFixtures = [...dynamicFixtures.entries()].filter(
   ([, route]) => !route.startsWith('/') || route.includes('['),
 );
 
 if (pageRoutes.length < MIN_PAGE_ROUTES) {
-  console.error(`frontend route smoke coverage too low: ${pageRoutes.length} page routes < ${MIN_PAGE_ROUTES}`);
+  console.error(
+    `frontend route smoke coverage too low: ${pageRoutes.length} page routes < ${MIN_PAGE_ROUTES}`,
+  );
   process.exit(1);
 }
 
@@ -106,7 +110,10 @@ const results = await mapLimit(routes, CONCURRENCY, async (route) => {
     });
     const html = await response.text();
     const errorSignature = ERROR_SIGNATURES.find((signature) => html.includes(signature));
-    const statusOk = route.kind === 'dynamic' ? response.status === 200 || response.status === 404 : response.status === 200;
+    const statusOk =
+      route.kind === 'dynamic'
+        ? response.status === 200 || response.status === 404
+        : response.status === 200;
     return {
       ...route,
       status: response.status,
@@ -130,6 +137,6 @@ if (failures.length > 0) {
   process.exitCode = 1;
 } else {
   console.log(
-    `frontend route smoke: OK (${staticRoutes.length} static routes, ${dynamicRoutes.length} dynamic samples)`,
+    `frontend route smoke: OK (${staticRoutes.length} static routes, ${dynamicRoutes.length} dynamic samples; dynamic samples validate rendering/404 tolerance, not real record correctness)`,
   );
 }

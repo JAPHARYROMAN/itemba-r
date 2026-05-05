@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { DocumentPreviewLink } from '@/components/documents';
 import { Btn, Card, PageHeader, PageSpinner, StatusBadge } from '@/components/ui';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -120,6 +121,9 @@ export default function CustomerProfilePage() {
           { label: 'Customers', href: '/westsides/customers' },
           { label: customer.name },
         ]}
+        actions={
+          <DocumentPreviewLink href={`/westsides/customers/${customer.id}/print`} />
+        }
       />
 
       {/* Summary tiles */}

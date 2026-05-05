@@ -23,6 +23,19 @@ Use this checklist before deploying to production.
 - [ ] All new endpoints have permission guards
 - [ ] Audit logging in place for all sensitive actions
 
+### Public Domain & Email
+- [ ] Domain purchased or transferred to managed DNS
+- [ ] `staging.itembagrouptz.com`, `api-staging.itembagrouptz.com`, `app.itembagrouptz.com`, and `api.itembagrouptz.com` resolve to the deployment target
+- [ ] TLS certificates are active for every public hostname
+- [ ] `.env.staging` and `.env.production` use HTTPS public URLs, not localhost
+- [ ] `npm run verify:public-env -- staging` passes
+- [ ] `npm run verify:public-env -- production` passes
+- [ ] `npm run verify:domain-dns -- staging` passes
+- [ ] `npm run verify:domain-dns -- production` passes
+- [ ] Domain email is configured with MX, SPF, DKIM, and DMARC
+- [ ] `SMTP_FROM` uses the organization domain
+- [ ] Live SMTP smoke passes for staging and production
+
 ### Performance
 - [ ] New endpoints have pagination
 - [ ] New queries use company scope filters
@@ -39,6 +52,18 @@ Use this checklist before deploying to production.
 - [ ] Frontend Docker image builds successfully
 - [ ] `npm run verify:deploy` passes
 - [ ] Production Compose smoke passes in CI, or locally with `npm run smoke:deploy -- --allow-local`
+
+### Smoke Coverage
+- [ ] Auth flow passes: `npm run smoke:auth-flow`
+- [ ] Authenticated dashboard data passes: `npm run smoke:authenticated-dashboard-data`
+- [ ] Current live staging dashboard correctness passes without deleting volumes: `npm run smoke:live-dashboard-data -- .env.staging`
+- [ ] Registry API CRUD passes: `npm run smoke:registry-crud`
+- [ ] Registry browser CRUD passes: `npm run smoke:registry-ui`
+- [ ] Document print and generated PDF letterhead passes: `npm run smoke:document-print`
+- [ ] Dynamic frontend records pass: `npm run smoke:dynamic-frontend-records`
+- [ ] File persistence passes: `npm run smoke:file-persistence`
+- [ ] Backup/restore artifact verification passes: `npm run smoke:backup-restore-artifact`
+- [ ] Current live staging storage/backup check passes without deleting volumes: `npm run smoke:live-storage-backup -- .env.staging`
 
 ## Deployment
 

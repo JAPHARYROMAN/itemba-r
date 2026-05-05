@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
 import { DivisionType } from '@prisma/client';
 
 export class CreateDivisionDto {
@@ -7,4 +7,5 @@ export class CreateDivisionDto {
   @IsString() code!: string;
   @IsEnum(DivisionType) type!: DivisionType;
   @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
 }

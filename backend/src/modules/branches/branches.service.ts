@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AccessLevel, Prisma } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
@@ -23,7 +23,7 @@ export class BranchesService {
 
   async findAll(user: AuthUser, args: FindAllBranchesArgs = {}) {
     const where: Prisma.BranchWhereInput = { deletedAt: null };
-    const divisionWhere: Prisma.DivisionWhereInput = {};
+    const divisionWhere: Prisma.DivisionWhereInput = { deletedAt: null };
 
     if (args.divisionId) where.divisionId = args.divisionId;
     if (args.companyId) {
@@ -35,8 +35,11 @@ export class BranchesService {
         divisionWhere.companyId = { in: accessibleCompanyIds };
       }
     }
-    if (args.activeOnly) where.isActive = true;
-    if (Object.keys(divisionWhere).length > 0) where.division = divisionWhere;
+    if (args.activeOnly) {
+      where.isActive = true;
+      divisionWhere.isActive = true;
+    }
+    where.division = divisionWhere;
 
     return this.prisma.branch.findMany({
       where,
@@ -47,7 +50,7 @@ export class BranchesService {
 
   async findOne(id: string, user: AuthUser, minimumAccess: AccessLevel = AccessLevel.READ) {
     const branch = await this.prisma.branch.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: null, division: { deletedAt: null } },
       include: { division: { include: { company: true } } },
     });
     if (!branch) throw new NotFoundException(`Branch ${id} not found`);
@@ -66,12 +69,18 @@ export class BranchesService {
   }
 
   async update(id: string, dto: UpdateBranchDto, user: AuthUser) {
-    await this.findOne(id, user, AccessLevel.WRITE);
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (dto.isActive === true && !existing.division.isActive) {
+      throw new BadRequestException('Cannot activate a branch whose parent division is inactive');
+    }
     return this.prisma.branch.update({ where: { id }, data: dto });
   }
 
   async remove(id: string, user: AuthUser) {
     await this.findOne(id, user, AccessLevel.WRITE);
-    return this.prisma.branch.delete({ where: { id } });
+    return this.prisma.branch.update({
+      where: { id },
+      data: { deletedAt: new Date(), isActive: false },
+    });
   }
 }

@@ -42,7 +42,13 @@ export class BackupRunJobHandler implements OnModuleInit {
       (ctx.payload.backupRunId as string | undefined) ?? ctx.correlationId ?? null;
     if (!backupRunId) throw new Error('payload.backupRunId is required');
 
-    const backupsDir = process.env.BACKUPS_DIR ?? path.join(process.cwd(), 'uploads', 'backups');
+    const backupsDir =
+      process.env.BACKUPS_DIR ??
+      process.env.BACKUP_STORAGE_PATH ??
+      path.join(
+        process.env.STORAGE_LOCAL_PATH ?? process.env.LOCAL_STORAGE_PATH ?? process.cwd(),
+        'backups',
+      );
     await fs.mkdir(backupsDir, { recursive: true });
 
     const databaseUrl = process.env.DATABASE_URL;

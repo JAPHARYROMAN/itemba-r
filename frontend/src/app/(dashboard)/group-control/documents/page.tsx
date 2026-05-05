@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { backendUpload } from '@/lib/api-client';
 
 interface Company { id: string; name: string; code: string }
 
@@ -83,8 +84,7 @@ function UploadModal({ companies, onClose, onSaved }: { companies: Company[]; on
       fd.append('isConfidential', form.isConfidential ? 'true' : 'false');
       if (form.expiryDate) fd.append('expiryDate', form.expiryDate);
       if (form.renewalDate) fd.append('renewalDate', form.renewalDate);
-      const res = await fetch('/api/backend/documents/upload', { method: 'POST', body: fd });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Upload failed'); }
+      await backendUpload('/documents/upload', fd);
       onSaved();
     } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Failed'); }
     finally { setSaving(false); }

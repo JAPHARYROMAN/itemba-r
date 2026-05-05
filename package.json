@@ -12,9 +12,25 @@
     "verify:frontend:local": "pwsh -File scripts/build-all.ps1 -SkipBackend -SkipInstall",
     "verify:env": "node scripts/validate-env-contract.mjs",
     "verify:deploy": "node scripts/validate-env-contract.mjs && node scripts/validate-deployment.mjs",
-    "smoke:deploy": "node scripts/smoke-compose-deployment.mjs"
+    "verify:public-env": "node scripts/validate-public-env.mjs",
+    "verify:domain-dns": "node scripts/validate-domain-dns.mjs",
+    "smoke:deploy": "node scripts/smoke-compose-deployment.mjs",
+    "smoke:file-persistence": "node scripts/smoke-file-persistence.mjs",
+    "smoke:backup-restore-artifact": "node scripts/smoke-backup-restore-artifact.mjs",
+    "smoke:live-storage-backup": "node scripts/smoke-live-storage-backup.mjs",
+    "smoke:external-integrations": "node scripts/smoke-external-integrations.mjs",
+    "smoke:external-integrations:live": "node scripts/smoke-live-integration-gate.mjs",
+    "smoke:auth-flow": "node scripts/smoke-auth-flow.mjs",
+    "smoke:authenticated-dashboard-data": "node scripts/smoke-authenticated-dashboard-data.mjs",
+    "smoke:live-dashboard-data": "node scripts/smoke-live-dashboard-data.mjs",
+    "smoke:registry-crud": "node scripts/smoke-registry-crud.mjs",
+    "smoke:registry-ui": "playwright test scripts/smoke-registry-ui.spec.mjs --reporter=line",
+    "smoke:document-print": "playwright test scripts/smoke-document-print.spec.mjs --reporter=line",
+    "smoke:dynamic-frontend-records": "node scripts/smoke-dynamic-frontend-records.mjs",
+    "smoke:frontend-routes": "npm --prefix frontend run smoke:routes"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "prisma": "^5.22.0"
   },
   "dependencies": {

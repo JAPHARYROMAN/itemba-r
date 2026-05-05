@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { DocumentPreviewLink } from '@/components/documents';
 import { Card, PageHeader } from '@/components/ui';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -218,6 +219,7 @@ export default function QuotationsPage() {
                         <td className={tdCls}><Badge status={q.status} /></td>
                         <td className="px-4 py-2">
                           <div className="flex items-center gap-2">
+                            <DocumentPreviewLink href={`/westsides/quotations/${q.id}/print`} />
                             <button onClick={() => { setEditing(q); setModalOpen(true); }} className="text-xs text-indigo-600 hover:text-indigo-800">Edit</button>
                             {actions.map((a) => (
                               <button

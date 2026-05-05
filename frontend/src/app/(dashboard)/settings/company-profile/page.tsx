@@ -1,39 +1,98 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, PageHeader, FormInput, FormSelect, FormTextarea, DateInput, Btn } from '@/components/ui';
+import { backendGet, backendPage, backendPatch, backendPut, backendUpload } from '@/lib/api-client';
+import { documentOrganization } from '@/components/documents';
 
-interface Company { id: string; name: string; code: string; }
+interface CompanySummary {
+  id: string;
+  name: string;
+  code: string;
+}
+
+interface CompanyDetail extends CompanySummary {
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  logoUrl?: string | null;
+  group?: {
+    id: string;
+    name?: string | null;
+    code?: string | null;
+    address?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    website?: string | null;
+  } | null;
+  profile?: CompanyProfile | null;
+  divisions?: Array<{
+    id: string;
+    name: string;
+    branches?: Branch[];
+  }>;
+}
+
+interface Branch {
+  id: string;
+  name?: string | null;
+  code?: string | null;
+  location?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  isActive?: boolean;
+}
+
+interface CompanyIdentityForm {
+  name: string;
+  phone: string;
+  email: string;
+  website: string;
+  logoUrl: string;
+}
+
+interface BranchForm {
+  name: string;
+  location: string;
+  address: string;
+  phone: string;
+}
 
 interface CompanyProfile {
   id?: string;
   companyId?: string;
   registeredName: string;
-  tradingName?: string;
+  tradingName?: string | null;
   brelaRegNumber: string;
   tin: string;
-  vrn?: string;
-  businessLicenseNumber?: string;
-  incorporationDate?: string;
+  vrn?: string | null;
+  businessLicenseNumber?: string | null;
+  incorporationDate?: string | null;
   registeredAddress: string;
-  postalAddress?: string;
-  taxOffice?: string;
-  natureOfBusiness?: string;
-  authorizedCapital?: string;
-  currency?: string;
-  status?: string;
-  notes?: string;
+  postalAddress?: string | null;
+  taxOffice?: string | null;
+  natureOfBusiness?: string | null;
+  authorizedCapital?: string | null;
+  currency?: string | null;
+  status?: string | null;
+  notes?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
 
+interface UploadedDocument {
+  id: string;
+  fileName: string;
+  mimeType: string;
+}
+
 const CURRENCIES = [
-  { value: 'TZS', label: 'TZS — Tanzanian Shilling' },
-  { value: 'USD', label: 'USD — US Dollar' },
-  { value: 'EUR', label: 'EUR — Euro' },
-  { value: 'GBP', label: 'GBP — British Pound' },
-  { value: 'KES', label: 'KES — Kenyan Shilling' },
-  { value: 'UGX', label: 'UGX — Ugandan Shilling' },
+  { value: 'TZS', label: 'TZS - Tanzanian Shilling' },
+  { value: 'USD', label: 'USD - US Dollar' },
+  { value: 'EUR', label: 'EUR - Euro' },
+  { value: 'GBP', label: 'GBP - British Pound' },
+  { value: 'KES', label: 'KES - Kenyan Shilling' },
+  { value: 'UGX', label: 'UGX - Ugandan Shilling' },
 ];
 
 const STATUSES = [
@@ -41,6 +100,21 @@ const STATUSES = [
   { value: 'INACTIVE', label: 'Inactive' },
   { value: 'SUSPENDED', label: 'Suspended' },
 ];
+
+const EMPTY_COMPANY: CompanyIdentityForm = {
+  name: '',
+  phone: '',
+  email: '',
+  website: '',
+  logoUrl: '',
+};
+
+const EMPTY_BRANCH: BranchForm = {
+  name: '',
+  location: '',
+  address: '',
+  phone: '',
+};
 
 const EMPTY_PROFILE: CompanyProfile = {
   registeredName: '',
@@ -61,114 +135,214 @@ const EMPTY_PROFILE: CompanyProfile = {
 };
 
 export default function CompanyProfilePage() {
-  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companies, setCompanies] = useState<CompanySummary[]>([]);
   const [companyId, setCompanyId] = useState('');
+  const [company, setCompany] = useState<CompanyDetail | null>(null);
+  const [companyForm, setCompanyForm] = useState<CompanyIdentityForm>(EMPTY_COMPANY);
   const [profile, setProfile] = useState<CompanyProfile>(EMPTY_PROFILE);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [branchId, setBranchId] = useState('');
+  const [branchForm, setBranchForm] = useState<BranchForm>(EMPTY_BRANCH);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
-  const [isNew, setIsNew] = useState(false);
+  const [isNewProfile, setIsNewProfile] = useState(false);
 
-  // Load companies once.
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
-      .then((r) => r.json())
-      .then((j) => {
-        const inner = j.data?.data ?? j.data;
-        const rows: Company[] = Array.isArray(inner) ? inner : Array.isArray(inner?.data) ? inner.data : [];
-        setCompanies(rows);
-      })
-      .catch(() => {});
+    backendPage<CompanySummary>('/companies', { query: { limit: 100 } })
+      .then((page) => setCompanies(page.data))
+      .catch(() => setCompanies([]));
   }, []);
 
-  const loadProfile = useCallback(async () => {
+  const loadLetterhead = useCallback(async () => {
     if (!companyId) return;
-    setLoading(true); setError(''); setInfo('');
+    setLoading(true);
+    setError('');
+    setInfo('');
     try {
-      const res = await fetch(`/api/backend/companies/${companyId}/profile`);
-      if (res.status === 404) {
-        // Profile doesn't exist yet — start with empty. Keep companyId so save creates it.
-        setProfile({ ...EMPTY_PROFILE });
-        setIsNew(true);
-        setInfo('No profile yet — fill in the legal details and save to create one.');
-        return;
-      }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const data = json.data ?? json;
-      setProfile({
-        ...EMPTY_PROFILE,
-        ...data,
-        incorporationDate: data.incorporationDate ? String(data.incorporationDate).slice(0, 10) : '',
-        authorizedCapital: data.authorizedCapital !== null && data.authorizedCapital !== undefined ? String(data.authorizedCapital) : '',
+      const detail = await backendGet<CompanyDetail>(`/companies/${companyId}`);
+      const flattenedBranches = (detail.divisions ?? [])
+        .flatMap((division) => division.branches ?? [])
+        .filter((branch) => branch.id);
+      const firstBranch = flattenedBranches[0] ?? null;
+
+      setCompany(detail);
+      setCompanyForm({
+        name: detail.name ?? '',
+        phone: detail.phone ?? '',
+        email: detail.email ?? '',
+        website: detail.website ?? '',
+        logoUrl: detail.logoUrl ?? '',
       });
-      setIsNew(false);
+      setProfile(toProfileForm(detail.profile));
+      setIsNewProfile(!detail.profile);
+      setBranches(flattenedBranches);
+      setBranchId(firstBranch?.id ?? '');
+      setBranchForm(toBranchForm(firstBranch));
+      if (!detail.profile) setInfo('Fill the letterhead fields and save to create this company profile.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load profile');
+      setCompany(null);
+      setBranches([]);
+      setBranchId('');
+      setError(err instanceof Error ? err.message : 'Failed to load company letterhead');
     } finally {
       setLoading(false);
     }
   }, [companyId]);
 
-  useEffect(() => { loadProfile(); }, [loadProfile]);
+  useEffect(() => {
+    loadLetterhead();
+  }, [loadLetterhead]);
 
-  const update = <K extends keyof CompanyProfile>(key: K, value: CompanyProfile[K]) => {
-    setProfile((p) => ({ ...p, [key]: value }));
+  const selectedBranch = branches.find((branch) => branch.id === branchId) ?? null;
+  const previewCompany = useMemo(
+    () => ({
+      ...company,
+      ...companyForm,
+      profile,
+    }),
+    [company, companyForm, profile],
+  );
+  const previewBranch = useMemo(
+    () => selectedBranch ? { ...selectedBranch, ...branchForm } : null,
+    [branchForm, selectedBranch],
+  );
+  const organization = documentOrganization(previewCompany, previewBranch);
+
+  function updateCompany<K extends keyof CompanyIdentityForm>(key: K, value: CompanyIdentityForm[K]) {
+    setCompanyForm((current) => ({ ...current, [key]: value }));
     setInfo('');
-  };
+  }
 
-  const save = async () => {
-    if (!companyId) return;
-    setSaving(true); setError(''); setInfo('');
+  function updateProfile<K extends keyof CompanyProfile>(key: K, value: CompanyProfile[K]) {
+    setProfile((current) => ({ ...current, [key]: value }));
+    setInfo('');
+  }
+
+  function updateBranch<K extends keyof BranchForm>(key: K, value: BranchForm[K]) {
+    setBranchForm((current) => ({ ...current, [key]: value }));
+    setInfo('');
+  }
+
+  function selectBranch(nextBranchId: string) {
+    setBranchId(nextBranchId);
+    setBranchForm(toBranchForm(branches.find((branch) => branch.id === nextBranchId) ?? null));
+    setInfo('');
+  }
+
+  async function uploadLogo(file: File | null) {
+    if (!file || !companyId) return;
+    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+      setError('Logo must be a PNG or JPEG image.');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setError('Logo image must be 2 MB or smaller.');
+      return;
+    }
+
+    setUploadingLogo(true);
+    setError('');
+    setInfo('');
     try {
-      const body: Record<string, unknown> = { ...profile };
-      // Strip undefined / empty optional strings the backend doesn't want.
-      if (!body.tradingName) delete body.tradingName;
-      if (!body.vrn) delete body.vrn;
-      if (!body.businessLicenseNumber) delete body.businessLicenseNumber;
-      if (!body.incorporationDate) delete body.incorporationDate;
-      if (!body.postalAddress) delete body.postalAddress;
-      if (!body.taxOffice) delete body.taxOffice;
-      if (!body.natureOfBusiness) delete body.natureOfBusiness;
-      if (!body.authorizedCapital) delete body.authorizedCapital;
-      if (!body.notes) delete body.notes;
-      // Drop server-managed fields.
-      delete body.id;
-      delete body.companyId;
-      delete body.createdAt;
-      delete body.updatedAt;
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('title', `${companyForm.name || company?.name || 'Company'} Letterhead Logo`);
+      formData.append('category', 'OTHER');
+      formData.append('ownerType', 'COMPANY');
+      formData.append('ownerId', companyId);
+      formData.append('companyId', companyId);
+      formData.append('description', 'Company letterhead logo');
 
-      const res = await fetch(`/api/backend/companies/${companyId}/profile`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j?.message ?? `HTTP ${res.status}`);
-      }
-      setInfo(isNew ? 'Profile created.' : 'Profile saved.');
-      setIsNew(false);
-      // Re-fetch to surface server-side normalized values.
-      await loadProfile();
+      const document = await backendUpload<UploadedDocument>('/documents/upload', formData);
+      const logoUrl = `/api/backend/documents/${document.id}/download?inline=1`;
+      setCompanyForm((current) => ({ ...current, logoUrl }));
+      setCompany((current) => current ? { ...current, logoUrl } : current);
+      await backendPatch(`/companies/${companyId}`, { logoUrl });
+      setInfo('Logo uploaded and linked to this company.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      setError(err instanceof Error ? err.message : 'Failed to upload logo');
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
+
+  async function save() {
+    if (!companyId) return;
+    if (!companyForm.name.trim()) {
+      setError('Company name is required.');
+      return;
+    }
+    if (!profile.registeredName.trim() || !profile.brelaRegNumber.trim() || !profile.tin.trim() || !profile.registeredAddress.trim()) {
+      setError('Registered name, BRELA number, TIN, and registered address are required.');
+      return;
+    }
+    if (branchId && !branchForm.name.trim()) {
+      setError('Branch name is required when a branch is selected.');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    setInfo('');
+    try {
+      await backendPatch(`/companies/${companyId}`, {
+        name: cleanRequired(companyForm.name),
+        phone: cleanOptional(companyForm.phone),
+        email: cleanOptional(companyForm.email),
+        website: cleanOptional(companyForm.website),
+        logoUrl: cleanOptional(companyForm.logoUrl),
+      });
+
+      await backendPut(`/companies/${companyId}/profile`, {
+        registeredName: cleanRequired(profile.registeredName),
+        tradingName: cleanOptional(profile.tradingName),
+        brelaRegNumber: cleanRequired(profile.brelaRegNumber),
+        tin: cleanRequired(profile.tin),
+        vrn: cleanOptional(profile.vrn),
+        businessLicenseNumber: cleanOptional(profile.businessLicenseNumber),
+        incorporationDate: cleanOptional(profile.incorporationDate),
+        registeredAddress: cleanRequired(profile.registeredAddress),
+        postalAddress: cleanOptional(profile.postalAddress),
+        taxOffice: cleanOptional(profile.taxOffice),
+        natureOfBusiness: cleanOptional(profile.natureOfBusiness),
+        authorizedCapital: cleanOptional(profile.authorizedCapital),
+        currency: profile.currency || 'TZS',
+        status: profile.status || 'ACTIVE',
+        notes: cleanOptional(profile.notes),
+      });
+
+      if (branchId) {
+        await backendPatch(`/branches/${branchId}`, {
+          name: cleanRequired(branchForm.name),
+          location: cleanOptional(branchForm.location),
+          address: cleanOptional(branchForm.address),
+          phone: cleanOptional(branchForm.phone),
+        });
+      }
+
+      setInfo(isNewProfile ? 'Letterhead profile created.' : 'Letterhead settings saved.');
+      setIsNewProfile(false);
+      await loadLetterhead();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save letterhead settings');
     } finally {
       setSaving(false);
     }
-  };
+  }
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="space-y-5 p-6">
       <PageHeader
-        title="Company Profile"
-        subtitle="Legal identity, tax registration, and currency for a single company."
-        breadcrumbs={[{ label: 'Settings', href: '/settings' }, { label: 'Company Profile' }]}
+        title="Company Letterhead"
+        subtitle="Edit the identity used by document previews, generated PDFs, invoices, orders, and print views."
+        breadcrumbs={[{ label: 'Settings', href: '/settings' }, { label: 'Company Letterhead' }]}
         actions={
           <div className="flex items-center gap-2">
-            <Btn variant="secondary" onClick={loadProfile} disabled={!companyId || loading}>Reload</Btn>
-            <Btn onClick={save} disabled={!companyId || saving || loading}>{saving ? 'Saving…' : isNew ? 'Create Profile' : 'Save'}</Btn>
+            <Btn variant="secondary" onClick={loadLetterhead} disabled={!companyId || loading}>Reload</Btn>
+            <Btn onClick={save} disabled={!companyId || saving || loading}>{saving ? 'Saving...' : 'Save Letterhead'}</Btn>
           </div>
         }
       />
@@ -177,144 +351,348 @@ export default function CompanyProfilePage() {
         <FormSelect
           label="Company"
           value={companyId}
-          onChange={(e) => setCompanyId(e.target.value)}
+          onChange={(event) => setCompanyId(event.target.value)}
           required
-          placeholder="— Select Company —"
-          options={companies.map((c) => ({ value: c.id, label: c.name }))}
+          placeholder="- Select Company -"
+          options={companies.map((item) => ({ value: item.id, label: `${item.name} (${item.code})` }))}
         />
       </Card>
 
-      {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
-      {info && <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-700">{info}</div>}
-      {loading && <div className="flex justify-center py-10"><div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" /></div>}
+      {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+      {info && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{info}</div>}
+      {loading && <div className="flex justify-center py-10"><div className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" /></div>}
 
       {companyId && !loading && (
-        <>
-          <Card className="p-5 space-y-4">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Legal identity</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormInput
-                label="Registered Name"
-                value={profile.registeredName}
-                onChange={(e) => update('registeredName', e.target.value)}
-                required
-              />
-              <FormInput
-                label="Trading Name"
-                value={profile.tradingName ?? ''}
-                onChange={(e) => update('tradingName', e.target.value)}
-                hint="As-marketed name if different from registered."
-              />
-              <FormInput
-                label="BRELA Reg. Number"
-                value={profile.brelaRegNumber}
-                onChange={(e) => update('brelaRegNumber', e.target.value)}
-                required
-              />
-              <FormInput
-                label="Business License No."
-                value={profile.businessLicenseNumber ?? ''}
-                onChange={(e) => update('businessLicenseNumber', e.target.value)}
-              />
-              <DateInput
-                label="Incorporation Date"
-                value={profile.incorporationDate ?? ''}
-                onChange={(e) => update('incorporationDate', e.target.value)}
-              />
-              <FormInput
-                label="Nature of Business"
-                value={profile.natureOfBusiness ?? ''}
-                onChange={(e) => update('natureOfBusiness', e.target.value)}
-              />
-            </div>
-          </Card>
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+          <div className="space-y-5">
+            <Card className="space-y-4 p-5">
+              <SectionTitle title="Logo and Contact" />
+              <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center border border-slate-300 bg-white p-1 text-xs font-bold uppercase text-slate-700">
+                    {companyForm.logoUrl ? (
+                      <img src={companyForm.logoUrl} alt="Company logo" className="h-full w-full object-contain" />
+                    ) : (
+                      initials(companyForm.name || company?.group?.name || 'IR')
+                    )}
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">Managed Logo</div>
+                    <div className="text-xs text-slate-500">PNG or JPEG, up to 2 MB.</div>
+                  </div>
+                </div>
+                <label className="inline-flex cursor-pointer items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50">
+                  {uploadingLogo ? 'Uploading...' : 'Upload Logo'}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    className="sr-only"
+                    disabled={uploadingLogo}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] ?? null;
+                      event.currentTarget.value = '';
+                      void uploadLogo(file);
+                    }}
+                  />
+                </label>
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <FormInput
+                  label="Logo URL or Managed Path"
+                  value={companyForm.logoUrl}
+                  onChange={(event) => updateCompany('logoUrl', event.target.value)}
+                  placeholder="https://itembagrouptz.com/logo.png"
+                />
+                <FormInput
+                  label="Company Display Name"
+                  value={companyForm.name}
+                  onChange={(event) => updateCompany('name', event.target.value)}
+                  required
+                  placeholder="Mwanjalisi Oil Company Ltd"
+                />
+                <FormInput
+                  label="Telephone"
+                  value={companyForm.phone}
+                  onChange={(event) => updateCompany('phone', event.target.value)}
+                  placeholder="+255 XXX XXX XXX"
+                />
+                <FormInput
+                  label="Email"
+                  value={companyForm.email}
+                  onChange={(event) => updateCompany('email', event.target.value)}
+                  placeholder="info@itembagrouptz.com"
+                />
+                <FormInput
+                  label="Website"
+                  value={companyForm.website}
+                  onChange={(event) => updateCompany('website', event.target.value)}
+                  placeholder="https://itembagrouptz.com"
+                />
+                <FormInput
+                  label="Group"
+                  value={company?.group?.name ?? ''}
+                  disabled
+                  placeholder="ITEMBA GROUP"
+                />
+              </div>
+            </Card>
 
-          <Card className="p-5 space-y-4">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Tax registration</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormInput
-                label="TIN"
-                value={profile.tin}
-                onChange={(e) => update('tin', e.target.value)}
-                required
-                hint="Taxpayer Identification Number (TRA)."
-              />
-              <FormInput
-                label="VRN"
-                value={profile.vrn ?? ''}
-                onChange={(e) => update('vrn', e.target.value)}
-                hint="VAT Registration Number — only if VAT-registered."
-              />
-              <FormInput
-                label="Tax Office"
-                value={profile.taxOffice ?? ''}
-                onChange={(e) => update('taxOffice', e.target.value)}
-                hint="The TRA office that handles this company."
-              />
-            </div>
-          </Card>
+            <Card className="space-y-4 p-5">
+              <SectionTitle title="Legal and Tax Details" />
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <FormInput
+                  label="Registered Name"
+                  value={profile.registeredName}
+                  onChange={(event) => updateProfile('registeredName', event.target.value)}
+                  required
+                  placeholder="Mwanjalisi Oil Company Ltd"
+                />
+                <FormInput
+                  label="Trading Name"
+                  value={profile.tradingName ?? ''}
+                  onChange={(event) => updateProfile('tradingName', event.target.value)}
+                  placeholder="Itemba Group"
+                />
+                <FormInput
+                  label="BRELA Reg. Number"
+                  value={profile.brelaRegNumber}
+                  onChange={(event) => updateProfile('brelaRegNumber', event.target.value)}
+                  required
+                  placeholder="XXX XXX XXX"
+                />
+                <FormInput
+                  label="TIN"
+                  value={profile.tin}
+                  onChange={(event) => updateProfile('tin', event.target.value)}
+                  required
+                  placeholder="XXX XXX XXX"
+                />
+                <FormInput
+                  label="VRN"
+                  value={profile.vrn ?? ''}
+                  onChange={(event) => updateProfile('vrn', event.target.value)}
+                  placeholder="XXX XXX XXX"
+                />
+                <FormInput
+                  label="Business License No."
+                  value={profile.businessLicenseNumber ?? ''}
+                  onChange={(event) => updateProfile('businessLicenseNumber', event.target.value)}
+                  placeholder="XXX XXX XXX"
+                />
+                <DateInput
+                  label="Incorporation Date"
+                  value={profile.incorporationDate ?? ''}
+                  onChange={(event) => updateProfile('incorporationDate', event.target.value)}
+                />
+                <FormInput
+                  label="Tax Office"
+                  value={profile.taxOffice ?? ''}
+                  onChange={(event) => updateProfile('taxOffice', event.target.value)}
+                  placeholder="TRA office"
+                />
+              </div>
+            </Card>
 
-          <Card className="p-5 space-y-4">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Address</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Card className="space-y-4 p-5">
+              <SectionTitle title="Address and Defaults" />
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <FormTextarea
+                  label="Registered Address"
+                  value={profile.registeredAddress}
+                  onChange={(event) => updateProfile('registeredAddress', event.target.value)}
+                  required
+                  rows={2}
+                  placeholder="Tunduma - Mpemba Area, Songwe, Tanzania"
+                />
+                <FormTextarea
+                  label="Postal Address"
+                  value={profile.postalAddress ?? ''}
+                  onChange={(event) => updateProfile('postalAddress', event.target.value)}
+                  rows={2}
+                  placeholder="P.O. Box ..."
+                />
+                <FormInput
+                  label="Nature of Business"
+                  value={profile.natureOfBusiness ?? ''}
+                  onChange={(event) => updateProfile('natureOfBusiness', event.target.value)}
+                  placeholder="Oil and petroleum products"
+                />
+                <FormInput
+                  label="Authorized Capital"
+                  value={profile.authorizedCapital ?? ''}
+                  onChange={(event) => updateProfile('authorizedCapital', event.target.value)}
+                  placeholder="0.00"
+                  inputMode="decimal"
+                />
+                <FormSelect
+                  label="Default Currency"
+                  value={profile.currency ?? 'TZS'}
+                  onChange={(event) => updateProfile('currency', event.target.value)}
+                  options={CURRENCIES}
+                />
+                <FormSelect
+                  label="Status"
+                  value={profile.status ?? 'ACTIVE'}
+                  onChange={(event) => updateProfile('status', event.target.value)}
+                  options={STATUSES}
+                />
+              </div>
+            </Card>
+
+            <Card className="space-y-4 p-5">
+              <SectionTitle title="Branch Line" />
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <FormSelect
+                  label="Branch"
+                  value={branchId}
+                  onChange={(event) => selectBranch(event.target.value)}
+                  placeholder="- No branch -"
+                  options={branches.map((branch) => ({ value: branch.id, label: branch.name ?? branch.code ?? branch.id }))}
+                />
+                <FormInput
+                  label="Branch Name"
+                  value={branchForm.name}
+                  onChange={(event) => updateBranch('name', event.target.value)}
+                  disabled={!branchId}
+                  placeholder="Tunduma Main Branch"
+                />
+                <FormInput
+                  label="Branch Location"
+                  value={branchForm.location}
+                  onChange={(event) => updateBranch('location', event.target.value)}
+                  disabled={!branchId}
+                  placeholder="Tunduma"
+                />
+                <FormInput
+                  label="Branch Phone"
+                  value={branchForm.phone}
+                  onChange={(event) => updateBranch('phone', event.target.value)}
+                  disabled={!branchId}
+                  placeholder="+255 XXX XXX XXX"
+                />
+                <FormTextarea
+                  label="Branch Address"
+                  value={branchForm.address}
+                  onChange={(event) => updateBranch('address', event.target.value)}
+                  disabled={!branchId}
+                  rows={2}
+                  className="md:col-span-2"
+                  placeholder="Tunduma - Mpemba Area, Songwe, Tanzania"
+                />
+              </div>
+            </Card>
+
+            <Card className="space-y-4 p-5">
+              <SectionTitle title="Internal Notes" />
               <FormTextarea
-                label="Registered Address"
-                value={profile.registeredAddress}
-                onChange={(e) => update('registeredAddress', e.target.value)}
-                required
-                rows={2}
+                value={profile.notes ?? ''}
+                onChange={(event) => updateProfile('notes', event.target.value)}
+                rows={3}
+                placeholder="Internal notes"
               />
-              <FormTextarea
-                label="Postal Address"
-                value={profile.postalAddress ?? ''}
-                onChange={(e) => update('postalAddress', e.target.value)}
-                rows={2}
-              />
-            </div>
-          </Card>
+            </Card>
+          </div>
 
-          <Card className="p-5 space-y-4">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Financial defaults</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <FormSelect
-                label="Default Currency"
-                value={profile.currency ?? 'TZS'}
-                onChange={(e) => update('currency', e.target.value)}
-                options={CURRENCIES}
-              />
-              <FormInput
-                label="Authorized Capital"
-                value={profile.authorizedCapital ?? ''}
-                onChange={(e) => update('authorizedCapital', e.target.value)}
-                placeholder="0.00"
-                inputMode="decimal"
-              />
-              <FormSelect
-                label="Status"
-                value={profile.status ?? 'ACTIVE'}
-                onChange={(e) => update('status', e.target.value)}
-                options={STATUSES}
-              />
-            </div>
-          </Card>
-
-          <Card className="p-5 space-y-4">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Notes</div>
-            <FormTextarea
-              value={profile.notes ?? ''}
-              onChange={(e) => update('notes', e.target.value)}
-              rows={3}
-              placeholder="Internal notes about this company's setup, regulatory caveats, etc."
-            />
-          </Card>
-
-          {profile.updatedAt && (
-            <div className="text-[11px] text-slate-400">
-              Last updated {new Date(profile.updatedAt).toLocaleString()}
-            </div>
-          )}
-        </>
+          <div className="xl:sticky xl:top-5 xl:self-start">
+            <LetterheadPreview organization={organization} />
+          </div>
+        </div>
       )}
     </div>
   );
+}
+
+function LetterheadPreview({ organization }: { organization: ReturnType<typeof documentOrganization> }) {
+  return (
+    <Card className="p-5">
+      <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Preview</div>
+      <div className="border border-slate-200 bg-white p-5 text-slate-900 shadow-sm">
+        <div className="flex gap-4 border-b-2 border-slate-900 pb-4">
+          <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center border-2 border-slate-900 p-1 text-sm font-bold uppercase">
+            {organization.logoUrl ? (
+              <img src={organization.logoUrl} alt="Letterhead logo" className="h-full w-full object-contain" />
+            ) : (
+              initials(organization.groupName ?? organization.name)
+            )}
+          </div>
+          <div className="min-w-0 text-xs leading-5">
+            <div className="text-lg font-extrabold uppercase leading-tight text-slate-950">{organization.groupName}</div>
+            <div className="mt-0.5 text-sm font-bold leading-tight text-slate-900">{organization.name}</div>
+            {organization.branchName && <div className="mt-0.5 text-sm text-slate-700">{organization.branchName}</div>}
+            {organization.address && <div className="mt-2 text-slate-600">Address: {organization.address}</div>}
+            {(organization.phone || organization.email) && (
+              <div className="text-slate-600">
+                {[organization.phone ? `Tel: ${organization.phone}` : null, organization.email ? `Email: ${organization.email}` : null].filter(Boolean).join(' | ')}
+              </div>
+            )}
+            {(organization.tin || organization.vrn) && (
+              <div className="text-slate-600">
+                {[organization.tin ? `TIN: ${organization.tin}` : null, organization.vrn ? `VRN: ${organization.vrn}` : null].filter(Boolean).join(' | ')}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="mt-5">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Document</div>
+          <div className="mt-1 text-2xl font-bold text-slate-950">Sales Order</div>
+          <div className="mt-1 text-sm text-slate-500">SO-2026-000001</div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function SectionTitle({ title }: { title: string }) {
+  return <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</div>;
+}
+
+function toProfileForm(profile: CompanyProfile | null | undefined): CompanyProfile {
+  if (!profile) return { ...EMPTY_PROFILE };
+  return {
+    ...EMPTY_PROFILE,
+    ...profile,
+    tradingName: profile.tradingName ?? '',
+    vrn: profile.vrn ?? '',
+    businessLicenseNumber: profile.businessLicenseNumber ?? '',
+    incorporationDate: profile.incorporationDate ? String(profile.incorporationDate).slice(0, 10) : '',
+    postalAddress: profile.postalAddress ?? '',
+    taxOffice: profile.taxOffice ?? '',
+    natureOfBusiness: profile.natureOfBusiness ?? '',
+    authorizedCapital: profile.authorizedCapital !== null && profile.authorizedCapital !== undefined ? String(profile.authorizedCapital) : '',
+    currency: profile.currency ?? 'TZS',
+    status: profile.status ?? 'ACTIVE',
+    notes: profile.notes ?? '',
+  };
+}
+
+function toBranchForm(branch: Branch | null | undefined): BranchForm {
+  if (!branch) return { ...EMPTY_BRANCH };
+  return {
+    name: branch.name ?? '',
+    location: branch.location ?? '',
+    address: branch.address ?? '',
+    phone: branch.phone ?? '',
+  };
+}
+
+function cleanRequired(value: unknown) {
+  return String(value ?? '').trim();
+}
+
+function cleanOptional(value: unknown) {
+  const text = String(value ?? '').trim();
+  return text ? text : null;
+}
+
+function initials(name: string) {
+  const parts = name
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return 'IR';
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase();
 }

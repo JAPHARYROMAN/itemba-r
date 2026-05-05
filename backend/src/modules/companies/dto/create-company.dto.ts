@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsUUID, IsEnum, IsEmail, IsUrl } from 'class-validator';
+import { IsOptional, IsString, IsUUID, IsEnum, IsEmail } from 'class-validator';
 import { CompanyStatus } from '@prisma/client';
 
 export class CreateCompanyDto {
@@ -9,5 +9,6 @@ export class CreateCompanyDto {
   @IsOptional() @IsEnum(CompanyStatus) status?: CompanyStatus;
   @IsOptional() @IsString() phone?: string;
   @IsOptional() @IsEmail() email?: string;
-  @IsOptional() @IsUrl() website?: string;
+  @IsOptional() @IsString() website?: string;
+  @IsOptional() @IsString() logoUrl?: string;
 }
