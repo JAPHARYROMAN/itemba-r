@@ -2245,7 +2245,7 @@ async function main() {
   // Layered on top of M10's core authorities/types and tz-reference's payroll
   // bands. Adds WHT variants, VAT-0 / VAT-EXEMPT, City Service Levy, CIT,
   // provisional ITX, and the operator-facing tax codes.
-  const c1Admin = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@itemba.local' } });
+  const c1Admin = await prisma.user.findUniqueOrThrow({ where: { email: adminEmail } });
   await seedC1TaxExtensions(prisma, c1Admin.id);
 
   // ── Milestone 11 seed ──────────────────────────────────────────────────
@@ -4022,7 +4022,7 @@ async function main() {
   console.log(`   Divisions: ${divCount}`);
   console.log(`   Roles:     ${ROLES.length}`);
   console.log(`   Perms:     ${ALL_PERMISSIONS.length}`);
-  console.log(`   Admin:     ${adminEmail}  /  ${adminPassword}`);
+  console.log(`   Admin:     ${adminEmail}`);
 }
 
 main()
@@ -5832,7 +5832,8 @@ async function seedM9() {
   const mwanjalisi = await prisma.company.findFirst({ where: { code: 'MWANJALISI' } });
   const westsides = await prisma.company.findFirst({ where: { code: 'WESTSIDES' } });
   const itemba = await prisma.company.findFirst({ where: { code: 'ITEMBA_ENT' } });
-  const adminUser = await prisma.user.findFirst({ where: { email: 'admin@itemba.local' } });
+  const adminEmail = process.env.SEED_ADMIN_EMAIL ?? 'admin@itemba.local';
+  const adminUser = await prisma.user.findFirst({ where: { email: adminEmail } });
 
   if (!mwanjalisi || !westsides || !itemba || !adminUser) {
     console.warn('      M9: required companies or admin user not found — skipping.');
@@ -6539,7 +6540,8 @@ async function seedM10() {
   const mwanjalisi = await prisma.company.findUniqueOrThrow({ where: { code: 'MWANJALISI' } });
   const itemba = await prisma.company.findUniqueOrThrow({ where: { code: 'ITEMBA_ENT' } });
   const westsides = await prisma.company.findUniqueOrThrow({ where: { code: 'WESTSIDES' } });
-  const admin = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@itemba.local' } });
+  const adminEmail = process.env.SEED_ADMIN_EMAIL ?? 'admin@itemba.local';
+  const admin = await prisma.user.findUniqueOrThrow({ where: { email: adminEmail } });
 
   // ── Tax Authorities ─────────────────────────────────────────────────────
   const authDefs = [
@@ -7123,7 +7125,8 @@ async function seedM10() {
 async function seedM11() {
   console.log('Seeding M11: Approval Workflows, Notifications, Alerts, Internal Controls...');
 
-  const superAdmin = await prisma.user.findFirst({ where: { email: 'admin@itemba.local' } });
+  const adminEmail = process.env.SEED_ADMIN_EMAIL ?? 'admin@itemba.local';
+  const superAdmin = await prisma.user.findFirst({ where: { email: adminEmail } });
   const mwanjalisi = await prisma.company.findFirst({ where: { code: 'MWANJALISI' } });
   const westsides = await prisma.company.findFirst({ where: { code: 'WESTSIDES' } });
   const itembaEnt = await prisma.company.findFirst({ where: { code: 'ITEMBA_ENT' } });
