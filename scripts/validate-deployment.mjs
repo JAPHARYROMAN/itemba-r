@@ -43,6 +43,7 @@ const requiredSecretKeys = [
   'FRONTEND_URL',
   'CORS_ORIGIN',
   'NEXT_PUBLIC_API_URL',
+  'NEXT_PUBLIC_WEBSITE_URL',
 ];
 
 const sampleEnv = {
@@ -58,6 +59,7 @@ const sampleEnv = {
   FRONTEND_URL: 'https://app.validation.local',
   CORS_ORIGIN: 'https://app.validation.local',
   NEXT_PUBLIC_API_URL: 'https://api.validation.local/api/v1',
+  NEXT_PUBLIC_WEBSITE_URL: 'https://validation.local',
   BACKEND_INTERNAL_URL: 'http://backend:3001/api/v1',
   JOB_WORKER_ENABLED: 'true',
 };
@@ -252,11 +254,17 @@ function assertDeploymentShape(target, config) {
   );
   assert(
     target,
+    frontend.build?.args?.NEXT_PUBLIC_WEBSITE_URL,
+    'frontend build receives NEXT_PUBLIC_WEBSITE_URL',
+  );
+  assert(
+    target,
     frontend.build?.args?.BACKEND_INTERNAL_URL,
     'frontend build receives BACKEND_INTERNAL_URL',
   );
   assert(target, frontend.environment?.BACKEND_INTERNAL_URL, 'frontend has internal backend URL');
   assert(target, frontend.environment?.NEXT_PUBLIC_API_URL, 'frontend has public API URL');
+  assert(target, frontend.environment?.NEXT_PUBLIC_WEBSITE_URL, 'frontend has public website URL');
 
   for (const serviceName of ['postgres', 'redis', 'backend', 'frontend']) {
     assert(target, services[serviceName].healthcheck?.test, `${serviceName} has a healthcheck`);

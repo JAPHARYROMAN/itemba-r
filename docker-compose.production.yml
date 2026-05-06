@@ -121,6 +121,7 @@ services:
       args:
         BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:3001/api/v1}
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+        NEXT_PUBLIC_WEBSITE_URL: ${NEXT_PUBLIC_WEBSITE_URL:?NEXT_PUBLIC_WEBSITE_URL is required}
     container_name: itemba_r_frontend_prod
     restart: unless-stopped
     environment:
@@ -131,6 +132,8 @@ services:
       # Browser-public URL — only used by client-side code that needs an absolute
       # backend URL (rare; most browser calls go through the /api/backend/* proxy).
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+      # Public website URL shown from login/signup as the permanent group address.
+      NEXT_PUBLIC_WEBSITE_URL: ${NEXT_PUBLIC_WEBSITE_URL:?NEXT_PUBLIC_WEBSITE_URL is required}
     ports:
       - '3000:3000'
     depends_on:

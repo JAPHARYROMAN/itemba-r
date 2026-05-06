@@ -98,7 +98,7 @@ services:
       SMTP_SECURE: ${SMTP_SECURE:-false}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
-      SMTP_FROM: ${SMTP_FROM:-noreply@staging.itemba-r.co.tz}
+      SMTP_FROM: ${SMTP_FROM:-info@itembagrouptz.com}
       AT_API_KEY: ${AT_API_KEY:-}
       AT_USERNAME: ${AT_USERNAME:-}
       AT_SENDER_ID: ${AT_SENDER_ID:-}
@@ -141,6 +141,7 @@ services:
       args:
         BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:3001/api/v1}
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+        NEXT_PUBLIC_WEBSITE_URL: ${NEXT_PUBLIC_WEBSITE_URL:?NEXT_PUBLIC_WEBSITE_URL is required}
     container_name: itemba_r_frontend_staging
     restart: unless-stopped
     environment:
@@ -149,6 +150,8 @@ services:
       BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:3001/api/v1}
       # Browser-public URL (used only by client-side code that needs absolute URLs).
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+      # Public website URL shown from login/signup as the permanent group address.
+      NEXT_PUBLIC_WEBSITE_URL: ${NEXT_PUBLIC_WEBSITE_URL:?NEXT_PUBLIC_WEBSITE_URL is required}
     ports:
       - '3000:3000'
     depends_on:

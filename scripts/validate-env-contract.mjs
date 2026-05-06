@@ -27,6 +27,7 @@ const requiredKeys = [
   'FRONTEND_URL',
   'CORS_ORIGIN',
   'NEXT_PUBLIC_API_URL',
+  'NEXT_PUBLIC_WEBSITE_URL',
   'BACKEND_INTERNAL_URL',
 ];
 

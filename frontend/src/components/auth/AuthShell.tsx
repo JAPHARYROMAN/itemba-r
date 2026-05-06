@@ -10,6 +10,7 @@ interface AuthShellProps {
 }
 
 const ACCESS_POINTS = ['Governance', 'Operations', 'Finance', 'Documents'];
+const WEBSITE_URL = process.env.NEXT_PUBLIC_WEBSITE_URL ?? 'https://itembagrouptz.com';
 
 export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthShellProps) {
   return (
@@ -53,7 +54,14 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
             </div>
             <div className="rounded-lg border border-slate-200 bg-slate-950 px-4 py-3 text-sm text-white">
               <span className="font-semibold">Permanent address:</span>{' '}
-              <span className="text-slate-200">itembagrouptz.com</span>
+              <a
+                href={WEBSITE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-200 underline-offset-4 transition-colors hover:text-white hover:underline"
+              >
+                itembagrouptz.com
+              </a>
             </div>
           </div>
         </section>

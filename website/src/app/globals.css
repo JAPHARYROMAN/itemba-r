@@ -1,0 +1,157 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Base ─────────────────────────────────────────────────────────────── */
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(200, 134, 10, 0.3);
+  color: #ffffff;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #080f1e; }
+::-webkit-scrollbar-thumb { background: #243d60; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #c8860a; }
+
+/* ─── Focus rings (keyboard accessibility) ────────────────────────────── */
+*:focus { outline: none; }
+*:focus-visible {
+  outline: 2px solid #e8b52e;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* ─── Ambient hero background ─────────────────────────────────────────── */
+.hero-ambient {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.hero-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+  will-change: transform;
+}
+
+.hero-orb-gold {
+  width: 700px; height: 700px;
+  background: radial-gradient(circle, rgba(200, 134, 10, 0.18) 0%, transparent 70%);
+  top: -200px; right: -100px;
+  animation: float 10s ease-in-out infinite;
+}
+
+.hero-orb-blue {
+  width: 600px; height: 600px;
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.12) 0%, transparent 70%);
+  bottom: -150px; left: -100px;
+  animation: float 8s ease-in-out infinite reverse;
+}
+
+.hero-orb-violet {
+  width: 400px; height: 400px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.08) 0%, transparent 70%);
+  top: 40%; left: 35%;
+  animation: float 12s ease-in-out infinite;
+}
+
+/* ─── Grid overlay ────────────────────────────────────────────────────── */
+.grid-overlay {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, black 50%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, black 50%, transparent 100%);
+}
+
+/* ─── Animations ──────────────────────────────────────────────────────── */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%      { transform: translateY(-30px); }
+}
+
+/* ─── Card interactions ───────────────────────────────────────────────── */
+.company-card {
+  transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.company-card:hover {
+  transform: translateY(-10px) scale(1.01);
+  box-shadow: 0 40px 80px rgba(0, 0, 0, 0.5);
+}
+
+.sector-card { transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
+.sector-card:hover { transform: translateY(-4px); }
+
+/* ─── Image zoom on hover ─────────────────────────────────────────────── */
+.img-zoom img,
+.img-zoom .img-inner { transition: transform 0.7s cubic-bezier(0.22, 1, 0.36, 1); }
+.img-zoom:hover img,
+.img-zoom:hover .img-inner { transform: scale(1.06); }
+
+/* ─── Premium button polish ───────────────────────────────────────────── */
+.btn-primary {
+  position: relative;
+  isolation: isolate;
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.btn-primary:hover  { transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+
+/* ─── Gradient text ───────────────────────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, #f0cc6a 0%, #c8860a 50%, #f0cc6a 100%);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gradientX 4s ease infinite;
+}
+
+@keyframes gradientX {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
+/* ─── Separator line ──────────────────────────────────────────────────── */
+.gold-line {
+  width: 48px;
+  height: 3px;
+  background: linear-gradient(90deg, #c8860a, #f0cc6a);
+  border-radius: 2px;
+}
+
+/* ─── Stat value ──────────────────────────────────────────────────────── */
+.stat-number {
+  font-feature-settings: 'tnum';
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Section divider — subtle gradient on dark→light transitions ─────── */
+.section-divider-up {
+  background: linear-gradient(to bottom, #080f1e 0%, transparent 100%);
+}
+
+/* ─── Reduced motion support ──────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .hero-orb { animation: none !important; }
+  .gradient-text { animation: none !important; }
+}

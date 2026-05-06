@@ -21,6 +21,10 @@ const apiUrl = requiredUrl('NEXT_PUBLIC_API_URL', {
   requireApiPrefix: true,
   publicHttps: true,
 });
+const websiteUrl = requiredUrl('NEXT_PUBLIC_WEBSITE_URL', {
+  originOnly: true,
+  publicHttps: true,
+});
 validateCorsOrigin(frontendUrl);
 validateBackendInternalUrl();
 validateDomainEmail();
@@ -30,7 +34,7 @@ if (errors.length > 0) {
 }
 
 console.log(
-  `validate-public-env: OK ${envFile} (${frontendUrl.origin}, ${apiUrl.origin}${apiUrl.pathname})`,
+  `validate-public-env: OK ${envFile} (${frontendUrl.origin}, ${apiUrl.origin}${apiUrl.pathname}, ${websiteUrl.origin})`,
 );
 
 function parseArgs(argv, processEnv) {
