@@ -5,6 +5,35 @@
 name: itemba-r-staging
 
 services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: itemba_r_caddy_staging
+    restart: unless-stopped
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:-info@itembagrouptz.com}
+      APP_HOST: ${APP_HOST:-staging.itembagrouptz.com}
+      API_HOST: ${API_HOST:-api-staging.itembagrouptz.com}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - itemba_staging_network
+    healthcheck:
+      test: ['CMD-SHELL', 'caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   postgres:
     image: postgres:16-alpine
     container_name: itemba_r_postgres_staging
@@ -111,8 +140,8 @@ services:
       AIRTEL_CLIENT_ID: ${AIRTEL_CLIENT_ID:-}
       AIRTEL_CLIENT_SECRET: ${AIRTEL_CLIENT_SECRET:-}
       LOG_LEVEL: debug
-    ports:
-      - '3001:3001'
+    expose:
+      - '3001'
     volumes:
       - backend_staging_storage:/app/storage
       - backend_staging_backups:/app/backups
@@ -152,8 +181,8 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
       # Public website URL shown from login/signup as the permanent group address.
       NEXT_PUBLIC_WEBSITE_URL: ${NEXT_PUBLIC_WEBSITE_URL:?NEXT_PUBLIC_WEBSITE_URL is required}
-    ports:
-      - '3000:3000'
+    expose:
+      - '3000'
     depends_on:
       backend:
         condition: service_healthy
@@ -170,6 +199,8 @@ services:
       retries: 3
 
 volumes:
+  caddy_data:
+  caddy_config:
   postgres_staging_data:
   redis_staging_data:
   backend_staging_storage:

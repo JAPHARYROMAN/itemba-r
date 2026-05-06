@@ -1,6 +1,35 @@
 name: itemba-r-prod
 
 services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: itemba_r_caddy_prod
+    restart: unless-stopped
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:-info@itembagrouptz.com}
+      APP_HOST: ${APP_HOST:-app.itembagrouptz.com}
+      API_HOST: ${API_HOST:-api.itembagrouptz.com}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - itemba_network
+    healthcheck:
+      test: ['CMD-SHELL', 'caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   postgres:
     image: postgres:16-alpine
     container_name: itemba_r_postgres_prod
@@ -91,8 +120,8 @@ services:
       # P0-06: enable the BackgroundJob worker loop in production. Defaults to
       # off in dev so test suites don't process queued jobs unexpectedly.
       JOB_WORKER_ENABLED: ${JOB_WORKER_ENABLED:-true}
-    ports:
-      - '3001:3001'
+    expose:
+      - '3001'
     volumes:
       - backend_storage:/app/storage
       - backend_backups:/app/backups
@@ -134,8 +163,8 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
       # Public website URL shown from login/signup as the permanent group address.
       NEXT_PUBLIC_WEBSITE_URL: ${NEXT_PUBLIC_WEBSITE_URL:?NEXT_PUBLIC_WEBSITE_URL is required}
-    ports:
-      - '3000:3000'
+    expose:
+      - '3000'
     depends_on:
       backend:
         condition: service_healthy
@@ -169,6 +198,8 @@ services:
     command: sh -c 'redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"'
 
 volumes:
+  caddy_data:
+  caddy_config:
   postgres_data:
   redis_data:
   backend_storage:

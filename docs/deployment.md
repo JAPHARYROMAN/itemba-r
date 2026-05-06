@@ -28,6 +28,9 @@ and configure every deployment secret before starting Compose.
 | `CORS_ORIGIN` | Yes | Public frontend origin allowed by backend CORS |
 | `BACKEND_INTERNAL_URL` | Yes | Server-side backend URL used by Next.js API routes; must include `/api/v1` |
 | `NEXT_PUBLIC_API_URL` | Yes | Browser-public backend API URL; most browser calls should still use `/api/backend/*` |
+| `APP_HOST` | Yes | Hostname Caddy serves for the frontend, without `https://` |
+| `API_HOST` | Yes | Hostname Caddy serves for the backend API, without `https://` |
+| `ACME_EMAIL` | Yes | Email address used by Caddy for Let's Encrypt certificate registration |
 
 ### Public domain and email
 
@@ -48,10 +51,16 @@ CORS_ORIGIN=https://staging.itembagrouptz.com
 NEXT_PUBLIC_API_URL=https://api-staging.itembagrouptz.com/api/v1
 BACKEND_INTERNAL_URL=http://backend:3001/api/v1
 SMTP_FROM=info@itembagrouptz.com
+APP_HOST=staging.itembagrouptz.com
+API_HOST=api-staging.itembagrouptz.com
+ACME_EMAIL=info@itembagrouptz.com
 ```
 
 `BACKEND_INTERNAL_URL` intentionally stays on the Docker network name. It is used only by
 Next.js server routes and should not be changed to the public domain.
+Caddy terminates HTTPS for `APP_HOST` and `API_HOST`, then proxies traffic to the private
+Docker services. Frontend and backend ports should not be exposed directly to the public
+internet.
 
 Before go-live, validate the real env file:
 
@@ -168,7 +177,8 @@ waits for backend readiness, verifies the frontend login route, and then removes
 # Required at minimum:
 # POSTGRES_PASSWORD, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, REDIS_PASSWORD,
 # TWO_FACTOR_ENCRYPTION_KEY, REFRESH_TOKEN_PEPPER, APP_ENCRYPTION_KEY,
-# FRONTEND_URL, CORS_ORIGIN, BACKEND_INTERNAL_URL, NEXT_PUBLIC_API_URL
+# FRONTEND_URL, CORS_ORIGIN, BACKEND_INTERNAL_URL, NEXT_PUBLIC_API_URL,
+# NEXT_PUBLIC_WEBSITE_URL, APP_HOST, API_HOST, ACME_EMAIL
 
 # 2. Validate deployment contract
 npm run verify:deploy
@@ -186,6 +196,7 @@ docker exec itemba_r_backend_prod npm run db:seed
 - Frontend: `GET /login`
 - PostgreSQL: `pg_isready` check built into Docker healthcheck
 - Redis: authenticated `redis-cli ping` check built into Docker healthcheck
+- Caddy: `caddy validate` check built into Docker healthcheck
 
 ## Rollback
 1. In the Deployment → Releases UI, click Rollback on the failed release

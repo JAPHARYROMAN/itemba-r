@@ -1,0 +1,13 @@
+{
+	email {$ACME_EMAIL:info@itembagrouptz.com}
+}
+
+{$APP_HOST:app.itembagrouptz.com} {
+	encode zstd gzip
+	reverse_proxy frontend:3000
+}
+
+{$API_HOST:api.itembagrouptz.com} {
+	encode zstd gzip
+	reverse_proxy backend:3001
+}

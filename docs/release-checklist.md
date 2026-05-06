@@ -27,6 +27,7 @@ Use this checklist before deploying to production.
 - [ ] Domain purchased or transferred to managed DNS
 - [ ] `staging.itembagrouptz.com`, `api-staging.itembagrouptz.com`, `app.itembagrouptz.com`, and `api.itembagrouptz.com` resolve to the deployment target
 - [ ] TLS certificates are active for every public hostname
+- [ ] Caddy is the only service exposing public web ports `80` and `443`
 - [ ] `.env.staging` and `.env.production` use HTTPS public URLs, not localhost
 - [ ] `npm run verify:public-env -- staging` passes
 - [ ] `npm run verify:public-env -- production` passes
@@ -114,3 +115,4 @@ Use this checklist before deploying to production.
 | Frontend | 3000 | HTTP 200 on `/login` |
 | PostgreSQL | 5432 | `pg_isready` |
 | Redis | 6379 | authenticated `redis-cli ping` |
+| Caddy | 80/443 | `caddy validate` |
