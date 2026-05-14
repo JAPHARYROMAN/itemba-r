@@ -1,16 +1,26 @@
 import Link from 'next/link';
 import Image from 'next/image';
+import {
+  companyProfiles,
+  companyUrl,
+  locationProfiles,
+  locationUrl,
+  serviceAreas,
+  serviceUrl,
+} from '@/lib/site';
 
 const links = {
-  Group:     [{ label: 'Home', href: '/' }, { label: 'About Us', href: '/about' }, { label: 'Contact', href: '/contact' }],
-  Companies: [{ label: 'Mwanjalisi Oil Co Ltd', href: '/companies#mwanjalisi' }, { label: 'Westsides Company Ltd', href: '/companies#westsides' }, { label: 'Itemba Enterprises Co Ltd', href: '/companies#enterprises' }],
+  Group:     [{ label: 'Home', href: '/' }, { label: 'About Us', href: '/about' }, { label: 'Capabilities', href: '/capabilities' }, { label: 'Insights', href: '/insights' }, { label: 'Company Profile', href: '/company-profile' }, { label: 'Partnerships', href: '/partnerships' }, { label: 'FAQ', href: '/faq' }, { label: 'Contact', href: '/contact' }],
+  Services: serviceAreas.map((service) => ({ label: service.shortTitle, href: serviceUrl(service.slug) })),
+  Locations: locationProfiles.map((location) => ({ label: location.shortTitle, href: locationUrl(location.slug) })),
+  Companies: companyProfiles.map((company) => ({ label: company.name, href: companyUrl(company.slug) })),
 };
 
 export default function Footer() {
   return (
     <footer className="bg-ink-950 text-slate-400 border-t border-ink-700">
       <div className="max-w-7xl mx-auto px-5 sm:px-8 py-16">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-10 mb-12">
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-10 mb-12">
           {/* Brand */}
           <div className="md:col-span-2">
             <div className="mb-5">
@@ -57,7 +67,7 @@ export default function Footer() {
 
           {/* Link columns */}
           {Object.entries(links).map(([section, items]) => (
-            <div key={section}>
+            <nav key={section} aria-label={`${section} footer links`}>
               <h3 className="text-white font-semibold text-xs uppercase tracking-widest mb-4">{section}</h3>
               <ul className="space-y-2.5">
                 {items.map((item) => (
@@ -68,7 +78,7 @@ export default function Footer() {
                   </li>
                 ))}
               </ul>
-            </div>
+            </nav>
           ))}
         </div>
 

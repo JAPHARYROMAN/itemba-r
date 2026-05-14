@@ -41,6 +41,12 @@ export default function NotFound() {
           >
             Our Companies
           </Link>
+          <Link
+            href="/services"
+            className="btn-primary border border-slate-600 hover:border-slate-300 text-slate-300 hover:text-white font-semibold px-7 py-3.5 rounded-full text-sm"
+          >
+            Services
+          </Link>
         </div>
       </div>
     </section>

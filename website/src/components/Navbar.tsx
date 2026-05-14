@@ -9,7 +9,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 const links = [
   { href: '/',          label: 'Home' },
   { href: '/about',     label: 'About' },
+  { href: '/services',   label: 'Services' },
   { href: '/companies', label: 'Companies' },
+  { href: '/locations', label: 'Location' },
+  { href: '/partnerships', label: 'Partnerships' },
+  { href: '/company-profile', label: 'Profile' },
   { href: '/contact',   label: 'Contact' },
 ];
 
@@ -40,7 +44,7 @@ export default function Navbar() {
     >
       <div className="max-w-7xl mx-auto px-5 sm:px-8 h-20 flex items-center justify-between">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-3 flex-shrink-0">
+        <Link href="/" className="flex items-center gap-3 flex-shrink-0" aria-label="Itemba Group home">
           <div className="rounded-sm">
             {/* Save logo to website/public/logo.png */}
             <Image
@@ -55,22 +59,23 @@ export default function Navbar() {
         </Link>
 
         {/* Desktop nav */}
-        <nav className="hidden md:flex items-center gap-1">
+        <nav className="hidden lg:flex items-center gap-0.5" aria-label="Primary navigation">
           {links.map((link) => {
-            const active = pathname === link.href;
+            const active = pathname === link.href || (link.href !== '/' && pathname.startsWith(`${link.href}/`));
             return (
               <Link
                 key={link.href}
                 href={link.href}
-                className={`relative px-4 py-2 text-sm font-medium transition-colors duration-200 rounded-md ${
+                className={`relative px-3 py-2 text-sm font-medium transition-colors duration-200 rounded-md xl:px-4 ${
                   active ? 'text-gold-400' : 'text-slate-300 hover:text-white'
                 }`}
+                aria-current={active ? 'page' : undefined}
               >
                 {link.label}
                 {active && (
                   <motion.div
                     layoutId="nav-indicator"
-                    className="absolute bottom-0 left-4 right-4 h-0.5 bg-gold-500 rounded-full"
+                    className="absolute bottom-0 left-3 right-3 h-0.5 bg-gold-500 rounded-full xl:left-4 xl:right-4"
                   />
                 )}
               </Link>
@@ -81,8 +86,10 @@ export default function Navbar() {
         {/* Mobile hamburger */}
         <button
           onClick={() => setOpen(!open)}
-          className="md:hidden p-2 text-slate-300 hover:text-white transition-colors"
+          className="lg:hidden p-2 text-slate-300 hover:text-white transition-colors"
           aria-label="Toggle menu"
+          aria-expanded={open}
+          aria-controls="mobile-navigation"
         >
           <motion.div animate={open ? 'open' : 'closed'} className="flex flex-col gap-1.5 w-6">
             <motion.span
@@ -105,27 +112,33 @@ export default function Navbar() {
       <AnimatePresence>
         {open && (
           <motion.div
+            id="mobile-navigation"
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-            className="md:hidden bg-ink-900 border-t border-ink-600 overflow-hidden"
+            className="lg:hidden bg-ink-900 border-t border-ink-600 overflow-hidden"
           >
             <div className="px-5 py-4 space-y-1">
-              {links.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  onClick={() => setOpen(false)}
-                  className={`block px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
-                    pathname === link.href
-                      ? 'text-gold-400 bg-ink-700'
-                      : 'text-slate-300 hover:text-white hover:bg-ink-700'
-                  }`}
-                >
-                  {link.label}
-                </Link>
-              ))}
+              {links.map((link) => {
+                const active = pathname === link.href || (link.href !== '/' && pathname.startsWith(`${link.href}/`));
+
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    onClick={() => setOpen(false)}
+                    className={`block px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+                      active
+                        ? 'text-gold-400 bg-ink-700'
+                        : 'text-slate-300 hover:text-white hover:bg-ink-700'
+                    }`}
+                    aria-current={active ? 'page' : undefined}
+                  >
+                    {link.label}
+                  </Link>
+                );
+              })}
             </div>
           </motion.div>
         )}

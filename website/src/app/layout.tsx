@@ -5,6 +5,11 @@ import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import ScrollProgress from '@/components/ScrollProgress';
 import PageTransition from '@/components/PageTransition';
+import JsonLd from '@/components/JsonLd';
+import QuickContact from '@/components/QuickContact';
+import Analytics from '@/components/Analytics';
+import ConversionTracker from '@/components/ConversionTracker';
+import { absoluteUrl, companyProfiles, contact, site } from '@/lib/site';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -20,15 +25,94 @@ const interTight = Inter_Tight({
 });
 
 export const metadata: Metadata = {
-  title: "Itemba Group | Tanzania's Diversified Business Group",
-  description:
-    'Itemba Group is a Tanzanian holding group operating across energy, trade, manufacturing, construction, hospitality, and real estate. Headquartered in Mpemba-Tunduma, Songwe Region.',
+  metadataBase: new URL(site.url),
+  applicationName: site.name,
+  title: {
+    default: site.title,
+    template: `%s | ${site.name}`,
+  },
+  description: site.description,
   keywords:
-    'Itemba Group, Tanzania, energy, trade, manufacturing, construction, hospitality, real estate, Mwanjalisi Oil, Westsides, Itemba Enterprises',
+    'Itemba Group, Tanzania, Songwe, Tunduma, energy, fuel distribution, logistics, cross-border transit, trade distribution, construction supplies, hospitality, real estate, Mwanjalisi Oil, Westsides, Itemba Enterprises',
+  alternates: {
+    canonical: '/',
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
+  manifest: '/manifest.webmanifest',
   openGraph: {
-    title: "Itemba Group | Tanzania's Diversified Business Group",
-    description: 'A multi-industry business ecosystem in Tanzania.',
+    title: site.title,
+    description: site.shortDescription,
+    url: site.url,
+    siteName: site.name,
+    locale: site.locale,
     type: 'website',
+    images: [
+      {
+        url: '/opengraph-image',
+        width: 1200,
+        height: 630,
+        alt: site.title,
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: site.title,
+    description: site.shortDescription,
+    images: ['/opengraph-image'],
+  },
+  verification: process.env.GOOGLE_SITE_VERIFICATION
+    ? {
+        google: process.env.GOOGLE_SITE_VERIFICATION,
+      }
+    : undefined,
+};
+
+const organizationJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  '@id': `${site.url}/#organization`,
+  name: site.name,
+  url: site.url,
+  logo: absoluteUrl('/logo.png'),
+  email: contact.email,
+  telephone: [contact.primaryPhoneDisplay, contact.secondaryPhoneDisplay],
+  address: {
+    '@type': 'PostalAddress',
+    streetAddress: contact.headOffice,
+    addressLocality: 'Tunduma',
+    addressRegion: 'Songwe',
+    addressCountry: 'TZ',
+    postOfficeBoxNumber: contact.postal,
+  },
+  contactPoint: [
+    {
+      '@type': 'ContactPoint',
+      telephone: contact.primaryPhoneDisplay,
+      contactType: 'business enquiries',
+      areaServed: ['TZ', 'ZM'],
+      availableLanguage: ['English', 'Swahili'],
+    },
+  ],
+  subOrganization: companyProfiles.map((company) => ({
+    '@type': 'Organization',
+    name: company.name,
+    url: absoluteUrl(`/companies/${company.slug}`),
+  })),
+};
+
+const websiteJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  '@id': `${site.url}/#website`,
+  name: site.name,
+  url: site.url,
+  inLanguage: 'en',
+  publisher: {
+    '@id': `${site.url}/#organization`,
   },
 };
 
@@ -36,12 +120,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${inter.variable} ${interTight.variable}`}>
       <body className="font-sans antialiased bg-white text-slate-900 overflow-x-hidden">
+        <a href="#main-content" className="skip-link">
+          Skip to content
+        </a>
+        <Analytics />
+        <ConversionTracker />
+        <JsonLd data={[organizationJsonLd, websiteJsonLd]} />
         <ScrollProgress />
         <Navbar />
-        <main>
+        <main id="main-content" tabIndex={-1}>
           <PageTransition>{children}</PageTransition>
         </main>
         <Footer />
+        <QuickContact />
       </body>
     </html>
   );

@@ -27,6 +27,30 @@ html {
   border-radius: 4px;
 }
 
+.skip-link {
+  position: fixed;
+  left: 1rem;
+  top: 1rem;
+  z-index: 100;
+  transform: translateY(-160%);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #080f1e;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  box-shadow: 0 20px 45px rgba(8, 15, 30, 0.24);
+  transition: transform 0.18s ease;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+#main-content:focus {
+  outline: none;
+}
+
 /* ─── Ambient hero background ─────────────────────────────────────────── */
 .hero-ambient {
   position: absolute;
@@ -154,4 +178,38 @@ html {
   }
   .hero-orb { animation: none !important; }
   .gradient-text { animation: none !important; }
+}
+
+/* ─── Print profile support ───────────────────────────────────────────── */
+@media print {
+  @page {
+    margin: 18mm;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #080f1e !important;
+  }
+
+  header,
+  footer,
+  .print-hidden,
+  .fixed {
+    display: none !important;
+  }
+
+  main {
+    display: block !important;
+  }
+
+  .print-sheet {
+    max-width: none !important;
+  }
+
+  .gradient-text {
+    background: none !important;
+    -webkit-text-fill-color: #080f1e !important;
+    color: #080f1e !important;
+  }
 }

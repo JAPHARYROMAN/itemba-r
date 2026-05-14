@@ -1,7 +1,20 @@
-import Image from 'next/image';
+import Link from 'next/link';
+import type { Metadata } from 'next';
 import AnimatedSection from '@/components/AnimatedSection';
+import BrandVisual from '@/components/BrandVisual';
+import { absoluteUrl, companyUrl, mailtoWithSubject } from '@/lib/site';
 
-export const metadata = { title: 'Our Companies | Itemba Group' };
+export const metadata: Metadata = {
+  title: 'Our Companies',
+  description:
+    'Explore Itemba Group subsidiaries: Mwanjalisi Oil Co Ltd, Westsides Company Ltd, and Itemba Enterprises Co Ltd.',
+  alternates: { canonical: absoluteUrl('/companies') },
+  openGraph: {
+    title: 'Itemba Group Companies',
+    description: 'Three independent companies operating across energy, trade, logistics, hospitality, real estate, and construction.',
+    url: absoluteUrl('/companies'),
+  },
+};
 
 const companies = [
   {
@@ -13,16 +26,15 @@ const companies = [
     accentBg: 'bg-amber-500',
     accentBorder: 'border-amber-500/30',
     accentGlow: 'shadow-amber-500/20',
-    // PLACEHOLDER — replace with real Mwanjalisi fuel station hero photo
-    hero: 'https://loremflickr.com/1200/600/fuel,station?lock=3101',
+    visual: 'fuel' as const,
+    profileHref: companyUrl('mwanjalisi-oil'),
     summary: "Tanzania's petroleum retail arm within Itemba Group — delivering reliable fuel supply to businesses, transport operators, and communities across the Songwe region and beyond.",
     detail: "Positioned in a high-traffic corridor near the Tanzania-Zambia border, Mwanjalisi Oil serves a diverse customer base from individual motorists to commercial fleet operators. The company's fuel stations are designed for reliability, safety, and operational efficiency.",
     products: ['Diesel', 'Petrol', 'Kerosene', 'Lubricants'],
-    // PLACEHOLDER gallery — swap with real station photos
     gallery: [
-      { src: 'https://loremflickr.com/600/420/gas,pump?lock=3102', cap: 'Fuel pumps' },
-      { src: 'https://loremflickr.com/600/420/fuel,station?lock=3103', cap: 'Forecourt' },
-      { src: 'https://loremflickr.com/600/420/motor,oil?lock=3104', cap: 'Lubricants' },
+      { visual: 'fuel' as const, cap: 'Fuel pumps' },
+      { visual: 'corridor' as const, cap: 'Forecourt' },
+      { visual: 'hardware' as const, cap: 'Lubricants' },
     ],
     divisions: [],
   },
@@ -35,16 +47,15 @@ const companies = [
     accentBg: 'bg-blue-500',
     accentBorder: 'border-blue-500/30',
     accentGlow: 'shadow-blue-500/20',
-    // PLACEHOLDER — replace with real Westsides store or warehouse photo
-    hero: 'https://loremflickr.com/1200/600/warehouse,store?lock=3201',
+    visual: 'trade' as const,
+    profileHref: companyUrl('westsides-company'),
     summary: 'Wholesale and retail distribution covering beverages and construction goods — serving both consumer markets and business customers across the Songwe region.',
     detail: "Westsides bridges two high-demand markets: beverage distribution and construction supply. Its network reaches retailers, contractors, and hospitality businesses, making it a central distribution hub in the region's trade ecosystem.",
     products: ['Alcoholic Beverages', 'Non-Alcoholic Beverages', 'Building Materials', 'Hand & Power Tools', 'Electrical Supplies'],
-    // PLACEHOLDER gallery
     gallery: [
-      { src: 'https://loremflickr.com/600/420/beverage,warehouse?lock=3202', cap: 'Beverages' },
-      { src: 'https://loremflickr.com/600/420/hardware,tools?lock=3203', cap: 'Hardware' },
-      { src: 'https://loremflickr.com/600/420/warehouse,distribution?lock=3204', cap: 'Warehouse' },
+      { visual: 'trade' as const, cap: 'Beverages' },
+      { visual: 'hardware' as const, cap: 'Hardware' },
+      { visual: 'logistics' as const, cap: 'Warehouse' },
     ],
     divisions: [],
   },
@@ -57,23 +68,22 @@ const companies = [
     accentBg: 'bg-emerald-500',
     accentBorder: 'border-emerald-500/30',
     accentGlow: 'shadow-emerald-500/20',
-    // PLACEHOLDER — replace with real Itemba Enterprises photo
-    hero: 'https://loremflickr.com/1200/600/logistics,truck?lock=3301',
+    visual: 'logistics' as const,
+    profileHref: companyUrl('itemba-enterprises'),
     summary: "The group's multi-sector flagship — anchored by logistics for local distribution and cross-border transit, alongside manufacturing, hardware, real estate, and hospitality — operating through five specialised business divisions.",
     detail: "Itemba Enterprises acts as the group's growth engine across multiple consumer and service markets. Logistics is its largest line of business, leveraging the strategic Tunduma corridor for local distribution and cross-border transit between Tanzania, Zambia, and the wider region. The remaining four divisions create a self-reinforcing ecosystem of products and services — from building materials to hospitality — all under one parent entity.",
     products: ['Local Logistics', 'Cross-Border Transit', 'Industrial Goods', 'Consumer Goods', 'Building Materials', 'Property Services', 'Hotel & Lodging', 'Parking Yard'],
-    // PLACEHOLDER gallery
     gallery: [
-      { src: 'https://loremflickr.com/600/420/truck,logistics?lock=3302', cap: 'Itemba Logistics' },
-      { src: 'https://loremflickr.com/600/420/hardware,store?lock=3303', cap: 'Itemba Hardware' },
-      { src: 'https://loremflickr.com/600/420/hotel,restaurant?lock=3304', cap: 'Uzunguni Inn' },
+      { visual: 'logistics' as const, cap: 'Itemba Logistics' },
+      { visual: 'hardware' as const, cap: 'Itemba Hardware' },
+      { visual: 'hospitality' as const, cap: 'Uzunguni Inn' },
     ],
     divisions: [
-      { name: 'Itemba Logistics',    desc: 'Local distribution and cross-border transit logistics through the Tunduma corridor — the flagship business of Itemba Enterprises.', photo: 'https://loremflickr.com/500/360/truck,logistics?lock=3401', flagship: true },
-      { name: 'Itemba Hardware',     desc: 'Building materials, hand tools, power tools, and electrical supplies to contractors and retail customers.',                          photo: 'https://loremflickr.com/500/360/hardware,tools?lock=3402' },
-      { name: 'Itemba Estate',       desc: 'Property development, real estate management, and property-related services in the Songwe region.',                                  photo: 'https://loremflickr.com/500/360/real,estate?lock=3403' },
-      { name: 'Uzunguni Inn',        desc: 'Hotel accommodation, restaurant dining, and lodging services for travellers and business guests.',                                    photo: 'https://loremflickr.com/500/360/hotel,room?lock=3404' },
-      { name: 'Uzunguni Parking Yard', desc: 'Secure parking yard services supporting the movement of goods and vehicles in the region.',                                         photo: 'https://loremflickr.com/500/360/parking,truck?lock=3405' },
+      { name: 'Itemba Logistics',    desc: 'Local distribution and cross-border transit logistics through the Tunduma corridor — the flagship business of Itemba Enterprises.', visual: 'logistics' as const, flagship: true },
+      { name: 'Itemba Hardware',     desc: 'Building materials, hand tools, power tools, and electrical supplies to contractors and retail customers.',                          visual: 'hardware' as const },
+      { name: 'Itemba Estate',       desc: 'Property development, real estate management, and property-related services in the Songwe region.',                                  visual: 'estate' as const },
+      { name: 'Uzunguni Inn',        desc: 'Hotel accommodation, restaurant dining, and lodging services for travellers and business guests.',                                    visual: 'hospitality' as const },
+      { name: 'Uzunguni Parking Yard', desc: 'Secure parking yard services supporting the movement of goods and vehicles in the region.',                                         visual: 'parking' as const },
     ],
   },
 ];
@@ -119,14 +129,7 @@ export default function CompaniesPage() {
               {/* Company hero banner */}
               <AnimatedSection>
                 <div className="relative h-72 sm:h-96 rounded-3xl overflow-hidden shadow-2xl mb-14 img-zoom">
-                  <Image
-                    src={co.hero}
-                    alt={`${co.name} — placeholder`}
-                    fill
-                    sizes="100vw"
-                    className="object-cover img-inner"
-                    priority={idx === 0}
-                  />
+                  <BrandVisual variant={co.visual} label={`${co.name} operations`} className="absolute inset-0 img-inner" />
                   <div className="absolute inset-0 bg-gradient-to-r from-ink-950/90 via-ink-950/60 to-transparent" />
                   <div className="absolute inset-0 flex items-end p-10">
                     <div>
@@ -159,6 +162,20 @@ export default function CompaniesPage() {
                         </span>
                       ))}
                     </div>
+                    <div className="mb-10 flex flex-wrap gap-3">
+                      <Link
+                        href={co.profileHref}
+                        className="btn-primary inline-flex items-center rounded-full bg-ink-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink-700"
+                      >
+                        Open company profile
+                      </Link>
+                      <a
+                        href={mailtoWithSubject(`${co.name} business enquiry`)}
+                        className="btn-primary inline-flex items-center rounded-full border border-slate-300 px-5 py-3 text-sm font-semibold text-ink-900 transition hover:border-gold-400 hover:text-gold-600"
+                      >
+                        Send enquiry
+                      </a>
+                    </div>
                   </AnimatedSection>
 
                   {/* Gallery */}
@@ -166,15 +183,8 @@ export default function CompaniesPage() {
                     <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4">Gallery</p>
                     <div className="grid grid-cols-3 gap-3">
                       {co.gallery.map((img) => (
-                        <div key={img.src} className="relative h-32 rounded-xl overflow-hidden group img-zoom">
-                          {/* PLACEHOLDER photos — replace with real images */}
-                          <Image
-                            src={img.src}
-                            alt={img.cap}
-                            fill
-                            sizes="(min-width: 1024px) 22vw, 33vw"
-                            className="object-cover img-inner"
-                          />
+                        <div key={img.cap} className="relative h-32 rounded-xl overflow-hidden group img-zoom">
+                          <BrandVisual variant={img.visual} label={img.cap} className="absolute inset-0 img-inner" />
                           <div className="absolute inset-0 bg-ink-900/30 group-hover:bg-ink-900/10 transition-colors" />
                         </div>
                       ))}
@@ -216,14 +226,7 @@ export default function CompaniesPage() {
                               }`}
                             >
                               <div className="relative h-28 img-zoom">
-                                {/* PLACEHOLDER division photo */}
-                                <Image
-                                  src={div.photo}
-                                  alt={`${div.name} — placeholder`}
-                                  fill
-                                  sizes="(min-width: 1024px) 28vw, 100vw"
-                                  className="object-cover img-inner"
-                                />
+                                <BrandVisual variant={div.visual} label={`${div.name} operations`} className="absolute inset-0 img-inner" />
                                 <div className="absolute inset-0 bg-ink-900/50 group-hover:bg-ink-900/30 transition-colors flex items-end p-4">
                                   <span className="font-tight font-bold text-white text-sm">{div.name}</span>
                                 </div>

@@ -46,6 +46,9 @@ apps/api/prisma/migrations/dev.db*
 
 # Local uploads (dev file storage)
 apps/api/uploads/
+website/data/
 
 # Docker volumes
 .docker-data/
+
+.vercel

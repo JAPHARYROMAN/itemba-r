@@ -1,6 +1,6 @@
 'use client';
 
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { ReactNode } from 'react';
 
 type Direction = 'up' | 'down' | 'left' | 'right' | 'fade';
@@ -30,7 +30,12 @@ export default function AnimatedSection({
   duration = 0.7,
   once = true,
 }: Props) {
+  const reduceMotion = useReducedMotion();
   const offset = offsets[direction];
+
+  if (reduceMotion) {
+    return <div className={className}>{children}</div>;
+  }
 
   return (
     <motion.div

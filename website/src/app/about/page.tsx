@@ -1,7 +1,20 @@
-import Image from 'next/image';
+import type { Metadata } from 'next';
 import AnimatedSection from '@/components/AnimatedSection';
+import BrandVisual from '@/components/BrandVisual';
+import { absoluteUrl } from '@/lib/site';
 
-export const metadata = { title: 'About Us | Itemba Group' };
+export const metadata: Metadata = {
+  title: 'About Us',
+  description:
+    'Learn about Itemba Group, a Tanzanian multi-industry holding group headquartered in Mpemba-Tunduma, Songwe Region.',
+  alternates: { canonical: absoluteUrl('/about') },
+  openGraph: {
+    title: 'About Itemba Group',
+    description:
+      'A Tanzanian holding group built on diversification, resilience, and long-term growth across multiple sectors.',
+    url: absoluteUrl('/about'),
+  },
+};
 
 const pillars = [
   { title: 'Risk Reduction',         desc: 'Operating across six sectors shields the group from downturns in any single industry.' },
@@ -75,15 +88,8 @@ export default function AboutPage() {
             </AnimatedSection>
           </div>
           <AnimatedSection direction="left">
-            {/* PLACEHOLDER — replace with real group/leadership photo */}
             <div className="relative h-[440px] rounded-3xl overflow-hidden shadow-2xl img-zoom">
-              <Image
-                src="https://loremflickr.com/800/700/business,team?lock=2101"
-                alt="Itemba Group — placeholder"
-                fill
-                sizes="(min-width: 1024px) 50vw, 100vw"
-                className="object-cover img-inner"
-              />
+              <BrandVisual variant="group" label="Itemba Group team" className="absolute inset-0 img-inner" />
               <div className="absolute inset-0 bg-gradient-to-tl from-ink-900/40 to-transparent" />
             </div>
           </AnimatedSection>
@@ -143,15 +149,8 @@ export default function AboutPage() {
       <section className="py-28 px-5 sm:px-8 bg-white">
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
           <AnimatedSection direction="right">
-            {/* PLACEHOLDER — replace with operations photo */}
             <div className="relative h-[400px] rounded-3xl overflow-hidden shadow-2xl img-zoom">
-              <Image
-                src="https://loremflickr.com/800/640/industry,logistics?lock=2102"
-                alt="Itemba Group operations — placeholder"
-                fill
-                sizes="(min-width: 1024px) 50vw, 100vw"
-                className="object-cover img-inner"
-              />
+              <BrandVisual variant="operations" label="Itemba Group operations" className="absolute inset-0 img-inner" />
             </div>
           </AnimatedSection>
           <div>
@@ -210,15 +209,8 @@ export default function AboutPage() {
             </AnimatedSection>
           </div>
           <AnimatedSection direction="left">
-            {/* PLACEHOLDER — replace with real HQ building or Tunduma photo */}
             <div className="relative h-[380px] rounded-3xl overflow-hidden shadow-2xl img-zoom">
-              <Image
-                src="https://loremflickr.com/800/600/fuel,station?lock=2103"
-                alt="Mpemba-Tunduma HQ — placeholder"
-                fill
-                sizes="(min-width: 1024px) 50vw, 100vw"
-                className="object-cover img-inner"
-              />
+              <BrandVisual variant="fuel" label="Mpemba-Tunduma headquarters" className="absolute inset-0 img-inner" />
               <div className="absolute inset-0 bg-gradient-to-bl from-ink-900/50 to-transparent" />
               <div className="absolute bottom-6 left-6 bg-ink-900/85 backdrop-blur-sm rounded-xl px-5 py-3">
                 <div className="font-tight font-bold text-white">Itemba Filling Station</div>

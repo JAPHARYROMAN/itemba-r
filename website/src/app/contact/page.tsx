@@ -1,7 +1,21 @@
-import Image from 'next/image';
+import type { Metadata } from 'next';
+import Link from 'next/link';
 import AnimatedSection from '@/components/AnimatedSection';
+import EnquiryRouter from '@/components/EnquiryRouter';
+import JsonLd from '@/components/JsonLd';
+import { absoluteUrl, breadcrumbJsonLd, contact, mailtoWithSubject, site } from '@/lib/site';
 
-export const metadata = { title: 'Contact | Itemba Group' };
+export const metadata: Metadata = {
+  title: 'Contact',
+  description:
+    'Contact Itemba Group for business enquiries, partnerships, fuel, trade, logistics, hospitality, real estate, and group information.',
+  alternates: { canonical: absoluteUrl('/contact') },
+  openGraph: {
+    title: 'Contact Itemba Group',
+    description: 'Reach Itemba Group headquarters in Mpemba-Tunduma, Songwe Region, Tanzania.',
+    url: absoluteUrl('/contact'),
+  },
+};
 
 const subsidiaries = [
   { name: 'Mwanjalisi Oil Co Ltd',    sector: 'Energy & Fuel Distribution',  dot: 'bg-amber-400' },
@@ -15,9 +29,40 @@ const contextCards = [
   { icon: '📈', title: 'Growing Economy',       desc: "Songwe Region is one of Tanzania's fastest-growing regions, driven by trade and infrastructure investment." },
 ];
 
+const contactPageJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'ContactPage',
+  '@id': `${absoluteUrl('/contact')}#contact`,
+  name: 'Contact Itemba Group',
+  url: absoluteUrl('/contact'),
+  about: {
+    '@id': `${site.url}/#organization`,
+  },
+  contactPoint: [
+    {
+      '@type': 'ContactPoint',
+      telephone: contact.primaryPhoneDisplay,
+      email: contact.email,
+      contactType: 'business enquiries',
+      areaServed: ['TZ', 'ZM'],
+      availableLanguage: ['English', 'Swahili'],
+    },
+  ],
+};
+
 export default function ContactPage() {
   return (
     <>
+      <JsonLd
+        data={[
+          contactPageJsonLd,
+          breadcrumbJsonLd([
+            { name: 'Home', path: '/' },
+            { name: 'Contact', path: '/contact' },
+          ]),
+        ]}
+      />
+
       {/* ── Hero ──────────────────────────────────────────────────── */}
       <section className="relative bg-ink-900 pt-40 pb-24 px-5 sm:px-8 overflow-hidden">
         <div className="hero-ambient">
@@ -158,29 +203,56 @@ export default function ContactPage() {
               <div className="mt-10 p-6 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-600 leading-relaxed">
                 <strong className="font-tight font-bold text-ink-900 block mb-1">Business Enquiries</strong>
                 For sector-specific enquiries, we recommend contacting the relevant subsidiary company directly. Each company operates with its own team and management structure.
+                <div className="mt-3 flex flex-wrap gap-4">
+                  <Link href="/partnerships" className="font-semibold text-gold-600 hover:text-gold-500">
+                    Partnership enquiry routes
+                  </Link>
+                  <Link href="/faq" className="font-semibold text-gold-600 hover:text-gold-500">
+                    Browse frequently asked questions
+                  </Link>
+                </div>
+              </div>
+            </AnimatedSection>
+
+            <AnimatedSection delay={0.22}>
+              <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <a
+                  href={`tel:${contact.primaryPhone}`}
+                  className="btn-primary rounded-2xl bg-ink-900 px-5 py-4 text-center text-sm font-semibold text-white hover:bg-ink-700"
+                >
+                  Call
+                </a>
+                <a
+                  href={contact.whatsapp}
+                  className="btn-primary rounded-2xl bg-emerald-600 px-5 py-4 text-center text-sm font-semibold text-white hover:bg-emerald-500"
+                >
+                  WhatsApp
+                </a>
+                <a
+                  href={mailtoWithSubject('Business enquiry')}
+                  className="btn-primary rounded-2xl bg-gold-500 px-5 py-4 text-center text-sm font-semibold text-white hover:bg-gold-400"
+                >
+                  Email
+                </a>
               </div>
             </AnimatedSection>
           </div>
 
           {/* Right — map + subsidiaries */}
           <div className="space-y-8">
+            <AnimatedSection direction="left" delay={0.06}>
+              <EnquiryRouter />
+            </AnimatedSection>
+
             <AnimatedSection direction="left" delay={0.1}>
-              {/* PLACEHOLDER map — replace with a Google Maps embed or real location photo */}
-              <div className="relative h-56 rounded-3xl overflow-hidden shadow-xl img-zoom">
-                <Image
-                  src="https://loremflickr.com/800/450/map,tanzania?lock=4101"
-                  alt="Mpemba-Tunduma — placeholder"
-                  fill
-                  sizes="(min-width: 1024px) 50vw, 100vw"
-                  className="object-cover img-inner"
+              <div className="relative h-72 rounded-3xl overflow-hidden shadow-xl border border-slate-200">
+                <iframe
+                  title="Itemba Group headquarters map"
+                  src={`https://www.google.com/maps?q=${encodeURIComponent(contact.mapQuery)}&output=embed`}
+                  className="h-full w-full"
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
                 />
-                <div className="absolute inset-0 bg-ink-900/40 flex items-center justify-center">
-                  <div className="bg-white/95 backdrop-blur-sm rounded-2xl px-6 py-4 text-center shadow-xl">
-                    <div className="text-2xl mb-1">📍</div>
-                    <div className="font-tight font-bold text-ink-900 text-sm">Mpemba-Tunduma</div>
-                    <div className="text-xs text-slate-500 mt-0.5">Songwe Region, Tanzania</div>
-                  </div>
-                </div>
               </div>
             </AnimatedSection>
 

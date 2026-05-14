@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import Image from 'next/image';
 import { motion } from 'framer-motion';
 import AnimatedSection from '@/components/AnimatedSection';
+import BrandVisual from '@/components/BrandVisual';
 import CountUp from '@/components/CountUp';
 import SectorIcon from '@/components/SectorIcon';
 import SpotlightCard from '@/components/SpotlightCard';
+import { companyUrl, insightArticles, insightUrl } from '@/lib/site';
 
 /* ── Framer Motion variants ─────────────────────────────────────────── */
 const stagger = { visible: { transition: { staggerChildren: 0.12 } } };
@@ -22,33 +23,36 @@ const companies = [
     name: 'Mwanjalisi Oil Co Ltd',
     tagline: 'Energy & Fuel Distribution',
     desc: 'Petroleum retail operations covering diesel, petrol, kerosene, and lubricants — powering businesses and communities across the Songwe region.',
-    photo: 'https://loremflickr.com/900/700/fuel,station?lock=1101',
+    visual: 'fuel' as const,
     accentBg: 'from-amber-900/85 via-amber-900/40 to-ink-900/95',
     accentTag: 'bg-amber-500',
     accentSpotlight: 'rgba(245, 158, 11, 0.18)',
     sectors: ['Petroleum Retail', 'Fuel Distribution', 'Lubricants'],
+    href: companyUrl('mwanjalisi-oil'),
   },
   {
     id: 'westsides',
     name: 'Westsides Company Ltd',
     tagline: 'Trade & Distribution',
     desc: 'Wholesale and retail of beverages and construction goods — serving a wide consumer and business market across the region.',
-    photo: 'https://loremflickr.com/900/700/warehouse,retail?lock=1102',
+    visual: 'trade' as const,
     accentBg: 'from-blue-900/85 via-blue-900/40 to-ink-900/95',
     accentTag: 'bg-blue-500',
     accentSpotlight: 'rgba(59, 130, 246, 0.18)',
     sectors: ['Beverages', 'Hardware & Tools', 'Building Materials'],
+    href: companyUrl('westsides-company'),
   },
   {
     id: 'enterprises',
     name: 'Itemba Enterprises Co Ltd',
     tagline: 'Multi-Sector Operations',
     desc: 'Logistics, manufacturing, hardware, real estate, and hospitality under one roof — the most diversified entity within the Itemba Group ecosystem.',
-    photo: 'https://loremflickr.com/900/700/logistics,truck?lock=1103',
+    visual: 'logistics' as const,
     accentBg: 'from-emerald-900/85 via-emerald-900/40 to-ink-900/95',
     accentTag: 'bg-emerald-500',
     accentSpotlight: 'rgba(16, 185, 129, 0.18)',
     sectors: ['Logistics & Transit', 'Manufacturing', 'Real Estate', 'Hospitality', 'Hardware'],
+    href: companyUrl('itemba-enterprises'),
   },
 ];
 
@@ -63,11 +67,30 @@ const sectors = [
 ];
 
 const divisions = [
-  { name: 'Itemba Logistics',      desc: 'Local distribution & cross-border transit', photo: 'https://loremflickr.com/500/380/truck,logistics?lock=1201', flagship: true },
-  { name: 'Itemba Hardware',       desc: 'Building materials, tools & electrical',     photo: 'https://loremflickr.com/500/380/hardware,tools?lock=1202' },
-  { name: 'Itemba Estate',         desc: 'Property development & real estate',         photo: 'https://loremflickr.com/500/380/real,estate?lock=1203' },
-  { name: 'Uzunguni Inn',          desc: 'Hotel, restaurant & lodging',                photo: 'https://loremflickr.com/500/380/hotel,restaurant?lock=1204' },
-  { name: 'Uzunguni Parking Yard', desc: 'Parking yard services',                      photo: 'https://loremflickr.com/500/380/parking,truck?lock=1205' },
+  { name: 'Itemba Logistics',      desc: 'Local distribution & cross-border transit', visual: 'logistics' as const, flagship: true },
+  { name: 'Itemba Hardware',       desc: 'Building materials, tools & electrical',     visual: 'hardware' as const },
+  { name: 'Itemba Estate',         desc: 'Property development & real estate',         visual: 'estate' as const },
+  { name: 'Uzunguni Inn',          desc: 'Hotel, restaurant & lodging',                visual: 'hospitality' as const },
+  { name: 'Uzunguni Parking Yard', desc: 'Parking yard services',                      visual: 'parking' as const },
+];
+
+const proofPoints = [
+  {
+    title: 'Named operating companies',
+    desc: 'Visitors can move from group overview to the specific company responsible for each enquiry route.',
+  },
+  {
+    title: 'Service-to-company mapping',
+    desc: 'Fuel, trade, logistics, hardware, hospitality, and property pages each point back to an operating team.',
+  },
+  {
+    title: 'Songwe-Tunduma location context',
+    desc: 'The site makes the Mpemba-Tunduma base and Tanzania-Zambia corridor relevance clear for local search.',
+  },
+  {
+    title: 'Direct enquiry routing',
+    desc: 'Forms, WhatsApp, email, and phone options guide each enquiry to the closest business area.',
+  },
 ];
 
 /* ── Page ──────────────────────────────────────────────────────────── */
@@ -165,6 +188,47 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* ══ OPERATING PROOF ══════════════════════════════════════ */}
+      <section className="bg-slate-50 px-5 py-24 sm:px-8">
+        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[0.78fr_1.22fr] lg:items-start">
+          <AnimatedSection>
+            <div className="gold-line mb-6" />
+            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-600">
+              Operating Proof
+            </p>
+            <h2 className="mb-5 font-tight text-4xl font-black leading-none tracking-tighter text-ink-900 sm:text-5xl">
+              Clear Signals for Customers and Partners
+            </h2>
+            <p className="text-sm leading-relaxed text-slate-600">
+              The site now gives visitors a practical way to verify what Itemba Group operates,
+              where the group is based, and which team should receive each business enquiry.
+            </p>
+            <Link
+              href="/capabilities"
+              className="btn-primary mt-7 inline-flex rounded-full bg-ink-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink-700"
+            >
+              View capability proof
+            </Link>
+          </AnimatedSection>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {proofPoints.map((point, index) => (
+              <AnimatedSection key={point.title} delay={index * 0.06}>
+                <div className="h-full rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <span className="mb-5 flex h-9 w-9 items-center justify-center rounded-full bg-gold-500 text-sm font-black text-white">
+                    {index + 1}
+                  </span>
+                  <h3 className="mb-3 font-tight text-xl font-black leading-tight text-ink-900">
+                    {point.title}
+                  </h3>
+                  <p className="text-sm leading-relaxed text-slate-600">{point.desc}</p>
+                </div>
+              </AnimatedSection>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ══ GROUP STORY ═══════════════════════════════════════════ */}
       <section className="py-28 px-5 sm:px-8 bg-white">
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
@@ -204,13 +268,7 @@ export default function HomePage() {
           </div>
           <AnimatedSection direction="left">
             <div className="relative h-96 rounded-3xl overflow-hidden shadow-2xl img-zoom">
-              <Image
-                src="https://loremflickr.com/800/640/business,office?lock=1301"
-                alt="Itemba Group — placeholder"
-                fill
-                sizes="(min-width: 1024px) 50vw, 100vw"
-                className="object-cover img-inner"
-              />
+              <BrandVisual variant="group" label="Itemba Group operations" className="absolute inset-0 img-inner" />
               <div className="absolute inset-0 bg-gradient-to-tl from-ink-900/40 to-transparent" />
             </div>
           </AnimatedSection>
@@ -234,18 +292,16 @@ export default function HomePage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {companies.map((co, i) => (
               <AnimatedSection key={co.id} delay={i * 0.1} direction="up">
-                <Link href={`/companies#${co.id}`} className="block group">
+                <Link href={co.href} className="block group">
                   <SpotlightCard
                     spotlightColor={co.accentSpotlight}
                     className="company-card relative h-[520px] rounded-3xl overflow-hidden cursor-pointer"
                   >
                     <div className="absolute inset-0">
-                      <Image
-                        src={co.photo}
-                        alt={co.name}
-                        fill
-                        sizes="(min-width: 768px) 33vw, 100vw"
-                        className="object-cover transition-transform duration-700 group-hover:scale-105"
+                      <BrandVisual
+                        variant={co.visual}
+                        label={`${co.name} visual`}
+                        className="h-full w-full transition-transform duration-700 group-hover:scale-105"
                       />
                     </div>
                     <div className={`absolute inset-0 bg-gradient-to-t ${co.accentBg}`} />
@@ -346,13 +402,7 @@ export default function HomePage() {
               <AnimatedSection key={d.name} delay={i * 0.08}>
                 <div className={`group rounded-2xl overflow-hidden border bg-white hover:shadow-xl transition-shadow duration-500 ${d.flagship ? 'border-gold-400 shadow-lg shadow-gold-500/10' : 'border-slate-200'}`}>
                   <div className="relative h-48 overflow-hidden img-zoom">
-                    <Image
-                      src={d.photo}
-                      alt={d.name}
-                      fill
-                      sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
-                      className="object-cover img-inner"
-                    />
+                    <BrandVisual variant={d.visual} label={d.name} className="absolute inset-0 img-inner" />
                     <div className="absolute inset-0 bg-ink-900/40 group-hover:bg-ink-900/20 transition-colors duration-500" />
                     {d.flagship && (
                       <span className="absolute top-3 left-3 bg-gold-500 text-white text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full">
@@ -379,13 +429,7 @@ export default function HomePage() {
         <div className="relative z-10 max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
           <AnimatedSection direction="right">
             <div className="relative h-96 rounded-3xl overflow-hidden shadow-2xl img-zoom">
-              <Image
-                src="https://loremflickr.com/800/640/highway,truck?lock=1302"
-                alt="Tunduma, Songwe Region — placeholder"
-                fill
-                sizes="(min-width: 1024px) 50vw, 100vw"
-                className="object-cover img-inner"
-              />
+              <BrandVisual variant="corridor" label="Tunduma and Songwe Region trade corridor" className="absolute inset-0 img-inner" />
               <div className="absolute inset-0 bg-gradient-to-br from-ink-900/30 to-transparent" />
             </div>
           </AnimatedSection>
@@ -422,8 +466,66 @@ export default function HomePage() {
                   </div>
                 ))}
               </div>
+              <Link
+                href="/locations/songwe-tunduma"
+                className="mt-8 inline-flex items-center gap-2 text-sm font-semibold text-gold-400 transition-colors hover:text-gold-300 group"
+              >
+                View Songwe-Tunduma location profile
+                <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                </svg>
+              </Link>
             </AnimatedSection>
           </div>
+        </div>
+      </section>
+
+      {/* ══ INSIGHTS HUB ═════════════════════════════════════════ */}
+      <section className="bg-slate-50 px-5 py-24 sm:px-8">
+        <div className="mx-auto max-w-7xl">
+          <AnimatedSection className="mb-12">
+            <div className="gold-line mb-6" />
+            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-600">
+              Business Guides
+            </p>
+            <h2 className="font-tight text-4xl font-black leading-tight tracking-tighter text-ink-900 sm:text-5xl">
+              Practical Insights for Search and Enquiries
+            </h2>
+          </AnimatedSection>
+
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+            {insightArticles.slice(0, 3).map((article, index) => (
+              <AnimatedSection key={article.slug} delay={index * 0.06}>
+                <Link
+                  href={insightUrl(article.slug)}
+                  className="group flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-gold-400 hover:shadow-lg"
+                >
+                  <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-600">
+                    {article.eyebrow}
+                  </p>
+                  <h3 className="mb-4 font-tight text-2xl font-black leading-tight text-ink-900">
+                    {article.title}
+                  </h3>
+                  <p className="mb-6 flex-1 text-sm leading-relaxed text-slate-600">{article.summary}</p>
+                  <span className="inline-flex items-center gap-2 text-sm font-semibold text-gold-600 transition group-hover:text-gold-500">
+                    Read insight
+                    <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                    </svg>
+                  </span>
+                </Link>
+              </AnimatedSection>
+            ))}
+          </div>
+
+          <AnimatedSection className="mt-10 text-center">
+            <Link
+              href="/insights"
+              className="inline-flex text-sm font-semibold text-gold-600 transition hover:text-gold-500"
+            >
+              View all insights
+            </Link>
+          </AnimatedSection>
         </div>
       </section>
 
@@ -438,11 +540,34 @@ export default function HomePage() {
             Interested in doing business with Itemba Group or one of our subsidiaries?
             Reach out — we&apos;d love to hear from you.
           </p>
-          <Link
-            href="/contact"
-            className="btn-primary inline-block bg-ink-900 hover:bg-ink-700 text-white font-semibold px-10 py-4 rounded-full text-sm hover:shadow-xl hover:shadow-ink-900/20"
-          >
-            Contact Us
+          <div className="flex flex-wrap justify-center gap-3">
+            <Link
+              href="/contact"
+              className="btn-primary inline-block bg-ink-900 hover:bg-ink-700 text-white font-semibold px-10 py-4 rounded-full text-sm hover:shadow-xl hover:shadow-ink-900/20"
+            >
+              Contact Us
+            </Link>
+            <Link
+              href="/services"
+              className="btn-primary inline-block border border-slate-300 hover:border-gold-400 text-ink-900 hover:text-gold-600 font-semibold px-10 py-4 rounded-full text-sm"
+            >
+              Services
+            </Link>
+            <Link
+              href="/partnerships"
+              className="btn-primary inline-block border border-slate-300 hover:border-gold-400 text-ink-900 hover:text-gold-600 font-semibold px-10 py-4 rounded-full text-sm"
+            >
+              Partnerships
+            </Link>
+            <Link
+              href="/company-profile"
+              className="btn-primary inline-block border border-slate-300 hover:border-gold-400 text-ink-900 hover:text-gold-600 font-semibold px-10 py-4 rounded-full text-sm"
+            >
+              Company Profile
+            </Link>
+          </div>
+          <Link href="/faq" className="mt-6 inline-flex text-sm font-semibold text-gold-600 hover:text-gold-500">
+            Browse frequently asked questions
           </Link>
         </AnimatedSection>
       </section>
