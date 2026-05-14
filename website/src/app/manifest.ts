@@ -15,14 +15,20 @@ export default function manifest(): MetadataRoute.Manifest {
     categories: ['business'],
     icons: [
       {
-        src: '/icon',
-        sizes: '64x64',
+        src: '/favicon-48x48.png',
+        sizes: '48x48',
         type: 'image/png',
         purpose: 'any',
       },
       {
-        src: '/apple-icon',
-        sizes: '180x180',
+        src: '/site-icon-192.png',
+        sizes: '192x192',
+        type: 'image/png',
+        purpose: 'any',
+      },
+      {
+        src: '/site-icon-512.png',
+        sizes: '512x512',
         type: 'image/png',
         purpose: 'any',
       },
