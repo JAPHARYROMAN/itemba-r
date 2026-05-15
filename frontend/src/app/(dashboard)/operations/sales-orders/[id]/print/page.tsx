@@ -56,8 +56,19 @@ interface SalesOrder {
   paidAmount?: number | string | null;
   outstandingAmount?: number | string | null;
   notes?: string | null;
-  company?: { name?: string | null; code?: string | null; phone?: string | null; email?: string | null; website?: string | null } | null;
-  branch?: { name?: string | null; code?: string | null; address?: string | null; phone?: string | null } | null;
+  company?: {
+    name?: string | null;
+    code?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    website?: string | null;
+  } | null;
+  branch?: {
+    name?: string | null;
+    code?: string | null;
+    address?: string | null;
+    phone?: string | null;
+  } | null;
   customer?: { name?: string | null } | null;
   cashAccount?: { accountName?: string | null; accountType?: string | null } | null;
   createdBy?: { fullName?: string | null } | null;
@@ -79,7 +90,7 @@ export default function SalesOrderPrintPage() {
     setError('');
     backendGet<SalesOrder>(`/sales-orders/${id}`)
       .then(setRecord)
-      .catch(err => setError(err instanceof Error ? err.message : 'Load failed'))
+      .catch((err) => setError(err instanceof Error ? err.message : 'Load failed'))
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -147,16 +158,26 @@ export default function SalesOrderPrintPage() {
                 </tr>
               </thead>
               <tbody>
-                {lines.map(line => (
+                {lines.map((line) => (
                   <tr key={line.id} className="border-t border-slate-200">
                     <DocumentTd>{line.description || line.product?.name || 'N/A'}</DocumentTd>
-                    <DocumentTd mono>{line.product?.sku ?? line.product?.productCode ?? 'N/A'}</DocumentTd>
+                    <DocumentTd mono>
+                      {line.product?.sku ?? line.product?.productCode ?? 'N/A'}
+                    </DocumentTd>
                     <DocumentTd align="right">{formatQty(line.quantity ?? line.qty)}</DocumentTd>
                     <DocumentTd>{line.unit?.symbol ?? line.unit?.name ?? 'N/A'}</DocumentTd>
-                    <DocumentTd align="right">{formatDocumentMoney(line.unitPrice, record.currency)}</DocumentTd>
-                    <DocumentTd align="right">{formatDocumentMoney(line.discountAmount, record.currency)}</DocumentTd>
-                    <DocumentTd align="right">{formatDocumentMoney(line.taxAmount, record.currency)}</DocumentTd>
-                    <DocumentTd align="right">{formatDocumentMoney(line.lineTotal, record.currency)}</DocumentTd>
+                    <DocumentTd align="right">
+                      {formatDocumentMoney(line.unitPrice, record.currency)}
+                    </DocumentTd>
+                    <DocumentTd align="right">
+                      {formatDocumentMoney(line.discountAmount, record.currency)}
+                    </DocumentTd>
+                    <DocumentTd align="right">
+                      {formatDocumentMoney(line.taxAmount, record.currency)}
+                    </DocumentTd>
+                    <DocumentTd align="right">
+                      {formatDocumentMoney(line.lineTotal, record.currency)}
+                    </DocumentTd>
                   </tr>
                 ))}
               </tbody>
@@ -164,11 +185,22 @@ export default function SalesOrderPrintPage() {
             <DocumentTotals
               items={[
                 { label: 'Subtotal', value: formatDocumentMoney(record.subtotal, record.currency) },
-                { label: 'Discount', value: formatDocumentMoney(record.discountAmount, record.currency) },
+                {
+                  label: 'Discount',
+                  value: formatDocumentMoney(record.discountAmount, record.currency),
+                },
                 { label: 'Tax', value: formatDocumentMoney(record.taxAmount, record.currency) },
-                { label: 'Total', value: formatDocumentMoney(record.totalAmount, record.currency), emphasis: true },
+                {
+                  label: 'Total',
+                  value: formatDocumentMoney(record.totalAmount, record.currency),
+                  emphasis: true,
+                },
                 { label: 'Paid', value: formatDocumentMoney(record.paidAmount, record.currency) },
-                { label: 'Outstanding', value: formatDocumentMoney(record.outstandingAmount, record.currency), emphasis: true },
+                {
+                  label: 'Outstanding',
+                  value: formatDocumentMoney(record.outstandingAmount, record.currency),
+                  emphasis: true,
+                },
               ]}
             />
           </>

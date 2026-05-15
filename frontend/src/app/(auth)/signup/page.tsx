@@ -64,7 +64,9 @@ export default function SignupPage() {
       }
     >
       <div className="mb-7">
-        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">New account</div>
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+          New account
+        </div>
         <h2 className="mt-3 text-2xl font-semibold text-slate-950">Request workspace access</h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">
           Your profile is created first. Company permissions are controlled by an administrator.

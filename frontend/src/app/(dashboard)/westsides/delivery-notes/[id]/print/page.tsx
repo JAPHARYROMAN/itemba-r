@@ -44,8 +44,19 @@ interface DeliveryNote {
   receivedByPhone?: string | null;
   status: string;
   notes?: string | null;
-  company?: { name?: string | null; code?: string | null; phone?: string | null; email?: string | null; website?: string | null } | null;
-  branch?: { name?: string | null; code?: string | null; address?: string | null; phone?: string | null } | null;
+  company?: {
+    name?: string | null;
+    code?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    website?: string | null;
+  } | null;
+  branch?: {
+    name?: string | null;
+    code?: string | null;
+    address?: string | null;
+    phone?: string | null;
+  } | null;
   customer?: {
     name?: string | null;
     customerCode?: string | null;
@@ -73,7 +84,7 @@ export default function DeliveryNotePrintPage() {
     setError('');
     backendGet<DeliveryNote>(`/westsides/delivery-notes/${id}`)
       .then(setRecord)
-      .catch(err => setError(err instanceof Error ? err.message : 'Load failed'))
+      .catch((err) => setError(err instanceof Error ? err.message : 'Load failed'))
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -115,7 +126,10 @@ export default function DeliveryNotePrintPage() {
           items={[
             { label: 'Customer', value: customerName },
             { label: 'Customer Code', value: valueOrNA(record.customer?.customerCode) },
-            { label: 'Delivery Address', value: valueOrNA(record.deliveryAddress ?? record.customer?.address) },
+            {
+              label: 'Delivery Address',
+              value: valueOrNA(record.deliveryAddress ?? record.customer?.address),
+            },
             { label: 'Customer Contact', value: valueOrNA(record.customer?.contactPerson) },
             { label: 'Driver', value: valueOrNA(record.driverName) },
             { label: 'Delivered By', value: valueOrNA(record.deliveredBy?.fullName) },
@@ -138,10 +152,12 @@ export default function DeliveryNotePrintPage() {
               </tr>
             </thead>
             <tbody>
-              {lines.map(line => (
+              {lines.map((line) => (
                 <tr key={line.id} className="border-t border-slate-200">
                   <DocumentTd>{line.description || line.product?.name || 'N/A'}</DocumentTd>
-                  <DocumentTd mono>{line.product?.sku ?? line.product?.productCode ?? 'N/A'}</DocumentTd>
+                  <DocumentTd mono>
+                    {line.product?.sku ?? line.product?.productCode ?? 'N/A'}
+                  </DocumentTd>
                   <DocumentTd align="right">{formatQty(line.orderedQuantity)}</DocumentTd>
                   <DocumentTd align="right">{formatQty(line.deliveredQuantity)}</DocumentTd>
                   <DocumentTd>{line.unit?.symbol ?? line.unit?.name ?? 'N/A'}</DocumentTd>

@@ -35,7 +35,9 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
             </Link>
 
             <div className="mt-14 max-w-xl">
-              <div className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">{eyebrow}</div>
+              <div className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">
+                {eyebrow}
+              </div>
               <h1 className="mt-4 text-4xl font-semibold leading-tight text-slate-950 sm:text-5xl">
                 {title}
               </h1>
@@ -46,7 +48,10 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
           <div className="mt-10 space-y-5">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
               {ACCESS_POINTS.map((item) => (
-                <div key={item} className="rounded-lg border border-slate-200 bg-[#fbfcfb] px-3 py-3">
+                <div
+                  key={item}
+                  className="rounded-lg border border-slate-200 bg-[#fbfcfb] px-3 py-3"
+                >
                   <div className="h-1.5 w-8 rounded-full bg-emerald-600" />
                   <div className="mt-3 text-sm font-semibold text-slate-800">{item}</div>
                 </div>
@@ -68,7 +73,9 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
 
         <section className="flex items-center justify-center px-6 py-10 sm:px-10">
           <div className="w-full max-w-md">
-            <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm sm:p-8">{children}</div>
+            <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+              {children}
+            </div>
             <div className="mt-5 text-center text-sm text-slate-600">{footer}</div>
           </div>
         </section>

@@ -51,7 +51,13 @@ interface Customer {
       postalAddress?: string | null;
     } | null;
   } | null;
-  branch?: { id: string; name: string; code?: string | null; address?: string | null; phone?: string | null } | null;
+  branch?: {
+    id: string;
+    name: string;
+    code?: string | null;
+    address?: string | null;
+    phone?: string | null;
+  } | null;
 }
 
 interface CustomerProfile {
@@ -96,11 +102,17 @@ interface CustomerProfile {
     paidAmount: number | string;
     updatedAt: string;
   }>;
-  preferredSalesperson: { id: string; fullName?: string | null; employeeCode?: string | null } | null;
+  preferredSalesperson: {
+    id: string;
+    fullName?: string | null;
+    employeeCode?: string | null;
+  } | null;
 }
 
 const fmt = (n: number | string | undefined | null) =>
-  new Intl.NumberFormat('en-TZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n ?? 0));
+  new Intl.NumberFormat('en-TZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
+    Number(n ?? 0),
+  );
 
 export default function CustomerPrintPage() {
   const params = useParams<{ id: string }>();
@@ -115,15 +127,15 @@ export default function CustomerPrintPage() {
     setLoading(true);
     setError('');
     fetch(`/api/backend/customers/${id}/profile`, { cache: 'no-store' })
-      .then(async response => {
+      .then(async (response) => {
         if (!response.ok) {
           const body = await response.json().catch(() => ({}));
           throw new Error(body?.message ?? `HTTP ${response.status}`);
         }
         return response.json();
       })
-      .then(body => setProfile(body.data ?? body))
-      .catch(err => setError(err instanceof Error ? err.message : 'Load failed'))
+      .then((body) => setProfile(body.data ?? body))
+      .catch((err) => setError(err instanceof Error ? err.message : 'Load failed'))
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -139,8 +151,17 @@ export default function CustomerPrintPage() {
 
   if (!profile) return null;
 
-  const { customer, credit, lifetime, recentOrders, topProducts, recentPayments, preferredSalesperson } = profile;
-  const salespersonName = preferredSalesperson?.fullName ?? preferredSalesperson?.employeeCode ?? 'N/A';
+  const {
+    customer,
+    credit,
+    lifetime,
+    recentOrders,
+    topProducts,
+    recentPayments,
+    preferredSalesperson,
+  } = profile;
+  const salespersonName =
+    preferredSalesperson?.fullName ?? preferredSalesperson?.employeeCode ?? 'N/A';
 
   return (
     <DocumentShell
@@ -185,10 +206,27 @@ export default function CustomerPrintPage() {
       <DocumentSection title="Credit Position">
         <DocumentStatGrid
           items={[
-            { label: 'Credit Limit', value: money(credit.creditLimit), hint: 'Approved customer limit' },
-            { label: 'Outstanding', value: money(credit.totalReceivable), hint: `${credit.openReceivables} open receivable${credit.openReceivables === 1 ? '' : 's'}` },
-            { label: 'Available Credit', value: money(credit.creditAvailable), tone: credit.creditAvailable < 0 ? 'danger' : 'success' },
-            { label: 'Overdue', value: money(credit.overdueAmount), hint: `${credit.overdueCount} overdue receivable${credit.overdueCount === 1 ? '' : 's'}`, tone: credit.overdueAmount > 0 ? 'danger' : 'neutral' },
+            {
+              label: 'Credit Limit',
+              value: money(credit.creditLimit),
+              hint: 'Approved customer limit',
+            },
+            {
+              label: 'Outstanding',
+              value: money(credit.totalReceivable),
+              hint: `${credit.openReceivables} open receivable${credit.openReceivables === 1 ? '' : 's'}`,
+            },
+            {
+              label: 'Available Credit',
+              value: money(credit.creditAvailable),
+              tone: credit.creditAvailable < 0 ? 'danger' : 'success',
+            },
+            {
+              label: 'Overdue',
+              value: money(credit.overdueAmount),
+              hint: `${credit.overdueCount} overdue receivable${credit.overdueCount === 1 ? '' : 's'}`,
+              tone: credit.overdueAmount > 0 ? 'danger' : 'neutral',
+            },
           ]}
         />
         <div className="mt-4">
@@ -217,13 +255,15 @@ export default function CustomerPrintPage() {
               </tr>
             </thead>
             <tbody>
-              {recentOrders.map(order => (
+              {recentOrders.map((order) => (
                 <tr key={order.id} className="border-t border-slate-200">
                   <Td mono>{order.salesOrderNumber}</Td>
                   <Td>{formatDate(order.orderDate)}</Td>
                   <Td>{order.salesperson?.fullName ?? order.salesperson?.employeeCode ?? 'N/A'}</Td>
                   <Td align="right">{fmt(order.totalAmount)}</Td>
-                  <Td align="right">{Number(order.outstandingAmount) > 0 ? fmt(order.outstandingAmount) : 'N/A'}</Td>
+                  <Td align="right">
+                    {Number(order.outstandingAmount) > 0 ? fmt(order.outstandingAmount) : 'N/A'}
+                  </Td>
                   <Td>{label(order.status)}</Td>
                 </tr>
               ))}
@@ -246,7 +286,7 @@ export default function CustomerPrintPage() {
               </tr>
             </thead>
             <tbody>
-              {recentPayments.map(payment => (
+              {recentPayments.map((payment) => (
                 <tr key={payment.id} className="border-t border-slate-200">
                   <Td mono>{payment.receivableNumber}</Td>
                   <Td>{formatDate(payment.updatedAt)}</Td>
@@ -257,7 +297,9 @@ export default function CustomerPrintPage() {
             </tbody>
           </DocumentTable>
         ) : (
-          <EmptyDocumentState>No settled payments have been recorded for this customer.</EmptyDocumentState>
+          <EmptyDocumentState>
+            No settled payments have been recorded for this customer.
+          </EmptyDocumentState>
         )}
       </DocumentSection>
 
@@ -273,7 +315,7 @@ export default function CustomerPrintPage() {
               </tr>
             </thead>
             <tbody>
-              {topProducts.map(product => (
+              {topProducts.map((product) => (
                 <tr key={product.productId} className="border-t border-slate-200">
                   <Td>{product.productName}</Td>
                   <Td mono>{product.sku ?? 'N/A'}</Td>
@@ -284,7 +326,9 @@ export default function CustomerPrintPage() {
             </tbody>
           </DocumentTable>
         ) : (
-          <EmptyDocumentState>No product purchases are available for the last 90 days.</EmptyDocumentState>
+          <EmptyDocumentState>
+            No product purchases are available for the last 90 days.
+          </EmptyDocumentState>
         )}
       </DocumentSection>
     </DocumentShell>
@@ -294,7 +338,9 @@ export default function CustomerPrintPage() {
 function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {
   const alignClass = align === 'right' ? 'text-right' : 'text-left';
   return (
-    <th className={`px-3 py-2 ${alignClass} text-[10px] font-bold uppercase tracking-wide text-slate-600`}>
+    <th
+      className={`px-3 py-2 ${alignClass} text-[10px] font-bold uppercase tracking-wide text-slate-600`}
+    >
       {children}
     </th>
   );
@@ -311,7 +357,9 @@ function Td({
 }) {
   const alignClass = align === 'right' ? 'text-right' : 'text-left';
   return (
-    <td className={`px-3 py-2 ${alignClass} align-top text-xs text-slate-800 ${mono ? 'font-mono' : ''}`}>
+    <td
+      className={`px-3 py-2 ${alignClass} align-top text-xs text-slate-800 ${mono ? 'font-mono' : ''}`}
+    >
       {children}
     </td>
   );

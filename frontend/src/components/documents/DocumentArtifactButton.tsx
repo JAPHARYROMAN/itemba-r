@@ -37,7 +37,11 @@ export function DocumentArtifactButton({
         entityId,
       });
       setDocumentId(result.document.id);
-      window.open(`/api/backend/documents/${result.document.id}/download`, '_blank', 'noopener,noreferrer');
+      window.open(
+        `/api/backend/documents/${result.document.id}/download`,
+        '_blank',
+        'noopener,noreferrer',
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not generate PDF');
     } finally {

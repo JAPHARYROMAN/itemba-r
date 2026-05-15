@@ -49,7 +49,9 @@ export default function LoginPage() {
       }
     >
       <div className="mb-7">
-        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Welcome back</div>
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+          Welcome back
+        </div>
         <h2 className="mt-3 text-2xl font-semibold text-slate-950">Account sign in</h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">
           Use the email and password assigned to your Itemba Group user profile.
