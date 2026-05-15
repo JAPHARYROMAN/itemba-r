@@ -11,6 +11,7 @@ const tdCls = 'px-3 py-3 text-[13px]';
 
 interface Company { id: string; name: string; code: string; }
 interface Division { id: string; name: string; code: string; }
+interface Route { id: string; name: string; origin: string; destination: string; }
 
 function fmtCurrency(n: number) { return `TZS ${new Intl.NumberFormat('en-US').format(n)}`; }
 function fmtDate(d: string) { return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
@@ -31,6 +32,7 @@ export default function TripsPage() {
   const [divisionId, setDivisionId] = useState('');
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [drivers, setDrivers] = useState<any[]>([]);
+  const [routes, setRoutes] = useState<Route[]>([]);
   const [statusFilter, setStatusFilter] = useState('');
   const [data, setData] = useState<{ data: any[]; total: number }>({ data: [], total: 0 });
   const [loading, setLoading] = useState(false);
@@ -50,7 +52,7 @@ export default function TripsPage() {
   }, []);
 
   useEffect(() => {
-    if (!companyId) { setDivisions([]); setDivisionId(''); setVehicles([]); setDrivers([]); return; }
+    if (!companyId) { setDivisions([]); setDivisionId(''); setVehicles([]); setDrivers([]); setRoutes([]); return; }
     fetch(`/api/backend/divisions?companyId=${companyId}&limit=50`)
       .then(r => r.json())
       .then(j => {
@@ -65,6 +67,9 @@ export default function TripsPage() {
     fetch(`/api/backend/logistics/drivers?companyId=${companyId}&limit=100`)
       .then(r => r.json())
       .then(j => setDrivers(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
+    fetch(`/api/backend/logistics/routes?companyId=${companyId}&limit=100`)
+      .then(r => r.json())
+      .then(j => setRoutes(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
   }, [companyId]);
 
   useEffect(() => {
@@ -82,7 +87,10 @@ export default function TripsPage() {
       if (from) params.set('from', from);
       if (to) params.set('to', to);
       const res = await fetch(`/api/backend/logistics/trips?${params}`);
-      if (!res.ok) throw new Error('Failed to load');
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.message ?? 'Failed to load');
+      }
       const json = await res.json();
       setData(Array.isArray(json.data?.data) ? json.data : { data: Array.isArray(json.data) ? json.data : [], total: 0 });
     } catch (err: unknown) {
@@ -119,8 +127,20 @@ export default function TripsPage() {
   }
 
   async function handleSave() {
-    if (!form.origin || !form.destination || !form.tripDate) {
-      alert('Origin, Destination, and Trip Date are required.');
+    if (!divisionId) {
+      setToast({ message: 'Create a division for this company before creating trips.', type: 'error' });
+      return;
+    }
+    if (!form.vehicleId) {
+      setToast({ message: 'Vehicle is required.', type: 'error' });
+      return;
+    }
+    if (!form.driverId) {
+      setToast({ message: 'Driver is required.', type: 'error' });
+      return;
+    }
+    if (!form.origin.trim() || !form.destination.trim() || !form.tripDate) {
+      setToast({ message: 'Origin, destination, and trip date are required.', type: 'error' });
       return;
     }
     const activeStatuses = ['DISPATCHED', 'IN_TRANSIT'];
@@ -144,13 +164,23 @@ export default function TripsPage() {
     }
     setSaving(true);
     try {
-      const body = {
-        ...form,
+      const body: Record<string, unknown> = {
         companyId,
         divisionId,
+        vehicleId: form.vehicleId,
+        driverId: form.driverId,
+        origin: form.origin.trim(),
+        destination: form.destination.trim(),
+        tripDate: form.tripDate,
+        currency: form.currency.trim() || 'TZS',
         cargoWeight: form.cargoWeight !== '' ? Number(form.cargoWeight) : undefined,
         revenueAmount: form.revenueAmount !== '' ? Number(form.revenueAmount) : undefined,
       };
+      if (form.routeId) body.routeId = form.routeId;
+      if (form.expectedReturnDate) body.expectedReturnDate = form.expectedReturnDate;
+      if (form.customerName.trim()) body.customerName = form.customerName.trim();
+      if (form.cargoDescription.trim()) body.cargoDescription = form.cargoDescription.trim();
+      if (form.notes.trim()) body.notes = form.notes.trim();
       const res = await fetch('/api/backend/logistics/trips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const j = await res.json(); throw new Error(j.message ?? 'Save failed'); }
       setModal(null);
@@ -282,13 +312,15 @@ export default function TripsPage() {
           <FormInput label="Destination" value={form.destination} onChange={e => setForm(f => ({ ...f, destination: e.target.value }))} placeholder="e.g. Mwanza" required />
           <DateInput label="Trip Date" value={form.tripDate} onChange={e => setForm(f => ({ ...f, tripDate: e.target.value }))} required />
           <DateInput label="Expected Return Date" value={form.expectedReturnDate} onChange={e => setForm(f => ({ ...f, expectedReturnDate: e.target.value }))} />
-          <FormSelect label="Vehicle" value={form.vehicleId} onChange={e => setForm(f => ({ ...f, vehicleId: e.target.value }))} placeholder="— Select Vehicle —">
+          <FormSelect label="Vehicle" value={form.vehicleId} onChange={e => setForm(f => ({ ...f, vehicleId: e.target.value }))} placeholder="— Select Vehicle —" required>
             {vehicles.map(v => <option key={v.id} value={v.id}>{v.vehicleCode} – {v.registrationNumber}</option>)}
           </FormSelect>
-          <FormSelect label="Driver" value={form.driverId} onChange={e => setForm(f => ({ ...f, driverId: e.target.value }))} placeholder="— Select Driver —">
+          <FormSelect label="Driver" value={form.driverId} onChange={e => setForm(f => ({ ...f, driverId: e.target.value }))} placeholder="— Select Driver —" required>
             {drivers.map(d => <option key={d.id} value={d.id}>{d.fullName} ({d.driverCode})</option>)}
           </FormSelect>
-          <FormInput label="Route ID" value={form.routeId} onChange={e => setForm(f => ({ ...f, routeId: e.target.value }))} placeholder="Route ID (optional)" />
+          <FormSelect label="Route" value={form.routeId} onChange={e => setForm(f => ({ ...f, routeId: e.target.value }))} placeholder="— Optional Route —">
+            {routes.map(r => <option key={r.id} value={r.id}>{r.name} ({r.origin} → {r.destination})</option>)}
+          </FormSelect>
           <FormInput label="Customer Name" value={form.customerName} onChange={e => setForm(f => ({ ...f, customerName: e.target.value }))} placeholder="Customer" />
           <FormInput label="Cargo Description" value={form.cargoDescription} onChange={e => setForm(f => ({ ...f, cargoDescription: e.target.value }))} placeholder="What's being transported" />
           <FormInput label="Cargo Weight (kg)" type="number" value={form.cargoWeight} onChange={e => setForm(f => ({ ...f, cargoWeight: e.target.value }))} placeholder="kg" min="0" />
