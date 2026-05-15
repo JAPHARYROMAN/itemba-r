@@ -52,6 +52,7 @@ const sampleEnv = {
   FRONTEND_URL: 'http://127.0.0.1:3000',
   CORS_ORIGIN: 'http://127.0.0.1:3000',
   NEXT_PUBLIC_API_URL: 'http://127.0.0.1:3001/api/v1',
+  NEXT_PUBLIC_WEBSITE_URL: 'http://127.0.0.1:3000',
   BACKEND_INTERNAL_URL: 'http://backend:3001/api/v1',
 };
 
