@@ -93,27 +93,43 @@ async function runSmoke() {
   compose(['down', '-v', '--remove-orphans'], { allowFailure: true });
   compose(['up', '--build', '-d']);
 
-  await waitForHttp(
+  await waitForContainerCommand(
     'backend readiness',
-    'http://127.0.0.1:3001/api/v1/health/ready',
+    'backend',
+    [
+      'node',
+      '-e',
+      `
+fetch('http://127.0.0.1:3001/api/v1/health/ready')
+  .then(async (response) => {
+    if (!response.ok) process.exit(1);
+    const body = await response.json().catch(() => null);
+    const health = body?.data ?? body;
+    process.exit(health?.database === 'up' && health?.status !== 'critical' ? 0 : 1);
+  })
+  .catch(() => process.exit(1));
+`,
+    ],
     240_000,
-    async (response) => {
-      if (!response.ok) return false;
-      const body = await response.json().catch(() => null);
-      const health = body?.data ?? body;
-      return health?.database === 'up' && health?.status !== 'critical';
-    },
   );
 
-  await waitForHttp(
+  await waitForContainerCommand(
     'frontend login route',
-    'http://127.0.0.1:3000/login',
+    'frontend',
+    [
+      'node',
+      '-e',
+      `
+fetch('http://127.0.0.1:3000/login')
+  .then(async (response) => {
+    if (!response.ok) process.exit(1);
+    const text = await response.text().catch(() => '');
+    process.exit(text.length > 0 ? 0 : 1);
+  })
+  .catch(() => process.exit(1));
+`,
+    ],
     180_000,
-    async (response) => {
-      if (!response.ok) return false;
-      const text = await response.text().catch(() => '');
-      return text.length > 0;
-    },
   );
 }
 
@@ -154,27 +170,28 @@ function runDocker(dockerArgs, { allowFailure = false, capture = false } = {}) {
   return result;
 }
 
-async function waitForHttp(label, url, timeoutMs, predicate) {
+async function waitForContainerCommand(label, service, command, timeoutMs) {
   const startedAt = Date.now();
   let lastError = 'not attempted';
 
   while (Date.now() - startedAt < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (await predicate(response)) {
-        console.log(`${label} is ready`);
-        return;
-      }
-      lastError = `HTTP ${response.status}`;
-    } catch (error) {
-      lastError = error.message;
+    const result = compose(['exec', '-T', service, ...command], {
+      allowFailure: true,
+      capture: true,
+    });
+
+    if (result.status === 0) {
+      console.log(`${label} is ready`);
+      return;
     }
 
+    lastError = [result.stderr, result.stdout].filter(Boolean).join('\n').trim();
+    if (!lastError) lastError = `exit ${result.status}`;
     await sleep(3_000);
   }
 
   throw new Error(
-    `${label} did not become ready within ${timeoutMs / 1000}s; last result: ${lastError}`,
+    `${label} did not become ready within ${timeoutMs / 1000}s; last result: ${lastError.slice(0, 500)}`,
   );
 }
 
