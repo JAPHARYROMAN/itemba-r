@@ -12,9 +12,10 @@ import {
   FormInput,
   FormSelect,
   FormTextarea,
+  ConfirmDialog,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
-import { backendList, backendPage, backendPatch, backendPost } from '@/lib/api-client';
+import { backendDelete, backendList, backendPage, backendPatch, backendPost } from '@/lib/api-client';
 
 interface Company {
   id: string;
@@ -246,6 +247,7 @@ export default function InventoryLocationsPage() {
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<InventoryLocation | null>(null);
+  const [deleting, setDeleting] = useState<InventoryLocation | null>(null);
 
   const canView = hasPermission('inventory.view');
   const canManage = hasPermission('inventory.manage');
@@ -298,6 +300,22 @@ export default function InventoryLocationsPage() {
     load();
   }, [load]);
 
+  const handleDelete = async () => {
+    if (!deleting) return;
+    setError('');
+    try {
+      await backendDelete(`/inventory-locations/${deleting.id}`);
+      setDeleting(null);
+      if (data?.data.length === 1 && page > 1) {
+        setPage((p) => p - 1);
+      } else {
+        await load();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete inventory location');
+    }
+  };
+
   if (!canView) {
     return (
       <div className="p-6">
@@ -346,6 +364,15 @@ export default function InventoryLocationsPage() {
           }}
         />
       )}
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete Location"
+        message={`Delete "${deleting?.name ?? 'this inventory location'}"? This hides it from inventory workflows but keeps its audit history.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setDeleting(null)}
+      />
 
       <PageHeader title="Inventory Locations" subtitle="Stores, warehouses, and storage points" />
 
@@ -488,10 +515,15 @@ export default function InventoryLocationsPage() {
                       </span>
                     </td>
                     {canManage && (
-                      <td className="px-4 py-3 text-right">
-                        <Btn variant="ghost" size="xs" onClick={() => setEditing(loc)}>
-                          Edit
-                        </Btn>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-2">
+                          <Btn variant="ghost" size="xs" onClick={() => setEditing(loc)}>
+                            Edit
+                          </Btn>
+                          <Btn variant="danger" size="xs" onClick={() => setDeleting(loc)}>
+                            Delete
+                          </Btn>
+                        </div>
                       </td>
                     )}
                   </tr>

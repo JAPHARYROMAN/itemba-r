@@ -66,9 +66,9 @@ interface PurchaseOrderLine {
 
 interface PurchaseOrder {
   id: string;
-  orderNumber?: string;
+  purchaseOrderNumber?: string;
   orderDate: string;
-  dueDate?: string | null;
+  expectedDate?: string | null;
   supplierId?: string | null;
   supplierName?: string | null;
   purchaseType: string;
@@ -90,7 +90,7 @@ interface PurchaseOrderForm {
   supplierName: string;
   purchaseType: string;
   orderDate: string;
-  dueDate: string;
+  expectedDate: string;
   currency: string;
   notes: string;
   lines: PurchaseOrderLine[];
@@ -143,7 +143,7 @@ const blankForm = (): PurchaseOrderForm => ({
   supplierName: '',
   purchaseType: 'CASH_PURCHASE',
   orderDate: new Date().toISOString().slice(0, 10),
-  dueDate: '',
+  expectedDate: '',
   currency: 'TZS',
   notes: '',
   lines: [BLANK_LINE()],
@@ -179,7 +179,7 @@ function PurchaseOrderModal({
           supplierName: initial.supplierName ?? '',
           purchaseType: initial.purchaseType,
           orderDate: initial.orderDate.slice(0, 10),
-          dueDate: initial.dueDate?.slice(0, 10) ?? '',
+          expectedDate: initial.expectedDate?.slice(0, 10) ?? '',
           currency: initial.currency,
           notes: initial.notes ?? '',
           lines: initial.lines?.length
@@ -313,7 +313,7 @@ function PurchaseOrderModal({
       };
       if (form.supplierId) body.supplierId = form.supplierId;
       if (form.supplierName) body.supplierName = form.supplierName;
-      if (form.dueDate) body.dueDate = form.dueDate;
+      if (form.expectedDate) body.expectedDate = form.expectedDate;
       if (form.notes) body.notes = form.notes;
       if (mode === 'create') {
         await backendPost('/purchase-orders', body);
@@ -420,10 +420,10 @@ function PurchaseOrderModal({
             onChange={(e) => setField('orderDate', e.target.value)}
           />
           <FormInput
-            label="Due Date"
+            label="Expected Date"
             type="date"
-            value={form.dueDate}
-            onChange={(e) => setField('dueDate', e.target.value)}
+            value={form.expectedDate}
+            onChange={(e) => setField('expectedDate', e.target.value)}
           />
           <div className="col-span-2">
             <FormTextarea
@@ -721,7 +721,7 @@ function DeleteConfirm({
         </div>
       )}
       <p className="text-sm" style={{ color: 'var(--aurora-text)' }}>
-        Delete order <strong>{order.orderNumber ?? order.id}</strong>?
+        Delete order <strong>{order.purchaseOrderNumber ?? order.id}</strong>?
       </p>
     </Modal>
   );
@@ -1052,7 +1052,7 @@ export default function PurchaseOrdersPage() {
                 data.data.map((o) => (
                   <tr key={o.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono text-xs">
-                      {o.orderNumber ?? o.id.slice(0, 8)}
+                      {o.purchaseOrderNumber ?? o.id.slice(0, 8)}
                     </td>
                     <td className="px-4 py-3 text-xs">
                       {new Date(o.orderDate).toLocaleDateString('en-GB')}
