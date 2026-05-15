@@ -52,7 +52,7 @@ interface Product {
   defaultPurchasePrice?: number | null;
   wholesalePrice?: number | null;
   retailPrice?: number | null;
-  minStockLevel?: number | null;
+  minimumStockLevel?: number | null;
   reorderLevel?: number | null;
   trackInventory: boolean;
   trackBatch: boolean;
@@ -60,11 +60,11 @@ interface Product {
   description?: string | null;
   companyId: string;
   divisionId?: string | null;
-  productCategoryId: string;
+  categoryId: string;
   baseUnitId: string;
   company?: { name: string } | null;
   division?: { id: string; name: string; code: string } | null;
-  productCategory?: { name: string } | null;
+  category?: { name: string } | null;
   baseUnit?: { name: string; symbol: string } | null;
 }
 
@@ -73,14 +73,14 @@ interface ProductForm {
   divisionId: string;
   productCode: string;
   name: string;
-  productCategoryId: string;
+  categoryId: string;
   productType: string;
   baseUnitId: string;
   defaultSellingPrice: string;
   defaultPurchasePrice: string;
   wholesalePrice: string;
   retailPrice: string;
-  minStockLevel: string;
+  minimumStockLevel: string;
   reorderLevel: string;
   trackInventory: boolean;
   trackBatch: boolean;
@@ -121,14 +121,14 @@ const BLANK: ProductForm = {
   divisionId: '',
   productCode: '',
   name: '',
-  productCategoryId: '',
+  categoryId: '',
   productType: 'STOCK_ITEM',
   baseUnitId: '',
   defaultSellingPrice: '',
   defaultPurchasePrice: '',
   wholesalePrice: '',
   retailPrice: '',
-  minStockLevel: '',
+  minimumStockLevel: '',
   reorderLevel: '',
   trackInventory: true,
   trackBatch: false,
@@ -167,7 +167,7 @@ function ProductModal({
           divisionId: initial.divisionId ?? '',
           productCode: initial.productCode ?? '',
           name: initial.name,
-          productCategoryId: initial.productCategoryId,
+          categoryId: initial.categoryId,
           productType: initial.productType,
           baseUnitId: initial.baseUnitId,
           defaultSellingPrice:
@@ -176,7 +176,8 @@ function ProductModal({
             initial.defaultPurchasePrice != null ? String(initial.defaultPurchasePrice) : '',
           wholesalePrice: initial.wholesalePrice != null ? String(initial.wholesalePrice) : '',
           retailPrice: initial.retailPrice != null ? String(initial.retailPrice) : '',
-          minStockLevel: initial.minStockLevel != null ? String(initial.minStockLevel) : '',
+          minimumStockLevel:
+            initial.minimumStockLevel != null ? String(initial.minimumStockLevel) : '',
           reorderLevel: initial.reorderLevel != null ? String(initial.reorderLevel) : '',
           trackInventory: initial.trackInventory,
           trackBatch: initial.trackBatch,
@@ -232,7 +233,7 @@ function ProductModal({
       setError('Name is required');
       return;
     }
-    if (!form.productCategoryId) {
+    if (!form.categoryId) {
       setError('Category is required');
       return;
     }
@@ -246,8 +247,8 @@ function ProductModal({
       const num = (s: string) => (s.trim() === '' ? undefined : Number(s));
       const body: Record<string, unknown> = {
         companyId: form.companyId,
-        name: form.name,
-        productCategoryId: form.productCategoryId,
+        name: form.name.trim(),
+        categoryId: form.categoryId,
         productType: form.productType,
         baseUnitId: form.baseUnitId,
         status: form.status,
@@ -255,8 +256,8 @@ function ProductModal({
         trackBatch: form.trackBatch,
         trackExpiry: form.trackExpiry,
       };
-      if (form.productCode) body.productCode = form.productCode;
-      if (form.description) body.description = form.description;
+      if (form.productCode.trim()) body.productCode = form.productCode.trim();
+      if (form.description.trim()) body.description = form.description.trim();
       // Division: empty string => clear in edit mode (send null);
       // populated => assign to that division; omit on create when blank.
       if (mode === 'edit') body.divisionId = form.divisionId || null;
@@ -266,7 +267,7 @@ function ProductModal({
         'defaultPurchasePrice',
         'wholesalePrice',
         'retailPrice',
-        'minStockLevel',
+        'minimumStockLevel',
         'reorderLevel',
       ];
       for (const k of fields) {
@@ -326,8 +327,8 @@ function ProductModal({
         <FormSelect
           label="Category"
           required
-          value={form.productCategoryId}
-          onChange={(e) => set('productCategoryId', e.target.value)}
+          value={form.categoryId}
+          onChange={(e) => set('categoryId', e.target.value)}
           placeholder={form.companyId ? 'Select category' : 'Select company first'}
         >
           {categories.map((c) => (
@@ -411,8 +412,8 @@ function ProductModal({
         <FormInput
           label="Min Stock Level"
           type="number"
-          value={form.minStockLevel}
-          onChange={(e) => set('minStockLevel', e.target.value)}
+          value={form.minimumStockLevel}
+          onChange={(e) => set('minimumStockLevel', e.target.value)}
         />
         <FormInput
           label="Reorder Level"
@@ -606,7 +607,7 @@ export default function ProductsPage() {
           limit: 20,
           search: search.trim() || undefined,
           companyId: companyId || undefined,
-          productCategoryId: categoryId || undefined,
+          categoryId: categoryId || undefined,
           productType: productType || undefined,
           status: status || undefined,
         },
@@ -832,7 +833,7 @@ export default function ProductsPage() {
                   <tr key={p.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono text-xs">{p.productCode ?? '—'}</td>
                     <td className="px-4 py-3 font-medium">{p.name}</td>
-                    <td className="px-4 py-3 text-xs">{p.productCategory?.name ?? '—'}</td>
+                    <td className="px-4 py-3 text-xs">{p.category?.name ?? '—'}</td>
                     <td className="px-4 py-3 text-xs">
                       {p.division?.name ?? (
                         <span className="text-slate-400 italic">company-wide</span>

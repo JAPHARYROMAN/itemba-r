@@ -14,6 +14,10 @@ export class CreateProductDto {
   @IsString()
   companyId!: string;
 
+  @IsOptional()
+  @IsString()
+  productCode?: string;
+
   /**
    * Optional FK to Division — scopes the SKU to a specific division. When
    * set, sales pickers (Quick Sale, Sales Orders) filter to this division.

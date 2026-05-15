@@ -20,6 +20,11 @@ function generateProductCode(): string {
   return `PRD-${Date.now().toString(36).toUpperCase()}`;
 }
 
+function normalizeProductCode(productCode?: string): string | undefined {
+  const trimmed = productCode?.trim();
+  return trimmed || undefined;
+}
+
 @Injectable()
 export class ProductsService {
   constructor(
@@ -108,7 +113,7 @@ export class ProductsService {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     await this.assertReferencesBelongToCompany(dto.companyId, dto);
     const userId = user.id;
-    const productCode = generateProductCode();
+    const productCode = normalizeProductCode(dto.productCode) ?? generateProductCode();
 
     const existing = await this.prisma.product.findFirst({
       where: { productCode, companyId: dto.companyId, deletedAt: null },
@@ -167,10 +172,26 @@ export class ProductsService {
     const userId = user.id;
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     await this.assertReferencesBelongToCompany(existing.companyId, dto);
+    const productCode = normalizeProductCode(dto.productCode);
+
+    if (productCode && productCode !== existing.productCode) {
+      const duplicate = await this.prisma.product.findFirst({
+        where: {
+          productCode,
+          companyId: existing.companyId,
+          deletedAt: null,
+          NOT: { id },
+        },
+      });
+      if (duplicate) {
+        throw new BadRequestException('A product with this code already exists in the company');
+      }
+    }
 
     const record = await this.prisma.product.update({
       where: { id },
       data: {
+        ...(productCode !== undefined && { productCode }),
         ...(dto.divisionId !== undefined && { divisionId: dto.divisionId || null }),
         ...(dto.categoryId !== undefined && { categoryId: dto.categoryId }),
         ...(dto.name !== undefined && { name: dto.name }),

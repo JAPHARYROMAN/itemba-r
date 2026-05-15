@@ -11,6 +11,10 @@ import { ProductType, ProductStatus } from '@prisma/client';
 export class UpdateProductDto {
   @IsOptional()
   @IsString()
+  productCode?: string;
+
+  @IsOptional()
+  @IsString()
   divisionId?: string;
 
   @IsOptional()
