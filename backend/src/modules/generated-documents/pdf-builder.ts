@@ -95,7 +95,9 @@ class SimplePdf {
     const logoText = valueOrNull(org.logoText) ?? initials(groupName);
 
     this.rect(MARGIN, headerTop - 2, 54, 54, false, 0);
-    const imageDrawn = org.logoImage ? this.image(org.logoImage, MARGIN + 4, headerTop + 2, 46, 46) : false;
+    const imageDrawn = org.logoImage
+      ? this.image(org.logoImage, MARGIN + 4, headerTop + 2, 46, 46)
+      : false;
     if (!imageDrawn) this.text(logoText, MARGIN + 13, headerTop + 31, 13, 'F2', 28, 'center');
 
     const orgX = MARGIN + 66;
@@ -111,17 +113,22 @@ class SimplePdf {
     const contactLine = [
       valueOrNull(org.phone) ? `Tel: ${valueOrNull(org.phone)}` : null,
       valueOrNull(org.email) ? `Email: ${valueOrNull(org.email)}` : null,
-    ].filter(Boolean).join(' | ');
+    ]
+      .filter(Boolean)
+      .join(' | ');
     if (contactLine) orgY = this.wrappedText(contactLine, orgX, orgY, 8, orgWidth, 'F1') + 1;
 
     const taxLine = [
       valueOrNull(org.tin) ? `TIN: ${valueOrNull(org.tin)}` : null,
       valueOrNull(org.vrn) ? `VRN: ${valueOrNull(org.vrn)}` : null,
-    ].filter(Boolean).join(' | ');
+    ]
+      .filter(Boolean)
+      .join(' | ');
     if (taxLine) orgY = this.wrappedText(taxLine, orgX, orgY, 8, orgWidth, 'F1') + 1;
 
     const registrationNumber = valueOrNull(org.registrationNumber);
-    if (registrationNumber) orgY = this.wrappedText(`Reg: ${registrationNumber}`, orgX, orgY, 8, orgWidth, 'F1') + 1;
+    if (registrationNumber)
+      orgY = this.wrappedText(`Reg: ${registrationNumber}`, orgX, orgY, 8, orgWidth, 'F1') + 1;
 
     const rightX = PAGE_WIDTH - MARGIN - 160;
     this.text('DOCUMENT', rightX, headerTop + 2, 8, 'F2', 160, 'right');
@@ -184,7 +191,15 @@ class SimplePdf {
     for (let i = 0; i < pageCount; i += 1) {
       const previous = this.pages;
       this.pages = [previous[i]];
-      this.text(`Page ${i + 1} of ${pageCount}`, PAGE_WIDTH - MARGIN - 120, PAGE_HEIGHT - 24, 8, 'F1', 120, 'right');
+      this.text(
+        `Page ${i + 1} of ${pageCount}`,
+        PAGE_WIDTH - MARGIN - 120,
+        PAGE_HEIGHT - 24,
+        8,
+        'F1',
+        120,
+        'right',
+      );
       this.pages = previous;
     }
   }
@@ -215,7 +230,9 @@ class SimplePdf {
 
     for (const ops of this.pages) {
       const stream = ops.join('\n');
-      const contentId = addObject(`<< /Length ${Buffer.byteLength(stream, 'binary')} >>\nstream\n${stream}\nendstream`);
+      const contentId = addObject(
+        `<< /Length ${Buffer.byteLength(stream, 'binary')} >>\nstream\n${stream}\nendstream`,
+      );
       const pageId = addObject(
         `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] ` +
           `/Resources << /Font << /F1 ${fontRegularId} 0 R /F2 ${fontBoldId} 0 R >> ${xObjectResources}>> ` +
@@ -224,7 +241,8 @@ class SimplePdf {
       pageIds.push(pageId);
     }
 
-    objects[pagesId - 1] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`;
+    objects[pagesId - 1] =
+      `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`;
 
     let body = '%PDF-1.4\n';
     const offsets = [0];
@@ -251,7 +269,14 @@ class SimplePdf {
       row.forEach((item, index) => {
         const x = MARGIN + index * colWidth;
         this.text(item.label.toUpperCase(), x, startY, 7, 'F2', colWidth - 12);
-        const bottom = this.wrappedText(item.value || 'N/A', x, startY + 10, 9, colWidth - 12, 'F1');
+        const bottom = this.wrappedText(
+          item.value || 'N/A',
+          x,
+          startY + 10,
+          9,
+          colWidth - 12,
+          'F1',
+        );
         rowHeight = Math.max(rowHeight, bottom - startY);
       });
       this.y += Math.max(rowHeight, 24);
@@ -464,21 +489,9 @@ function parseJpegImage(data: Buffer): ParsedPdfImage {
 }
 
 function isJpegStartOfFrame(marker: number) {
-  return [
-    0xc0,
-    0xc1,
-    0xc2,
-    0xc3,
-    0xc5,
-    0xc6,
-    0xc7,
-    0xc9,
-    0xca,
-    0xcb,
-    0xcd,
-    0xce,
-    0xcf,
-  ].includes(marker);
+  return [0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(
+    marker,
+  );
 }
 
 function jpegColorSpace(components: number): ParsedPdfImage['colorSpace'] {
@@ -631,10 +644,14 @@ function pngPixelsToImage(
     if (opacity !== 255) hasAlpha = true;
   };
 
-  const transparentGray = transparency && transparency.length >= 2 ? transparency.readUInt16BE(0) : null;
-  const transparentRed = transparency && transparency.length >= 6 ? transparency.readUInt16BE(0) : null;
-  const transparentGreen = transparency && transparency.length >= 6 ? transparency.readUInt16BE(2) : null;
-  const transparentBlue = transparency && transparency.length >= 6 ? transparency.readUInt16BE(4) : null;
+  const transparentGray =
+    transparency && transparency.length >= 2 ? transparency.readUInt16BE(0) : null;
+  const transparentRed =
+    transparency && transparency.length >= 6 ? transparency.readUInt16BE(0) : null;
+  const transparentGreen =
+    transparency && transparency.length >= 6 ? transparency.readUInt16BE(2) : null;
+  const transparentBlue =
+    transparency && transparency.length >= 6 ? transparency.readUInt16BE(4) : null;
 
   for (let index = 0; index < width * height; index += 1) {
     if (colorType === 0) {
@@ -663,7 +680,8 @@ function pngPixelsToImage(
       const red = palette[paletteOffset] ?? 0;
       const green = palette[paletteOffset + 1] ?? 0;
       const blue = palette[paletteOffset + 2] ?? 0;
-      const opacity = transparency && paletteIndex < transparency.length ? transparency[paletteIndex] : 255;
+      const opacity =
+        transparency && paletteIndex < transparency.length ? transparency[paletteIndex] : 255;
       setPixel(index, red, green, blue, opacity);
     } else if (colorType === 4) {
       const offset = index * 2;
@@ -703,7 +721,9 @@ function pngPixelsToImage(
 
 function wrapText(value: string, width: number, size: number): string[] {
   const maxChars = Math.max(8, Math.floor(width / (size * 0.48)));
-  const words = cleanText(value || 'N/A').split(/\s+/).filter(Boolean);
+  const words = cleanText(value || 'N/A')
+    .split(/\s+/)
+    .filter(Boolean);
   const lines: string[] = [];
   let line = '';
   for (const word of words) {
