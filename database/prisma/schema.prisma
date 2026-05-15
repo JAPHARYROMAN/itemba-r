@@ -1175,6 +1175,7 @@ model PasswordResetToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([tokenHash])
   @@map("password_reset_tokens")
 }
 
@@ -1717,7 +1718,7 @@ model AuditLog {
 // ───────────────────────────────────────────────────────────────────────────────
 
 /// Tracks issued refresh tokens to support logout and session revocation.
-/// The token value is stored as an Argon2 hash — never in plain text.
+/// The token value is stored as a peppered HMAC lookup hash — never in plain text.
 model RefreshToken {
   id        String    @id @default(uuid())
   userId    String
@@ -3040,7 +3041,7 @@ model SalesOrderLine {
 
 model PurchaseOrder {
   id                  String              @id @default(uuid())
-  purchaseOrderNumber String              @unique
+  purchaseOrderNumber String
   companyId           String
   divisionId          String?
   branchId            String?
@@ -3090,6 +3091,7 @@ model PurchaseOrder {
   @@index([status])
   @@index([orderDate])
   @@index([companyId, supplierId, orderDate, status])
+  @@unique([companyId, purchaseOrderNumber])
   @@map("purchase_orders")
 }
 
@@ -3372,7 +3374,7 @@ model FuelPrice {
 
 model FuelShift {
   id                       String          @id @default(uuid())
-  shiftNumber              String          @unique
+  shiftNumber              String
   companyId                String
   divisionId               String?
   branchId                 String
@@ -3414,6 +3416,7 @@ model FuelShift {
   @@index([branchId])
   @@index([shiftDate])
   @@index([status])
+  @@unique([companyId, shiftNumber])
   @@map("fuel_shifts")
 }
 
@@ -3485,7 +3488,7 @@ model FuelNozzleReading {
 
 model FuelTankDip {
   id               String            @id @default(uuid())
-  dipNumber        String            @unique
+  dipNumber        String
   companyId        String
   branchId         String
   tankId           String
@@ -3517,6 +3520,7 @@ model FuelTankDip {
   @@index([tankId])
   @@index([dipDate])
   @@index([status])
+  @@unique([companyId, dipNumber])
   @@map("fuel_tank_dips")
 }
 
@@ -3548,7 +3552,7 @@ model FuelShiftCollection {
 
 model FuelCreditSale {
   id               String               @id @default(uuid())
-  creditSaleNumber String               @unique
+  creditSaleNumber String
   fuelShiftId      String?
   companyId        String
   branchId         String
@@ -3582,12 +3586,13 @@ model FuelCreditSale {
   @@index([customerId])
   @@index([saleDate])
   @@index([status])
+  @@unique([companyId, creditSaleNumber])
   @@map("fuel_credit_sales")
 }
 
 model FuelDelivery {
   id                 String             @id @default(uuid())
-  deliveryNumber     String             @unique
+  deliveryNumber     String
   companyId          String
   branchId           String
   supplierId         String
@@ -3634,12 +3639,13 @@ model FuelDelivery {
   @@index([tankId])
   @@index([deliveryDate])
   @@index([status])
+  @@unique([companyId, deliveryNumber])
   @@map("fuel_deliveries")
 }
 
 model FuelDailyReconciliation {
   id                         String                        @id @default(uuid())
-  reconciliationNumber       String                        @unique
+  reconciliationNumber       String
   companyId                  String
   branchId                   String
   reconciliationDate         DateTime                      @db.Date
@@ -3672,6 +3678,7 @@ model FuelDailyReconciliation {
   postedBy   User?     @relation("ReconciliationPostedBy", fields: [postedById], references: [id], onDelete: SetNull)
 
   @@unique([branchId, reconciliationDate])
+  @@unique([companyId, reconciliationNumber])
   @@index([companyId])
   @@index([branchId])
   @@index([reconciliationDate])
@@ -3931,7 +3938,7 @@ model CustomerPriceAgreement {
 // ─── ProductBatch ──────────────────────────────────────────────────────────────
 model ProductBatch {
   id                  String             @id @default(uuid())
-  batchNumber         String             @unique
+  batchNumber         String
   companyId           String
   productId           String
   supplierId          String?
@@ -3964,13 +3971,14 @@ model ProductBatch {
   @@index([batchNumber])
   @@index([expiryDate])
   @@index([status])
+  @@unique([companyId, batchNumber])
   @@map("product_batches")
 }
 
 // ─── StockDamage ──────────────────────────────────────────────────────────────
 model StockDamage {
   id                  String            @id @default(uuid())
-  damageNumber        String            @unique
+  damageNumber        String
   companyId           String
   branchId            String?
   inventoryLocationId String
@@ -4002,6 +4010,7 @@ model StockDamage {
   @@index([branchId])
   @@index([productId])
   @@index([status])
+  @@unique([companyId, damageNumber])
   @@map("stock_damages")
 }
 
@@ -4087,7 +4096,7 @@ model PackageMovement {
 // ─── Quotation ────────────────────────────────────────────────────────────────
 model Quotation {
   id                    String          @id @default(uuid())
-  quotationNumber       String          @unique
+  quotationNumber       String
   companyId             String
   divisionId            String?
   branchId              String?
@@ -4125,6 +4134,7 @@ model Quotation {
   @@index([customerId])
   @@index([status])
   @@index([quotationDate])
+  @@unique([companyId, quotationNumber])
   @@map("quotations")
 }
 
@@ -4155,7 +4165,7 @@ model QuotationLine {
 // ─── ProformaInvoice ──────────────────────────────────────────────────────────
 model ProformaInvoice {
   id                    String         @id @default(uuid())
-  proformaNumber        String         @unique
+  proformaNumber        String
   companyId             String
   divisionId            String?
   branchId              String?
@@ -4190,6 +4200,7 @@ model ProformaInvoice {
   @@index([customerId])
   @@index([status])
   @@index([proformaDate])
+  @@unique([companyId, proformaNumber])
   @@map("proforma_invoices")
 }
 
@@ -4220,7 +4231,7 @@ model ProformaInvoiceLine {
 // ─── DeliveryNote ─────────────────────────────────────────────────────────────
 model DeliveryNote {
   id                 String             @id @default(uuid())
-  deliveryNoteNumber String             @unique
+  deliveryNoteNumber String
   companyId          String
   branchId           String?
   salesOrderId       String?
@@ -4252,6 +4263,7 @@ model DeliveryNote {
   @@index([customerId])
   @@index([salesOrderId])
   @@index([status])
+  @@unique([companyId, deliveryNoteNumber])
   @@map("delivery_notes")
 }
 
@@ -7217,9 +7229,9 @@ model Employee {
   driverProfiles       DriverProfile[]         @relation("DriverEmployee")
 
   @@unique([companyId, employeeCode])
+  @@unique([nidaNumber])
   @@index([companyId, employmentStatus])
   @@index([companyId, departmentId, positionId])
-  @@index([nidaNumber])
   @@map("employees")
 }
 
@@ -7278,6 +7290,11 @@ model EmployeeAssignment {
   department           Department?           @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   position             Position?             @relation(fields: [positionId], references: [id], onDelete: SetNull)
 
+  @@index([companyId, status])
+  @@index([employeeId, status])
+  @@index([divisionId, status])
+  @@index([branchId, status])
+  @@index([startDate])
   @@map("employee_assignments")
 }
 
@@ -7338,6 +7355,7 @@ model WorkShift {
   schedules            ShiftSchedule[]
 
   @@unique([companyId, shiftCode])
+  @@index([companyId, isActive])
   @@map("work_shifts")
 }
 
@@ -7370,6 +7388,9 @@ model ShiftSchedule {
   attendanceRecords    AttendanceRecord[]
 
   @@unique([companyId, scheduleNumber])
+  @@index([employeeId, scheduleDate])
+  @@index([companyId, scheduleDate])
+  @@index([workShiftId])
   @@map("shift_schedules")
 }
 
@@ -7403,6 +7424,9 @@ model AttendanceRecord {
   approvedBy    User?          @relation("AttendanceApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
 
   @@unique([companyId, attendanceNumber])
+  @@index([employeeId])
+  @@index([attendanceDate])
+  @@index([companyId, attendanceDate])
   @@map("attendance_records")
 }
 
@@ -7423,6 +7447,7 @@ model LeaveType {
   leaveRequests LeaveRequest[]
 
   @@unique([companyId, code])
+  @@index([companyId, isActive])
   @@map("leave_types")
 }
 
@@ -7476,6 +7501,7 @@ model AllowanceType {
   payrollAllowances  PayrollEntryAllowance[]
 
   @@unique([companyId, code])
+  @@index([companyId, isActive])
   @@map("allowance_types")
 }
 
@@ -7498,6 +7524,7 @@ model DeductionType {
   payrollDeductions  PayrollEntryDeduction[]
 
   @@unique([companyId, code])
+  @@index([companyId, isActive])
   @@map("deduction_types")
 }
 
@@ -7519,6 +7546,10 @@ model EmployeeAllowance {
   employee      Employee     @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   allowanceType AllowanceType @relation(fields: [allowanceTypeId], references: [id], onDelete: Restrict)
 
+  @@index([companyId, status])
+  @@index([employeeId, status])
+  @@index([allowanceTypeId])
+  @@index([effectiveFrom])
   @@map("employee_allowances")
 }
 
@@ -7541,6 +7572,10 @@ model EmployeeDeduction {
   employee      Employee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   deductionType DeductionType @relation(fields: [deductionTypeId], references: [id], onDelete: Restrict)
 
+  @@index([companyId, status])
+  @@index([employeeId, status])
+  @@index([deductionTypeId])
+  @@index([effectiveFrom])
   @@map("employee_deductions")
 }
 
@@ -7855,6 +7890,9 @@ model PerformanceRecord {
   reviewer  User     @relation("PerformanceReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
 
   @@unique([companyId, performanceNumber])
+  @@index([employeeId, reviewDate])
+  @@index([companyId, reviewDate])
+  @@index([reviewerId])
   @@map("performance_records")
 }
 
@@ -8976,6 +9014,9 @@ model DataExportLog {
   exportedBy User @relation("DataExportBy", fields: [exportedById], references: [id], onDelete: Restrict)
   company    Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
 
+  @@index([companyId, createdAt])
+  @@index([exportedById, createdAt])
+  @@index([status, createdAt])
   @@map("data_export_logs")
 }
 
@@ -9257,7 +9298,7 @@ model ApprovalStep {
 
 model ApprovalRequest {
   id                     String                    @id @default(cuid())
-  approvalRequestNumber  String                    @unique
+  approvalRequestNumber  String
   workflowId             String?
   companyId              String?
   divisionId             String?
@@ -9297,6 +9338,7 @@ model ApprovalRequest {
   @@index([requestedById])
   @@index([companyId, entityType, entityId, status])
   @@index([requestedById, status, createdAt])
+  @@unique([companyId, approvalRequestNumber])
   @@map("approval_requests")
 }
 
@@ -9427,7 +9469,7 @@ model AlertRule {
 
 model AlertEvent {
   id                String           @id @default(cuid())
-  alertEventNumber  String           @unique
+  alertEventNumber  String
   alertRuleId       String?
   companyId         String?
   alertType         AlertType        @default(CUSTOM)
@@ -9455,12 +9497,13 @@ model AlertEvent {
   dismissedBy       User?            @relation("AlertDismissedBy", fields: [dismissedById], references: [id], onDelete: SetNull)
 
   @@index([status, alertType])
+  @@unique([companyId, alertEventNumber])
   @@map("alert_events")
 }
 
 model Task {
   id                     String     @id @default(cuid())
-  taskNumber             String     @unique
+  taskNumber             String
   companyId              String?
   divisionId             String?
   branchId               String?
@@ -9488,6 +9531,7 @@ model Task {
 
   @@index([assignedToId, status])
   @@index([companyId, status])
+  @@unique([companyId, taskNumber])
   @@map("tasks")
 }
 
@@ -12067,7 +12111,7 @@ model AccountingLock {
 
 model BankReconciliation {
   id                       String                   @id @default(cuid())
-  reconciliationNumber     String                   @unique
+  reconciliationNumber     String
   companyId                String
   cashAccountId            String
   bankAccountId            String?
@@ -12100,6 +12144,7 @@ model BankReconciliation {
   matches                  BankReconciliationMatch[]
 
   @@index([companyId, cashAccountId, status])
+  @@unique([companyId, reconciliationNumber])
   @@map("bank_reconciliations")
 }
 
@@ -12336,7 +12381,7 @@ model AuditAdjustmentLine {
 
 model PurchaseRequisition {
   id                      String              @id @default(cuid())
-  requisitionNumber       String              @unique
+  requisitionNumber       String
   companyId               String
   divisionId              String?
   branchId                String?
@@ -12365,6 +12410,7 @@ model PurchaseRequisition {
   lines                   PurchaseRequisitionLine[]
 
   @@index([companyId, status, requestDate])
+  @@unique([companyId, requisitionNumber])
   @@map("purchase_requisitions")
 }
 
@@ -12389,7 +12435,7 @@ model PurchaseRequisitionLine {
 
 model RequestForQuotation {
   id                   String    @id @default(cuid())
-  rfqNumber            String    @unique
+  rfqNumber            String
   companyId            String
   purchaseRequisitionId String?
   rfqDate              DateTime  @default(now())
@@ -12412,6 +12458,7 @@ model RequestForQuotation {
   bidComparisons       BidComparison[]
 
   @@index([companyId, status, rfqDate])
+  @@unique([companyId, rfqNumber])
   @@map("request_for_quotations")
 }
 
@@ -12539,7 +12586,7 @@ model BidComparisonLine {
 
 model GoodsReceivedNote {
   id             String    @id @default(cuid())
-  grnNumber      String    @unique
+  grnNumber      String
   companyId      String
   branchId       String?
   purchaseOrderId String?
@@ -12564,6 +12611,7 @@ model GoodsReceivedNote {
   threeWayMatches ThreeWayMatch[]
 
   @@index([companyId, supplierId, status, receivedDate])
+  @@unique([companyId, grnNumber])
   @@map("goods_received_notes")
 }
 
@@ -12590,7 +12638,7 @@ model GoodsReceivedNoteLine {
 
 model SupplierInvoice {
   id                     String                @id @default(cuid())
-  supplierInvoiceNumber  String                @unique
+  supplierInvoiceNumber  String
   companyId              String
   supplierId             String
   purchaseOrderId        String?
@@ -12624,6 +12672,7 @@ model SupplierInvoice {
   threeWayMatches        ThreeWayMatch[]
 
   @@index([companyId, supplierId, status, invoiceDate])
+  @@unique([companyId, supplierInvoiceNumber])
   @@map("supplier_invoices")
 }
 
@@ -13816,7 +13865,7 @@ model QATestResult {
 
 model LaunchBlocker {
   id                   String              @id @default(cuid())
-  blockerNumber        String              @unique
+  blockerNumber        String
   title                String
   description          String
   blockerType          LaunchBlockerType
@@ -13848,6 +13897,7 @@ model LaunchBlocker {
   @@index([reportedById])
   @@index([assignedToId])
   @@index([createdAt])
+  @@unique([companyId, blockerNumber])
 }
 
 model LaunchReadinessAssessment {
@@ -14122,7 +14172,7 @@ model TrainingEnvironmentConfig {
 
 model SupportTicket {
   id           String                @id @default(cuid())
-  ticketNumber String                @unique
+  ticketNumber String
   companyId    String?
   reportedById String
   assignedToId String?
@@ -14152,6 +14202,7 @@ model SupportTicket {
   @@index([reportedById])
   @@index([assignedToId])
   @@index([createdAt])
+  @@unique([companyId, ticketNumber])
 }
 
 model SupportTicketComment {

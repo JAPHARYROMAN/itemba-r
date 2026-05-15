@@ -22,8 +22,16 @@ export class LoansService {
 
   async findAll(query: QueryLoanDto, user: AuthUser) {
     const {
-      page = 1, limit = 20, companyId, groupId, status,
-      obligationType, borrowerLevel, riskLevel, search, maturityBefore,
+      page = 1,
+      limit = 20,
+      companyId,
+      groupId,
+      status,
+      obligationType,
+      borrowerLevel,
+      riskLevel,
+      search,
+      maturityBefore,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -119,14 +127,14 @@ export class LoansService {
         lenderName: dto.lenderName,
         lenderType: dto.lenderType,
         lenderContact: dto.lenderContact,
-        principalAmount: parseFloat(dto.principalAmount),
+        principalAmount: new Prisma.Decimal(dto.principalAmount),
         currency: dto.currency,
-        interestRate: parseFloat(dto.interestRate),
+        interestRate: new Prisma.Decimal(dto.interestRate),
         disbursementDate: new Date(dto.disbursementDate),
         maturityDate: new Date(dto.maturityDate),
         repaymentFrequency: dto.repaymentFrequency,
-        repaymentAmount: dto.repaymentAmount ? parseFloat(dto.repaymentAmount) : undefined,
-        outstandingBalance: parseFloat(dto.outstandingBalance),
+        repaymentAmount: dto.repaymentAmount ? new Prisma.Decimal(dto.repaymentAmount) : undefined,
+        outstandingBalance: new Prisma.Decimal(dto.outstandingBalance),
         status: dto.status,
         riskLevel: dto.riskLevel,
         purpose: dto.purpose,
@@ -166,17 +174,23 @@ export class LoansService {
         ...(dto.lenderName && { lenderName: dto.lenderName }),
         ...(dto.lenderType !== undefined && { lenderType: dto.lenderType }),
         ...(dto.lenderContact !== undefined && { lenderContact: dto.lenderContact }),
-        ...(dto.principalAmount && { principalAmount: parseFloat(dto.principalAmount) }),
-        ...(dto.interestRate && { interestRate: parseFloat(dto.interestRate) }),
+        ...(dto.principalAmount && { principalAmount: new Prisma.Decimal(dto.principalAmount) }),
+        ...(dto.interestRate && { interestRate: new Prisma.Decimal(dto.interestRate) }),
         ...(dto.disbursementDate && { disbursementDate: new Date(dto.disbursementDate) }),
         ...(dto.maturityDate && { maturityDate: new Date(dto.maturityDate) }),
         ...(dto.repaymentFrequency && { repaymentFrequency: dto.repaymentFrequency }),
-        ...(dto.repaymentAmount !== undefined && { repaymentAmount: dto.repaymentAmount ? parseFloat(dto.repaymentAmount) : null }),
-        ...(dto.outstandingBalance && { outstandingBalance: parseFloat(dto.outstandingBalance) }),
+        ...(dto.repaymentAmount !== undefined && {
+          repaymentAmount: dto.repaymentAmount ? new Prisma.Decimal(dto.repaymentAmount) : null,
+        }),
+        ...(dto.outstandingBalance && {
+          outstandingBalance: new Prisma.Decimal(dto.outstandingBalance),
+        }),
         ...(dto.status && { status: dto.status }),
         ...(dto.riskLevel && { riskLevel: dto.riskLevel }),
         ...(dto.purpose !== undefined && { purpose: dto.purpose }),
-        ...(dto.collateralDescription !== undefined && { collateralDescription: dto.collateralDescription }),
+        ...(dto.collateralDescription !== undefined && {
+          collateralDescription: dto.collateralDescription,
+        }),
         ...(dto.linkedAssetIds && { linkedAssetIds: dto.linkedAssetIds }),
         ...(dto.guarantorName !== undefined && { guarantorName: dto.guarantorName }),
         ...(dto.guarantorContact !== undefined && { guarantorContact: dto.guarantorContact }),
@@ -207,31 +221,39 @@ export class LoansService {
       throw new BadRequestException('Cannot record repayment on a settled loan');
     }
     const actorId = user.id;
+    const amount = new Prisma.Decimal(dto.amount);
+    if (amount.lte(0)) throw new BadRequestException('Repayment amount must be greater than zero');
 
-    const repayment = await this.prisma.loanRepayment.create({
-      data: {
-        loanId,
-        repaymentDate: new Date(dto.repaymentDate),
-        amount: parseFloat(dto.amount),
-        currency: dto.currency,
-        principal: dto.principal ? parseFloat(dto.principal) : undefined,
-        interest: dto.interest ? parseFloat(dto.interest) : undefined,
-        penalties: dto.penalties ? parseFloat(dto.penalties) : undefined,
-        remainingBalance: dto.remainingBalance ? parseFloat(dto.remainingBalance) : undefined,
-        paymentMethod: dto.paymentMethod,
-        referenceNumber: dto.referenceNumber,
-        notes: dto.notes,
-        recordedById: actorId,
-      },
-    });
-
-    // Update outstanding balance if remaining balance provided
-    if (dto.remainingBalance !== undefined) {
-      await this.prisma.loan.update({
-        where: { id: loanId },
-        data: { outstandingBalance: parseFloat(dto.remainingBalance) },
+    const repayment = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "loans" WHERE "id" = ${loanId} AND "deletedAt" IS NULL FOR UPDATE`;
+      const created = await tx.loanRepayment.create({
+        data: {
+          loanId,
+          repaymentDate: new Date(dto.repaymentDate),
+          amount,
+          currency: dto.currency,
+          principal: dto.principal ? new Prisma.Decimal(dto.principal) : undefined,
+          interest: dto.interest ? new Prisma.Decimal(dto.interest) : undefined,
+          penalties: dto.penalties ? new Prisma.Decimal(dto.penalties) : undefined,
+          remainingBalance: dto.remainingBalance
+            ? new Prisma.Decimal(dto.remainingBalance)
+            : undefined,
+          paymentMethod: dto.paymentMethod,
+          referenceNumber: dto.referenceNumber,
+          notes: dto.notes,
+          recordedById: actorId,
+        },
       });
-    }
+
+      if (dto.remainingBalance !== undefined) {
+        await tx.loan.update({
+          where: { id: loanId },
+          data: { outstandingBalance: new Prisma.Decimal(dto.remainingBalance) },
+        });
+      }
+
+      return created;
+    });
 
     await this.auditLogs.log({
       action: 'loan.repayment_recorded',
@@ -301,13 +323,20 @@ export class LoansService {
     const activeFilter: Prisma.LoanWhereInput = { ...baseFilter, status: LoanStatus.ACTIVE };
 
     const [
-      totalCount, activeCount, settledCount, defaultedCount,
-      highRiskCount, collateralCount,
-      totalPrincipal, totalOutstanding,
+      totalCount,
+      activeCount,
+      settledCount,
+      defaultedCount,
+      highRiskCount,
+      collateralCount,
+      totalPrincipal,
+      totalOutstanding,
     ] = await Promise.all([
       this.prisma.loan.count({ where: baseFilter }),
       this.prisma.loan.count({ where: activeFilter }),
-      this.prisma.loan.count({ where: { ...baseFilter, status: { in: [LoanStatus.SETTLED, LoanStatus.FULLY_PAID] } } }),
+      this.prisma.loan.count({
+        where: { ...baseFilter, status: { in: [LoanStatus.SETTLED, LoanStatus.FULLY_PAID] } },
+      }),
       this.prisma.loan.count({ where: { ...baseFilter, status: LoanStatus.DEFAULTED } }),
       this.prisma.loan.count({ where: { ...baseFilter, riskLevel: { in: ['HIGH', 'CRITICAL'] } } }),
       this.prisma.loan.count({ where: { ...baseFilter, collateralDescription: { not: null } } }),

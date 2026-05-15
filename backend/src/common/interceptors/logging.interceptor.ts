@@ -12,9 +12,19 @@ export class LoggingInterceptor implements NestInterceptor {
     const start = Date.now();
 
     return next.handle().pipe(
-      tap(() => {
-        const elapsed = Date.now() - start;
-        this.logger.log(`${method} ${url} — ${elapsed}ms`);
+      tap({
+        next: () => {
+          const elapsed = Date.now() - start;
+          this.logger.log(`${method} ${url} — ${elapsed}ms`);
+        },
+        error: (error: unknown) => {
+          const elapsed = Date.now() - start;
+          const status =
+            typeof error === 'object' && error !== null && 'status' in error
+              ? String((error as { status?: unknown }).status)
+              : 'error';
+          this.logger.warn(`${method} ${url} — ${status} — ${elapsed}ms`);
+        },
       }),
     );
   }

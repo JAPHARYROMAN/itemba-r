@@ -14,7 +14,7 @@ export class ParkingPaymentsController {
   @Post()
   @RequirePermissions('parking_payments.create')
   create(@Body() dto: CreateParkingPaymentDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Get()

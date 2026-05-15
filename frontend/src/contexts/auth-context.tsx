@@ -1,13 +1,6 @@
 'use client';
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import type { AuthUser } from '@/lib/auth-types';
 
@@ -81,7 +74,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const res = await fetch('/api/auth/refresh', { method: 'POST' });
         if (res.ok) {
           await fetchUser();
-          refreshTimerRef.current = setTimeout(silentRefresh, 14 * 60 * 1000);
+          if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+          refreshTimerRef.current = setTimeout(
+            () => {
+              void silentRefresh();
+            },
+            14 * 60 * 1000,
+          );
           return true;
         }
         setUser(null);
@@ -103,7 +102,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // /me returned 401 — try silent refresh; if THAT fails, redirect.
         await silentRefresh();
       } else {
-        refreshTimerRef.current = setTimeout(silentRefresh, 14 * 60 * 1000);
+        if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = setTimeout(
+          () => {
+            void silentRefresh();
+          },
+          14 * 60 * 1000,
+        );
       }
       setLoading(false);
     })();
@@ -120,7 +125,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     setUser(null);
-    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
     router.push('/login');
   }, [router]);
 
@@ -141,9 +149,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <AuthContext.Provider
-      value={{ user, loading, hasPermission, hasRole, refreshUser, logout }}
-    >
+    <AuthContext.Provider value={{ user, loading, hasPermission, hasRole, refreshUser, logout }}>
       {children}
     </AuthContext.Provider>
   );

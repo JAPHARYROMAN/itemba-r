@@ -25,10 +25,15 @@ const requiredKeys = [
   'JWT_REFRESH_EXPIRES_IN',
   'JOB_WORKER_ENABLED',
   'FRONTEND_URL',
+  'APP_URL',
   'CORS_ORIGIN',
   'NEXT_PUBLIC_API_URL',
   'NEXT_PUBLIC_WEBSITE_URL',
   'BACKEND_INTERNAL_URL',
+  'APP_HOST',
+  'API_HOST',
+  'WEBSITE_HOST',
+  'WEBSITE_WWW_HOST',
 ];
 
 const secretKeys = [

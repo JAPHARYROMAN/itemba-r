@@ -3,7 +3,8 @@ import { AuditSeverity, MobileSessionStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { QueryMobileSessionDto } from './dto/query-mobile-session.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 const SAFE_SELECT = {
   id: true,
@@ -30,7 +31,7 @@ export class MobileSessionsService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: QueryMobileSessionDto, user?: any) {
+  async findAll(query: QueryMobileSessionDto, user?: AuthUser) {
     const { page = 1, limit = 20, userId, deviceId, companyId, status } = query;
     const skip = (page - 1) * limit;
     const where: any = {};
@@ -52,18 +53,20 @@ export class MobileSessionsService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser) {
     const record = await this.prisma.mobileSession.findFirst({
       where: { id },
       select: SAFE_SELECT,
     });
     if (!record) throw new NotFoundException('Mobile session not found');
+    assertCanAccessCompanyFromUser(user, record.companyId);
     return record;
   }
 
-  async revoke(id: string, userId: string) {
+  async revoke(id: string, user: AuthUser) {
     const record = await this.prisma.mobileSession.findFirst({ where: { id } });
     if (!record) throw new NotFoundException('Mobile session not found');
+    assertCanAccessCompanyFromUser(user, record.companyId);
 
     const updated = await this.prisma.mobileSession.update({
       where: { id },
@@ -75,7 +78,7 @@ export class MobileSessionsService {
       action: 'MOBILE_SESSION_REVOKED',
       entityType: 'MobileSession',
       entityId: id,
-      userId,
+      userId: user.id,
       severity: AuditSeverity.MEDIUM,
     });
 

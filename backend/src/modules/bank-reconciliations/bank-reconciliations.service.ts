@@ -2,7 +2,8 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 /**
  * JournalEntry.referenceType values that should win disambiguation when
@@ -41,7 +42,7 @@ export class BankReconciliationsService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: any, user?: any) {
+  async findAll(query: any, user?: AuthUser) {
     const { companyId, bankAccountId, status, page = 1, limit = 20 } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
@@ -50,57 +51,76 @@ export class BankReconciliationsService {
     if (status) where.status = status;
     const [items, total] = await Promise.all([
       this.prisma.bankReconciliation.findMany({
-        where, skip, take: Number(limit), orderBy: { createdAt: 'desc' },
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
       }),
       this.prisma.bankReconciliation.count({ where }),
     ]);
     return { items, total, page: Number(page), limit: Number(limit) };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser) {
     const item = await this.prisma.bankReconciliation.findFirst({
       where: { id, deletedAt: null },
       include: { statementLines: true, matches: true },
     });
     if (!item) throw new NotFoundException('Bank reconciliation not found');
+    assertCanAccessCompanyFromUser(user, item.companyId);
     return item;
   }
 
-  async create(dto: any, user: any) {
+  async create(dto: any, user: AuthUser) {
+    assertCanAccessCompanyFromUser(user, dto.companyId);
     const item = await this.prisma.bankReconciliation.create({
       data: { ...dto, status: 'DRAFT', preparedById: user.id },
     });
     await this.auditLogs.log({
-      action: 'CREATE', entityType: 'BankReconciliation', entityId: item.id,
-      userId: user.id, companyId: item.companyId,
+      action: 'CREATE',
+      entityType: 'BankReconciliation',
+      entityId: item.id,
+      userId: user.id,
+      companyId: item.companyId,
     });
     return item;
   }
 
-  async update(id: string, dto: any, user: any) {
-    const existing = await this.findOne(id);
+  async update(id: string, dto: any, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    if (dto.companyId && dto.companyId !== existing.companyId) {
+      assertCanAccessCompanyFromUser(user, dto.companyId);
+    }
     const updated = await this.prisma.bankReconciliation.update({ where: { id }, data: dto });
     await this.auditLogs.log({
-      action: 'UPDATE', entityType: 'BankReconciliation', entityId: id,
-      userId: user.id, oldValue: existing as any, newValue: updated as any,
+      action: 'UPDATE',
+      entityType: 'BankReconciliation',
+      entityId: id,
+      userId: user.id,
+      oldValue: existing as any,
+      newValue: updated as any,
     });
     return updated;
   }
 
-  async getLines(reconciliationId: string) {
+  async getLines(reconciliationId: string, user: AuthUser) {
+    await this.findOne(reconciliationId, user);
     return this.prisma.bankStatementLine.findMany({
       where: { bankReconciliationId: reconciliationId },
       orderBy: { transactionDate: 'asc' },
     });
   }
 
-  async addLine(reconciliationId: string, dto: any, user: any) {
-    await this.findOne(reconciliationId);
+  async addLine(reconciliationId: string, dto: any, user: AuthUser) {
+    await this.findOne(reconciliationId, user);
     const line = await this.prisma.bankStatementLine.create({
       data: { ...dto, bankReconciliationId: reconciliationId },
     });
     await this.auditLogs.log({
-      action: 'CREATE', entityType: 'BankStatementLine', entityId: line.id, userId: user.id,
+      action: 'CREATE',
+      entityType: 'BankStatementLine',
+      entityId: line.id,
+      userId: user.id,
     });
     return line;
   }
@@ -116,10 +136,10 @@ export class BankReconciliationsService {
    */
   async runMatching(
     reconciliationId: string,
-    user: any,
+    user: AuthUser,
     options: { dateWindowDays?: number; amountToleranceCents?: number } = {},
   ) {
-    const reconciliation = await this.findOne(reconciliationId);
+    const reconciliation = await this.findOne(reconciliationId, user);
     if (reconciliation.status !== 'DRAFT') {
       throw new BadRequestException('Matching can only run on DRAFT reconciliations');
     }
@@ -134,12 +154,25 @@ export class BankReconciliationsService {
     let ambiguous = 0;
     const perLine: Array<
       | { lineId: string; matched: true; matchId: string; entityType: string; entityId: string }
-      | { lineId: string; matched: false; reason: 'NO_CANDIDATES' | 'AMBIGUOUS'; suggestions: Array<{ entityType: string; entityId: string; amount: number; date: Date; description: string }> }
+      | {
+          lineId: string;
+          matched: false;
+          reason: 'NO_CANDIDATES' | 'AMBIGUOUS';
+          suggestions: Array<{
+            entityType: string;
+            entityId: string;
+            amount: number;
+            date: Date;
+            description: string;
+          }>;
+        }
     > = [];
 
     for (const line of unmatched) {
-      const lineAmount = Number(line.creditAmount) > 0 ? Number(line.creditAmount) : -Number(line.debitAmount);
-      const absAmount = Math.abs(lineAmount);
+      const lineAmount = new Prisma.Decimal(line.creditAmount).gt(0)
+        ? new Prisma.Decimal(line.creditAmount)
+        : new Prisma.Decimal(line.debitAmount).negated();
+      const absAmount = lineAmount.abs();
       const start = this.addDays(line.transactionDate, -dateWindowDays);
       const end = this.addDays(line.transactionDate, dateWindowDays);
 
@@ -170,8 +203,10 @@ export class BankReconciliationsService {
       // For inbound bank credits we expect a debit on the cash account
       // (cash increased on the books). For bank debits, we expect a credit.
       const matches = candidates.filter((c) => {
-        const candidateAmount = Number(c.debit) > 0 ? Number(c.debit) : -Number(c.credit);
-        return Math.abs(Math.abs(candidateAmount) - absAmount) <= tolerance;
+        const candidateAmount = new Prisma.Decimal(c.debit).gt(0)
+          ? new Prisma.Decimal(c.debit)
+          : new Prisma.Decimal(c.credit).negated();
+        return candidateAmount.abs().minus(absAmount).abs().lte(tolerance);
       });
 
       // Disambiguation: when multiple candidates tie on amount and date, prefer
@@ -190,7 +225,9 @@ export class BankReconciliationsService {
 
       if (winningMatch) {
         const m = winningMatch;
-        const matchAmount = Number(m.debit) > 0 ? Number(m.debit) : Number(m.credit);
+        const matchAmount = new Prisma.Decimal(m.debit).gt(0)
+          ? new Prisma.Decimal(m.debit)
+          : new Prisma.Decimal(m.credit);
         const created = await this.prisma.bankReconciliationMatch.create({
           data: {
             bankReconciliationId: reconciliationId,
@@ -227,7 +264,10 @@ export class BankReconciliationsService {
           suggestions: matches.map((m) => ({
             entityType: 'JournalEntryLine',
             entityId: m.id,
-            amount: Number(m.debit) > 0 ? Number(m.debit) : Number(m.credit),
+            amount: (new Prisma.Decimal(m.debit).gt(0)
+              ? new Prisma.Decimal(m.debit)
+              : new Prisma.Decimal(m.credit)
+            ).toNumber(),
             date: m.journalEntry.transactionDate,
             description: m.description ?? m.journalEntry.description,
           })),
@@ -269,17 +309,22 @@ export class BankReconciliationsService {
     reconciliationId: string,
     statementLineId: string,
     journalEntryLineId: string,
-    user: any,
+    user: AuthUser,
   ) {
-    const reconciliation = await this.findOne(reconciliationId);
+    const reconciliation = await this.findOne(reconciliationId, user);
     const line = reconciliation.statementLines.find((l) => l.id === statementLineId);
     if (!line) throw new NotFoundException('Statement line not on this reconciliation');
 
     const jeLine = await this.prisma.journalEntryLine.findUniqueOrThrow({
       where: { id: journalEntryLineId },
     });
+    if (jeLine.companyId !== reconciliation.companyId) {
+      throw new BadRequestException('Journal entry line belongs to another company');
+    }
 
-    const matchAmount = Number(jeLine.debit) > 0 ? Number(jeLine.debit) : Number(jeLine.credit);
+    const matchAmount = new Prisma.Decimal(jeLine.debit).gt(0)
+      ? new Prisma.Decimal(jeLine.debit)
+      : new Prisma.Decimal(jeLine.credit);
     const created = await this.prisma.bankReconciliationMatch.create({
       data: {
         bankReconciliationId: reconciliationId,
@@ -303,8 +348,8 @@ export class BankReconciliationsService {
     return created;
   }
 
-  async unmatch(reconciliationId: string, statementLineId: string, user: any) {
-    await this.findOne(reconciliationId);
+  async unmatch(reconciliationId: string, statementLineId: string, user: AuthUser) {
+    await this.findOne(reconciliationId, user);
     await this.prisma.bankReconciliationMatch.deleteMany({
       where: { bankReconciliationId: reconciliationId, bankStatementLineId: statementLineId },
     });
@@ -321,31 +366,47 @@ export class BankReconciliationsService {
     });
   }
 
-  async approve(id: string, user: any) {
-    const existing = await this.findOne(id);
-    if (existing.status !== 'DRAFT') throw new BadRequestException('Only DRAFT reconciliations can be approved');
-    if (Math.abs(Number(existing.differenceAmount)) > 0.01) {
+  async approve(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    if (existing.status !== 'DRAFT')
+      throw new BadRequestException('Only DRAFT reconciliations can be approved');
+    if (new Prisma.Decimal(existing.differenceAmount).abs().gt(0.01)) {
       throw new BadRequestException(
         `Reconciliation cannot be approved while it has an unexplained difference of ${existing.differenceAmount}`,
       );
     }
     if (existing.preparedById === user.id) {
-      throw new BadRequestException('Maker-checker: the preparer cannot approve their own reconciliation');
+      throw new BadRequestException(
+        'Maker-checker: the preparer cannot approve their own reconciliation',
+      );
     }
     const updated = await this.prisma.bankReconciliation.update({
-      where: { id }, data: { status: 'APPROVED', approvedAt: new Date(), approvedById: user.id },
+      where: { id },
+      data: { status: 'APPROVED', approvedAt: new Date(), approvedById: user.id },
     });
-    await this.auditLogs.log({ action: 'APPROVE', entityType: 'BankReconciliation', entityId: id, userId: user.id });
+    await this.auditLogs.log({
+      action: 'APPROVE',
+      entityType: 'BankReconciliation',
+      entityId: id,
+      userId: user.id,
+    });
     return updated;
   }
 
-  async close(id: string, user: any) {
-    const existing = await this.findOne(id);
-    if (existing.status !== 'APPROVED') throw new BadRequestException('Only APPROVED reconciliations can be closed');
+  async close(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    if (existing.status !== 'APPROVED')
+      throw new BadRequestException('Only APPROVED reconciliations can be closed');
     const updated = await this.prisma.bankReconciliation.update({
-      where: { id }, data: { status: 'CLOSED', closedAt: new Date(), closedById: user.id },
+      where: { id },
+      data: { status: 'CLOSED', closedAt: new Date(), closedById: user.id },
     });
-    await this.auditLogs.log({ action: 'CLOSE', entityType: 'BankReconciliation', entityId: id, userId: user.id });
+    await this.auditLogs.log({
+      action: 'CLOSE',
+      entityType: 'BankReconciliation',
+      entityId: id,
+      userId: user.id,
+    });
     return updated;
   }
 
@@ -356,14 +417,17 @@ export class BankReconciliationsService {
       where: { id: reconciliationId },
       include: { statementLines: true, matches: true },
     });
-    const matchedTotal = reconciliation.matches.reduce((s, m) => s + Number(m.amount), 0);
-    const reconciled = Number(reconciliation.bookOpeningBalance) + matchedTotal;
-    const difference = Number(reconciliation.statementClosingBalance) - reconciled;
+    const matchedTotal = reconciliation.matches.reduce(
+      (sum, match) => sum.plus(match.amount),
+      new Prisma.Decimal(0),
+    );
+    const reconciled = new Prisma.Decimal(reconciliation.bookOpeningBalance).plus(matchedTotal);
+    const difference = new Prisma.Decimal(reconciliation.statementClosingBalance).minus(reconciled);
     await this.prisma.bankReconciliation.update({
       where: { id: reconciliationId },
       data: {
-        reconciledBalance: new Prisma.Decimal(reconciled),
-        differenceAmount: new Prisma.Decimal(difference),
+        reconciledBalance: reconciled,
+        differenceAmount: difference,
       },
     });
   }

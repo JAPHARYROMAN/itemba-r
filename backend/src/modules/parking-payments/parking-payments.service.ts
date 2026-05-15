@@ -2,14 +2,23 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateParkingPaymentDto } from './dto/create-parking-payment.dto';
-import { ParkingPaymentStatus } from '@prisma/client';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { ParkingPaymentStatus, Prisma } from '@prisma/client';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 @Injectable()
 export class ParkingPaymentsService {
-  constructor(private prisma: PrismaService, private audit: AuditLogsService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditLogsService,
+    private companyScope: CompanyScopeService,
+  ) {}
 
-  async create(dto: CreateParkingPaymentDto, userId: string) {
+  async create(dto: CreateParkingPaymentDto, user: AuthUser) {
+    const amount = new Prisma.Decimal(dto.amount);
+    if (amount.lte(0)) throw new BadRequestException('Payment amount must be greater than zero');
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId);
+
     if (dto.idempotencyKey) {
       const replay = await this.prisma.parkingPayment.findFirst({
         where: {
@@ -28,9 +37,12 @@ export class ParkingPaymentsService {
 
     // Payment + session balance must be atomic.
     const payment = await this.prisma.$transaction(async (tx) => {
-      const session = await tx.parkingSession.findFirst({
-        where: { id: dto.parkingSessionId, deletedAt: null },
-      });
+      const [session] = await tx.$queryRaw<
+        Array<{ id: string; paidAmount: Prisma.Decimal; outstandingAmount: Prisma.Decimal }>
+      >`SELECT "id", "paidAmount", "outstandingAmount"
+        FROM "parking_sessions"
+        WHERE "id" = ${dto.parkingSessionId} AND "deletedAt" IS NULL
+        FOR UPDATE`;
       if (!session) throw new NotFoundException('Parking session not found');
 
       const created = await tx.parkingPayment.create({
@@ -40,10 +52,14 @@ export class ParkingPaymentsService {
         },
       });
 
-      const newPaidAmount = Number(session.paidAmount) + dto.amount;
-      const newOutstandingAmount = Math.max(0, Number(session.outstandingAmount) - dto.amount);
-      const newPaymentStatus =
-        newOutstandingAmount <= 0 ? ParkingPaymentStatus.PAID : ParkingPaymentStatus.PARTIALLY_PAID;
+      const newPaidAmount = new Prisma.Decimal(session.paidAmount).plus(amount);
+      const rawOutstandingAmount = new Prisma.Decimal(session.outstandingAmount).minus(amount);
+      const newOutstandingAmount = rawOutstandingAmount.lt(0)
+        ? new Prisma.Decimal(0)
+        : rawOutstandingAmount;
+      const newPaymentStatus = newOutstandingAmount.lte(0)
+        ? ParkingPaymentStatus.PAID
+        : ParkingPaymentStatus.PARTIALLY_PAID;
 
       await tx.parkingSession.update({
         where: { id: dto.parkingSessionId },
@@ -58,7 +74,7 @@ export class ParkingPaymentsService {
     });
 
     await this.audit.log({
-      userId,
+      userId: user.id,
       action: 'CREATE',
       entityType: 'ParkingPayment',
       entityId: payment.id,
@@ -94,7 +110,9 @@ export class ParkingPaymentsService {
       where: { id, deletedAt: null },
       include: {
         company: { select: { name: true } },
-        parkingSession: { select: { sessionNumber: true, truckNumber: true, totalAmount: true, paidAmount: true } },
+        parkingSession: {
+          select: { sessionNumber: true, truckNumber: true, totalAmount: true, paidAmount: true },
+        },
         receivedBy: { select: { fullName: true } },
       },
     });

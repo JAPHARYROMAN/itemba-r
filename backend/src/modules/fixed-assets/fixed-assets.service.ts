@@ -11,10 +11,10 @@ import { DisposeAssetDto } from './dto/dispose-asset.dto';
 import { MarkCollateralDto } from './dto/mark-collateral.dto';
 
 const ASSET_INCLUDES = {
-  company:  { select: { id: true, name: true, code: true } },
-  group:    { select: { id: true, name: true, code: true } },
+  company: { select: { id: true, name: true, code: true } },
+  group: { select: { id: true, name: true, code: true } },
   division: { select: { id: true, name: true, code: true } },
-  branch:   { select: { id: true, name: true } },
+  branch: { select: { id: true, name: true } },
 };
 
 @Injectable()
@@ -27,9 +27,17 @@ export class FixedAssetsService {
 
   async findAll(query: QueryFixedAssetDto, user: AuthUser) {
     const {
-      page = 1, limit = 20,
-      companyId, divisionId, branchId, ownershipLevel,
-      category, status, collateralStatus, insuranceStatus, financingStatus,
+      page = 1,
+      limit = 20,
+      companyId,
+      divisionId,
+      branchId,
+      ownershipLevel,
+      category,
+      status,
+      collateralStatus,
+      insuranceStatus,
+      financingStatus,
       search,
     } = query;
     const skip = (page - 1) * limit;
@@ -99,8 +107,12 @@ export class FixedAssetsService {
 
   async create(dto: CreateFixedAssetDto, user: AuthUser) {
     const {
-      acquisitionCost, currentBookValue, depreciationRate,
-      residualValue, acquisitionDate, ...rest
+      acquisitionCost,
+      currentBookValue,
+      depreciationRate,
+      residualValue,
+      acquisitionDate,
+      ...rest
     } = dto;
 
     if (dto.ownershipLevel === AssetOwnershipLevel.COMPANY && !dto.companyId) {
@@ -115,11 +127,11 @@ export class FixedAssetsService {
     const asset = await this.prisma.fixedAsset.create({
       data: {
         ...rest,
-        acquisitionCost: parseFloat(acquisitionCost),
-        currentBookValue: parseFloat(currentBookValue),
+        acquisitionCost: new Prisma.Decimal(acquisitionCost),
+        currentBookValue: new Prisma.Decimal(currentBookValue),
         acquisitionDate: new Date(acquisitionDate),
-        ...(depreciationRate && { depreciationRate: parseFloat(depreciationRate) }),
-        ...(residualValue && { residualValue: parseFloat(residualValue) }),
+        ...(depreciationRate && { depreciationRate: new Prisma.Decimal(depreciationRate) }),
+        ...(residualValue && { residualValue: new Prisma.Decimal(residualValue) }),
         createdById,
       },
       include: ASSET_INCLUDES,
@@ -142,19 +154,23 @@ export class FixedAssetsService {
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     const userId = user.id;
     const {
-      acquisitionCost, currentBookValue, depreciationRate,
-      residualValue, acquisitionDate, ...rest
+      acquisitionCost,
+      currentBookValue,
+      depreciationRate,
+      residualValue,
+      acquisitionDate,
+      ...rest
     } = dto;
 
     const updated = await this.prisma.fixedAsset.update({
       where: { id },
       data: {
         ...rest,
-        ...(acquisitionCost && { acquisitionCost: parseFloat(acquisitionCost) }),
-        ...(currentBookValue && { currentBookValue: parseFloat(currentBookValue) }),
+        ...(acquisitionCost && { acquisitionCost: new Prisma.Decimal(acquisitionCost) }),
+        ...(currentBookValue && { currentBookValue: new Prisma.Decimal(currentBookValue) }),
         ...(acquisitionDate && { acquisitionDate: new Date(acquisitionDate) }),
-        ...(depreciationRate && { depreciationRate: parseFloat(depreciationRate) }),
-        ...(residualValue && { residualValue: parseFloat(residualValue) }),
+        ...(depreciationRate && { depreciationRate: new Prisma.Decimal(depreciationRate) }),
+        ...(residualValue && { residualValue: new Prisma.Decimal(residualValue) }),
       },
       include: ASSET_INCLUDES,
     });
@@ -197,7 +213,7 @@ export class FixedAssetsService {
       data: {
         status: dto.disposalStatus,
         disposalDate: new Date(dto.disposalDate),
-        ...(dto.disposalValue && { disposalValue: parseFloat(dto.disposalValue) }),
+        ...(dto.disposalValue && { disposalValue: new Prisma.Decimal(dto.disposalValue) }),
         ...(dto.notes && { notes: dto.notes }),
       },
       include: ASSET_INCLUDES,
@@ -270,9 +286,13 @@ export class FixedAssetsService {
     ] = await Promise.all([
       this.prisma.fixedAsset.count({ where: baseWhere }),
       this.prisma.fixedAsset.count({ where: { ...baseWhere, status: 'ACTIVE' } }),
-      this.prisma.fixedAsset.count({ where: { ...baseWhere, collateralStatus: 'USED_AS_COLLATERAL' } }),
+      this.prisma.fixedAsset.count({
+        where: { ...baseWhere, collateralStatus: 'USED_AS_COLLATERAL' },
+      }),
       this.prisma.fixedAsset.count({ where: { ...baseWhere, insuranceStatus: 'NOT_INSURED' } }),
-      this.prisma.fixedAsset.count({ where: { ...baseWhere, status: { in: ['DISPOSED', 'SOLD', 'WRITTEN_OFF'] } } }),
+      this.prisma.fixedAsset.count({
+        where: { ...baseWhere, status: { in: ['DISPOSED', 'SOLD', 'WRITTEN_OFF'] } },
+      }),
       this.prisma.fixedAsset.count({ where: { ...baseWhere, status: 'UNDER_MAINTENANCE' } }),
       this.prisma.fixedAsset.aggregate({
         where: baseWhere,

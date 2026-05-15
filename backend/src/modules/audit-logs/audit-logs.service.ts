@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AuditSeverity, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  assertCanAccessCompanyFromUser,
+  companyWhereForUser,
+} from '../../common/services/company-scope.service';
 
 export interface AuditLogInput {
   action: string;
@@ -211,10 +216,10 @@ export class AuditLogsService {
 
   // ─── Queries ───────────────────────────────────────────────────────────────
 
-  private buildWhere(q: AuditLogQuery): Prisma.AuditLogWhereInput {
+  private buildWhere(q: AuditLogQuery, user?: AuthUser): Prisma.AuditLogWhereInput {
     return {
+      ...(user && companyWhereForUser(user, q.companyId)),
       ...(q.userId && { userId: q.userId }),
-      ...(q.companyId && { companyId: q.companyId }),
       ...(q.entityType && { entityType: q.entityType }),
       ...(q.severity && { severity: q.severity }),
       ...(q.action && { action: { contains: q.action, mode: 'insensitive' as const } }),
@@ -240,11 +245,11 @@ export class AuditLogsService {
     company: { select: { id: true, name: true, code: true } },
   } as const;
 
-  async findAll(q: AuditLogQuery) {
+  async findAll(q: AuditLogQuery, user?: AuthUser) {
     const page = q.page ?? 1;
     const limit = q.limit ?? 50;
     const skip = (page - 1) * limit;
-    const where = this.buildWhere(q);
+    const where = this.buildWhere(q, user);
 
     const [data, total] = await Promise.all([
       this.prisma.auditLog.findMany({
@@ -260,51 +265,56 @@ export class AuditLogsService {
     return { data, total, page, totalPages: Math.ceil(total / limit) };
   }
 
-  findOne(id: string) {
-    return this.prisma.auditLog.findUniqueOrThrow({
+  async findOne(id: string, user?: AuthUser) {
+    const log = await this.prisma.auditLog.findUniqueOrThrow({
       where: { id },
       include: this.auditInclude,
     });
+    if (user) assertCanAccessCompanyFromUser(user, log.companyId);
+    return log;
   }
 
-  async findByEntity(entityType: string, entityId: string) {
+  async findByEntity(entityType: string, entityId: string, user?: AuthUser) {
     return this.prisma.auditLog.findMany({
-      where: { entityType, entityId },
+      where: { ...(user && companyWhereForUser(user)), entityType, entityId },
       orderBy: { createdAt: 'desc' },
       take: 200,
       include: this.auditInclude,
     });
   }
 
-  async findByUser(userId: string, q: Pick<AuditLogQuery, 'page' | 'limit'> = {}) {
+  async findByUser(userId: string, q: Pick<AuditLogQuery, 'page' | 'limit'> = {}, user?: AuthUser) {
     const page = q.page ?? 1;
     const limit = q.limit ?? 50;
     const skip = (page - 1) * limit;
 
     const [data, total] = await Promise.all([
       this.prisma.auditLog.findMany({
-        where: { userId },
+        where: { ...(user && companyWhereForUser(user)), userId },
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: this.auditInclude,
       }),
-      this.prisma.auditLog.count({ where: { userId } }),
+      this.prisma.auditLog.count({ where: { ...(user && companyWhereForUser(user)), userId } }),
     ]);
 
     return { data, total, page, totalPages: Math.ceil(total / limit) };
   }
 
-  async findSensitive(limit = 100) {
+  async findSensitive(limit = 100, user?: AuthUser) {
     return this.prisma.auditLog.findMany({
-      where: { severity: { in: [AuditSeverity.CRITICAL, AuditSeverity.HIGH] } },
+      where: {
+        ...(user && companyWhereForUser(user)),
+        severity: { in: [AuditSeverity.CRITICAL, AuditSeverity.HIGH] },
+      },
       orderBy: { createdAt: 'desc' },
       take: limit,
       include: this.auditInclude,
     });
   }
 
-  async getSummary(dateFrom?: string, dateTo?: string) {
+  async getSummary(dateFrom?: string, dateTo?: string, user?: AuthUser) {
     const createdAt =
       dateFrom || dateTo
         ? {
@@ -313,7 +323,10 @@ export class AuditLogsService {
           }
         : undefined;
 
-    const baseWhere: Prisma.AuditLogWhereInput = { ...(createdAt && { createdAt }) };
+    const baseWhere: Prisma.AuditLogWhereInput = {
+      ...(user && companyWhereForUser(user)),
+      ...(createdAt && { createdAt }),
+    };
 
     const [total, bySeverity, byEntityType, recentCritical] = await Promise.all([
       this.prisma.auditLog.count({ where: baseWhere }),
@@ -342,8 +355,9 @@ export class AuditLogsService {
   }
 
   /** Distinct list of entity types present in audit logs — for filter dropdown. */
-  async getEntityTypes(): Promise<string[]> {
+  async getEntityTypes(user?: AuthUser): Promise<string[]> {
     const rows = await this.prisma.auditLog.findMany({
+      where: { ...(user && companyWhereForUser(user)) },
       distinct: ['entityType'],
       select: { entityType: true },
       orderBy: { entityType: 'asc' },

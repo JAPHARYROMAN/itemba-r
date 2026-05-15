@@ -4,16 +4,18 @@ import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { QueryCompanyDto } from './dto/query-company.dto';
 import { UpsertCompanyProfileDto } from './dto/upsert-company-profile.dto';
-import { Prisma } from '@prisma/client';
+import { AuditSeverity, Prisma } from '@prisma/client';
 import { AccessLevel } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 @Injectable()
 export class CompaniesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companyScope: CompanyScopeService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   async findAll(query: QueryCompanyDto, user: AuthUser) {
@@ -45,7 +47,17 @@ export class CompaniesService {
         take: limit,
         orderBy: { name: 'asc' },
         include: {
-          group: { select: { id: true, name: true, code: true, address: true, phone: true, email: true, website: true } },
+          group: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+              address: true,
+              phone: true,
+              email: true,
+              website: true,
+            },
+          },
           profile: {
             select: {
               registeredName: true,
@@ -77,7 +89,17 @@ export class CompaniesService {
     const company = await this.prisma.company.findFirst({
       where: { id, deletedAt: null },
       include: {
-        group: { select: { id: true, name: true, code: true, address: true, phone: true, email: true, website: true } },
+        group: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            address: true,
+            phone: true,
+            email: true,
+            website: true,
+          },
+        },
         profile: true,
         divisions: {
           where: { deletedAt: null },
@@ -126,16 +148,42 @@ export class CompaniesService {
 
   async create(dto: CreateCompanyDto, user: AuthUser) {
     this.companyScope.assertGroupScoped(user, 'create companies');
-    return this.prisma.company.create({ data: dto });
+    const company = await this.prisma.company.create({ data: dto });
+    await this.auditLogs.log({
+      action: 'COMPANY_CREATED',
+      entityType: 'Company',
+      entityId: company.id,
+      userId: user.id,
+      companyId: company.id,
+      severity: AuditSeverity.HIGH,
+      newValue: { name: company.name, code: company.code, status: company.status } as any,
+    });
+    return company;
   }
 
   async update(id: string, dto: UpdateCompanyDto, user: AuthUser) {
-    await this.findOne(id, user, AccessLevel.MANAGE);
-    return this.prisma.company.update({ where: { id }, data: dto });
+    const existing = await this.findOne(id, user, AccessLevel.MANAGE);
+    const company = await this.prisma.company.update({ where: { id }, data: dto });
+    await this.auditLogs.log({
+      action: 'COMPANY_UPDATED',
+      entityType: 'Company',
+      entityId: id,
+      userId: user.id,
+      companyId: id,
+      severity: AuditSeverity.HIGH,
+      oldValue: {
+        name: existing.name,
+        code: existing.code,
+        status: existing.status,
+        industryType: existing.industryType,
+      } as any,
+      newValue: dto as any,
+    });
+    return company;
   }
 
   async remove(id: string, user: AuthUser) {
-    await this.findOne(id, user, AccessLevel.MANAGE);
+    const existing = await this.findOne(id, user, AccessLevel.MANAGE);
     const now = new Date();
     const [, , company] = await this.prisma.$transaction([
       this.prisma.branch.updateMany({
@@ -148,6 +196,19 @@ export class CompaniesService {
       }),
       this.prisma.company.update({ where: { id }, data: { deletedAt: now } }),
     ]);
+    await this.auditLogs.log({
+      action: 'COMPANY_DELETED',
+      entityType: 'Company',
+      entityId: id,
+      userId: user.id,
+      companyId: id,
+      severity: AuditSeverity.HIGH,
+      oldValue: {
+        name: existing.name,
+        code: existing.code,
+        status: existing.status,
+      } as any,
+    });
     return company;
   }
 

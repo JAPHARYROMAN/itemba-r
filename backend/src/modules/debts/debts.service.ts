@@ -62,8 +62,11 @@ export class DebtsService {
     if (user) {
       await this.companyScope.assertCanAccessCompany(user, record.companyId);
       await this.auditLogs.log({
-        action: 'debt.view', entityType: 'Debt', entityId: id,
-        userId: user.id, companyId: record.companyId,
+        action: 'debt.view',
+        entityType: 'Debt',
+        entityId: id,
+        userId: user.id,
+        companyId: record.companyId,
         metadata: { creditorName: record.creditorName },
       });
     }
@@ -78,8 +81,8 @@ export class DebtsService {
         companyId: dto.companyId,
         creditorName: dto.creditorName,
         creditorContact: dto.creditorContact,
-        amount: parseFloat(dto.amount),
-        amountPaid: dto.amountPaid ? parseFloat(dto.amountPaid) : 0,
+        amount: new Prisma.Decimal(dto.amount),
+        amountPaid: dto.amountPaid ? new Prisma.Decimal(dto.amountPaid) : new Prisma.Decimal(0),
         currency: dto.currency,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
         description: dto.description,
@@ -91,8 +94,12 @@ export class DebtsService {
       },
     });
     await this.auditLogs.log({
-      action: 'debt.create', entityType: 'Debt', entityId: record.id,
-      userId: createdById, companyId: record.companyId, newValue: record as any,
+      action: 'debt.create',
+      entityType: 'Debt',
+      entityId: record.id,
+      userId: createdById,
+      companyId: record.companyId,
+      newValue: record as any,
     });
     return record;
   }
@@ -106,8 +113,10 @@ export class DebtsService {
       data: {
         ...(dto.creditorName && { creditorName: dto.creditorName }),
         ...(dto.creditorContact !== undefined && { creditorContact: dto.creditorContact }),
-        ...(dto.amount && { amount: parseFloat(dto.amount) }),
-        ...(dto.amountPaid !== undefined && { amountPaid: dto.amountPaid ? parseFloat(dto.amountPaid) : 0 }),
+        ...(dto.amount && { amount: new Prisma.Decimal(dto.amount) }),
+        ...(dto.amountPaid !== undefined && {
+          amountPaid: dto.amountPaid ? new Prisma.Decimal(dto.amountPaid) : new Prisma.Decimal(0),
+        }),
         ...(dto.dueDate !== undefined && { dueDate: dto.dueDate ? new Date(dto.dueDate) : null }),
         ...(dto.description && { description: dto.description }),
         ...(dto.invoiceNumber !== undefined && { invoiceNumber: dto.invoiceNumber }),
@@ -117,9 +126,13 @@ export class DebtsService {
       },
     });
     await this.auditLogs.log({
-      action: 'debt.update', entityType: 'Debt', entityId: id,
-      userId: actorId, companyId: record.companyId,
-      oldValue: existing as any, newValue: record as any,
+      action: 'debt.update',
+      entityType: 'Debt',
+      entityId: id,
+      userId: actorId,
+      companyId: record.companyId,
+      oldValue: existing as any,
+      newValue: record as any,
     });
     return record;
   }
@@ -130,8 +143,12 @@ export class DebtsService {
     const actorId = user.id;
     await this.prisma.debt.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.auditLogs.log({
-      action: 'debt.delete', entityType: 'Debt', entityId: id,
-      userId: actorId, companyId: existing.companyId, oldValue: existing as any,
+      action: 'debt.delete',
+      entityType: 'Debt',
+      entityId: id,
+      userId: actorId,
+      companyId: existing.companyId,
+      oldValue: existing as any,
     });
     return { success: true };
   }
@@ -143,7 +160,14 @@ export class DebtsService {
     const base: Prisma.DebtWhereInput = { deletedAt: null, ...scope };
     const outstanding: Prisma.DebtWhereInput = { ...base, status: DebtStatus.OUTSTANDING };
 
-    const [totalCount, outstandingCount, overdueCount, highRiskCount, totalAmount, totalOutstanding] = await Promise.all([
+    const [
+      totalCount,
+      outstandingCount,
+      overdueCount,
+      highRiskCount,
+      totalAmount,
+      totalOutstanding,
+    ] = await Promise.all([
       this.prisma.debt.count({ where: base }),
       this.prisma.debt.count({ where: outstanding }),
       this.prisma.debt.count({ where: { ...outstanding, dueDate: { lt: new Date() } } }),
@@ -152,7 +176,10 @@ export class DebtsService {
       this.prisma.debt.aggregate({ where: outstanding, _sum: { amount: true } }),
     ]);
     return {
-      totalCount, outstandingCount, overdueCount, highRiskCount,
+      totalCount,
+      outstandingCount,
+      overdueCount,
+      highRiskCount,
       totalAmount: totalAmount._sum.amount ?? 0,
       totalOutstandingAmount: totalOutstanding._sum.amount ?? 0,
     };

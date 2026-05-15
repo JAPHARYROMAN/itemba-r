@@ -252,13 +252,7 @@ export default function DashboardPage() {
     try {
       setLoading(true);
       setError(null);
-      let res = await fetch('/api/backend/dashboard/executive-summary');
-      if (res.status === 401) {
-        const refreshed = await fetch('/api/auth/refresh', { method: 'POST' });
-        if (refreshed.ok) {
-          res = await fetch('/api/backend/dashboard/executive-summary');
-        }
-      }
+      const res = await fetch('/api/backend/dashboard/executive-summary');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = (await res.json()) as { data: Summary };
       setData(json.data);

@@ -10,7 +10,7 @@ export class SupportTicketsController {
   @Post()
   @RequirePermissions('support.tickets.create')
   create(@Body() dto: any, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Get()
@@ -34,42 +34,42 @@ export class SupportTicketsController {
   @Patch(':id')
   @RequirePermissions('support.tickets.manage')
   update(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 
   @Patch(':id/assign')
   @RequirePermissions('support.tickets.assign')
   assign(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
-    return this.service.assign(id, dto, user.id);
+    return this.service.assign(id, dto, user);
   }
 
   @Patch(':id/start')
   @RequirePermissions('support.tickets.manage')
   start(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.setStatus(id, 'IN_PROGRESS', user.id);
+    return this.service.setStatus(id, 'IN_PROGRESS', user);
   }
 
   @Patch(':id/resolve')
   @RequirePermissions('support.tickets.resolve')
   resolve(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
-    return this.service.resolve(id, dto, user.id);
+    return this.service.resolve(id, dto, user);
   }
 
   @Patch(':id/close')
   @RequirePermissions('support.tickets.manage')
   close(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.close(id, user.id);
+    return this.service.close(id, user);
   }
 
   @Patch(':id/cancel')
   @RequirePermissions('support.tickets.manage')
   cancel(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.setStatus(id, 'CANCELLED', user.id);
+    return this.service.setStatus(id, 'CANCELLED', user);
   }
 
   @Delete(':id')
   @RequirePermissions('support.tickets.manage')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user);
   }
 }

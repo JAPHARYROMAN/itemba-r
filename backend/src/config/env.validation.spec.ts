@@ -18,6 +18,10 @@ describe('envValidate', () => {
     TWO_FACTOR_ENCRYPTION_KEY: STRONG_2FA,
     APP_ENCRYPTION_KEY: STRONG_APP_ENC,
     REFRESH_TOKEN_PEPPER: STRONG_PEPPER,
+    REDIS_PASSWORD: 'redis-production-secret',
+    CORS_ORIGIN: 'https://app.itembagrouptz.com',
+    FRONTEND_URL: 'https://app.itembagrouptz.com',
+    APP_URL: 'https://app.itembagrouptz.com',
   };
 
   it('accepts a minimal valid development config', () => {
@@ -30,29 +34,40 @@ describe('envValidate', () => {
   });
 
   it('rejects JWT secrets shorter than 32 chars', () => {
-    expect(() =>
-      envValidate({ ...baseValid, JWT_ACCESS_SECRET: 'short' }),
-    ).toThrow(/JWT_ACCESS_SECRET/);
+    expect(() => envValidate({ ...baseValid, JWT_ACCESS_SECRET: 'short' })).toThrow(
+      /JWT_ACCESS_SECRET/,
+    );
   });
 
   it('requires TWO_FACTOR_ENCRYPTION_KEY in production', () => {
-    expect(() =>
-      envValidate({ ...baseValid, NODE_ENV: 'production' }),
-    ).toThrow(/TWO_FACTOR_ENCRYPTION_KEY/);
+    expect(() => envValidate({ ...baseValid, NODE_ENV: 'production' })).toThrow(
+      /TWO_FACTOR_ENCRYPTION_KEY/,
+    );
   });
 
   it('requires APP_ENCRYPTION_KEY in production', () => {
     const { APP_ENCRYPTION_KEY: _, ...partial } = validProductionExtras;
-    expect(() =>
-      envValidate({ ...baseValid, NODE_ENV: 'production', ...partial }),
-    ).toThrow(/APP_ENCRYPTION_KEY/);
+    expect(() => envValidate({ ...baseValid, NODE_ENV: 'production', ...partial })).toThrow(
+      /APP_ENCRYPTION_KEY/,
+    );
   });
 
   it('requires REFRESH_TOKEN_PEPPER in production', () => {
     const { REFRESH_TOKEN_PEPPER: _, ...partial } = validProductionExtras;
+    expect(() => envValidate({ ...baseValid, NODE_ENV: 'production', ...partial })).toThrow(
+      /REFRESH_TOKEN_PEPPER/,
+    );
+  });
+
+  it('rejects localhost deployment URLs in production', () => {
     expect(() =>
-      envValidate({ ...baseValid, NODE_ENV: 'production', ...partial }),
-    ).toThrow(/REFRESH_TOKEN_PEPPER/);
+      envValidate({
+        ...baseValid,
+        NODE_ENV: 'production',
+        ...validProductionExtras,
+        APP_URL: 'http://localhost:3009',
+      }),
+    ).toThrow(/APP_URL must be set to a public HTTPS URL/);
   });
 
   it('accepts production config with all required strong secrets', () => {

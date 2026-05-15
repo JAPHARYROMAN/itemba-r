@@ -1,10 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AccessLevel, AuditSeverity, ApiKeyStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
+import { hashApiKey } from '../../common/utils/api-key-hash';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { QueryApiKeyDto } from './dto/query-api-key.dto';
 
@@ -32,6 +34,7 @@ export class ApiKeysService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly config: ConfigService,
   ) {}
 
   async findAll(query: QueryApiKeyDto, user: AuthUser) {
@@ -74,7 +77,7 @@ export class ApiKeysService {
     const client = await this.getApiClientForAccess(dto.apiClientId, user, AccessLevel.MANAGE);
     const rawKey = crypto.randomBytes(32).toString('hex');
     const keyPrefix = rawKey.substring(0, 8);
-    const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
+    const keyHash = hashApiKey(rawKey, this.config.getOrThrow<string>('APP_ENCRYPTION_KEY'));
     const apiKeyCode = `KEY-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
 
     const record = await this.prisma.apiKey.create({
@@ -110,7 +113,11 @@ export class ApiKeysService {
       include: { apiClient: { select: { companyId: true } } },
     });
     if (!record) throw new NotFoundException('API key not found');
-    await this.companyScope.assertCanAccessCompany(user, record.apiClient.companyId, AccessLevel.MANAGE);
+    await this.companyScope.assertCanAccessCompany(
+      user,
+      record.apiClient.companyId,
+      AccessLevel.MANAGE,
+    );
 
     await this.prisma.apiKey.update({
       where: { id },

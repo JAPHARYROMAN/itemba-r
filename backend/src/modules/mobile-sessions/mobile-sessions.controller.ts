@@ -16,13 +16,13 @@ export class MobileSessionsController {
 
   @Get(':id')
   @RequirePermissions('mobile_sessions.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Delete(':id/revoke')
   @RequirePermissions('mobile_sessions.revoke')
   revoke(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.revoke(id, user.id);
+    return this.service.revoke(id, user);
   }
 }

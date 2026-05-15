@@ -41,11 +41,14 @@ const requiredSecretKeys = [
   'REFRESH_TOKEN_PEPPER',
   'APP_ENCRYPTION_KEY',
   'FRONTEND_URL',
+  'APP_URL',
   'CORS_ORIGIN',
   'NEXT_PUBLIC_API_URL',
   'NEXT_PUBLIC_WEBSITE_URL',
   'APP_HOST',
   'API_HOST',
+  'WEBSITE_HOST',
+  'WEBSITE_WWW_HOST',
 ];
 
 const sampleEnv = {
@@ -59,12 +62,15 @@ const sampleEnv = {
   REFRESH_TOKEN_PEPPER: 'refresh-pepper-deploy-validation-secret-40',
   APP_ENCRYPTION_KEY: 'app-encryption-deploy-validation-secret-40',
   FRONTEND_URL: 'https://app.validation.local',
+  APP_URL: 'https://app.validation.local',
   CORS_ORIGIN: 'https://app.validation.local',
   NEXT_PUBLIC_API_URL: 'https://api.validation.local/api/v1',
   NEXT_PUBLIC_WEBSITE_URL: 'https://validation.local',
   BACKEND_INTERNAL_URL: 'http://backend:3001/api/v1',
   APP_HOST: 'app.validation.local',
   API_HOST: 'api.validation.local',
+  WEBSITE_HOST: 'validation.local',
+  WEBSITE_WWW_HOST: 'www.validation.local',
   ACME_EMAIL: 'ops@validation.local',
   JOB_WORKER_ENABLED: 'true',
 };
@@ -153,7 +159,15 @@ function assertDeploymentShape(target, config) {
   assertEqual(target, config.name, target.expectedProjectName, 'project name');
 
   const services = config.services ?? {};
-  for (const serviceName of ['caddy', 'postgres', 'redis', 'backend-migrate', 'backend', 'frontend']) {
+  for (const serviceName of [
+    'caddy',
+    'postgres',
+    'redis',
+    'backend-migrate',
+    'backend',
+    'frontend',
+    'website',
+  ]) {
     assert(target, services[serviceName], `service "${serviceName}" is present`);
   }
 
@@ -161,11 +175,13 @@ function assertDeploymentShape(target, config) {
   const backend = services.backend;
   const migrate = services['backend-migrate'];
   const frontend = services.frontend;
+  const website = services.website;
   const redis = services.redis;
 
   assertEqual(target, migrate.build?.target, 'migration', 'backend-migrate uses migration target');
   assertEqual(target, backend.build?.target, 'production', 'backend uses production target');
   assertEqual(target, frontend.build?.target, 'runner', 'frontend uses runner target');
+  assert(target, website.build, 'website has build configuration');
 
   assertEqual(
     target,
@@ -197,6 +213,12 @@ function assertDeploymentShape(target, config) {
     'service_healthy',
     'caddy waits for healthy backend',
   );
+  assertEqual(
+    target,
+    caddy.depends_on?.website?.condition,
+    'service_healthy',
+    'caddy waits for healthy website',
+  );
 
   assertEqual(target, backend.environment?.NODE_ENV, target.expectedNodeEnv, 'backend NODE_ENV');
   assertEqual(
@@ -213,6 +235,10 @@ function assertDeploymentShape(target, config) {
     'TWO_FACTOR_ENCRYPTION_KEY',
     'REFRESH_TOKEN_PEPPER',
     'APP_ENCRYPTION_KEY',
+    'FRONTEND_URL',
+    'APP_URL',
+    'CORS_ORIGIN',
+    'REDIS_PASSWORD',
   ]) {
     assert(target, migrate.environment?.[envKey], `backend-migrate has ${envKey}`);
     assert(target, backend.environment?.[envKey], `backend has ${envKey}`);
@@ -220,6 +246,7 @@ function assertDeploymentShape(target, config) {
 
   for (const envKey of [
     'FRONTEND_URL',
+    'APP_URL',
     'CORS_ORIGIN',
     'REDIS_PASSWORD',
     'JOB_WORKER_ENABLED',
@@ -285,17 +312,34 @@ function assertDeploymentShape(target, config) {
   assert(target, frontend.environment?.NEXT_PUBLIC_WEBSITE_URL, 'frontend has public website URL');
   assert(target, caddy.environment?.APP_HOST, 'caddy has frontend hostname');
   assert(target, caddy.environment?.API_HOST, 'caddy has API hostname');
+  assert(target, caddy.environment?.WEBSITE_HOST, 'caddy has website hostname');
+  assert(target, caddy.environment?.WEBSITE_WWW_HOST, 'caddy has website www hostname');
   assert(target, caddy.environment?.ACME_EMAIL, 'caddy has ACME email');
 
-  const caddyPorts = (caddy.ports ?? []).map((port) => String(port.published ?? port.target ?? port));
+  const caddyPorts = (caddy.ports ?? []).map((port) =>
+    String(port.published ?? port.target ?? port),
+  );
   assert(target, caddyPorts.includes('80'), 'caddy publishes HTTP port 80');
   assert(target, caddyPorts.includes('443'), 'caddy publishes HTTPS port 443');
   assert(target, !(backend.ports ?? []).length, 'backend does not publish a public port');
   assert(target, !(frontend.ports ?? []).length, 'frontend does not publish a public port');
-  assert(target, (backend.expose ?? []).map(String).includes('3001'), 'backend exposes port 3001 internally');
-  assert(target, (frontend.expose ?? []).map(String).includes('3000'), 'frontend exposes port 3000 internally');
+  assert(
+    target,
+    (backend.expose ?? []).map(String).includes('3001'),
+    'backend exposes port 3001 internally',
+  );
+  assert(
+    target,
+    (frontend.expose ?? []).map(String).includes('3000'),
+    'frontend exposes port 3000 internally',
+  );
+  assert(
+    target,
+    (website.expose ?? []).map(String).includes('3001'),
+    'website exposes port 3001 internally',
+  );
 
-  for (const serviceName of ['caddy', 'postgres', 'redis', 'backend', 'frontend']) {
+  for (const serviceName of ['caddy', 'postgres', 'redis', 'backend', 'frontend', 'website']) {
     assert(target, services[serviceName].healthcheck?.test, `${serviceName} has a healthcheck`);
   }
 
@@ -319,15 +363,28 @@ function assertDeploymentShape(target, config) {
   );
   assert(
     target,
-    frontendHealthcheck.includes('127.0.0.1:3000/login'),
-    'frontend healthcheck probes the login route',
+    frontendHealthcheck.includes('127.0.0.1:3000/api/health'),
+    'frontend healthcheck probes the dedicated health route',
+  );
+
+  const websiteHealthcheck = flatten(website.healthcheck?.test);
+  assert(
+    target,
+    websiteHealthcheck.includes('node -e') && websiteHealthcheck.includes('fetch('),
+    'website healthcheck uses Node fetch',
+  );
+  assert(
+    target,
+    websiteHealthcheck.includes('127.0.0.1:3001/api/health'),
+    'website healthcheck probes the dedicated health route',
   );
 
   const caddyHealthcheck = flatten(caddy.healthcheck?.test);
   assert(
     target,
-    caddyHealthcheck.includes('caddy validate') && caddyHealthcheck.includes('/etc/caddy/Caddyfile'),
-    'caddy healthcheck validates the Caddyfile',
+    caddyHealthcheck.includes('wget -qO-') &&
+      caddyHealthcheck.includes('127.0.0.1:2019/config'),
+    'caddy healthcheck probes the admin config endpoint',
   );
 }
 

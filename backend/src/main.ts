@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -10,15 +11,19 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: ['error', 'warn', 'log', 'debug'],
   });
 
   const config = app.get(ConfigService);
   const port = config.get<number>('PORT', 3001);
   const apiPrefix = config.get<string>('API_PREFIX', 'api/v1');
-  const corsOrigin = config.get<string>('CORS_ORIGIN', 'http://localhost:3000');
+  const corsOrigin = config.getOrThrow<string>('CORS_ORIGIN');
   const isProd = config.get<string>('NODE_ENV') === 'production';
+
+  if (isProd) {
+    app.set('trust proxy', 1);
+  }
 
   app.use(helmet());
   app.enableCors({

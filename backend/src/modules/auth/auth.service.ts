@@ -1,9 +1,15 @@
-import { ConflictException, ForbiddenException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { SecurityEventSeverity, SecurityEventType } from '@prisma/client';
 import * as argon2 from 'argon2';
-import { randomUUID } from 'crypto';
+import { createHmac, randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -37,7 +43,6 @@ export interface AuthUser {
   companyAccess?: Array<{ companyId: string; accessLevel: string }>;
 }
 
-const REFRESH_TOKEN_SALT_ROUNDS = 2; // argon2 — speed-over-strength is fine for token hashes
 const jwtExpiresIn = (value: string): JwtSignOptions['expiresIn'] =>
   value as JwtSignOptions['expiresIn'];
 
@@ -57,9 +62,17 @@ const DUMMY_ARGON2_HASH_PROMISE: Promise<string> = (async () => {
   return argon2.hash(random);
 })();
 
+const EMAIL_LOGIN_WINDOW_MS = 15 * 60_000;
+const EMAIL_LOGIN_LOCK_MS = 15 * 60_000;
+const EMAIL_LOGIN_MAX_FAILURES = 5;
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private readonly emailLoginFailures = new Map<
+    string,
+    { count: number; resetAt: number; lockedUntil?: number }
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -78,7 +91,9 @@ export class AuthService {
         ipAddress: meta?.ipAddress,
         userAgent: meta?.userAgent,
       });
-      throw new ForbiddenException('Public registration is disabled. Ask an administrator to create your account.');
+      throw new ForbiddenException(
+        'Public registration is disabled. Ask an administrator to create your account.',
+      );
     }
 
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
@@ -102,7 +117,14 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, meta?: { ipAddress?: string; userAgent?: string }) {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const submittedEmail = dto.email.trim();
+    const normalizedEmail = submittedEmail.toLowerCase();
+    if (this.isEmailLoginLocked(normalizedEmail)) {
+      await this.constantTimeVerify(undefined, dto.password);
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { email: submittedEmail } });
 
     // Account lockout check (only meaningful when the user exists).
     if (user?.lockedUntil && user.lockedUntil > new Date()) {
@@ -128,6 +150,7 @@ export class AuthService {
     const ok = await this.constantTimeVerify(user?.passwordHash, dto.password);
 
     if (!user || user.status !== 'ACTIVE') {
+      this.recordEmailLoginFailure(normalizedEmail);
       if (user) {
         await this.logSecurityEvent('LOGIN_FAILED', user.id, 'MEDIUM', meta);
         await this.audit.log({
@@ -143,6 +166,7 @@ export class AuthService {
     }
 
     if (!ok) {
+      this.recordEmailLoginFailure(normalizedEmail);
       const attempts = user.failedLoginAttempts + 1;
       const locked = attempts >= 5;
       const lockData = locked ? { lockedUntil: new Date(Date.now() + 15 * 60_000) } : {};
@@ -167,13 +191,16 @@ export class AuthService {
     }
 
     // Reset failure counter on successful password verification
+    this.clearEmailLoginFailure(normalizedEmail);
     await this.prisma.user.update({
       where: { id: user.id },
       data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
     });
 
     // Check if 2FA is required
-    const secProfile = await this.prisma.userSecurityProfile.findUnique({ where: { userId: user.id } });
+    const secProfile = await this.prisma.userSecurityProfile.findUnique({
+      where: { userId: user.id },
+    });
     if (secProfile?.twoFactorEnabled) {
       const tempToken = await this.jwt.signAsync(
         { sub: user.id, email: user.email, scope: 'twoFactor' } as JwtPayload,
@@ -238,29 +265,30 @@ export class AuthService {
 
   async logout(
     userId: string,
-    rawToken: string,
+    rawToken?: string,
     meta?: { ipAddress?: string; userAgent?: string },
     sid?: string,
   ) {
-    const tokens = await this.prisma.refreshToken.findMany({
-      where: { userId, revokedAt: null },
-    });
-    for (const t of tokens) {
-      if (await argon2.verify(t.tokenHash, rawToken)) {
+    if (rawToken) {
+      const matched = await this.findRefreshTokenByRawValue(userId, rawToken, {
+        includeRevoked: false,
+        requireUnexpired: false,
+      });
+
+      if (matched) {
         // Revoke this token AND its entire family — logging out from one device
         // should invalidate all rotated descendants of the same login.
-        if (t.familyId) {
+        if (matched.familyId) {
           await this.prisma.refreshToken.updateMany({
-            where: { familyId: t.familyId, revokedAt: null },
+            where: { familyId: matched.familyId, revokedAt: null },
             data: { revokedAt: new Date(), revokedReason: 'LOGOUT' },
           });
         } else {
           await this.prisma.refreshToken.update({
-            where: { id: t.id },
+            where: { id: matched.id },
             data: { revokedAt: new Date(), revokedReason: 'LOGOUT' },
           });
         }
-        break;
       }
     }
 
@@ -302,17 +330,10 @@ export class AuthService {
     // Reuse detection: scan ALL the user's tokens (active AND revoked).
     // If the presented token matches a previously-revoked sibling, that's a sign the
     // refresh token was stolen and replayed — revoke the whole family.
-    const allTokens = await this.prisma.refreshToken.findMany({
-      where: { userId, expiresAt: { gt: new Date() } },
+    const matched = await this.findRefreshTokenByRawValue(userId, rawToken, {
+      includeRevoked: true,
+      requireUnexpired: true,
     });
-
-    let matched: (typeof allTokens)[0] | null = null;
-    for (const t of allTokens) {
-      if (await argon2.verify(t.tokenHash, rawToken)) {
-        matched = t;
-        break;
-      }
-    }
 
     if (!matched) throw new UnauthorizedException('Invalid or expired refresh token');
 
@@ -372,13 +393,7 @@ export class AuthService {
       preservedSid = undefined;
     }
 
-    return this.issueTokens(
-      userId,
-      user.email,
-      meta,
-      matched.familyId ?? undefined,
-      preservedSid,
-    );
+    return this.issueTokens(userId, user.email, meta, matched.familyId ?? undefined, preservedSid);
   }
 
   /**
@@ -433,13 +448,11 @@ export class AuthService {
   }
 
   async validateRefreshToken(userId: string, rawToken: string): Promise<boolean> {
-    const tokens = await this.prisma.refreshToken.findMany({
-      where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
+    const matched = await this.findRefreshTokenByRawValue(userId, rawToken, {
+      includeRevoked: false,
+      requireUnexpired: true,
     });
-    for (const t of tokens) {
-      if (await argon2.verify(t.tokenHash, rawToken)) return true;
-    }
-    return false;
+    return Boolean(matched);
   }
 
   // ─── Private helpers ─────────────────────────────────────────────────────
@@ -487,7 +500,7 @@ export class AuthService {
       },
     );
 
-    const tokenHash = await argon2.hash(refreshToken, { timeCost: REFRESH_TOKEN_SALT_ROUNDS });
+    const tokenHash = this.hashRefreshToken(refreshToken);
     const expiresAt = new Date(Date.now() + this.parseDuration(refreshExpiresIn));
     // New login → new family. Refresh rotation → existing family is preserved.
     const tokenFamilyId = familyId ?? randomUUID();
@@ -509,10 +522,7 @@ export class AuthService {
     await this.prisma.refreshToken.deleteMany({
       where: {
         userId,
-        OR: [
-          { expiresAt: { lt: new Date() } },
-          { revokedAt: { lt: replayWindow } },
-        ],
+        OR: [{ expiresAt: { lt: new Date() } }, { revokedAt: { lt: replayWindow } }],
       },
     });
 
@@ -520,17 +530,95 @@ export class AuthService {
   }
 
   private parseDuration(duration: string): number {
-    const match = /^(\d+)([smhd])$/.exec(duration);
-    if (!match) return 7 * 24 * 60 * 60 * 1000;
+    const match = /^(\d+)([smhdw])$/.exec(duration);
+    if (!match) {
+      this.logger.warn(`Unsupported duration "${duration}", falling back to 7d`);
+      return 7 * 24 * 60 * 60 * 1000;
+    }
     const n = parseInt(match[1], 10);
     const unit = match[2];
-    const ms: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+    const ms: Record<string, number> = {
+      s: 1000,
+      m: 60_000,
+      h: 3_600_000,
+      d: 86_400_000,
+      w: 7 * 86_400_000,
+    };
     return n * (ms[unit] ?? 86_400_000);
+  }
+
+  private isEmailLoginLocked(email: string): boolean {
+    const entry = this.emailLoginFailures.get(email);
+    const now = Date.now();
+    if (!entry) return false;
+    if (entry.lockedUntil && entry.lockedUntil > now) return true;
+    if (entry.resetAt <= now) this.emailLoginFailures.delete(email);
+    return false;
+  }
+
+  private recordEmailLoginFailure(email: string) {
+    const now = Date.now();
+    const existing = this.emailLoginFailures.get(email);
+    const entry =
+      existing && existing.resetAt > now
+        ? existing
+        : { count: 0, resetAt: now + EMAIL_LOGIN_WINDOW_MS };
+
+    entry.count += 1;
+    if (entry.count >= EMAIL_LOGIN_MAX_FAILURES) {
+      entry.lockedUntil = now + EMAIL_LOGIN_LOCK_MS;
+    }
+    this.emailLoginFailures.set(email, entry);
+  }
+
+  private clearEmailLoginFailure(email: string) {
+    this.emailLoginFailures.delete(email);
   }
 
   private publicRegistrationEnabled(): boolean {
     const raw = this.config.get<string>('ALLOW_PUBLIC_REGISTRATION', 'false');
     return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase());
+  }
+
+  private hashRefreshToken(rawToken: string): string {
+    const pepper =
+      this.config.get<string>('REFRESH_TOKEN_PEPPER') ??
+      this.config.getOrThrow<string>('JWT_REFRESH_SECRET');
+    return createHmac('sha256', pepper).update(rawToken).digest('hex');
+  }
+
+  private isLegacyRefreshTokenHash(tokenHash: string): boolean {
+    return tokenHash.startsWith('$argon2');
+  }
+
+  private async findRefreshTokenByRawValue(
+    userId: string,
+    rawToken: string,
+    options: { includeRevoked: boolean; requireUnexpired: boolean },
+  ) {
+    const where = {
+      userId,
+      ...(options.includeRevoked ? {} : { revokedAt: null }),
+      ...(options.requireUnexpired ? { expiresAt: { gt: new Date() } } : {}),
+    };
+
+    const lookupHash = this.hashRefreshToken(rawToken);
+    const directMatch = await this.prisma.refreshToken.findFirst({
+      where: { ...where, tokenHash: lookupHash },
+    });
+    if (directMatch) return directMatch;
+
+    const legacyTokens = await this.prisma.refreshToken.findMany({ where });
+    for (const token of legacyTokens) {
+      if (!this.isLegacyRefreshTokenHash(token.tokenHash)) continue;
+      try {
+        if (await argon2.verify(token.tokenHash, rawToken)) return token;
+      } catch {
+        // Ignore malformed legacy hashes; a failed match is equivalent here.
+      }
+    }
+
+    return null;
   }
 
   /**

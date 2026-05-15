@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Get,
   HttpCode,
@@ -60,6 +61,7 @@ export class AuthController {
   @JwtRefresh()
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60000, limit: 20 } })
   @Post('refresh')
   @ApiOperation({ summary: 'Rotate refresh token and obtain new access token' })
   refresh(@CurrentUser() user: AuthUser, @Req() req: Request) {
@@ -78,14 +80,15 @@ export class AuthController {
   @ApiOperation({ summary: 'Revoke current refresh token session' })
   async logout(@CurrentUser() user: AuthUser, @Req() req: Request) {
     const rawToken = req.body?.refreshToken as string | undefined;
-    if (rawToken && user) {
-      await this.auth.logout(
-        user.id,
-        rawToken,
-        { ipAddress: req.ip, userAgent: req.headers['user-agent'] },
-        user.sid,
-      );
+    if (!rawToken && !user.sid) {
+      throw new BadRequestException('Refresh token is required for logout');
     }
+    await this.auth.logout(
+      user.id,
+      rawToken,
+      { ipAddress: req.ip, userAgent: req.headers['user-agent'] },
+      user.sid,
+    );
     return { message: 'Logged out successfully' };
   }
 
@@ -143,6 +146,9 @@ export class AuthController {
   // ─── Two-Factor Authentication ────────────────────────────────────────────
 
   @ApiBearerAuth()
+  @UseGuards(RecentAuthGuard)
+  @RecentAuth(15)
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @Post('2fa/setup')
   @ApiOperation({ summary: 'Begin 2FA TOTP setup — returns secret and QR code URI' })
   twoFactorSetup(@CurrentUser() user: AuthUser) {

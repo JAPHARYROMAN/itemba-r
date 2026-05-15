@@ -12,7 +12,7 @@
 // Resolution order:
 //   1. BACKEND_INTERNAL_URL  — canonical (server-only)
 //   2. BACKEND_URL           — legacy fallback (will be removed)
-//   3. http://localhost:3001/api/v1 — local-dev default
+//   3. http://localhost:3001/api/v1 — local-dev default only
 //
 // Do NOT fall back to NEXT_PUBLIC_API_URL: that variable is for the browser
 // bundle and points at the public domain, which would force server-to-server
@@ -26,6 +26,14 @@ function configuredUrl(value: string | undefined): string | undefined {
 }
 
 export function getBackendInternalUrl(): string {
+  if (
+    process.env.NODE_ENV === 'production' &&
+    !configuredUrl(process.env.BACKEND_INTERNAL_URL) &&
+    !configuredUrl(process.env.BACKEND_URL)
+  ) {
+    throw new Error('BACKEND_INTERNAL_URL is required in production');
+  }
+
   const url =
     configuredUrl(process.env.BACKEND_INTERNAL_URL) ??
     configuredUrl(process.env.BACKEND_URL) ??

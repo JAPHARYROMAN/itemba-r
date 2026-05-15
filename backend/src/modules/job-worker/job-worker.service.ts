@@ -8,7 +8,7 @@ import { JobContext, JobHandlerRegistry } from './job-handler.registry';
 
 const POLL_INTERVAL_MS = 2_000; // baseline poll cadence
 const POLL_BATCH = 5; // jobs leased per tick
-const STALE_AFTER_MS = 5 * 60_000; // running jobs older than this are reclaimed
+const DEFAULT_STALE_AFTER_MS = 30 * 60_000; // running jobs older than this are reclaimed
 const STALE_RECOVERY_BATCH = 100;
 const DEFAULT_CANDIDATE_MULTIPLIER = 10;
 
@@ -134,7 +134,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
    * they can be retried. This recovers from worker crashes mid-handler.
    */
   private async recoverStale(): Promise<number> {
-    const cutoff = new Date(Date.now() - STALE_AFTER_MS);
+    const cutoff = new Date(Date.now() - this.staleAfterMs());
     const staleJobs = await this.prisma.backgroundJob.findMany({
       where: { status: 'RUNNING', startedAt: { lt: cutoff } },
       orderBy: { startedAt: 'asc' },
@@ -407,7 +407,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
             where: { id: exportLogId },
             data: { status: 'FAILED', completedAt: new Date(), notes: errorMessage },
           })
-          .catch(() => undefined);
+          .catch((err) => this.logRelatedFailureUpdate('DataExportLog', exportLogId, err));
       }
       return;
     }
@@ -421,7 +421,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
             where: { id: backupRunId },
             data: { status: 'FAILED', completedAt: new Date(), errorMessage },
           })
-          .catch(() => undefined);
+          .catch((err) => this.logRelatedFailureUpdate('BackupRun', backupRunId, err));
       }
       return;
     }
@@ -435,9 +435,26 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
             where: { id: restoreTestId },
             data: { status: 'FAILED', completedAt: new Date(), issuesFound: errorMessage },
           })
-          .catch(() => undefined);
+          .catch((err) => this.logRelatedFailureUpdate('RestoreTest', restoreTestId, err));
       }
     }
+  }
+
+  private staleAfterMs(): number {
+    const configuredSeconds = Number(
+      this.config.get<string>('JOB_WORKER_STALE_AFTER_SECONDS', '0'),
+    );
+    if (Number.isFinite(configuredSeconds) && configuredSeconds > 0) {
+      return configuredSeconds * 1000;
+    }
+    return DEFAULT_STALE_AFTER_MS;
+  }
+
+  private logRelatedFailureUpdate(entityType: string, id: string, err: unknown): void {
+    this.logger.error(
+      `Failed to mark ${entityType} ${id} as failed`,
+      err instanceof Error ? err.stack : String(err),
+    );
   }
 
   private payloadObject(payload: Prisma.JsonValue | null): Record<string, unknown> {

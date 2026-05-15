@@ -13,10 +13,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { applyCompanyScopeWhere } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { DocumentsService } from '../documents/documents.service';
-import {
-  BusinessPdfEntityType,
-  GenerateBusinessPdfDto,
-} from './dto/generate-business-pdf.dto';
+import { BusinessPdfEntityType, GenerateBusinessPdfDto } from './dto/generate-business-pdf.dto';
 import {
   BusinessPdfModel,
   BusinessPdfOrganization,
@@ -41,15 +38,24 @@ export class GeneratedDocumentsService {
     if (entityType) where.entityType = entityType;
     if (entityId) where.entityId = entityId;
     const [items, total] = await Promise.all([
-      this.prisma.generatedDocument.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' } }),
+      this.prisma.generatedDocument.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
+      }),
       this.prisma.generatedDocument.count({ where }),
     ]);
     return { items, total, page: Number(page), limit: Number(limit) };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser) {
     const item = await this.prisma.generatedDocument.findFirst({ where: { id, deletedAt: null } });
     if (!item) throw new NotFoundException('Generated document not found');
+    const where: any = { id, deletedAt: null };
+    applyCompanyScopeWhere(where, user, item.companyId);
+    const scoped = await this.prisma.generatedDocument.findFirst({ where });
+    if (!scoped) throw new NotFoundException('Generated document not found');
     return item;
   }
 
@@ -67,7 +73,10 @@ export class GeneratedDocumentsService {
         fileName,
         mimeType: 'application/pdf',
         title: model.title,
-        ownerType: dto.entityType === 'CUSTOMER_PROFILE' ? DocumentOwnerType.CUSTOMER : DocumentOwnerType.TRANSACTION,
+        ownerType:
+          dto.entityType === 'CUSTOMER_PROFILE'
+            ? DocumentOwnerType.CUSTOMER
+            : DocumentOwnerType.TRANSACTION,
         ownerId: dto.entityId,
         companyId: model.companyId,
         branchId: model.branchId,
@@ -255,38 +264,40 @@ export class GeneratedDocumentsService {
     });
     if (!record) throw new NotFoundException('Quotation not found');
     const customerName = record.customer?.name ?? record.customerName ?? 'N/A';
-    return this.wrapPdf(record.companyId, record.branchId, record.quotationNumber, DocumentCategory.OTHER, {
-      title: 'Quotation',
-      subtitle: customerName,
-      reference: record.quotationNumber,
-      status: label(record.status),
-      organization: organization(record.company, record.branch),
-      generatedAt: new Date(),
-      meta: [
-        kv('Quotation Number', record.quotationNumber),
-        kv('Quotation Date', date(record.quotationDate)),
-        kv('Valid Until', date(record.validUntil)),
-        kv('Quotation Type', label(record.quotationType)),
-      ],
-      sections: [
-        customerDetails(customerName, record.customer, [
-          kv('Approved At', date(record.approvedAt)),
-          kv('Converted Sales Order', value(record.convertedSalesOrderId)),
-        ]),
-        lineSection(
-          standardLineRows(record.lines, record.currency),
-          record.currency,
-          [
+    return this.wrapPdf(
+      record.companyId,
+      record.branchId,
+      record.quotationNumber,
+      DocumentCategory.OTHER,
+      {
+        title: 'Quotation',
+        subtitle: customerName,
+        reference: record.quotationNumber,
+        status: label(record.status),
+        organization: organization(record.company, record.branch),
+        generatedAt: new Date(),
+        meta: [
+          kv('Quotation Number', record.quotationNumber),
+          kv('Quotation Date', date(record.quotationDate)),
+          kv('Valid Until', date(record.validUntil)),
+          kv('Quotation Type', label(record.quotationType)),
+        ],
+        sections: [
+          customerDetails(customerName, record.customer, [
+            kv('Approved At', date(record.approvedAt)),
+            kv('Converted Sales Order', value(record.convertedSalesOrderId)),
+          ]),
+          lineSection(standardLineRows(record.lines, record.currency), record.currency, [
             total('Subtotal', record.subtotal, record.currency),
             total('Discount', record.discountAmount, record.currency),
             total('Tax', record.taxAmount, record.currency),
             total('Total', record.totalAmount, record.currency, true),
-          ],
-        ),
-        notesSection(record.notes),
-        { title: 'Acceptance', signatures: ['Issued By', 'Customer Acceptance', 'Approved By'] },
-      ].filter(Boolean) as BusinessPdfSection[],
-    });
+          ]),
+          notesSection(record.notes),
+          { title: 'Acceptance', signatures: ['Issued By', 'Customer Acceptance', 'Approved By'] },
+        ].filter(Boolean) as BusinessPdfSection[],
+      },
+    );
   }
 
   private async proformaPdf(id: string, user: AuthUser): Promise<ResolvedBusinessPdfModel> {
@@ -309,38 +320,40 @@ export class GeneratedDocumentsService {
     });
     if (!record) throw new NotFoundException('Proforma invoice not found');
     const customerName = record.customer?.name ?? record.customerName ?? 'N/A';
-    return this.wrapPdf(record.companyId, record.branchId, record.proformaNumber, DocumentCategory.INVOICE, {
-      title: 'Proforma Invoice',
-      subtitle: customerName,
-      reference: record.proformaNumber,
-      status: label(record.status),
-      organization: organization(record.company, record.branch),
-      generatedAt: new Date(),
-      meta: [
-        kv('Proforma Number', record.proformaNumber),
-        kv('Proforma Date', date(record.proformaDate)),
-        kv('Valid Until', date(record.validUntil)),
-        kv('Related Quotation', value(record.quotation?.quotationNumber ?? record.quotationId)),
-      ],
-      sections: [
-        customerDetails(customerName, record.customer, [
-          kv('Converted Sales Order', value(record.convertedSalesOrderId)),
-          kv('Currency', value(record.currency)),
-        ]),
-        lineSection(
-          standardLineRows(record.lines, record.currency),
-          record.currency,
-          [
+    return this.wrapPdf(
+      record.companyId,
+      record.branchId,
+      record.proformaNumber,
+      DocumentCategory.INVOICE,
+      {
+        title: 'Proforma Invoice',
+        subtitle: customerName,
+        reference: record.proformaNumber,
+        status: label(record.status),
+        organization: organization(record.company, record.branch),
+        generatedAt: new Date(),
+        meta: [
+          kv('Proforma Number', record.proformaNumber),
+          kv('Proforma Date', date(record.proformaDate)),
+          kv('Valid Until', date(record.validUntil)),
+          kv('Related Quotation', value(record.quotation?.quotationNumber ?? record.quotationId)),
+        ],
+        sections: [
+          customerDetails(customerName, record.customer, [
+            kv('Converted Sales Order', value(record.convertedSalesOrderId)),
+            kv('Currency', value(record.currency)),
+          ]),
+          lineSection(standardLineRows(record.lines, record.currency), record.currency, [
             total('Subtotal', record.subtotal, record.currency),
             total('Discount', record.discountAmount, record.currency),
             total('Tax', record.taxAmount, record.currency),
             total('Total', record.totalAmount, record.currency, true),
-          ],
-        ),
-        notesSection(record.notes),
-        { title: 'Authorization', signatures: ['Issued By', 'Reviewed By', 'Customer'] },
-      ].filter(Boolean) as BusinessPdfSection[],
-    });
+          ]),
+          notesSection(record.notes),
+          { title: 'Authorization', signatures: ['Issued By', 'Reviewed By', 'Customer'] },
+        ].filter(Boolean) as BusinessPdfSection[],
+      },
+    );
   }
 
   private async deliveryNotePdf(id: string, user: AuthUser): Promise<ResolvedBusinessPdfModel> {
@@ -450,50 +463,56 @@ export class GeneratedDocumentsService {
       }),
     ]);
 
-    return this.wrapPdf(customer.companyId, customer.branchId, customer.customerCode, DocumentCategory.OTHER, {
-      title: 'Customer Profile',
-      subtitle: customer.name,
-      reference: customer.customerCode,
-      status: label(customer.status),
-      organization: organization(customer.company, customer.branch),
-      generatedAt: new Date(),
-      meta: [
-        kv('Customer Code', customer.customerCode),
-        kv('Customer Type', label(customer.customerType)),
-        kv('Payment Terms', value(customer.paymentTerms)),
-        kv('Open Receivables', String(receivableSummary._count.id)),
-      ],
-      sections: [
-        {
-          title: 'Customer Details',
-          items: [
-            kv('Customer Name', customer.name),
-            kv('Legal Name', value(customer.legalName)),
-            kv('Status', label(customer.status)),
-            kv('Phone', value(customer.phone)),
-            kv('Email', value(customer.email)),
-            kv('Contact Person', value(customer.contactPerson)),
-            kv('Address', value(customer.address)),
-            kv('Outstanding', money(receivableSummary._sum.outstandingAmount, 'TZS')),
-          ],
-        },
-        {
-          title: 'Recent Orders',
-          table: {
-            headers: ['Order', 'Date', 'Status', 'Payment', 'Total', 'Outstanding'],
-            numericColumns: [4, 5],
-            rows: recentOrders.map((order) => [
-              order.salesOrderNumber,
-              date(order.orderDate),
-              label(order.status),
-              label(order.paymentStatus),
-              money(order.totalAmount, 'TZS'),
-              money(order.outstandingAmount, 'TZS'),
-            ]),
+    return this.wrapPdf(
+      customer.companyId,
+      customer.branchId,
+      customer.customerCode,
+      DocumentCategory.OTHER,
+      {
+        title: 'Customer Profile',
+        subtitle: customer.name,
+        reference: customer.customerCode,
+        status: label(customer.status),
+        organization: organization(customer.company, customer.branch),
+        generatedAt: new Date(),
+        meta: [
+          kv('Customer Code', customer.customerCode),
+          kv('Customer Type', label(customer.customerType)),
+          kv('Payment Terms', value(customer.paymentTerms)),
+          kv('Open Receivables', String(receivableSummary._count.id)),
+        ],
+        sections: [
+          {
+            title: 'Customer Details',
+            items: [
+              kv('Customer Name', customer.name),
+              kv('Legal Name', value(customer.legalName)),
+              kv('Status', label(customer.status)),
+              kv('Phone', value(customer.phone)),
+              kv('Email', value(customer.email)),
+              kv('Contact Person', value(customer.contactPerson)),
+              kv('Address', value(customer.address)),
+              kv('Outstanding', money(receivableSummary._sum.outstandingAmount, 'TZS')),
+            ],
           },
-        },
-      ],
-    });
+          {
+            title: 'Recent Orders',
+            table: {
+              headers: ['Order', 'Date', 'Status', 'Payment', 'Total', 'Outstanding'],
+              numericColumns: [4, 5],
+              rows: recentOrders.map((order) => [
+                order.salesOrderNumber,
+                date(order.orderDate),
+                label(order.status),
+                label(order.paymentStatus),
+                money(order.totalAmount, 'TZS'),
+                money(order.outstandingAmount, 'TZS'),
+              ]),
+            },
+          },
+        ],
+      },
+    );
   }
 
   private wrapPdf(
@@ -568,7 +587,9 @@ function companySelect() {
       email: true,
       website: true,
       logoUrl: true,
-      group: { select: { name: true, code: true, address: true, phone: true, email: true, website: true } },
+      group: {
+        select: { name: true, code: true, address: true, phone: true, email: true, website: true },
+      },
       profile: {
         select: {
           registeredName: true,
@@ -605,11 +626,12 @@ function organization(company: any, branch?: any): BusinessPdfOrganization {
   const profile = company?.profile;
   const group = company?.group;
   const groupName = value(group?.name) !== 'N/A' ? value(group?.name) : 'ITEMBA GROUP';
-  const companyName = value(profile?.registeredName) !== 'N/A'
-    ? value(profile?.registeredName)
-    : value(company?.name) !== 'N/A'
-      ? value(company?.name)
-      : 'ITEMBA-R Group';
+  const companyName =
+    value(profile?.registeredName) !== 'N/A'
+      ? value(profile?.registeredName)
+      : value(company?.name) !== 'N/A'
+        ? value(company?.name)
+        : 'ITEMBA-R Group';
 
   return {
     groupName,
@@ -617,7 +639,8 @@ function organization(company: any, branch?: any): BusinessPdfOrganization {
     companyName: company?.name,
     code: company?.code,
     branchName: branch?.name,
-    address: branch?.address ?? profile?.registeredAddress ?? profile?.postalAddress ?? group?.address,
+    address:
+      branch?.address ?? profile?.registeredAddress ?? profile?.postalAddress ?? group?.address,
     phone: branch?.phone ?? company?.phone ?? group?.phone,
     email: company?.email ?? group?.email ?? 'info@itembagrouptz.com',
     website: company?.website ?? group?.website ?? 'itembagrouptz.com',
@@ -640,7 +663,11 @@ function kv(labelText: string, rawValue: unknown) {
   return { label: labelText, value: value(rawValue) };
 }
 
-function customerDetails(customerName: string, customer: any, extra: Array<{ label: string; value: string }>) {
+function customerDetails(
+  customerName: string,
+  customer: any,
+  extra: Array<{ label: string; value: string }>,
+) {
   return {
     title: 'Customer Details',
     items: [
@@ -723,12 +750,14 @@ function label(raw: unknown) {
 }
 
 function safeFileStem(value: string) {
-  return value
-    .replace(/\s+/g, '-')
-    .replace(/[^A-Za-z0-9._-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 96) || 'document';
+  return (
+    value
+      .replace(/\s+/g, '-')
+      .replace(/[^A-Za-z0-9._-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 96) || 'document'
+  );
 }
 
 function templateTypeFor(entityType: BusinessPdfEntityType): DocumentTemplateType {

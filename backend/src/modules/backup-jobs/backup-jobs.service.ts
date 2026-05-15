@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { AuditSeverity, BackupSchedule } from '@prisma/client';
+import { AuditSeverity, BackupSchedule, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { computeNextBackupRunAt } from '../job-worker/backup-schedule';
+import { CreateBackupJobDto, QueryBackupJobDto, UpdateBackupJobDto } from './dto/backup-job.dto';
 
 const SAFE_SELECT = {
   id: true,
@@ -29,7 +30,7 @@ export class BackupJobsService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async findAll(query: any) {
+  async findAll(query: QueryBackupJobDto) {
     const { page = 1, limit = 20, backupType, status, schedule } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
@@ -38,27 +39,36 @@ export class BackupJobsService {
     if (schedule) where.schedule = schedule;
 
     const [data, total] = await Promise.all([
-      this.prisma.backupJob.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' }, select: SAFE_SELECT }),
+      this.prisma.backupJob.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
+        select: SAFE_SELECT,
+      }),
       this.prisma.backupJob.count({ where }),
     ]);
     return { data, total, page: Number(page), limit: Number(limit) };
   }
 
   async findOne(id: string) {
-    const record = await this.prisma.backupJob.findFirst({ where: { id, deletedAt: null }, select: SAFE_SELECT });
+    const record = await this.prisma.backupJob.findFirst({
+      where: { id, deletedAt: null },
+      select: SAFE_SELECT,
+    });
     if (!record) throw new NotFoundException('Backup job not found');
     return record;
   }
 
-  async create(dto: any, userId: string) {
+  async create(dto: CreateBackupJobDto, userId: string) {
     const schedule = dto.schedule ?? BackupSchedule.MANUAL;
-    const scheduleConfig = dto.scheduleConfig ?? {};
+    const scheduleConfig = (dto.scheduleConfig ?? {}) as Prisma.InputJsonObject;
     const nextRunAt =
       dto.nextRunAt !== undefined
         ? dto.nextRunAt
           ? new Date(dto.nextRunAt)
           : null
-        : computeNextBackupRunAt(schedule, new Date(), scheduleConfig);
+        : computeNextBackupRunAt(schedule, new Date(), scheduleConfig as Prisma.JsonObject);
 
     const record = await this.prisma.backupJob.create({
       data: {
@@ -68,7 +78,6 @@ export class BackupJobsService {
         schedule,
         scheduleConfig,
         storageTarget: dto.storageTarget,
-        storageConfigEncrypted: dto.storageConfigEncrypted ?? '',
         retentionDays: dto.retentionDays ?? 30,
         status: dto.status ?? 'ACTIVE',
         nextRunAt,
@@ -76,14 +85,23 @@ export class BackupJobsService {
       },
       select: SAFE_SELECT,
     });
-    await this.auditLogs.log({ action: 'BACKUP_JOB_CREATED', entityType: 'BackupJob', entityId: (record as any).id, userId, severity: AuditSeverity.HIGH });
+    await this.auditLogs.log({
+      action: 'BACKUP_JOB_CREATED',
+      entityType: 'BackupJob',
+      entityId: (record as any).id,
+      userId,
+      severity: AuditSeverity.HIGH,
+    });
     return record;
   }
 
-  async update(id: string, dto: any, userId: string) {
+  async update(id: string, dto: UpdateBackupJobDto, userId: string) {
     const existing = await this.findOne(id);
     const schedule = dto.schedule ?? existing.schedule;
-    const scheduleConfig = dto.scheduleConfig ?? existing.scheduleConfig;
+    const scheduleConfig =
+      dto.scheduleConfig !== undefined
+        ? (dto.scheduleConfig as Prisma.JsonObject)
+        : (existing.scheduleConfig as Prisma.JsonValue | null);
     const shouldRecalculateNextRunAt =
       dto.nextRunAt === undefined &&
       (dto.schedule !== undefined || dto.scheduleConfig !== undefined || dto.status === 'ACTIVE');
@@ -101,24 +119,39 @@ export class BackupJobsService {
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.schedule !== undefined && { schedule }),
-        ...(dto.scheduleConfig !== undefined && { scheduleConfig }),
+        ...(dto.scheduleConfig !== undefined && {
+          scheduleConfig: dto.scheduleConfig as Prisma.InputJsonObject,
+        }),
         ...(dto.storageTarget !== undefined && { storageTarget: dto.storageTarget }),
-        ...(dto.storageConfigEncrypted !== undefined && { storageConfigEncrypted: dto.storageConfigEncrypted }),
         ...(dto.retentionDays !== undefined && { retentionDays: dto.retentionDays }),
         ...(dto.status !== undefined && { status: dto.status }),
-        ...(dto.lastRunAt !== undefined && { lastRunAt: new Date(dto.lastRunAt) }),
         ...(nextRunAt !== undefined && { nextRunAt }),
       },
       select: SAFE_SELECT,
     });
-    await this.auditLogs.log({ action: 'BACKUP_JOB_UPDATED', entityType: 'BackupJob', entityId: id, userId, oldValue: existing as any, newValue: record as any, severity: AuditSeverity.MEDIUM });
+    await this.auditLogs.log({
+      action: 'BACKUP_JOB_UPDATED',
+      entityType: 'BackupJob',
+      entityId: id,
+      userId,
+      oldValue: existing as any,
+      newValue: record as any,
+      severity: AuditSeverity.MEDIUM,
+    });
     return record;
   }
 
   async remove(id: string, userId: string) {
     const existing = await this.findOne(id);
     await this.prisma.backupJob.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.auditLogs.log({ action: 'BACKUP_JOB_DELETED', entityType: 'BackupJob', entityId: id, userId, oldValue: existing as any, severity: AuditSeverity.HIGH });
+    await this.auditLogs.log({
+      action: 'BACKUP_JOB_DELETED',
+      entityType: 'BackupJob',
+      entityId: id,
+      userId,
+      oldValue: existing as any,
+      severity: AuditSeverity.HIGH,
+    });
     return { success: true };
   }
 }

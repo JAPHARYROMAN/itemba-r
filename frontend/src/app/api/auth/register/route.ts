@@ -5,13 +5,14 @@ const BACKEND = getBackendInternalUrl();
 const COOKIE_OPTS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
+  sameSite: 'lax' as const,
   path: '/',
 };
 const REFRESH_COOKIE = 'itemba_refresh';
 const BACKEND_REFRESH_COOKIE = 'itemba_backend_refresh';
 const REFRESH_MAX_AGE = 60 * 60 * 24 * 7;
-const AUTH_REFRESH_PATH = '/api/auth/refresh';
+const AUTH_REFRESH_PATH = '/';
+const LEGACY_AUTH_REFRESH_PATH = '/api/auth/refresh';
 const BACKEND_REFRESH_PATH = '/api/backend';
 
 function setRefreshCookies(res: NextResponse, refreshToken: string) {
@@ -19,6 +20,11 @@ function setRefreshCookies(res: NextResponse, refreshToken: string) {
     ...COOKIE_OPTS,
     path: AUTH_REFRESH_PATH,
     maxAge: REFRESH_MAX_AGE,
+  });
+  res.cookies.set(REFRESH_COOKIE, '', {
+    ...COOKIE_OPTS,
+    path: LEGACY_AUTH_REFRESH_PATH,
+    maxAge: 0,
   });
   res.cookies.set(BACKEND_REFRESH_COOKIE, refreshToken, {
     ...COOKIE_OPTS,
@@ -90,14 +96,14 @@ export async function POST(req: NextRequest) {
   setRefreshCookies(res, refreshToken);
   res.cookies.set('itemba_auth', '1', {
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    sameSite: 'lax',
     path: '/',
     maxAge: REFRESH_MAX_AGE,
   });
   res.cookies.set('itemba_csrf', csrfToken, {
     httpOnly: false,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    sameSite: 'lax',
     path: '/',
     maxAge: REFRESH_MAX_AGE,
   });

@@ -61,6 +61,15 @@ describe('CompanyScopeService', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('requires group-scoped users to have explicit company access for company records', async () => {
+    await expect(
+      service.assertCanAccessCompany(
+        user({ roleScopes: ['GROUP'], companyId: null, companyAccess: [] }),
+        'company-2',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
   it('requires the requested minimum access level', async () => {
     const scopedUser = user({
       companyId: null,
@@ -96,6 +105,24 @@ describe('CompanyScopeService', () => {
         }),
       ),
     ).toEqual({ companyId: { in: ['company-1', 'company-2', 'company-3'] } });
+  });
+
+  it('does not turn an unbounded group-scoped query into all companies', () => {
+    expect(companyWhereForUser(user({ roleScopes: ['GROUP'], companyId: null }))).toEqual({
+      id: { in: [] },
+    });
+  });
+
+  it('returns explicit company ids for async group-scoped filters', async () => {
+    await expect(
+      service.accessibleCompanyIds(
+        user({
+          roleScopes: ['GROUP'],
+          companyId: null,
+          companyAccess: [{ companyId: 'company-2', accessLevel: AccessLevel.READ }],
+        }),
+      ),
+    ).resolves.toEqual(['company-2']);
   });
 
   it('rejects an explicit query override outside the user company scope', () => {

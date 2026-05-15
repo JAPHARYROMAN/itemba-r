@@ -3,7 +3,7 @@ import { AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../common/services';
 
 @Injectable()
 export class SupportTicketsService {
@@ -12,7 +12,8 @@ export class SupportTicketsService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async create(dto: any, userId: string) {
+  async create(dto: any, user: AuthUser) {
+    assertCanAccessCompanyFromUser(user, dto.companyId);
     const record = await this.prisma.supportTicket.create({
       data: {
         ticketNumber: 'ST-' + Date.now(),
@@ -23,20 +24,21 @@ export class SupportTicketsService {
         moduleName: dto.moduleName,
         companyId: dto.companyId,
         status: 'OPEN',
-        reportedById: userId,
+        reportedById: user.id,
       },
     });
     await this.auditLogs.log({
       action: 'SUPPORT_TICKET_CREATED',
       entityType: 'SupportTicket',
       entityId: record.id,
-      userId,
+      userId: user.id,
+      companyId: record.companyId ?? undefined,
       severity: AuditSeverity.MEDIUM,
     });
     return record;
   }
 
-  async findAll(query: any, user?: any) {
+  async findAll(query: any, user?: AuthUser) {
     const {
       page = 1,
       pageSize = 20,
@@ -84,11 +86,15 @@ export class SupportTicketsService {
       },
     });
     if (!record) throw new NotFoundException('Support ticket not found');
+    assertCanAccessCompanyFromUser(user, record.companyId);
     return record;
   }
 
-  async update(id: string, dto: any, userId: string) {
-    await this.findOneBasic(id);
+  async update(id: string, dto: any, user: AuthUser) {
+    const existing = await this.findOneBasic(id, user);
+    if (dto.companyId !== undefined && dto.companyId !== existing.companyId) {
+      assertCanAccessCompanyFromUser(user, dto.companyId);
+    }
     const record = await this.prisma.supportTicket.update({
       where: { id },
       data: {
@@ -103,14 +109,15 @@ export class SupportTicketsService {
       action: 'SUPPORT_TICKET_UPDATED',
       entityType: 'SupportTicket',
       entityId: id,
-      userId,
+      userId: user.id,
+      companyId: record.companyId ?? undefined,
       severity: AuditSeverity.LOW,
     });
     return record;
   }
 
-  async assign(id: string, dto: any, userId: string) {
-    await this.findOneBasic(id);
+  async assign(id: string, dto: any, user: AuthUser) {
+    const existing = await this.findOneBasic(id, user);
     const record = await this.prisma.supportTicket.update({
       where: { id },
       data: { assignedToId: dto.assignedToId },
@@ -119,15 +126,16 @@ export class SupportTicketsService {
       action: 'SUPPORT_TICKET_ASSIGNED',
       entityType: 'SupportTicket',
       entityId: id,
-      userId,
+      userId: user.id,
+      companyId: existing.companyId ?? undefined,
       severity: AuditSeverity.MEDIUM,
       metadata: { assignedToId: dto.assignedToId } as any,
     });
     return record;
   }
 
-  async setStatus(id: string, status: string, userId: string) {
-    await this.findOneBasic(id);
+  async setStatus(id: string, status: string, user: AuthUser) {
+    const existing = await this.findOneBasic(id, user);
     const record = await this.prisma.supportTicket.update({
       where: { id },
       data: { status: status as any },
@@ -136,20 +144,21 @@ export class SupportTicketsService {
       action: 'SUPPORT_TICKET_' + status,
       entityType: 'SupportTicket',
       entityId: id,
-      userId,
+      userId: user.id,
+      companyId: existing.companyId ?? undefined,
       severity: AuditSeverity.LOW,
     });
     return record;
   }
 
-  async resolve(id: string, dto: any, userId: string) {
-    await this.findOneBasic(id);
+  async resolve(id: string, dto: any, user: AuthUser) {
+    const existing = await this.findOneBasic(id, user);
     const record = await this.prisma.supportTicket.update({
       where: { id },
       data: {
         status: 'RESOLVED',
         resolution: dto.resolution,
-        resolvedById: userId,
+        resolvedById: user.id,
         resolvedAt: new Date(),
       },
     });
@@ -157,14 +166,15 @@ export class SupportTicketsService {
       action: 'SUPPORT_TICKET_RESOLVED',
       entityType: 'SupportTicket',
       entityId: id,
-      userId,
+      userId: user.id,
+      companyId: existing.companyId ?? undefined,
       severity: AuditSeverity.MEDIUM,
     });
     return record;
   }
 
-  async close(id: string, userId: string) {
-    await this.findOneBasic(id);
+  async close(id: string, user: AuthUser) {
+    const existing = await this.findOneBasic(id, user);
     const record = await this.prisma.supportTicket.update({
       where: { id },
       data: { status: 'CLOSED', closedAt: new Date() },
@@ -173,28 +183,31 @@ export class SupportTicketsService {
       action: 'SUPPORT_TICKET_CLOSED',
       entityType: 'SupportTicket',
       entityId: id,
-      userId,
+      userId: user.id,
+      companyId: existing.companyId ?? undefined,
       severity: AuditSeverity.LOW,
     });
     return record;
   }
 
-  async remove(id: string, userId: string) {
-    await this.findOneBasic(id);
+  async remove(id: string, user: AuthUser) {
+    const existing = await this.findOneBasic(id, user);
     await this.prisma.supportTicket.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.auditLogs.log({
       action: 'SUPPORT_TICKET_DELETED',
       entityType: 'SupportTicket',
       entityId: id,
-      userId,
+      userId: user.id,
+      companyId: existing.companyId ?? undefined,
       severity: AuditSeverity.MEDIUM,
     });
     return { success: true };
   }
 
-  private async findOneBasic(id: string) {
+  private async findOneBasic(id: string, user?: AuthUser) {
     const record = await this.prisma.supportTicket.findFirst({ where: { id, deletedAt: null } });
     if (!record) throw new NotFoundException('Support ticket not found');
+    if (user) assertCanAccessCompanyFromUser(user, record.companyId);
     return record;
   }
 }

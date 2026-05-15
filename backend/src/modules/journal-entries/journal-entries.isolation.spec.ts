@@ -61,12 +61,9 @@ describe('JournalEntriesService isolation (P0-01 regression)', () => {
     // for non-GROUP-scoped users. The exact shape is verified separately in
     // company-scope.service.spec.ts; here we only assert that some companyId
     // restriction reaches Prisma — and that it does NOT permit company-B.
-    const where = (prisma.journalEntry.findMany as jest.Mock).mock.calls[0][0]
-      .where;
+    const where = (prisma.journalEntry.findMany as jest.Mock).mock.calls[0][0].where;
     const cidValue =
-      typeof where.companyId === 'string'
-        ? [where.companyId]
-        : where.companyId?.in ?? [];
+      typeof where.companyId === 'string' ? [where.companyId] : (where.companyId?.in ?? []);
     expect(cidValue).toEqual(['company-A']);
   });
 
@@ -81,13 +78,17 @@ describe('JournalEntriesService isolation (P0-01 regression)', () => {
     expect(prisma.journalEntry.findMany).not.toHaveBeenCalled();
   });
 
-  it('findAll permits group-scoped users to query any company', async () => {
+  it('findAll permits group-scoped users to query explicitly granted companies', async () => {
     const prisma = makePrisma();
     const service = makeService(prisma);
 
     await service.findAll(
       { page: 1, limit: 20, companyId: 'company-B' } as any,
-      authUser({ roleScopes: ['GROUP'], companyId: null }),
+      authUser({
+        roleScopes: ['GROUP'],
+        companyId: null,
+        companyAccess: [{ companyId: 'company-B', accessLevel: AccessLevel.READ }],
+      }),
     );
 
     expect(prisma.journalEntry.findMany).toHaveBeenCalledWith(
@@ -106,9 +107,7 @@ describe('JournalEntriesService isolation (P0-01 regression)', () => {
     });
     const service = makeService(prisma);
 
-    await expect(service.findOne('je-1', authUser())).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
+    await expect(service.findOne('je-1', authUser())).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('findOne returns the record when the requesting user has access', async () => {
@@ -129,9 +128,7 @@ describe('JournalEntriesService isolation (P0-01 regression)', () => {
     prisma.journalEntry.findFirst.mockResolvedValue(null);
     const service = makeService(prisma);
 
-    await expect(service.findOne('missing', authUser())).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(service.findOne('missing', authUser())).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('explicitly scoped users can read a company they were granted access to', async () => {
@@ -166,9 +163,9 @@ describe('JournalEntriesService isolation (P0-01 regression)', () => {
       companyAccess: [{ companyId: 'company-B', accessLevel: AccessLevel.READ }],
     });
 
-    await expect(
-      service.findOne('je-2', grantedUser, AccessLevel.WRITE),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.findOne('je-2', grantedUser, AccessLevel.WRITE)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 });
 

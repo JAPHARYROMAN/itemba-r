@@ -16,7 +16,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV BACKEND_INTERNAL_URL=$BACKEND_INTERNAL_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_WEBSITE_URL=$NEXT_PUBLIC_WEBSITE_URL
-RUN mkdir -p public && npm run build
+RUN test -n "$BACKEND_INTERNAL_URL" \
+  && test -n "$NEXT_PUBLIC_API_URL" \
+  && test -n "$NEXT_PUBLIC_WEBSITE_URL" \
+  && mkdir -p public \
+  && npm run build
 
 # Runner
 FROM node:20-bookworm-slim AS runner

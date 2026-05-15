@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Delete,
   Get,
@@ -25,6 +26,29 @@ import { CreateDocumentDto } from './dto/create-document.dto';
 import { QueryDocumentDto } from './dto/query-document.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 
+const ALLOWED_UPLOAD_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'text/plain',
+  'text/csv',
+  'application/csv',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+]);
+
+const INLINE_SAFE_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'text/plain',
+]);
+
+function safeDispositionFileName(fileName: string): string {
+  return fileName.replace(/[\\\"\r\n]/g, '_');
+}
+
 @ApiTags('documents')
 @ApiBearerAuth()
 @Controller('documents')
@@ -41,6 +65,10 @@ export class DocumentsController {
         destination: os.tmpdir(),
         filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
       }),
+      fileFilter: (_req, file, cb) => {
+        if (ALLOWED_UPLOAD_MIME_TYPES.has(file.mimetype)) return cb(null, true);
+        return cb(new BadRequestException(`Unsupported file type: ${file.mimetype}`), false);
+      },
       limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
     }),
   )
@@ -102,10 +130,14 @@ export class DocumentsController {
     @Query('inline') inline?: string,
   ) {
     const sf = await this.service.download(id, user, req.ip);
-    const disposition = inline === '1' || inline === 'true' ? 'inline' : 'attachment';
+    const inlineRequested = inline === '1' || inline === 'true';
+    const disposition =
+      inlineRequested && INLINE_SAFE_MIME_TYPES.has(sf.doc.mimeType) ? 'inline' : 'attachment';
+    const fileName = safeDispositionFileName(sf.doc.fileName);
     res.set({
       'Content-Type': sf.doc.mimeType,
-      'Content-Disposition': `${disposition}; filename="${encodeURIComponent(sf.doc.fileName)}"`,
+      'Content-Disposition': `${disposition}; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(sf.doc.fileName)}`,
+      'X-Content-Type-Options': 'nosniff',
     });
     return sf;
   }

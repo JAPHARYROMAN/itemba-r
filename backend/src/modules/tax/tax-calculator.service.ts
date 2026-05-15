@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /**
@@ -33,19 +34,19 @@ export class TaxCalculatorService {
   /** Compute tax on an exclusive (net-of-tax) base amount. */
   async computeExclusive(input: TaxComputeInput): Promise<TaxComputeResult> {
     const { rate, calculation } = await this.resolveRate(input);
-    const base = input.baseAmount;
-    let tax: number;
+    const base = new Prisma.Decimal(input.baseAmount);
+    let tax: Prisma.Decimal;
     if (calculation === 'PERCENTAGE') {
-      tax = round(base * (rate / 100));
+      tax = round(base.mul(rate).div(100));
     } else {
       tax = round(rate);
     }
-    const gross = round(base + tax);
+    const gross = round(base.plus(tax));
     return {
-      base,
-      tax,
-      gross,
-      rate,
+      base: base.toNumber(),
+      tax: tax.toNumber(),
+      gross: gross.toNumber(),
+      rate: rate.toNumber(),
       method: 'EXCLUSIVE',
       calculation,
     };
@@ -54,19 +55,19 @@ export class TaxCalculatorService {
   /** Compute tax on an inclusive (gross-of-tax) base amount. */
   async computeInclusive(input: TaxComputeInput): Promise<TaxComputeResult> {
     const { rate, calculation } = await this.resolveRate(input);
-    const gross = input.baseAmount;
-    let tax: number;
+    const gross = new Prisma.Decimal(input.baseAmount);
+    let tax: Prisma.Decimal;
     if (calculation === 'PERCENTAGE') {
-      tax = round((gross * rate) / (100 + rate));
+      tax = round(gross.mul(rate).div(new Prisma.Decimal(100).plus(rate)));
     } else {
       tax = round(rate);
     }
-    const net = round(gross - tax);
+    const net = round(gross.minus(tax));
     return {
-      base: net,
-      tax,
-      gross,
-      rate,
+      base: net.toNumber(),
+      tax: tax.toNumber(),
+      gross: gross.toNumber(),
+      rate: rate.toNumber(),
       method: 'INCLUSIVE',
       calculation,
     };
@@ -76,11 +77,13 @@ export class TaxCalculatorService {
    * Find the applicable tax rate for the given category/company at a date.
    * Caller can also pre-supply taxRateId to bypass resolution.
    */
-  private async resolveRate(input: TaxComputeInput): Promise<{ rate: number; calculation: 'PERCENTAGE' | 'FIXED' }> {
+  private async resolveRate(
+    input: TaxComputeInput,
+  ): Promise<{ rate: Prisma.Decimal; calculation: 'PERCENTAGE' | 'FIXED' }> {
     if (input.taxRateId) {
       const r = await this.prisma.taxRate.findUniqueOrThrow({ where: { id: input.taxRateId } });
       return {
-        rate: Number(r.rate),
+        rate: new Prisma.Decimal(r.rate),
         calculation: r.calculationMethod === 'FIXED_AMOUNT' ? 'FIXED' : 'PERCENTAGE',
       };
     }
@@ -95,10 +98,7 @@ export class TaxCalculatorService {
         deletedAt: null,
         status: 'ACTIVE',
         effectiveFrom: { lte: date },
-        OR: [
-          { effectiveTo: null },
-          { effectiveTo: { gte: date } },
-        ],
+        OR: [{ effectiveTo: null }, { effectiveTo: { gte: date } }],
         AND: [
           {
             OR: [
@@ -123,7 +123,7 @@ export class TaxCalculatorService {
 
     const r = candidates[0];
     return {
-      rate: Number(r.rate),
+      rate: new Prisma.Decimal(r.rate),
       calculation: r.calculationMethod === 'FIXED_AMOUNT' ? 'FIXED' : 'PERCENTAGE',
     };
   }
@@ -147,6 +147,6 @@ export interface TaxComputeResult {
   calculation: 'PERCENTAGE' | 'FIXED';
 }
 
-function round(x: number): number {
-  return Math.round(x * 100) / 100;
+function round(x: Prisma.Decimal): Prisma.Decimal {
+  return x.toDecimalPlaces(2);
 }

@@ -42,8 +42,6 @@ export function assertCanAccessCompanyFromUser(
     return;
   }
 
-  if (isGroupScopedUser(user)) return;
-
   const access = new Map<string, AccessLevel>();
   if (user.companyId) access.set(user.companyId, AccessLevel.MANAGE);
   for (const entry of user.companyAccess ?? []) {
@@ -70,7 +68,12 @@ export function companyWhereForUser(
   }
 
   if (isGroupScopedUser(user)) {
-    return requestedCompanyId ? { companyId: requestedCompanyId } : {};
+    if (requestedCompanyId) {
+      assertCanAccessCompanyFromUser(user, requestedCompanyId);
+      return { companyId: requestedCompanyId };
+    }
+    const companyIds = accessibleCompanyIdsFromUser(user);
+    return companyIds.length > 0 ? { companyId: { in: companyIds } } : { id: { in: [] } };
   }
 
   if (requestedCompanyId) {
@@ -119,8 +122,6 @@ export class CompanyScopeService {
       return;
     }
 
-    if (this.isGroupScoped(user)) return;
-
     const accessible = await this.getAccessibleCompanyAccess(user);
     const match = accessible.find((a) => a.companyId === companyId);
     if (!match || ACCESS_RANK[match.accessLevel] < ACCESS_RANK[minimum]) {
@@ -133,7 +134,13 @@ export class CompanyScopeService {
     requestedCompanyId?: string | null,
   ): Promise<CompanyScopedWhere> {
     if (this.isGroupScoped(user)) {
-      return requestedCompanyId ? { companyId: requestedCompanyId } : {};
+      if (requestedCompanyId) {
+        await this.assertCanAccessCompany(user, requestedCompanyId);
+        return { companyId: requestedCompanyId };
+      }
+      const accessible = await this.getAccessibleCompanyAccess(user);
+      const companyIds = accessible.map((a) => a.companyId);
+      return companyIds.length > 0 ? { companyId: { in: companyIds } } : { id: { in: [] } };
     }
 
     const accessible = await this.getAccessibleCompanyAccess(user);
@@ -151,8 +158,7 @@ export class CompanyScopeService {
     return { companyId: { in: companyIds } };
   }
 
-  async accessibleCompanyIds(user: AuthUser): Promise<string[] | null> {
-    if (this.isGroupScoped(user)) return null;
+  async accessibleCompanyIds(user: AuthUser): Promise<string[]> {
     return (await this.getAccessibleCompanyAccess(user)).map((a) => a.companyId);
   }
 

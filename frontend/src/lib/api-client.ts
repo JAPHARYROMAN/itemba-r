@@ -1,5 +1,5 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
 const BACKEND_PROXY_URL = '/api/backend';
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? BACKEND_PROXY_URL;
 
 export interface ApiEnvelope<T> {
   success: boolean;
@@ -207,12 +207,20 @@ export function backendPatch<T>(path: string, body?: unknown, opts: FetchOpts = 
   return backendFetch<T>(path, { ...opts, method: 'PATCH', body });
 }
 
-export function backendUpload<T>(path: string, formData: FormData, opts: Omit<FetchOpts, 'body'> = {}) {
+export function backendUpload<T>(
+  path: string,
+  formData: FormData,
+  opts: Omit<FetchOpts, 'body'> = {},
+) {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return requestFormData<T>(`${BACKEND_PROXY_URL}${withQuery(normalizedPath, opts.query)}`, formData, {
-    ...opts,
-    method: opts.method ?? 'POST',
-  });
+  return requestFormData<T>(
+    `${BACKEND_PROXY_URL}${withQuery(normalizedPath, opts.query)}`,
+    formData,
+    {
+      ...opts,
+      method: opts.method ?? 'POST',
+    },
+  );
 }
 
 export function backendDelete<T>(path: string, opts: FetchOpts = {}) {

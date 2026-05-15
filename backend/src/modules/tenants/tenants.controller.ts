@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -20,32 +30,41 @@ export class TenantsController {
     @Query('tenantType') tenantType?: string,
     @Query('search') search?: string,
     @Query('page') page?: string,
-    @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
+    @Query('limit') limit?: string,
+    @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
-    return this.service.findAll(companyId, status, tenantType, search, page ? +page : 1, limit ? +limit : 20, user);
+    return this.service.findAll(
+      companyId,
+      status,
+      tenantType,
+      search,
+      page ? +page : 1,
+      limit ? +limit : 20,
+      user,
+    );
   }
 
   @Get(':id')
   @RequirePermissions('tenants.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()
   @RequirePermissions('tenants.manage')
   create(@Body() dto: CreateTenantDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Patch(':id')
   @RequirePermissions('tenants.manage')
   update(@Param('id') id: string, @Body() dto: UpdateTenantDto, @CurrentUser() user: AuthUser) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 
   @Delete(':id')
   @RequirePermissions('tenants.manage')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user);
   }
 }

@@ -18,7 +18,16 @@ export class BankAccountsService {
 
   async findAll(query: QueryBankAccountDto, user: AuthUser) {
     this.companyScope.assertGroupScoped(user, 'view bank accounts');
-    const { page = 1, limit = 20, companyId, groupId, accountType, currency, isActive, search } = query;
+    const {
+      page = 1,
+      limit = 20,
+      companyId,
+      groupId,
+      accountType,
+      currency,
+      isActive,
+      search,
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: any = { deletedAt: null };
@@ -60,13 +69,17 @@ export class BankAccountsService {
     });
     if (!record) throw new NotFoundException('Bank account not found');
     if (user) {
+      await this.companyScope.assertCanAccessCompany(user, record.companyId);
       await this.auditLogs.log({
         action: 'SENSITIVE_VIEW',
         entityType: 'BankAccount',
         entityId: id,
         userId: user.id,
         severity: AuditSeverity.HIGH,
-        metadata: { accountNumber: record.accountNumber?.slice(-4), bankName: record.bankName } as any,
+        metadata: {
+          accountNumber: record.accountNumber?.slice(-4),
+          bankName: record.bankName,
+        } as any,
       });
     }
     return record;
@@ -88,15 +101,18 @@ export class BankAccountsService {
       entityId: record.id,
       userId: user.id,
       severity: AuditSeverity.HIGH,
-      newValue: { bankName: record.bankName, accountType: record.accountType, companyId: record.companyId } as any,
+      newValue: {
+        bankName: record.bankName,
+        accountType: record.accountType,
+        companyId: record.companyId,
+      } as any,
     });
     return record;
   }
 
   async update(id: string, dto: UpdateBankAccountDto, user: AuthUser) {
     this.companyScope.assertGroupScoped(user, 'update bank accounts');
-    const existing = await this.findOne(id);
-    await this.companyScope.assertCanAccessCompany(user, existing.companyId);
+    const existing = await this.findOne(id, user);
     if (dto.companyId !== undefined) {
       await this.companyScope.assertCanAccessCompany(user, dto.companyId);
     }
@@ -121,8 +137,7 @@ export class BankAccountsService {
 
   async remove(id: string, user: AuthUser) {
     this.companyScope.assertGroupScoped(user, 'delete bank accounts');
-    const existing = await this.findOne(id);
-    await this.companyScope.assertCanAccessCompany(user, existing.companyId);
+    const existing = await this.findOne(id, user);
     const record = await this.prisma.bankAccount.update({
       where: { id },
       data: { deletedAt: new Date() },
@@ -139,30 +154,34 @@ export class BankAccountsService {
 
   async getSummary(user: AuthUser) {
     this.companyScope.assertGroupScoped(user, 'view bank account summaries');
+    const accessibleCompanyIds = await this.companyScope.accessibleCompanyIds(user);
+    const scopedWhere =
+      accessibleCompanyIds.length > 0
+        ? { OR: [{ companyId: { in: accessibleCompanyIds } }, { companyId: null }] }
+        : { companyId: null };
+    const where = { deletedAt: null, ...scopedWhere };
     const [total, active, byCompanyRaw, byCurrencyRaw, byTypeRaw] = await Promise.all([
-      this.prisma.bankAccount.count({ where: { deletedAt: null } }),
-      this.prisma.bankAccount.count({ where: { deletedAt: null, isActive: true } }),
+      this.prisma.bankAccount.count({ where }),
+      this.prisma.bankAccount.count({ where: { ...where, isActive: true } }),
       this.prisma.bankAccount.groupBy({
         by: ['companyId'],
-        where: { deletedAt: null },
+        where,
         _count: { id: true },
       }),
       this.prisma.bankAccount.groupBy({
         by: ['currency'],
-        where: { deletedAt: null },
+        where,
         _count: { id: true },
       }),
       this.prisma.bankAccount.groupBy({
         by: ['accountType'],
-        where: { deletedAt: null },
+        where,
         _count: { id: true },
       }),
     ]);
 
     // Enrich company names
-    const companyIds = byCompanyRaw
-      .map((r) => r.companyId)
-      .filter(Boolean) as string[];
+    const companyIds = byCompanyRaw.map((r) => r.companyId).filter(Boolean) as string[];
 
     const companies =
       companyIds.length > 0
@@ -176,9 +195,7 @@ export class BankAccountsService {
 
     const byCompany = byCompanyRaw.map((r) => ({
       companyId: r.companyId,
-      companyName: r.companyId
-        ? (companyMap[r.companyId]?.name ?? 'Unknown')
-        : 'Group Level',
+      companyName: r.companyId ? (companyMap[r.companyId]?.name ?? 'Unknown') : 'Group Level',
       count: r._count.id,
     }));
 

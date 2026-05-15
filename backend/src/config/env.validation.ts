@@ -38,6 +38,14 @@ export class EnvironmentVariables {
   CORS_ORIGIN: string = 'http://localhost:3000';
 
   @IsString()
+  @IsOptional()
+  FRONTEND_URL?: string;
+
+  @IsString()
+  @IsOptional()
+  APP_URL?: string;
+
+  @IsString()
   DATABASE_URL!: string;
 
   @IsString()
@@ -94,6 +102,22 @@ export class EnvironmentVariables {
   @IsString()
   @IsOptional()
   REDIS_PASSWORD?: string;
+
+  @IsString()
+  @IsOptional()
+  SMTP_HOST?: string;
+
+  @IsString()
+  @IsOptional()
+  SMTP_USER?: string;
+
+  @IsString()
+  @IsOptional()
+  SMTP_PASS?: string;
+
+  @IsString()
+  @IsOptional()
+  SMTP_FROM?: string;
 }
 
 export function envValidate(raw: Record<string, unknown>) {
@@ -113,6 +137,9 @@ export function envValidate(raw: Record<string, unknown>) {
       ['TWO_FACTOR_ENCRYPTION_KEY', config.TWO_FACTOR_ENCRYPTION_KEY],
       ['APP_ENCRYPTION_KEY', config.APP_ENCRYPTION_KEY],
       ['REFRESH_TOKEN_PEPPER', config.REFRESH_TOKEN_PEPPER],
+      ['FRONTEND_URL', config.FRONTEND_URL],
+      ['APP_URL', config.APP_URL],
+      ['REDIS_PASSWORD', config.REDIS_PASSWORD],
     ];
     const missing = required.filter(([, v]) => !v).map(([k]) => k);
     if (missing.length > 0) {
@@ -171,6 +198,27 @@ export function envValidate(raw: Record<string, unknown>) {
           `${aName} and ${bName} must be distinct. Sharing key material across security domains breaks rotation safety.`,
         );
       }
+    }
+
+    const urlChecks: Array<[string, string | undefined]> = [
+      ['CORS_ORIGIN', config.CORS_ORIGIN],
+      ['FRONTEND_URL', config.FRONTEND_URL],
+      ['APP_URL', config.APP_URL],
+    ];
+    for (const [name, value] of urlChecks) {
+      if (!value || value.includes('localhost') || value.includes('127.0.0.1')) {
+        throw new Error(`${name} must be set to a public HTTPS URL in ${config.NODE_ENV}.`);
+      }
+      if (!value.split(',').every((url) => url.trim().startsWith('https://'))) {
+        throw new Error(`${name} must use HTTPS in ${config.NODE_ENV}.`);
+      }
+    }
+
+    const smtpValues = [config.SMTP_HOST, config.SMTP_USER, config.SMTP_PASS, config.SMTP_FROM];
+    if (smtpValues.some(Boolean) && smtpValues.some((value) => !value)) {
+      throw new Error(
+        `SMTP_HOST, SMTP_USER, SMTP_PASS, and SMTP_FROM must be configured together in ${config.NODE_ENV}.`,
+      );
     }
   }
 

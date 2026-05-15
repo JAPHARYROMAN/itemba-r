@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
 import * as crypto from 'crypto';
@@ -35,7 +31,7 @@ export class PasswordResetService {
     if (user && user.status === 'ACTIVE') {
       // Generate a cryptographically random token
       const rawToken = crypto.randomBytes(32).toString('hex');
-      const tokenHash = await argon2.hash(rawToken);
+      const tokenHash = this.hashResetToken(rawToken);
       const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60_000);
 
       // Invalidate existing reset tokens for this user
@@ -77,19 +73,7 @@ export class PasswordResetService {
     newPassword: string,
     meta?: { ipAddress?: string; userAgent?: string },
   ): Promise<{ message: string }> {
-    // Find unexpired, unused tokens
-    const candidates = await this.prisma.passwordResetToken.findMany({
-      where: { usedAt: null, expiresAt: { gt: new Date() } },
-      include: { user: true },
-    });
-
-    let matched: (typeof candidates)[0] | null = null;
-    for (const t of candidates) {
-      if (await argon2.verify(t.tokenHash, rawToken)) {
-        matched = t;
-        break;
-      }
-    }
+    const matched = await this.findResetTokenByRawValue(rawToken);
 
     if (!matched) {
       throw new BadRequestException('Invalid or expired password reset token.');
@@ -166,20 +150,53 @@ export class PasswordResetService {
     return { message: 'Password reset successfully. Please log in with your new password.' };
   }
 
+  private async findResetTokenByRawValue(rawToken: string) {
+    const where = { usedAt: null, expiresAt: { gt: new Date() } };
+    const directMatch = await this.prisma.passwordResetToken.findFirst({
+      where: { ...where, tokenHash: this.hashResetToken(rawToken) },
+      include: { user: true },
+    });
+    if (directMatch) return directMatch;
+
+    // Existing reset tokens were stored as Argon2 hashes. Keep a temporary
+    // fallback so users who requested a reset before this deploy can complete it.
+    const candidates = await this.prisma.passwordResetToken.findMany({
+      where: { ...where, tokenHash: { startsWith: '$argon2' } },
+      include: { user: true },
+    });
+    for (const t of candidates) {
+      try {
+        if (await argon2.verify(t.tokenHash, rawToken)) return t;
+      } catch {
+        // Ignore malformed legacy hashes; a failed match is equivalent here.
+      }
+    }
+
+    return null;
+  }
+
+  private hashResetToken(rawToken: string): string {
+    const pepper = this.config.getOrThrow<string>('APP_ENCRYPTION_KEY');
+    return crypto.createHmac('sha256', pepper).update(rawToken).digest('hex');
+  }
+
   // ─── Email ────────────────────────────────────────────────────────────────
 
   private async sendResetEmail(email: string, name: string, rawToken: string): Promise<void> {
     const smtpHost = this.config.get<string>('SMTP_HOST');
     const smtpUser = this.config.get<string>('SMTP_USER');
     const smtpPass = this.config.get<string>('SMTP_PASS');
-    const appUrl = this.config.get<string>('APP_URL', 'http://localhost:3009');
+    const appUrl =
+      this.config.get<string>('APP_URL') ??
+      this.config.get<string>('FRONTEND_URL') ??
+      'http://localhost:3009';
 
     if (!smtpHost || !smtpUser || !smtpPass) {
-      // Dev mode: log the reset link, never crash
+      // Dev mode: log a short token preview, never the reset URL or full token.
       this.logger.warn(
         `[DEV] Password reset requested for ${email}. ` +
-        `Reset token (not for production logs): ${rawToken.substring(0, 8)}... ` +
-        `Full reset URL: ${appUrl}/auth/reset-password?token=${rawToken}`,
+          `Reset token preview: ${rawToken.substring(0, 8)}... ` +
+          `Configure SMTP to deliver reset links from ${appUrl}.`,
       );
       return;
     }

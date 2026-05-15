@@ -15,8 +15,8 @@ export class BankReconciliationsController {
 
   @Get(':id')
   @RequirePermissions('bank_reconciliations.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()
@@ -33,8 +33,8 @@ export class BankReconciliationsController {
 
   @Get(':id/lines')
   @RequirePermissions('bank_reconciliations.view')
-  getLines(@Param('id') id: string) {
-    return this.service.getLines(id);
+  getLines(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.getLines(id, user);
   }
 
   @Post(':id/lines')

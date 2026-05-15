@@ -14,7 +14,7 @@ export class HospitalityPaymentsController {
   @Post()
   @RequirePermissions('hospitality_payments.create')
   create(@Body() dto: CreateHospitalityPaymentDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Get()
@@ -25,9 +25,18 @@ export class HospitalityPaymentsController {
     @Query('restaurantOrderId') restaurantOrderId?: string,
     @Query('paymentContextType') paymentContextType?: string,
     @Query('page') page?: string,
-    @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
+    @Query('limit') limit?: string,
+    @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
-    return this.service.findAll(companyId, roomBookingId, restaurantOrderId, paymentContextType, page ? +page : 1, limit ? +limit : 20, user);
+    return this.service.findAll(
+      companyId,
+      roomBookingId,
+      restaurantOrderId,
+      paymentContextType,
+      page ? +page : 1,
+      limit ? +limit : 20,
+      user,
+    );
   }
 
   @Get(':id')

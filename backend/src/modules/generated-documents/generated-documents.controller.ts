@@ -27,7 +27,7 @@ export class GeneratedDocumentsController {
 
   @Get(':id')
   @RequirePermissions('generated_documents.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 }

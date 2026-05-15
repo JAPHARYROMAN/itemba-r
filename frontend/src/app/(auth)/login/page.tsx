@@ -26,7 +26,8 @@ export default function LoginPage() {
         setError(data?.message ?? 'Login failed');
         return;
       }
-      window.location.href = '/dashboard';
+      const from = new URLSearchParams(window.location.search).get('from');
+      window.location.href = from?.startsWith('/') && !from.startsWith('//') ? from : '/dashboard';
     } catch {
       setError('Network error. Please try again.');
     } finally {

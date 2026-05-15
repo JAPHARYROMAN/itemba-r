@@ -12,7 +12,10 @@ import { AccessLevel, ContractOwnershipLevel, ContractStatus, Prisma } from '@pr
 const CONTRACT_INCLUDE = {
   company: { select: { id: true, name: true, code: true } },
   group: { select: { id: true, name: true, code: true } },
-  documents: { where: { deletedAt: null }, select: { id: true, title: true, fileName: true, mimeType: true, createdAt: true } },
+  documents: {
+    where: { deletedAt: null },
+    select: { id: true, title: true, fileName: true, mimeType: true, createdAt: true },
+  },
 } as const;
 
 @Injectable()
@@ -27,8 +30,16 @@ export class ContractsService {
 
   async findAll(query: QueryContractDto, user: AuthUser) {
     const {
-      page = 1, limit = 20, companyId, groupId, owningLevel,
-      status, contractType, riskLevel, expiringBefore, search,
+      page = 1,
+      limit = 20,
+      companyId,
+      groupId,
+      owningLevel,
+      status,
+      contractType,
+      riskLevel,
+      expiringBefore,
+      search,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -89,7 +100,11 @@ export class ContractsService {
         userId: user.id,
         companyId: record.companyId ?? undefined,
         ipAddress,
-        metadata: { title: record.title, contractType: record.contractType, isSensitive: record.isSensitive },
+        metadata: {
+          title: record.title,
+          contractType: record.contractType,
+          isSensitive: record.isSensitive,
+        },
       });
     }
 
@@ -114,7 +129,7 @@ export class ContractsService {
       data: {
         ...rest,
         owningLevel,
-        value: value ? parseFloat(value) : undefined,
+        value: value ? new Prisma.Decimal(value) : undefined,
         startDate: new Date(startDate),
         endDate: endDate ? new Date(endDate) : undefined,
         renewalDate: renewalDate ? new Date(renewalDate) : undefined,
@@ -148,7 +163,7 @@ export class ContractsService {
       where: { id },
       data: {
         ...rest,
-        ...(value !== undefined && { value: parseFloat(value) }),
+        ...(value !== undefined && { value: new Prisma.Decimal(value) }),
         ...(startDate && { startDate: new Date(startDate) }),
         ...(endDate && { endDate: new Date(endDate) }),
         ...(renewalDate && { renewalDate: new Date(renewalDate) }),

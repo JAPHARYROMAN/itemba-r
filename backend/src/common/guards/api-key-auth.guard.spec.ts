@@ -1,9 +1,10 @@
 import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { ApiKeyStatus } from '@prisma/client';
-import * as crypto from 'crypto';
 import { ApiKeyAuthGuard } from './api-key-auth.guard';
 import { API_SCOPE_KEY } from '../decorators/require-api-scope.decorator';
+import { hashApiKey } from '../utils/api-key-hash';
 
 /**
  * P0-09 regression — ApiKeyAuthGuard authentication and scope enforcement.
@@ -20,7 +21,8 @@ import { API_SCOPE_KEY } from '../decorators/require-api-scope.decorator';
  */
 
 const SAMPLE_KEY = 'sk_live_abc123def';
-const SAMPLE_HASH = crypto.createHash('sha256').update(SAMPLE_KEY).digest('hex');
+const PEPPER = 'test-api-key-pepper';
+const SAMPLE_HASH = hashApiKey(SAMPLE_KEY, PEPPER);
 
 function ctx(headers: Record<string, string>, requiredScopes?: string[]) {
   const req: any = { headers };
@@ -42,7 +44,7 @@ function ctx(headers: Record<string, string>, requiredScopes?: string[]) {
 function makeGuard(prisma: any, requiredScopesStub: string[] | undefined) {
   const reflector = new Reflector();
   reflector.getAllAndOverride = jest.fn().mockReturnValue(requiredScopesStub);
-  return new ApiKeyAuthGuard(prisma, reflector);
+  return new ApiKeyAuthGuard(prisma, reflector, new ConfigService({ APP_ENCRYPTION_KEY: PEPPER }));
 }
 
 describe('ApiKeyAuthGuard (P0-09 regression)', () => {
@@ -61,9 +63,7 @@ describe('ApiKeyAuthGuard (P0-09 regression)', () => {
     const guard = makeGuard(prisma, []);
     const { executionContext } = ctx({});
 
-    await expect(guard.canActivate(executionContext)).rejects.toBeInstanceOf(
-      UnauthorizedException,
-    );
+    await expect(guard.canActivate(executionContext)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('rejects an unknown api key', async () => {
@@ -71,9 +71,7 @@ describe('ApiKeyAuthGuard (P0-09 regression)', () => {
     const guard = makeGuard(prisma, []);
     const { executionContext } = ctx({ 'x-api-key': SAMPLE_KEY });
 
-    await expect(guard.canActivate(executionContext)).rejects.toBeInstanceOf(
-      UnauthorizedException,
-    );
+    await expect(guard.canActivate(executionContext)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('rejects a revoked api key', async () => {
@@ -91,9 +89,7 @@ describe('ApiKeyAuthGuard (P0-09 regression)', () => {
     const guard = makeGuard(prisma, []);
     const { executionContext } = ctx({ 'x-api-key': SAMPLE_KEY });
 
-    await expect(guard.canActivate(executionContext)).rejects.toBeInstanceOf(
-      UnauthorizedException,
-    );
+    await expect(guard.canActivate(executionContext)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('rejects an expired api key', async () => {
@@ -112,9 +108,7 @@ describe('ApiKeyAuthGuard (P0-09 regression)', () => {
     const guard = makeGuard(prisma, []);
     const { executionContext } = ctx({ 'x-api-key': SAMPLE_KEY });
 
-    await expect(guard.canActivate(executionContext)).rejects.toBeInstanceOf(
-      UnauthorizedException,
-    );
+    await expect(guard.canActivate(executionContext)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('rejects when a required scope is missing', async () => {
@@ -134,9 +128,7 @@ describe('ApiKeyAuthGuard (P0-09 regression)', () => {
     const guard = makeGuard(prisma, ['payments.write']);
     const { executionContext } = ctx({ 'x-api-key': SAMPLE_KEY });
 
-    await expect(guard.canActivate(executionContext)).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
+    await expect(guard.canActivate(executionContext)).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('accepts when every required scope is present and synthesizes req.user', async () => {

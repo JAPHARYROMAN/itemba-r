@@ -2109,7 +2109,12 @@ async function main() {
     const prefix = PREFIX_BY_CODE[c.code] ?? c.code.slice(0, 4).toUpperCase();
     const company = await prisma.company.upsert({
       where: { code: c.code },
-      update: { name: c.name, groupId: group.id, industryType: c.industryType, employeeCodePrefix: prefix },
+      update: {
+        name: c.name,
+        groupId: group.id,
+        industryType: c.industryType,
+        employeeCodePrefix: prefix,
+      },
       create: {
         code: c.code,
         name: c.name,
@@ -2185,6 +2190,11 @@ async function main() {
   // ── 5. Super admin user ───────────────────────────────────────────────────
   console.log('  ▸ Admin user...');
   const adminEmail = process.env.SEED_ADMIN_EMAIL ?? 'admin@itemba.local';
+  const isProductionSeed = process.env.NODE_ENV === 'production';
+  const seedDemoData = !isProductionSeed || process.env.SEED_DEMO_DATA === 'true';
+  if (isProductionSeed && !process.env.SEED_ADMIN_PASSWORD) {
+    throw new Error('SEED_ADMIN_PASSWORD is required when running the seed in production');
+  }
   const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? 'ChangeMe!123';
   const passwordHash = await argon2.hash(adminPassword);
 
@@ -2196,6 +2206,7 @@ async function main() {
       passwordHash,
       fullName: 'Group Administrator',
       title: 'System Administrator',
+      mustChangePassword: true,
     },
   });
 
@@ -2218,24 +2229,34 @@ async function main() {
   await seedOperations();
 
   // ── 8. Petroleum Operations seed (Milestone 5) ─────────────────────────────
-  console.log('  ▸ Petroleum operations (tanks, pumps, nozzles, prices)...');
-  await seedPetroleum();
+  if (seedDemoData) {
+    console.log('  ▸ Petroleum operations (tanks, pumps, nozzles, prices)...');
+    await seedPetroleum();
+  }
 
   // ── 9. Westsides Operations seed (Milestone 6) ─────────────────────────────
-  console.log('  ▸ Westsides operations (sales channels, price lists, packages)...');
-  await seedWestsides();
+  if (seedDemoData) {
+    console.log('  ▸ Westsides operations (sales channels, price lists, packages)...');
+    await seedWestsides();
+  }
 
   // ── 10. Itemba Enterprises seed (Milestone 7) ──────────────────────────────
-  console.log('  ▸ Itemba Enterprises operations (logistics, agriculture, construction)...');
-  await seedItemba();
+  if (seedDemoData) {
+    console.log('  ▸ Itemba Enterprises operations (logistics, agriculture, construction)...');
+    await seedItemba();
+  }
 
   // ── 11. Rental, Parking, Hospitality seed (Milestone 8) ────────────────────
-  console.log('  ▸ Milestone 8 (licensed business units, rental, parking, hospitality)...');
-  await seedM8();
+  if (seedDemoData) {
+    console.log('  ▸ Milestone 8 (licensed business units, rental, parking, hospitality)...');
+    await seedM8();
+  }
 
   // ── 12. HR, Payroll, Attendance seed (Milestone 9) ─────────────────────────
-  console.log('  ▸ Milestone 9 (HR, payroll, departments, positions, employees)...');
-  await seedM9();
+  if (seedDemoData) {
+    console.log('  ▸ Milestone 9 (HR, payroll, departments, positions, employees)...');
+    await seedM9();
+  }
 
   // ── Milestone 10 seed ──────────────────────────────────────────────────
   console.log('  ▸ Milestone 10 (Tax authorities, types, registrations, compliance)...');
@@ -2249,18 +2270,24 @@ async function main() {
   await seedC1TaxExtensions(prisma, c1Admin.id);
 
   // ── Milestone 11 seed ──────────────────────────────────────────────────
-  console.log('  ▸ Milestone 11 (Approval workflows, notifications, alerts, controls, tasks)...');
-  await seedM11();
+  if (seedDemoData) {
+    console.log('  ▸ Milestone 11 (Approval workflows, notifications, alerts, controls, tasks)...');
+    await seedM11();
+  }
 
   // ── Milestone 12 seed ──────────────────────────────────────────────────
-  console.log('  ▸ Milestone 12 (BI & Executive Intelligence)...');
-  await seedM12();
+  if (seedDemoData) {
+    console.log('  ▸ Milestone 12 (BI & Executive Intelligence)...');
+    await seedM12();
+  }
 
   // ── Milestone 13 seed ──────────────────────────────────────────────────
-  console.log(
-    '  ▸ Milestone 13 (Integrations, API Gateway, Webhooks, Mobile, Payments, Messaging)...',
-  );
-  await seedM13();
+  if (seedDemoData) {
+    console.log(
+      '  ▸ Milestone 13 (Integrations, API Gateway, Webhooks, Mobile, Payments, Messaging)...',
+    );
+    await seedM13();
+  }
 
   // ── Milestone 14 — Security Policies ──────────────────────────────────────
   console.log('Seeding security policies...');
@@ -2344,6 +2371,9 @@ async function main() {
 
   // ── Milestone 14 — System Health Checks ──────────────────────────────────
   console.log('Seeding system health checks...');
+  const publicApiUrl = (
+    process.env.NEXT_PUBLIC_API_URL ?? 'https://api.itembagrouptz.com/api/v1'
+  ).replace(/\/$/, '');
   const healthChecks = [
     {
       healthCheckCode: 'HC-DB-001',
@@ -2356,7 +2386,7 @@ async function main() {
       healthCheckCode: 'HC-API-001',
       name: 'API Server',
       checkType: 'API' as any,
-      endpointOrTarget: 'http://localhost:3001/health',
+      endpointOrTarget: `${publicApiUrl}/health`,
       isActive: true,
     },
     {
@@ -4046,7 +4076,12 @@ const DEFAULT_COA: AccountSeed[] = [
   { code: '1000', name: 'Cash on Hand', type: AccountType.ASSET, subType: 'Current Asset' },
   { code: '1010', name: 'Bank', type: AccountType.ASSET, subType: 'Current Asset' },
   { code: '1100', name: 'Accounts Receivable', type: AccountType.ASSET, subType: 'Current Asset' },
-  { code: '1110', name: 'Employee Receivable (Salary Advances)', type: AccountType.ASSET, subType: 'Current Asset' },
+  {
+    code: '1110',
+    name: 'Employee Receivable (Salary Advances)',
+    type: AccountType.ASSET,
+    subType: 'Current Asset',
+  },
   { code: '1200', name: 'Inventory', type: AccountType.ASSET, subType: 'Current Asset' },
   { code: '1500', name: 'Fixed Assets', type: AccountType.ASSET, subType: 'Non-Current Asset' },
   // Liabilities
@@ -4070,14 +4105,39 @@ const DEFAULT_COA: AccountSeed[] = [
   },
   // ── Tanzania payroll statutory payables ──────────────────────────────────
   // Each cleared monthly to TRA / NSSF / PSSSF / WCF / NHIF / HESLB.
-  { code: '2210', name: 'PAYE Payable (TRA)', type: AccountType.LIABILITY, subType: 'Current Liability' },
+  {
+    code: '2210',
+    name: 'PAYE Payable (TRA)',
+    type: AccountType.LIABILITY,
+    subType: 'Current Liability',
+  },
   { code: '2220', name: 'NSSF Payable', type: AccountType.LIABILITY, subType: 'Current Liability' },
-  { code: '2225', name: 'PSSSF Payable', type: AccountType.LIABILITY, subType: 'Current Liability' },
+  {
+    code: '2225',
+    name: 'PSSSF Payable',
+    type: AccountType.LIABILITY,
+    subType: 'Current Liability',
+  },
   { code: '2230', name: 'WCF Payable', type: AccountType.LIABILITY, subType: 'Current Liability' },
-  { code: '2240', name: 'SDL Payable (TRA)', type: AccountType.LIABILITY, subType: 'Current Liability' },
+  {
+    code: '2240',
+    name: 'SDL Payable (TRA)',
+    type: AccountType.LIABILITY,
+    subType: 'Current Liability',
+  },
   { code: '2250', name: 'NHIF Payable', type: AccountType.LIABILITY, subType: 'Current Liability' },
-  { code: '2260', name: 'HESLB Payable', type: AccountType.LIABILITY, subType: 'Current Liability' },
-  { code: '2270', name: 'Salaries Payable (Net)', type: AccountType.LIABILITY, subType: 'Current Liability' },
+  {
+    code: '2260',
+    name: 'HESLB Payable',
+    type: AccountType.LIABILITY,
+    subType: 'Current Liability',
+  },
+  {
+    code: '2270',
+    name: 'Salaries Payable (Net)',
+    type: AccountType.LIABILITY,
+    subType: 'Current Liability',
+  },
   // Equity
   { code: '3000', name: 'Owner Capital', type: AccountType.EQUITY },
   { code: '3100', name: 'Retained Earnings', type: AccountType.EQUITY },
@@ -4102,9 +4162,24 @@ const DEFAULT_COA: AccountSeed[] = [
   { code: '6900', name: 'General Expense', type: AccountType.EXPENSE },
   // COGS
   { code: '5000', name: 'Cost of Goods Sold', type: AccountType.COST_OF_GOODS_SOLD },
-  { code: '5100', name: 'Direct Project Labour Cost', type: AccountType.COST_OF_GOODS_SOLD, subType: 'Direct Cost' },
-  { code: '5200', name: 'Direct Project Materials Cost', type: AccountType.COST_OF_GOODS_SOLD, subType: 'Direct Cost' },
-  { code: '5300', name: 'Direct Project Subcontractor Cost', type: AccountType.COST_OF_GOODS_SOLD, subType: 'Direct Cost' },
+  {
+    code: '5100',
+    name: 'Direct Project Labour Cost',
+    type: AccountType.COST_OF_GOODS_SOLD,
+    subType: 'Direct Cost',
+  },
+  {
+    code: '5200',
+    name: 'Direct Project Materials Cost',
+    type: AccountType.COST_OF_GOODS_SOLD,
+    subType: 'Direct Cost',
+  },
+  {
+    code: '5300',
+    name: 'Direct Project Subcontractor Cost',
+    type: AccountType.COST_OF_GOODS_SOLD,
+    subType: 'Direct Cost',
+  },
 ];
 
 const DEFAULT_EXPENSE_CATEGORIES = [

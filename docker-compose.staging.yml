@@ -13,6 +13,8 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:-info@itembagrouptz.com}
       APP_HOST: ${APP_HOST:-staging.itembagrouptz.com}
       API_HOST: ${API_HOST:-api-staging.itembagrouptz.com}
+      WEBSITE_HOST: ${WEBSITE_HOST:-staging-www.itembagrouptz.com}
+      WEBSITE_WWW_HOST: ${WEBSITE_WWW_HOST:-www-staging.itembagrouptz.com}
     ports:
       - '80:80'
       - '443:443'
@@ -26,10 +28,12 @@ services:
         condition: service_healthy
       backend:
         condition: service_healthy
+      website:
+        condition: service_healthy
     networks:
       - itemba_staging_network
     healthcheck:
-      test: ['CMD-SHELL', 'caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile']
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:2019/config/ >/dev/null']
       interval: 30s
       timeout: 10s
       retries: 3
@@ -82,12 +86,16 @@ services:
     restart: 'no'
     environment:
       NODE_ENV: staging
-      DATABASE_URL: postgresql://${POSTGRES_USER:-itemba_staging}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-itemba_r_staging}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-itemba_staging}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-itemba_r_staging}?connection_limit=20&pool_timeout=30
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
       TWO_FACTOR_ENCRYPTION_KEY: ${TWO_FACTOR_ENCRYPTION_KEY:?TWO_FACTOR_ENCRYPTION_KEY is required}
       REFRESH_TOKEN_PEPPER: ${REFRESH_TOKEN_PEPPER:?REFRESH_TOKEN_PEPPER is required}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY is required}
+      FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
+      APP_URL: ${APP_URL:?APP_URL is required}
+      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     depends_on:
       postgres:
         condition: service_healthy
@@ -103,7 +111,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: staging
-      DATABASE_URL: postgresql://${POSTGRES_USER:-itemba_staging}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-itemba_r_staging}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-itemba_staging}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-itemba_r_staging}?connection_limit=20&pool_timeout=30
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
       JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
@@ -113,6 +121,7 @@ services:
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY is required}
       PORT: 3001
       FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
+      APP_URL: ${APP_URL:?APP_URL is required}
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -192,7 +201,30 @@ services:
       test:
         [
           'CMD-SHELL',
-          'node -e "fetch(''http://127.0.0.1:3000/login'').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+          'node -e "fetch(''http://127.0.0.1:3000/api/health'').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  website:
+    build:
+      context: ./website
+      dockerfile: Dockerfile
+    container_name: itemba_r_website_staging
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: 1
+    expose:
+      - '3001'
+    networks:
+      - itemba_staging_network
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(''http://127.0.0.1:3001/api/health'').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
         ]
       interval: 30s
       timeout: 10s

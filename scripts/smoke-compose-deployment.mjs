@@ -49,8 +49,9 @@ const sampleEnv = {
   JWT_ACCESS_EXPIRES_IN: '15m',
   JWT_REFRESH_EXPIRES_IN: '7d',
   JOB_WORKER_ENABLED: 'true',
-  FRONTEND_URL: 'http://127.0.0.1:3000',
-  CORS_ORIGIN: 'http://127.0.0.1:3000',
+  FRONTEND_URL: 'https://app.smoke.local',
+  APP_URL: 'https://app.smoke.local',
+  CORS_ORIGIN: 'https://app.smoke.local',
   NEXT_PUBLIC_API_URL: 'http://127.0.0.1:3001/api/v1',
   NEXT_PUBLIC_WEBSITE_URL: 'http://127.0.0.1:3000',
   BACKEND_INTERNAL_URL: 'http://backend:3001/api/v1',
@@ -135,14 +136,7 @@ fetch('http://127.0.0.1:3000/login')
 
 function compose(composeArgs, options = {}) {
   return runDocker(
-    [
-      'compose',
-      '--env-file',
-      envFile,
-      '-f',
-      resolve(rootDir, target.composeFile),
-      ...composeArgs,
-    ],
+    ['compose', '--env-file', envFile, '-f', resolve(rootDir, target.composeFile), ...composeArgs],
     options,
   );
 }

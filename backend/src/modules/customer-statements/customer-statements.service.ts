@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -21,7 +21,12 @@ export class CustomerStatementsService {
     };
     if (customerId) where.customerId = customerId;
     const [items, total] = await Promise.all([
-      this.prisma.customerStatementRun.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' } }),
+      this.prisma.customerStatementRun.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
+      }),
       this.prisma.customerStatementRun.count({ where }),
     ]);
     return { items, total, page: Number(page), limit: Number(limit) };
@@ -51,17 +56,21 @@ export class CustomerStatementsService {
     const receivableWhere: any = { companyId };
     if (customerId) receivableWhere.customerId = customerId;
     if (periodStart) receivableWhere.issueDate = { gte: new Date(periodStart) };
-    if (periodEnd) receivableWhere.issueDate = { ...(receivableWhere.issueDate ?? {}), lte: new Date(periodEnd) };
+    if (periodEnd)
+      receivableWhere.issueDate = {
+        ...(receivableWhere.issueDate ?? {}),
+        lte: new Date(periodEnd),
+      };
 
     const receivables = await this.prisma.receivable.findMany({ where: receivableWhere });
 
-    let totalDebits = 0;
-    let totalCredits = 0;
+    let totalDebits = new Prisma.Decimal(0);
+    let totalCredits = new Prisma.Decimal(0);
     for (const r of receivables) {
-      totalDebits += Number(r.amount ?? 0);
-      totalCredits += Number(r.paidAmount ?? 0);
+      totalDebits = totalDebits.plus(r.amount ?? 0);
+      totalCredits = totalCredits.plus(r.paidAmount ?? 0);
     }
-    const closingBalance = totalDebits - totalCredits;
+    const closingBalance = totalDebits.minus(totalCredits);
 
     const run = await this.prisma.customerStatementRun.create({
       data: {
@@ -78,7 +87,13 @@ export class CustomerStatementsService {
       },
     });
 
-    await this.auditLogs.log({ action: 'GENERATE', entityType: 'CustomerStatementRun', entityId: run.id, userId: user.id, companyId });
+    await this.auditLogs.log({
+      action: 'GENERATE',
+      entityType: 'CustomerStatementRun',
+      entityId: run.id,
+      userId: user.id,
+      companyId,
+    });
     return run;
   }
 }
