@@ -85,12 +85,14 @@ function CategoryModal({
   mode,
   initial,
   companies,
+  defaultCompanyId,
   onClose,
   onSaved,
 }: {
   mode: 'create' | 'edit';
   initial?: ProductCategory;
   companies: Company[];
+  defaultCompanyId?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -104,7 +106,7 @@ function CategoryModal({
           description: initial.description ?? '',
           isActive: initial.isActive,
         }
-      : { ...BLANK_FORM },
+      : { ...BLANK_FORM, companyId: defaultCompanyId ?? '' },
   );
   const [parents, setParents] = useState<ProductCategory[]>([]);
   const [saving, setSaving] = useState(false);
@@ -117,9 +119,14 @@ function CategoryModal({
     let cancelled = false;
 
     async function loadParents() {
+      if (!form.companyId) {
+        setParents([]);
+        return;
+      }
+
       try {
         const payload = await backendGet<unknown>('/product-categories', {
-          query: { limit: 200, companyId: form.companyId || undefined },
+          query: { limit: 200, companyId: form.companyId },
         });
         const categories = normalizePaginated<ProductCategory>(payload).data;
         if (!cancelled) {
@@ -138,6 +145,10 @@ function CategoryModal({
   }, [form.companyId, initial?.id]);
 
   const handleSubmit = async () => {
+    if (!form.companyId) {
+      setError('Company is required');
+      return;
+    }
     if (!form.name.trim()) {
       setError('Name is required');
       return;
@@ -146,13 +157,14 @@ function CategoryModal({
     setError('');
     try {
       const body = {
-        ...form,
-        companyId: form.companyId || undefined,
+        name: form.name.trim(),
+        categoryType: form.categoryType,
         parentCategoryId: form.parentCategoryId || undefined,
         description: form.description || undefined,
+        isActive: form.isActive,
       };
       if (mode === 'create') {
-        await backendPost('/product-categories', body);
+        await backendPost('/product-categories', { ...body, companyId: form.companyId });
       } else {
         await backendPatch(`/product-categories/${initial!.id}`, body);
       }
@@ -188,10 +200,14 @@ function CategoryModal({
       )}
       <div className="space-y-3">
         <FormSelect
-          label="Company (optional)"
+          label="Company"
+          required
           value={form.companyId}
-          onChange={(e) => set('companyId', e.target.value)}
-          placeholder="Global category"
+          onChange={(e) =>
+            setForm((f) => ({ ...f, companyId: e.target.value, parentCategoryId: '' }))
+          }
+          placeholder="Select company"
+          disabled={mode === 'edit'}
         >
           {companies.map((c) => (
             <option key={c.id} value={c.id}>
@@ -341,6 +357,7 @@ export default function ProductCategoriesPage() {
         <CategoryModal
           mode="create"
           companies={companies}
+          defaultCompanyId={companyId || undefined}
           onClose={() => setCreating(false)}
           onSaved={() => {
             setCreating(false);
@@ -485,14 +502,7 @@ export default function ProductCategoriesPage() {
                       {cat.parentCategory?.name ?? '—'}
                     </td>
                     <td className="px-4 py-3">
-                      {cat.company?.name ?? (
-                        <span
-                          className="text-xs italic"
-                          style={{ color: 'var(--aurora-text-muted)' }}
-                        >
-                          Global
-                        </span>
-                      )}
+                      {cat.company?.name ?? '—'}
                     </td>
                     <td className="px-4 py-3">
                       <span
