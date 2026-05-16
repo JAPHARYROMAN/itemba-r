@@ -388,7 +388,9 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         }
                         className={fieldClass}
                       >
-                        <option value="">Select location</option>
+                        <option value="">
+                          {locations.length ? 'Select location' : 'No locations loaded'}
+                        </option>
                         {locations.map((location) => (
                           <option key={location.id} value={location.id}>
                             {location.locationCode} - {location.name}
