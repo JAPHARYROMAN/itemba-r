@@ -4,10 +4,9 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import AnimatedSection from '@/components/AnimatedSection';
 import BrandVisual from '@/components/BrandVisual';
-import CountUp from '@/components/CountUp';
 import SectorIcon from '@/components/SectorIcon';
 import SpotlightCard from '@/components/SpotlightCard';
-import { companyUrl, insightArticles, insightUrl } from '@/lib/site';
+import { companyUrl, insightArticles, insightUrl, locationUrl, serviceUrl } from '@/lib/site';
 
 /* ── Framer Motion variants ─────────────────────────────────────────── */
 const stagger = { visible: { transition: { staggerChildren: 0.12 } } };
@@ -57,13 +56,48 @@ const companies = [
 ];
 
 const sectors = [
-  { icon: 'logistics' as const,     name: 'Logistics & Transit',  desc: 'Local distribution and cross-border transit logistics through the Tunduma corridor.' },
-  { icon: 'energy' as const,        name: 'Energy & Fuel',         desc: 'Petroleum products and fuel supply chains.' },
-  { icon: 'trade' as const,         name: 'Trade & Distribution', desc: 'Beverages, building goods, consumer distribution.' },
-  { icon: 'manufacturing' as const, name: 'Manufacturing',         desc: 'Industrial and consumer goods production.' },
-  { icon: 'construction' as const,  name: 'Construction',          desc: 'Hardware, materials, and construction supplies.' },
-  { icon: 'hospitality' as const,   name: 'Hospitality',           desc: 'Hotel, restaurant, and lodging through Uzunguni Inn.' },
-  { icon: 'realestate' as const,    name: 'Real Estate',           desc: 'Property development through Itemba Estate.' },
+  {
+    icon: 'energy' as const,
+    name: 'Energy & Fuel',
+    desc: 'Petroleum retail, diesel, petrol, kerosene, lubricants, and fleet fuel enquiries.',
+    proof: 'Mwanjalisi Oil Co Ltd',
+    href: serviceUrl('fuel-and-lubricants'),
+  },
+  {
+    icon: 'trade' as const,
+    name: 'Trade & Distribution',
+    desc: 'Beverages, building goods, consumer supply, wholesale, and retail distribution.',
+    proof: 'Westsides Company Ltd',
+    href: serviceUrl('trade-and-distribution'),
+  },
+  {
+    icon: 'logistics' as const,
+    name: 'Logistics & Transit',
+    desc: 'Local distribution and cross-border transit support through the Tunduma corridor.',
+    proof: 'Itemba Enterprises Co Ltd',
+    href: serviceUrl('logistics-and-cross-border-transit'),
+  },
+  {
+    icon: 'construction' as const,
+    name: 'Construction & Hardware',
+    desc: 'Building materials, tools, electrical goods, and contractor supply enquiries.',
+    proof: 'Westsides and Itemba Hardware',
+    href: serviceUrl('construction-supplies-and-hardware'),
+  },
+  {
+    icon: 'hospitality' as const,
+    name: 'Hospitality & Lodging',
+    desc: 'Hotel, restaurant, lodging, and business guest support through Uzunguni Inn.',
+    proof: 'Uzunguni Inn',
+    href: serviceUrl('hospitality-and-lodging'),
+  },
+  {
+    icon: 'realestate' as const,
+    name: 'Real Estate & Manufacturing',
+    desc: 'Property development, estate services, and manufacturing-related activity.',
+    proof: 'Itemba Estate',
+    href: serviceUrl('real-estate-and-property'),
+  },
 ];
 
 const divisions = [
@@ -77,20 +111,27 @@ const divisions = [
 const proofPoints = [
   {
     title: 'Named operating companies',
-    desc: 'Visitors can move from group overview to the specific company responsible for each enquiry route.',
+    desc: 'Each major operating area is anchored by a company or division with clear responsibility.',
   },
   {
-    title: 'Service-to-company mapping',
-    desc: 'Fuel, trade, logistics, hardware, hospitality, and property pages each point back to an operating team.',
+    title: 'Corridor-based operations',
+    desc: 'The Mpemba-Tunduma base connects the group to local customers and Tanzania-Zambia trade movement.',
   },
   {
-    title: 'Songwe-Tunduma location context',
-    desc: 'The site makes the Mpemba-Tunduma base and Tanzania-Zambia corridor relevance clear for local search.',
+    title: 'Multi-sector coverage',
+    desc: 'Fuel, trade, logistics, construction supply, hospitality, property, and manufacturing interests sit under one group.',
   },
   {
-    title: 'Direct enquiry routing',
-    desc: 'Forms, WhatsApp, email, and phone options guide each enquiry to the closest business area.',
+    title: 'Clear enquiry routes',
+    desc: 'Partners, customers, suppliers, and contractors can start from the business need and reach the right team faster.',
   },
+];
+
+const heroProof = [
+  { value: '3', label: 'Operating companies' },
+  { value: '6', label: 'Business sectors' },
+  { value: '5', label: 'Specialised divisions' },
+  { value: 'Songwe', label: 'Regional base' },
 ];
 
 /* ── Page ──────────────────────────────────────────────────────────── */
@@ -98,124 +139,129 @@ export default function HomePage() {
   return (
     <>
       {/* ══ HERO ════════════════════════════════════════════════════ */}
-      <section className="relative min-h-screen flex items-center justify-center bg-ink-900 overflow-hidden">
-        <div className="hero-ambient">
-          <div className="hero-orb hero-orb-gold" />
-          <div className="hero-orb hero-orb-blue" />
-          <div className="hero-orb hero-orb-violet" />
-          <div className="grid-overlay" />
-        </div>
+      <section className="relative overflow-hidden bg-ink-950 px-5 pt-24 sm:px-8 lg:pt-20">
+        <BrandVisual
+          variant="corridor"
+          label="Tanzania and Tunduma corridor business operations"
+          className="absolute inset-0 h-full w-full opacity-70"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-ink-950 via-ink-950/88 to-ink-950/58" />
+        <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-transparent to-ink-950/70" />
 
         <motion.div
           variants={stagger}
           initial="hidden"
           animate="visible"
-          className="relative z-10 max-w-7xl mx-auto px-5 sm:px-8 text-center pt-24 pb-16"
+          className="relative z-10 mx-auto flex max-w-7xl flex-col justify-center pb-8 pt-6 sm:pt-8 lg:min-h-[610px] lg:pb-10"
         >
-          <motion.div variants={fadeUp} className="mb-6 inline-flex">
-            <span className="text-xs font-semibold uppercase tracking-widest text-gold-400 border border-gold-500/30 bg-gold-500/10 px-4 py-2 rounded-full">
-              Mpemba-Tunduma · Songwe Region · Tanzania
-            </span>
+          <motion.div variants={fadeUp} className="mb-5 flex flex-wrap gap-2">
+            {['Mpemba-Tunduma', 'Songwe Region', 'Tanzania'].map((item) => (
+              <span
+                key={item}
+                className="border border-gold-500/30 bg-ink-900/60 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-gold-300 backdrop-blur"
+              >
+                {item}
+              </span>
+            ))}
           </motion.div>
+
+          <motion.p
+            variants={fadeUp}
+            className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400"
+          >
+            Diversified. Resilient. Tanzanian.
+          </motion.p>
 
           <motion.h1
             variants={fadeUp}
-            className="font-tight font-black text-white mb-6 leading-[0.95] tracking-tightest"
-            style={{ fontSize: 'clamp(2.75rem, 8vw, 7rem)' }}
+            className="mb-6 max-w-4xl font-tight text-6xl font-black leading-[0.95] tracking-normal text-white sm:text-7xl lg:text-8xl xl:text-9xl"
           >
-            Diversified.<br />
-            <span className="gradient-text">Resilient.</span><br />
-            Tanzanian.
+            Itemba Group
           </motion.h1>
 
           <motion.p
             variants={fadeUp}
-            className="text-slate-300 text-base sm:text-xl max-w-2xl mx-auto mb-10 leading-relaxed px-2"
+            className="max-w-3xl text-base leading-relaxed text-slate-200 sm:text-xl"
           >
-            Itemba Group is Tanzania&apos;s multi-industry holding group — three independent
-            companies, six business sectors, one unified vision.
+            A Tanzania-based multi-sector group operating across fuel, trade,
+            logistics, construction supply, hospitality, real estate, and
+            manufacturing-related activity.
           </motion.p>
 
-          <motion.div variants={fadeUp} className="flex flex-wrap gap-3 sm:gap-4 justify-center">
+          <motion.div variants={fadeUp} className="mt-9 flex flex-wrap gap-3">
             <Link
               href="/companies"
-              className="btn-primary bg-gold-500 hover:bg-gold-400 text-white font-semibold px-7 sm:px-8 py-3.5 rounded-full text-sm hover:shadow-lg hover:shadow-gold-500/30"
+              className="btn-primary bg-gold-500 px-7 py-3.5 text-sm font-semibold text-white hover:bg-gold-400 hover:shadow-lg hover:shadow-gold-500/30"
             >
-              Explore Our Companies
+              Explore Companies
             </Link>
             <Link
-              href="/about"
-              className="btn-primary border border-slate-600 hover:border-slate-300 text-slate-300 hover:text-white font-semibold px-7 sm:px-8 py-3.5 rounded-full text-sm"
+              href="/capabilities"
+              className="btn-primary border border-white/25 bg-white/5 px-7 py-3.5 text-sm font-semibold text-white backdrop-blur hover:border-white/50 hover:bg-white/10"
             >
-              Our Story
+              View Capabilities
+            </Link>
+            <Link
+              href="/partnerships"
+              className="btn-primary border border-gold-500/40 px-7 py-3.5 text-sm font-semibold text-gold-300 hover:border-gold-300 hover:text-gold-200"
+            >
+              Start a Business Enquiry
             </Link>
           </motion.div>
 
           <motion.div
             variants={fadeUp}
-            className="mt-16 sm:mt-20 flex flex-col items-center gap-2 text-slate-500"
+            className="mt-8 grid grid-cols-2 gap-2 text-sm text-slate-300 lg:max-w-4xl lg:grid-cols-4"
           >
-            <span className="text-[10px] sm:text-xs uppercase tracking-widest">Scroll</span>
-            <motion.div
-              animate={{ y: [0, 8, 0] }}
-              transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
-              className="w-0.5 h-8 bg-gradient-to-b from-slate-500 to-transparent rounded-full"
-            />
+            {heroProof.map((item) => (
+              <div key={item.label} className="border border-white/10 bg-white/[0.04] p-3 backdrop-blur sm:p-4">
+                <div className="stat-number mb-1 font-tight text-2xl font-black text-gold-300 sm:text-3xl">
+                  {item.value}
+                </div>
+                <div className="text-xs uppercase tracking-widest text-slate-400">{item.label}</div>
+              </div>
+            ))}
           </motion.div>
         </motion.div>
       </section>
 
-      {/* ══ STATS RIBBON — animated counters ═══════════════════════ */}
-      <section className="bg-ink-800 border-y border-ink-600 py-10 px-5 sm:px-8">
-        <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-          {[
-            { value: 3,   suffix: '',  sub: 'Subsidiary Companies' },
-            { value: 6,   suffix: '+', sub: 'Business Sectors' },
-            { value: 5,   suffix: '',  sub: 'Specialised Divisions' },
-            { value: 'Songwe', sub: 'Region, Tanzania', isText: true },
-          ].map((s, i) => (
-            <AnimatedSection key={s.sub} direction="fade" delay={i * 0.08}>
-              <div className="stat-number text-4xl font-tight font-black text-gold-400">
-                {s.isText ? (
-                  s.value as string
-                ) : (
-                  <CountUp value={s.value as number} suffix={s.suffix} />
-                )}
-              </div>
-              <div className="text-xs text-slate-400 mt-2 tracking-wide">{s.sub}</div>
-            </AnimatedSection>
-          ))}
-        </div>
-      </section>
-
-      {/* ══ OPERATING PROOF ══════════════════════════════════════ */}
-      <section className="bg-slate-50 px-5 py-24 sm:px-8">
-        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[0.78fr_1.22fr] lg:items-start">
+      {/* ══ GROUP AT A GLANCE ═════════════════════════════════════ */}
+      <section className="bg-white px-5 py-20 sm:px-8">
+        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
           <AnimatedSection>
             <div className="gold-line mb-6" />
             <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-600">
-              Operating Proof
+              Group at a Glance
             </p>
-            <h2 className="mb-5 font-tight text-4xl font-black leading-none tracking-tighter text-ink-900 sm:text-5xl">
-              Clear Signals for Customers and Partners
+            <h2 className="mb-5 font-tight text-4xl font-black leading-tight tracking-tighter text-ink-900 sm:text-5xl">
+              One group structure, multiple routes to market.
             </h2>
-            <p className="text-sm leading-relaxed text-slate-600">
-              The site now gives visitors a practical way to verify what Itemba Group operates,
-              where the group is based, and which team should receive each business enquiry.
+            <p className="text-base leading-relaxed text-slate-600">
+              Itemba Group brings together independent operating companies serving customers,
+              partners, suppliers, contractors, and regional businesses from a strategic base
+              in Mpemba-Tunduma, Songwe Region.
             </p>
-            <Link
-              href="/capabilities"
-              className="btn-primary mt-7 inline-flex rounded-full bg-ink-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink-700"
-            >
-              View capability proof
-            </Link>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Link
+                href="/about"
+                className="btn-primary bg-ink-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink-700"
+              >
+                Our Story
+              </Link>
+              <Link
+                href={locationUrl('songwe-tunduma')}
+                className="btn-primary border border-slate-300 px-6 py-3 text-sm font-semibold text-ink-900 hover:border-gold-400 hover:text-gold-600"
+              >
+                Location Advantage
+              </Link>
+            </div>
           </AnimatedSection>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {proofPoints.map((point, index) => (
               <AnimatedSection key={point.title} delay={index * 0.06}>
-                <div className="h-full rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <span className="mb-5 flex h-9 w-9 items-center justify-center rounded-full bg-gold-500 text-sm font-black text-white">
+                <div className="h-full border border-slate-200 bg-slate-50 p-6">
+                  <span className="mb-5 flex h-9 w-9 items-center justify-center bg-gold-500 text-sm font-black text-white">
                     {index + 1}
                   </span>
                   <h3 className="mb-3 font-tight text-xl font-black leading-tight text-ink-900">
@@ -223,6 +269,52 @@ export default function HomePage() {
                   </h3>
                   <p className="text-sm leading-relaxed text-slate-600">{point.desc}</p>
                 </div>
+              </AnimatedSection>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ══ SECTOR PATHWAYS ═══════════════════════════════════════ */}
+      <section className="bg-slate-50 px-5 py-24 sm:px-8">
+        <div className="mx-auto max-w-7xl">
+          <AnimatedSection className="mb-14">
+            <div className="gold-line mb-6" />
+            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-600">
+              What We Do
+            </p>
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-[0.78fr_1.22fr] lg:items-end">
+              <h2 className="font-tight text-4xl font-black leading-tight tracking-tighter text-ink-900 sm:text-5xl">
+                Start from the sector that matches your need.
+              </h2>
+              <p className="max-w-2xl text-sm leading-relaxed text-slate-600 lg:justify-self-end">
+                Each pathway leads to a focused service page, connected company, likely audience,
+                and the right enquiry context before a visitor contacts the group.
+              </p>
+            </div>
+          </AnimatedSection>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {sectors.map((s, i) => (
+              <AnimatedSection key={s.name} delay={i * 0.06}>
+                <Link
+                  href={s.href}
+                  className="sector-card group flex h-full flex-col border border-slate-200 bg-white p-7 shadow-sm transition hover:border-gold-400 hover:bg-ink-900 hover:shadow-lg"
+                >
+                  <SectorIcon
+                    name={s.icon}
+                    className="mb-5 h-7 w-7 text-ink-700 transition-colors duration-400 group-hover:text-gold-400"
+                  />
+                  <h3 className="mb-2 font-tight text-xl font-bold text-ink-900 transition-colors group-hover:text-white">
+                    {s.name}
+                  </h3>
+                  <p className="mb-5 flex-1 text-sm leading-relaxed text-slate-500 transition-colors group-hover:text-slate-300">
+                    {s.desc}
+                  </p>
+                  <div className="border-t border-slate-200 pt-4 text-xs font-semibold uppercase tracking-widest text-slate-400 transition-colors group-hover:border-white/15 group-hover:text-gold-300">
+                    {s.proof}
+                  </div>
+                </Link>
               </AnimatedSection>
             ))}
           </div>
@@ -332,40 +424,6 @@ export default function HomePage() {
                     </div>
                   </SpotlightCard>
                 </Link>
-              </AnimatedSection>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ══ SECTORS GRID ═════════════════════════════════════════ */}
-      <section className="py-28 px-5 sm:px-8 bg-white">
-        <div className="max-w-7xl mx-auto">
-          <AnimatedSection className="mb-16">
-            <div className="gold-line mb-6" />
-            <p className="text-gold-600 text-xs font-semibold uppercase tracking-widest mb-3">
-              What We Do
-            </p>
-            <h2 className="font-tight font-black text-ink-900 text-4xl sm:text-5xl leading-none tracking-tighter max-w-xl">
-              Six Business Sectors
-            </h2>
-          </AnimatedSection>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {sectors.map((s, i) => (
-              <AnimatedSection key={s.name} delay={i * 0.06}>
-                <div className="sector-card bg-slate-50 hover:bg-ink-900 border border-slate-200 hover:border-ink-700 rounded-2xl p-7 group transition-colors duration-400">
-                  <SectorIcon
-                    name={s.icon}
-                    className="w-7 h-7 text-ink-700 group-hover:text-gold-400 mb-5 transition-colors duration-400"
-                  />
-                  <h3 className="font-tight font-bold text-ink-900 group-hover:text-white text-lg mb-2 transition-colors">
-                    {s.name}
-                  </h3>
-                  <p className="text-sm text-slate-500 group-hover:text-slate-400 leading-relaxed transition-colors">
-                    {s.desc}
-                  </p>
-                </div>
               </AnimatedSection>
             ))}
           </div>
