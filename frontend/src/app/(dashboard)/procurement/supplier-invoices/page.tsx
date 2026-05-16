@@ -1,64 +1,1168 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Btn,
+  Card,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  Modal,
+  PageHeader,
+  PageSpinner,
+  PageToolbar,
+  StatCard,
+  StatusBadge,
+} from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { backendGet, backendList, backendPage, backendPost, backendPut } from '@/lib/api-client';
 
-export default function SupplierInvoicesPage() {
-  const [data, setData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+interface Company {
+  id: string;
+  name: string;
+  code: string;
+}
+
+interface Supplier {
+  id: string;
+  name: string;
+  supplierCode?: string | null;
+}
+
+interface Unit {
+  id: string;
+  name: string;
+  symbol: string;
+}
+
+interface PurchaseOrderLine {
+  id: string;
+  productId?: string | null;
+  description?: string | null;
+  quantity: number | string;
+  unitId?: string | null;
+  unitCost: number | string;
+  discountAmount?: number | string | null;
+  taxAmount?: number | string | null;
+  lineTotal?: number | string | null;
+  product?: { name?: string | null } | null;
+  unit?: Unit | null;
+}
+
+interface PurchaseOrder {
+  id: string;
+  purchaseOrderNumber: string;
+  companyId: string;
+  supplierId?: string | null;
+  status: string;
+  currency: string;
+  totalAmount: number | string;
+  lines?: PurchaseOrderLine[];
+}
+
+interface GrnLine {
+  id: string;
+  productId?: string | null;
+  acceptedQuantity: number | string;
+  receivedQuantity: number | string;
+  unitId?: string | null;
+}
+
+interface GoodsReceivedNote {
+  id: string;
+  grnNumber: string;
+  companyId: string;
+  supplierId: string;
+  purchaseOrderId?: string | null;
+  status: string;
+  lines?: GrnLine[];
+}
+
+interface SupplierInvoiceLine {
+  id?: string;
+  productId?: string | null;
+  description: string;
+  quantity: number | string;
+  unitId?: string | null;
+  unitPrice: number | string;
+  taxAmount: number | string;
+  discountAmount: number | string;
+  lineTotal: number | string;
+}
+
+interface SupplierInvoice {
+  id: string;
+  supplierInvoiceNumber: string;
+  companyId: string;
+  supplierId: string;
+  purchaseOrderId?: string | null;
+  goodsReceivedNoteId?: string | null;
+  invoiceDate: string;
+  dueDate?: string | null;
+  invoiceReference?: string | null;
+  subtotal: number | string;
+  taxAmount: number | string;
+  discountAmount: number | string;
+  totalAmount: number | string;
+  paidAmount: number | string;
+  outstandingAmount: number | string;
+  currency: string;
+  status: string;
+  notes?: string | null;
+  lines?: SupplierInvoiceLine[];
+  company?: { name: string; code?: string | null } | null;
+  supplier?: { name: string; supplierCode?: string | null } | null;
+  purchaseOrder?: { id: string; purchaseOrderNumber: string; status: string } | null;
+  goodsReceivedNote?: { id: string; grnNumber: string; status: string } | null;
+  payable?: {
+    id: string;
+    payableNumber: string;
+    status: string;
+    outstandingAmount: number | string;
+  } | null;
+  latestMatch?: {
+    id: string;
+    matchNumber: string;
+    matchStatus: string;
+    quantityVariance: number | string;
+    amountVariance: number | string;
+  } | null;
+}
+
+interface InvoiceLineForm {
+  productId: string;
+  description: string;
+  quantity: string;
+  unitId: string;
+  unitPrice: string;
+  discountAmount: string;
+  taxAmount: string;
+}
+
+interface InvoiceForm {
+  companyId: string;
+  supplierId: string;
+  supplierInvoiceNumber: string;
+  purchaseOrderId: string;
+  goodsReceivedNoteId: string;
+  invoiceDate: string;
+  dueDate: string;
+  invoiceReference: string;
+  currency: string;
+  notes: string;
+  lines: InvoiceLineForm[];
+}
+
+interface Paginated<T> {
+  data: T[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
+
+const CURRENCIES = ['TZS', 'USD', 'EUR', 'GBP', 'KES', 'UGX'];
+const STATUSES = [
+  'DRAFT',
+  'RECEIVED',
+  'MATCHED',
+  'APPROVED',
+  'PARTIALLY_PAID',
+  'PAID',
+  'DISPUTED',
+  'CANCELLED',
+];
+
+function emptyPage<T>(page = 1): Paginated<T> {
+  return { data: [], total: 0, page, totalPages: 1 };
+}
+
+function blankLine(): InvoiceLineForm {
+  return {
+    productId: '',
+    description: '',
+    quantity: '1',
+    unitId: '',
+    unitPrice: '0',
+    discountAmount: '0',
+    taxAmount: '0',
+  };
+}
+
+function blankForm(): InvoiceForm {
+  return {
+    companyId: '',
+    supplierId: '',
+    supplierInvoiceNumber: '',
+    purchaseOrderId: '',
+    goodsReceivedNoteId: '',
+    invoiceDate: new Date().toISOString().slice(0, 10),
+    dueDate: '',
+    invoiceReference: '',
+    currency: 'TZS',
+    notes: '',
+    lines: [blankLine()],
+  };
+}
+
+function asNumber(value: number | string | null | undefined) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function money(value: number | string, currency = 'TZS') {
+  return `${currency} ${new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(asNumber(value))}`;
+}
+
+function listFromPayload<T>(payload: unknown): T[] {
+  if (Array.isArray(payload)) return payload as T[];
+  if (payload && typeof payload === 'object') {
+    const obj = payload as { data?: unknown; items?: unknown };
+    if (Array.isArray(obj.data)) return obj.data as T[];
+    if (Array.isArray(obj.items)) return obj.items as T[];
+  }
+  return [];
+}
+
+function lineTotal(line: InvoiceLineForm) {
+  return (
+    asNumber(line.quantity) * asNumber(line.unitPrice) -
+    asNumber(line.discountAmount) +
+    asNumber(line.taxAmount)
+  );
+}
+
+function InvoiceModal({
+  mode,
+  initial,
+  companies,
+  onClose,
+  onSaved,
+}: {
+  mode: 'create' | 'edit';
+  initial?: SupplierInvoice;
+  companies: Company[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState<InvoiceForm>(() =>
+    initial
+      ? {
+          companyId: initial.companyId,
+          supplierId: initial.supplierId,
+          supplierInvoiceNumber: initial.supplierInvoiceNumber,
+          purchaseOrderId: initial.purchaseOrderId ?? '',
+          goodsReceivedNoteId: initial.goodsReceivedNoteId ?? '',
+          invoiceDate: initial.invoiceDate.slice(0, 10),
+          dueDate: initial.dueDate?.slice(0, 10) ?? '',
+          invoiceReference: initial.invoiceReference ?? '',
+          currency: initial.currency,
+          notes: initial.notes ?? '',
+          lines: initial.lines?.length
+            ? initial.lines.map((line) => ({
+                productId: line.productId ?? '',
+                description: line.description,
+                quantity: String(line.quantity ?? 1),
+                unitId: line.unitId ?? '',
+                unitPrice: String(line.unitPrice ?? 0),
+                discountAmount: String(line.discountAmount ?? 0),
+                taxAmount: String(line.taxAmount ?? 0),
+              }))
+            : [blankLine()],
+        }
+      : blankForm(),
+  );
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [grns, setGrns] = useState<GoodsReceivedNote[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const selectedPo = purchaseOrders.find((po) => po.id === form.purchaseOrderId);
+  const selectedGrn = grns.find((grn) => grn.id === form.goodsReceivedNoteId);
+
+  const totals = useMemo(
+    () =>
+      form.lines.reduce(
+        (acc, line) => {
+          const gross = asNumber(line.quantity) * asNumber(line.unitPrice);
+          const discount = asNumber(line.discountAmount);
+          const tax = asNumber(line.taxAmount);
+          acc.subtotal += gross;
+          acc.discount += discount;
+          acc.tax += tax;
+          acc.total += gross - discount + tax;
+          return acc;
+        },
+        { subtotal: 0, discount: 0, tax: 0, total: 0 },
+      ),
+    [form.lines],
+  );
+
+  const set = <K extends keyof InvoiceForm>(key: K, value: InvoiceForm[K]) =>
+    setForm((current) => ({ ...current, [key]: value }));
+
+  const updateLine = <K extends keyof InvoiceLineForm>(
+    index: number,
+    key: K,
+    value: InvoiceLineForm[K],
+  ) =>
+    setForm((current) => ({
+      ...current,
+      lines: current.lines.map((line, lineIndex) =>
+        lineIndex === index ? { ...line, [key]: value } : line,
+      ),
+    }));
 
   useEffect(() => {
-    fetch('/api/backend/supplier-invoices')
-      .then(r => r.json())
-      .then(res => setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+    if (!form.companyId) {
+      setSuppliers([]);
+      setPurchaseOrders([]);
+      setGrns([]);
+      setUnits([]);
+      return;
+    }
+    let cancelled = false;
+
+    async function loadCompanyRefs() {
+      const [supplierResult, unitResult] = await Promise.allSettled([
+        backendList<Supplier>('/suppliers', {
+          query: { companyId: form.companyId, status: 'ACTIVE', limit: 500 },
+        }),
+        backendList<Unit>('/units', { query: { companyId: form.companyId, limit: 500 } }),
+      ]);
+      if (cancelled) return;
+      setSuppliers(supplierResult.status === 'fulfilled' ? supplierResult.value : []);
+      setUnits(unitResult.status === 'fulfilled' ? unitResult.value : []);
+    }
+
+    void loadCompanyRefs();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
+
+  useEffect(() => {
+    if (!form.companyId || !form.supplierId) {
+      setPurchaseOrders([]);
+      setGrns([]);
+      return;
+    }
+    let cancelled = false;
+
+    async function loadProcurementRefs() {
+      const [poResult, grnResult] = await Promise.allSettled([
+        backendList<PurchaseOrder>('/purchase-orders', {
+          query: { companyId: form.companyId, supplierId: form.supplierId, limit: 200 },
+        }),
+        backendGet<unknown>('/goods-received-notes', {
+          query: { companyId: form.companyId, supplierId: form.supplierId, limit: 200 },
+        }),
+      ]);
+      if (cancelled) return;
+      setPurchaseOrders(poResult.status === 'fulfilled' ? poResult.value : []);
+      setGrns(
+        grnResult.status === 'fulfilled' ? listFromPayload<GoodsReceivedNote>(grnResult.value) : [],
+      );
+    }
+
+    void loadProcurementRefs();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId, form.supplierId]);
+
+  const copyPoLines = useCallback(() => {
+    if (!selectedPo?.lines?.length) return;
+    setForm((current) => ({
+      ...current,
+      currency: selectedPo.currency || current.currency,
+      lines: selectedPo.lines!.map((line) => ({
+        productId: line.productId ?? '',
+        description: line.description || line.product?.name || 'Purchase item',
+        quantity: String(line.quantity ?? 1),
+        unitId: line.unitId ?? '',
+        unitPrice: String(line.unitCost ?? 0),
+        discountAmount: String(line.discountAmount ?? 0),
+        taxAmount: String(line.taxAmount ?? 0),
+      })),
+    }));
+  }, [selectedPo]);
+
+  const copyGrnLines = useCallback(() => {
+    if (!selectedGrn?.lines?.length) return;
+    const poLines = selectedPo?.lines ?? [];
+    setForm((current) => ({
+      ...current,
+      lines: selectedGrn.lines!.map((line) => {
+        const poLine = poLines.find((candidate) => candidate.productId === line.productId);
+        return {
+          productId: line.productId ?? '',
+          description:
+            poLine?.description || poLine?.product?.name || line.productId || 'Received item',
+          quantity: String(line.acceptedQuantity ?? line.receivedQuantity ?? 1),
+          unitId: line.unitId ?? poLine?.unitId ?? '',
+          unitPrice: String(poLine?.unitCost ?? 0),
+          discountAmount: '0',
+          taxAmount: '0',
+        };
+      }),
+    }));
+  }, [selectedGrn, selectedPo]);
+
+  const handleSubmit = async () => {
+    if (!form.companyId) return setError('Company is required');
+    if (!form.supplierId) return setError('Supplier is required');
+    if (!form.supplierInvoiceNumber.trim())
+      return setError('Supplier tax invoice number is required');
+    if (!form.invoiceDate) return setError('Invoice date is required');
+    if (!form.lines.length) return setError('At least one invoice line is required');
+    const invalidLine = form.lines.findIndex(
+      (line) =>
+        !line.description.trim() || asNumber(line.quantity) <= 0 || asNumber(line.unitPrice) < 0,
+    );
+    if (invalidLine >= 0) return setError(`Line ${invalidLine + 1} is incomplete`);
+
+    setSaving(true);
+    setError('');
+    try {
+      const body = {
+        companyId: form.companyId,
+        supplierId: form.supplierId,
+        supplierInvoiceNumber: form.supplierInvoiceNumber.trim(),
+        purchaseOrderId: form.purchaseOrderId || undefined,
+        goodsReceivedNoteId: form.goodsReceivedNoteId || undefined,
+        invoiceDate: form.invoiceDate,
+        dueDate: form.dueDate || undefined,
+        invoiceReference: form.invoiceReference || undefined,
+        currency: form.currency,
+        totalAmount: Number(totals.total.toFixed(2)),
+        notes: form.notes || undefined,
+        lines: form.lines.map((line) => ({
+          productId: line.productId || undefined,
+          description: line.description.trim(),
+          quantity: asNumber(line.quantity),
+          unitId: line.unitId || undefined,
+          unitPrice: asNumber(line.unitPrice),
+          discountAmount: asNumber(line.discountAmount),
+          taxAmount: asNumber(line.taxAmount),
+          lineTotal: Number(lineTotal(line).toFixed(2)),
+        })),
+      };
+      if (mode === 'create') {
+        await backendPost('/supplier-invoices', body);
+      } else {
+        await backendPut(`/supplier-invoices/${initial!.id}`, body);
+      }
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save supplier invoice');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Supplier Invoices</h1>
-        <p className="text-gray-500 mt-1">Process and manage supplier invoices</p>
+    <Modal
+      open
+      onClose={onClose}
+      title={mode === 'create' ? 'Create Supplier Tax Invoice' : 'Edit Supplier Tax Invoice'}
+      size="xl"
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn variant="primary" onClick={handleSubmit} loading={saving}>
+            {mode === 'create' ? 'Create Invoice' : 'Save Changes'}
+          </Btn>
+        </>
+      }
+    >
+      {error && (
+        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+          {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <FormSelect
+          label="Company"
+          required
+          value={form.companyId}
+          onChange={(e) =>
+            setForm((current) => ({
+              ...current,
+              companyId: e.target.value,
+              supplierId: '',
+              purchaseOrderId: '',
+              goodsReceivedNoteId: '',
+              lines: [blankLine()],
+            }))
+          }
+          placeholder="Select company"
+          disabled={mode === 'edit'}
+        >
+          {companies.map((company) => (
+            <option key={company.id} value={company.id}>
+              {company.name} ({company.code})
+            </option>
+          ))}
+        </FormSelect>
+        <FormSelect
+          label="Supplier"
+          required
+          value={form.supplierId}
+          onChange={(e) =>
+            setForm((current) => ({
+              ...current,
+              supplierId: e.target.value,
+              purchaseOrderId: '',
+              goodsReceivedNoteId: '',
+              lines: [blankLine()],
+            }))
+          }
+          placeholder={form.companyId ? 'Select supplier' : 'Select company first'}
+        >
+          {suppliers.map((supplier) => (
+            <option key={supplier.id} value={supplier.id}>
+              {supplier.name}
+              {supplier.supplierCode ? ` (${supplier.supplierCode})` : ''}
+            </option>
+          ))}
+        </FormSelect>
+        <FormInput
+          label="Supplier Tax Invoice #"
+          required
+          value={form.supplierInvoiceNumber}
+          onChange={(e) => set('supplierInvoiceNumber', e.target.value)}
+        />
+        <FormInput
+          label="Invoice Reference"
+          value={form.invoiceReference}
+          onChange={(e) => set('invoiceReference', e.target.value)}
+          placeholder="Delivery note or supplier reference"
+        />
+        <FormInput
+          label="Invoice Date"
+          required
+          type="date"
+          value={form.invoiceDate}
+          onChange={(e) => set('invoiceDate', e.target.value)}
+        />
+        <FormInput
+          label="Due Date"
+          type="date"
+          value={form.dueDate}
+          onChange={(e) => set('dueDate', e.target.value)}
+        />
+        <FormSelect
+          label="Currency"
+          value={form.currency}
+          onChange={(e) => set('currency', e.target.value)}
+        >
+          {CURRENCIES.map((currency) => (
+            <option key={currency} value={currency}>
+              {currency}
+            </option>
+          ))}
+        </FormSelect>
+        <FormSelect
+          label="Purchase Order"
+          value={form.purchaseOrderId}
+          onChange={(e) => {
+            const nextId = e.target.value;
+            const po = purchaseOrders.find((item) => item.id === nextId);
+            setForm((current) => ({
+              ...current,
+              purchaseOrderId: nextId,
+              goodsReceivedNoteId: '',
+              currency: po?.currency || current.currency,
+            }));
+          }}
+          placeholder={form.supplierId ? 'Select PO' : 'Select supplier first'}
+        >
+          {purchaseOrders.map((po) => (
+            <option key={po.id} value={po.id}>
+              {po.purchaseOrderNumber} - {money(po.totalAmount, po.currency)}
+            </option>
+          ))}
+        </FormSelect>
+        <FormSelect
+          label="Goods Received Note"
+          value={form.goodsReceivedNoteId}
+          onChange={(e) => set('goodsReceivedNoteId', e.target.value)}
+          placeholder={form.supplierId ? 'Select GRN' : 'Select supplier first'}
+        >
+          {grns
+            .filter(
+              (grn) =>
+                !form.purchaseOrderId ||
+                !grn.purchaseOrderId ||
+                grn.purchaseOrderId === form.purchaseOrderId,
+            )
+            .map((grn) => (
+              <option key={grn.id} value={grn.id}>
+                {grn.grnNumber} - {grn.status}
+              </option>
+            ))}
+        </FormSelect>
       </div>
 
-      {loading ? (
-        <div className="text-center py-10 text-gray-500">Loading...</div>
-      ) : (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Btn
+          variant="secondary"
+          size="xs"
+          onClick={copyPoLines}
+          disabled={!selectedPo?.lines?.length}
+        >
+          Copy PO Lines
+        </Btn>
+        <Btn
+          variant="secondary"
+          size="xs"
+          onClick={copyGrnLines}
+          disabled={!selectedGrn?.lines?.length}
+        >
+          Copy GRN Lines
+        </Btn>
+      </div>
+
+      <div
+        className="mt-4 overflow-x-auto rounded-lg border"
+        style={{ borderColor: 'var(--aurora-border)' }}
+      >
+        <table className="w-full min-w-[900px] text-sm">
+          <thead>
+            <tr
+              className="text-left text-xs uppercase"
+              style={{ color: 'var(--aurora-text-muted)' }}
+            >
+              <th className="px-3 py-2">Description</th>
+              <th className="px-3 py-2">Qty</th>
+              <th className="px-3 py-2">Unit</th>
+              <th className="px-3 py-2">Unit Price</th>
+              <th className="px-3 py-2">Discount</th>
+              <th className="px-3 py-2">Tax</th>
+              <th className="px-3 py-2 text-right">Total</th>
+              <th className="px-3 py-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {form.lines.map((line, index) => (
+              <tr key={index} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+                <td className="px-3 py-2">
+                  <input
+                    className="aurora-input w-full rounded-lg px-2 py-1.5 text-sm"
+                    value={line.description}
+                    onChange={(e) => updateLine(index, 'description', e.target.value)}
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    className="aurora-input w-24 rounded-lg px-2 py-1.5 text-sm"
+                    type="number"
+                    min="0"
+                    value={line.quantity}
+                    onChange={(e) => updateLine(index, 'quantity', e.target.value)}
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <select
+                    className="aurora-input w-32 rounded-lg px-2 py-1.5 text-sm"
+                    value={line.unitId}
+                    onChange={(e) => updateLine(index, 'unitId', e.target.value)}
+                  >
+                    <option value="">Unit</option>
+                    {units.map((unit) => (
+                      <option key={unit.id} value={unit.id}>
+                        {unit.symbol || unit.name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    className="aurora-input w-28 rounded-lg px-2 py-1.5 text-sm"
+                    type="number"
+                    min="0"
+                    value={line.unitPrice}
+                    onChange={(e) => updateLine(index, 'unitPrice', e.target.value)}
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    className="aurora-input w-24 rounded-lg px-2 py-1.5 text-sm"
+                    type="number"
+                    min="0"
+                    value={line.discountAmount}
+                    onChange={(e) => updateLine(index, 'discountAmount', e.target.value)}
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    className="aurora-input w-24 rounded-lg px-2 py-1.5 text-sm"
+                    type="number"
+                    min="0"
+                    value={line.taxAmount}
+                    onChange={(e) => updateLine(index, 'taxAmount', e.target.value)}
+                  />
+                </td>
+                <td className="px-3 py-2 text-right font-medium">
+                  {money(lineTotal(line), form.currency)}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <Btn
+                    variant="ghost"
+                    size="xs"
+                    disabled={form.lines.length === 1}
+                    onClick={() =>
+                      setForm((current) => ({
+                        ...current,
+                        lines: current.lines.filter((_, lineIndex) => lineIndex !== index),
+                      }))
+                    }
+                  >
+                    Remove
+                  </Btn>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-3 flex items-start justify-between gap-4">
+        <Btn
+          variant="secondary"
+          size="xs"
+          onClick={() =>
+            setForm((current) => ({ ...current, lines: [...current.lines, blankLine()] }))
+          }
+        >
+          + Add Line
+        </Btn>
+        <div className="min-w-[260px] space-y-1 text-sm">
+          <div className="flex justify-between gap-8">
+            <span style={{ color: 'var(--aurora-text-muted)' }}>Subtotal</span>
+            <span>{money(totals.subtotal, form.currency)}</span>
+          </div>
+          <div className="flex justify-between gap-8">
+            <span style={{ color: 'var(--aurora-text-muted)' }}>Discount</span>
+            <span>{money(totals.discount, form.currency)}</span>
+          </div>
+          <div className="flex justify-between gap-8">
+            <span style={{ color: 'var(--aurora-text-muted)' }}>Tax</span>
+            <span>{money(totals.tax, form.currency)}</span>
+          </div>
+          <div
+            className="flex justify-between gap-8 border-t pt-2 font-semibold"
+            style={{ borderColor: 'var(--aurora-border)' }}
+          >
+            <span>Total</span>
+            <span>{money(totals.total, form.currency)}</span>
+          </div>
+        </div>
+      </div>
+
+      <FormTextarea
+        className="mt-3"
+        label="Notes"
+        rows={2}
+        value={form.notes}
+        onChange={(e) => set('notes', e.target.value)}
+      />
+    </Modal>
+  );
+}
+
+export default function SupplierInvoicesPage() {
+  const { hasPermission } = useAuth();
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [data, setData] = useState<Paginated<SupplierInvoice> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [companyId, setCompanyId] = useState('');
+  const [status, setStatus] = useState('');
+  const [page, setPage] = useState(1);
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<SupplierInvoice | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const canView =
+    hasPermission('supplier_invoices.list') || hasPermission('supplier_invoices.view');
+  const canCreate = hasPermission('supplier_invoices.create');
+  const canUpdate = hasPermission('supplier_invoices.update');
+  const canApprove = hasPermission('supplier_invoices.approve');
+
+  useEffect(() => {
+    if (!canView) return;
+    let cancelled = false;
+    backendList<Company>('/companies', { query: { limit: 100 } })
+      .then((items) => {
+        if (!cancelled) setCompanies(items);
+      })
+      .catch(() => {
+        if (!cancelled) setCompanies([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canView]);
+
+  const load = useCallback(async () => {
+    if (!canView) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await backendPage<SupplierInvoice>('/supplier-invoices', {
+        query: {
+          page,
+          limit: 20,
+          companyId: companyId || undefined,
+          status: status || undefined,
+          search: search.trim() || undefined,
+        },
+      });
+      setData(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load supplier invoices');
+      setData(emptyPage<SupplierInvoice>(page));
+    } finally {
+      setLoading(false);
+    }
+  }, [canView, companyId, page, search, status]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const runAction = async (
+    invoice: SupplierInvoice,
+    action: 'match' | 'approve' | 'approveVariance',
+  ) => {
+    setBusyId(invoice.id);
+    setError(null);
+    try {
+      if (action === 'match') {
+        await backendPost(`/supplier-invoices/${invoice.id}/run-match`);
+      } else {
+        await backendPost(
+          `/supplier-invoices/${invoice.id}/approve`,
+          action === 'approveVariance' ? { allowVariance: true } : {},
+        );
+      }
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Action failed');
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (!canView) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Supplier Invoices" subtitle="Process supplier tax invoices" />
+        <div className="mt-8 text-center text-sm text-slate-500">Access Restricted</div>
+      </div>
+    );
+  }
+
+  const invoices = data?.data ?? [];
+  const approvedCount = invoices.filter((invoice) => invoice.status === 'APPROVED').length;
+  const disputedCount = invoices.filter((invoice) => invoice.status === 'DISPUTED').length;
+  const outstanding = invoices.reduce(
+    (sum, invoice) => sum + asNumber(invoice.outstandingAmount),
+    0,
+  );
+  const filterSelectCls =
+    'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
+  const filterStyle = {
+    borderColor: 'var(--aurora-border)',
+    background: 'var(--aurora-card)',
+    color: 'var(--aurora-text)',
+  } as const;
+
+  return (
+    <div className="p-6 space-y-6">
+      {creating && (
+        <InvoiceModal
+          mode="create"
+          companies={companies}
+          onClose={() => setCreating(false)}
+          onSaved={() => {
+            setCreating(false);
+            void load();
+          }}
+        />
+      )}
+      {editing && (
+        <InvoiceModal
+          mode="edit"
+          initial={editing}
+          companies={companies}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            void load();
+          }}
+        />
+      )}
+
+      <PageHeader
+        title="Supplier Invoices"
+        subtitle="Supplier tax invoices, matching, and AP posting"
+      />
+
+      <div className="grid grid-cols-4 gap-3">
+        <StatCard label="Invoices" value={data?.total ?? 0} />
+        <StatCard label="Approved" value={approvedCount} />
+        <StatCard label="Disputed" value={disputedCount} />
+        <StatCard label="Outstanding" value={money(outstanding)} />
+      </div>
+
+      <PageToolbar
+        search={search}
+        onSearch={(value) => {
+          setSearch(value);
+          setPage(1);
+        }}
+        searchPlaceholder="Search invoice number..."
+        filters={
+          <>
+            <select
+              value={companyId}
+              onChange={(event) => {
+                setCompanyId(event.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
+              <option value="">All Companies</option>
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
+              <option value="">All Statuses</option>
+              {STATUSES.map((item) => (
+                <option key={item} value={item}>
+                  {item.replace(/_/g, ' ')}
+                </option>
+              ))}
+            </select>
+          </>
+        }
+        actions={
+          canCreate ? (
+            <Btn variant="primary" onClick={() => setCreating(true)}>
+              + New Supplier Invoice
+            </Btn>
+          ) : null
+        }
+      />
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1100px] text-sm">
             <thead>
-              <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
-                <th className="px-4 py-3">Invoice #</th>
-                <th className="px-4 py-3">Company</th>
+              <tr
+                className="text-left text-xs uppercase"
+                style={{ color: 'var(--aurora-text-muted)' }}
+              >
+                <th className="px-4 py-3">Tax Invoice #</th>
                 <th className="px-4 py-3">Supplier</th>
+                <th className="px-4 py-3">PO / GRN</th>
                 <th className="px-4 py-3">Invoice Date</th>
-                <th className="px-4 py-3">Total Amount</th>
-                <th className="px-4 py-3">Outstanding</th>
+                <th className="px-4 py-3 text-right">Total</th>
+                <th className="px-4 py-3 text-right">Outstanding</th>
                 <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Match</th>
+                <th className="px-4 py-3">Payable</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody>
-              {data.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No records found</td></tr>
-              ) : data.map((row: any) => (
-                <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs">{row.supplierInvoiceNumber}</td>
-                  <td className="px-4 py-3">{row.companyId}</td>
-                  <td className="px-4 py-3">{row.supplierId}</td>
-                  <td className="px-4 py-3 text-gray-400">{row.invoiceDate ? new Date(row.invoiceDate).toLocaleDateString() : '—'}</td>
-                  <td className="px-4 py-3 font-medium">{row.totalAmount}</td>
-                  <td className="px-4 py-3 font-medium text-red-600">{row.outstandingAmount}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${row.status === 'PAID' ? 'bg-green-100 text-green-700' : row.status === 'OVERDUE' ? 'bg-red-100 text-red-700' : row.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>
-                      {row.status}
-                    </span>
+            <tbody className="divide-y divide-slate-100">
+              {loading ? (
+                <tr>
+                  <td colSpan={10}>
+                    <PageSpinner />
                   </td>
                 </tr>
-              ))}
+              ) : !invoices.length ? (
+                <tr>
+                  <td
+                    colSpan={10}
+                    className="px-4 py-10 text-center text-sm"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
+                    No supplier invoices found
+                  </td>
+                </tr>
+              ) : (
+                invoices.map((invoice) => (
+                  <tr key={invoice.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-mono text-xs">{invoice.supplierInvoiceNumber}</td>
+                    <td className="px-4 py-3">
+                      <div className="font-medium">
+                        {invoice.supplier?.name ?? invoice.supplierId}
+                      </div>
+                      <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                        {invoice.company?.name ?? invoice.companyId}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      <div>
+                        {invoice.purchaseOrder?.purchaseOrderNumber ??
+                          invoice.purchaseOrderId ??
+                          '-'}
+                      </div>
+                      <div style={{ color: 'var(--aurora-text-muted)' }}>
+                        {invoice.goodsReceivedNote?.grnNumber ?? invoice.goodsReceivedNoteId ?? '-'}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {new Date(invoice.invoiceDate).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-3 text-right font-medium">
+                      {money(invoice.totalAmount, invoice.currency)}
+                    </td>
+                    <td className="px-4 py-3 text-right font-medium">
+                      {money(invoice.outstandingAmount, invoice.currency)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={invoice.status} />
+                    </td>
+                    <td className="px-4 py-3">
+                      {invoice.latestMatch ? (
+                        <div className="space-y-1">
+                          <StatusBadge status={invoice.latestMatch.matchStatus} />
+                          <div
+                            className="text-[11px]"
+                            style={{ color: 'var(--aurora-text-muted)' }}
+                          >
+                            Qty {asNumber(invoice.latestMatch.quantityVariance).toFixed(4)} / Amt{' '}
+                            {asNumber(invoice.latestMatch.amountVariance).toFixed(2)}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                          Not run
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {invoice.payable ? (
+                        <div>
+                          <div className="font-mono">{invoice.payable.payableNumber}</div>
+                          <StatusBadge status={invoice.payable.status} />
+                        </div>
+                      ) : (
+                        <span style={{ color: 'var(--aurora-text-muted)' }}>Not posted</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-1">
+                        {canUpdate &&
+                          ['DRAFT', 'RECEIVED', 'DISPUTED'].includes(invoice.status) && (
+                            <Btn variant="ghost" size="xs" onClick={() => setEditing(invoice)}>
+                              Edit
+                            </Btn>
+                          )}
+                        {canApprove &&
+                          invoice.purchaseOrderId &&
+                          !['APPROVED', 'PAID'].includes(invoice.status) && (
+                            <Btn
+                              variant="secondary"
+                              size="xs"
+                              loading={busyId === invoice.id}
+                              onClick={() => runAction(invoice, 'match')}
+                            >
+                              Match
+                            </Btn>
+                          )}
+                        {canApprove && !['APPROVED', 'PAID'].includes(invoice.status) && (
+                          <Btn
+                            variant="primary"
+                            size="xs"
+                            loading={busyId === invoice.id}
+                            onClick={() => runAction(invoice, 'approve')}
+                          >
+                            Approve
+                          </Btn>
+                        )}
+                        {canApprove && invoice.status === 'DISPUTED' && (
+                          <Btn
+                            variant="secondary"
+                            size="xs"
+                            loading={busyId === invoice.id}
+                            onClick={() => runAction(invoice, 'approveVariance')}
+                          >
+                            Approve Variance
+                          </Btn>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
-      )}
+        {data && data.totalPages > 1 && (
+          <div
+            className="flex items-center justify-between border-t px-5 py-3"
+            style={{ borderColor: 'var(--aurora-border)' }}
+          >
+            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              Page {data.page} of {data.totalPages} - {data.total} total
+            </span>
+            <div className="flex gap-2">
+              <Btn
+                variant="secondary"
+                size="xs"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                Previous
+              </Btn>
+              <Btn
+                variant="secondary"
+                size="xs"
+                disabled={page >= data.totalPages}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next
+              </Btn>
+            </div>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

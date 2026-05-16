@@ -1,7 +1,11 @@
-import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { SupplierInvoicesService } from './supplier-invoices.service';
+import { CreateSupplierInvoiceDto } from './dto/create-supplier-invoice.dto';
+import { UpdateSupplierInvoiceDto } from './dto/update-supplier-invoice.dto';
+import { QuerySupplierInvoiceDto } from './dto/query-supplier-invoice.dto';
+import { ApproveSupplierInvoiceDto } from './dto/approve-supplier-invoice.dto';
 
 @Controller('supplier-invoices')
 export class SupplierInvoicesController {
@@ -9,7 +13,7 @@ export class SupplierInvoicesController {
 
   @Get()
   @RequirePermissions('supplier_invoices.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: QuerySupplierInvoiceDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
@@ -21,19 +25,33 @@ export class SupplierInvoicesController {
 
   @Post()
   @RequirePermissions('supplier_invoices.create')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreateSupplierInvoiceDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
   }
 
   @Put(':id')
   @RequirePermissions('supplier_invoices.update')
-  update(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateSupplierInvoiceDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
+  }
+
+  @Post(':id/run-match')
+  @RequirePermissions('supplier_invoices.approve')
+  runMatch(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.runMatch(id, user);
   }
 
   @Post(':id/approve')
   @RequirePermissions('supplier_invoices.approve')
-  approve(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approve(id, user);
+  approve(
+    @Param('id') id: string,
+    @Body() dto: ApproveSupplierInvoiceDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.approve(id, dto, user);
   }
 }
