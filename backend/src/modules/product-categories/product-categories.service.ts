@@ -134,6 +134,26 @@ export class ProductCategoriesService {
 
   async remove(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    const [childCategories, productFamilies, products, supplierLinks] = await Promise.all([
+      this.prisma.productCategory.count({
+        where: { parentCategoryId: id, deletedAt: null },
+      }),
+      this.prisma.productFamily.count({
+        where: { categoryId: id, deletedAt: null },
+      }),
+      this.prisma.product.count({
+        where: { categoryId: id, deletedAt: null },
+      }),
+      this.prisma.supplierProductCategory.count({
+        where: { productCategoryId: id, supplier: { deletedAt: null } },
+      }),
+    ]);
+
+    if (childCategories || productFamilies || products || supplierLinks) {
+      throw new BadRequestException(
+        'Product category is in use. Remove child categories, product families, products, and supplier mappings before deleting it.',
+      );
+    }
 
     await this.prisma.productCategory.update({
       where: { id },

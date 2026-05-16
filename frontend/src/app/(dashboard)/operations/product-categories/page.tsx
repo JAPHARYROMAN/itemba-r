@@ -12,9 +12,16 @@ import {
   FormInput,
   FormSelect,
   FormTextarea,
+  ConfirmDialog,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
-import { backendGet, backendPatch, backendPost, normalizePaginated } from '@/lib/api-client';
+import {
+  backendDelete,
+  backendGet,
+  backendPatch,
+  backendPost,
+  normalizePaginated,
+} from '@/lib/api-client';
 
 interface Company {
   id: string;
@@ -322,6 +329,8 @@ export default function ProductCategoriesPage() {
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ProductCategory | null>(null);
+  const [deleting, setDeleting] = useState<ProductCategory | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const canView = hasPermission('product_categories.view');
   const canCreate = hasPermission('product_categories.manage');
@@ -374,6 +383,22 @@ export default function ProductCategoriesPage() {
     load();
   }, [load]);
 
+  const handleDelete = async () => {
+    if (!deleting) return;
+    setDeleteLoading(true);
+    setError(null);
+    try {
+      await backendDelete(`/product-categories/${deleting.id}`);
+      setDeleting(null);
+      await load();
+    } catch (err) {
+      setDeleting(null);
+      setError(err instanceof Error ? err.message : 'Failed to delete product category');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   if (!canView) {
     return (
       <div className="p-6">
@@ -419,6 +444,16 @@ export default function ProductCategoriesPage() {
           }}
         />
       )}
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete Product Category"
+        message={`Delete "${deleting?.name ?? 'this category'}"? This cannot be undone. Categories linked to products, product families, supplier mappings, or child categories cannot be deleted.`}
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleteLoading}
+        onClose={() => setDeleting(null)}
+        onConfirm={handleDelete}
+      />
 
       <PageHeader title="Product Categories" subtitle="Organize products into categories" />
 
@@ -553,9 +588,14 @@ export default function ProductCategoriesPage() {
                     </td>
                     {canCreate && (
                       <td className="px-4 py-3 text-right">
-                        <Btn variant="ghost" size="xs" onClick={() => setEditing(cat)}>
-                          Edit
-                        </Btn>
+                        <div className="flex justify-end gap-1">
+                          <Btn variant="ghost" size="xs" onClick={() => setEditing(cat)}>
+                            Edit
+                          </Btn>
+                          <Btn variant="ghost" size="xs" onClick={() => setDeleting(cat)}>
+                            Delete
+                          </Btn>
+                        </div>
                       </td>
                     )}
                   </tr>
