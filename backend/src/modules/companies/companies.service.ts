@@ -7,7 +7,7 @@ import { UpsertCompanyProfileDto } from './dto/upsert-company-profile.dto';
 import { AuditSeverity, Prisma } from '@prisma/client';
 import { AccessLevel } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { CompanyScopeService } from '../../common/services';
+import { CompanyScopeService, PermissionCacheService } from '../../common/services';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 @Injectable()
@@ -16,6 +16,7 @@ export class CompaniesService {
     private readonly prisma: PrismaService,
     private readonly companyScope: CompanyScopeService,
     private readonly auditLogs: AuditLogsService,
+    private readonly permissionCache: PermissionCacheService,
   ) {}
 
   async findAll(query: QueryCompanyDto, user: AuthUser) {
@@ -148,7 +149,21 @@ export class CompaniesService {
 
   async create(dto: CreateCompanyDto, user: AuthUser) {
     this.companyScope.assertGroupScoped(user, 'create companies');
-    const company = await this.prisma.company.create({ data: dto });
+    const company = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.company.create({ data: dto });
+      await tx.userCompanyAccess.upsert({
+        where: { userId_companyId: { userId: user.id, companyId: created.id } },
+        update: { accessLevel: AccessLevel.MANAGE, grantedById: user.id },
+        create: {
+          userId: user.id,
+          companyId: created.id,
+          accessLevel: AccessLevel.MANAGE,
+          grantedById: user.id,
+        },
+      });
+      return created;
+    });
+    await this.permissionCache.invalidate(user.id);
     await this.auditLogs.log({
       action: 'COMPANY_CREATED',
       entityType: 'Company',
