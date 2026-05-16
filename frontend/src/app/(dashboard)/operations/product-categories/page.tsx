@@ -81,6 +81,8 @@ const BLANK_FORM: CategoryForm = {
   isActive: true,
 };
 
+const NEW_PARENT_VALUE = '__new_parent_category__';
+
 function CategoryModal({
   mode,
   initial,
@@ -108,12 +110,16 @@ function CategoryModal({
         }
       : { ...BLANK_FORM, companyId: defaultCompanyId ?? '' },
   );
+  const [parentMode, setParentMode] = useState<'existing' | 'new'>('existing');
+  const [newParentName, setNewParentName] = useState('');
   const [parents, setParents] = useState<ProductCategory[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const set = <K extends keyof CategoryForm>(k: K, v: CategoryForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
+
+  const selectedParentValue = parentMode === 'new' ? NEW_PARENT_VALUE : form.parentCategoryId;
 
   useEffect(() => {
     let cancelled = false;
@@ -153,13 +159,27 @@ function CategoryModal({
       setError('Name is required');
       return;
     }
+    if (parentMode === 'new' && !newParentName.trim()) {
+      setError('New parent name is required');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
+      let parentCategoryId = form.parentCategoryId || undefined;
+      if (mode === 'create' && parentMode === 'new') {
+        const parent = await backendPost<ProductCategory>('/product-categories', {
+          companyId: form.companyId,
+          name: newParentName.trim(),
+          categoryType: form.categoryType,
+          isActive: true,
+        });
+        parentCategoryId = parent.id;
+      }
       const body = {
         name: form.name.trim(),
         categoryType: form.categoryType,
-        parentCategoryId: form.parentCategoryId || undefined,
+        parentCategoryId,
         description: form.description || undefined,
         isActive: form.isActive,
       };
@@ -203,9 +223,11 @@ function CategoryModal({
           label="Company"
           required
           value={form.companyId}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, companyId: e.target.value, parentCategoryId: '' }))
-          }
+          onChange={(e) => {
+            setParentMode('existing');
+            setNewParentName('');
+            setForm((f) => ({ ...f, companyId: e.target.value, parentCategoryId: '' }));
+          }}
           placeholder="Select company"
           disabled={mode === 'edit'}
         >
@@ -236,8 +258,18 @@ function CategoryModal({
           </FormSelect>
           <FormSelect
             label="Parent Category"
-            value={form.parentCategoryId}
-            onChange={(e) => set('parentCategoryId', e.target.value)}
+            value={selectedParentValue}
+            onChange={(e) => {
+              if (e.target.value === NEW_PARENT_VALUE) {
+                setParentMode('new');
+                setNewParentName('');
+                set('parentCategoryId', '');
+                return;
+              }
+              setParentMode('existing');
+              setNewParentName('');
+              set('parentCategoryId', e.target.value);
+            }}
             placeholder="None (top-level)"
           >
             {parents.map((p) => (
@@ -245,8 +277,18 @@ function CategoryModal({
                 {p.name}
               </option>
             ))}
+            {mode === 'create' && <option value={NEW_PARENT_VALUE}>Create new parent...</option>}
           </FormSelect>
         </div>
+        {mode === 'create' && parentMode === 'new' && (
+          <FormInput
+            label="New Parent Category"
+            required
+            value={newParentName}
+            onChange={(e) => setNewParentName(e.target.value)}
+            placeholder="Example: Paints"
+          />
+        )}
         <FormTextarea
           label="Description"
           rows={2}
@@ -501,9 +543,7 @@ export default function ProductCategoriesPage() {
                     <td className="px-4 py-3 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
                       {cat.parentCategory?.name ?? '—'}
                     </td>
-                    <td className="px-4 py-3">
-                      {cat.company?.name ?? '—'}
-                    </td>
+                    <td className="px-4 py-3">{cat.company?.name ?? '—'}</td>
                     <td className="px-4 py-3">
                       <span
                         className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${cat.isActive ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-zinc-100 text-zinc-500 border-zinc-200'}`}
