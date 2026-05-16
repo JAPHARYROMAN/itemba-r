@@ -7,8 +7,8 @@ import { UpdateUnitDto } from './dto/update-unit.dto';
 import { QueryUnitDto } from './dto/query-unit.dto';
 import { CreateUnitConversionDto } from './dto/create-unit-conversion.dto';
 import { UpdateUnitConversionDto } from './dto/update-unit-conversion.dto';
-import { AccessLevel, AuditSeverity } from '@prisma/client';
-import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
+import { AccessLevel, AuditSeverity, Prisma } from '@prisma/client';
+import { CompanyScopeService } from '../../common/services';
 
 @Injectable()
 export class UnitsService {
@@ -24,16 +24,23 @@ export class UnitsService {
     const { page = 1, limit = 20, companyId, status, unitType, search } = query;
     const skip = (page - 1) * limit;
 
-    const where: any = { deletedAt: null };
-    applyCompanyScopeWhere(where, user, companyId);
-    if (status) where.status = status;
-    if (unitType) where.unitType = unitType;
+    const and: Prisma.UnitOfMeasureWhereInput[] = [
+      await this.companyOrSystemUnitWhere(user, companyId),
+    ];
     if (search) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { symbol: { contains: search, mode: 'insensitive' } },
-      ];
+      and.push({
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { symbol: { contains: search, mode: 'insensitive' } },
+        ],
+      });
     }
+    const where: Prisma.UnitOfMeasureWhereInput = {
+      deletedAt: null,
+      AND: and,
+      ...(status && { status }),
+      ...(unitType && { unitType }),
+    };
 
     const [data, total] = await Promise.all([
       this.prisma.unitOfMeasure.findMany({
@@ -152,8 +159,10 @@ export class UnitsService {
     const { page = 1, limit = 20, companyId } = query;
     const skip = (page - 1) * limit;
 
-    const where: any = { deletedAt: null };
-    applyCompanyScopeWhere(where, user, companyId);
+    const where: Prisma.UnitConversionWhereInput = {
+      deletedAt: null,
+      AND: [await this.companyOrSystemConversionWhere(user, companyId)],
+    };
 
     const [data, total] = await Promise.all([
       this.prisma.unitConversion.findMany({
@@ -296,6 +305,36 @@ export class UnitsService {
     throw new BadRequestException(
       'companyId is required when the user does not have exactly one accessible company',
     );
+  }
+
+  private async companyOrSystemUnitWhere(
+    user: AuthUser,
+    requestedCompanyId?: string,
+  ): Promise<Prisma.UnitOfMeasureWhereInput> {
+    if (requestedCompanyId) {
+      await this.companyScope.assertCanAccessCompany(user, requestedCompanyId);
+      return { OR: [{ companyId: requestedCompanyId }, { companyId: null }] };
+    }
+
+    const companyIds = await this.companyScope.accessibleCompanyIds(user);
+    if (companyIds.length === 0) return { companyId: null };
+
+    return { OR: [{ companyId: null }, { companyId: { in: companyIds } }] };
+  }
+
+  private async companyOrSystemConversionWhere(
+    user: AuthUser,
+    requestedCompanyId?: string,
+  ): Promise<Prisma.UnitConversionWhereInput> {
+    if (requestedCompanyId) {
+      await this.companyScope.assertCanAccessCompany(user, requestedCompanyId);
+      return { OR: [{ companyId: requestedCompanyId }, { companyId: null }] };
+    }
+
+    const companyIds = await this.companyScope.accessibleCompanyIds(user);
+    if (companyIds.length === 0) return { companyId: null };
+
+    return { OR: [{ companyId: null }, { companyId: { in: companyIds } }] };
   }
 
   private async assertUnitsUsableByCompany(unitIds: string[], companyId: string | null) {
