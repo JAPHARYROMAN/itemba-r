@@ -12,6 +12,7 @@ import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductDto } from './dto/query-product.dto';
+import { QueryProductFamilyDto } from './dto/query-product-family.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
@@ -23,6 +24,12 @@ export class ProductsController {
   @RequirePermissions('products.view')
   findAll(@Query() query: QueryProductDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
+  }
+
+  @Get('families')
+  @RequirePermissions('products.view')
+  findFamilies(@Query() query: QueryProductFamilyDto, @CurrentUser() user: AuthUser) {
+    return this.service.findFamilies(query, user);
   }
 
   @Get(':id')

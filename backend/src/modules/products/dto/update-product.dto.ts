@@ -23,7 +23,35 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsString()
+  productFamilyId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  productFamilyName?: string;
+
+  @IsOptional()
+  @IsString()
+  productFamilyBrand?: string;
+
+  @IsOptional()
+  @IsString()
   name?: string;
+
+  @IsOptional()
+  @IsString()
+  variantName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  variantColor?: string | null;
+
+  @IsOptional()
+  @IsString()
+  variantSize?: string | null;
+
+  @IsOptional()
+  @IsString()
+  variantFinish?: string | null;
 
   @IsOptional()
   @IsString()

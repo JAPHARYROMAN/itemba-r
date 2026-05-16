@@ -6,11 +6,15 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductDto } from './dto/query-product.dto';
-import { AccessLevel, AuditSeverity } from '@prisma/client';
+import { QueryProductFamilyDto } from './dto/query-product-family.dto';
+import { AccessLevel, AuditSeverity, Prisma } from '@prisma/client';
 
 type ProductReferenceIds = {
   categoryId?: string | null;
   divisionId?: string | null;
+  productFamilyId?: string | null;
+  productFamilyName?: string | null;
+  productFamilyBrand?: string | null;
   baseUnitId?: string | null;
   purchaseUnitId?: string | null;
   salesUnitId?: string | null;
@@ -22,6 +26,11 @@ function generateProductCode(): string {
 
 function normalizeProductCode(productCode?: string): string | undefined {
   const trimmed = productCode?.trim();
+  return trimmed || undefined;
+}
+
+function optionalText(value?: string | null): string | undefined {
+  const trimmed = value?.trim();
   return trimmed || undefined;
 }
 
@@ -40,6 +49,7 @@ export class ProductsService {
       companyId,
       divisionId,
       categoryId,
+      productFamilyId,
       productType,
       status,
       search,
@@ -55,6 +65,7 @@ export class ProductsService {
     // working in a division should still be able to sell company-wide SKUs.
     if (divisionId) where.OR = [{ divisionId }, { divisionId: null }];
     if (categoryId) where.categoryId = categoryId;
+    if (productFamilyId) where.productFamilyId = productFamilyId;
     if (productType) where.productType = productType;
     if (status) where.status = status;
     if (search) {
@@ -63,6 +74,10 @@ export class ProductsService {
         { productCode: { contains: search, mode: 'insensitive' as const } },
         { sku: { contains: search, mode: 'insensitive' as const } },
         { barcode: { contains: search, mode: 'insensitive' as const } },
+        { variantName: { contains: search, mode: 'insensitive' as const } },
+        { variantColor: { contains: search, mode: 'insensitive' as const } },
+        { variantSize: { contains: search, mode: 'insensitive' as const } },
+        { productFamily: { name: { contains: search, mode: 'insensitive' as const } } },
       ];
       // If divisionId already populated `where.OR`, AND it together with the
       // search OR using nested `AND`. Otherwise the search wins as the OR.
@@ -79,6 +94,7 @@ export class ProductsService {
         where,
         include: {
           category: { select: { id: true, name: true } },
+          productFamily: { select: { id: true, name: true, brand: true } },
           division: { select: { id: true, name: true, code: true } },
           company: { select: { id: true, name: true, code: true } },
           baseUnit: { select: { id: true, name: true, symbol: true } },
@@ -93,11 +109,61 @@ export class ProductsService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
+  async findFamilies(query: QueryProductFamilyDto, user: AuthUser) {
+    const {
+      page = 1,
+      limit = 50,
+      companyId,
+      divisionId,
+      categoryId,
+      isActive,
+      search,
+    } = query;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.ProductFamilyWhereInput = {
+      deletedAt: null,
+      ...(await this.companyScope.companyWhereFor(user, companyId)),
+    };
+    if (divisionId) where.OR = [{ divisionId }, { divisionId: null }];
+    if (categoryId) where.categoryId = categoryId;
+    if (isActive !== undefined) where.isActive = isActive;
+    if (search) {
+      const searchTerms: Prisma.ProductFamilyWhereInput[] = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { brand: { contains: search, mode: 'insensitive' } },
+      ];
+      if (where.OR) {
+        where.AND = [{ OR: where.OR as Prisma.ProductFamilyWhereInput[] }, { OR: searchTerms }];
+        delete where.OR;
+      } else {
+        where.OR = searchTerms;
+      }
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.productFamily.findMany({
+        where,
+        include: {
+          category: { select: { id: true, name: true } },
+          division: { select: { id: true, name: true, code: true } },
+        },
+        orderBy: [{ brand: 'asc' }, { name: 'asc' }],
+        skip,
+        take: limit,
+      }),
+      this.prisma.productFamily.count({ where }),
+    ]);
+
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
   async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const record = await this.prisma.product.findFirst({
       where: { id, deletedAt: null },
       include: {
         category: true,
+        productFamily: true,
         company: { select: { id: true, name: true, code: true } },
         baseUnit: { select: { id: true, name: true, symbol: true } },
         purchaseUnit: { select: { id: true, name: true, symbol: true } },
@@ -112,6 +178,13 @@ export class ProductsService {
   async create(dto: CreateProductDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     await this.assertReferencesBelongToCompany(dto.companyId, dto);
+    const productFamilyId = await this.resolveProductFamilyId(dto.companyId, {
+      categoryId: dto.categoryId,
+      divisionId: dto.divisionId ?? null,
+      productFamilyId: dto.productFamilyId,
+      productFamilyName: dto.productFamilyName,
+      productFamilyBrand: dto.productFamilyBrand,
+    });
     const userId = user.id;
     const productCode = normalizeProductCode(dto.productCode) ?? generateProductCode();
 
@@ -128,7 +201,12 @@ export class ProductsService {
         companyId: dto.companyId,
         divisionId: dto.divisionId,
         categoryId: dto.categoryId,
+        productFamilyId,
         name: dto.name,
+        variantName: optionalText(dto.variantName),
+        variantColor: optionalText(dto.variantColor),
+        variantSize: optionalText(dto.variantSize),
+        variantFinish: optionalText(dto.variantFinish),
         description: dto.description,
         productType: dto.productType,
         baseUnitId: dto.baseUnitId,
@@ -173,6 +251,21 @@ export class ProductsService {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     await this.assertReferencesBelongToCompany(existing.companyId, dto);
     const productCode = normalizeProductCode(dto.productCode);
+    const targetCategoryId = dto.categoryId ?? existing.categoryId;
+    const targetDivisionId =
+      dto.divisionId !== undefined ? optionalText(dto.divisionId) ?? null : existing.divisionId;
+    const productFamilyId = await this.resolveProductFamilyId(
+      existing.companyId,
+      {
+        categoryId: targetCategoryId,
+        divisionId: targetDivisionId,
+        productFamilyId: dto.productFamilyId,
+        productFamilyName: dto.productFamilyName,
+        productFamilyBrand: dto.productFamilyBrand,
+      },
+      existing.productFamilyId,
+      dto.categoryId !== undefined || dto.divisionId !== undefined,
+    );
 
     if (productCode && productCode !== existing.productCode) {
       const duplicate = await this.prisma.product.findFirst({
@@ -194,7 +287,16 @@ export class ProductsService {
         ...(productCode !== undefined && { productCode }),
         ...(dto.divisionId !== undefined && { divisionId: dto.divisionId || null }),
         ...(dto.categoryId !== undefined && { categoryId: dto.categoryId }),
+        ...(productFamilyId !== undefined && { productFamilyId }),
         ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.variantName !== undefined && { variantName: optionalText(dto.variantName) ?? null }),
+        ...(dto.variantColor !== undefined && {
+          variantColor: optionalText(dto.variantColor) ?? null,
+        }),
+        ...(dto.variantSize !== undefined && { variantSize: optionalText(dto.variantSize) ?? null }),
+        ...(dto.variantFinish !== undefined && {
+          variantFinish: optionalText(dto.variantFinish) ?? null,
+        }),
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.productType !== undefined && { productType: dto.productType }),
         ...(dto.baseUnitId !== undefined && { baseUnitId: dto.baseUnitId }),
@@ -241,6 +343,89 @@ export class ProductsService {
     }
 
     return record;
+  }
+
+  private async resolveProductFamilyId(
+    companyId: string,
+    refs: ProductReferenceIds,
+    currentProductFamilyId?: string | null,
+    validateCurrent = false,
+  ): Promise<string | null | undefined> {
+    const categoryId = refs.categoryId;
+    if (!categoryId) {
+      if (refs.productFamilyId || refs.productFamilyName) {
+        throw new BadRequestException('Product category is required before assigning a family');
+      }
+      return undefined;
+    }
+
+    const familyName = optionalText(refs.productFamilyName);
+    if (familyName) {
+      const divisionId = optionalText(refs.divisionId) ?? null;
+      const existing = await this.prisma.productFamily.findFirst({
+        where: {
+          companyId,
+          categoryId,
+          divisionId,
+          deletedAt: null,
+          name: { equals: familyName, mode: 'insensitive' },
+        },
+        select: { id: true },
+      });
+      if (existing) return existing.id;
+
+      const created = await this.prisma.productFamily.create({
+        data: {
+          companyId,
+          categoryId,
+          divisionId,
+          name: familyName,
+          brand: optionalText(refs.productFamilyBrand),
+        },
+        select: { id: true },
+      });
+      return created.id;
+    }
+
+    if (refs.productFamilyId !== undefined) {
+      const familyId = optionalText(refs.productFamilyId);
+      if (!familyId) return null;
+      return this.assertProductFamilyMatchesProduct(companyId, familyId, categoryId, refs.divisionId);
+    }
+
+    if (validateCurrent && currentProductFamilyId) {
+      return this.assertProductFamilyMatchesProduct(
+        companyId,
+        currentProductFamilyId,
+        categoryId,
+        refs.divisionId,
+      );
+    }
+
+    return undefined;
+  }
+
+  private async assertProductFamilyMatchesProduct(
+    companyId: string,
+    productFamilyId: string,
+    categoryId: string,
+    divisionId?: string | null,
+  ) {
+    const family = await this.prisma.productFamily.findFirst({
+      where: { id: productFamilyId, deletedAt: null, isActive: true },
+      select: { id: true, companyId: true, categoryId: true, divisionId: true },
+    });
+    if (!family || family.companyId !== companyId) {
+      throw new BadRequestException('Product family does not belong to this company');
+    }
+    if (family.categoryId !== categoryId) {
+      throw new BadRequestException('Product family must belong to the selected category');
+    }
+    const targetDivisionId = optionalText(divisionId) ?? null;
+    if (family.divisionId && family.divisionId !== targetDivisionId) {
+      throw new BadRequestException('Product family must belong to the selected division');
+    }
+    return family.id;
   }
 
   private async assertReferencesBelongToCompany(companyId: string, refs: ProductReferenceIds) {

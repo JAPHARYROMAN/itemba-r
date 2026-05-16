@@ -6,6 +6,7 @@ export class QueryProductDto {
   @IsOptional() @IsString() companyId?: string;
   @IsOptional() @IsString() divisionId?: string;
   @IsOptional() @IsString() categoryId?: string;
+  @IsOptional() @IsString() productFamilyId?: string;
   @IsOptional() @IsEnum(ProductType) productType?: ProductType;
   @IsOptional() @IsEnum(ProductStatus) status?: ProductStatus;
   @IsOptional() @IsString() search?: string;

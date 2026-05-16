@@ -389,6 +389,7 @@ model Company {
   customers             Customer[]
   suppliers             Supplier[]
   productCategories     ProductCategory[]
+  productFamilies       ProductFamily[]
   products              Product[]
   inventoryLocations    InventoryLocation[]
   inventoryBalances     InventoryBalance[]
@@ -708,6 +709,7 @@ model Division {
   shiftSchedules        ShiftSchedule[]
 
   approvalWorkflows     ApprovalWorkflow[]
+  productFamilies       ProductFamily[]      @relation("DivisionProductFamilies")
   products              Product[]            @relation("DivisionProducts")
   userPreferenceDefaults UserPreference[]    @relation("UserPrefDefaultDivision")
   @@unique([companyId, code])
@@ -2616,12 +2618,38 @@ model ProductCategory {
   company        Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
   parentCategory ProductCategory? @relation("CategoryHierarchy", fields: [parentCategoryId], references: [id], onDelete: SetNull)
   subCategories  ProductCategory[] @relation("CategoryHierarchy")
+  productFamilies ProductFamily[]
   products       Product[]
   supplierLinks  SupplierProductCategory[]
 
   @@index([companyId])
   @@index([categoryType])
   @@map("product_categories")
+}
+
+model ProductFamily {
+  id          String    @id @default(uuid())
+  companyId   String
+  divisionId  String?
+  categoryId  String
+  name        String
+  brand       String?
+  description String?
+  isActive    Boolean   @default(true)
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  company  Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division Division?       @relation("DivisionProductFamilies", fields: [divisionId], references: [id], onDelete: SetNull)
+  category ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  products Product[]
+
+  @@index([companyId])
+  @@index([divisionId])
+  @@index([categoryId])
+  @@index([companyId, categoryId, name])
+  @@map("product_families")
 }
 
 model Product {
@@ -2634,7 +2662,12 @@ model Product {
   /// (everyone sees it). Existing rows default to null on migration.
   divisionId           String?
   categoryId           String
+  productFamilyId      String?
   name                 String
+  variantName          String?
+  variantColor         String?
+  variantSize          String?
+  variantFinish        String?
   description          String?
   productType          ProductType   @default(STOCK_ITEM)
   baseUnitId           String
@@ -2662,6 +2695,7 @@ model Product {
   company      Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division     Division?       @relation("DivisionProducts", fields: [divisionId], references: [id], onDelete: SetNull)
   category     ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  productFamily ProductFamily? @relation(fields: [productFamilyId], references: [id], onDelete: SetNull)
   baseUnit     UnitOfMeasure   @relation("ProductBaseUnit", fields: [baseUnitId], references: [id], onDelete: Restrict)
   purchaseUnit UnitOfMeasure?  @relation("ProductPurchaseUnit", fields: [purchaseUnitId], references: [id], onDelete: SetNull)
   salesUnit    UnitOfMeasure?  @relation("ProductSalesUnit", fields: [salesUnitId], references: [id], onDelete: SetNull)
@@ -2700,6 +2734,7 @@ model Product {
   @@index([companyId])
   @@index([divisionId])
   @@index([categoryId])
+  @@index([productFamilyId])
   @@index([status])
   @@map("products")
 }

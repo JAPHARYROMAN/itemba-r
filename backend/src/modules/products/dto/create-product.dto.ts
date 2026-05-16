@@ -31,9 +31,37 @@ export class CreateProductDto {
   @IsString()
   categoryId!: string;
 
+  @IsOptional()
+  @IsString()
+  productFamilyId?: string;
+
+  @IsOptional()
+  @IsString()
+  productFamilyName?: string;
+
+  @IsOptional()
+  @IsString()
+  productFamilyBrand?: string;
+
   @IsNotEmpty()
   @IsString()
   name!: string;
+
+  @IsOptional()
+  @IsString()
+  variantName?: string;
+
+  @IsOptional()
+  @IsString()
+  variantColor?: string;
+
+  @IsOptional()
+  @IsString()
+  variantSize?: string;
+
+  @IsOptional()
+  @IsString()
+  variantFinish?: string;
 
   @IsOptional()
   @IsString()

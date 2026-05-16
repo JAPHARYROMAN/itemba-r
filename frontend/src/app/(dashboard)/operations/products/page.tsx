@@ -31,6 +31,13 @@ interface Category {
   id: string;
   name: string;
 }
+interface ProductFamily {
+  id: string;
+  name: string;
+  brand?: string | null;
+  categoryId: string;
+  divisionId?: string | null;
+}
 interface Unit {
   id: string;
   name: string;
@@ -61,10 +68,16 @@ interface Product {
   companyId: string;
   divisionId?: string | null;
   categoryId: string;
+  productFamilyId?: string | null;
   baseUnitId: string;
+  variantName?: string | null;
+  variantColor?: string | null;
+  variantSize?: string | null;
+  variantFinish?: string | null;
   company?: { name: string } | null;
   division?: { id: string; name: string; code: string } | null;
   category?: { name: string } | null;
+  productFamily?: { id: string; name: string; brand?: string | null } | null;
   baseUnit?: { name: string; symbol: string } | null;
 }
 
@@ -74,6 +87,13 @@ interface ProductForm {
   productCode: string;
   name: string;
   categoryId: string;
+  productFamilyId: string;
+  productFamilyName: string;
+  productFamilyBrand: string;
+  variantName: string;
+  variantColor: string;
+  variantSize: string;
+  variantFinish: string;
   productType: string;
   baseUnitId: string;
   defaultSellingPrice: string;
@@ -122,6 +142,13 @@ const BLANK: ProductForm = {
   productCode: '',
   name: '',
   categoryId: '',
+  productFamilyId: '',
+  productFamilyName: '',
+  productFamilyBrand: '',
+  variantName: '',
+  variantColor: '',
+  variantSize: '',
+  variantFinish: '',
   productType: 'STOCK_ITEM',
   baseUnitId: '',
   defaultSellingPrice: '',
@@ -168,6 +195,13 @@ function ProductModal({
           productCode: initial.productCode ?? '',
           name: initial.name,
           categoryId: initial.categoryId,
+          productFamilyId: initial.productFamilyId ?? '',
+          productFamilyName: '',
+          productFamilyBrand: initial.productFamily?.brand ?? '',
+          variantName: initial.variantName ?? '',
+          variantColor: initial.variantColor ?? '',
+          variantSize: initial.variantSize ?? '',
+          variantFinish: initial.variantFinish ?? '',
           productType: initial.productType,
           baseUnitId: initial.baseUnitId,
           defaultSellingPrice:
@@ -188,6 +222,7 @@ function ProductModal({
       : { ...BLANK },
   );
   const [categories, setCategories] = useState<Category[]>([]);
+  const [families, setFamilies] = useState<ProductFamily[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -198,6 +233,7 @@ function ProductModal({
   useEffect(() => {
     if (!form.companyId) {
       setCategories([]);
+      setFamilies([]);
       setDivisions([]);
       return;
     }
@@ -223,6 +259,34 @@ function ProductModal({
       cancelled = true;
     };
   }, [form.companyId]);
+
+  useEffect(() => {
+    if (!form.companyId || !form.categoryId) {
+      setFamilies([]);
+      return;
+    }
+    let cancelled = false;
+
+    backendList<ProductFamily>('/products/families', {
+      query: {
+        companyId: form.companyId,
+        categoryId: form.categoryId,
+        divisionId: form.divisionId || undefined,
+        isActive: true,
+        limit: 500,
+      },
+    })
+      .then((records) => {
+        if (!cancelled) setFamilies(records);
+      })
+      .catch(() => {
+        if (!cancelled) setFamilies([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId, form.categoryId, form.divisionId]);
 
   const handleSubmit = async () => {
     if (!form.companyId) {
@@ -258,6 +322,25 @@ function ProductModal({
       };
       if (form.productCode.trim()) body.productCode = form.productCode.trim();
       if (form.description.trim()) body.description = form.description.trim();
+      if (form.productFamilyName.trim()) {
+        body.productFamilyName = form.productFamilyName.trim();
+        if (form.productFamilyBrand.trim()) body.productFamilyBrand = form.productFamilyBrand.trim();
+      } else if (mode === 'edit') {
+        body.productFamilyId = form.productFamilyId || null;
+      } else if (form.productFamilyId) {
+        body.productFamilyId = form.productFamilyId;
+      }
+      const textFields: (keyof ProductForm)[] = [
+        'variantName',
+        'variantColor',
+        'variantSize',
+        'variantFinish',
+      ];
+      for (const k of textFields) {
+        const v = (form[k] as string).trim();
+        if (mode === 'edit') body[k] = v || null;
+        else if (v) body[k] = v;
+      }
       // Division: empty string => clear in edit mode (send null);
       // populated => assign to that division; omit on create when blank.
       if (mode === 'edit') body.divisionId = form.divisionId || null;
@@ -314,7 +397,17 @@ function ProductModal({
           label="Company"
           required
           value={form.companyId}
-          onChange={(e) => set('companyId', e.target.value)}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              companyId: e.target.value,
+              divisionId: '',
+              categoryId: '',
+              productFamilyId: '',
+              productFamilyName: '',
+              productFamilyBrand: '',
+            }))
+          }
           placeholder="Select company"
           disabled={mode === 'edit'}
         >
@@ -328,7 +421,15 @@ function ProductModal({
           label="Category"
           required
           value={form.categoryId}
-          onChange={(e) => set('categoryId', e.target.value)}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              categoryId: e.target.value,
+              productFamilyId: '',
+              productFamilyName: '',
+              productFamilyBrand: '',
+            }))
+          }
           placeholder={form.companyId ? 'Select category' : 'Select company first'}
         >
           {categories.map((c) => (
@@ -340,7 +441,15 @@ function ProductModal({
         <FormSelect
           label="Division"
           value={form.divisionId}
-          onChange={(e) => set('divisionId', e.target.value)}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              divisionId: e.target.value,
+              productFamilyId: '',
+              productFamilyName: '',
+              productFamilyBrand: '',
+            }))
+          }
           placeholder={form.companyId ? 'Company-wide (no division)' : 'Select company first'}
         >
           {divisions.map((d) => (
@@ -349,6 +458,45 @@ function ProductModal({
             </option>
           ))}
         </FormSelect>
+        <FormSelect
+          label="Product Family"
+          value={form.productFamilyId}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              productFamilyId: e.target.value,
+              productFamilyName: '',
+              productFamilyBrand:
+                families.find((family) => family.id === e.target.value)?.brand ?? '',
+            }))
+          }
+          placeholder={form.categoryId ? 'No family / create below' : 'Select category first'}
+          disabled={!form.categoryId}
+        >
+          {families.map((family) => (
+            <option key={family.id} value={family.id}>
+              {family.brand ? `${family.brand} — ${family.name}` : family.name}
+            </option>
+          ))}
+        </FormSelect>
+        <FormInput
+          label="New Family Name"
+          value={form.productFamilyName}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              productFamilyName: e.target.value,
+              productFamilyId: e.target.value.trim() ? '' : f.productFamilyId,
+            }))
+          }
+          placeholder="e.g. Coral Pro-Guard"
+        />
+        <FormInput
+          label="Family Brand"
+          value={form.productFamilyBrand}
+          onChange={(e) => set('productFamilyBrand', e.target.value)}
+          placeholder="e.g. Coral"
+        />
         <FormInput
           label="Product Code"
           value={form.productCode}
@@ -359,6 +507,30 @@ function ProductModal({
           required
           value={form.name}
           onChange={(e) => set('name', e.target.value)}
+        />
+        <FormInput
+          label="Variant Name"
+          value={form.variantName}
+          onChange={(e) => set('variantName', e.target.value)}
+          placeholder="e.g. White 4L"
+        />
+        <FormInput
+          label="Color"
+          value={form.variantColor}
+          onChange={(e) => set('variantColor', e.target.value)}
+          placeholder="White / Black / Summer Blue"
+        />
+        <FormInput
+          label="Size / Pack"
+          value={form.variantSize}
+          onChange={(e) => set('variantSize', e.target.value)}
+          placeholder="4L, 10L, 500ml"
+        />
+        <FormInput
+          label="Finish"
+          value={form.variantFinish}
+          onChange={(e) => set('variantFinish', e.target.value)}
+          placeholder="Matt, Gloss, Silk"
         />
         <FormSelect
           label="Product Type"
@@ -536,12 +708,14 @@ export default function ProductsPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [productFamilies, setProductFamilies] = useState<ProductFamily[]>([]);
   const [data, setData] = useState<Paginated<Product> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [productFamilyId, setProductFamilyId] = useState('');
   const [productType, setProductType] = useState('');
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
@@ -596,6 +770,33 @@ export default function ProductsPage() {
     };
   }, [canView, companyId]);
 
+  useEffect(() => {
+    if (!canView) return;
+    let cancelled = false;
+
+    async function loadFamilies() {
+      try {
+        const records = await backendList<ProductFamily>('/products/families', {
+          query: {
+            limit: 500,
+            companyId: companyId || undefined,
+            categoryId: categoryId || undefined,
+            isActive: true,
+          },
+        });
+        if (!cancelled) setProductFamilies(records);
+      } catch {
+        if (!cancelled) setProductFamilies([]);
+      }
+    }
+
+    void loadFamilies();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canView, companyId, categoryId]);
+
   const load = useCallback(async () => {
     if (!canView) return;
     setLoading(true);
@@ -608,6 +809,7 @@ export default function ProductsPage() {
           search: search.trim() || undefined,
           companyId: companyId || undefined,
           categoryId: categoryId || undefined,
+          productFamilyId: productFamilyId || undefined,
           productType: productType || undefined,
           status: status || undefined,
         },
@@ -619,7 +821,7 @@ export default function ProductsPage() {
     } finally {
       setLoading(false);
     }
-  }, [canView, page, search, companyId, categoryId, productType, status]);
+  }, [canView, page, search, companyId, categoryId, productFamilyId, productType, status]);
 
   useEffect(() => {
     load();
@@ -711,6 +913,7 @@ export default function ProductsPage() {
               onChange={(e) => {
                 setCompanyId(e.target.value);
                 setCategoryId('');
+                setProductFamilyId('');
                 setPage(1);
               }}
               className={filterSelectCls}
@@ -727,6 +930,7 @@ export default function ProductsPage() {
               value={categoryId}
               onChange={(e) => {
                 setCategoryId(e.target.value);
+                setProductFamilyId('');
                 setPage(1);
               }}
               className={filterSelectCls}
@@ -736,6 +940,22 @@ export default function ProductsPage() {
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={productFamilyId}
+              onChange={(e) => {
+                setProductFamilyId(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
+              <option value="">All Families</option>
+              {productFamilies.map((family) => (
+                <option key={family.id} value={family.id}>
+                  {family.brand ? `${family.brand} — ${family.name}` : family.name}
                 </option>
               ))}
             </select>
@@ -793,7 +1013,7 @@ export default function ProductsPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1000px]">
+          <table className="w-full text-sm min-w-[1200px]">
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
@@ -801,6 +1021,8 @@ export default function ProductsPage() {
               >
                 <th className="px-4 py-3">Code</th>
                 <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3">Family</th>
+                <th className="px-4 py-3">Variant</th>
                 <th className="px-4 py-3">Category</th>
                 <th className="px-4 py-3">Division</th>
                 <th className="px-4 py-3">Type</th>
@@ -814,14 +1036,14 @@ export default function ProductsPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={canCreate || canDelete ? 10 : 9}>
+                  <td colSpan={canCreate || canDelete ? 12 : 11}>
                     <PageSpinner />
                   </td>
                 </tr>
               ) : !data?.data.length ? (
                 <tr>
                   <td
-                    colSpan={canCreate || canDelete ? 10 : 9}
+                    colSpan={canCreate || canDelete ? 12 : 11}
                     className="px-4 py-10 text-center text-sm"
                     style={{ color: 'var(--aurora-text-muted)' }}
                   >
@@ -833,6 +1055,21 @@ export default function ProductsPage() {
                   <tr key={p.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono text-xs">{p.productCode ?? '—'}</td>
                     <td className="px-4 py-3 font-medium">{p.name}</td>
+                    <td className="px-4 py-3 text-xs">
+                      {p.productFamily
+                        ? p.productFamily.brand
+                          ? `${p.productFamily.brand} — ${p.productFamily.name}`
+                          : p.productFamily.name
+                        : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      <div>{p.variantName || p.variantColor || '—'}</div>
+                      {(p.variantSize || p.variantFinish) && (
+                        <div style={{ color: 'var(--aurora-text-muted)' }}>
+                          {[p.variantSize, p.variantFinish].filter(Boolean).join(' · ')}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-xs">{p.category?.name ?? '—'}</td>
                     <td className="px-4 py-3 text-xs">
                       {p.division?.name ?? (
