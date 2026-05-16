@@ -35,6 +35,8 @@ interface Customer {
   name: string;
   customerCode?: string | null;
   customerType: string;
+  divisionId?: string | null;
+  branchId?: string | null;
 }
 interface Product {
   id: string;
@@ -54,6 +56,8 @@ interface InventoryLocation {
   id: string;
   name: string;
   locationCode: string;
+  divisionId?: string | null;
+  branchId?: string | null;
 }
 interface Unit {
   id: string;
@@ -105,6 +109,8 @@ interface SalesOrder {
   cashAccountId?: string | null;
   paymentReference?: string | null;
   companyId: string;
+  divisionId?: string | null;
+  branchId?: string | null;
   company?: { name: string } | null;
   customer?: { name: string } | null;
   lines?: SalesOrderLine[];
@@ -113,6 +119,7 @@ interface SalesOrder {
 interface SalesOrderForm {
   companyId: string;
   divisionId: string;
+  branchId: string;
   customerId: string;
   customerName: string;
   salesType: string;
@@ -131,6 +138,13 @@ interface Division {
   id: string;
   name: string;
   code: string;
+}
+
+interface Branch {
+  id: string;
+  name: string;
+  code?: string | null;
+  divisionId: string;
 }
 
 interface Paginated<T> {
@@ -178,6 +192,7 @@ const BLANK_LINE = (): SalesOrderLine => ({
 const blankForm = (): SalesOrderForm => ({
   companyId: '',
   divisionId: '',
+  branchId: '',
   customerId: '',
   customerName: '',
   salesType: 'CASH_SALE',
@@ -213,7 +228,8 @@ function SalesOrderModal({
     initial
       ? {
           companyId: initial.companyId,
-          divisionId: '',
+          divisionId: initial.divisionId ?? '',
+          branchId: initial.branchId ?? '',
           customerId: initial.customerId ?? '',
           customerName: initial.customerName ?? '',
           salesType: initial.salesType,
@@ -249,6 +265,7 @@ function SalesOrderModal({
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -269,43 +286,71 @@ function SalesOrderModal({
   useEffect(() => {
     if (!form.companyId) {
       setCustomers([]);
-      setProducts([]);
       setLocations([]);
       setEmployees([]);
       setCashAccounts([]);
       setDivisions([]);
+      setBranches([]);
       return;
     }
     let cancelled = false;
     Promise.allSettled([
-      backendList<Customer>('/customers', { query: { companyId: form.companyId, limit: 200 } }),
-      backendList<InventoryLocation>('/inventory-locations', {
-        query: { companyId: form.companyId, limit: 200 },
-      }),
-      backendList<Employee>('/hr/employees', { query: { companyId: form.companyId, limit: 500 } }),
       backendList<Division>('/divisions', { query: { companyId: form.companyId, limit: 200 } }),
+      backendList<Branch>('/branches', {
+        query: { companyId: form.companyId, activeOnly: true, limit: 500 },
+      }),
       backendList<CashAccount>('/cash-accounts', {
         query: { companyId: form.companyId, limit: 200 },
       }),
-    ]).then(
-      ([customerResult, locationResult, employeeResult, divisionResult, cashAccountResult]) => {
-        if (cancelled) return;
-        setCustomers(customerResult.status === 'fulfilled' ? customerResult.value : []);
-        setLocations(locationResult.status === 'fulfilled' ? locationResult.value : []);
-        setEmployees(employeeResult.status === 'fulfilled' ? employeeResult.value : []);
-        setDivisions(divisionResult.status === 'fulfilled' ? divisionResult.value : []);
-        setCashAccounts(cashAccountResult.status === 'fulfilled' ? cashAccountResult.value : []);
-      },
-    );
+    ]).then(([divisionResult, branchResult, cashAccountResult]) => {
+      if (cancelled) return;
+      setDivisions(divisionResult.status === 'fulfilled' ? divisionResult.value : []);
+      setBranches(branchResult.status === 'fulfilled' ? branchResult.value : []);
+      setCashAccounts(cashAccountResult.status === 'fulfilled' ? cashAccountResult.value : []);
+    });
     return () => {
       cancelled = true;
     };
   }, [form.companyId]);
 
+  useEffect(() => {
+    if (!form.companyId || !form.branchId) {
+      setCustomers([]);
+      setLocations([]);
+      setEmployees([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.allSettled([
+      backendList<Customer>('/customers', {
+        query: { companyId: form.companyId, branchId: form.branchId, limit: 200 },
+      }),
+      backendList<InventoryLocation>('/inventory-locations', {
+        query: {
+          companyId: form.companyId,
+          divisionId: form.divisionId || undefined,
+          branchId: form.branchId,
+          limit: 200,
+        },
+      }),
+      backendList<Employee>('/hr/employees', {
+        query: { companyId: form.companyId, branchId: form.branchId, limit: 500 },
+      }),
+    ]).then(([customerResult, locationResult, employeeResult]) => {
+      if (cancelled) return;
+      setCustomers(customerResult.status === 'fulfilled' ? customerResult.value : []);
+      setLocations(locationResult.status === 'fulfilled' ? locationResult.value : []);
+      setEmployees(employeeResult.status === 'fulfilled' ? employeeResult.value : []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId, form.divisionId, form.branchId]);
+
   // Reload products when company OR division changes; the backend filters
   // to the chosen division (plus company-wide SKUs).
   useEffect(() => {
-    if (!form.companyId) {
+    if (!form.companyId || !form.divisionId) {
       setProducts([]);
       return;
     }
@@ -334,10 +379,21 @@ function SalesOrderModal({
   const addLine = () => setForm((f) => ({ ...f, lines: [...f.lines, BLANK_LINE()] }));
   const removeLine = (i: number) =>
     setForm((f) => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }));
+  const branchOptions = form.divisionId
+    ? branches.filter((branch) => branch.divisionId === form.divisionId)
+    : [];
 
   const handleSubmit = async () => {
     if (!form.companyId) {
       setError('Company is required');
+      return;
+    }
+    if (!form.divisionId) {
+      setError('Division is required');
+      return;
+    }
+    if (!form.branchId) {
+      setError('Branch/location is required');
       return;
     }
     if (!form.customerId && !form.customerName.trim()) {
@@ -361,6 +417,8 @@ function SalesOrderModal({
     try {
       const body: Record<string, unknown> = {
         companyId: form.companyId,
+        divisionId: form.divisionId,
+        branchId: form.branchId,
         salesType: form.salesType,
         orderDate: form.orderDate,
         currency: form.currency,
@@ -426,8 +484,19 @@ function SalesOrderModal({
             required
             value={form.companyId}
             onChange={(e) => {
-              setField('companyId', e.target.value);
-              setField('customerId', '');
+              setForm((f) => ({
+                ...f,
+                companyId: e.target.value,
+                divisionId: '',
+                branchId: '',
+                customerId: '',
+                salespersonId: '',
+                lines: f.lines.map((line) => ({
+                  ...line,
+                  productId: '',
+                  inventoryLocationId: '',
+                })),
+              }));
             }}
             placeholder="Select company"
             disabled={mode === 'edit'}
@@ -451,14 +520,52 @@ function SalesOrderModal({
             ))}
           </FormSelect>
           <FormSelect
-            label="Division (filters product list)"
+            label="Division"
+            required
             value={form.divisionId}
-            onChange={(e) => setField('divisionId', e.target.value)}
-            placeholder="All divisions"
+            onChange={(e) => {
+              const divisionId = e.target.value;
+              setForm((f) => ({
+                ...f,
+                divisionId,
+                branchId: '',
+                customerId: '',
+                salespersonId: '',
+                lines: f.lines.map((line) => ({
+                  ...line,
+                  productId: '',
+                  inventoryLocationId: '',
+                })),
+              }));
+            }}
+            placeholder={form.companyId ? 'Select division' : 'Select company first'}
           >
             {divisions.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.code ? `${d.code} — ${d.name}` : d.name}
+              </option>
+            ))}
+          </FormSelect>
+          <FormSelect
+            label="Branch / Location"
+            required
+            value={form.branchId}
+            onChange={(e) => {
+              const branchId = e.target.value;
+              setForm((f) => ({
+                ...f,
+                branchId,
+                customerId: '',
+                salespersonId: '',
+                lines: f.lines.map((line) => ({ ...line, inventoryLocationId: '' })),
+              }));
+            }}
+            placeholder={form.divisionId ? 'Select branch' : 'Select division first'}
+            disabled={!form.divisionId}
+          >
+            {branchOptions.map((branch) => (
+              <option key={branch.id} value={branch.id}>
+                {branch.code ? `${branch.code} — ${branch.name}` : branch.name}
               </option>
             ))}
           </FormSelect>
@@ -478,7 +585,8 @@ function SalesOrderModal({
             label="Customer"
             value={form.customerId}
             onChange={(e) => setField('customerId', e.target.value)}
-            placeholder="Walk-in (use name)"
+            placeholder={form.branchId ? 'Walk-in (use name)' : 'Select branch first'}
+            disabled={!form.branchId}
           >
             {customers.map((c) => (
               <option key={c.id} value={c.id}>
@@ -510,7 +618,8 @@ function SalesOrderModal({
             label="Salesperson"
             value={form.salespersonId}
             onChange={(e) => setField('salespersonId', e.target.value)}
-            placeholder="None (no commission)"
+            placeholder={form.branchId ? 'None (no commission)' : 'Select branch first'}
+            disabled={!form.branchId}
           >
             {employees.map((e) => {
               const ratePct =

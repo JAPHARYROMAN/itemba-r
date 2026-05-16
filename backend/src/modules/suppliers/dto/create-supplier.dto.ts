@@ -5,6 +5,8 @@ import {
   IsEmail,
   IsNumber,
   IsNotEmpty,
+  IsArray,
+  ArrayNotEmpty,
 } from 'class-validator';
 import { SupplierType, SupplierStatus } from '@prisma/client';
 
@@ -13,13 +15,18 @@ export class CreateSupplierDto {
   @IsString()
   companyId!: string;
 
-  @IsOptional()
+  @IsNotEmpty()
   @IsString()
-  divisionId?: string;
+  divisionId!: string;
 
   @IsOptional()
   @IsString()
   branchId?: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  productCategoryIds!: string[];
 
   @IsOptional()
   @IsString()

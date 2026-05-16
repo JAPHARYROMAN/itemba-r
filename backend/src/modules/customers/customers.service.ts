@@ -52,6 +52,8 @@ export class CustomersService {
         where,
         include: {
           company: { select: { id: true, name: true, code: true } },
+          division: { select: { id: true, name: true, code: true } },
+          branch: { select: { id: true, name: true, code: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -112,6 +114,7 @@ export class CustomersService {
 
   async create(dto: CreateCustomerDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    const branch = await this.assertBranchBelongsToCompany(dto.companyId, dto.branchId, dto.divisionId);
 
     const customerCode =
       dto.customerCode ?? `CUST-${Date.now().toString(36).toUpperCase()}`;
@@ -131,7 +134,7 @@ export class CustomersService {
       data: {
         customerCode,
         companyId: dto.companyId,
-        divisionId: dto.divisionId,
+        divisionId: branch.divisionId,
         branchId: dto.branchId,
         customerType: dto.customerType,
         name: dto.name,
@@ -174,12 +177,17 @@ export class CustomersService {
     if (dto.companyId !== undefined && dto.companyId !== existing.companyId) {
       throw new BadRequestException('Customer companyId is immutable after creation');
     }
+    if (dto.divisionId !== undefined && dto.branchId === undefined) {
+      throw new BadRequestException('Customer division is derived from the selected branch');
+    }
+    const branch = dto.branchId
+      ? await this.assertBranchBelongsToCompany(existing.companyId, dto.branchId, dto.divisionId)
+      : undefined;
 
     const record = await this.prisma.customer.update({
       where: { id },
       data: {
-        ...(dto.divisionId !== undefined && { divisionId: dto.divisionId }),
-        ...(dto.branchId !== undefined && { branchId: dto.branchId }),
+        ...(branch && { divisionId: branch.divisionId, branchId: branch.id }),
         ...(dto.customerType !== undefined && { customerType: dto.customerType }),
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.legalName !== undefined && { legalName: dto.legalName }),
@@ -426,5 +434,23 @@ export class CustomersService {
     if (!record) throw new NotFoundException('Customer not found');
     await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
     return record;
+  }
+
+  private async assertBranchBelongsToCompany(
+    companyId: string,
+    branchId: string,
+    divisionId?: string,
+  ) {
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: branchId, deletedAt: null },
+      select: { id: true, divisionId: true, division: { select: { companyId: true } } },
+    });
+    if (!branch || branch.division.companyId !== companyId) {
+      throw new BadRequestException('Customer branch must belong to this company');
+    }
+    if (divisionId && branch.divisionId !== divisionId) {
+      throw new BadRequestException('Customer branch must belong to the selected division');
+    }
+    return branch;
   }
 }

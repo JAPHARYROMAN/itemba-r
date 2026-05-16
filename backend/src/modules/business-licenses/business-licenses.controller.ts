@@ -28,6 +28,7 @@ export class BusinessLicensesController {
   findAll(
     @Query('companyId') companyId?: string,
     @Query('divisionId') divisionId?: string,
+    @Query('branchId') branchId?: string,
     @Query('licensedBusinessUnitId') licensedBusinessUnitId?: string,
     @Query('status') status?: BusinessLicenseStatus,
     @Query('licenseType') licenseType?: BusinessLicenseType,
@@ -35,7 +36,7 @@ export class BusinessLicensesController {
     @Query('page') page?: string,
     @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
-    return this.service.findAll(companyId, divisionId, licensedBusinessUnitId, status, licenseType, search, page ? +page : 1, limit ? +limit : 20, user);
+    return this.service.findAll(companyId, divisionId, branchId, licensedBusinessUnitId, status, licenseType, search, page ? +page : 1, limit ? +limit : 20, user);
   }
 
   @Get(':id')
@@ -47,24 +48,24 @@ export class BusinessLicensesController {
   @Post()
   @RequirePermissions('business_licenses.manage')
   create(@Body() dto: CreateBusinessLicenseDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Patch(':id')
   @RequirePermissions('business_licenses.manage')
   update(@Param('id') id: string, @Body() dto: UpdateBusinessLicenseDto, @CurrentUser() user: AuthUser) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 
   @Post(':id/renew')
   @RequirePermissions('business_licenses.renew')
   renew(@Param('id') id: string, @Body() dto: RenewBusinessLicenseDto, @CurrentUser() user: AuthUser) {
-    return this.service.renew(id, dto, user.id);
+    return this.service.renew(id, dto, user);
   }
 
   @Delete(':id')
   @RequirePermissions('business_licenses.manage')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user);
   }
 }

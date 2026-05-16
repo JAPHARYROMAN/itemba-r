@@ -745,6 +745,7 @@ model Branch {
   stockAdjustments   StockAdjustment[]
   salesOrders        SalesOrder[]
   purchaseOrders     PurchaseOrder[]
+  businessLicenses   BusinessLicense[]
 
   // Petroleum (Milestone 5)
   fuelTanks                FuelTank[]
@@ -2494,6 +2495,7 @@ model Supplier {
   updatedBy     User?     @relation("SupplierUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   purchaseOrders PurchaseOrder[]
   fuelDeliveries FuelDelivery[]
+  productCategories SupplierProductCategory[]
 
   // Westsides (Milestone 6)
   productBatches   ProductBatch[]
@@ -2513,6 +2515,20 @@ model Supplier {
   @@index([companyId, status, name])
   @@index([companyId, createdAt])
   @@map("suppliers")
+}
+
+model SupplierProductCategory {
+  id                String   @id @default(uuid())
+  supplierId        String
+  productCategoryId String
+  createdAt         DateTime @default(now())
+
+  supplier        Supplier        @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  productCategory ProductCategory @relation(fields: [productCategoryId], references: [id], onDelete: Restrict)
+
+  @@unique([supplierId, productCategoryId])
+  @@index([productCategoryId])
+  @@map("supplier_product_categories")
 }
 
 model UnitOfMeasure {
@@ -2601,6 +2617,7 @@ model ProductCategory {
   parentCategory ProductCategory? @relation("CategoryHierarchy", fields: [parentCategoryId], references: [id], onDelete: SetNull)
   subCategories  ProductCategory[] @relation("CategoryHierarchy")
   products       Product[]
+  supplierLinks  SupplierProductCategory[]
 
   @@index([companyId])
   @@index([categoryType])
@@ -5903,6 +5920,7 @@ model BusinessLicense {
   licenseCode             String
   companyId               String
   divisionId              String?
+  branchId                String?
   licensedBusinessUnitId  String?
   licenseType             BusinessLicenseType
   licenseNumber           String
@@ -5920,10 +5938,14 @@ model BusinessLicense {
 
   company              Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division             Division?             @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch               Branch?               @relation(fields: [branchId], references: [id], onDelete: SetNull)
   licensedBusinessUnit LicensedBusinessUnit? @relation("LBULicenses", fields: [licensedBusinessUnitId], references: [id], onDelete: SetNull)
   responsibleUser      User?                 @relation("LicenseResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
 
   @@unique([companyId, licenseCode])
+  @@index([divisionId])
+  @@index([branchId])
+  @@index([licensedBusinessUnitId])
   @@map("business_licenses")
 }
 

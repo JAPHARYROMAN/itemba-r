@@ -28,6 +28,18 @@ interface Company {
   code: string;
 }
 
+interface Division {
+  id: string;
+  name: string;
+  code: string;
+}
+
+interface ProductCategory {
+  id: string;
+  name: string;
+  categoryType: string;
+}
+
 interface Supplier {
   id: string;
   supplierCode?: string | null;
@@ -46,10 +58,15 @@ interface Supplier {
   notes?: string | null;
   companyId: string;
   company?: { name: string } | null;
+  divisionId?: string | null;
+  division?: { name: string; code?: string | null } | null;
+  productCategories?: Array<{ productCategory: ProductCategory }>;
 }
 
 interface SupplierForm {
   companyId: string;
+  divisionId: string;
+  productCategoryIds: string[];
   supplierType: string;
   supplierCode: string;
   name: string;
@@ -97,6 +114,8 @@ const STATUS_BADGE: Record<string, string> = {
 
 const BLANK_FORM: SupplierForm = {
   companyId: '',
+  divisionId: '',
+  productCategoryIds: [],
   supplierType: 'GENERAL_SUPPLIER',
   supplierCode: '',
   name: '',
@@ -136,6 +155,9 @@ function SupplierModal({
     initial
       ? {
           companyId: initial.companyId,
+          divisionId: initial.divisionId ?? '',
+          productCategoryIds:
+            initial.productCategories?.map((item) => item.productCategory.id) ?? [],
           supplierType: initial.supplierType,
           supplierCode: initial.supplierCode ?? '',
           name: initial.name,
@@ -152,11 +174,43 @@ function SupplierModal({
         }
       : { ...BLANK_FORM },
   );
+  const [divisions, setDivisions] = useState<Division[]>([]);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const set = <K extends keyof SupplierForm>(k: K, v: SupplierForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    if (!form.companyId) {
+      setDivisions([]);
+      setCategories([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.allSettled([
+      backendList<Division>('/divisions', { query: { companyId: form.companyId, limit: 200 } }),
+      backendList<ProductCategory>('/product-categories', {
+        query: { companyId: form.companyId, isActive: true, limit: 500 },
+      }),
+    ]).then(([divisionResult, categoryResult]) => {
+      if (cancelled) return;
+      setDivisions(divisionResult.status === 'fulfilled' ? divisionResult.value : []);
+      setCategories(categoryResult.status === 'fulfilled' ? categoryResult.value : []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
+
+  const toggleCategory = (id: string) =>
+    setForm((f) => ({
+      ...f,
+      productCategoryIds: f.productCategoryIds.includes(id)
+        ? f.productCategoryIds.filter((categoryId) => categoryId !== id)
+        : [...f.productCategoryIds, id],
+    }));
 
   const handleSubmit = async () => {
     if (!form.companyId) {
@@ -167,11 +221,21 @@ function SupplierModal({
       setError('Name is required');
       return;
     }
+    if (!form.divisionId) {
+      setError('Division is required');
+      return;
+    }
+    if (form.productCategoryIds.length === 0) {
+      setError('Select at least one product category this supplier serves');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
       const body: Record<string, unknown> = {
         companyId: form.companyId,
+        divisionId: form.divisionId,
+        productCategoryIds: form.productCategoryIds,
         supplierType: form.supplierType,
         name: form.name,
         status: form.status,
@@ -226,13 +290,33 @@ function SupplierModal({
           label="Company"
           required
           value={form.companyId}
-          onChange={(e) => set('companyId', e.target.value)}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              companyId: e.target.value,
+              divisionId: '',
+              productCategoryIds: [],
+            }))
+          }
           placeholder="Select company"
           disabled={mode === 'edit'}
         >
           {companies.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name} ({c.code})
+            </option>
+          ))}
+        </FormSelect>
+        <FormSelect
+          label="Division"
+          required
+          value={form.divisionId}
+          onChange={(e) => set('divisionId', e.target.value)}
+          placeholder={form.companyId ? 'Select division' : 'Select company first'}
+        >
+          {divisions.map((division) => (
+            <option key={division.id} value={division.id}>
+              {division.name} ({division.code})
             </option>
           ))}
         </FormSelect>
@@ -298,6 +382,44 @@ function SupplierModal({
           onChange={(e) => set('paymentTerms', e.target.value)}
           placeholder="Net 30, COD, etc."
         />
+        <div className="col-span-2">
+          <div
+            className="rounded-lg border p-3"
+            style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}
+          >
+            <p className="mb-2 text-xs font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+              Product Categories *
+            </p>
+            {categories.length === 0 ? (
+              <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                No categories loaded for this company.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {categories.map((category) => (
+                  <label
+                    key={category.id}
+                    className="flex items-center gap-2 text-sm"
+                    style={{ color: 'var(--aurora-text)' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.productCategoryIds.includes(category.id)}
+                      onChange={() => toggleCategory(category.id)}
+                      className="rounded"
+                    />
+                    <span>
+                      {category.name}
+                      <span className="ml-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                        {category.categoryType.replace(/_/g, ' ')}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
         <div className="col-span-2">
           <FormTextarea
             label="Address"
@@ -583,7 +705,7 @@ export default function SuppliersPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[900px]">
+          <table className="w-full text-sm min-w-[1100px]">
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
@@ -592,6 +714,8 @@ export default function SuppliersPage() {
                 <th className="px-4 py-3">Code</th>
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Type</th>
+                <th className="px-4 py-3">Division</th>
+                <th className="px-4 py-3">Product Categories</th>
                 <th className="px-4 py-3">Phone</th>
                 <th className="px-4 py-3 text-right">Credit Limit</th>
                 <th className="px-4 py-3 text-right">Balance</th>
@@ -602,14 +726,14 @@ export default function SuppliersPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={8}>
+                  <td colSpan={10}>
                     <PageSpinner />
                   </td>
                 </tr>
               ) : !data?.data.length ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={10}
                     className="px-4 py-10 text-center text-sm"
                     style={{ color: 'var(--aurora-text-muted)' }}
                   >
@@ -622,6 +746,14 @@ export default function SuppliersPage() {
                     <td className="px-4 py-3 font-mono text-xs">{s.supplierCode ?? '—'}</td>
                     <td className="px-4 py-3 font-medium">{s.name}</td>
                     <td className="px-4 py-3 text-xs">{s.supplierType.replace(/_/g, ' ')}</td>
+                    <td className="px-4 py-3 text-xs">
+                      {s.division ? `${s.division.name}${s.division.code ? ` (${s.division.code})` : ''}` : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {s.productCategories?.length
+                        ? s.productCategories.map((item) => item.productCategory.name).join(', ')
+                        : '—'}
+                    </td>
                     <td className="px-4 py-3 text-xs">{s.phone ?? '—'}</td>
                     <td className="px-4 py-3 text-right tabular-nums">{fmtTZS(s.creditLimit)}</td>
                     <td className="px-4 py-3 text-right tabular-nums">

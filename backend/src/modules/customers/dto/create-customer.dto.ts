@@ -17,9 +17,9 @@ export class CreateCustomerDto {
   @IsString()
   divisionId?: string;
 
-  @IsOptional()
+  @IsNotEmpty()
   @IsString()
-  branchId?: string;
+  branchId!: string;
 
   @IsOptional()
   @IsString()

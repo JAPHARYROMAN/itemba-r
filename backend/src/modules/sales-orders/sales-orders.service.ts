@@ -341,20 +341,32 @@ export class SalesOrdersService {
     if (refs.branchId) {
       const branch = await this.prisma.branch.findFirst({
         where: { id: refs.branchId, deletedAt: null },
-        select: { division: { select: { companyId: true } } },
+        select: { divisionId: true, division: { select: { companyId: true } } },
       });
       if (!branch || branch.division.companyId !== companyId) {
         throw new BadRequestException('Branch does not belong to this company');
+      }
+      if (refs.divisionId && branch.divisionId !== refs.divisionId) {
+        throw new BadRequestException('Branch does not belong to the selected division');
       }
     }
 
     if (refs.customerId) {
       const customer = await this.prisma.customer.findFirst({
         where: { id: refs.customerId, deletedAt: null },
-        select: { companyId: true },
+        select: { companyId: true, divisionId: true, branchId: true },
       });
       if (!customer || customer.companyId !== companyId) {
         throw new BadRequestException('Customer does not belong to this company');
+      }
+      if (!refs.branchId) {
+        throw new BadRequestException('Sales order branch is required for this customer');
+      }
+      if (customer.branchId && refs.branchId !== customer.branchId) {
+        throw new BadRequestException('Customer does not belong to the selected branch');
+      }
+      if (customer.divisionId && refs.divisionId && refs.divisionId !== customer.divisionId) {
+        throw new BadRequestException('Customer does not belong to the selected division');
       }
     }
 
@@ -378,12 +390,13 @@ export class SalesOrdersService {
       }
     }
 
-    await this.assertLineReferencesBelongToCompany(companyId, refs.lines);
+    await this.assertLineReferencesBelongToCompany(companyId, refs.lines, refs.branchId);
   }
 
   private async assertLineReferencesBelongToCompany(
     companyId: string,
     lines: SalesOrderLineDto[] | undefined,
+    branchId?: string | null,
   ) {
     if (!lines?.length) return;
 
@@ -406,7 +419,7 @@ export class SalesOrdersService {
               deletedAt: null,
               isActive: true,
             },
-            select: { id: true, companyId: true },
+            select: { id: true, companyId: true, branchId: true },
           })
         : Promise.resolve([]),
       this.prisma.unitOfMeasure.findMany({
@@ -430,12 +443,14 @@ export class SalesOrdersService {
 
     const validLocationIds = new Set(
       inventoryLocations
-        .filter((location) => location.companyId === companyId)
+        .filter((location) => location.companyId === companyId && (!branchId || location.branchId === branchId))
         .map((location) => location.id),
     );
     if (validLocationIds.size !== inventoryLocationIds.length) {
       throw new BadRequestException(
-        'Sales order inventory location does not belong to this company',
+        branchId
+          ? 'Sales order inventory location does not belong to the selected branch'
+          : 'Sales order inventory location does not belong to this company',
       );
     }
 

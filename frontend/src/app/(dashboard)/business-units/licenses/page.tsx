@@ -50,18 +50,28 @@ function KpiCard({ label, value, color }: { label: string; value: number; color:
 
 interface Company  { id: string; name: string; }
 interface Division { id: string; name: string; }
-interface BUnit    { id: string; businessUnitCode: string; name: string; }
+interface Branch { id: string; name: string; code?: string | null; divisionId: string; }
+interface BUnit {
+  id: string;
+  businessUnitCode: string;
+  name: string;
+  divisionId?: string | null;
+  branchId?: string | null;
+}
 interface License {
   id: string; licenseCode: string; licenseNumber: string; licenseType: string;
   issuingAuthority?: string; issueDate?: string; expiryDate?: string;
   renewalDate?: string; status: string; licensedBusinessUnitId?: string;
-  divisionId?: string; notes?: string; documentId?: string; responsibleUserId?: string;
+  divisionId?: string; branchId?: string; notes?: string; documentId?: string; responsibleUserId?: string;
+  division?: { id: string; name: string; code?: string | null } | null;
+  branch?: { id: string; name: string; code?: string | null } | null;
+  licensedBusinessUnit?: { id: string; businessUnitCode: string; name: string } | null;
 }
 
 const EMPTY_LIC: Omit<License, 'id'> = {
   licenseCode: '', licenseNumber: '', licenseType: 'BUSINESS_LICENSE',
   issuingAuthority: '', issueDate: '', expiryDate: '', renewalDate: '',
-  status: 'ACTIVE', licensedBusinessUnitId: '', divisionId: '',
+  status: 'ACTIVE', licensedBusinessUnitId: '', divisionId: '', branchId: '',
   notes: '', documentId: '', responsibleUserId: '',
 };
 
@@ -69,8 +79,10 @@ export default function BusinessLicensesPage() {
   const [companies,     setCompanies]     = useState<Company[]>([]);
   const [companyId,     setCompanyId]     = useState('');
   const [divisions,     setDivisions]     = useState<Division[]>([]);
+  const [branches,      setBranches]      = useState<Branch[]>([]);
   const [businessUnits, setBusinessUnits] = useState<BUnit[]>([]);
   const [filterBuId,    setFilterBuId]    = useState('');
+  const [filterBranchId,setFilterBranchId]= useState('');
   const [rows,          setRows]          = useState<License[]>([]);
   const [total,         setTotal]         = useState(0);
   const [loading,       setLoading]       = useState(false);
@@ -87,11 +99,20 @@ export default function BusinessLicensesPage() {
   }, []);
 
   useEffect(() => {
-    if (!companyId) { setDivisions([]); setBusinessUnits([]); setFilterBuId(''); return; }
+    if (!companyId) {
+      setDivisions([]);
+      setBranches([]);
+      setBusinessUnits([]);
+      setFilterBuId('');
+      setFilterBranchId('');
+      return;
+    }
     fetch(`/api/backend/divisions?companyId=${companyId}&limit=100`).then(r => r.json()).then(j =>
       setDivisions(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
+    fetch(`/api/backend/branches?companyId=${companyId}&activeOnly=true&limit=500`).then(r => r.json()).then(j =>
+      setBranches(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
     fetch(`/api/backend/licensed-business-units?companyId=${companyId}&limit=100`).then(r => r.json()).then(j =>
-      setBusinessUnits(Array.isArray(j.data?.data) ? j.data.data : []));
+      setBusinessUnits(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
   }, [companyId]);
 
   const load = useCallback(async () => {
@@ -100,6 +121,7 @@ export default function BusinessLicensesPage() {
     try {
       const params = new URLSearchParams({ companyId, page: '1', limit: '200' });
       if (filterBuId) params.set('licensedBusinessUnitId', filterBuId);
+      if (filterBranchId) params.set('branchId', filterBranchId);
       const res  = await fetch(`/api/backend/business-licenses?${params}`);
       if (!res.ok) throw new Error('Failed to load');
       const json = await res.json();
@@ -112,7 +134,7 @@ export default function BusinessLicensesPage() {
       setRows(items); setTotal(json.data?.total ?? items.length);
     } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Error'); }
     finally { setLoading(false); }
-  }, [companyId, filterBuId]);
+  }, [companyId, filterBuId, filterBranchId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -121,18 +143,50 @@ export default function BusinessLicensesPage() {
   const expiring30 = rows.filter(r => { const d = r.expiryDate ? daysUntil(r.expiryDate) : null; return d !== null && d >= 0 && d < 30; }).length;
   const expiring60 = rows.filter(r => { const d = r.expiryDate ? daysUntil(r.expiryDate) : null; return d !== null && d >= 30 && d < 60; }).length;
   const alertLicenses = rows.filter(r => { const d = r.expiryDate ? daysUntil(r.expiryDate) : null; return d !== null && d < 60; });
+  const branchOptions = form.divisionId
+    ? branches.filter((branch) => branch.divisionId === form.divisionId)
+    : branches;
 
   function openCreate() { setEditing(null); setForm({ ...EMPTY_LIC }); setShowModal(true); }
   function openEdit(lic: License) {
     setEditing(lic);
-    setForm({ licenseCode: lic.licenseCode, licenseNumber: lic.licenseNumber, licenseType: lic.licenseType, issuingAuthority: lic.issuingAuthority ?? '', issueDate: lic.issueDate?.slice(0, 10) ?? '', expiryDate: lic.expiryDate?.slice(0, 10) ?? '', renewalDate: lic.renewalDate?.slice(0, 10) ?? '', status: lic.status, licensedBusinessUnitId: lic.licensedBusinessUnitId ?? '', divisionId: lic.divisionId ?? '', notes: lic.notes ?? '', documentId: lic.documentId ?? '', responsibleUserId: lic.responsibleUserId ?? '' });
+    setForm({ licenseCode: lic.licenseCode, licenseNumber: lic.licenseNumber, licenseType: lic.licenseType, issuingAuthority: lic.issuingAuthority ?? '', issueDate: lic.issueDate?.slice(0, 10) ?? '', expiryDate: lic.expiryDate?.slice(0, 10) ?? '', renewalDate: lic.renewalDate?.slice(0, 10) ?? '', status: lic.status, licensedBusinessUnitId: lic.licensedBusinessUnitId ?? '', divisionId: lic.divisionId ?? '', branchId: lic.branchId ?? '', notes: lic.notes ?? '', documentId: lic.documentId ?? '', responsibleUserId: lic.responsibleUserId ?? '' });
     setShowModal(true);
   }
   const sf = (k: keyof Omit<License, 'id'>) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm(p => ({ ...p, [k]: e.target.value }));
 
+  function setLicensedBusinessUnit(id: string) {
+    const unit = businessUnits.find((bu) => bu.id === id);
+    setForm((p) => ({
+      ...p,
+      licensedBusinessUnitId: id,
+      divisionId: unit?.divisionId ?? p.divisionId,
+      branchId: unit?.branchId ?? p.branchId,
+    }));
+  }
+
+  function setDivision(id: string) {
+    setForm((p) => ({
+      ...p,
+      divisionId: id,
+      branchId: branches.some((branch) => branch.id === p.branchId && branch.divisionId === id)
+        ? p.branchId
+        : '',
+    }));
+  }
+
+  function setBranch(id: string) {
+    const branch = branches.find((item) => item.id === id);
+    setForm((p) => ({
+      ...p,
+      branchId: id,
+      divisionId: branch?.divisionId ?? p.divisionId,
+    }));
+  }
+
   async function markRenewal(lic: License) {
     try {
-      const res = await fetch(`/api/backend/business-licenses/${lic.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...lic, companyId, status: 'PENDING_RENEWAL' }) });
+      const res = await fetch(`/api/backend/business-licenses/${lic.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyId, divisionId: lic.divisionId, branchId: lic.branchId, licensedBusinessUnitId: lic.licensedBusinessUnitId, status: 'PENDING_RENEWAL' }) });
       if (!res.ok) throw new Error('Update failed');
       await load();
     } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Update failed'); }
@@ -140,11 +194,12 @@ export default function BusinessLicensesPage() {
 
   async function handleSave() {
     if (!form.licenseCode.trim() || !form.licenseNumber.trim()) { setError('License Code and Number are required'); return; }
+    if (!form.branchId) { setError('Branch/location is required for a business license'); return; }
     setSaving(true); setError('');
     try {
-      const body = { ...form, companyId, licensedBusinessUnitId: form.licensedBusinessUnitId || undefined, divisionId: form.divisionId || undefined, issueDate: form.issueDate || undefined, expiryDate: form.expiryDate || undefined, renewalDate: form.renewalDate || undefined, documentId: form.documentId || undefined, responsibleUserId: form.responsibleUserId || undefined };
+      const body = { ...form, companyId, licensedBusinessUnitId: form.licensedBusinessUnitId || undefined, divisionId: form.divisionId || undefined, branchId: form.branchId || undefined, issueDate: form.issueDate || undefined, expiryDate: form.expiryDate || undefined, renewalDate: form.renewalDate || undefined, documentId: form.documentId || undefined, responsibleUserId: form.responsibleUserId || undefined };
       const url = editing ? `/api/backend/business-licenses/${editing.id}` : '/api/backend/business-licenses';
-      const res = await fetch(url, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const res = await fetch(url, { method: editing ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const e = await res.json(); throw new Error(e.message ?? 'Save failed'); }
       setShowModal(false); await load();
     } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Save failed'); }
@@ -174,6 +229,10 @@ export default function BusinessLicensesPage() {
               <select value={filterBuId} onChange={e => setFilterBuId(e.target.value)} className="text-sm border border-slate-200 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" style={{ color: 'var(--aurora-text)' }}>
                 <option value="">All Business Units</option>
                 {businessUnits.map(bu => <option key={bu.id} value={bu.id}>{bu.businessUnitCode} — {bu.name}</option>)}
+              </select>
+              <select value={filterBranchId} onChange={e => setFilterBranchId(e.target.value)} className="text-sm border border-slate-200 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" style={{ color: 'var(--aurora-text)' }}>
+                <option value="">All Branches</option>
+                {branches.map(branch => <option key={branch.id} value={branch.id}>{branch.code ? `${branch.code} — ` : ''}{branch.name}</option>)}
               </select>
               <Btn variant="primary" onClick={openCreate}>+ New License</Btn>
             </>
@@ -248,6 +307,8 @@ export default function BusinessLicensesPage() {
                     <th className={thCls} style={{ color: 'var(--aurora-text-muted)' }}>Code</th>
                     <th className={thCls} style={{ color: 'var(--aurora-text-muted)' }}>License #</th>
                     <th className={thCls} style={{ color: 'var(--aurora-text-muted)' }}>Type</th>
+                    <th className={thCls} style={{ color: 'var(--aurora-text-muted)' }}>Branch</th>
+                    <th className={thCls} style={{ color: 'var(--aurora-text-muted)' }}>Business Unit</th>
                     <th className={thCls} style={{ color: 'var(--aurora-text-muted)' }}>Issuing Authority</th>
                     <th className={thCls} style={{ color: 'var(--aurora-text-muted)' }}>Issue Date</th>
                     <th className={thCls} style={{ color: 'var(--aurora-text-muted)' }}>Expiry Date</th>
@@ -258,7 +319,7 @@ export default function BusinessLicensesPage() {
                 </thead>
                 <tbody>
                   {rows.length === 0 ? (
-                    <tr><td colSpan={9} className="px-4 py-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No licenses found.</td></tr>
+                    <tr><td colSpan={11} className="px-4 py-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No licenses found.</td></tr>
                   ) : rows.map(lic => {
                     const d = lic.expiryDate ? daysUntil(lic.expiryDate) : null;
                     const canRenew = lic.status === 'ACTIVE' && d !== null && d < 60;
@@ -267,6 +328,8 @@ export default function BusinessLicensesPage() {
                         <td className={`${tdCls} font-mono font-medium text-indigo-600`}>{lic.licenseCode}</td>
                         <td className={tdCls} style={{ color: 'var(--aurora-text)' }}>{lic.licenseNumber}</td>
                         <td className={tdCls} style={{ color: 'var(--aurora-text)' }}><span className="text-xs">{lic.licenseType.replace(/_/g, ' ')}</span></td>
+                        <td className={tdCls} style={{ color: 'var(--aurora-text)' }}>{lic.branch ? `${lic.branch.code ? `${lic.branch.code} — ` : ''}${lic.branch.name}` : '—'}</td>
+                        <td className={tdCls} style={{ color: 'var(--aurora-text)' }}>{lic.licensedBusinessUnit ? `${lic.licensedBusinessUnit.businessUnitCode} — ${lic.licensedBusinessUnit.name}` : '—'}</td>
                         <td className={tdCls} style={{ color: 'var(--aurora-text)' }}>{lic.issuingAuthority || '—'}</td>
                         <td className={tdCls} style={{ color: 'var(--aurora-text)' }}>{fmtDate(lic.issueDate ?? '')}</td>
                         <td className={tdCls} style={{ color: 'var(--aurora-text)' }}>{fmtDate(lic.expiryDate ?? '')}</td>
@@ -307,17 +370,21 @@ export default function BusinessLicensesPage() {
           </div>
           <FormInput label="Issuing Authority" value={form.issuingAuthority ?? ''} onChange={sf('issuingAuthority')} placeholder="Tanzania Revenue Authority" />
           {businessUnits.length > 0 && (
-            <FormSelect label="Business Unit" value={form.licensedBusinessUnitId ?? ''} onChange={sf('licensedBusinessUnitId')}>
+            <FormSelect label="Business Unit" value={form.licensedBusinessUnitId ?? ''} onChange={e => setLicensedBusinessUnit(e.target.value)}>
               <option value="">— None —</option>
               {businessUnits.map(bu => <option key={bu.id} value={bu.id}>{bu.businessUnitCode} — {bu.name}</option>)}
             </FormSelect>
           )}
           {divisions.length > 0 && (
-            <FormSelect label="Division" value={form.divisionId ?? ''} onChange={sf('divisionId')}>
+            <FormSelect label="Division" value={form.divisionId ?? ''} onChange={e => setDivision(e.target.value)}>
               <option value="">— None —</option>
               {divisions.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
             </FormSelect>
           )}
+          <FormSelect label="Branch / Location *" value={form.branchId ?? ''} onChange={e => setBranch(e.target.value)}>
+            <option value="">— Select branch —</option>
+            {branchOptions.map(branch => <option key={branch.id} value={branch.id}>{branch.code ? `${branch.code} — ` : ''}{branch.name}</option>)}
+          </FormSelect>
           <div className="grid grid-cols-3 gap-4">
             <FormInput label="Issue Date" type="date" value={form.issueDate ?? ''} onChange={sf('issueDate')} />
             <FormInput label="Expiry Date" type="date" value={form.expiryDate ?? ''} onChange={sf('expiryDate')} />

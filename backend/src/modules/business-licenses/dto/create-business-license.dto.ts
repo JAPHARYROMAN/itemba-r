@@ -8,6 +8,7 @@ export class CreateBusinessLicenseDto {
   @IsString() licenseNumber!: string;
   @IsEnum(BusinessLicenseStatus) @IsOptional() status?: BusinessLicenseStatus;
   @IsString() @IsOptional() divisionId?: string;
+  @IsString() @IsOptional() branchId?: string;
   @IsString() @IsOptional() licensedBusinessUnitId?: string;
   @IsString() @IsOptional() issuingAuthority?: string;
   @IsDateString() @IsOptional() issueDate?: string;

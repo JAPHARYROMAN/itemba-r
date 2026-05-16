@@ -28,6 +28,19 @@ interface Company {
   code: string;
 }
 
+interface Division {
+  id: string;
+  name: string;
+  code: string;
+}
+
+interface Branch {
+  id: string;
+  name: string;
+  code: string;
+  divisionId: string;
+}
+
 interface Customer {
   id: string;
   customerCode?: string | null;
@@ -46,10 +59,16 @@ interface Customer {
   notes?: string | null;
   companyId: string;
   company?: { name: string } | null;
+  divisionId?: string | null;
+  branchId?: string | null;
+  division?: { name: string; code?: string | null } | null;
+  branch?: { name: string; code?: string | null } | null;
 }
 
 interface CustomerForm {
   companyId: string;
+  divisionId: string;
+  branchId: string;
   customerType: string;
   customerCode: string;
   name: string;
@@ -96,6 +115,8 @@ const STATUS_BADGE: Record<string, string> = {
 
 const BLANK_FORM: CustomerForm = {
   companyId: '',
+  divisionId: '',
+  branchId: '',
   customerType: 'INDIVIDUAL',
   customerCode: '',
   name: '',
@@ -135,6 +156,8 @@ function CustomerModal({
     initial
       ? {
           companyId: initial.companyId,
+          divisionId: initial.divisionId ?? '',
+          branchId: initial.branchId ?? '',
           customerType: initial.customerType,
           customerCode: initial.customerCode ?? '',
           name: initial.name,
@@ -151,11 +174,37 @@ function CustomerModal({
         }
       : { ...BLANK_FORM },
   );
+  const [divisions, setDivisions] = useState<Division[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const set = <K extends keyof CustomerForm>(k: K, v: CustomerForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    if (!form.companyId) {
+      setDivisions([]);
+      setBranches([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.allSettled([
+      backendList<Division>('/divisions', { query: { companyId: form.companyId, limit: 200 } }),
+      backendList<Branch>('/branches', {
+        query: { companyId: form.companyId, activeOnly: true, limit: 500 },
+      }),
+    ]).then(([divisionResult, branchResult]) => {
+      if (cancelled) return;
+      setDivisions(divisionResult.status === 'fulfilled' ? divisionResult.value : []);
+      setBranches(branchResult.status === 'fulfilled' ? branchResult.value : []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
+
+  const divisionBranches = branches.filter((branch) => branch.divisionId === form.divisionId);
 
   const handleSubmit = async () => {
     if (!form.companyId) {
@@ -166,11 +215,21 @@ function CustomerModal({
       setError('Name is required');
       return;
     }
+    if (!form.divisionId) {
+      setError('Division is required');
+      return;
+    }
+    if (!form.branchId) {
+      setError('Branch/location is required');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
       const body: Record<string, unknown> = {
         companyId: form.companyId,
+        divisionId: form.divisionId,
+        branchId: form.branchId,
         customerType: form.customerType,
         name: form.name,
         status: form.status,
@@ -225,13 +284,53 @@ function CustomerModal({
           label="Company"
           required
           value={form.companyId}
-          onChange={(e) => set('companyId', e.target.value)}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              companyId: e.target.value,
+              divisionId: '',
+              branchId: '',
+            }))
+          }
           placeholder="Select company"
           disabled={mode === 'edit'}
         >
           {companies.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name} ({c.code})
+            </option>
+          ))}
+        </FormSelect>
+        <FormSelect
+          label="Division"
+          required
+          value={form.divisionId}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              divisionId: e.target.value,
+              branchId: '',
+            }))
+          }
+          placeholder={form.companyId ? 'Select division' : 'Select company first'}
+        >
+          {divisions.map((division) => (
+            <option key={division.id} value={division.id}>
+              {division.name} ({division.code})
+            </option>
+          ))}
+        </FormSelect>
+        <FormSelect
+          label="Branch / Location"
+          required
+          value={form.branchId}
+          onChange={(e) => set('branchId', e.target.value)}
+          placeholder={form.divisionId ? 'Select branch' : 'Select division first'}
+          disabled={!form.divisionId}
+        >
+          {divisionBranches.map((branch) => (
+            <option key={branch.id} value={branch.id}>
+              {branch.name} ({branch.code})
             </option>
           ))}
         </FormSelect>
@@ -582,7 +681,7 @@ export default function CustomersPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[900px]">
+          <table className="w-full text-sm min-w-[1050px]">
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
@@ -591,6 +690,7 @@ export default function CustomersPage() {
                 <th className="px-4 py-3">Code</th>
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Type</th>
+                <th className="px-4 py-3">Branch / Division</th>
                 <th className="px-4 py-3">Phone</th>
                 <th className="px-4 py-3 text-right">Credit Limit</th>
                 <th className="px-4 py-3 text-right">Balance</th>
@@ -601,14 +701,14 @@ export default function CustomersPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={8}>
+                  <td colSpan={9}>
                     <PageSpinner />
                   </td>
                 </tr>
               ) : !data?.data.length ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-4 py-10 text-center text-sm"
                     style={{ color: 'var(--aurora-text-muted)' }}
                   >
@@ -621,6 +721,12 @@ export default function CustomersPage() {
                     <td className="px-4 py-3 font-mono text-xs">{c.customerCode ?? '—'}</td>
                     <td className="px-4 py-3 font-medium">{c.name}</td>
                     <td className="px-4 py-3 text-xs">{c.customerType.replace(/_/g, ' ')}</td>
+                    <td className="px-4 py-3 text-xs">
+                      <div>{c.branch?.name ?? '—'}</div>
+                      <div style={{ color: 'var(--aurora-text-muted)' }}>
+                        {c.division?.name ?? 'No division'}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-xs">{c.phone ?? '—'}</td>
                     <td className="px-4 py-3 text-right tabular-nums">{fmtTZS(c.creditLimit)}</td>
                     <td className="px-4 py-3 text-right tabular-nums">

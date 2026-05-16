@@ -6,6 +6,7 @@ export class QuerySupplierDto {
   @IsOptional() @IsString() companyId?: string;
   @IsOptional() @IsString() divisionId?: string;
   @IsOptional() @IsString() branchId?: string;
+  @IsOptional() @IsString() productCategoryId?: string;
   @IsOptional() @IsString() search?: string;
   @IsOptional() @IsEnum(SupplierType) supplierType?: SupplierType;
   @IsOptional() @IsEnum(SupplierStatus) status?: SupplierStatus;

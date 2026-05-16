@@ -29,11 +29,23 @@ interface Company {
   name: string;
   code: string;
 }
+interface Division {
+  id: string;
+  name: string;
+  code: string;
+}
+interface Branch {
+  id: string;
+  name: string;
+  code?: string | null;
+  divisionId: string;
+}
 interface Supplier {
   id: string;
   name: string;
   supplierCode?: string | null;
   supplierType: string;
+  divisionId?: string | null;
 }
 interface Product {
   id: string;
@@ -53,6 +65,8 @@ interface InventoryLocation {
   id: string;
   name: string;
   locationCode: string;
+  divisionId?: string | null;
+  branchId?: string | null;
 }
 interface Unit {
   id: string;
@@ -89,6 +103,8 @@ interface PurchaseOrder {
   currency: string;
   notes?: string | null;
   companyId: string;
+  divisionId?: string | null;
+  branchId?: string | null;
   company?: { name: string } | null;
   supplier?: { name: string } | null;
   lines?: PurchaseOrderLine[];
@@ -96,6 +112,8 @@ interface PurchaseOrder {
 
 interface PurchaseOrderForm {
   companyId: string;
+  divisionId: string;
+  branchId: string;
   supplierId: string;
   supplierName: string;
   purchaseType: string;
@@ -149,6 +167,8 @@ const BLANK_LINE = (): PurchaseOrderLine => ({
 });
 const blankForm = (): PurchaseOrderForm => ({
   companyId: '',
+  divisionId: '',
+  branchId: '',
   supplierId: '',
   supplierName: '',
   purchaseType: 'CASH_PURCHASE',
@@ -180,6 +200,8 @@ function PurchaseOrderModal({
     initial
       ? {
           companyId: initial.companyId,
+          divisionId: initial.divisionId ?? '',
+          branchId: initial.branchId ?? '',
           supplierId: initial.supplierId ?? '',
           supplierName: initial.supplierName ?? '',
           purchaseType: initial.purchaseType,
@@ -209,6 +231,8 @@ function PurchaseOrderModal({
   const [products, setProducts] = useState<Product[]>([]);
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
+  const [divisions, setDivisions] = useState<Division[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -228,6 +252,8 @@ function PurchaseOrderModal({
 
   useEffect(() => {
     if (!form.companyId) {
+      setDivisions([]);
+      setBranches([]);
       setSuppliers([]);
       setProducts([]);
       setLocations([]);
@@ -235,11 +261,53 @@ function PurchaseOrderModal({
     }
     let cancelled = false;
     Promise.allSettled([
-      backendList<Supplier>('/suppliers', { query: { companyId: form.companyId, limit: 200 } }),
-      backendList<Product>('/products', { query: { companyId: form.companyId, limit: 200 } }),
-      backendList<InventoryLocation>('/inventory-locations', {
-        query: { companyId: form.companyId, limit: 200 },
+      backendList<Division>('/divisions', { query: { companyId: form.companyId, limit: 200 } }),
+      backendList<Branch>('/branches', {
+        query: { companyId: form.companyId, activeOnly: true, limit: 500 },
       }),
+    ]).then(([divisionResult, branchResult]) => {
+      if (cancelled) return;
+      setDivisions(divisionResult.status === 'fulfilled' ? divisionResult.value : []);
+      setBranches(branchResult.status === 'fulfilled' ? branchResult.value : []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
+
+  useEffect(() => {
+    if (!form.companyId || !form.divisionId) {
+      setSuppliers([]);
+      setProducts([]);
+      setLocations([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.allSettled([
+      backendList<Supplier>('/suppliers', {
+        query: {
+          companyId: form.companyId,
+          divisionId: form.divisionId,
+          limit: 200,
+        },
+      }),
+      backendList<Product>('/products', {
+        query: {
+          companyId: form.companyId,
+          divisionId: form.divisionId,
+          limit: 200,
+        },
+      }),
+      form.branchId
+        ? backendList<InventoryLocation>('/inventory-locations', {
+            query: {
+              companyId: form.companyId,
+              divisionId: form.divisionId,
+              branchId: form.branchId,
+              limit: 200,
+            },
+          })
+        : Promise.resolve([]),
     ]).then(([supplierResult, productResult, locationResult]) => {
       if (cancelled) return;
       setSuppliers(supplierResult.status === 'fulfilled' ? supplierResult.value : []);
@@ -249,7 +317,7 @@ function PurchaseOrderModal({
     return () => {
       cancelled = true;
     };
-  }, [form.companyId]);
+  }, [form.companyId, form.divisionId, form.branchId]);
 
   const setField = <K extends keyof PurchaseOrderForm>(k: K, v: PurchaseOrderForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
@@ -261,10 +329,21 @@ function PurchaseOrderModal({
   const addLine = () => setForm((f) => ({ ...f, lines: [...f.lines, BLANK_LINE()] }));
   const removeLine = (i: number) =>
     setForm((f) => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }));
+  const branchOptions = form.divisionId
+    ? branches.filter((branch) => branch.divisionId === form.divisionId)
+    : [];
 
   const handleSubmit = async () => {
     if (!form.companyId) {
       setError('Company is required');
+      return;
+    }
+    if (!form.divisionId) {
+      setError('Division is required');
+      return;
+    }
+    if (!form.branchId) {
+      setError('Branch/location is required');
       return;
     }
     if (!form.supplierId && !form.supplierName.trim()) {
@@ -284,6 +363,8 @@ function PurchaseOrderModal({
     try {
       const body: Record<string, unknown> = {
         companyId: form.companyId,
+        divisionId: form.divisionId,
+        branchId: form.branchId,
         purchaseType: form.purchaseType,
         orderDate: form.orderDate,
         currency: form.currency,
@@ -349,8 +430,18 @@ function PurchaseOrderModal({
             required
             value={form.companyId}
             onChange={(e) => {
-              setField('companyId', e.target.value);
-              setField('supplierId', '');
+              setForm((f) => ({
+                ...f,
+                companyId: e.target.value,
+                divisionId: '',
+                branchId: '',
+                supplierId: '',
+                lines: f.lines.map((line) => ({
+                  ...line,
+                  productId: '',
+                  inventoryLocationId: '',
+                })),
+              }));
             }}
             placeholder="Select company"
             disabled={mode === 'edit'}
@@ -358,6 +449,53 @@ function PurchaseOrderModal({
             {companies.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
+              </option>
+            ))}
+          </FormSelect>
+          <FormSelect
+            label="Division"
+            required
+            value={form.divisionId}
+            onChange={(e) => {
+              const divisionId = e.target.value;
+              setForm((f) => ({
+                ...f,
+                divisionId,
+                branchId: '',
+                supplierId: '',
+                lines: f.lines.map((line) => ({
+                  ...line,
+                  productId: '',
+                  inventoryLocationId: '',
+                })),
+              }));
+            }}
+            placeholder={form.companyId ? 'Select division' : 'Select company first'}
+          >
+            {divisions.map((division) => (
+              <option key={division.id} value={division.id}>
+                {division.code ? `${division.code} — ${division.name}` : division.name}
+              </option>
+            ))}
+          </FormSelect>
+          <FormSelect
+            label="Branch / Location"
+            required
+            value={form.branchId}
+            onChange={(e) => {
+              const branchId = e.target.value;
+              setForm((f) => ({
+                ...f,
+                branchId,
+                lines: f.lines.map((line) => ({ ...line, inventoryLocationId: '' })),
+              }));
+            }}
+            placeholder={form.divisionId ? 'Select branch' : 'Select division first'}
+            disabled={!form.divisionId}
+          >
+            {branchOptions.map((branch) => (
+              <option key={branch.id} value={branch.id}>
+                {branch.code ? `${branch.code} — ${branch.name}` : branch.name}
               </option>
             ))}
           </FormSelect>
@@ -389,7 +527,8 @@ function PurchaseOrderModal({
             label="Supplier"
             value={form.supplierId}
             onChange={(e) => setField('supplierId', e.target.value)}
-            placeholder="Use name below"
+            placeholder={form.divisionId ? 'Use name below' : 'Select division first'}
+            disabled={!form.divisionId}
           >
             {suppliers.map((s) => (
               <option key={s.id} value={s.id}>
