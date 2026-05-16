@@ -22,6 +22,12 @@ describe('middleware route protection', () => {
     expect(res.headers.get('x-middleware-next')).toBe('1');
   });
 
+  it('allows health checks without a session cookie', () => {
+    const res = proxy(request('/api/health'));
+
+    expect(res.headers.get('x-middleware-next')).toBe('1');
+  });
+
   it('allows protected routes when the session flag cookie is present', () => {
     const res = proxy(request('/dashboard', 'itemba_auth=1'));
 
