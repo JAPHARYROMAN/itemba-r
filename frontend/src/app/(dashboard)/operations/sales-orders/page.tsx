@@ -23,6 +23,7 @@ import {
   backendPost,
 } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { OrderLineEditor } from '../_components/order-line-editor';
 
 interface Company {
   id: string;
@@ -39,6 +40,15 @@ interface Product {
   id: string;
   name: string;
   productCode?: string | null;
+  sku?: string | null;
+  barcode?: string | null;
+  baseUnitId?: string | null;
+  baseUnit?: { name?: string | null; symbol?: string | null } | null;
+  category?: { name?: string | null } | null;
+  defaultPurchasePrice?: number | string | null;
+  defaultSellingPrice?: number | string | null;
+  wholesalePrice?: number | string | null;
+  retailPrice?: number | string | null;
 }
 interface InventoryLocation {
   id: string;
@@ -186,11 +196,6 @@ function fmtMoney(n: number, ccy = 'TZS') {
   return `${ccy} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)}`;
 }
 
-function lineTotal(l: SalesOrderLine) {
-  const sub = (Number(l.qty) || 0) * (Number(l.unitPrice) || 0);
-  return sub - (Number(l.discount) || 0) + (Number(l.tax) || 0);
-}
-
 function SalesOrderModal({
   mode,
   initial,
@@ -330,19 +335,6 @@ function SalesOrderModal({
   const removeLine = (i: number) =>
     setForm((f) => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }));
 
-  const totals = form.lines.reduce(
-    (acc, l) => {
-      const sub = (Number(l.qty) || 0) * (Number(l.unitPrice) || 0);
-      return {
-        sub: acc.sub + sub,
-        disc: acc.disc + (Number(l.discount) || 0),
-        tax: acc.tax + (Number(l.tax) || 0),
-      };
-    },
-    { sub: 0, disc: 0, tax: 0 },
-  );
-  const total = totals.sub - totals.disc + totals.tax;
-
   const handleSubmit = async () => {
     if (!form.companyId) {
       setError('Company is required');
@@ -410,7 +402,7 @@ function SalesOrderModal({
       open
       onClose={onClose}
       title={mode === 'create' ? 'Create Sales Order' : 'Edit Sales Order'}
-      size="2xl"
+      size="3xl"
       footer={
         <>
           <Btn variant="secondary" onClick={onClose}>
@@ -576,213 +568,17 @@ function SalesOrderModal({
           </div>
         </div>
 
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <h4 className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
-              Line Items
-            </h4>
-            <Btn variant="secondary" size="xs" onClick={addLine}>
-              + Add Line
-            </Btn>
-          </div>
-          <div
-            className="overflow-x-auto rounded-lg border"
-            style={{ borderColor: 'var(--aurora-border)' }}
-          >
-            <table className="w-full text-xs">
-              <thead>
-                <tr
-                  className="text-left uppercase bg-gray-50"
-                  style={{ color: 'var(--aurora-text-muted)' }}
-                >
-                  <th className="px-2 py-2">Product</th>
-                  <th className="px-2 py-2">Description</th>
-                  <th className="px-2 py-2">Qty</th>
-                  <th className="px-2 py-2">Unit</th>
-                  <th className="px-2 py-2">Price</th>
-                  <th className="px-2 py-2">Discount</th>
-                  <th className="px-2 py-2">Tax</th>
-                  <th className="px-2 py-2">Location</th>
-                  <th className="px-2 py-2 text-right">Total</th>
-                  <th className="px-2 py-2"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {form.lines.map((line, i) => (
-                  <tr key={i}>
-                    <td className="px-1 py-1">
-                      <select
-                        value={line.productId}
-                        onChange={(e) => setLine(i, { productId: e.target.value })}
-                        className="w-32 text-xs border rounded px-1 py-1"
-                        style={{
-                          borderColor: 'var(--aurora-border)',
-                          background: 'var(--aurora-card)',
-                          color: 'var(--aurora-text)',
-                        }}
-                      >
-                        <option value="">Select…</option>
-                        {products.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-1 py-1">
-                      <input
-                        type="text"
-                        value={line.description}
-                        onChange={(e) => setLine(i, { description: e.target.value })}
-                        className="w-32 text-xs border rounded px-1 py-1"
-                        style={{
-                          borderColor: 'var(--aurora-border)',
-                          background: 'var(--aurora-card)',
-                          color: 'var(--aurora-text)',
-                        }}
-                      />
-                    </td>
-                    <td className="px-1 py-1">
-                      <input
-                        type="number"
-                        value={line.qty}
-                        onChange={(e) => setLine(i, { qty: Number(e.target.value) })}
-                        className="w-16 text-xs border rounded px-1 py-1"
-                        style={{
-                          borderColor: 'var(--aurora-border)',
-                          background: 'var(--aurora-card)',
-                          color: 'var(--aurora-text)',
-                        }}
-                      />
-                    </td>
-                    <td className="px-1 py-1">
-                      <select
-                        value={line.unitId}
-                        onChange={(e) => setLine(i, { unitId: e.target.value })}
-                        className="w-16 text-xs border rounded px-1 py-1"
-                        style={{
-                          borderColor: 'var(--aurora-border)',
-                          background: 'var(--aurora-card)',
-                          color: 'var(--aurora-text)',
-                        }}
-                      >
-                        <option value="">…</option>
-                        {units.map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {u.symbol}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-1 py-1">
-                      <input
-                        type="number"
-                        value={line.unitPrice}
-                        onChange={(e) => setLine(i, { unitPrice: Number(e.target.value) })}
-                        className="w-20 text-xs border rounded px-1 py-1"
-                        style={{
-                          borderColor: 'var(--aurora-border)',
-                          background: 'var(--aurora-card)',
-                          color: 'var(--aurora-text)',
-                        }}
-                      />
-                    </td>
-                    <td className="px-1 py-1">
-                      <input
-                        type="number"
-                        value={line.discount}
-                        onChange={(e) => setLine(i, { discount: Number(e.target.value) })}
-                        className="w-16 text-xs border rounded px-1 py-1"
-                        style={{
-                          borderColor: 'var(--aurora-border)',
-                          background: 'var(--aurora-card)',
-                          color: 'var(--aurora-text)',
-                        }}
-                      />
-                    </td>
-                    <td className="px-1 py-1">
-                      <input
-                        type="number"
-                        value={line.tax}
-                        onChange={(e) => setLine(i, { tax: Number(e.target.value) })}
-                        className="w-16 text-xs border rounded px-1 py-1"
-                        style={{
-                          borderColor: 'var(--aurora-border)',
-                          background: 'var(--aurora-card)',
-                          color: 'var(--aurora-text)',
-                        }}
-                      />
-                    </td>
-                    <td className="px-1 py-1">
-                      <select
-                        value={line.inventoryLocationId}
-                        onChange={(e) => setLine(i, { inventoryLocationId: e.target.value })}
-                        className="w-24 text-xs border rounded px-1 py-1"
-                        style={{
-                          borderColor: 'var(--aurora-border)',
-                          background: 'var(--aurora-card)',
-                          color: 'var(--aurora-text)',
-                        }}
-                      >
-                        <option value="">…</option>
-                        {locations.map((l) => (
-                          <option key={l.id} value={l.id}>
-                            {l.name}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-2 py-1 text-right tabular-nums font-medium">
-                      {lineTotal(line).toFixed(2)}
-                    </td>
-                    <td className="px-1 py-1 text-right">
-                      {form.lines.length > 1 && (
-                        <Btn variant="ghost" size="xs" onClick={() => removeLine(i)}>
-                          ×
-                        </Btn>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot className="bg-gray-50">
-                <tr>
-                  <td colSpan={8} className="px-2 py-1 text-right font-medium">
-                    Subtotal
-                  </td>
-                  <td className="px-2 py-1 text-right tabular-nums">{totals.sub.toFixed(2)}</td>
-                  <td></td>
-                </tr>
-                <tr>
-                  <td colSpan={8} className="px-2 py-1 text-right font-medium">
-                    Discount
-                  </td>
-                  <td className="px-2 py-1 text-right tabular-nums text-red-600">
-                    -{totals.disc.toFixed(2)}
-                  </td>
-                  <td></td>
-                </tr>
-                <tr>
-                  <td colSpan={8} className="px-2 py-1 text-right font-medium">
-                    Tax
-                  </td>
-                  <td className="px-2 py-1 text-right tabular-nums">+{totals.tax.toFixed(2)}</td>
-                  <td></td>
-                </tr>
-                <tr
-                  className="font-semibold border-t"
-                  style={{ borderColor: 'var(--aurora-border)' }}
-                >
-                  <td colSpan={8} className="px-2 py-2 text-right">
-                    Total ({form.currency})
-                  </td>
-                  <td className="px-2 py-2 text-right tabular-nums">{total.toFixed(2)}</td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </div>
+        <OrderLineEditor
+          variant="sales"
+          lines={form.lines}
+          products={products}
+          units={units}
+          locations={locations}
+          currency={form.currency}
+          onAddLine={addLine}
+          onRemoveLine={removeLine}
+          onLineChange={setLine}
+        />
       </div>
     </Modal>
   );
