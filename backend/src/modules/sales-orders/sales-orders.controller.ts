@@ -25,6 +25,12 @@ export class SalesOrdersController {
     return this.service.findAll(query, user);
   }
 
+  @Get('receipt-accounts')
+  @RequirePermissions('sales.create')
+  findReceiptAccounts(@Query() query: any, @CurrentUser() user: AuthUser) {
+    return this.service.findReceiptAccounts(query, user);
+  }
+
   @Get(':id')
   @RequirePermissions('sales.view')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {

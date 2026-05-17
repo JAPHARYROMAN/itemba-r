@@ -72,6 +72,7 @@ interface CashAccount {
   currency?: string | null;
   isActive?: boolean;
   linkedBank?: {
+    id?: string;
     bankName?: string | null;
     accountName?: string | null;
     accountNumber?: string | null;
@@ -186,23 +187,6 @@ const ACCOUNT_TYPE_LABELS: Record<string, string> = {
   MOBILE_MONEY: 'Mobile money',
   OTHER: 'Other',
 };
-
-function accountTypesForPaymentMethod(method: string) {
-  switch (method) {
-    case 'CASH':
-      return ['CASH_ON_HAND', 'PETTY_CASH'];
-    case 'BANK_CARD':
-    case 'BANK_TRANSFER':
-      return ['BANK'];
-    case 'MOBILE_MONEY':
-      return ['MOBILE_MONEY'];
-    case 'MIXED':
-    case 'OTHER':
-      return ['CASH_ON_HAND', 'PETTY_CASH', 'BANK', 'MOBILE_MONEY', 'OTHER'];
-    default:
-      return [];
-  }
-}
 
 function accountSelectLabel(method: string) {
   switch (method) {
@@ -361,19 +345,48 @@ function SalesOrderModal({
       backendList<Branch>('/branches', {
         query: { companyId: form.companyId, activeOnly: true, limit: 500 },
       }),
-      backendList<CashAccount>('/cash-accounts', {
-        query: { companyId: form.companyId, isActive: true, limit: 500 },
-      }),
-    ]).then(([divisionResult, branchResult, cashAccountResult]) => {
+    ]).then(([divisionResult, branchResult]) => {
       if (cancelled) return;
       setDivisions(divisionResult.status === 'fulfilled' ? divisionResult.value : []);
       setBranches(branchResult.status === 'fulfilled' ? branchResult.value : []);
-      setCashAccounts(cashAccountResult.status === 'fulfilled' ? cashAccountResult.value : []);
     });
     return () => {
       cancelled = true;
     };
   }, [form.companyId]);
+
+  useEffect(() => {
+    if (
+      !form.companyId ||
+      !form.divisionId ||
+      !form.branchId ||
+      form.paymentMethod === 'CREDIT'
+    ) {
+      setCashAccounts([]);
+      return;
+    }
+
+    let cancelled = false;
+    backendList<CashAccount>('/sales-orders/receipt-accounts', {
+      query: {
+        companyId: form.companyId,
+        divisionId: form.divisionId,
+        branchId: form.branchId,
+        paymentMethod: form.paymentMethod,
+        limit: 500,
+      },
+    })
+      .then((rows) => {
+        if (!cancelled) setCashAccounts(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCashAccounts([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId, form.divisionId, form.branchId, form.paymentMethod]);
 
   useEffect(() => {
     if (!form.companyId || !form.branchId) {
@@ -434,19 +447,10 @@ function SalesOrderModal({
   const branchOptions = form.divisionId
     ? branches.filter((branch) => branch.divisionId === form.divisionId)
     : [];
-  const receiptAccountTypes = accountTypesForPaymentMethod(form.paymentMethod);
   const receiptAccounts =
     form.paymentMethod === 'CREDIT'
       ? []
-      : cashAccounts.filter(
-          (account) =>
-            account.isActive !== false &&
-            receiptAccountTypes.includes(account.accountType) &&
-            (account.accountType === 'BANK'
-              ? (!account.divisionId || account.divisionId === form.divisionId) &&
-                (!account.branchId || account.branchId === form.branchId)
-              : account.divisionId === form.divisionId && account.branchId === form.branchId),
-        );
+      : cashAccounts.filter((account) => account.isActive !== false);
 
   useEffect(() => {
     setForm((current) => {
@@ -455,14 +459,8 @@ function SalesOrderModal({
       }
       if (!current.cashAccountId) return current;
 
-      const allowedTypes = accountTypesForPaymentMethod(current.paymentMethod);
       const selected = cashAccounts.find((account) => account.id === current.cashAccountId);
-      const belongsToSelection =
-        selected?.accountType === 'BANK'
-          ? (!selected.divisionId || selected.divisionId === current.divisionId) &&
-            (!selected.branchId || selected.branchId === current.branchId)
-          : selected?.divisionId === current.divisionId && selected?.branchId === current.branchId;
-      if (!selected || !allowedTypes.includes(selected.accountType) || !belongsToSelection) {
+      if (!selected) {
         return { ...current, cashAccountId: '' };
       }
       return current;
@@ -742,13 +740,17 @@ function SalesOrderModal({
                 value={form.cashAccountId}
                 onChange={(e) => setField('cashAccountId', e.target.value)}
                 placeholder={
-                  form.companyId
-                    ? `Select ${accountSelectLabel(form.paymentMethod).toLowerCase()}`
-                    : 'Pick company first'
+                  !form.companyId
+                    ? 'Pick company first'
+                    : !form.branchId
+                      ? 'Pick branch/location first'
+                      : `Select ${accountSelectLabel(form.paymentMethod).toLowerCase()}`
                 }
-                disabled={!form.companyId || receiptAccounts.length === 0}
+                disabled={!form.companyId || !form.branchId || receiptAccounts.length === 0}
                 hint={
-                  form.companyId && receiptAccounts.length === 0
+                  form.companyId && !form.branchId
+                    ? 'Select the sale branch/location first so the form can load the correct receipt accounts.'
+                    : form.companyId && receiptAccounts.length === 0
                     ? `${emptyAccountHint(form.paymentMethod)} Create it under ${
                         ['BANK_CARD', 'BANK_TRANSFER'].includes(form.paymentMethod)
                           ? 'Group Control > Bank Accounts.'

@@ -212,6 +212,62 @@ export class SalesOrdersService {
     return record;
   }
 
+  async findReceiptAccounts(
+    query: {
+      companyId?: string;
+      divisionId?: string;
+      branchId?: string;
+      paymentMethod?: SalesPaymentMethod;
+      limit?: string | number;
+    },
+    user: AuthUser,
+  ) {
+    if (!query.companyId || query.paymentMethod === SalesPaymentMethod.CREDIT) {
+      return [];
+    }
+
+    await this.companyScope.assertCanAccessCompany(user, query.companyId, AccessLevel.READ);
+
+    const paymentMethod = query.paymentMethod as SalesPaymentMethod | undefined;
+    const allowedTypes = accountTypesForPaymentMethod(paymentMethod);
+    if (allowedTypes.length === 0) return [];
+
+    const max = Math.min(Math.max(Number(query.limit ?? 500), 1), 1000);
+    const accounts = await this.prisma.cashAccount.findMany({
+      where: {
+        companyId: query.companyId,
+        deletedAt: null,
+        isActive: true,
+        accountType: { in: allowedTypes },
+      },
+      include: {
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
+        linkedBank: { select: { id: true, bankName: true, accountName: true, accountNumber: true } },
+      },
+      orderBy: { accountName: 'asc' },
+      take: 1000,
+    });
+
+    return accounts
+      .filter((account) => {
+        if (account.accountType === CashAccountType.BANK) {
+          return (
+            (!account.divisionId || account.divisionId === query.divisionId) &&
+            (!account.branchId || account.branchId === query.branchId)
+          );
+        }
+
+        return (
+          Boolean(query.divisionId) &&
+          Boolean(query.branchId) &&
+          account.divisionId === query.divisionId &&
+          account.branchId === query.branchId
+        );
+      })
+      .slice(0, max);
+  }
+
   async create(dto: CreateSalesOrderDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     await this.assertReferencesBelongToCompany(dto.companyId, dto);
