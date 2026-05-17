@@ -9,7 +9,13 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateSalesOrderDto, SalesOrderLineDto } from './dto/create-sales-order.dto';
 import { UpdateSalesOrderDto } from './dto/update-sales-order.dto';
 import { QuerySalesOrderDto } from './dto/query-sales-order.dto';
-import { AccessLevel, AuditSeverity, CurrencyCode } from '@prisma/client';
+import {
+  AccessLevel,
+  AuditSeverity,
+  CashAccountType,
+  CurrencyCode,
+  SalesPaymentMethod,
+} from '@prisma/client';
 
 type SalesOrderReferenceIds = {
   divisionId?: string | null;
@@ -17,8 +23,32 @@ type SalesOrderReferenceIds = {
   customerId?: string | null;
   salespersonId?: string | null;
   cashAccountId?: string | null;
+  paymentMethod?: SalesPaymentMethod | null;
   lines?: SalesOrderLineDto[];
 };
+
+function accountTypesForPaymentMethod(method?: SalesPaymentMethod | null): CashAccountType[] {
+  switch (method) {
+    case SalesPaymentMethod.CASH:
+      return [CashAccountType.CASH_ON_HAND, CashAccountType.PETTY_CASH];
+    case SalesPaymentMethod.BANK_CARD:
+    case SalesPaymentMethod.BANK_TRANSFER:
+      return [CashAccountType.BANK];
+    case SalesPaymentMethod.MOBILE_MONEY:
+      return [CashAccountType.MOBILE_MONEY];
+    case SalesPaymentMethod.MIXED:
+    case SalesPaymentMethod.OTHER:
+      return [
+        CashAccountType.CASH_ON_HAND,
+        CashAccountType.PETTY_CASH,
+        CashAccountType.BANK,
+        CashAccountType.MOBILE_MONEY,
+        CashAccountType.OTHER,
+      ];
+    default:
+      return [];
+  }
+}
 
 function calculateLineTotals(
   lines: {
@@ -267,6 +297,7 @@ export class SalesOrdersService {
       customerId: dto.customerId ?? existing.customerId,
       salespersonId: dto.salespersonId ?? existing.salespersonId,
       cashAccountId: dto.cashAccountId ?? (existing as any).cashAccountId,
+      paymentMethod: dto.paymentMethod ?? ((existing as any).paymentMethod as SalesPaymentMethod),
       lines: dto.lines,
     });
 
@@ -389,10 +420,15 @@ export class SalesOrdersService {
     if (refs.cashAccountId) {
       const cashAccount = await this.prisma.cashAccount.findFirst({
         where: { id: refs.cashAccountId, deletedAt: null, isActive: true },
-        select: { companyId: true },
+        select: { companyId: true, accountType: true },
       });
       if (!cashAccount || cashAccount.companyId !== companyId) {
         throw new BadRequestException('Cash account does not belong to this company');
+      }
+
+      const allowedTypes = accountTypesForPaymentMethod(refs.paymentMethod);
+      if (allowedTypes.length && !allowedTypes.includes(cashAccount.accountType)) {
+        throw new BadRequestException('Cash account type does not match payment method');
       }
     }
 

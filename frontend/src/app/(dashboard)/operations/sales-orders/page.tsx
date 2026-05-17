@@ -67,6 +67,13 @@ interface CashAccount {
   id: string;
   accountName: string;
   accountType: string;
+  currency?: string | null;
+  isActive?: boolean;
+  linkedBank?: {
+    bankName?: string | null;
+    accountName?: string | null;
+    accountNumber?: string | null;
+  } | null;
 }
 
 interface SalesOrderLine {
@@ -169,6 +176,71 @@ const PAYMENT_METHODS = [
   { value: 'MIXED', label: 'Mixed' },
   { value: 'OTHER', label: 'Other' },
 ];
+
+const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+  CASH_ON_HAND: 'Cash on hand',
+  PETTY_CASH: 'Petty cash',
+  BANK: 'Bank',
+  MOBILE_MONEY: 'Mobile money',
+  OTHER: 'Other',
+};
+
+function accountTypesForPaymentMethod(method: string) {
+  switch (method) {
+    case 'CASH':
+      return ['CASH_ON_HAND', 'PETTY_CASH'];
+    case 'BANK_CARD':
+    case 'BANK_TRANSFER':
+      return ['BANK'];
+    case 'MOBILE_MONEY':
+      return ['MOBILE_MONEY'];
+    case 'MIXED':
+    case 'OTHER':
+      return ['CASH_ON_HAND', 'PETTY_CASH', 'BANK', 'MOBILE_MONEY', 'OTHER'];
+    default:
+      return [];
+  }
+}
+
+function accountSelectLabel(method: string) {
+  switch (method) {
+    case 'CASH':
+      return 'Cash Account';
+    case 'BANK_CARD':
+    case 'BANK_TRANSFER':
+      return 'Bank Account';
+    case 'MOBILE_MONEY':
+      return 'Mobile Money Account';
+    default:
+      return 'Receipt Account';
+  }
+}
+
+function emptyAccountHint(method: string) {
+  switch (method) {
+    case 'CASH':
+      return 'No active cash-on-hand or petty-cash account is available for this company.';
+    case 'BANK_CARD':
+    case 'BANK_TRANSFER':
+      return 'No active bank receipt account is available for this company.';
+    case 'MOBILE_MONEY':
+      return 'No active mobile-money account is available for this company.';
+    default:
+      return 'No active receipt account is available for this company.';
+  }
+}
+
+function accountOptionLabel(account: CashAccount) {
+  const typeLabel = ACCOUNT_TYPE_LABELS[account.accountType] ?? account.accountType;
+  const bankName =
+    account.accountType === 'BANK' &&
+    account.linkedBank?.bankName &&
+    !account.accountName.toLowerCase().includes(account.linkedBank.bankName.toLowerCase())
+      ? ` - ${account.linkedBank.bankName}`
+      : '';
+  const currency = account.currency ? ` - ${account.currency}` : '';
+  return `${account.accountName}${bankName} (${typeLabel}${currency})`;
+}
 
 const BLANK_LINE = (): SalesOrderLine => ({
   productId: '',
@@ -288,7 +360,7 @@ function SalesOrderModal({
         query: { companyId: form.companyId, activeOnly: true, limit: 500 },
       }),
       backendList<CashAccount>('/cash-accounts', {
-        query: { companyId: form.companyId, limit: 200 },
+        query: { companyId: form.companyId, isActive: true, limit: 500 },
       }),
     ]).then(([divisionResult, branchResult, cashAccountResult]) => {
       if (cancelled) return;
@@ -360,6 +432,30 @@ function SalesOrderModal({
   const branchOptions = form.divisionId
     ? branches.filter((branch) => branch.divisionId === form.divisionId)
     : [];
+  const receiptAccountTypes = accountTypesForPaymentMethod(form.paymentMethod);
+  const receiptAccounts =
+    form.paymentMethod === 'CREDIT'
+      ? []
+      : cashAccounts.filter(
+          (account) =>
+            account.isActive !== false && receiptAccountTypes.includes(account.accountType),
+        );
+
+  useEffect(() => {
+    setForm((current) => {
+      if (current.paymentMethod === 'CREDIT') {
+        return current.cashAccountId ? { ...current, cashAccountId: '' } : current;
+      }
+      if (!current.cashAccountId) return current;
+
+      const allowedTypes = accountTypesForPaymentMethod(current.paymentMethod);
+      const selected = cashAccounts.find((account) => account.id === current.cashAccountId);
+      if (!selected || !allowedTypes.includes(selected.accountType)) {
+        return { ...current, cashAccountId: '' };
+      }
+      return current;
+    });
+  }, [cashAccounts, form.paymentMethod]);
 
   const handleSubmit = async () => {
     if (!form.companyId) {
@@ -387,7 +483,7 @@ function SalesOrderModal({
       return;
     }
     if (form.paymentMethod !== 'CREDIT' && !form.cashAccountId) {
-      setError('Pick a cash/bank account for non-credit payments');
+      setError(`Pick a ${accountSelectLabel(form.paymentMethod).toLowerCase()}`);
       return;
     }
     setSaving(true);
@@ -468,6 +564,7 @@ function SalesOrderModal({
                 branchId: '',
                 customerId: '',
                 salespersonId: '',
+                cashAccountId: '',
                 lines: f.lines.map((line) => ({
                   ...line,
                   productId: '',
@@ -614,23 +711,41 @@ function SalesOrderModal({
             required
             value={form.paymentMethod}
             onChange={(e) => {
-              setField('paymentMethod', e.target.value);
-              if (e.target.value === 'CREDIT') setField('cashAccountId', '');
+              const paymentMethod = e.target.value;
+              setForm((current) => ({
+                ...current,
+                paymentMethod,
+                cashAccountId: '',
+              }));
             }}
             options={PAYMENT_METHODS}
           />
           {form.paymentMethod !== 'CREDIT' && (
             <>
               <FormSelect
-                label="Cash / Bank Account"
+                label={accountSelectLabel(form.paymentMethod)}
                 required
                 value={form.cashAccountId}
                 onChange={(e) => setField('cashAccountId', e.target.value)}
-                placeholder={form.companyId ? 'Select account' : 'Pick company first'}
+                placeholder={
+                  form.companyId
+                    ? `Select ${accountSelectLabel(form.paymentMethod).toLowerCase()}`
+                    : 'Pick company first'
+                }
+                disabled={!form.companyId || receiptAccounts.length === 0}
+                hint={
+                  form.companyId && receiptAccounts.length === 0
+                    ? `${emptyAccountHint(form.paymentMethod)} Create it under ${
+                        ['BANK_CARD', 'BANK_TRANSFER'].includes(form.paymentMethod)
+                          ? 'Group Control > Bank Accounts.'
+                          : 'Finance > Cash Accounts.'
+                      }`
+                    : undefined
+                }
               >
-                {cashAccounts.map((a) => (
+                {receiptAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
-                    {a.accountName} ({a.accountType})
+                    {accountOptionLabel(a)}
                   </option>
                 ))}
               </FormSelect>

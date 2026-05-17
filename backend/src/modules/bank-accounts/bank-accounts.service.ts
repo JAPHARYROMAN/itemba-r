@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { AuditSeverity } from '@prisma/client';
+import { AuditSeverity, BankAccount, CashAccountType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -95,6 +95,7 @@ export class BankAccountsService {
         openedDate: dto.openedDate ? new Date(dto.openedDate) : undefined,
       },
     });
+    await this.syncReceiptCashAccount(record);
     await this.auditLogs.log({
       action: 'CREATE',
       entityType: 'BankAccount',
@@ -123,6 +124,7 @@ export class BankAccountsService {
         openedDate: dto.openedDate ? new Date(dto.openedDate) : undefined,
       },
     });
+    await this.syncReceiptCashAccount(record);
     await this.auditLogs.log({
       action: 'UPDATE',
       entityType: 'BankAccount',
@@ -142,6 +144,7 @@ export class BankAccountsService {
       where: { id },
       data: { deletedAt: new Date() },
     });
+    await this.archiveReceiptCashAccount(record.id);
     await this.auditLogs.log({
       action: 'DELETE',
       entityType: 'BankAccount',
@@ -207,5 +210,57 @@ export class BankAccountsService {
       byCurrency: byCurrencyRaw.map((r) => ({ currency: r.currency, count: r._count.id })),
       byAccountType: byTypeRaw.map((r) => ({ accountType: r.accountType, count: r._count.id })),
     };
+  }
+
+  private async syncReceiptCashAccount(bankAccount: BankAccount) {
+    if (!bankAccount.companyId || bankAccount.deletedAt) {
+      await this.archiveReceiptCashAccount(bankAccount.id);
+      return;
+    }
+
+    const lastFour = bankAccount.accountNumber?.slice(-4);
+    const accountName = `${bankAccount.bankName} - ${bankAccount.accountName}${
+      lastFour ? ` (${lastFour})` : ''
+    }`;
+
+    const existing = await this.prisma.cashAccount.findFirst({
+      where: { linkedBankAccountId: bankAccount.id, deletedAt: null },
+      select: { id: true },
+    });
+
+    if (existing) {
+      await this.prisma.cashAccount.update({
+        where: { id: existing.id },
+        data: {
+          companyId: bankAccount.companyId,
+          accountName,
+          accountType: CashAccountType.BANK,
+          currency: bankAccount.currency,
+          isActive: bankAccount.isActive,
+        },
+      });
+      return;
+    }
+
+    await this.prisma.cashAccount.create({
+      data: {
+        companyId: bankAccount.companyId,
+        linkedBankAccountId: bankAccount.id,
+        accountName,
+        accountType: CashAccountType.BANK,
+        currency: bankAccount.currency,
+        openingBalance: 0,
+        currentBalance: 0,
+        isActive: bankAccount.isActive,
+        notes: 'Auto-created from bank account for sales receipts and payments.',
+      },
+    });
+  }
+
+  private async archiveReceiptCashAccount(bankAccountId: string) {
+    await this.prisma.cashAccount.updateMany({
+      where: { linkedBankAccountId: bankAccountId, deletedAt: null },
+      data: { isActive: false, deletedAt: new Date() },
+    });
   }
 }
