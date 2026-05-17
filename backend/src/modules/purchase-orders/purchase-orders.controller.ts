@@ -1,17 +1,9 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Body,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { QueryPurchaseOrderDto } from './dto/query-purchase-order.dto';
+import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
@@ -55,8 +47,12 @@ export class PurchaseOrdersController {
 
   @Patch(':id/receive')
   @RequirePermissions('purchases.receive')
-  receive(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.receive(id, user);
+  receive(
+    @Param('id') id: string,
+    @Body() dto: ReceivePurchaseOrderDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.receive(id, user, dto);
   }
 
   @Patch(':id/cancel')

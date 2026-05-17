@@ -9,6 +9,7 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreatePurchaseOrderDto, PurchaseOrderLineDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { QueryPurchaseOrderDto } from './dto/query-purchase-order.dto';
+import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { AccessLevel, AuditSeverity, PurchaseType } from '@prisma/client';
 
 type PurchaseOrderReferenceIds = {
@@ -464,7 +465,7 @@ export class PurchaseOrdersService {
     return record;
   }
 
-  async receive(id: string, user: AuthUser) {
+  async receive(id: string, user: AuthUser, dto: ReceivePurchaseOrderDto = {}) {
     const userId = user.id;
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (!['CONFIRMED', 'PARTIALLY_RECEIVED'].includes(existing.status as string)) {
@@ -485,16 +486,17 @@ export class PurchaseOrdersService {
         }
 
         if (product.trackInventory) {
-          if (!line.inventoryLocationId) {
+          const inventoryLocationId = line.inventoryLocationId ?? dto.inventoryLocationId;
+          if (!inventoryLocationId) {
             throw new BadRequestException(
-              `Inventory location is required for tracked product on line with product ${line.productId}`,
+              `Receiving location is required for tracked product on line with product ${line.productId}`,
             );
           }
 
           await this.inventoryMovements.createMovement({
             companyId: existing.companyId,
             productId: line.productId,
-            inventoryLocationId: line.inventoryLocationId,
+            inventoryLocationId,
             movementType: 'PURCHASE_RECEIPT',
             quantity: Number(line.quantity),
             unitId: line.unitId,
@@ -509,6 +511,13 @@ export class PurchaseOrdersService {
             branchId: existing.branchId ?? undefined,
             tx,
           });
+
+          if (!line.inventoryLocationId) {
+            await tx.purchaseOrderLine.update({
+              where: { id: line.id },
+              data: { inventoryLocationId },
+            });
+          }
         }
       }
 

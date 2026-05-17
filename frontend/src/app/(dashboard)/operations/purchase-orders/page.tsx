@@ -183,6 +183,12 @@ function fmtMoney(n: number, ccy = 'TZS') {
   return `${ccy} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)}`;
 }
 
+function locationAvailableForOrder(location: InventoryLocation, order: PurchaseOrder) {
+  if (location.branchId) return location.branchId === order.branchId;
+  if (location.divisionId) return location.divisionId === order.divisionId;
+  return true;
+}
+
 function PurchaseOrderModal({
   mode,
   initial,
@@ -485,7 +491,7 @@ function PurchaseOrderModal({
             ))}
           </FormSelect>
           <FormSelect
-            label="Branch / Location"
+            label="Branch"
             required
             value={form.branchId}
             onChange={(e) => {
@@ -641,6 +647,123 @@ function DeleteConfirm({
   );
 }
 
+function ReceiveOrderModal({
+  order,
+  onClose,
+  onReceived,
+}: {
+  order: PurchaseOrder;
+  onClose: () => void;
+  onReceived: () => void;
+}) {
+  const [locations, setLocations] = useState<InventoryLocation[]>([]);
+  const [inventoryLocationId, setInventoryLocationId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    backendList<InventoryLocation>('/inventory-locations', {
+      query: { companyId: order.companyId, isActive: true, limit: 500 },
+    })
+      .then((rows) => {
+        if (cancelled) return;
+        const available = rows.filter((location) => locationAvailableForOrder(location, order));
+        setLocations(available);
+        setInventoryLocationId(available.length === 1 ? available[0].id : '');
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load locations');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [order]);
+
+  const handleReceive = async () => {
+    if (!inventoryLocationId) {
+      setError('Receiving location is required');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await backendPatch(`/purchase-orders/${order.id}/receive`, { inventoryLocationId });
+      onReceived();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to receive order');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Receive Purchase Order"
+      size="md"
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn
+            variant="success"
+            onClick={handleReceive}
+            loading={saving}
+            disabled={loading || !locations.length}
+          >
+            Receive
+          </Btn>
+        </>
+      }
+    >
+      {error && (
+        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+      <div className="space-y-3">
+        <div className="text-sm" style={{ color: 'var(--aurora-text)' }}>
+          <div>
+            Order: <span className="font-mono">{order.purchaseOrderNumber ?? order.id}</span>
+          </div>
+          <div>
+            Supplier:{' '}
+            <span className="font-medium">{order.supplier?.name ?? order.supplierName ?? '-'}</span>
+          </div>
+        </div>
+        <FormSelect
+          label="Receiving Location"
+          required
+          value={inventoryLocationId}
+          onChange={(event) => setInventoryLocationId(event.target.value)}
+          placeholder={loading ? 'Loading locations...' : 'Select receiving location'}
+          disabled={loading || !locations.length}
+        >
+          {locations.map((location) => (
+            <option key={location.id} value={location.id}>
+              {location.locationCode} - {location.name}
+            </option>
+          ))}
+        </FormSelect>
+        {!loading && !locations.length && (
+          <p className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+            No active inventory location is available for this order branch/division. Create one in
+            Operations &gt; Inventory Locations, then receive this order.
+          </p>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 export default function PurchaseOrdersPage() {
   const { hasPermission } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -657,6 +780,7 @@ export default function PurchaseOrdersPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<PurchaseOrder | null>(null);
   const [deleting, setDeleting] = useState<PurchaseOrder | null>(null);
+  const [receiving, setReceiving] = useState<PurchaseOrder | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
   const [loadError, setLoadError] = useState('');
@@ -717,7 +841,7 @@ export default function PurchaseOrdersPage() {
     load();
   }, [load]);
 
-  const doAction = async (id: string, action: 'confirm' | 'receive' | 'cancel') => {
+  const doAction = async (id: string, action: 'confirm' | 'cancel') => {
     setActionLoading(`${id}:${action}`);
     setActionError('');
     try {
@@ -788,6 +912,16 @@ export default function PurchaseOrdersPage() {
           onClose={() => setDeleting(null)}
           onConfirmed={() => {
             setDeleting(null);
+            load();
+          }}
+        />
+      )}
+      {receiving && (
+        <ReceiveOrderModal
+          order={receiving}
+          onClose={() => setReceiving(null)}
+          onReceived={() => {
+            setReceiving(null);
             load();
           }}
         />
@@ -1009,12 +1143,7 @@ export default function PurchaseOrdersPage() {
                       )}
                       {(o.status === 'CONFIRMED' || o.status === 'PARTIALLY_RECEIVED') &&
                         canReceive && (
-                          <Btn
-                            variant="success"
-                            size="xs"
-                            loading={actionLoading === `${o.id}:receive`}
-                            onClick={() => doAction(o.id, 'receive')}
-                          >
+                          <Btn variant="success" size="xs" onClick={() => setReceiving(o)}>
                             Receive
                           </Btn>
                         )}
