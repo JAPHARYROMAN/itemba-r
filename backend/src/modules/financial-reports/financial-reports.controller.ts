@@ -8,7 +8,11 @@ class ReportQueryDto {
   @IsOptional() @IsString() periodId?: string;
   @IsOptional() @IsString() dateFrom?: string;
   @IsOptional() @IsString() dateTo?: string;
+  @IsOptional() @IsString() periodStart?: string;
+  @IsOptional() @IsString() periodEnd?: string;
   @IsOptional() @IsString() asOf?: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
 }
 
 @Controller('financial-reports')
@@ -34,7 +38,10 @@ export class FinancialReportsController {
     @Query() q: ReportQueryDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.getTrialBalance(companyId, q.periodId, q.dateFrom, q.dateTo, user);
+    return this.service.getTrialBalance(companyId, q.periodId, q.dateFrom, q.dateTo, user, {
+      divisionId: q.divisionId,
+      branchId: q.branchId,
+    });
   }
 
   @Get('profit-and-loss/:companyId')
@@ -44,7 +51,10 @@ export class FinancialReportsController {
     @Query() q: ReportQueryDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.getProfitAndLoss(companyId, q.dateFrom, q.dateTo, user);
+    return this.service.getProfitAndLoss(companyId, q.dateFrom, q.dateTo, user, {
+      divisionId: q.divisionId,
+      branchId: q.branchId,
+    });
   }
 
   @Get('balance-sheet/:companyId')
@@ -54,18 +64,33 @@ export class FinancialReportsController {
     @Query() q: ReportQueryDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.getBalanceSheet(companyId, q.asOf, user);
+    return this.service.getBalanceSheet(companyId, q.asOf, user, {
+      divisionId: q.divisionId,
+      branchId: q.branchId,
+    });
   }
 
   @Get('cash-flow/:companyId')
   @RequirePermissions('finance.reports.view')
   getCashFlow(
     @Param('companyId') companyId: string,
-    @Query('periodStart') periodStart: string,
-    @Query('periodEnd') periodEnd: string,
+    @Query() q: ReportQueryDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.getCashFlow(companyId, periodStart, periodEnd, user);
+    return this.service.getCashFlow(companyId, q.periodStart!, q.periodEnd!, user, {
+      divisionId: q.divisionId,
+      branchId: q.branchId,
+    });
+  }
+
+  @Get('scope-rollup/:companyId')
+  @RequirePermissions('finance.reports.view')
+  getScopeRollup(
+    @Param('companyId') companyId: string,
+    @Query() q: ReportQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.getScopeRollup(companyId, q.dateFrom, q.dateTo, user);
   }
 
   @Get('receivables-aging/:companyId')
@@ -104,6 +129,27 @@ export class FinancialReportsController {
   @RequirePermissions('finance.reports.view')
   getGroupBalanceSheet(@Query() q: ReportQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.getGroupBalanceSheet(q.asOf, user);
+  }
+
+  @Get('group/consolidated/profit-and-loss')
+  @RequirePermissions('finance.reports.view')
+  getConsolidatedProfitAndLoss(@Query() q: ReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getConsolidatedProfitAndLoss(q.dateFrom, q.dateTo, user);
+  }
+
+  @Get('group/consolidated/balance-sheet')
+  @RequirePermissions('finance.reports.view')
+  getConsolidatedBalanceSheet(@Query() q: ReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getConsolidatedBalanceSheet(q.asOf, user);
+  }
+
+  @Get('group/consolidated/cash-flow')
+  @RequirePermissions('finance.reports.view')
+  getConsolidatedCashFlow(
+    @Query() q: ReportQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.getConsolidatedCashFlow(q.periodStart!, q.periodEnd!, user);
   }
 
   @Get('group/receivables-aging')

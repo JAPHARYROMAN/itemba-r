@@ -40,7 +40,7 @@ export class GroupReportsService {
       if (dateTo) where.orderDate.lte = new Date(dateTo);
     }
 
-    const [byCompanyRaw, byDivisionRaw, totals] = await Promise.all([
+    const [byCompanyRaw, byDivisionRaw, byBranchRaw, totals] = await Promise.all([
       this.prisma.salesOrder.groupBy({
         by: ['companyId'],
         where,
@@ -49,6 +49,12 @@ export class GroupReportsService {
       }),
       this.prisma.salesOrder.groupBy({
         by: ['companyId', 'divisionId'],
+        where,
+        _count: { id: true },
+        _sum: { totalAmount: true, paidAmount: true, outstandingAmount: true },
+      }),
+      this.prisma.salesOrder.groupBy({
+        by: ['companyId', 'divisionId', 'branchId'],
         where,
         _count: { id: true },
         _sum: { totalAmount: true, paidAmount: true, outstandingAmount: true },
@@ -62,8 +68,9 @@ export class GroupReportsService {
 
     const companyIds = byCompanyRaw.map((r) => r.companyId);
     const divisionIds = byDivisionRaw.map((r) => r.divisionId).filter((x): x is string => !!x);
+    const branchIds = byBranchRaw.map((r) => r.branchId).filter((x): x is string => !!x);
 
-    const [companies, divisions] = await Promise.all([
+    const [companies, divisions, branches] = await Promise.all([
       companyIds.length
         ? this.prisma.company.findMany({
             where: { id: { in: companyIds } },
@@ -76,9 +83,16 @@ export class GroupReportsService {
             select: { id: true, name: true, code: true, companyId: true },
           })
         : Promise.resolve([]),
+      branchIds.length
+        ? this.prisma.branch.findMany({
+            where: { id: { in: branchIds } },
+            select: { id: true, name: true, code: true, divisionId: true },
+          })
+        : Promise.resolve([]),
     ]);
     const companyById = new Map(companies.map((c) => [c.id, c]));
     const divisionById = new Map(divisions.map((d) => [d.id, d]));
+    const branchById = new Map(branches.map((b) => [b.id, b]));
 
     return {
       scope: 'GROUP',
@@ -104,6 +118,18 @@ export class GroupReportsService {
         companyName: companyById.get(r.companyId)?.name ?? null,
         divisionId: r.divisionId,
         divisionName: r.divisionId ? (divisionById.get(r.divisionId)?.name ?? null) : 'Unassigned',
+        orderCount: r._count.id,
+        totalAmount: Number(r._sum.totalAmount ?? 0),
+        paidAmount: Number(r._sum.paidAmount ?? 0),
+        outstandingAmount: Number(r._sum.outstandingAmount ?? 0),
+      })),
+      byBranch: byBranchRaw.map((r) => ({
+        companyId: r.companyId,
+        companyName: companyById.get(r.companyId)?.name ?? null,
+        divisionId: r.divisionId,
+        divisionName: r.divisionId ? (divisionById.get(r.divisionId)?.name ?? null) : 'Unassigned',
+        branchId: r.branchId,
+        branchName: r.branchId ? (branchById.get(r.branchId)?.name ?? null) : 'Unassigned',
         orderCount: r._count.id,
         totalAmount: Number(r._sum.totalAmount ?? 0),
         paidAmount: Number(r._sum.paidAmount ?? 0),

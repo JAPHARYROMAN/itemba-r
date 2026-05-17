@@ -3,6 +3,12 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 
+type ReportScope = {
+  divisionId?: string | null;
+  branchId?: string | null;
+  excludeIntercompany?: boolean;
+};
+
 @Injectable()
 export class FinancialReportsService {
   constructor(
@@ -76,10 +82,70 @@ export class FinancialReportsService {
     dateFrom?: string,
     dateTo?: string,
     user?: AuthUser,
+    scope: ReportScope = {},
   ) {
     if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
     const jeWhere: any = { companyId, status: 'POSTED', deletedAt: null };
     if (periodId) jeWhere.accountingPeriodId = periodId;
+    if (dateFrom || dateTo) {
+      jeWhere.transactionDate = {};
+      if (dateFrom) jeWhere.transactionDate.gte = new Date(dateFrom);
+      if (dateTo) jeWhere.transactionDate.lte = new Date(dateTo);
+    }
+    this.applyConsolidationFilter(jeWhere, scope);
+
+    const lines = await this.prisma.journalEntryLine.findMany({
+      where: this.buildLineWhere(companyId, jeWhere, scope),
+      include: {
+        account: {
+          select: { id: true, accountCode: true, accountName: true, accountType: true },
+        },
+      },
+    });
+
+    const accountMap = new Map<string, {
+      account: any;
+      debit: number;
+      credit: number;
+      journalEntryIds: Set<string>;
+    }>();
+
+    for (const line of lines) {
+      const existing = accountMap.get(line.accountId) ?? {
+        account: line.account,
+        debit: 0,
+        credit: 0,
+        journalEntryIds: new Set<string>(),
+      };
+      existing.debit += Number(line.debit);
+      existing.credit += Number(line.credit);
+      existing.journalEntryIds.add(line.journalEntryId);
+      accountMap.set(line.accountId, existing);
+    }
+
+    const rows = Array.from(accountMap.values()).map((r) => ({
+      account: r.account,
+      debit: r.debit,
+      credit: r.credit,
+      balance: r.debit - r.credit,
+      journalEntryIds: Array.from(r.journalEntryIds),
+    }));
+
+    rows.sort((a, b) => a.account.accountCode.localeCompare(b.account.accountCode));
+
+    return {
+      companyId,
+      divisionId: scope.divisionId ?? null,
+      branchId: scope.branchId ?? null,
+      rows,
+      totalDebit: rows.reduce((s, r) => s + r.debit, 0),
+      totalCredit: rows.reduce((s, r) => s + r.credit, 0),
+    };
+  }
+
+  async getScopeRollup(companyId: string, dateFrom?: string, dateTo?: string, user?: AuthUser) {
+    if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
+    const jeWhere: any = { companyId, status: 'POSTED', deletedAt: null };
     if (dateFrom || dateTo) {
       jeWhere.transactionDate = {};
       if (dateFrom) jeWhere.transactionDate.gte = new Date(dateFrom);
@@ -93,38 +159,54 @@ export class FinancialReportsService {
       },
       include: {
         account: {
-          select: { id: true, accountCode: true, accountName: true, accountType: true },
+          select: { accountType: true },
         },
       },
     });
 
-    const accountMap = new Map<string, {
-      account: any;
-      debit: number;
-      credit: number;
-    }>();
+    const divisionIds = Array.from(new Set(lines.map((line) => line.divisionId).filter(Boolean))) as string[];
+    const branchIds = Array.from(new Set(lines.map((line) => line.branchId).filter(Boolean))) as string[];
+    const [divisions, branches] = await Promise.all([
+      divisionIds.length
+        ? this.prisma.division.findMany({
+            where: { id: { in: divisionIds } },
+            select: { id: true, name: true, code: true },
+          })
+        : [],
+      branchIds.length
+        ? this.prisma.branch.findMany({
+            where: { id: { in: branchIds } },
+            select: { id: true, name: true, code: true, divisionId: true },
+          })
+        : [],
+    ]);
+    const divisionById = new Map(divisions.map((division) => [division.id, division]));
+    const branchById = new Map(branches.map((branch) => [branch.id, branch]));
 
+    const byDivision = new Map<string, any>();
+    const byBranch = new Map<string, any>();
     for (const line of lines) {
-      const existing = accountMap.get(line.accountId) ?? { account: line.account, debit: 0, credit: 0 };
-      existing.debit += Number(line.debit);
-      existing.credit += Number(line.credit);
-      accountMap.set(line.accountId, existing);
+      const division = line.divisionId ? divisionById.get(line.divisionId) : null;
+      const branch = line.branchId ? branchById.get(line.branchId) : null;
+      this.addRollupAmount(byDivision, line.divisionId ?? 'unassigned', {
+        id: line.divisionId,
+        name: division?.name ?? 'Unassigned',
+        code: division?.code ?? null,
+      }, line);
+      this.addRollupAmount(byBranch, line.branchId ?? 'unassigned', {
+        id: line.branchId,
+        name: branch?.name ?? 'Unassigned',
+        code: branch?.code ?? null,
+        divisionId: branch?.divisionId ?? line.divisionId ?? null,
+      }, line);
     }
-
-    const rows = Array.from(accountMap.values()).map((r) => ({
-      account: r.account,
-      debit: r.debit,
-      credit: r.credit,
-      balance: r.debit - r.credit,
-    }));
-
-    rows.sort((a, b) => a.account.accountCode.localeCompare(b.account.accountCode));
 
     return {
       companyId,
-      rows,
-      totalDebit: rows.reduce((s, r) => s + r.debit, 0),
-      totalCredit: rows.reduce((s, r) => s + r.credit, 0),
+      dateFrom,
+      dateTo,
+      byDivision: Array.from(byDivision.values()).map((row) => this.serializeRollup(row)),
+      byBranch: Array.from(byBranch.values()).map((row) => this.serializeRollup(row)),
     };
   }
 
@@ -133,6 +215,7 @@ export class FinancialReportsService {
     dateFrom?: string,
     dateTo?: string,
     user?: AuthUser,
+    scope: ReportScope = {},
   ) {
     if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
     const jeWhere: any = { companyId, status: 'POSTED', deletedAt: null };
@@ -141,27 +224,34 @@ export class FinancialReportsService {
       if (dateFrom) jeWhere.transactionDate.gte = new Date(dateFrom);
       if (dateTo) jeWhere.transactionDate.lte = new Date(dateTo);
     }
+    this.applyConsolidationFilter(jeWhere, scope);
 
     const lines = await this.prisma.journalEntryLine.findMany({
-      where: { companyId, journalEntry: jeWhere },
+      where: this.buildLineWhere(companyId, jeWhere, scope),
       include: { account: { select: { accountType: true } } },
     });
 
     let income = 0;
     let expenses = 0;
     let cogs = 0;
+    const incomeJournalEntryIds = new Set<string>();
+    const expenseJournalEntryIds = new Set<string>();
+    const cogsJournalEntryIds = new Set<string>();
 
     for (const line of lines) {
       const net = Number(line.credit) - Number(line.debit);
       switch (line.account.accountType) {
         case 'INCOME':
           income += net;
+          incomeJournalEntryIds.add(line.journalEntryId);
           break;
         case 'EXPENSE':
           expenses += Number(line.debit) - Number(line.credit);
+          expenseJournalEntryIds.add(line.journalEntryId);
           break;
         case 'COST_OF_GOODS_SOLD':
           cogs += Number(line.debit) - Number(line.credit);
+          cogsJournalEntryIds.add(line.journalEntryId);
           break;
       }
     }
@@ -175,10 +265,22 @@ export class FinancialReportsService {
       netIncome: income - expenses - cogs,
       dateFrom,
       dateTo,
+      divisionId: scope.divisionId ?? null,
+      branchId: scope.branchId ?? null,
+      drillDown: {
+        income: Array.from(incomeJournalEntryIds),
+        expenses: Array.from(expenseJournalEntryIds),
+        cogs: Array.from(cogsJournalEntryIds),
+      },
+      statementLines: [
+        { key: 'income', label: 'Income', amount: income, journalEntryIds: Array.from(incomeJournalEntryIds) },
+        { key: 'cogs', label: 'Cost of Goods Sold', amount: cogs, journalEntryIds: Array.from(cogsJournalEntryIds) },
+        { key: 'expenses', label: 'Expenses', amount: expenses, journalEntryIds: Array.from(expenseJournalEntryIds) },
+      ],
     };
   }
 
-  async getBalanceSheet(companyId: string, asOf?: string, user?: AuthUser) {
+  async getBalanceSheet(companyId: string, asOf?: string, user?: AuthUser, scope: ReportScope = {}) {
     if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
     const asOfDate = asOf ? new Date(asOf) : new Date();
     const jeWhere: any = {
@@ -187,32 +289,57 @@ export class FinancialReportsService {
       deletedAt: null,
       transactionDate: { lte: asOfDate },
     };
+    this.applyConsolidationFilter(jeWhere, scope);
 
     const lines = await this.prisma.journalEntryLine.findMany({
-      where: { companyId, journalEntry: jeWhere },
+      where: this.buildLineWhere(companyId, jeWhere, scope),
       include: { account: { select: { accountType: true } } },
     });
 
     let assets = 0;
     let liabilities = 0;
     let equity = 0;
+    const assetJournalEntryIds = new Set<string>();
+    const liabilityJournalEntryIds = new Set<string>();
+    const equityJournalEntryIds = new Set<string>();
 
     for (const line of lines) {
       const net = Number(line.debit) - Number(line.credit);
       switch (line.account.accountType) {
         case 'ASSET':
           assets += net;
+          assetJournalEntryIds.add(line.journalEntryId);
           break;
         case 'LIABILITY':
           liabilities += Number(line.credit) - Number(line.debit);
+          liabilityJournalEntryIds.add(line.journalEntryId);
           break;
         case 'EQUITY':
           equity += Number(line.credit) - Number(line.debit);
+          equityJournalEntryIds.add(line.journalEntryId);
           break;
       }
     }
 
-    return { companyId, assets, liabilities, equity, asOf: asOfDate };
+    return {
+      companyId,
+      assets,
+      liabilities,
+      equity,
+      asOf: asOfDate,
+      divisionId: scope.divisionId ?? null,
+      branchId: scope.branchId ?? null,
+      drillDown: {
+        assets: Array.from(assetJournalEntryIds),
+        liabilities: Array.from(liabilityJournalEntryIds),
+        equity: Array.from(equityJournalEntryIds),
+      },
+      statementLines: [
+        { key: 'assets', label: 'Assets', amount: assets, journalEntryIds: Array.from(assetJournalEntryIds) },
+        { key: 'liabilities', label: 'Liabilities', amount: liabilities, journalEntryIds: Array.from(liabilityJournalEntryIds) },
+        { key: 'equity', label: 'Equity', amount: equity, journalEntryIds: Array.from(equityJournalEntryIds) },
+      ],
+    };
   }
 
   async getReceivablesAging(companyId: string, user?: AuthUser) {
@@ -302,21 +429,21 @@ export class FinancialReportsService {
     periodStart: string,
     periodEnd: string,
     user?: AuthUser,
+    scope: ReportScope = {},
   ) {
     if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
     const start = new Date(periodStart);
     const end = new Date(periodEnd);
+    const jeWhere: any = {
+      status: 'POSTED',
+      deletedAt: null,
+      transactionDate: { gte: start, lte: end },
+    };
+    this.applyConsolidationFilter(jeWhere, scope);
 
     // Net income from P&L for the period (income - expenses - cogs).
     const lines = await this.prisma.journalEntryLine.findMany({
-      where: {
-        companyId,
-        journalEntry: {
-          status: 'POSTED',
-          deletedAt: null,
-          transactionDate: { gte: start, lte: end },
-        },
-      },
+      where: this.buildLineWhere(companyId, jeWhere, scope),
       include: { account: { select: { accountType: true, accountCode: true, accountSubType: true } } },
     });
 
@@ -333,6 +460,9 @@ export class FinancialReportsService {
     let loanPayableCredit = 0;
     let assetAcquisitions = 0;
     let assetDisposals = 0;
+    const operatingJournalEntryIds = new Set<string>();
+    const investingJournalEntryIds = new Set<string>();
+    const financingJournalEntryIds = new Set<string>();
 
     for (const line of lines) {
       const debit = Number(line.debit);
@@ -343,15 +473,18 @@ export class FinancialReportsService {
       switch (line.account.accountType) {
         case 'INCOME':
           income += credit - debit;
+          operatingJournalEntryIds.add(line.journalEntryId);
           break;
         case 'EXPENSE':
           if (subtype === 'depreciation_expense' || code === '5500' || code === '6500') {
             depreciationExpense += debit - credit;
           }
           expenses += debit - credit;
+          operatingJournalEntryIds.add(line.journalEntryId);
           break;
         case 'COST_OF_GOODS_SOLD':
           cogs += debit - credit;
+          operatingJournalEntryIds.add(line.journalEntryId);
           break;
         case 'ASSET':
           // Cash movements
@@ -362,20 +495,24 @@ export class FinancialReportsService {
           else if (subtype === 'ar_control' || code === '1100' || code === '1110') {
             arDebit += debit;
             arCredit += credit;
+            operatingJournalEntryIds.add(line.journalEntryId);
           }
           // Fixed assets (proxy for investing activities)
           else if (code?.startsWith('15') || subtype.includes('fixed')) {
             assetAcquisitions += debit;
             assetDisposals += credit;
+            investingJournalEntryIds.add(line.journalEntryId);
           }
           break;
         case 'LIABILITY':
           if (subtype === 'ap_control' || code === '2000' || code === '2010') {
             apDebit += debit;
             apCredit += credit;
+            operatingJournalEntryIds.add(line.journalEntryId);
           } else if (subtype === 'loan_principal_payable' || code === '2400' || code === '2500') {
             loanPayableDebit += debit;
             loanPayableCredit += credit;
+            financingJournalEntryIds.add(line.journalEntryId);
           }
           break;
       }
@@ -393,22 +530,27 @@ export class FinancialReportsService {
       companyId,
       period: { start, end },
       method: 'INDIRECT',
+      divisionId: scope.divisionId ?? null,
+      branchId: scope.branchId ?? null,
       operatingActivities: {
         netIncome,
         depreciation: depreciationExpense,
         receivablesChange: arChange,
         payablesChange: apChange,
         total: operatingActivities,
+        journalEntryIds: Array.from(operatingJournalEntryIds),
       },
       investingActivities: {
         assetAcquisitions: -assetAcquisitions,
         assetDisposals,
         total: investingActivities,
+        journalEntryIds: Array.from(investingJournalEntryIds),
       },
       financingActivities: {
         loanProceeds: loanPayableCredit,
         loanRepayments: -loanPayableDebit,
         total: financingActivities,
+        journalEntryIds: Array.from(financingJournalEntryIds),
       },
       netChangeInCash,
       reconciliation: {
@@ -488,7 +630,14 @@ export class FinancialReportsService {
       },
     });
 
-    const byCode = new Map<string, { accountCode: string; accountName: string; accountType: string; debit: number; credit: number }>();
+    const byCode = new Map<string, {
+      accountCode: string;
+      accountName: string;
+      accountType: string;
+      debit: number;
+      credit: number;
+      journalEntryIds: Set<string>;
+    }>();
     for (const line of lines) {
       const key = line.account.accountCode;
       const existing = byCode.get(key) ?? {
@@ -497,14 +646,16 @@ export class FinancialReportsService {
         accountType: line.account.accountType,
         debit: 0,
         credit: 0,
+        journalEntryIds: new Set<string>(),
       };
       existing.debit += Number(line.debit);
       existing.credit += Number(line.credit);
+      existing.journalEntryIds.add(line.journalEntryId);
       byCode.set(key, existing);
     }
 
     const rows = Array.from(byCode.values())
-      .map((r) => ({ ...r, balance: r.debit - r.credit }))
+      .map((r) => ({ ...r, balance: r.debit - r.credit, journalEntryIds: Array.from(r.journalEntryIds) }))
       .sort((a, b) => a.accountCode.localeCompare(b.accountCode));
 
     return {
@@ -570,6 +721,91 @@ export class FinancialReportsService {
       asOf: byCompany[0]?.asOf ?? new Date(),
       byCompany,
       assumptions: ['Sums are pre-consolidation: no intercompany elimination or FX translation.'],
+    };
+  }
+
+  async getConsolidatedProfitAndLoss(dateFrom?: string, dateTo?: string, user?: AuthUser) {
+    if (user) this.companyScope.assertGroupScoped(user, 'view consolidated group P&L');
+    const [raw, consolidated, eliminatedJournalEntryIds] = await Promise.all([
+      this.getGroupProfitAndLoss(dateFrom, dateTo),
+      this.getGroupProfitAndLossWithScope(dateFrom, dateTo, { excludeIntercompany: true }),
+      this.getIntercompanyJournalEntryIds({ dateFrom, dateTo }),
+    ]);
+
+    return {
+      ...consolidated,
+      scope: 'GROUP',
+      consolidation: 'CONSOLIDATED',
+      rawPreConsolidation: this.pickProfitAndLossTotals(raw),
+      eliminations: {
+        method: 'Posted InterCompanyTransaction journal entries are excluded from consolidated totals.',
+        journalEntryIds: eliminatedJournalEntryIds,
+        income: raw.income - consolidated.income,
+        expenses: raw.expenses - consolidated.expenses,
+        cogs: raw.cogs - consolidated.cogs,
+        grossProfit: raw.grossProfit - consolidated.grossProfit,
+        netIncome: raw.netIncome - consolidated.netIncome,
+      },
+      assumptions: [
+        'Intercompany elimination is based on JournalEntry.referenceType=InterCompanyTransaction.',
+        'Multi-currency and FX translation are not included.',
+      ],
+    };
+  }
+
+  async getConsolidatedBalanceSheet(asOf?: string, user?: AuthUser) {
+    if (user) this.companyScope.assertGroupScoped(user, 'view consolidated group balance sheet');
+    const [raw, consolidated, eliminatedJournalEntryIds] = await Promise.all([
+      this.getGroupBalanceSheet(asOf),
+      this.getGroupBalanceSheetWithScope(asOf, { excludeIntercompany: true }),
+      this.getIntercompanyJournalEntryIds({ asOf }),
+    ]);
+
+    return {
+      ...consolidated,
+      scope: 'GROUP',
+      consolidation: 'CONSOLIDATED',
+      rawPreConsolidation: this.pickBalanceSheetTotals(raw),
+      eliminations: {
+        method: 'Posted InterCompanyTransaction journal entries are excluded from consolidated totals.',
+        journalEntryIds: eliminatedJournalEntryIds,
+        assets: raw.assets - consolidated.assets,
+        liabilities: raw.liabilities - consolidated.liabilities,
+        equity: raw.equity - consolidated.equity,
+      },
+      assumptions: [
+        'Intercompany receivables/payables are eliminated through InterCompanyTransaction journal entries.',
+        'Multi-currency and FX translation are not included.',
+      ],
+    };
+  }
+
+  async getConsolidatedCashFlow(periodStart: string, periodEnd: string, user?: AuthUser) {
+    if (user) this.companyScope.assertGroupScoped(user, 'view consolidated group cash flow');
+    const [raw, consolidated, eliminatedJournalEntryIds] = await Promise.all([
+      this.getGroupCashFlow(periodStart, periodEnd),
+      this.getGroupCashFlowWithScope(periodStart, periodEnd, { excludeIntercompany: true }),
+      this.getIntercompanyJournalEntryIds({ dateFrom: periodStart, dateTo: periodEnd }),
+    ]);
+
+    return {
+      ...consolidated,
+      scope: 'GROUP',
+      consolidation: 'CONSOLIDATED',
+      rawPreConsolidation: this.pickCashFlowTotals(raw),
+      eliminations: {
+        method: 'Posted InterCompanyTransaction journal entries are excluded from consolidated totals.',
+        journalEntryIds: eliminatedJournalEntryIds,
+        operatingActivities: raw.operatingActivities.total - consolidated.operatingActivities.total,
+        investingActivities: raw.investingActivities.total - consolidated.investingActivities.total,
+        financingActivities: raw.financingActivities.total - consolidated.financingActivities.total,
+        netChangeInCash: raw.netChangeInCash - consolidated.netChangeInCash,
+      },
+      assumptions: [
+        'Cash flow uses the existing indirect-method classification rules.',
+        'Intercompany cash movement is removed by excluding InterCompanyTransaction journal entries.',
+        'Multi-currency and FX translation are not included.',
+      ],
     };
   }
 
@@ -660,6 +896,252 @@ export class FinancialReportsService {
       groupTotal,
       byCompany: Array.from(byCompany.values()),
       assumptions: ['Balances are summed at face value — no FX translation across currency.'],
+    };
+  }
+
+  private async getGroupProfitAndLossWithScope(
+    dateFrom?: string,
+    dateTo?: string,
+    scope: ReportScope = {},
+  ) {
+    const companies = await this.prisma.company.findMany({
+      where: { deletedAt: null },
+      select: { id: true, name: true, code: true },
+    });
+    const byCompany = await Promise.all(
+      companies.map((company) =>
+        this.getProfitAndLoss(company.id, dateFrom, dateTo, undefined, scope).then((report) => ({
+          ...report,
+          company,
+        })),
+      ),
+    );
+    const totals = byCompany.reduce(
+      (acc, report) => ({
+        income: acc.income + Number(report.income),
+        expenses: acc.expenses + Number(report.expenses),
+        cogs: acc.cogs + Number(report.cogs),
+        grossProfit: acc.grossProfit + Number(report.grossProfit),
+        netIncome: acc.netIncome + Number(report.netIncome),
+      }),
+      { income: 0, expenses: 0, cogs: 0, grossProfit: 0, netIncome: 0 },
+    );
+    return {
+      scope: 'GROUP',
+      ...totals,
+      dateFrom,
+      dateTo,
+      byCompany,
+    };
+  }
+
+  private async getGroupBalanceSheetWithScope(asOf?: string, scope: ReportScope = {}) {
+    const companies = await this.prisma.company.findMany({
+      where: { deletedAt: null },
+      select: { id: true, name: true, code: true },
+    });
+    const byCompany = await Promise.all(
+      companies.map((company) =>
+        this.getBalanceSheet(company.id, asOf, undefined, scope).then((report) => ({
+          ...report,
+          company,
+        })),
+      ),
+    );
+    const totals = byCompany.reduce(
+      (acc, report) => ({
+        assets: acc.assets + Number(report.assets),
+        liabilities: acc.liabilities + Number(report.liabilities),
+        equity: acc.equity + Number(report.equity),
+      }),
+      { assets: 0, liabilities: 0, equity: 0 },
+    );
+    return {
+      scope: 'GROUP',
+      ...totals,
+      asOf: byCompany[0]?.asOf ?? (asOf ? new Date(asOf) : new Date()),
+      byCompany,
+    };
+  }
+
+  private async getGroupCashFlow(periodStart: string, periodEnd: string) {
+    return this.getGroupCashFlowWithScope(periodStart, periodEnd, {});
+  }
+
+  private async getGroupCashFlowWithScope(
+    periodStart: string,
+    periodEnd: string,
+    scope: ReportScope = {},
+  ) {
+    const companies = await this.prisma.company.findMany({
+      where: { deletedAt: null },
+      select: { id: true, name: true, code: true },
+    });
+    const byCompany = await Promise.all(
+      companies.map((company) =>
+        this.getCashFlow(company.id, periodStart, periodEnd, undefined, scope).then((report) => ({
+          ...report,
+          company,
+        })),
+      ),
+    );
+    const totals = byCompany.reduce(
+      (acc, report) => ({
+        operatingActivities: acc.operatingActivities + Number(report.operatingActivities.total),
+        investingActivities: acc.investingActivities + Number(report.investingActivities.total),
+        financingActivities: acc.financingActivities + Number(report.financingActivities.total),
+        netChangeInCash: acc.netChangeInCash + Number(report.netChangeInCash),
+        cashMovementFromLedger:
+          acc.cashMovementFromLedger + Number(report.reconciliation.cashMovementFromLedger),
+        unexplainedDelta: acc.unexplainedDelta + Number(report.reconciliation.unexplainedDelta),
+      }),
+      {
+        operatingActivities: 0,
+        investingActivities: 0,
+        financingActivities: 0,
+        netChangeInCash: 0,
+        cashMovementFromLedger: 0,
+        unexplainedDelta: 0,
+      },
+    );
+
+    return {
+      scope: 'GROUP',
+      period: { start: new Date(periodStart), end: new Date(periodEnd) },
+      method: 'INDIRECT',
+      operatingActivities: { total: totals.operatingActivities },
+      investingActivities: { total: totals.investingActivities },
+      financingActivities: { total: totals.financingActivities },
+      netChangeInCash: totals.netChangeInCash,
+      reconciliation: {
+        cashMovementFromLedger: totals.cashMovementFromLedger,
+        unexplainedDelta: totals.unexplainedDelta,
+      },
+      byCompany,
+    };
+  }
+
+  private buildLineWhere(companyId: string, journalEntryWhere: any, scope: ReportScope) {
+    return {
+      companyId,
+      ...(scope.divisionId ? { divisionId: scope.divisionId } : {}),
+      ...(scope.branchId ? { branchId: scope.branchId } : {}),
+      journalEntry: journalEntryWhere,
+    };
+  }
+
+  private applyConsolidationFilter(journalEntryWhere: any, scope: ReportScope) {
+    if (!scope.excludeIntercompany) return;
+    journalEntryWhere.OR = [
+      { referenceType: null },
+      { referenceType: { not: 'InterCompanyTransaction' } },
+    ];
+  }
+
+  private addRollupAmount(
+    target: Map<string, any>,
+    key: string,
+    scopeInfo: any,
+    line: { debit: any; credit: any; journalEntryId: string; account: { accountType: string } },
+  ) {
+    const existing = target.get(key) ?? {
+      ...scopeInfo,
+      income: 0,
+      expenses: 0,
+      cogs: 0,
+      assets: 0,
+      liabilities: 0,
+      equity: 0,
+      debit: 0,
+      credit: 0,
+      journalEntryIds: new Set<string>(),
+    };
+    const debit = Number(line.debit);
+    const credit = Number(line.credit);
+    existing.debit += debit;
+    existing.credit += credit;
+    existing.journalEntryIds.add(line.journalEntryId);
+
+    switch (line.account.accountType) {
+      case 'INCOME':
+        existing.income += credit - debit;
+        break;
+      case 'EXPENSE':
+        existing.expenses += debit - credit;
+        break;
+      case 'COST_OF_GOODS_SOLD':
+        existing.cogs += debit - credit;
+        break;
+      case 'ASSET':
+        existing.assets += debit - credit;
+        break;
+      case 'LIABILITY':
+        existing.liabilities += credit - debit;
+        break;
+      case 'EQUITY':
+        existing.equity += credit - debit;
+        break;
+    }
+    existing.grossProfit = existing.income - existing.cogs;
+    existing.netIncome = existing.income - existing.expenses - existing.cogs;
+    target.set(key, existing);
+  }
+
+  private serializeRollup(row: any) {
+    return {
+      ...row,
+      journalEntryIds: Array.from(row.journalEntryIds ?? []),
+    };
+  }
+
+  private async getIntercompanyJournalEntryIds(input: {
+    dateFrom?: string;
+    dateTo?: string;
+    asOf?: string;
+  }) {
+    const where: any = {
+      status: 'POSTED',
+      deletedAt: null,
+      referenceType: 'InterCompanyTransaction',
+    };
+    if (input.dateFrom || input.dateTo || input.asOf) {
+      where.transactionDate = {};
+      if (input.dateFrom) where.transactionDate.gte = new Date(input.dateFrom);
+      if (input.dateTo) where.transactionDate.lte = new Date(input.dateTo);
+      if (input.asOf) where.transactionDate.lte = new Date(input.asOf);
+    }
+    const entries = await this.prisma.journalEntry.findMany({
+      where,
+      select: { id: true },
+      orderBy: { transactionDate: 'asc' },
+    });
+    return entries.map((entry) => entry.id);
+  }
+
+  private pickProfitAndLossTotals(report: any) {
+    return {
+      income: report.income,
+      expenses: report.expenses,
+      cogs: report.cogs,
+      grossProfit: report.grossProfit,
+      netIncome: report.netIncome,
+    };
+  }
+
+  private pickBalanceSheetTotals(report: any) {
+    return {
+      assets: report.assets,
+      liabilities: report.liabilities,
+      equity: report.equity,
+    };
+  }
+
+  private pickCashFlowTotals(report: any) {
+    return {
+      operatingActivities: report.operatingActivities.total,
+      investingActivities: report.investingActivities.total,
+      financingActivities: report.financingActivities.total,
+      netChangeInCash: report.netChangeInCash,
     };
   }
 }
