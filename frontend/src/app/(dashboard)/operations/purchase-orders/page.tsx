@@ -184,8 +184,15 @@ function fmtMoney(n: number, ccy = 'TZS') {
 }
 
 function locationAvailableForOrder(location: InventoryLocation, order: PurchaseOrder) {
-  if (location.branchId) return location.branchId === order.branchId;
-  if (location.divisionId) return location.divisionId === order.divisionId;
+  if (order.branchId) {
+    if (location.branchId) return location.branchId === order.branchId;
+    if (location.divisionId) return location.divisionId === order.divisionId;
+    return true;
+  }
+  if (order.divisionId) {
+    if (location.divisionId) return location.divisionId === order.divisionId;
+    return !location.branchId;
+  }
   return true;
 }
 

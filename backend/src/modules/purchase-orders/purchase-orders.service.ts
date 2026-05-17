@@ -19,6 +19,20 @@ type PurchaseOrderReferenceIds = {
   lines?: PurchaseOrderLineDto[];
 };
 
+type ReceivingLocationScope = {
+  id: string;
+  companyId: string;
+  name: string;
+  isActive: boolean;
+  divisionId: string | null;
+  branchId: string | null;
+  branch: { divisionId: string } | null;
+};
+
+type ResolvedReceivingLocationScope = ReceivingLocationScope & {
+  effectiveDivisionId: string | null;
+};
+
 function calcLineTotals(line: {
   quantity: number;
   unitCost: number;
@@ -475,6 +489,8 @@ export class PurchaseOrdersService {
     }
 
     const record = await this.prisma.$transaction(async (tx) => {
+      const receivingLocations = new Map<string, ResolvedReceivingLocationScope>();
+
       for (const line of existing.lines as any[]) {
         const product = await tx.product.findUnique({
           where: { id: line.productId },
@@ -492,6 +508,15 @@ export class PurchaseOrdersService {
               `Receiving location is required for tracked product on line with product ${line.productId}`,
             );
           }
+          let receivingLocation = receivingLocations.get(inventoryLocationId);
+          if (!receivingLocation) {
+            receivingLocation = await this.resolveReceivingLocationForOrder(
+              tx,
+              inventoryLocationId,
+              existing,
+            );
+            receivingLocations.set(inventoryLocationId, receivingLocation);
+          }
 
           await this.inventoryMovements.createMovement({
             companyId: existing.companyId,
@@ -507,8 +532,8 @@ export class PurchaseOrdersService {
             referenceId: id,
             batchNumber: line.batchNumber ?? undefined,
             expiryDate: line.expiryDate ?? undefined,
-            divisionId: existing.divisionId ?? undefined,
-            branchId: existing.branchId ?? undefined,
+            divisionId: existing.divisionId ?? receivingLocation.effectiveDivisionId ?? undefined,
+            branchId: existing.branchId ?? receivingLocation.branchId ?? undefined,
             tx,
           });
 
@@ -586,5 +611,70 @@ export class PurchaseOrdersService {
     });
 
     return { success: true };
+  }
+
+  private async resolveReceivingLocationForOrder(
+    tx: any,
+    inventoryLocationId: string,
+    order: { companyId: string; divisionId?: string | null; branchId?: string | null },
+  ): Promise<ResolvedReceivingLocationScope> {
+    const location = (await tx.inventoryLocation.findFirst({
+      where: { id: inventoryLocationId, deletedAt: null },
+      select: {
+        id: true,
+        companyId: true,
+        name: true,
+        isActive: true,
+        divisionId: true,
+        branchId: true,
+        branch: { select: { divisionId: true } },
+      },
+    })) as ReceivingLocationScope | null;
+
+    if (!location) {
+      throw new NotFoundException(`Inventory location ${inventoryLocationId} not found`);
+    }
+    if (location.companyId !== order.companyId) {
+      throw new BadRequestException(
+        `Inventory location "${location.name}" does not belong to this purchase order company`,
+      );
+    }
+    if (!location.isActive) {
+      throw new BadRequestException(`Inventory location "${location.name}" is not active`);
+    }
+
+    const resolved = {
+      ...location,
+      effectiveDivisionId: location.divisionId ?? location.branch?.divisionId ?? null,
+    };
+
+    if (!this.receivingLocationAvailableForOrder(resolved, order)) {
+      throw new BadRequestException(
+        'Receiving location is not available for this purchase order branch or division',
+      );
+    }
+
+    return resolved;
+  }
+
+  private receivingLocationAvailableForOrder(
+    location: {
+      divisionId?: string | null;
+      effectiveDivisionId?: string | null;
+      branchId?: string | null;
+    },
+    order: { divisionId?: string | null; branchId?: string | null },
+  ) {
+    const locationDivisionId = location.effectiveDivisionId ?? location.divisionId ?? null;
+    if (order.branchId) {
+      if (location.branchId) return location.branchId === order.branchId;
+      if (locationDivisionId) return locationDivisionId === order.divisionId;
+      return true;
+    }
+    if (order.divisionId) {
+      if (locationDivisionId) return locationDivisionId === order.divisionId;
+      return !location.branchId;
+    }
+    return true;
   }
 }
