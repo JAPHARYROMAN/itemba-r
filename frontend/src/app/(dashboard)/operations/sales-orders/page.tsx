@@ -67,6 +67,8 @@ interface CashAccount {
   id: string;
   accountName: string;
   accountType: string;
+  divisionId?: string | null;
+  branchId?: string | null;
   currency?: string | null;
   isActive?: boolean;
   linkedBank?: {
@@ -438,7 +440,12 @@ function SalesOrderModal({
       ? []
       : cashAccounts.filter(
           (account) =>
-            account.isActive !== false && receiptAccountTypes.includes(account.accountType),
+            account.isActive !== false &&
+            receiptAccountTypes.includes(account.accountType) &&
+            (account.accountType === 'BANK'
+              ? (!account.divisionId || account.divisionId === form.divisionId) &&
+                (!account.branchId || account.branchId === form.branchId)
+              : account.divisionId === form.divisionId && account.branchId === form.branchId),
         );
 
   useEffect(() => {
@@ -450,12 +457,17 @@ function SalesOrderModal({
 
       const allowedTypes = accountTypesForPaymentMethod(current.paymentMethod);
       const selected = cashAccounts.find((account) => account.id === current.cashAccountId);
-      if (!selected || !allowedTypes.includes(selected.accountType)) {
+      const belongsToSelection =
+        selected?.accountType === 'BANK'
+          ? (!selected.divisionId || selected.divisionId === current.divisionId) &&
+            (!selected.branchId || selected.branchId === current.branchId)
+          : selected?.divisionId === current.divisionId && selected?.branchId === current.branchId;
+      if (!selected || !allowedTypes.includes(selected.accountType) || !belongsToSelection) {
         return { ...current, cashAccountId: '' };
       }
       return current;
     });
-  }, [cashAccounts, form.paymentMethod]);
+  }, [cashAccounts, form.paymentMethod, form.divisionId, form.branchId]);
 
   const handleSubmit = async () => {
     if (!form.companyId) {
@@ -604,6 +616,7 @@ function SalesOrderModal({
                 branchId: '',
                 customerId: '',
                 salespersonId: '',
+                cashAccountId: '',
                 lines: f.lines.map((line) => ({
                   ...line,
                   productId: '',
@@ -629,6 +642,7 @@ function SalesOrderModal({
                 branchId,
                 customerId: '',
                 salespersonId: '',
+                cashAccountId: '',
                 lines: f.lines,
               }));
             }}
@@ -738,7 +752,7 @@ function SalesOrderModal({
                     ? `${emptyAccountHint(form.paymentMethod)} Create it under ${
                         ['BANK_CARD', 'BANK_TRANSFER'].includes(form.paymentMethod)
                           ? 'Group Control > Bank Accounts.'
-                          : 'Finance > Cash Accounts.'
+                          : 'Finance > Cash Accounts for this branch/location.'
                       }`
                     : undefined
                 }

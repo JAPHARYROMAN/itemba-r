@@ -1,17 +1,18 @@
-import {
-  IsBoolean,
-  IsEnum,
-  IsNotEmpty,
-  IsNumber,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 import { CashAccountType, CurrencyCode } from '@prisma/client';
 
 export class CreateCashAccountDto {
   @IsNotEmpty()
   @IsString()
   companyId!: string;
+
+  @IsOptional()
+  @IsString()
+  divisionId?: string;
+
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 
   @IsOptional()
   @IsString()

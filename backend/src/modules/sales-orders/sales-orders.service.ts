@@ -420,7 +420,7 @@ export class SalesOrdersService {
     if (refs.cashAccountId) {
       const cashAccount = await this.prisma.cashAccount.findFirst({
         where: { id: refs.cashAccountId, deletedAt: null, isActive: true },
-        select: { companyId: true, accountType: true },
+        select: { companyId: true, divisionId: true, branchId: true, accountType: true },
       });
       if (!cashAccount || cashAccount.companyId !== companyId) {
         throw new BadRequestException('Cash account does not belong to this company');
@@ -429,6 +429,26 @@ export class SalesOrdersService {
       const allowedTypes = accountTypesForPaymentMethod(refs.paymentMethod);
       if (allowedTypes.length && !allowedTypes.includes(cashAccount.accountType)) {
         throw new BadRequestException('Cash account type does not match payment method');
+      }
+
+      if (cashAccount.accountType === CashAccountType.BANK) {
+        if (
+          cashAccount.divisionId &&
+          refs.divisionId &&
+          cashAccount.divisionId !== refs.divisionId
+        ) {
+          throw new BadRequestException('Bank account does not belong to the selected division');
+        }
+        if (cashAccount.branchId && refs.branchId && cashAccount.branchId !== refs.branchId) {
+          throw new BadRequestException('Bank account does not belong to the selected branch');
+        }
+      } else {
+        if (!refs.divisionId || cashAccount.divisionId !== refs.divisionId) {
+          throw new BadRequestException('Cash account does not belong to the selected division');
+        }
+        if (!refs.branchId || cashAccount.branchId !== refs.branchId) {
+          throw new BadRequestException('Cash account does not belong to the selected branch');
+        }
       }
     }
 
@@ -709,6 +729,13 @@ export class SalesOrdersService {
       paymentMethod:
         dto.paymentMethod && dto.paymentMethod !== 'CREDIT' ? dto.paymentMethod : 'CASH',
     };
+    if (!safeDto.divisionId && safeDto.branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: safeDto.branchId, deletedAt: null },
+        select: { divisionId: true },
+      });
+      if (branch) safeDto.divisionId = branch.divisionId;
+    }
     const draft = await this.create(safeDto, user);
     return this.confirm(draft.id, user);
   }

@@ -4,6 +4,8 @@ import { CashAccountType } from '@prisma/client';
 
 export class QueryCashAccountDto {
   @IsOptional() @IsString() companyId?: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsEnum(CashAccountType) accountType?: CashAccountType;
   @IsOptional() @Transform(({ value }) => value === 'true') @IsBoolean() isActive?: boolean;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number = 1;

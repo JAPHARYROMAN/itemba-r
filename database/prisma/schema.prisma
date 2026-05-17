@@ -645,6 +645,7 @@ model Division {
   company        Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   branches       Branch[]
   fixedAssets    FixedAsset[]
+  cashAccounts   CashAccount[]
   divisionAccess UserDivisionAccess[]
   documents      Document[]           @relation("DivisionDocuments")
 
@@ -735,6 +736,7 @@ model Branch {
 
   division     Division           @relation(fields: [divisionId], references: [id], onDelete: Cascade)
   fixedAssets  FixedAsset[]
+  cashAccounts CashAccount[]
   branchAccess UserBranchAccess[]
   documents    Document[]         @relation("BranchDocuments")
 
@@ -1999,6 +2001,8 @@ model JournalEntryLine {
 model CashAccount {
   id                  String          @id @default(uuid())
   companyId           String
+  divisionId          String?
+  branchId            String?
   linkedBankAccountId String?
   accountName         String
   accountType         CashAccountType @default(CASH_ON_HAND)
@@ -2012,6 +2016,8 @@ model CashAccount {
   updatedAt           DateTime        @updatedAt
 
   company              Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division             Division?             @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch               Branch?               @relation(fields: [branchId], references: [id], onDelete: SetNull)
   linkedBank           BankAccount?          @relation(fields: [linkedBankAccountId], references: [id], onDelete: SetNull)
   expenses             Expense[]
   fuelShiftCollections FuelShiftCollection[]
@@ -2021,6 +2027,8 @@ model CashAccount {
   bankReconciliations BankReconciliation[]
 
   @@index([companyId])
+  @@index([divisionId])
+  @@index([branchId])
   @@map("cash_accounts")
 }
 

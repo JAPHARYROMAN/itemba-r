@@ -15,6 +15,7 @@ interface Branch {
   id: string;
   name: string;
   code: string;
+  divisionId: string;
 }
 interface Division {
   id: string;
@@ -25,6 +26,9 @@ interface CashAccount {
   id: string;
   accountName: string;
   accountType: string;
+  divisionId?: string | null;
+  branchId?: string | null;
+  isActive?: boolean;
 }
 interface Unit {
   id: string;
@@ -86,6 +90,20 @@ const PAYMENT_METHODS = [
   { value: 'BANK_CARD', label: 'Bank Card' },
   { value: 'BANK_TRANSFER', label: 'Bank Transfer' },
 ];
+
+function accountTypesForPaymentMethod(method: string) {
+  switch (method) {
+    case 'CASH':
+      return ['CASH_ON_HAND', 'PETTY_CASH'];
+    case 'BANK_CARD':
+    case 'BANK_TRANSFER':
+      return ['BANK'];
+    case 'MOBILE_MONEY':
+      return ['MOBILE_MONEY'];
+    default:
+      return [];
+  }
+}
 
 const SETTINGS_KEY = 'itemba.quickSale.settings.v1';
 
@@ -232,7 +250,7 @@ export default function QuickSalePage() {
         ),
       )
       .catch(() => setDivisions([]));
-    fetch(`/api/backend/cash-accounts?companyId=${cid}&limit=200`)
+    fetch(`/api/backend/cash-accounts?companyId=${cid}&isActive=true&limit=500`)
       .then((r) => r.json())
       .then((j) =>
         setCashAccounts(
@@ -335,10 +353,45 @@ export default function QuickSalePage() {
     return { subtotal, total: subtotal };
   }, [cart]);
 
+  const branchOptions = useMemo(
+    () =>
+      settings.divisionId
+        ? branches.filter((branch) => branch.divisionId === settings.divisionId)
+        : [],
+    [branches, settings.divisionId],
+  );
+  const allowedAccountTypes = useMemo(
+    () => accountTypesForPaymentMethod(settings.paymentMethod),
+    [settings.paymentMethod],
+  );
+  const selectableCashAccounts = useMemo(
+    () =>
+      cashAccounts.filter(
+        (account) =>
+          account.isActive !== false &&
+          allowedAccountTypes.includes(account.accountType) &&
+          (account.accountType === 'BANK'
+            ? (!account.divisionId || account.divisionId === settings.divisionId) &&
+              (!account.branchId || account.branchId === settings.branchId)
+            : account.divisionId === settings.divisionId && account.branchId === settings.branchId),
+      ),
+    [allowedAccountTypes, cashAccounts, settings.branchId, settings.divisionId],
+  );
+
+  useEffect(() => {
+    if (
+      settings.cashAccountId &&
+      !selectableCashAccounts.some((account) => account.id === settings.cashAccountId)
+    ) {
+      setSettings((current) => ({ ...current, cashAccountId: '' }));
+    }
+  }, [selectableCashAccounts, settings.cashAccountId]);
+
   // ─── Submit ────────────────────────────────────────────────────────────────
 
   const canSubmit =
     !!settings.companyId &&
+    !!settings.divisionId &&
     !!settings.branchId &&
     !!settings.cashAccountId &&
     cart.length > 0 &&
@@ -351,6 +404,7 @@ export default function QuickSalePage() {
     try {
       const body = {
         companyId: settings.companyId,
+        divisionId: settings.divisionId,
         branchId: settings.branchId,
         salesType: 'CASH_SALE',
         orderDate: new Date().toISOString(),
@@ -403,7 +457,12 @@ export default function QuickSalePage() {
   const divisionName = divisions.find((d) => d.id === settings.divisionId)?.name;
   const cashAccountName = cashAccounts.find((a) => a.id === settings.cashAccountId)?.accountName;
   const companyName = companies.find((c) => c.id === settings.companyId)?.name;
-  const settingsReady = !!(settings.companyId && settings.branchId && settings.cashAccountId);
+  const settingsReady = !!(
+    settings.companyId &&
+    settings.divisionId &&
+    settings.branchId &&
+    settings.cashAccountId
+  );
 
   // ─── Keyboard helpers ──────────────────────────────────────────────────────
 
@@ -674,45 +733,73 @@ export default function QuickSalePage() {
             placeholder="Select company"
           />
           <FormSelect
+            label="Division"
+            required
+            value={settings.divisionId}
+            onChange={(e) =>
+              setSettings((s) => ({
+                ...s,
+                divisionId: e.target.value,
+                branchId: '',
+                cashAccountId: '',
+              }))
+            }
+            options={divisions.map((d) => ({
+              value: d.id,
+              label: `${d.code ? d.code + ' - ' : ''}${d.name}`,
+            }))}
+            placeholder={settings.companyId ? 'Select division' : 'Pick company first'}
+            hint="This scopes product search, stock, and branch cash handling."
+          />
+          <FormSelect
             label="Branch"
             required
             value={settings.branchId}
-            onChange={(e) => setSettings((s) => ({ ...s, branchId: e.target.value }))}
-            options={branches.map((b) => ({
+            onChange={(e) => {
+              const branch = branches.find((b) => b.id === e.target.value);
+              setSettings((s) => ({
+                ...s,
+                branchId: e.target.value,
+                divisionId: branch?.divisionId ?? s.divisionId,
+                cashAccountId: '',
+              }));
+            }}
+            options={branchOptions.map((b) => ({
               value: b.id,
-              label: `${b.code ? b.code + ' — ' : ''}${b.name}`,
+              label: `${b.code ? b.code + ' - ' : ''}${b.name}`,
             }))}
-            placeholder={settings.companyId ? 'Select branch' : 'Pick company first'}
-          />
-          <FormSelect
-            label="Division (filters product list)"
-            value={settings.divisionId}
-            onChange={(e) => setSettings((s) => ({ ...s, divisionId: e.target.value }))}
-            options={[
-              { value: '', label: '— All divisions —' },
-              ...divisions.map((d) => ({
-                value: d.id,
-                label: `${d.code ? d.code + ' — ' : ''}${d.name}`,
-              })),
-            ]}
-            placeholder={settings.companyId ? 'All divisions' : 'Pick company first'}
-            hint="Pick a division to scope the product search to that vertical (e.g. only beverages, only hardware)."
+            placeholder={settings.divisionId ? 'Select branch' : 'Pick division first'}
+            disabled={!settings.divisionId}
           />
           <FormSelect
             label="Cash / bank account"
             required
             value={settings.cashAccountId}
             onChange={(e) => setSettings((s) => ({ ...s, cashAccountId: e.target.value }))}
-            options={cashAccounts.map((a) => ({
+            options={selectableCashAccounts.map((a) => ({
               value: a.id,
               label: `${a.accountName} (${a.accountType})`,
             }))}
-            placeholder={settings.companyId ? 'Select account' : 'Pick company first'}
+            placeholder={
+              settings.branchId ? 'Select account' : 'Pick company, division, and branch first'
+            }
+            disabled={!settings.branchId || selectableCashAccounts.length === 0}
+            hint={
+              settings.branchId && selectableCashAccounts.length === 0
+                ? 'Create an active cash account for this branch under Finance > Cash Accounts.'
+                : undefined
+            }
           />
           <FormSelect
             label="Default payment method"
             value={settings.paymentMethod}
-            onChange={(e) => setSettings((s) => ({ ...s, paymentMethod: e.target.value }))}
+            onChange={(e) =>
+              setSettings((s) => ({
+                ...s,
+                paymentMethod: e.target.value,
+                cashAccountId: '',
+              }))
+            }
             options={PAYMENT_METHODS}
           />
           <p className="text-xs text-slate-500">
