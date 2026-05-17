@@ -360,8 +360,8 @@ function PurchaseOrderModal({
       setError('Add at least one line');
       return;
     }
-    if (form.lines.some((l) => !l.productId || !l.unitId || !l.inventoryLocationId)) {
-      setError('Each line needs product, unit, and location');
+    if (form.lines.some((l) => !l.productId || !l.unitId)) {
+      setError('Each line needs product and unit');
       return;
     }
     setSaving(true);
@@ -383,8 +383,8 @@ function PurchaseOrderModal({
             unitCost: Number(l.unitPrice) || 0,
             discountAmount: Number(l.discount) || 0,
             taxAmount: Number(l.tax) || 0,
-            inventoryLocationId: l.inventoryLocationId,
           };
+          if (l.inventoryLocationId) out.inventoryLocationId = l.inventoryLocationId;
           if (l.batchNumber) out.batchNumber = l.batchNumber;
           if (l.expiryDate) out.expiryDate = l.expiryDate;
           return out;
@@ -579,6 +579,7 @@ function PurchaseOrderModal({
           units={units}
           locations={locations}
           currency={form.currency}
+          requireLocation={false}
           onAddLine={addLine}
           onRemoveLine={removeLine}
           onLineChange={setLine}
