@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Card, PageHeader, FormSelect, Btn } from '@/components/ui';
+import { Card, PageHeader, FormInput, FormSelect, Btn } from '@/components/ui';
 
 // ── Types mirroring the backend responses ────────────────────────────────────
 interface Company { id: string; name: string; code: string; }
@@ -124,6 +124,9 @@ export default function ComplianceCockpitPage() {
   const [info, setInfo] = useState('');
   const [computing, setComputing] = useState<string | null>(null);
   const [drillDown, setDrillDown] = useState<ComputeResult | null>(null);
+  const [autoApplyType, setAutoApplyType] = useState<'sales-order' | 'purchase-order'>('sales-order');
+  const [autoApplyId, setAutoApplyId] = useState('');
+  const [autoApplying, setAutoApplying] = useState(false);
 
   // Load companies once.
   useEffect(() => {
@@ -214,6 +217,28 @@ export default function ComplianceCockpitPage() {
     }
   };
 
+  const runAutoApply = async () => {
+    if (!autoApplyId.trim()) {
+      setError('Enter the sales order or purchase order ID to apply tax to');
+      return;
+    }
+    setAutoApplying(true); setError(''); setInfo('');
+    try {
+      const res = await fetch(`/api/backend/tax-auto-apply/${autoApplyType}/${autoApplyId.trim()}`, { method: 'POST' });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.message ?? `HTTP ${res.status}`);
+      }
+      setInfo('Tax auto-apply completed for the selected source document.');
+      setAutoApplyId('');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to auto-apply tax');
+    } finally {
+      setAutoApplying(false);
+    }
+  };
+
   // ── KPIs ──────────────────────────────────────────────────────────────────
   const kpis = useMemo(() => {
     let computedTotal = 0;
@@ -256,6 +281,26 @@ export default function ComplianceCockpitPage() {
           placeholder="— Select Company —"
           options={companies.map((c) => ({ value: c.id, label: c.name }))}
         />
+      </Card>
+
+      <Card className="p-4">
+        <div className="grid md:grid-cols-[220px_minmax(0,1fr)_auto] gap-3 items-end">
+          <FormSelect
+            label="Tax Auto Apply"
+            value={autoApplyType}
+            onChange={(e) => setAutoApplyType(e.target.value as 'sales-order' | 'purchase-order')}
+          >
+            <option value="sales-order">Sales Order</option>
+            <option value="purchase-order">Purchase Order</option>
+          </FormSelect>
+          <FormInput
+            label="Source Document ID"
+            value={autoApplyId}
+            onChange={(e) => setAutoApplyId(e.target.value)}
+            placeholder="Paste the order ID"
+          />
+          <Btn variant="secondary" onClick={runAutoApply} loading={autoApplying}>Run Auto Apply</Btn>
+        </div>
       </Card>
 
       {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}

@@ -7,12 +7,12 @@ import { useAuth } from '@/hooks/use-auth';
 interface Company { id: string; name: string }
 interface EvidencePack {
   id: string;
-  packCode: string;
+  evidencePackNumber: string;
   companyId: string;
   company?: { name: string };
   packType: string;
   title: string;
-  description?: string | null;
+  notes?: string | null;
   periodStart?: string | null;
   periodEnd?: string | null;
   status: string;
@@ -21,42 +21,45 @@ interface EvidencePack {
 
 interface Paginated<T> { data: T[]; total: number; page: number; totalPages: number }
 
-const TYPES = ['AUDIT', 'TAX', 'REGULATORY', 'INTERNAL'];
-const STATUSES = ['DRAFT', 'IN_REVIEW', 'READY', 'ARCHIVED'];
+const TYPES = ['TAX_AUDIT', 'FINANCIAL_AUDIT', 'PAYROLL_AUDIT', 'LICENSE_RENEWAL', 'BRELA_COMPLIANCE', 'INTERNAL_AUDIT', 'BANK_REVIEW', 'LOAN_REVIEW', 'LEGAL_REVIEW', 'OTHER'];
+const STATUSES = ['DRAFT', 'PREPARING', 'REVIEWED', 'READY', 'ARCHIVED', 'CANCELLED'];
 
 const filterSelectCls = 'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
 const filterStyle = { borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' };
 
 interface PackForm {
-  packCode: string; title: string; companyId: string; packType: string;
-  status: string; periodStart: string; periodEnd: string; description: string;
+  evidencePackNumber: string; title: string; companyId: string; packType: string;
+  status: string; periodStart: string; periodEnd: string; notes: string;
 }
-const BLANK: PackForm = { packCode: '', title: '', companyId: '', packType: 'AUDIT', status: 'DRAFT', periodStart: '', periodEnd: '', description: '' };
+const BLANK: PackForm = { evidencePackNumber: '', title: '', companyId: '', packType: 'OTHER', status: 'DRAFT', periodStart: '', periodEnd: '', notes: '' };
 
 function PackModal({ mode, initial, companies, onClose, onSaved }: { mode: 'create' | 'edit'; initial?: EvidencePack; companies: Company[]; onClose: () => void; onSaved: () => void }) {
+  const { user } = useAuth();
   const [form, setForm] = useState<PackForm>(() => initial ? {
-    packCode: initial.packCode, title: initial.title, companyId: initial.companyId,
+    evidencePackNumber: initial.evidencePackNumber, title: initial.title, companyId: initial.companyId,
     packType: initial.packType, status: initial.status,
     periodStart: initial.periodStart?.split('T')[0] ?? '',
     periodEnd: initial.periodEnd?.split('T')[0] ?? '',
-    description: initial.description ?? '',
+    notes: initial.notes ?? '',
   } : { ...BLANK });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const set = (k: keyof PackForm, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   const submit = async () => {
-    if (!form.packCode.trim() || !form.title.trim() || !form.companyId) { setError('Code, title, company required'); return; }
+    if (!form.evidencePackNumber.trim() || !form.title.trim() || !form.companyId) { setError('Number, title, company required'); return; }
+    if (mode === 'create' && !user?.id) { setError('Current user is required to prepare the pack'); return; }
     setSaving(true); setError('');
     try {
       const body: Record<string, unknown> = {
-        packCode: form.packCode, title: form.title, companyId: form.companyId,
+        evidencePackNumber: form.evidencePackNumber, title: form.title, companyId: form.companyId,
         packType: form.packType, status: form.status,
         periodStart: form.periodStart || undefined,
         periodEnd: form.periodEnd || undefined,
-        description: form.description || undefined,
+        notes: form.notes || undefined,
       };
-      const res = await fetch(mode === 'create' ? '/api/backend/compliance/evidence-packs' : `/api/backend/compliance/evidence-packs/${initial!.id}`,
+      if (mode === 'create') body.preparedById = user!.id;
+      const res = await fetch(mode === 'create' ? '/api/backend/audit-evidence-packs' : `/api/backend/audit-evidence-packs/${initial!.id}`,
         { method: mode === 'create' ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
       onSaved();
@@ -68,7 +71,7 @@ function PackModal({ mode, initial, companies, onClose, onSaved }: { mode: 'crea
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
       {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
-        <FormInput label="Code" required value={form.packCode} onChange={(e) => set('packCode', e.target.value)} />
+        <FormInput label="Pack Number" required value={form.evidencePackNumber} onChange={(e) => set('evidencePackNumber', e.target.value)} />
         <FormInput label="Title" required value={form.title} onChange={(e) => set('title', e.target.value)} />
         <FormSelect label="Company" required value={form.companyId} onChange={(e) => set('companyId', e.target.value)} placeholder="Select…">
           {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -82,7 +85,7 @@ function PackModal({ mode, initial, companies, onClose, onSaved }: { mode: 'crea
         <div />
         <FormInput label="Period Start" type="date" value={form.periodStart} onChange={(e) => set('periodStart', e.target.value)} />
         <FormInput label="Period End" type="date" value={form.periodEnd} onChange={(e) => set('periodEnd', e.target.value)} />
-        <div className="col-span-2"><FormTextarea label="Description" rows={3} value={form.description} onChange={(e) => set('description', e.target.value)} /></div>
+        <div className="col-span-2"><FormTextarea label="Notes" rows={3} value={form.notes} onChange={(e) => set('notes', e.target.value)} /></div>
       </div>
     </Modal>
   );
@@ -117,9 +120,12 @@ export default function EvidencePacksPage() {
     if (companyId) params.set('companyId', companyId);
     if (packType) params.set('packType', packType);
     if (status) params.set('status', status);
-    const j = await fetch(`/api/backend/compliance/evidence-packs?${params}`).then((r) => r.json()).catch(() => ({}));
+    const j = await fetch(`/api/backend/audit-evidence-packs?${params}`).then((r) => r.json()).catch(() => ({}));
     const p: Paginated<EvidencePack> = j.data ?? {};
-    setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
+    const totalCount = p.total ?? 0;
+    setItems(p.data ?? []);
+    setTotal(totalCount);
+    setTotalPages(p.totalPages ?? Math.max(1, Math.ceil(totalCount / 20)));
     setLoading(false);
   }, [page, companyId, packType, status]);
 
@@ -128,12 +134,12 @@ export default function EvidencePacksPage() {
   const onSaved = () => { setCreating(false); setEditing(null); load(); };
   const doDelete = async () => {
     if (!deleting) return;
-    await fetch(`/api/backend/compliance/evidence-packs/${deleting.id}`, { method: 'DELETE' });
+    await fetch(`/api/backend/audit-evidence-packs/${deleting.id}`, { method: 'DELETE' });
     setDeleting(null); load();
   };
-  const doAction = async (id: string, action: 'review' | 'ready') => {
+  const doAction = async (id: string, action: 'review' | 'mark-ready') => {
     setActingId(id);
-    await fetch(`/api/backend/compliance/evidence-packs/${id}/${action}`, { method: 'POST' });
+    await fetch(`/api/backend/audit-evidence-packs/${id}/${action}`, { method: 'PATCH' });
     setActingId(''); load();
   };
 
@@ -191,7 +197,7 @@ export default function EvidencePacksPage() {
               <tbody>
                 {items.map((p) => (
                   <tr key={p.id} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
-                    <td className="px-4 py-3 font-mono text-xs">{p.packCode}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{p.evidencePackNumber}</td>
                     <td className="px-4 py-3">{p.title}</td>
                     <td className="px-4 py-3 text-xs">{p.company?.name ?? '—'}</td>
                     <td className="px-4 py-3 text-xs">{p.packType}</td>
@@ -199,8 +205,8 @@ export default function EvidencePacksPage() {
                     <td className="px-4 py-3"><StatusBadge status={p.status} /></td>
                     {canManage && (
                       <td className="px-4 py-3 text-right whitespace-nowrap">
-                        {p.status === 'DRAFT' && <Btn variant="primary" size="xs" loading={actingId === p.id} onClick={() => doAction(p.id, 'review')}>Submit Review</Btn>}
-                        {p.status === 'IN_REVIEW' && <Btn variant="success" size="xs" loading={actingId === p.id} onClick={() => doAction(p.id, 'ready')}>Mark Ready</Btn>}
+                        {['DRAFT', 'PREPARING'].includes(p.status) && <Btn variant="primary" size="xs" loading={actingId === p.id} onClick={() => doAction(p.id, 'review')}>Mark Reviewed</Btn>}
+                        {p.status === 'REVIEWED' && <Btn variant="success" size="xs" loading={actingId === p.id} onClick={() => doAction(p.id, 'mark-ready')}>Mark Ready</Btn>}
                         <Btn variant="ghost" size="xs" onClick={() => setEditing(p)}>Edit</Btn>
                         <Btn variant="ghost" size="xs" onClick={() => setDeleting(p)}>Delete</Btn>
                       </td>
