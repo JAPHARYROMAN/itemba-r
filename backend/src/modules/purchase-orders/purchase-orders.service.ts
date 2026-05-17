@@ -341,12 +341,18 @@ export class PurchaseOrdersService {
       }
     }
 
-    await this.assertLineReferencesBelongToCompany(companyId, refs.lines, refs.branchId);
+    await this.assertLineReferencesBelongToCompany(
+      companyId,
+      refs.lines,
+      refs.divisionId,
+      refs.branchId,
+    );
   }
 
   private async assertLineReferencesBelongToCompany(
     companyId: string,
     lines: PurchaseOrderLineDto[] | undefined,
+    divisionId?: string | null,
     branchId?: string | null,
   ) {
     if (!lines?.length) return;
@@ -369,7 +375,7 @@ export class PurchaseOrdersService {
               deletedAt: null,
               isActive: true,
             },
-            select: { id: true, companyId: true, branchId: true },
+            select: { id: true, companyId: true, divisionId: true, branchId: true },
           })
         : Promise.resolve([]),
       this.prisma.unitOfMeasure.findMany({
@@ -387,13 +393,18 @@ export class PurchaseOrdersService {
 
     const validLocationIds = new Set(
       inventoryLocations
-        .filter((location) => location.companyId === companyId && (!branchId || location.branchId === branchId))
+        .filter((location) => {
+          if (location.companyId !== companyId) return false;
+          if (location.branchId) return !branchId || location.branchId === branchId;
+          if (location.divisionId) return !divisionId || location.divisionId === divisionId;
+          return true;
+        })
         .map((location) => location.id),
     );
     if (validLocationIds.size !== inventoryLocationIds.length) {
       throw new BadRequestException(
         branchId
-          ? 'Purchase order inventory location does not belong to the selected branch'
+          ? 'Purchase order inventory location is not available for the selected branch or division'
           : 'Purchase order inventory location does not belong to this company',
       );
     }

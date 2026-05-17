@@ -302,9 +302,8 @@ function PurchaseOrderModal({
         ? backendList<InventoryLocation>('/inventory-locations', {
             query: {
               companyId: form.companyId,
-              divisionId: form.divisionId,
-              branchId: form.branchId,
-              limit: 200,
+              isActive: true,
+              limit: 500,
             },
           })
         : Promise.resolve([]),
@@ -312,7 +311,14 @@ function PurchaseOrderModal({
       if (cancelled) return;
       setSuppliers(supplierResult.status === 'fulfilled' ? supplierResult.value : []);
       setProducts(productResult.status === 'fulfilled' ? productResult.value : []);
-      setLocations(locationResult.status === 'fulfilled' ? locationResult.value : []);
+      const locationRows = locationResult.status === 'fulfilled' ? locationResult.value : [];
+      setLocations(
+        locationRows.filter((location) => {
+          if (location.branchId) return location.branchId === form.branchId;
+          if (location.divisionId) return location.divisionId === form.divisionId;
+          return true;
+        }),
+      );
     });
     return () => {
       cancelled = true;
