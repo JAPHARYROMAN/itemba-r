@@ -1,10 +1,4 @@
-import {
-  IsBoolean,
-  IsEnum,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { InventoryLocationType } from '@prisma/client';
 
 export class CreateInventoryLocationDto {
@@ -12,13 +6,13 @@ export class CreateInventoryLocationDto {
   @IsString()
   companyId!: string;
 
-  @IsOptional()
+  @IsNotEmpty()
   @IsString()
-  divisionId?: string;
+  divisionId!: string;
 
-  @IsOptional()
+  @IsNotEmpty()
   @IsString()
-  branchId?: string;
+  branchId!: string;
 
   @IsNotEmpty()
   @IsString()

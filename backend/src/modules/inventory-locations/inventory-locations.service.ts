@@ -40,6 +40,8 @@ export class InventoryLocationsService {
         where,
         include: {
           company: { select: { id: true, name: true, code: true } },
+          division: { select: { id: true, name: true, code: true } },
+          branch: { select: { id: true, name: true, code: true } },
         },
         orderBy: { name: 'asc' },
         skip,
@@ -56,6 +58,8 @@ export class InventoryLocationsService {
       where: { id, deletedAt: null },
       include: {
         company: { select: { id: true, name: true, code: true } },
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
       },
     });
     if (!record) throw new NotFoundException('Inventory location not found');
@@ -65,6 +69,7 @@ export class InventoryLocationsService {
 
   async create(dto: CreateInventoryLocationDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    this.assertBranchScopeRequired(dto.divisionId, dto.branchId);
     await this.assertReferencesBelongToCompany(dto.companyId, {
       divisionId: dto.divisionId,
       branchId: dto.branchId,
@@ -99,9 +104,13 @@ export class InventoryLocationsService {
 
   async update(id: string, dto: UpdateInventoryLocationDto, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    const divisionId = dto.divisionId ?? existing.divisionId ?? undefined;
+    const branchId = dto.branchId ?? existing.branchId ?? undefined;
+
+    this.assertBranchScopeRequired(divisionId, branchId);
     await this.assertReferencesBelongToCompany(existing.companyId, {
-      divisionId: dto.divisionId,
-      branchId: dto.branchId,
+      divisionId,
+      branchId,
       responsibleUserId: dto.responsibleUserId,
     });
 
@@ -166,10 +175,13 @@ export class InventoryLocationsService {
     if (references.branchId) {
       const branch = await this.prisma.branch.findFirst({
         where: { id: references.branchId, deletedAt: null },
-        select: { division: { select: { companyId: true } } },
+        select: { divisionId: true, division: { select: { companyId: true } } },
       });
       if (!branch || branch.division.companyId !== companyId) {
         throw new BadRequestException('Branch must belong to the inventory location company');
+      }
+      if (references.divisionId && branch.divisionId !== references.divisionId) {
+        throw new BadRequestException('Branch must belong to the selected division');
       }
     }
 
@@ -186,6 +198,12 @@ export class InventoryLocationsService {
           'Responsible user must belong to the inventory location company',
         );
       }
+    }
+  }
+
+  private assertBranchScopeRequired(divisionId?: string, branchId?: string) {
+    if (!divisionId || !branchId) {
+      throw new BadRequestException('Inventory location must be assigned to a division and branch');
     }
   }
 }

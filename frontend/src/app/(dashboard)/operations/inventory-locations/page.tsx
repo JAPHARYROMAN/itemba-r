@@ -15,12 +15,31 @@ import {
   ConfirmDialog,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
-import { backendDelete, backendList, backendPage, backendPatch, backendPost } from '@/lib/api-client';
+import {
+  backendDelete,
+  backendList,
+  backendPage,
+  backendPatch,
+  backendPost,
+} from '@/lib/api-client';
 
 interface Company {
   id: string;
   name: string;
   code: string;
+}
+
+interface Division {
+  id: string;
+  name: string;
+  code: string;
+}
+
+interface Branch {
+  id: string;
+  name: string;
+  code: string;
+  divisionId: string;
 }
 
 interface InventoryLocation {
@@ -34,11 +53,15 @@ interface InventoryLocation {
   divisionId?: string | null;
   branchId?: string | null;
   company?: { name: string } | null;
+  division?: { name: string; code?: string | null } | null;
+  branch?: { name: string; code?: string | null } | null;
   createdAt?: string;
 }
 
 interface LocationForm {
   companyId: string;
+  divisionId: string;
+  branchId: string;
   locationCode: string;
   name: string;
   locationType: string;
@@ -83,6 +106,8 @@ const TYPE_BADGE: Record<string, string> = {
 
 const BLANK_FORM: LocationForm = {
   companyId: '',
+  divisionId: '',
+  branchId: '',
   locationCode: '',
   name: '',
   locationType: 'STORE',
@@ -107,6 +132,8 @@ function LocationModal({
     initial
       ? {
           companyId: initial.companyId,
+          divisionId: initial.divisionId ?? '',
+          branchId: initial.branchId ?? '',
           locationCode: initial.locationCode,
           name: initial.name,
           locationType: initial.locationType,
@@ -115,15 +142,51 @@ function LocationModal({
         }
       : { ...BLANK_FORM },
   );
+  const [divisions, setDivisions] = useState<Division[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const set = <K extends keyof LocationForm>(k: K, v: LocationForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
+  useEffect(() => {
+    if (!form.companyId) {
+      setDivisions([]);
+      setBranches([]);
+      return;
+    }
+
+    let cancelled = false;
+    Promise.allSettled([
+      backendList<Division>('/divisions', { query: { companyId: form.companyId, limit: 200 } }),
+      backendList<Branch>('/branches', {
+        query: { companyId: form.companyId, activeOnly: true, limit: 500 },
+      }),
+    ]).then(([divisionResult, branchResult]) => {
+      if (cancelled) return;
+      setDivisions(divisionResult.status === 'fulfilled' ? divisionResult.value : []);
+      setBranches(branchResult.status === 'fulfilled' ? branchResult.value : []);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
+
+  const divisionBranches = branches.filter((branch) => branch.divisionId === form.divisionId);
+
   const handleSubmit = async () => {
     if (!form.companyId) {
       setError('Company is required');
+      return;
+    }
+    if (!form.divisionId) {
+      setError('Division is required');
+      return;
+    }
+    if (!form.branchId) {
+      setError('Branch/location is required');
       return;
     }
     if (!form.locationCode.trim()) {
@@ -178,7 +241,14 @@ function LocationModal({
           label="Company"
           required
           value={form.companyId}
-          onChange={(e) => set('companyId', e.target.value)}
+          onChange={(e) =>
+            setForm((current) => ({
+              ...current,
+              companyId: e.target.value,
+              divisionId: '',
+              branchId: '',
+            }))
+          }
           placeholder="Select company"
           disabled={mode === 'edit'}
         >
@@ -188,6 +258,42 @@ function LocationModal({
             </option>
           ))}
         </FormSelect>
+        <div className="grid grid-cols-2 gap-3">
+          <FormSelect
+            label="Division"
+            required
+            value={form.divisionId}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                divisionId: e.target.value,
+                branchId: '',
+              }))
+            }
+            placeholder={form.companyId ? 'Select division' : 'Select company first'}
+            disabled={!form.companyId || divisions.length === 0}
+          >
+            {divisions.map((division) => (
+              <option key={division.id} value={division.id}>
+                {division.name} ({division.code})
+              </option>
+            ))}
+          </FormSelect>
+          <FormSelect
+            label="Branch"
+            required
+            value={form.branchId}
+            onChange={(e) => set('branchId', e.target.value)}
+            placeholder={form.divisionId ? 'Select branch' : 'Select division first'}
+            disabled={!form.divisionId || divisionBranches.length === 0}
+          >
+            {divisionBranches.map((branch) => (
+              <option key={branch.id} value={branch.id}>
+                {branch.name} ({branch.code})
+              </option>
+            ))}
+          </FormSelect>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <FormInput
             label="Location Code"
@@ -338,6 +444,7 @@ export default function InventoryLocationsPage() {
   const warehouses = data?.data.filter((l) => l.locationType === 'WAREHOUSE').length ?? 0;
   const stores = data?.data.filter((l) => l.locationType === 'STORE').length ?? 0;
   const active = data?.data.filter((l) => l.isActive).length ?? 0;
+  const tableColSpan = canManage ? 9 : 8;
 
   return (
     <div className="p-6 space-y-6">
@@ -459,7 +566,7 @@ export default function InventoryLocationsPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[800px]">
+          <table className="w-full text-sm min-w-[1050px]">
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
@@ -469,6 +576,8 @@ export default function InventoryLocationsPage() {
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Type</th>
                 <th className="px-4 py-3">Company</th>
+                <th className="px-4 py-3">Division</th>
+                <th className="px-4 py-3">Branch</th>
                 <th className="px-4 py-3">Address</th>
                 <th className="px-4 py-3">Status</th>
                 {canManage && <th className="px-4 py-3 text-right">Actions</th>}
@@ -477,14 +586,14 @@ export default function InventoryLocationsPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7}>
+                  <td colSpan={tableColSpan}>
                     <PageSpinner />
                   </td>
                 </tr>
               ) : !data?.data.length ? (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={tableColSpan}
                     className="px-4 py-10 text-center text-sm"
                     style={{ color: 'var(--aurora-text-muted)' }}
                   >
@@ -504,6 +613,16 @@ export default function InventoryLocationsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">{loc.company?.name ?? '—'}</td>
+                    <td className="px-4 py-3">
+                      {loc.division
+                        ? `${loc.division.name}${loc.division.code ? ` (${loc.division.code})` : ''}`
+                        : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      {loc.branch
+                        ? `${loc.branch.name}${loc.branch.code ? ` (${loc.branch.code})` : ''}`
+                        : '—'}
+                    </td>
                     <td className="px-4 py-3 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
                       {loc.address ?? '—'}
                     </td>
