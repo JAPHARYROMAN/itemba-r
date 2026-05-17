@@ -39,6 +39,8 @@ export class SupplierInvoicesService {
   async findAll(query: QuerySupplierInvoiceDto, user: AuthUser) {
     const {
       companyId,
+      divisionId,
+      branchId,
       supplierId,
       status,
       purchaseOrderId,
@@ -54,6 +56,8 @@ export class SupplierInvoicesService {
     };
 
     if (supplierId) where.supplierId = supplierId;
+    if (divisionId) where.divisionId = divisionId;
+    if (branchId) where.branchId = branchId;
     if (status) where.status = status;
     if (purchaseOrderId) where.purchaseOrderId = purchaseOrderId;
     if (goodsReceivedNoteId) where.goodsReceivedNoteId = goodsReceivedNoteId;
@@ -72,6 +76,8 @@ export class SupplierInvoicesService {
         orderBy: { createdAt: 'desc' },
         include: {
           company: { select: { id: true, name: true, code: true } },
+          division: { select: { id: true, name: true, code: true } },
+          branch: { select: { id: true, name: true, code: true } },
           goodsReceivedNote: { select: { id: true, grnNumber: true, status: true } },
           lines: true,
         },
@@ -95,6 +101,8 @@ export class SupplierInvoicesService {
       where: { id, deletedAt: null },
       include: {
         company: { select: { id: true, name: true, code: true } },
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
         goodsReceivedNote: { select: { id: true, grnNumber: true, status: true } },
         lines: true,
       },
@@ -112,6 +120,8 @@ export class SupplierInvoicesService {
     const refs = await this.assertProcurementReferences({
       companyId: dto.companyId,
       supplierId: dto.supplierId,
+      divisionId: dto.divisionId || null,
+      branchId: dto.branchId || null,
       purchaseOrderId: dto.purchaseOrderId,
       goodsReceivedNoteId: dto.goodsReceivedNoteId,
     });
@@ -121,6 +131,8 @@ export class SupplierInvoicesService {
       data: {
         supplierInvoiceNumber: dto.supplierInvoiceNumber.trim(),
         companyId: dto.companyId,
+        divisionId: refs.divisionId,
+        branchId: refs.branchId,
         supplierId: dto.supplierId,
         purchaseOrderId: refs.purchaseOrderId,
         goodsReceivedNoteId: dto.goodsReceivedNoteId,
@@ -173,6 +185,9 @@ export class SupplierInvoicesService {
     const refs = await this.assertProcurementReferences({
       companyId: existing.companyId,
       supplierId,
+      divisionId:
+        dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId || null,
+      branchId: dto.branchId !== undefined ? dto.branchId || null : existing.branchId || null,
       purchaseOrderId: dto.purchaseOrderId ?? existing.purchaseOrderId ?? undefined,
       goodsReceivedNoteId: dto.goodsReceivedNoteId ?? existing.goodsReceivedNoteId ?? undefined,
     });
@@ -189,6 +204,8 @@ export class SupplierInvoicesService {
             supplierInvoiceNumber: dto.supplierInvoiceNumber.trim(),
           }),
           ...(dto.supplierId !== undefined && { supplierId }),
+          divisionId: refs.divisionId,
+          branchId: refs.branchId,
           ...(dto.purchaseOrderId !== undefined && { purchaseOrderId: refs.purchaseOrderId }),
           ...(dto.goodsReceivedNoteId !== undefined && {
             goodsReceivedNoteId: dto.goodsReceivedNoteId || null,
@@ -275,6 +292,8 @@ export class SupplierInvoicesService {
             data: {
               supplierId: supplier.id,
               supplierName: supplier.name,
+              divisionId: existing.divisionId,
+              branchId: existing.branchId,
               amount: new Prisma.Decimal(existing.totalAmount).toDecimalPlaces(2),
               outstandingAmount: new Prisma.Decimal(existing.totalAmount)
                 .minus(existing.paidAmount ?? 0)
@@ -291,6 +310,8 @@ export class SupplierInvoicesService {
             data: {
               payableNumber: generatePayableNumber(),
               companyId: existing.companyId,
+              divisionId: existing.divisionId,
+              branchId: existing.branchId,
               supplierId: supplier.id,
               supplierName: supplier.name,
               sourceType: 'SupplierInvoice',
@@ -419,43 +440,114 @@ export class SupplierInvoicesService {
   private async assertProcurementReferences(refs: {
     companyId: string;
     supplierId: string;
+    divisionId?: string | null;
+    branchId?: string | null;
     purchaseOrderId?: string;
     goodsReceivedNoteId?: string;
   }) {
     const supplier = await this.prisma.supplier.findFirst({
       where: { id: refs.supplierId, companyId: refs.companyId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, divisionId: true, branchId: true },
     });
     if (!supplier) throw new BadRequestException('Supplier does not belong to this company');
+    if (refs.divisionId && supplier.divisionId && refs.divisionId !== supplier.divisionId) {
+      throw new BadRequestException('Supplier does not belong to the selected division');
+    }
+    if (refs.branchId && supplier.branchId && refs.branchId !== supplier.branchId) {
+      throw new BadRequestException('Supplier does not belong to the selected branch/location');
+    }
 
     let purchaseOrderId = refs.purchaseOrderId || undefined;
+    let divisionId = refs.divisionId || supplier.divisionId || null;
+    let branchId = refs.branchId || supplier.branchId || null;
+
     if (refs.purchaseOrderId) {
       const po = await this.prisma.purchaseOrder.findFirst({
         where: { id: refs.purchaseOrderId, companyId: refs.companyId, deletedAt: null },
-        select: { id: true, supplierId: true },
+        select: { id: true, supplierId: true, divisionId: true, branchId: true },
       });
       if (!po) throw new BadRequestException('Purchase order does not belong to this company');
       if (po.supplierId && po.supplierId !== refs.supplierId) {
         throw new BadRequestException('Purchase order supplier does not match invoice supplier');
       }
+      if (supplier.divisionId && po.divisionId && supplier.divisionId !== po.divisionId) {
+        throw new BadRequestException('Purchase order is outside the supplier division');
+      }
+      if (supplier.branchId && po.branchId && supplier.branchId !== po.branchId) {
+        throw new BadRequestException('Purchase order is outside the supplier branch/location');
+      }
+      if (refs.divisionId && po.divisionId && refs.divisionId !== po.divisionId) {
+        throw new BadRequestException('Purchase order does not belong to the selected division');
+      }
+      if (refs.branchId && po.branchId && refs.branchId !== po.branchId) {
+        throw new BadRequestException(
+          'Purchase order does not belong to the selected branch/location',
+        );
+      }
+      divisionId = po.divisionId || divisionId;
+      branchId = po.branchId || branchId;
     }
 
     if (refs.goodsReceivedNoteId) {
       const grn = await this.prisma.goodsReceivedNote.findFirst({
         where: { id: refs.goodsReceivedNoteId, companyId: refs.companyId, deletedAt: null },
-        select: { id: true, supplierId: true, purchaseOrderId: true },
+        select: {
+          id: true,
+          supplierId: true,
+          purchaseOrderId: true,
+          divisionId: true,
+          branchId: true,
+        },
       });
       if (!grn) throw new BadRequestException('GRN does not belong to this company');
       if (grn.supplierId !== refs.supplierId) {
         throw new BadRequestException('GRN supplier does not match invoice supplier');
       }
+      if (supplier.divisionId && grn.divisionId && supplier.divisionId !== grn.divisionId) {
+        throw new BadRequestException('GRN is outside the supplier division');
+      }
+      if (supplier.branchId && grn.branchId && supplier.branchId !== grn.branchId) {
+        throw new BadRequestException('GRN is outside the supplier branch/location');
+      }
       if (purchaseOrderId && grn.purchaseOrderId && grn.purchaseOrderId !== purchaseOrderId) {
         throw new BadRequestException('GRN is not linked to the selected purchase order');
       }
+      if (refs.divisionId && grn.divisionId && refs.divisionId !== grn.divisionId) {
+        throw new BadRequestException('GRN does not belong to the selected division');
+      }
+      if (refs.branchId && grn.branchId && refs.branchId !== grn.branchId) {
+        throw new BadRequestException('GRN does not belong to the selected branch/location');
+      }
       purchaseOrderId = purchaseOrderId || grn.purchaseOrderId || undefined;
+      divisionId = grn.divisionId || divisionId;
+      branchId = grn.branchId || branchId;
     }
 
-    return { purchaseOrderId };
+    if (branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: branchId, deletedAt: null },
+        select: { divisionId: true, division: { select: { companyId: true } } },
+      });
+      if (!branch || branch.division.companyId !== refs.companyId) {
+        throw new BadRequestException('Branch/location does not belong to this company');
+      }
+      if (!divisionId) divisionId = branch.divisionId;
+      if (divisionId && branch.divisionId !== divisionId) {
+        throw new BadRequestException('Branch/location does not belong to the selected division');
+      }
+    }
+
+    if (divisionId) {
+      const division = await this.prisma.division.findFirst({
+        where: { id: divisionId, deletedAt: null },
+        select: { companyId: true },
+      });
+      if (!division || division.companyId !== refs.companyId) {
+        throw new BadRequestException('Division does not belong to this company');
+      }
+    }
+
+    return { purchaseOrderId, divisionId, branchId };
   }
 
   private async createThreeWayMatch(invoice: any, userId: string) {

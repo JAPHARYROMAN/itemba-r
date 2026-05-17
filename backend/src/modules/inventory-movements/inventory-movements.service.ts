@@ -215,6 +215,7 @@ export class InventoryMovementsService {
       },
       create: {
         companyId: movement.companyId,
+        divisionId: movement.divisionId,
         productId: movement.productId,
         branchId: movement.branchId,
         quantityOnHand: 0,
@@ -223,7 +224,7 @@ export class InventoryMovementsService {
         totalValue: 0,
         lastMovementAt: null,
       },
-      update: {},
+      update: { divisionId: movement.divisionId },
     });
 
     const rows = await db.$queryRaw<BalanceLockRow[]>(Prisma.sql`
@@ -264,6 +265,7 @@ export class InventoryMovementsService {
     await db.inventoryBalance.update({
       where: { id: existing.id },
       data: {
+        divisionId: movement.divisionId,
         quantityOnHand: newQty,
         averageCost: newAvgCost,
         totalValue: newQty * newAvgCost,

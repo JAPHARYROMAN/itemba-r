@@ -23,7 +23,17 @@ export class PayablesService {
   ) {}
 
   async findAll(query: QueryPayableDto, user: AuthUser) {
-    const { page = 1, limit = 20, companyId, status, supplierId, dateFrom, dateTo } = query;
+    const {
+      page = 1,
+      limit = 20,
+      companyId,
+      divisionId,
+      branchId,
+      status,
+      supplierId,
+      dateFrom,
+      dateTo,
+    } = query;
     const skip = (page - 1) * limit;
 
     const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
@@ -34,6 +44,8 @@ export class PayablesService {
     } else if (accessibleIds !== null) {
       where.companyId = { in: accessibleIds };
     }
+    if (divisionId) where.divisionId = divisionId;
+    if (branchId) where.branchId = branchId;
     if (status) where.status = status;
     if (supplierId) where.supplierId = supplierId;
     if (dateFrom || dateTo) {
@@ -45,7 +57,7 @@ export class PayablesService {
     const [data, total] = await Promise.all([
       this.prisma.payable.findMany({
         where,
-        include: { company: { select: { id: true, name: true, code: true } } },
+        include: this.includeScope(),
         orderBy: { issueDate: 'desc' },
         skip,
         take: limit,
@@ -59,7 +71,7 @@ export class PayablesService {
   async findOne(id: string, user?: AuthUser) {
     const record = await this.prisma.payable.findFirst({
       where: { id, deletedAt: null },
-      include: { company: { select: { id: true, name: true, code: true } } },
+      include: this.includeScope(),
     });
     if (!record) throw new NotFoundException('Payable not found');
     if (user) {
@@ -71,10 +83,18 @@ export class PayablesService {
   async create(dto: CreatePayableDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const userId = user.id;
+    const scope = await this.resolvePayableScope({
+      companyId: dto.companyId,
+      divisionId: dto.divisionId || null,
+      branchId: dto.branchId || null,
+      supplierId: dto.supplierId || null,
+    });
     const record = await this.prisma.payable.create({
       data: {
         payableNumber: generatePayableNumber(),
         companyId: dto.companyId,
+        divisionId: scope.divisionId,
+        branchId: scope.branchId,
         supplierId: dto.supplierId,
         supplierName: dto.supplierName,
         sourceType: dto.sourceType,
@@ -106,9 +126,19 @@ export class PayablesService {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     const userId = user.id;
+    const scope = await this.resolvePayableScope({
+      companyId: existing.companyId,
+      divisionId:
+        dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId || null,
+      branchId: dto.branchId !== undefined ? dto.branchId || null : existing.branchId || null,
+      supplierId:
+        dto.supplierId !== undefined ? dto.supplierId || null : existing.supplierId || null,
+    });
     const record = await this.prisma.payable.update({
       where: { id },
       data: {
+        divisionId: scope.divisionId,
+        branchId: scope.branchId,
         ...(dto.supplierName && { supplierName: dto.supplierName }),
         ...(dto.supplierId !== undefined && { supplierId: dto.supplierId }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
@@ -239,5 +269,67 @@ export class PayablesService {
     });
 
     return { success: true };
+  }
+
+  private includeScope() {
+    return {
+      company: { select: { id: true, name: true, code: true } },
+      division: { select: { id: true, name: true, code: true } },
+      branch: { select: { id: true, name: true, code: true } },
+    };
+  }
+
+  private async resolvePayableScope(input: {
+    companyId: string;
+    divisionId?: string | null;
+    branchId?: string | null;
+    supplierId?: string | null;
+  }) {
+    let divisionId = input.divisionId || null;
+    let branchId = input.branchId || null;
+
+    if (input.supplierId) {
+      const supplier = await this.prisma.supplier.findFirst({
+        where: { id: input.supplierId, deletedAt: null },
+        select: { companyId: true, divisionId: true, branchId: true },
+      });
+      if (!supplier || supplier.companyId !== input.companyId) {
+        throw new BadRequestException('Supplier does not belong to this company');
+      }
+      if (!divisionId && supplier.divisionId) divisionId = supplier.divisionId;
+      if (!branchId && supplier.branchId) branchId = supplier.branchId;
+      if (divisionId && supplier.divisionId && supplier.divisionId !== divisionId) {
+        throw new BadRequestException('Supplier does not belong to the selected division');
+      }
+      if (branchId && supplier.branchId && supplier.branchId !== branchId) {
+        throw new BadRequestException('Supplier does not belong to the selected branch/location');
+      }
+    }
+
+    if (branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: branchId, deletedAt: null },
+        select: { divisionId: true, division: { select: { companyId: true } } },
+      });
+      if (!branch || branch.division.companyId !== input.companyId) {
+        throw new BadRequestException('Branch/location does not belong to this company');
+      }
+      if (!divisionId) divisionId = branch.divisionId;
+      if (divisionId && branch.divisionId !== divisionId) {
+        throw new BadRequestException('Branch/location does not belong to the selected division');
+      }
+    }
+
+    if (divisionId) {
+      const division = await this.prisma.division.findFirst({
+        where: { id: divisionId, deletedAt: null },
+        select: { companyId: true },
+      });
+      if (!division || division.companyId !== input.companyId) {
+        throw new BadRequestException('Division does not belong to this company');
+      }
+    }
+
+    return { divisionId, branchId };
   }
 }

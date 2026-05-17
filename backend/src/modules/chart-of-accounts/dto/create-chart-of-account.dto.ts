@@ -1,16 +1,18 @@
-import {
-  IsBoolean,
-  IsEnum,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { AccountType } from '@prisma/client';
 
 export class CreateChartOfAccountDto {
   @IsNotEmpty()
   @IsString()
   companyId!: string;
+
+  @IsOptional()
+  @IsString()
+  divisionId?: string;
+
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 
   @IsNotEmpty()
   @IsString()

@@ -25,6 +25,8 @@ export class LoansService {
       page = 1,
       limit = 20,
       companyId,
+      divisionId,
+      branchId,
       groupId,
       status,
       obligationType,
@@ -45,6 +47,8 @@ export class LoansService {
       where.companyId = { in: accessibleIds };
     }
     if (groupId) where.groupId = groupId;
+    if (divisionId) where.divisionId = divisionId;
+    if (branchId) where.branchId = branchId;
     if (status) where.status = status;
     if (obligationType) where.obligationType = obligationType;
     if (borrowerLevel) where.borrowerLevel = borrowerLevel;
@@ -63,6 +67,8 @@ export class LoansService {
         where,
         include: {
           company: { select: { id: true, name: true, code: true } },
+          division: { select: { id: true, name: true, code: true } },
+          branch: { select: { id: true, name: true, code: true } },
           group: { select: { id: true, name: true, code: true } },
           repayments: { orderBy: { repaymentDate: 'desc' }, take: 5 },
         },
@@ -83,6 +89,8 @@ export class LoansService {
       where: { id, deletedAt: null },
       include: {
         company: { select: { id: true, name: true, code: true } },
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
         group: { select: { id: true, name: true, code: true } },
         repayments: { orderBy: { repaymentDate: 'desc' } },
         documents: { where: { deletedAt: null } },
@@ -115,6 +123,13 @@ export class LoansService {
       throw new BadRequestException('groupId is required when borrowerLevel is GROUP');
     }
     await this.companyScope.assertCanAccessCompany(user, dto.companyId);
+    const scope = await this.resolveLoanScope({
+      companyId: dto.companyId,
+      divisionId: dto.divisionId || null,
+      branchId: dto.branchId || null,
+      bankAccountId: dto.bankAccountId || null,
+      borrowerLevel,
+    });
 
     const createdById = user.id;
     const record = await this.prisma.loan.create({
@@ -122,6 +137,8 @@ export class LoansService {
         obligationType: dto.obligationType,
         borrowerLevel,
         companyId: dto.companyId,
+        divisionId: scope.divisionId,
+        branchId: scope.branchId,
         groupId: dto.groupId,
         loanReference: dto.loanReference,
         lenderName: dto.lenderName,
@@ -167,9 +184,22 @@ export class LoansService {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     const actorId = user.id;
+    const scope = await this.resolveLoanScope({
+      companyId: dto.companyId !== undefined ? dto.companyId : existing.companyId,
+      divisionId:
+        dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId || null,
+      branchId: dto.branchId !== undefined ? dto.branchId || null : existing.branchId || null,
+      bankAccountId:
+        dto.bankAccountId !== undefined
+          ? dto.bankAccountId || null
+          : existing.bankAccountId || null,
+      borrowerLevel: dto.borrowerLevel ?? existing.borrowerLevel,
+    });
     const record = await this.prisma.loan.update({
       where: { id },
       data: {
+        divisionId: scope.divisionId,
+        branchId: scope.branchId,
         ...(dto.obligationType && { obligationType: dto.obligationType }),
         ...(dto.lenderName && { lenderName: dto.lenderName }),
         ...(dto.lenderType !== undefined && { lenderType: dto.lenderType }),
@@ -195,6 +225,7 @@ export class LoansService {
         ...(dto.guarantorName !== undefined && { guarantorName: dto.guarantorName }),
         ...(dto.guarantorContact !== undefined && { guarantorContact: dto.guarantorContact }),
         ...(dto.guaranteeDetails !== undefined && { guaranteeDetails: dto.guaranteeDetails }),
+        ...(dto.bankAccountId !== undefined && { bankAccountId: dto.bankAccountId || null }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
       },
     });
@@ -411,6 +442,8 @@ export class LoansService {
       where,
       include: {
         company: { select: { id: true, name: true, code: true } },
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
         group: { select: { id: true, name: true } },
       },
       orderBy: { maturityDate: 'asc' },
@@ -431,6 +464,8 @@ export class LoansService {
       where,
       include: {
         company: { select: { id: true, name: true, code: true } },
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
         group: { select: { id: true, name: true } },
       },
       orderBy: { maturityDate: 'asc' },
@@ -454,5 +489,67 @@ export class LoansService {
     const d = new Date();
     d.setDate(d.getDate() + days);
     return d;
+  }
+
+  private async resolveLoanScope(input: {
+    companyId?: string | null;
+    divisionId?: string | null;
+    branchId?: string | null;
+    bankAccountId?: string | null;
+    borrowerLevel?: BorrowerLevel;
+  }) {
+    let divisionId = input.divisionId || null;
+    let branchId = input.branchId || null;
+
+    if (input.borrowerLevel === BorrowerLevel.GROUP) {
+      return { divisionId: null, branchId: null };
+    }
+
+    if (input.bankAccountId) {
+      const bankAccount = await this.prisma.bankAccount.findFirst({
+        where: { id: input.bankAccountId, deletedAt: null },
+        select: { companyId: true, divisionId: true, branchId: true },
+      });
+      if (!bankAccount) throw new BadRequestException('Bank account not found');
+      if (input.companyId && bankAccount.companyId && bankAccount.companyId !== input.companyId) {
+        throw new BadRequestException('Bank account does not belong to this company');
+      }
+      if (!divisionId && bankAccount.divisionId) divisionId = bankAccount.divisionId;
+      if (!branchId && bankAccount.branchId) branchId = bankAccount.branchId;
+      if (divisionId && bankAccount.divisionId && bankAccount.divisionId !== divisionId) {
+        throw new BadRequestException('Bank account does not belong to the selected division');
+      }
+      if (branchId && bankAccount.branchId && bankAccount.branchId !== branchId) {
+        throw new BadRequestException(
+          'Bank account does not belong to the selected branch/location',
+        );
+      }
+    }
+
+    if (branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: branchId, deletedAt: null },
+        select: { divisionId: true, division: { select: { companyId: true } } },
+      });
+      if (!branch || (input.companyId && branch.division.companyId !== input.companyId)) {
+        throw new BadRequestException('Branch/location does not belong to this company');
+      }
+      if (!divisionId) divisionId = branch.divisionId;
+      if (divisionId && branch.divisionId !== divisionId) {
+        throw new BadRequestException('Branch/location does not belong to the selected division');
+      }
+    }
+
+    if (divisionId) {
+      const division = await this.prisma.division.findFirst({
+        where: { id: divisionId, deletedAt: null },
+        select: { companyId: true },
+      });
+      if (!division || (input.companyId && division.companyId !== input.companyId)) {
+        throw new BadRequestException('Division does not belong to this company');
+      }
+    }
+
+    return { divisionId, branchId };
   }
 }

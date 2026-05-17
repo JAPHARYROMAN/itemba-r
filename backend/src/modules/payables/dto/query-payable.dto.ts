@@ -4,6 +4,8 @@ import { PayableStatus } from '@prisma/client';
 
 export class QueryPayableDto {
   @IsOptional() @IsString() companyId?: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsEnum(PayableStatus) status?: PayableStatus;
   @IsOptional() @IsString() supplierId?: string;
   @IsOptional() @IsString() dateFrom?: string;

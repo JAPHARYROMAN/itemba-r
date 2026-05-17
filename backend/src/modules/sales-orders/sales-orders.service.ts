@@ -577,6 +577,8 @@ export class SalesOrdersService {
             data: {
               receivableNumber: recNumber,
               companyId: existing.companyId,
+              divisionId: existing.divisionId ?? null,
+              branchId: existing.branchId ?? null,
               customerId: existing.customerId,
               customerName: existing.customerName ?? '',
               amount: existing.totalAmount,

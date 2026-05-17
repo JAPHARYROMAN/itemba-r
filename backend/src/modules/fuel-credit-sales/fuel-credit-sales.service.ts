@@ -42,10 +42,13 @@ export class FuelCreditSalesService {
     try {
       const receivableNumber = await this.codes.next({ entityType: 'Receivable', companyId: dto.companyId });
       const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId } });
+      const branch = await this.prisma.branch.findUnique({ where: { id: dto.branchId }, select: { divisionId: true } });
       const receivable = await this.prisma.receivable.create({
         data: {
           receivableNumber,
           companyId: dto.companyId,
+          divisionId: branch?.divisionId,
+          branchId: dto.branchId,
           customerId: dto.customerId,
           customerName: customer?.name ?? 'Unknown',
           sourceType: 'FUEL_CREDIT_SALE',

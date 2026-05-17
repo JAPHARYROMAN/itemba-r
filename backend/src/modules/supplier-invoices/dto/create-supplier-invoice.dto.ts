@@ -60,6 +60,14 @@ export class CreateSupplierInvoiceDto {
   @IsString()
   companyId!: string;
 
+  @IsOptional()
+  @IsString()
+  divisionId?: string;
+
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
   @IsNotEmpty()
   @IsString()
   supplierId!: string;

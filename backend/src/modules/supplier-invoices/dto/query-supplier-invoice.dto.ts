@@ -9,6 +9,14 @@ export class QuerySupplierInvoiceDto {
 
   @IsOptional()
   @IsString()
+  divisionId?: string;
+
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
+  @IsOptional()
+  @IsString()
   supplierId?: string;
 
   @IsOptional()

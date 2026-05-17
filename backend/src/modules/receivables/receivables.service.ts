@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -27,7 +23,17 @@ export class ReceivablesService {
   ) {}
 
   async findAll(query: QueryReceivableDto, user: AuthUser) {
-    const { page = 1, limit = 20, companyId, status, customerId, dateFrom, dateTo } = query;
+    const {
+      page = 1,
+      limit = 20,
+      companyId,
+      divisionId,
+      branchId,
+      status,
+      customerId,
+      dateFrom,
+      dateTo,
+    } = query;
     const skip = (page - 1) * limit;
 
     const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
@@ -38,6 +44,8 @@ export class ReceivablesService {
     } else if (accessibleIds !== null) {
       where.companyId = { in: accessibleIds };
     }
+    if (divisionId) where.divisionId = divisionId;
+    if (branchId) where.branchId = branchId;
     if (status) where.status = status;
     if (customerId) where.customerId = customerId;
     if (dateFrom || dateTo) {
@@ -49,7 +57,7 @@ export class ReceivablesService {
     const [data, total] = await Promise.all([
       this.prisma.receivable.findMany({
         where,
-        include: { company: { select: { id: true, name: true, code: true } } },
+        include: this.includeScope(),
         orderBy: { issueDate: 'desc' },
         skip,
         take: limit,
@@ -63,7 +71,7 @@ export class ReceivablesService {
   async findOne(id: string, user?: AuthUser) {
     const record = await this.prisma.receivable.findFirst({
       where: { id, deletedAt: null },
-      include: { company: { select: { id: true, name: true, code: true } } },
+      include: this.includeScope(),
     });
     if (!record) throw new NotFoundException('Receivable not found');
     if (user) {
@@ -75,10 +83,18 @@ export class ReceivablesService {
   async create(dto: CreateReceivableDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const userId = user.id;
+    const scope = await this.resolveReceivableScope({
+      companyId: dto.companyId,
+      divisionId: dto.divisionId || null,
+      branchId: dto.branchId || null,
+      customerId: dto.customerId || null,
+    });
     const record = await this.prisma.receivable.create({
       data: {
         receivableNumber: generateReceivableNumber(),
         companyId: dto.companyId,
+        divisionId: scope.divisionId,
+        branchId: scope.branchId,
         customerId: dto.customerId,
         customerName: dto.customerName,
         sourceType: dto.sourceType,
@@ -110,9 +126,19 @@ export class ReceivablesService {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     const userId = user.id;
+    const scope = await this.resolveReceivableScope({
+      companyId: existing.companyId,
+      divisionId:
+        dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId || null,
+      branchId: dto.branchId !== undefined ? dto.branchId || null : existing.branchId || null,
+      customerId:
+        dto.customerId !== undefined ? dto.customerId || null : existing.customerId || null,
+    });
     const record = await this.prisma.receivable.update({
       where: { id },
       data: {
+        divisionId: scope.divisionId,
+        branchId: scope.branchId,
         ...(dto.customerName && { customerName: dto.customerName }),
         ...(dto.customerId !== undefined && { customerId: dto.customerId }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
@@ -166,7 +192,11 @@ export class ReceivablesService {
       userId,
       companyId: record.companyId,
       oldValue: { outstandingAmount: outstanding, status: existing.status } as any,
-      newValue: { outstandingAmount: newOutstanding, paidAmount: newPaid, status: newStatus } as any,
+      newValue: {
+        outstandingAmount: newOutstanding,
+        paidAmount: newPaid,
+        status: newStatus,
+      } as any,
     });
 
     return record;
@@ -210,5 +240,67 @@ export class ReceivablesService {
     });
 
     return { success: true };
+  }
+
+  private includeScope() {
+    return {
+      company: { select: { id: true, name: true, code: true } },
+      division: { select: { id: true, name: true, code: true } },
+      branch: { select: { id: true, name: true, code: true } },
+    };
+  }
+
+  private async resolveReceivableScope(input: {
+    companyId: string;
+    divisionId?: string | null;
+    branchId?: string | null;
+    customerId?: string | null;
+  }) {
+    let divisionId = input.divisionId || null;
+    let branchId = input.branchId || null;
+
+    if (input.customerId) {
+      const customer = await this.prisma.customer.findFirst({
+        where: { id: input.customerId, deletedAt: null },
+        select: { companyId: true, divisionId: true, branchId: true },
+      });
+      if (!customer || customer.companyId !== input.companyId) {
+        throw new BadRequestException('Customer does not belong to this company');
+      }
+      if (!divisionId && customer.divisionId) divisionId = customer.divisionId;
+      if (!branchId && customer.branchId) branchId = customer.branchId;
+      if (divisionId && customer.divisionId && customer.divisionId !== divisionId) {
+        throw new BadRequestException('Customer does not belong to the selected division');
+      }
+      if (branchId && customer.branchId && customer.branchId !== branchId) {
+        throw new BadRequestException('Customer does not belong to the selected branch/location');
+      }
+    }
+
+    if (branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: branchId, deletedAt: null },
+        select: { divisionId: true, division: { select: { companyId: true } } },
+      });
+      if (!branch || branch.division.companyId !== input.companyId) {
+        throw new BadRequestException('Branch/location does not belong to this company');
+      }
+      if (!divisionId) divisionId = branch.divisionId;
+      if (divisionId && branch.divisionId !== divisionId) {
+        throw new BadRequestException('Branch/location does not belong to the selected division');
+      }
+    }
+
+    if (divisionId) {
+      const division = await this.prisma.division.findFirst({
+        where: { id: divisionId, deletedAt: null },
+        select: { companyId: true },
+      });
+      if (!division || division.companyId !== input.companyId) {
+        throw new BadRequestException('Division does not belong to this company');
+      }
+    }
+
+    return { divisionId, branchId };
   }
 }

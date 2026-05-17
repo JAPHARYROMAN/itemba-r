@@ -4,6 +4,8 @@ import { AccountType } from '@prisma/client';
 
 export class QueryChartOfAccountDto {
   @IsOptional() @IsString() companyId?: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsEnum(AccountType) accountType?: AccountType;
   @IsOptional() @Transform(({ value }) => value === 'true') @IsBoolean() isActive?: boolean;
   @IsOptional() @IsString() search?: string;

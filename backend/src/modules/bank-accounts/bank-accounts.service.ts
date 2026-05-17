@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditSeverity, BankAccount, CashAccountType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -22,6 +22,8 @@ export class BankAccountsService {
       page = 1,
       limit = 20,
       companyId,
+      divisionId,
+      branchId,
       groupId,
       accountType,
       currency,
@@ -32,6 +34,8 @@ export class BankAccountsService {
 
     const where: any = { deletedAt: null };
     applyCompanyScopeWhere(where, user, companyId);
+    if (divisionId) where.divisionId = divisionId;
+    if (branchId) where.branchId = branchId;
     if (groupId) where.groupId = groupId;
     if (accountType) where.accountType = accountType;
     if (currency) where.currency = currency;
@@ -47,7 +51,11 @@ export class BankAccountsService {
     const [data, total] = await Promise.all([
       this.prisma.bankAccount.findMany({
         where,
-        include: { company: { select: { id: true, name: true, code: true } } },
+        include: {
+          company: { select: { id: true, name: true, code: true } },
+          division: { select: { id: true, name: true, code: true } },
+          branch: { select: { id: true, name: true, code: true } },
+        },
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
@@ -64,6 +72,8 @@ export class BankAccountsService {
       where: { id, deletedAt: null },
       include: {
         company: { select: { id: true, name: true, code: true } },
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
         documents: { where: { deletedAt: null } },
       },
     });
@@ -88,9 +98,16 @@ export class BankAccountsService {
   async create(dto: CreateBankAccountDto, user: AuthUser) {
     this.companyScope.assertGroupScoped(user, 'create bank accounts');
     await this.companyScope.assertCanAccessCompany(user, dto.companyId);
+    const scope = await this.assertHierarchyScope({
+      companyId: dto.companyId,
+      divisionId: dto.divisionId || null,
+      branchId: dto.branchId || null,
+    });
     const record = await this.prisma.bankAccount.create({
       data: {
         ...dto,
+        divisionId: scope.divisionId,
+        branchId: scope.branchId,
         createdById: user.id,
         openedDate: dto.openedDate ? new Date(dto.openedDate) : undefined,
       },
@@ -117,10 +134,18 @@ export class BankAccountsService {
     if (dto.companyId !== undefined) {
       await this.companyScope.assertCanAccessCompany(user, dto.companyId);
     }
+    const scope = await this.assertHierarchyScope({
+      companyId: dto.companyId !== undefined ? dto.companyId : existing.companyId,
+      divisionId:
+        dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId || null,
+      branchId: dto.branchId !== undefined ? dto.branchId || null : existing.branchId || null,
+    });
     const record = await this.prisma.bankAccount.update({
       where: { id },
       data: {
         ...dto,
+        divisionId: scope.divisionId,
+        branchId: scope.branchId,
         openedDate: dto.openedDate ? new Date(dto.openedDate) : undefined,
       },
     });
@@ -233,6 +258,8 @@ export class BankAccountsService {
         where: { id: existing.id },
         data: {
           companyId: bankAccount.companyId,
+          divisionId: bankAccount.divisionId,
+          branchId: bankAccount.branchId,
           accountName,
           accountType: CashAccountType.BANK,
           currency: bankAccount.currency,
@@ -245,6 +272,8 @@ export class BankAccountsService {
     await this.prisma.cashAccount.create({
       data: {
         companyId: bankAccount.companyId,
+        divisionId: bankAccount.divisionId,
+        branchId: bankAccount.branchId,
         linkedBankAccountId: bankAccount.id,
         accountName,
         accountType: CashAccountType.BANK,
@@ -262,5 +291,49 @@ export class BankAccountsService {
       where: { linkedBankAccountId: bankAccountId, deletedAt: null },
       data: { isActive: false, deletedAt: new Date() },
     });
+  }
+
+  private async assertHierarchyScope(input: {
+    companyId?: string | null;
+    divisionId?: string | null;
+    branchId?: string | null;
+  }) {
+    let divisionId = input.divisionId || null;
+    const branchId = input.branchId || null;
+
+    if (!input.companyId) {
+      if (divisionId || branchId) {
+        throw new BadRequestException(
+          'Company is required when assigning division or branch scope',
+        );
+      }
+      return { divisionId: null, branchId: null };
+    }
+
+    if (branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: branchId, deletedAt: null },
+        select: { divisionId: true, division: { select: { companyId: true } } },
+      });
+      if (!branch || branch.division.companyId !== input.companyId) {
+        throw new BadRequestException('Branch/location does not belong to this company');
+      }
+      if (!divisionId) divisionId = branch.divisionId;
+      if (divisionId && branch.divisionId !== divisionId) {
+        throw new BadRequestException('Branch/location does not belong to the selected division');
+      }
+    }
+
+    if (divisionId) {
+      const division = await this.prisma.division.findFirst({
+        where: { id: divisionId, deletedAt: null },
+        select: { companyId: true },
+      });
+      if (!division || division.companyId !== input.companyId) {
+        throw new BadRequestException('Division does not belong to this company');
+      }
+    }
+
+    return { divisionId, branchId };
   }
 }

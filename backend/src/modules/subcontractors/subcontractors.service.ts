@@ -86,6 +86,7 @@ export class SubcontractorsService {
         data: {
           payableNumber,
           companyId: sub.companyId,
+          divisionId: sub.divisionId,
           supplierId: dto.supplierId ?? sub.supplierId ?? null,
           supplierName: sub.name,
           sourceType: 'SubcontractorRecord',

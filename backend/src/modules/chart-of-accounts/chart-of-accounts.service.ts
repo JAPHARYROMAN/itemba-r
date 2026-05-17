@@ -22,7 +22,16 @@ export class ChartOfAccountsService {
   ) {}
 
   async findAll(query: QueryChartOfAccountDto, user: AuthUser) {
-    const { page = 1, limit = 20, companyId, accountType, isActive, search } = query;
+    const {
+      page = 1,
+      limit = 20,
+      companyId,
+      divisionId,
+      branchId,
+      accountType,
+      isActive,
+      search,
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.ChartOfAccountWhereInput = { deletedAt: null };
@@ -35,6 +44,8 @@ export class ChartOfAccountsService {
         where.companyId = { in: accessibleCompanyIds };
       }
     }
+    if (divisionId) where.divisionId = divisionId;
+    if (branchId) where.branchId = branchId;
     if (accountType) where.accountType = accountType;
     if (isActive !== undefined) where.isActive = isActive;
     if (search) {
@@ -47,7 +58,11 @@ export class ChartOfAccountsService {
     const [data, total] = await Promise.all([
       this.prisma.chartOfAccount.findMany({
         where,
-        include: { company: { select: { id: true, name: true, code: true } } },
+        include: {
+          company: { select: { id: true, name: true, code: true } },
+          division: { select: { id: true, name: true, code: true } },
+          branch: { select: { id: true, name: true, code: true } },
+        },
         orderBy: { accountCode: 'asc' },
         skip,
         take: limit,
@@ -63,6 +78,8 @@ export class ChartOfAccountsService {
       where: { id, deletedAt: null },
       include: {
         company: { select: { id: true, name: true, code: true } },
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
         parentAccount: { select: { id: true, accountCode: true, accountName: true } },
         childAccounts: {
           where: { deletedAt: null },
@@ -86,9 +103,16 @@ export class ChartOfAccountsService {
   async create(dto: CreateChartOfAccountDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     await this.assertParentAccountBelongsToCompany(dto.parentAccountId, dto.companyId);
+    const scope = await this.resolveAccountScope({
+      companyId: dto.companyId,
+      divisionId: dto.divisionId || null,
+      branchId: dto.branchId || null,
+    });
 
     try {
-      const record = await this.prisma.chartOfAccount.create({ data: dto });
+      const record = await this.prisma.chartOfAccount.create({
+        data: { ...dto, divisionId: scope.divisionId, branchId: scope.branchId },
+      });
       await this.auditLogs.log({
         action: 'CHART_ACCOUNT_CREATE',
         entityType: 'ChartOfAccount',
@@ -115,9 +139,18 @@ export class ChartOfAccountsService {
       await this.companyScope.assertCanAccessCompany(user, targetCompanyId, AccessLevel.WRITE);
     }
     await this.assertParentAccountBelongsToCompany(dto.parentAccountId, targetCompanyId);
+    const scope = await this.resolveAccountScope({
+      companyId: targetCompanyId,
+      divisionId:
+        dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId || null,
+      branchId: dto.branchId !== undefined ? dto.branchId || null : existing.branchId || null,
+    });
 
     try {
-      const record = await this.prisma.chartOfAccount.update({ where: { id }, data: dto });
+      const record = await this.prisma.chartOfAccount.update({
+        where: { id },
+        data: { ...dto, divisionId: scope.divisionId, branchId: scope.branchId },
+      });
       await this.auditLogs.log({
         action: 'CHART_ACCOUNT_UPDATE',
         entityType: 'ChartOfAccount',
@@ -165,5 +198,40 @@ export class ChartOfAccountsService {
     if (!parent || parent.companyId !== companyId) {
       throw new BadRequestException('Parent account must belong to the same company');
     }
+  }
+
+  private async resolveAccountScope(input: {
+    companyId: string;
+    divisionId?: string | null;
+    branchId?: string | null;
+  }) {
+    let divisionId = input.divisionId || null;
+    const branchId = input.branchId || null;
+
+    if (branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: branchId, deletedAt: null },
+        select: { divisionId: true, division: { select: { companyId: true } } },
+      });
+      if (!branch || branch.division.companyId !== input.companyId) {
+        throw new BadRequestException('Branch/location does not belong to this company');
+      }
+      if (!divisionId) divisionId = branch.divisionId;
+      if (divisionId && branch.divisionId !== divisionId) {
+        throw new BadRequestException('Branch/location does not belong to the selected division');
+      }
+    }
+
+    if (divisionId) {
+      const division = await this.prisma.division.findFirst({
+        where: { id: divisionId, deletedAt: null },
+        select: { companyId: true },
+      });
+      if (!division || division.companyId !== input.companyId) {
+        throw new BadRequestException('Division does not belong to this company');
+      }
+    }
+
+    return { divisionId, branchId };
   }
 }

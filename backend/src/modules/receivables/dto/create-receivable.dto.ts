@@ -1,17 +1,18 @@
-import {
-  IsDateString,
-  IsEnum,
-  IsNotEmpty,
-  IsNumber,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { IsDateString, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 import { CurrencyCode } from '@prisma/client';
 
 export class CreateReceivableDto {
   @IsNotEmpty()
   @IsString()
   companyId!: string;
+
+  @IsOptional()
+  @IsString()
+  divisionId?: string;
+
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 
   @IsOptional()
   @IsString()

@@ -4,6 +4,8 @@ import { BorrowerLevel, LoanStatus, ObligationType, RiskLevel } from '@prisma/cl
 
 export class QueryLoanDto {
   @IsOptional() @IsString() companyId?: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsString() groupId?: string;
   @IsOptional() @IsEnum(LoanStatus) status?: LoanStatus;
   @IsOptional() @IsEnum(ObligationType) obligationType?: ObligationType;

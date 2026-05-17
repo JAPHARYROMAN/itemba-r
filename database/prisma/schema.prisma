@@ -646,16 +646,20 @@ model Division {
   branches       Branch[]
   fixedAssets    FixedAsset[]
   cashAccounts   CashAccount[]
+  bankAccounts   BankAccount[]
+  loans          Loan[]
   divisionAccess UserDivisionAccess[]
   documents      Document[]           @relation("DivisionDocuments")
 
   // Operations (Milestone 4)
   customers          Customer[]
   suppliers          Supplier[]
+  inventoryBalances  InventoryBalance[]
   inventoryMovements InventoryMovement[]
   stockAdjustments   StockAdjustment[]
   salesOrders        SalesOrder[]
   purchaseOrders     PurchaseOrder[]
+  goodsReceivedNotes GoodsReceivedNote[]
 
   // Petroleum (Milestone 5)
   fuelTanks   FuelTank[]
@@ -711,6 +715,10 @@ model Division {
   productFamilies        ProductFamily[]    @relation("DivisionProductFamilies")
   products               Product[]          @relation("DivisionProducts")
   userPreferenceDefaults UserPreference[]   @relation("UserPrefDefaultDivision")
+  chartOfAccounts        ChartOfAccount[]
+  receivables            Receivable[]
+  payables               Payable[]
+  supplierInvoices       SupplierInvoice[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -737,6 +745,8 @@ model Branch {
   division     Division           @relation(fields: [divisionId], references: [id], onDelete: Cascade)
   fixedAssets  FixedAsset[]
   cashAccounts CashAccount[]
+  bankAccounts BankAccount[]
+  loans        Loan[]
   branchAccess UserBranchAccess[]
   documents    Document[]         @relation("BranchDocuments")
 
@@ -749,6 +759,7 @@ model Branch {
   salesOrders        SalesOrder[]
   purchaseOrders     PurchaseOrder[]
   businessLicenses   BusinessLicense[]
+  goodsReceivedNotes GoodsReceivedNote[]
 
   // Petroleum (Milestone 5)
   fuelTanks                FuelTank[]
@@ -796,6 +807,10 @@ model Branch {
 
   approvalWorkflows      ApprovalWorkflow[]
   userPreferenceDefaults UserPreference[]   @relation("UserPrefDefaultBranch")
+  chartOfAccounts        ChartOfAccount[]
+  receivables            Receivable[]
+  payables               Payable[]
+  supplierInvoices       SupplierInvoice[]
 
   @@unique([divisionId, code])
   @@index([divisionId])
@@ -1329,6 +1344,8 @@ model BankAccount {
   id            String          @id @default(uuid())
   /// Null when this is a group-level account.
   companyId     String?
+  divisionId    String?
+  branchId      String?
   /// Set only when companyId is null (pure group-level account).
   groupId       String?
   bankName      String
@@ -1349,12 +1366,16 @@ model BankAccount {
   updatedAt     DateTime        @updatedAt
 
   company      Company?      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division     Division?     @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch       Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
   group        Group?        @relation(fields: [groupId], references: [id], onDelete: Restrict)
   documents    Document[]    @relation("BankAccountDocuments")
   cashAccounts CashAccount[]
 
   @@unique([bankName, accountNumber])
   @@index([companyId])
+  @@index([divisionId])
+  @@index([branchId])
   @@index([groupId])
   @@map("bank_accounts")
 }
@@ -1371,6 +1392,8 @@ model Loan {
   borrowerLevel         BorrowerLevel      @default(COMPANY)
   /// Set when borrowerLevel = COMPANY.
   companyId             String?
+  divisionId            String?
+  branchId              String?
   /// Set when borrowerLevel = GROUP.
   groupId               String?
   loanReference         String?
@@ -1408,11 +1431,15 @@ model Loan {
   updatedAt             DateTime           @updatedAt
 
   company    Company?        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division   Division?       @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch     Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
   group      Group?          @relation(fields: [groupId], references: [id], onDelete: Restrict)
   repayments LoanRepayment[]
   documents  Document[]      @relation("LoanDocuments")
 
   @@index([companyId])
+  @@index([divisionId])
+  @@index([branchId])
   @@index([groupId])
   @@index([status])
   @@index([obligationType])
@@ -1843,6 +1870,8 @@ enum InterCompanyTxStatus {
 model ChartOfAccount {
   id              String      @id @default(uuid())
   companyId       String
+  divisionId      String?
+  branchId        String?
   accountCode     String
   accountName     String
   accountType     AccountType
@@ -1856,6 +1885,8 @@ model ChartOfAccount {
   updatedAt       DateTime    @updatedAt
 
   company              Company                     @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division             Division?                   @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch               Branch?                     @relation(fields: [branchId], references: [id], onDelete: SetNull)
   parentAccount        ChartOfAccount?             @relation("AccountHierarchy", fields: [parentAccountId], references: [id], onDelete: SetNull)
   childAccounts        ChartOfAccount[]            @relation("AccountHierarchy")
   journalLines         JournalEntryLine[]
@@ -1865,6 +1896,8 @@ model ChartOfAccount {
   @@unique([companyId, accountCode])
   @@unique([companyId, accountName])
   @@index([companyId])
+  @@index([divisionId])
+  @@index([branchId])
   @@index([accountType])
   @@map("chart_of_accounts")
 }
@@ -2106,6 +2139,8 @@ model Receivable {
   id                String           @id @default(uuid())
   receivableNumber  String
   companyId         String
+  divisionId        String?
+  branchId          String?
   customerId        String?
   customerName      String
   sourceType        String?
@@ -2124,6 +2159,8 @@ model Receivable {
   updatedAt         DateTime         @updatedAt
 
   company         Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division        Division?        @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch          Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
   journalEntry    JournalEntry?    @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   salesOrders     SalesOrder[]
   fuelCreditSales FuelCreditSale[]
@@ -2132,6 +2169,8 @@ model Receivable {
 
   @@unique([companyId, receivableNumber])
   @@index([companyId])
+  @@index([divisionId])
+  @@index([branchId])
   @@index([status])
   @@index([dueDate])
   @@index([companyId, customerId, dueDate, status])
@@ -2143,6 +2182,8 @@ model Payable {
   id                String        @id @default(uuid())
   payableNumber     String
   companyId         String
+  divisionId        String?
+  branchId          String?
   supplierId        String?
   supplierName      String
   sourceType        String?
@@ -2161,12 +2202,16 @@ model Payable {
   updatedAt         DateTime      @updatedAt
 
   company        Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division       Division?       @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch         Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
   journalEntry   JournalEntry?   @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   purchaseOrders PurchaseOrder[]
   fuelDeliveries FuelDelivery[]
 
   @@unique([companyId, payableNumber])
   @@index([companyId])
+  @@index([divisionId])
+  @@index([branchId])
   @@index([status])
   @@index([dueDate])
   @@index([companyId, supplierId, dueDate, status])
@@ -2740,6 +2785,7 @@ model Product {
 model InventoryBalance {
   id               String    @id @default(uuid())
   companyId        String
+  divisionId       String?
   productId        String
   branchId         String?
   quantityOnHand   Decimal   @default(0) @db.Decimal(18, 4)
@@ -2750,12 +2796,14 @@ model InventoryBalance {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
-  branch  Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division Division? @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  product  Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  branch   Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   @@unique([companyId, productId, branchId])
   @@index([companyId])
+  @@index([divisionId])
   @@index([productId])
   @@index([branchId])
   @@map("inventory_balances")
@@ -12586,6 +12634,7 @@ model GoodsReceivedNote {
   id              String    @id @default(cuid())
   grnNumber       String
   companyId       String
+  divisionId      String?
   branchId        String?
   purchaseOrderId String?
   supplierId      String
@@ -12602,6 +12651,8 @@ model GoodsReceivedNote {
   deletedAt       DateTime?
 
   company          Company                 @relation(fields: [companyId], references: [id])
+  division         Division?               @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch           Branch?                 @relation(fields: [branchId], references: [id], onDelete: SetNull)
   receivedBy       User                    @relation("GRNReceivedBy", fields: [receivedById], references: [id])
   approvedBy       User?                   @relation("GRNApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   lines            GoodsReceivedNoteLine[]
@@ -12610,6 +12661,8 @@ model GoodsReceivedNote {
 
   @@unique([companyId, grnNumber])
   @@index([companyId, supplierId, status, receivedDate])
+  @@index([divisionId])
+  @@index([branchId])
   @@map("goods_received_notes")
 }
 
@@ -12637,6 +12690,8 @@ model SupplierInvoice {
   id                    String                @id @default(cuid())
   supplierInvoiceNumber String
   companyId             String
+  divisionId            String?
+  branchId              String?
   supplierId            String
   purchaseOrderId       String?
   goodsReceivedNoteId   String?
@@ -12662,6 +12717,8 @@ model SupplierInvoice {
   deletedAt             DateTime?
 
   company           Company               @relation(fields: [companyId], references: [id])
+  division          Division?             @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch            Branch?               @relation(fields: [branchId], references: [id], onDelete: SetNull)
   goodsReceivedNote GoodsReceivedNote?    @relation(fields: [goodsReceivedNoteId], references: [id], onDelete: SetNull)
   createdBy         User                  @relation("SupplierInvCreatedBy", fields: [createdById], references: [id])
   approvedBy        User?                 @relation("SupplierInvApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
@@ -12670,6 +12727,8 @@ model SupplierInvoice {
 
   @@unique([companyId, supplierInvoiceNumber])
   @@index([companyId, supplierId, status, invoiceDate])
+  @@index([divisionId])
+  @@index([branchId])
   @@map("supplier_invoices")
 }
 

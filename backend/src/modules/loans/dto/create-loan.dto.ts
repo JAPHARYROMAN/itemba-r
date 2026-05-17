@@ -12,6 +12,8 @@ export class CreateLoanDto {
   @IsOptional() @IsEnum(ObligationType) obligationType?: ObligationType;
   @IsOptional() @IsEnum(BorrowerLevel) borrowerLevel?: BorrowerLevel;
   @IsOptional() @IsString() companyId?: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsString() groupId?: string;
   @IsOptional() @IsString() loanReference?: string;
   @IsNotEmpty() @IsString() lenderName!: string;

@@ -4,6 +4,8 @@ import { ReceivableStatus } from '@prisma/client';
 
 export class QueryReceivableDto {
   @IsOptional() @IsString() companyId?: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsEnum(ReceivableStatus) status?: ReceivableStatus;
   @IsOptional() @IsString() customerId?: string;
   @IsOptional() @IsString() dateFrom?: string;
