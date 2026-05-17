@@ -2,8 +2,9 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { CompanyScopeService } from '../../common/services';
+import { AccountResolverService, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { CreatePayableDto } from './dto/create-payable.dto';
 import { UpdatePayableDto } from './dto/update-payable.dto';
 import { QueryPayableDto } from './dto/query-payable.dto';
@@ -20,6 +21,8 @@ export class PayablesService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly accountResolver: AccountResolverService,
+    private readonly postingEngine: PostingEngineService,
   ) {}
 
   async findAll(query: QueryPayableDto, user: AuthUser) {
@@ -89,25 +92,68 @@ export class PayablesService {
       branchId: dto.branchId || null,
       supplierId: dto.supplierId || null,
     });
-    const record = await this.prisma.payable.create({
-      data: {
-        payableNumber: generatePayableNumber(),
-        companyId: dto.companyId,
-        divisionId: scope.divisionId,
-        branchId: scope.branchId,
-        supplierId: dto.supplierId,
-        supplierName: dto.supplierName,
-        sourceType: dto.sourceType,
-        sourceId: dto.sourceId,
-        amount: dto.amount,
-        paidAmount: 0,
-        outstandingAmount: dto.amount,
-        currency: dto.currency,
-        issueDate: new Date(dto.issueDate),
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
-        status: 'OPEN',
-        notes: dto.notes,
-      },
+    const amount = new Prisma.Decimal(dto.amount).toDecimalPlaces(2);
+    if (amount.lte(0)) throw new BadRequestException('Payable amount must be greater than zero');
+
+    const record = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.payable.create({
+        data: {
+          payableNumber: generatePayableNumber(),
+          companyId: dto.companyId,
+          divisionId: scope.divisionId,
+          branchId: scope.branchId,
+          supplierId: dto.supplierId,
+          supplierName: dto.supplierName,
+          sourceType: dto.sourceType,
+          sourceId: dto.sourceId,
+          amount,
+          paidAmount: 0,
+          outstandingAmount: amount,
+          currency: dto.currency,
+          issueDate: new Date(dto.issueDate),
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+          status: 'OPEN',
+          notes: dto.notes,
+        },
+      });
+
+      const [expenseAccount, apAccount] = await Promise.all([
+        this.accountResolver.resolve(created.companyId, 'GENERAL_EXPENSE', tx),
+        this.accountResolver.resolve(created.companyId, 'AP_CONTROL', tx),
+      ]);
+      const journalEntry = await this.postingEngine.postLines(
+        {
+          companyId: created.companyId,
+          divisionId: created.divisionId,
+          branchId: created.branchId,
+          transactionDate: created.issueDate,
+          description: `Manual payable ${created.payableNumber}`,
+          referenceType: 'Payable',
+          referenceId: created.id,
+          moduleName: 'payables',
+          userId,
+          lines: [
+            {
+              accountId: expenseAccount.id,
+              description: `Payable expense: ${created.supplierName}`,
+              debit: amount,
+              credit: 0,
+            },
+            {
+              accountId: apAccount.id,
+              description: `Accounts payable: ${created.supplierName}`,
+              debit: 0,
+              credit: amount,
+            },
+          ],
+        },
+        tx,
+      );
+
+      return tx.payable.update({
+        where: { id: created.id },
+        data: { journalEntryId: journalEntry.id },
+      });
     });
 
     await this.auditLogs.log({

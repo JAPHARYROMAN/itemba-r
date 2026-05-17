@@ -4073,6 +4073,12 @@ const DEFAULT_COA: AccountSeed[] = [
   },
   { code: '1200', name: 'Inventory', type: AccountType.ASSET, subType: 'Current Asset' },
   { code: '1500', name: 'Fixed Assets', type: AccountType.ASSET, subType: 'Non-Current Asset' },
+  {
+    code: '1599',
+    name: 'Accumulated Depreciation',
+    type: AccountType.ASSET,
+    subType: 'accumulated_depreciation',
+  },
   // Liabilities
   {
     code: '2000',
@@ -4130,6 +4136,7 @@ const DEFAULT_COA: AccountSeed[] = [
   // Equity
   { code: '3000', name: 'Owner Capital', type: AccountType.EQUITY },
   { code: '3100', name: 'Retained Earnings', type: AccountType.EQUITY },
+  { code: '3900', name: 'Income Summary', type: AccountType.EQUITY, subType: 'income_summary' },
   // Income
   { code: '4000', name: 'Sales Revenue', type: AccountType.INCOME },
   { code: '4100', name: 'Service Revenue', type: AccountType.INCOME },
@@ -4137,6 +4144,12 @@ const DEFAULT_COA: AccountSeed[] = [
   { code: '4900', name: 'Other Income', type: AccountType.INCOME },
   // Expenses
   { code: '6000', name: 'Salaries Expense', type: AccountType.EXPENSE },
+  {
+    code: '5500',
+    name: 'Depreciation Expense',
+    type: AccountType.EXPENSE,
+    subType: 'depreciation_expense',
+  },
   // ── Tanzania employer-side payroll expenses (employer contributions) ────
   { code: '6040', name: 'NSSF Employer Contribution', type: AccountType.EXPENSE },
   { code: '6045', name: 'PSSSF Employer Contribution', type: AccountType.EXPENSE },

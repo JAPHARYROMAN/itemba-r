@@ -7,8 +7,10 @@ import {
 import { AccessLevel, CurrencyCode, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { CompanyScopeService } from '../../common/services';
+import { AccountResolverService, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import type { PostingLine } from '../accounting-engine/posting-engine.service';
 import {
   CreateSupplierInvoiceDto,
   SupplierInvoiceLineDto,
@@ -34,6 +36,8 @@ export class SupplierInvoicesService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly accountResolver: AccountResolverService,
+    private readonly postingEngine: PostingEngineService,
   ) {}
 
   async findAll(query: QuerySupplierInvoiceDto, user: AuthUser) {
@@ -334,6 +338,14 @@ export class SupplierInvoicesService {
         });
       }
 
+      if (!payable.journalEntryId) {
+        const journalEntry = await this.postSupplierInvoicePayable(existing, payable, user.id, tx);
+        await tx.payable.update({
+          where: { id: payable.id },
+          data: { journalEntryId: journalEntry.id },
+        });
+      }
+
       return tx.supplierInvoice.update({
         where: { id },
         data: {
@@ -417,6 +429,108 @@ export class SupplierInvoicesService {
     }
 
     return { lines: data, subtotal, taxAmount, discountAmount, totalAmount };
+  }
+
+  private async postSupplierInvoicePayable(
+    invoice: any,
+    payable: { id: string; amount: Prisma.Decimal },
+    userId: string,
+    tx: Prisma.TransactionClient,
+  ) {
+    const payableCents = this.moneyToCents(payable.amount);
+    if (payableCents <= 0) {
+      throw new BadRequestException('Supplier invoice total must be greater than zero to post');
+    }
+
+    const productIds = Array.from(
+      new Set((invoice.lines ?? []).map((line: any) => line.productId).filter(Boolean)),
+    ) as string[];
+    const products = productIds.length
+      ? await tx.product.findMany({
+          where: { id: { in: productIds }, companyId: invoice.companyId, deletedAt: null },
+          select: { id: true, trackInventory: true },
+        })
+      : [];
+    const stockProductIds = new Set(
+      products.filter((product) => product.trackInventory).map((product) => product.id),
+    );
+
+    let inventoryCents = 0;
+    let expenseCents = 0;
+    for (const line of invoice.lines ?? []) {
+      const cents = this.moneyToCents(line.lineTotal);
+      if (line.productId && stockProductIds.has(line.productId)) {
+        inventoryCents += cents;
+      } else {
+        expenseCents += cents;
+      }
+    }
+
+    const roundingDelta = payableCents - inventoryCents - expenseCents;
+    if (roundingDelta !== 0) {
+      if (inventoryCents > 0) {
+        inventoryCents += roundingDelta;
+      } else {
+        expenseCents += roundingDelta;
+      }
+    }
+    if (inventoryCents < 0 || expenseCents < 0) {
+      throw new BadRequestException('Supplier invoice line totals cannot be reconciled to payable amount');
+    }
+
+    const [inventoryAccount, expenseAccount, apAccount] = await Promise.all([
+      this.accountResolver.resolve(invoice.companyId, 'INVENTORY_ASSET', tx),
+      this.accountResolver.resolve(invoice.companyId, 'GENERAL_EXPENSE', tx),
+      this.accountResolver.resolve(invoice.companyId, 'AP_CONTROL', tx),
+    ]);
+
+    const lines: PostingLine[] = [];
+    if (inventoryCents > 0) {
+      lines.push({
+        accountId: inventoryAccount.id,
+        debit: this.fromCents(inventoryCents),
+        credit: 0,
+        description: `Inventory from supplier invoice ${invoice.supplierInvoiceNumber}`,
+      });
+    }
+    if (expenseCents > 0) {
+      lines.push({
+        accountId: expenseAccount.id,
+        debit: this.fromCents(expenseCents),
+        credit: 0,
+        description: `Supplier invoice expense ${invoice.supplierInvoiceNumber}`,
+      });
+    }
+    lines.push({
+      accountId: apAccount.id,
+      debit: 0,
+      credit: this.fromCents(payableCents),
+      description: `Accounts payable for supplier invoice ${invoice.supplierInvoiceNumber}`,
+    });
+
+    return this.postingEngine.postLines(
+      {
+        companyId: invoice.companyId,
+        divisionId: invoice.divisionId,
+        branchId: invoice.branchId,
+        transactionDate: invoice.invoiceDate,
+        description: `Supplier invoice ${invoice.supplierInvoiceNumber}`,
+        referenceType: 'SupplierInvoice',
+        referenceId: invoice.id,
+        moduleName: 'supplier_invoices',
+        userId,
+        lines,
+      },
+      tx,
+    );
+  }
+
+  private moneyToCents(value: Prisma.Decimal | number | string): number {
+    return Math.round(Number(value) * 100);
+  }
+
+  private fromCents(cents: number): number {
+    return cents / 100;
   }
 
   private async assertInvoiceNumberAvailable(

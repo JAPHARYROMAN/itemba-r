@@ -2,8 +2,9 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { CompanyScopeService } from '../../common/services';
+import { AccountResolverService, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { CreateReceivableDto } from './dto/create-receivable.dto';
 import { UpdateReceivableDto } from './dto/update-receivable.dto';
 import { QueryReceivableDto } from './dto/query-receivable.dto';
@@ -20,6 +21,8 @@ export class ReceivablesService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly accountResolver: AccountResolverService,
+    private readonly postingEngine: PostingEngineService,
   ) {}
 
   async findAll(query: QueryReceivableDto, user: AuthUser) {
@@ -89,25 +92,68 @@ export class ReceivablesService {
       branchId: dto.branchId || null,
       customerId: dto.customerId || null,
     });
-    const record = await this.prisma.receivable.create({
-      data: {
-        receivableNumber: generateReceivableNumber(),
-        companyId: dto.companyId,
-        divisionId: scope.divisionId,
-        branchId: scope.branchId,
-        customerId: dto.customerId,
-        customerName: dto.customerName,
-        sourceType: dto.sourceType,
-        sourceId: dto.sourceId,
-        amount: dto.amount,
-        paidAmount: 0,
-        outstandingAmount: dto.amount,
-        currency: dto.currency,
-        issueDate: new Date(dto.issueDate),
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
-        status: 'OPEN',
-        notes: dto.notes,
-      },
+    const amount = new Prisma.Decimal(dto.amount).toDecimalPlaces(2);
+    if (amount.lte(0)) throw new BadRequestException('Receivable amount must be greater than zero');
+
+    const record = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.receivable.create({
+        data: {
+          receivableNumber: generateReceivableNumber(),
+          companyId: dto.companyId,
+          divisionId: scope.divisionId,
+          branchId: scope.branchId,
+          customerId: dto.customerId,
+          customerName: dto.customerName,
+          sourceType: dto.sourceType,
+          sourceId: dto.sourceId,
+          amount,
+          paidAmount: 0,
+          outstandingAmount: amount,
+          currency: dto.currency,
+          issueDate: new Date(dto.issueDate),
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+          status: 'OPEN',
+          notes: dto.notes,
+        },
+      });
+
+      const [arAccount, incomeAccount] = await Promise.all([
+        this.accountResolver.resolve(created.companyId, 'AR_CONTROL', tx),
+        this.accountResolver.resolve(created.companyId, 'INCOME_SUMMARY', tx),
+      ]);
+      const journalEntry = await this.postingEngine.postLines(
+        {
+          companyId: created.companyId,
+          divisionId: created.divisionId,
+          branchId: created.branchId,
+          transactionDate: created.issueDate,
+          description: `Manual receivable ${created.receivableNumber}`,
+          referenceType: 'Receivable',
+          referenceId: created.id,
+          moduleName: 'receivables',
+          userId,
+          lines: [
+            {
+              accountId: arAccount.id,
+              description: `Accounts receivable: ${created.customerName}`,
+              debit: amount,
+              credit: 0,
+            },
+            {
+              accountId: incomeAccount.id,
+              description: `Contra income for receivable ${created.receivableNumber}`,
+              debit: 0,
+              credit: amount,
+            },
+          ],
+        },
+        tx,
+      );
+
+      return tx.receivable.update({
+        where: { id: created.id },
+        data: { journalEntryId: journalEntry.id },
+      });
     });
 
     await this.auditLogs.log({

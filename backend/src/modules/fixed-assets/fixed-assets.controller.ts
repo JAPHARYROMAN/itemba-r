@@ -8,6 +8,7 @@ import { UpdateFixedAssetDto } from './dto/update-fixed-asset.dto';
 import { QueryFixedAssetDto } from './dto/query-fixed-asset.dto';
 import { DisposeAssetDto } from './dto/dispose-asset.dto';
 import { MarkCollateralDto } from './dto/mark-collateral.dto';
+import { CapitalizeFixedAssetDto } from './dto/capitalize-fixed-asset.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { SensitiveAccessInterceptor } from '../../common/interceptors/sensitive-access.interceptor';
@@ -69,5 +70,11 @@ export class FixedAssetsController {
   @RequirePermissions('fixed-assets.update')
   markCollateral(@Param('id') id: string, @Body() dto: MarkCollateralDto, @CurrentUser() user: AuthUser) {
     return this.service.markCollateral(id, dto, user);
+  }
+
+  @Post(':id/capitalize')
+  @RequirePermissions('fixed-assets.update')
+  capitalize(@Param('id') id: string, @Body() dto: CapitalizeFixedAssetDto, @CurrentUser() user: AuthUser) {
+    return this.service.capitalize(id, dto, user);
   }
 }

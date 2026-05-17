@@ -2,10 +2,10 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { AccountingControlService } from '../../common/services/accounting-control.service';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { applyCompanyScopeWhere } from '../../common/services';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 
 /**
  * Depreciation engine.
@@ -28,9 +28,9 @@ export class DepreciationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
-    private readonly accountingControl: AccountingControlService,
     private readonly accountResolver: AccountResolverService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly postingEngine: PostingEngineService,
   ) {}
 
   async findAll(query: any, user?: any) {
@@ -189,23 +189,16 @@ export class DepreciationService {
       where: { id },
       include: {
         depreciationSchedule: { select: { id: true, companyId: true, fixedAssetId: true } },
-        fixedAsset: { select: { name: true, assetCode: true } },
+        fixedAsset: { select: { name: true, assetCode: true, divisionId: true, branchId: true } },
       },
     });
     if (!entry) throw new NotFoundException('Depreciation entry not found');
     if (entry.status !== 'DRAFT') throw new BadRequestException('Only DRAFT entries can be posted');
 
-    await this.accountingControl.assertPostingAllowed({
-      companyId: entry.depreciationSchedule.companyId,
-      transactionDate: entry.depreciationDate,
-      moduleName: 'depreciation',
-    });
-
     const amount = Number(entry.amount);
     const description = `Depreciation: ${entry.fixedAsset.assetCode ?? entry.fixedAsset.name}`;
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      // Resolve accounts via the semantic resolver (no hardcoded codes).
       const expenseAccount = await this.accountResolver.resolve(
         entry.depreciationSchedule.companyId,
         'DEPRECIATION_EXPENSE',
@@ -217,44 +210,40 @@ export class DepreciationService {
         tx,
       );
 
-      const journalNumber = await this.codes.next({ entityType: 'DepreciationJournal', companyId: entry.depreciationSchedule.companyId, tx });
-      const je = await tx.journalEntry.create({
-        data: {
+      const journalNumber = await this.codes.next({
+        entityType: 'DepreciationJournal',
+        companyId: entry.depreciationSchedule.companyId,
+        tx,
+      });
+      const je = await this.postingEngine.postLines(
+        {
           journalNumber,
           companyId: entry.depreciationSchedule.companyId,
+          divisionId: entry.fixedAsset.divisionId,
+          branchId: entry.fixedAsset.branchId,
           transactionDate: entry.depreciationDate,
           description,
-          totalDebit: amount,
-          totalCredit: amount,
-          status: 'POSTED',
-          createdById: user.id,
-          postedById: user.id,
-          postedAt: new Date(),
           referenceType: 'DepreciationEntry',
           referenceId: entry.id,
+          moduleName: 'depreciation',
+          userId: user.id,
+          lines: [
+            {
+              accountId: expenseAccount.id,
+              description,
+              debit: amount,
+              credit: 0,
+            },
+            {
+              accountId: accumulatedAccount.id,
+              description,
+              debit: 0,
+              credit: amount,
+            },
+          ],
         },
-      });
-
-      await tx.journalEntryLine.createMany({
-        data: [
-          {
-            journalEntryId: je.id,
-            accountId: expenseAccount.id,
-            companyId: entry.depreciationSchedule.companyId,
-            description,
-            debit: amount,
-            credit: 0,
-          },
-          {
-            journalEntryId: je.id,
-            accountId: accumulatedAccount.id,
-            companyId: entry.depreciationSchedule.companyId,
-            description,
-            debit: 0,
-            credit: amount,
-          },
-        ],
-      });
+        tx,
+      );
 
       // Advance schedule's accumulatedDepreciation.
       await tx.depreciationSchedule.update({

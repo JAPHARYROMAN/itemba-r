@@ -21,6 +21,6 @@ import { AccountResolverService } from '../../common/services/account-resolver.s
     AccountingControlService,
     AccountResolverService,
   ],
-  exports: [AccountingEngineService, PostingEngineService],
+  exports: [AccountingEngineService, PostingEngineService, AccountResolverService],
 })
 export class AccountingEngineModule {}

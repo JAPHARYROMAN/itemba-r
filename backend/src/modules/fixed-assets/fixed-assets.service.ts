@@ -1,14 +1,19 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel, AssetOwnershipLevel, Prisma } from '@prisma/client';
+import { AccessLevel, AssetFinancingStatus, AssetOwnershipLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { CompanyScopeService } from '../../common/services';
+import { AccountResolverService, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateFixedAssetDto } from './dto/create-fixed-asset.dto';
 import { UpdateFixedAssetDto } from './dto/update-fixed-asset.dto';
 import { QueryFixedAssetDto } from './dto/query-fixed-asset.dto';
 import { DisposeAssetDto } from './dto/dispose-asset.dto';
 import { MarkCollateralDto } from './dto/mark-collateral.dto';
+import {
+  CapitalizeFixedAssetDto,
+  FixedAssetCapitalizationSource,
+} from './dto/capitalize-fixed-asset.dto';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 
 const ASSET_INCLUDES = {
   company: { select: { id: true, name: true, code: true } },
@@ -23,6 +28,8 @@ export class FixedAssetsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly accountResolver: AccountResolverService,
+    private readonly postingEngine: PostingEngineService,
   ) {}
 
   async findAll(query: QueryFixedAssetDto, user: AuthUser) {
@@ -260,6 +267,101 @@ export class FixedAssetsService {
     });
 
     return updated;
+  }
+
+  async capitalize(id: string, dto: CapitalizeFixedAssetDto, user: AuthUser) {
+    const existing = await this.findOne(id);
+    if (!existing.companyId) {
+      throw new BadRequestException('Only company-owned assets can be capitalized into the GL');
+    }
+    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
+
+    const existingJournal = await this.prisma.journalEntry.findFirst({
+      where: {
+        companyId: existing.companyId,
+        referenceType: 'FixedAsset',
+        referenceId: existing.id,
+        deletedAt: null,
+        status: { in: ['DRAFT', 'POSTED'] },
+      },
+      select: { id: true, journalNumber: true },
+    });
+    if (existingJournal) {
+      throw new BadRequestException(
+        `Fixed asset is already capitalized by journal entry ${existingJournal.journalNumber}`,
+      );
+    }
+
+    const amount = new Prisma.Decimal(existing.acquisitionCost).toDecimalPlaces(2);
+    if (amount.lte(0)) {
+      throw new BadRequestException('Fixed asset acquisition cost must be greater than zero');
+    }
+
+    const source = dto.source ?? this.defaultCapitalizationSource(existing.financingStatus);
+    const transactionDate = dto.transactionDate
+      ? new Date(dto.transactionDate)
+      : existing.acquisitionDate;
+    const creditRole =
+      source === FixedAssetCapitalizationSource.PAYABLE ? 'AP_CONTROL' : 'CASH_ON_HAND';
+    const description = `Capitalize fixed asset ${existing.assetCode} - ${existing.name}`;
+
+    const journalEntry = await this.prisma.$transaction(async (tx) => {
+      const [assetAccount, creditAccount] = await Promise.all([
+        this.accountResolver.resolve(existing.companyId!, 'FIXED_ASSET', tx),
+        this.accountResolver.resolve(existing.companyId!, creditRole, tx),
+      ]);
+
+      return this.postingEngine.postLines(
+        {
+          companyId: existing.companyId!,
+          divisionId: existing.divisionId,
+          branchId: existing.branchId,
+          transactionDate,
+          description,
+          referenceType: 'FixedAsset',
+          referenceId: existing.id,
+          moduleName: 'fixed_assets',
+          userId: user.id,
+          lines: [
+            {
+              accountId: assetAccount.id,
+              description,
+              debit: amount,
+              credit: 0,
+            },
+            {
+              accountId: creditAccount.id,
+              description:
+                source === FixedAssetCapitalizationSource.PAYABLE
+                  ? `Asset payable: ${existing.assetCode}`
+                  : `Asset cash acquisition: ${existing.assetCode}`,
+              debit: 0,
+              credit: amount,
+            },
+          ],
+        },
+        tx,
+      );
+    });
+
+    await this.audit.log({
+      action: 'fixed_asset.capitalize',
+      entityType: 'FixedAsset',
+      entityId: existing.id,
+      userId: user.id,
+      companyId: existing.companyId,
+      metadata: { source, amount: amount.toString(), journalEntryId: journalEntry.id },
+    });
+
+    return { asset: existing, journalEntry };
+  }
+
+  private defaultCapitalizationSource(
+    financingStatus: AssetFinancingStatus | null,
+  ): FixedAssetCapitalizationSource {
+    return financingStatus && financingStatus !== AssetFinancingStatus.OWNED_OUTRIGHT
+      ? FixedAssetCapitalizationSource.PAYABLE
+      : FixedAssetCapitalizationSource.CASH;
   }
 
   /** Aggregate summary across all assets, optionally filtered by company. */
