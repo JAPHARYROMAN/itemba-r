@@ -4,7 +4,6 @@ import {
   AccountType,
   BranchType,
   DivisionType,
-  InventoryLocationType,
   ProductCategoryType,
   ProductType,
   RoleScope,
@@ -85,7 +84,6 @@ describe('Company Isolation (e2e)', () => {
   const fiscalYearIds: string[] = [];
   const accountingPeriodIds: string[] = [];
   const productCategoryIds: string[] = [];
-  const inventoryLocationIds: string[] = [];
   const unitIds: string[] = [];
   const productIds: string[] = [];
   const stockAdjustmentIds: string[] = [];
@@ -108,8 +106,6 @@ describe('Company Isolation (e2e)', () => {
   let accountingPeriodBId = '';
   let productCategoryAId = '';
   let productCategoryBId = '';
-  let inventoryLocationAId = '';
-  let inventoryLocationBId = '';
   let unitAId = '';
   let unitBId = '';
   let productAId = '';
@@ -272,32 +268,6 @@ describe('Company Isolation (e2e)', () => {
     productCategoryAId = productCategoryA.id;
     productCategoryBId = productCategoryB.id;
     productCategoryIds.push(productCategoryA.id, productCategoryB.id);
-
-    const [inventoryLocationA, inventoryLocationB] = await Promise.all([
-      prisma.inventoryLocation.create({
-        data: {
-          companyId: companyA.id,
-          divisionId: divisionA.id,
-          branchId: branchA.id,
-          locationCode: `LOCA${suffix.slice(-8)}`,
-          name: 'E2E Inventory Location A',
-          locationType: InventoryLocationType.STORE,
-        },
-      }),
-      prisma.inventoryLocation.create({
-        data: {
-          companyId: companyB.id,
-          divisionId: divisionB.id,
-          branchId: branchB.id,
-          locationCode: `LOCB${suffix.slice(-8)}`,
-          name: 'E2E Inventory Location B',
-          locationType: InventoryLocationType.STORE,
-        },
-      }),
-    ]);
-    inventoryLocationAId = inventoryLocationA.id;
-    inventoryLocationBId = inventoryLocationB.id;
-    inventoryLocationIds.push(inventoryLocationA.id, inventoryLocationB.id);
 
     const [unitA, unitB] = await Promise.all([
       prisma.unitOfMeasure.create({
@@ -514,7 +484,6 @@ describe('Company Isolation (e2e)', () => {
           companyId: companyA.id,
           divisionId: divisionA.id,
           branchId: branchA.id,
-          inventoryLocationId: inventoryLocationA.id,
           reason: 'E2E isolation stock count A',
           createdById: companyUser.id,
           lines: {
@@ -534,7 +503,6 @@ describe('Company Isolation (e2e)', () => {
           companyId: companyB.id,
           divisionId: divisionB.id,
           branchId: branchB.id,
-          inventoryLocationId: inventoryLocationB.id,
           reason: 'E2E isolation stock count B',
           createdById: companyUser.id,
           lines: {
@@ -733,9 +701,6 @@ describe('Company Isolation (e2e)', () => {
     if (fiscalYearIds.length > 0) {
       await prisma.fiscalYear.deleteMany({ where: { id: { in: fiscalYearIds } } });
     }
-    if (inventoryLocationIds.length > 0) {
-      await prisma.inventoryLocation.deleteMany({ where: { id: { in: inventoryLocationIds } } });
-    }
     if (productCategoryIds.length > 0) {
       await prisma.productCategory.deleteMany({ where: { id: { in: productCategoryIds } } });
     }
@@ -907,30 +872,6 @@ describe('Company Isolation (e2e)', () => {
         .expect(403);
     });
 
-    it('limits inventory location lists to the caller company', async () => {
-      const res = await request(app.getHttpServer())
-        .get('/api/v1/inventory-locations')
-        .set('Authorization', authorization(companyToken))
-        .expect(200);
-
-      const ids = bodyArray<CompanyRecordResponse>(res.body).map((location) => location.id);
-      expect(ids).toContain(inventoryLocationAId);
-      expect(ids).not.toContain(inventoryLocationBId);
-    });
-
-    it('rejects inventory location access across companies', async () => {
-      await request(app.getHttpServer())
-        .get('/api/v1/inventory-locations')
-        .query({ companyId: companyBId })
-        .set('Authorization', authorization(companyToken))
-        .expect(403);
-
-      await request(app.getHttpServer())
-        .get(`/api/v1/inventory-locations/${inventoryLocationBId}`)
-        .set('Authorization', authorization(companyToken))
-        .expect(403);
-    });
-
     it('limits stock adjustment lists to the caller company', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/stock-adjustments')
@@ -963,7 +904,6 @@ describe('Company Isolation (e2e)', () => {
           companyId: companyAId,
           divisionId: divisionAId,
           branchId: branchAId,
-          inventoryLocationId: inventoryLocationAId,
           reason: 'Cross-company reference attempt',
           lines: [
             {
@@ -1228,17 +1168,6 @@ describe('Company Isolation (e2e)', () => {
       );
       expect(productCategoryListIds).toEqual(
         expect.arrayContaining([productCategoryAId, productCategoryBId]),
-      );
-
-      const inventoryLocations = await request(app.getHttpServer())
-        .get('/api/v1/inventory-locations')
-        .set('Authorization', authorization(groupToken))
-        .expect(200);
-      const inventoryLocationListIds = bodyArray<CompanyRecordResponse>(
-        inventoryLocations.body,
-      ).map((location) => location.id);
-      expect(inventoryLocationListIds).toEqual(
-        expect.arrayContaining([inventoryLocationAId, inventoryLocationBId]),
       );
 
       const stockAdjustments = await request(app.getHttpServer())

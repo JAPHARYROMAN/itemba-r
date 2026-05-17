@@ -32,7 +32,7 @@ describe('InventoryMovementsService direction + guards (P0-04 regression)', () =
   const baseMovement = {
     companyId: 'company-A',
     productId: 'product-1',
-    inventoryLocationId: 'loc-1',
+    branchId: 'branch-1',
     quantity: 5,
     unitId: 'unit-1',
     movementDate: new Date('2026-05-01'),
@@ -99,10 +99,7 @@ describe('InventoryMovementsService direction + guards (P0-04 regression)', () =
 });
 
 function readSource(): string {
-  return readFileSync(
-    join(__dirname, 'inventory-movements.service.ts'),
-    'utf8',
-  );
+  return readFileSync(join(__dirname, 'inventory-movements.service.ts'), 'utf8');
 }
 
 /**

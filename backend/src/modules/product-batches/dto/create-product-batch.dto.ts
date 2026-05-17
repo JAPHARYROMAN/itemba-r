@@ -4,9 +4,9 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export class CreateProductBatchDto {
   @ApiProperty() @IsUUID() companyId!: string;
   @ApiProperty() @IsUUID() productId!: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() branchId?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() supplierId?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() purchaseOrderId?: string;
-  @ApiPropertyOptional() @IsOptional() @IsUUID() inventoryLocationId?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() manufactureDate?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() expiryDate?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() receivedDate?: string;

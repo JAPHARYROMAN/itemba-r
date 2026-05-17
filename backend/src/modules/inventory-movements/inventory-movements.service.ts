@@ -35,6 +35,11 @@ interface BalanceLockRow {
   totalValue: Prisma.Decimal;
 }
 
+type MovementScope = {
+  divisionId?: string;
+  branchId: string;
+};
+
 @Injectable()
 export class InventoryMovementsService {
   constructor(
@@ -46,8 +51,14 @@ export class InventoryMovementsService {
 
   async findAll(query: QueryInventoryMovementDto, user: AuthUser) {
     const {
-      page = 1, limit = 20, companyId, productId, locationId,
-      movementType, dateFrom, dateTo,
+      page = 1,
+      limit = 20,
+      companyId,
+      productId,
+      locationId,
+      movementType,
+      dateFrom,
+      dateTo,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -55,7 +66,7 @@ export class InventoryMovementsService {
       ...(await this.companyScope.companyWhereFor(user, companyId)),
     };
     if (productId) where.productId = productId;
-    if (locationId) where.inventoryLocationId = locationId;
+    if (locationId) where.branchId = locationId;
     if (movementType) where.movementType = movementType;
     if (dateFrom || dateTo) {
       where.movementDate = {};
@@ -69,7 +80,7 @@ export class InventoryMovementsService {
         include: {
           company: { select: { id: true, name: true, code: true } },
           product: { select: { id: true, name: true, sku: true } },
-          inventoryLocation: { select: { id: true, name: true, locationCode: true } },
+          branch: { select: { id: true, name: true, code: true } },
           createdBy: { select: { id: true, fullName: true } },
         },
         orderBy: { movementDate: 'desc' },
@@ -88,7 +99,7 @@ export class InventoryMovementsService {
       include: {
         company: { select: { id: true, name: true, code: true } },
         product: { select: { id: true, name: true, sku: true } },
-        inventoryLocation: { select: { id: true, name: true, locationCode: true } },
+        branch: { select: { id: true, name: true, code: true } },
         createdBy: { select: { id: true, fullName: true } },
       },
     });
@@ -100,7 +111,6 @@ export class InventoryMovementsService {
   async createMovement(data: {
     companyId: string;
     productId: string;
-    inventoryLocationId: string;
     movementType: InventoryMovementType;
     quantity: number;
     unitId: string;
@@ -124,15 +134,19 @@ export class InventoryMovementsService {
     // Movement creation and balance update MUST be atomic. If no transaction
     // was passed in, open one here so a failure in either side rolls back both.
     const run = async (db: Prisma.TransactionClient) => {
-      await this.validateMovementReferences(data, db);
+      const scope = await this.resolveMovementScope(data, db);
+      await this.validateMovementReferences({ ...data, ...scope }, db);
 
-      const movementNumber = await this.codes.next({ entityType: 'InventoryMovement', companyId: data.companyId, tx: db });
+      const movementNumber = await this.codes.next({
+        entityType: 'InventoryMovement',
+        companyId: data.companyId,
+        tx: db,
+      });
       const movement = await db.inventoryMovement.create({
         data: {
           movementNumber,
           companyId: data.companyId,
           productId: data.productId,
-          inventoryLocationId: data.inventoryLocationId,
           movementType: data.movementType,
           quantity: data.quantity,
           unitId: data.unitId,
@@ -145,8 +159,8 @@ export class InventoryMovementsService {
           batchNumber: data.batchNumber,
           expiryDate: data.expiryDate,
           notes: data.notes,
-          divisionId: data.divisionId,
-          branchId: data.branchId,
+          divisionId: data.divisionId ?? scope.divisionId,
+          branchId: scope.branchId,
         },
       });
 
@@ -154,9 +168,7 @@ export class InventoryMovementsService {
       return movement;
     };
 
-    const movement = data.tx
-      ? await run(data.tx)
-      : await this.prisma.$transaction((tx) => run(tx));
+    const movement = data.tx ? await run(data.tx) : await this.prisma.$transaction((tx) => run(tx));
 
     // Audit logs are written outside the transaction; failures must not block the movement.
     await this.auditLogs.log({
@@ -170,7 +182,7 @@ export class InventoryMovementsService {
         movementType: movement.movementType,
         quantity: data.quantity,
         productId: data.productId,
-        inventoryLocationId: data.inventoryLocationId,
+        branchId: movement.branchId,
         referenceType: data.referenceType,
         referenceId: data.referenceId,
       } as any,
@@ -179,29 +191,32 @@ export class InventoryMovementsService {
     return movement;
   }
 
-  private async applyMovementToBalance(
-    movement: InventoryMovement,
-    db: Prisma.TransactionClient,
-  ) {
+  private async applyMovementToBalance(movement: InventoryMovement, db: Prisma.TransactionClient) {
     const isInbound = INBOUND_TYPES.includes(movement.movementType);
     const isOutbound = OUTBOUND_TYPES.includes(movement.movementType);
     if (!isInbound && !isOutbound) {
-      throw new BadRequestException(`Unsupported inventory movement type: ${movement.movementType}`);
+      throw new BadRequestException(
+        `Unsupported inventory movement type: ${movement.movementType}`,
+      );
     }
 
     const quantity = Number(movement.quantity);
+    if (!movement.branchId) {
+      throw new BadRequestException('Branch/location is required for inventory movement');
+    }
+
     await db.inventoryBalance.upsert({
       where: {
-        companyId_productId_inventoryLocationId: {
+        companyId_productId_branchId: {
           companyId: movement.companyId,
           productId: movement.productId,
-          inventoryLocationId: movement.inventoryLocationId,
+          branchId: movement.branchId,
         },
       },
       create: {
         companyId: movement.companyId,
         productId: movement.productId,
-        inventoryLocationId: movement.inventoryLocationId,
+        branchId: movement.branchId,
         quantityOnHand: 0,
         quantityReserved: 0,
         averageCost: 0,
@@ -216,7 +231,7 @@ export class InventoryMovementsService {
       FROM "inventory_balances"
       WHERE "companyId" = ${movement.companyId}
         AND "productId" = ${movement.productId}
-        AND "inventoryLocationId" = ${movement.inventoryLocationId}
+        AND "branchId" = ${movement.branchId}
       FOR UPDATE
     `);
     const existing = rows[0];
@@ -231,12 +246,12 @@ export class InventoryMovementsService {
 
     if (isOutbound && newQty < 0) {
       throw new BadRequestException(
-        `Insufficient stock at location ${movement.inventoryLocationId}: requested ${quantity}, available ${currentQty}`,
+        `Insufficient stock at branch/location ${movement.branchId}: requested ${quantity}, available ${currentQty}`,
       );
     }
     if (isOutbound && currentQty - reservedQty < quantity) {
       throw new BadRequestException(
-        `Insufficient available stock at location ${movement.inventoryLocationId}: requested ${quantity}, available ${Math.max(0, currentQty - reservedQty)} after reservations`,
+        `Insufficient available stock at branch/location ${movement.branchId}: requested ${quantity}, available ${Math.max(0, currentQty - reservedQty)} after reservations`,
       );
     }
 
@@ -267,19 +282,24 @@ export class InventoryMovementsService {
     data: {
       companyId: string;
       productId: string;
-      inventoryLocationId: string;
+      branchId: string;
       unitId: string;
     },
     db: Prisma.TransactionClient,
   ) {
-    const [product, location, unit] = await Promise.all([
+    const [product, branch, unit] = await Promise.all([
       db.product.findFirst({
         where: { id: data.productId, deletedAt: null },
         select: { id: true, companyId: true, name: true },
       }),
-      db.inventoryLocation.findFirst({
-        where: { id: data.inventoryLocationId, deletedAt: null },
-        select: { id: true, companyId: true, name: true, isActive: true },
+      db.branch.findFirst({
+        where: { id: data.branchId, deletedAt: null },
+        select: {
+          id: true,
+          name: true,
+          isActive: true,
+          division: { select: { companyId: true } },
+        },
       }),
       db.unitOfMeasure.findFirst({
         where: { id: data.unitId, deletedAt: null },
@@ -289,15 +309,19 @@ export class InventoryMovementsService {
 
     if (!product) throw new NotFoundException(`Product ${data.productId} not found`);
     if (product.companyId !== data.companyId) {
-      throw new BadRequestException(`Product "${product.name}" does not belong to the movement company`);
+      throw new BadRequestException(
+        `Product "${product.name}" does not belong to the movement company`,
+      );
     }
 
-    if (!location) throw new NotFoundException(`Inventory location ${data.inventoryLocationId} not found`);
-    if (location.companyId !== data.companyId) {
-      throw new BadRequestException(`Inventory location "${location.name}" does not belong to the movement company`);
+    if (!branch) throw new NotFoundException(`Branch ${data.branchId} not found`);
+    if (branch.division.companyId !== data.companyId) {
+      throw new BadRequestException(
+        `Branch/location "${branch.name}" does not belong to the movement company`,
+      );
     }
-    if (!location.isActive) {
-      throw new BadRequestException(`Inventory location "${location.name}" is not active`);
+    if (!branch.isActive) {
+      throw new BadRequestException(`Branch/location "${branch.name}" is not active`);
     }
 
     if (!unit) throw new NotFoundException(`Unit ${data.unitId} not found`);
@@ -307,5 +331,40 @@ export class InventoryMovementsService {
     if (unit.status !== 'ACTIVE') {
       throw new BadRequestException(`Unit "${unit.name}" is not active`);
     }
+  }
+
+  private async resolveMovementScope(
+    data: {
+      companyId: string;
+      divisionId?: string;
+      branchId?: string;
+    },
+    db: Prisma.TransactionClient,
+  ): Promise<MovementScope> {
+    if (!data.branchId) {
+      throw new BadRequestException('Branch/location is required for inventory movement');
+    }
+
+    const branch = await db.branch.findFirst({
+      where: { id: data.branchId, deletedAt: null, isActive: true },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        divisionId: true,
+        division: { select: { companyId: true } },
+      },
+    });
+    if (!branch) {
+      throw new NotFoundException(`Branch ${data.branchId} not found`);
+    }
+    if (branch.division.companyId !== data.companyId) {
+      throw new BadRequestException('Branch does not belong to the movement company');
+    }
+
+    return {
+      divisionId: branch.divisionId,
+      branchId: branch.id,
+    };
   }
 }

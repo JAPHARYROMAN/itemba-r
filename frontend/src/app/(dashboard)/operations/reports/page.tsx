@@ -10,12 +10,6 @@ interface Company {
   name: string;
   code: string;
 }
-interface InventoryLocation {
-  id: string;
-  name: string;
-  locationCode: string;
-}
-
 interface StockValuationRow {
   productCode: string;
   productName: string;
@@ -84,9 +78,7 @@ export default function OperationsReportsPage() {
   const { hasPermission } = useAuth();
   const [tab, setTab] = useState<Tab>('stock-valuation');
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [companyId, setCompanyId] = useState('');
-  const [locationId, setLocationId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
@@ -112,24 +104,6 @@ export default function OperationsReportsPage() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!companyId) {
-      setLocations([]);
-      return;
-    }
-    let cancelled = false;
-    backendList<InventoryLocation>('/inventory-locations', { query: { companyId, limit: 200 } })
-      .then((rows) => {
-        if (!cancelled) setLocations(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setLocations([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId]);
-
   const generate = async () => {
     if (!companyId) {
       setError('Company is required');
@@ -140,7 +114,6 @@ export default function OperationsReportsPage() {
     try {
       const query: Record<string, string> = { companyId };
       if (tab === 'stock-valuation') {
-        if (locationId) query.locationId = locationId;
         const payload = await backendGet<unknown>('/operations-reports/stock-valuation', { query });
         setStockRows(normalizeStockRows(payload));
       } else if (tab === 'sales-summary') {
@@ -232,27 +205,6 @@ export default function OperationsReportsPage() {
               ))}
             </select>
           </div>
-          {tab === 'stock-valuation' && (
-            <div>
-              <label className="block text-xs mb-1" style={{ color: 'var(--aurora-text-muted)' }}>
-                Location
-              </label>
-              <select
-                value={locationId}
-                onChange={(e) => setLocationId(e.target.value)}
-                disabled={!companyId}
-                className={filterSelectCls}
-                style={filterStyle}
-              >
-                <option value="">All Locations</option>
-                {locations.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
           {(tab === 'sales-summary' || tab === 'purchase-summary') && (
             <>
               <div>

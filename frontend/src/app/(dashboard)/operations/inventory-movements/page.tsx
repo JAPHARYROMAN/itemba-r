@@ -17,12 +17,6 @@ interface Product {
   name: string;
   productCode: string;
 }
-interface InventoryLocation {
-  id: string;
-  name: string;
-  locationCode: string;
-}
-
 type MovementType =
   | 'PURCHASE_RECEIPT'
   | 'SALE_ISSUE'
@@ -45,10 +39,9 @@ interface InventoryMovement {
   referenceNumber?: string | null;
   notes?: string | null;
   productId: string;
-  locationId: string;
   companyId: string;
   product?: { name: string; productCode: string } | null;
-  location?: { name: string; locationCode: string } | null;
+  branch?: { name: string; code?: string | null } | null;
   company?: { name: string; code: string } | null;
 }
 
@@ -301,7 +294,7 @@ export default function InventoryMovementsPage() {
                 <th className={thCls}>Movement #</th>
                 <th className={thCls}>Date</th>
                 <th className={thCls}>Product</th>
-                <th className={thCls}>Location</th>
+                <th className={thCls}>Branch / Location</th>
                 <th className={thCls}>Type</th>
                 <th className={`${thCls} text-right`}>Quantity</th>
                 <th className={`${thCls} text-right`}>Unit Cost</th>
@@ -343,7 +336,9 @@ export default function InventoryMovementsPage() {
                       )}
                     </td>
                     <td className={tdCls}>
-                      {mov.location ? `${mov.location.locationCode} – ${mov.location.name}` : '—'}
+                      {mov.branch
+                        ? `${mov.branch.code ? `${mov.branch.code} - ` : ''}${mov.branch.name}`
+                        : '-'}
                     </td>
                     <td className={tdCls}>
                       <MovementBadge type={mov.movementType} />

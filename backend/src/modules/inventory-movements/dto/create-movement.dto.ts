@@ -1,19 +1,11 @@
-import {
-  IsDateString,
-  IsEnum,
-  IsNotEmpty,
-  IsNumber,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { IsDateString, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 import { InventoryMovementType } from '@prisma/client';
 
 export class CreateMovementDto {
   @IsNotEmpty() @IsString() companyId!: string;
   @IsOptional() @IsString() divisionId?: string;
-  @IsOptional() @IsString() branchId?: string;
+  @IsNotEmpty() @IsString() branchId!: string;
   @IsNotEmpty() @IsString() productId!: string;
-  @IsNotEmpty() @IsString() inventoryLocationId!: string;
   @IsNotEmpty() @IsEnum(InventoryMovementType) movementType!: InventoryMovementType;
   @IsNotEmpty() @IsNumber() quantity!: number;
   @IsNotEmpty() @IsString() unitId!: string;

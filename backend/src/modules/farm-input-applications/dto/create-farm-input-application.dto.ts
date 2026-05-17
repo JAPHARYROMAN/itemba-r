@@ -8,7 +8,6 @@ export class CreateFarmInputApplicationDto {
   @IsString() @IsOptional() fieldId?: string;
   @IsString() cropSeasonId!: string;
   @IsString() productId!: string;
-  @IsString() @IsOptional() inventoryLocationId?: string;
   @IsDateString() applicationDate!: string;
   @IsNumber() quantity!: number;
   @IsString() unitId!: string;

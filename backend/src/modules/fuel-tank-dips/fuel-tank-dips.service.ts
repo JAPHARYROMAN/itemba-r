@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { FuelTankDipStatus, FuelPriceStatus, InventoryMovementType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -87,7 +83,10 @@ export class FuelTankDipsService {
       ? varianceLitres * Number(activePrice.pricePerLitre)
       : undefined;
 
-    const dipNumber = await this.codes.next({ entityType: 'FuelTankDip', companyId: dto.companyId });
+    const dipNumber = await this.codes.next({
+      entityType: 'FuelTankDip',
+      companyId: dto.companyId,
+    });
 
     const record = await this.prisma.fuelTankDip.create({
       data: {
@@ -128,9 +127,8 @@ export class FuelTankDipsService {
 
     let bookBalance = Number(existing.bookBalance);
     let varianceLitres = Number(existing.varianceLitres);
-    let varianceValue: number | null = existing.varianceValue != null
-      ? Number(existing.varianceValue)
-      : null;
+    let varianceValue: number | null =
+      existing.varianceValue != null ? Number(existing.varianceValue) : null;
 
     if (dto.tankId || dto.physicalDipLitres !== undefined) {
       const tankId = dto.tankId ?? existing.tankId;
@@ -245,7 +243,7 @@ export class FuelTankDipsService {
 
     const notes = reason
       ? `[REJECTED] ${reason}${existing.notes ? `\n${existing.notes}` : ''}`
-      : existing.notes ?? undefined;
+      : (existing.notes ?? undefined);
 
     const record = await this.prisma.fuelTankDip.update({
       where: { id },
@@ -310,9 +308,10 @@ export class FuelTankDipsService {
         companyId: existing.companyId,
         branchId: existing.branchId,
         productId: existing.productId,
-        inventoryLocationId: tank.inventoryLocationId ?? '',
         movementType:
-          varianceLitres > 0 ? InventoryMovementType.ADJUSTMENT_IN : InventoryMovementType.ADJUSTMENT_OUT,
+          varianceLitres > 0
+            ? InventoryMovementType.ADJUSTMENT_IN
+            : InventoryMovementType.ADJUSTMENT_OUT,
         quantity: Math.abs(varianceLitres),
         unitId: product?.baseUnitId ?? '',
         unitCost: activePrice ? Number(activePrice.pricePerLitre) : undefined,

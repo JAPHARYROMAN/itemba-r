@@ -17,16 +17,10 @@ interface Product {
   name: string;
   productCode: string;
 }
-interface InventoryLocation {
-  id: string;
-  name: string;
-  locationCode: string;
-}
-
 interface InventoryBalance {
   id: string;
   productId: string;
-  locationId: string;
+  branchId?: string | null;
   companyId: string;
   quantityOnHand: number;
   quantityReserved: number;
@@ -34,7 +28,7 @@ interface InventoryBalance {
   totalValue: number;
   lastMovementDate?: string | null;
   product?: { name: string; productCode: string; reorderLevel?: number | null } | null;
-  location?: { name: string; locationCode: string } | null;
+  branch?: { name: string; code?: string | null } | null;
   company?: { name: string; code: string } | null;
 }
 
@@ -99,12 +93,10 @@ export default function InventoryBalancesPage() {
   const { hasPermission } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [data, setData] = useState<Paginated<InventoryBalance> | null>(null);
   const [loading, setLoading] = useState(false);
   const [companyId, setCompanyId] = useState('');
   const [productId, setProductId] = useState('');
-  const [locationId, setLocationId] = useState('');
   const [lowStock, setLowStock] = useState(false);
   const [page, setPage] = useState(1);
   const [error, setError] = useState('');
@@ -132,31 +124,6 @@ export default function InventoryBalancesPage() {
     };
   }, [canView]);
 
-  useEffect(() => {
-    if (companyId) {
-      let cancelled = false;
-
-      async function loadLocations() {
-        try {
-          const records = await backendList<InventoryLocation>('/inventory-locations', {
-            query: { companyId, isActive: true, limit: 200 },
-          });
-          if (!cancelled) setLocations(records);
-        } catch {
-          if (!cancelled) setLocations([]);
-        }
-      }
-
-      void loadLocations();
-
-      return () => {
-        cancelled = true;
-      };
-    } else {
-      setLocations([]);
-    }
-  }, [companyId]);
-
   const load = useCallback(async () => {
     if (!canView || !companyId) return;
     setLoading(true);
@@ -168,7 +135,6 @@ export default function InventoryBalancesPage() {
           limit: 20,
           companyId,
           productId: productId || undefined,
-          locationId: locationId || undefined,
           lowStock: lowStock || undefined,
         },
       });
@@ -179,7 +145,7 @@ export default function InventoryBalancesPage() {
     } finally {
       setLoading(false);
     }
-  }, [canView, page, companyId, productId, locationId, lowStock]);
+  }, [canView, page, companyId, productId, lowStock]);
 
   useEffect(() => {
     load();
@@ -193,7 +159,7 @@ export default function InventoryBalancesPage() {
   if (!canView) {
     return (
       <div className="p-6">
-        <PageHeader title="Inventory Balances" subtitle="View stock on hand across all locations" />
+        <PageHeader title="Inventory Balances" subtitle="View stock on hand across branches" />
         <div className="mt-8 text-center">
           <p className="text-sm text-slate-500">Access Restricted</p>
         </div>
@@ -213,7 +179,7 @@ export default function InventoryBalancesPage() {
     <div className="p-6 space-y-6">
       <PageHeader
         title="Inventory Balances"
-        subtitle="Real-time stock on hand by product and location"
+        subtitle="Real-time stock on hand by product and branch/location"
       />
 
       {error && (
@@ -239,7 +205,6 @@ export default function InventoryBalancesPage() {
               value={companyId}
               onChange={(e) => {
                 reset(setCompanyId)(e.target.value);
-                setLocationId('');
                 setPage(1);
               }}
               className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
@@ -260,19 +225,6 @@ export default function InventoryBalancesPage() {
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.productCode} – {p.name}
-                </option>
-              ))}
-            </select>
-            <select
-              value={locationId}
-              onChange={(e) => reset(setLocationId)(e.target.value)}
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
-              disabled={!companyId}
-            >
-              <option value="">All Locations</option>
-              {locations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.locationCode} – {l.name}
                 </option>
               ))}
             </select>
@@ -305,7 +257,7 @@ export default function InventoryBalancesPage() {
               <tr>
                 <th className={thCls}>Product Code</th>
                 <th className={thCls}>Product Name</th>
-                <th className={thCls}>Location</th>
+                <th className={thCls}>Branch / Location</th>
                 <th className={thCls}>Company</th>
                 <th className={`${thCls} text-right`}>Qty On Hand</th>
                 <th className={`${thCls} text-right`}>Qty Reserved</th>
@@ -344,7 +296,9 @@ export default function InventoryBalancesPage() {
                       </div>
                     </td>
                     <td className={tdCls}>
-                      {bal.location ? `${bal.location.locationCode} – ${bal.location.name}` : '—'}
+                      {bal.branch
+                        ? `${bal.branch.code ? `${bal.branch.code} - ` : ''}${bal.branch.name}`
+                        : '—'}
                     </td>
                     <td className={tdCls}>{bal.company?.name ?? '—'}</td>
                     <td

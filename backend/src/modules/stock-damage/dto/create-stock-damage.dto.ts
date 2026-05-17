@@ -4,8 +4,7 @@ import { StockDamageType } from '@prisma/client';
 
 export class CreateStockDamageDto {
   @ApiProperty() @IsUUID() companyId!: string;
-  @ApiPropertyOptional() @IsOptional() @IsUUID() branchId?: string;
-  @ApiProperty() @IsUUID() inventoryLocationId!: string;
+  @ApiProperty() @IsUUID() branchId!: string;
   @ApiProperty() @IsUUID() productId!: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() batchId?: string;
   @ApiProperty() @IsNumber() quantity!: number;

@@ -358,8 +358,6 @@
     "src/modules/internal-controls/internal-controls.controller.ts",
     "src/modules/internal-controls/internal-controls.service.ts",
     "src/modules/inventory-balances/inventory-balances.service.ts",
-    "src/modules/inventory-locations/dto/create-inventory-location.dto.ts",
-    "src/modules/inventory-locations/inventory-locations.controller.ts",
     "src/modules/inventory-movements/dto/create-movement.dto.ts",
     "src/modules/inventory-movements/inventory-movements.atomicity.spec.ts",
     "src/modules/inventory-movements/inventory-movements.controller.ts",

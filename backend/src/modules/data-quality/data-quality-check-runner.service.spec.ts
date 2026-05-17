@@ -92,7 +92,7 @@ describe('DataQualityCheckRunnerService', () => {
         id: 'balance-1',
         companyId: 'company-1',
         productId: 'product-1',
-        inventoryLocationId: 'location-1',
+        branchId: 'branch-1',
         quantityOnHand: -5,
       },
     ]);

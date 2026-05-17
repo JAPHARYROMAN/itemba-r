@@ -40,10 +40,6 @@ export class SalesOrderLineDto {
   @IsNumber()
   taxAmount?: number;
 
-  @IsOptional()
-  @IsString()
-  inventoryLocationId?: string;
-
   /** Optional FK to a specific ProductBatch — for FIFO/expiry tracking. */
   @IsOptional()
   @IsString()

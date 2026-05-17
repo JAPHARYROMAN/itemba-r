@@ -203,7 +203,7 @@ export class WestsidesDashboardService {
         take: 5,
         include: {
           product: { select: { name: true, sku: true } },
-          inventoryLocation: { select: { name: true } },
+          branch: { select: { name: true } },
         },
       }),
       // Room state counts (group by status).
@@ -396,7 +396,7 @@ export class WestsidesDashboardService {
           productId: b.productId,
           productName: b.product.name,
           sku: b.product.sku,
-          locationName: b.inventoryLocation.name,
+          locationName: b.branch?.name ?? 'Unassigned branch/location',
           quantityOnHand: Number(b.quantityOnHand),
         })),
       },

@@ -17,26 +17,22 @@ export class OperationsReportsService {
     user: AuthUser,
   ) {
     const where: any = await this.companyScope.companyWhereFor(user, companyId);
-    if (locationId) where.inventoryLocationId = locationId;
-    // InventoryBalance has no direct divisionId — filter via the location.
-    if (divisionId) where.inventoryLocation = { divisionId };
+    if (locationId) where.branchId = locationId;
+    if (divisionId) where.branch = { divisionId };
 
     const balances = await this.prisma.inventoryBalance.findMany({
       where,
       include: {
         product: { select: { id: true, productCode: true, name: true } },
-        inventoryLocation: { select: { id: true, name: true, divisionId: true } },
+        branch: { select: { id: true, name: true, divisionId: true } },
       },
-      orderBy: [
-        { product: { productCode: 'asc' } },
-        { inventoryLocation: { name: 'asc' } },
-      ],
+      orderBy: [{ product: { productCode: 'asc' } }, { branch: { name: 'asc' } }],
     });
 
     return balances.map((b) => ({
       productCode: b.product.productCode,
       productName: b.product.name,
-      locationName: b.inventoryLocation.name,
+      locationName: b.branch?.name ?? 'Unassigned branch/location',
       quantityOnHand: Number(b.quantityOnHand),
       averageCost: Number(b.averageCost),
       totalValue: Number(b.totalValue),
@@ -50,7 +46,10 @@ export class OperationsReportsService {
     divisionId: string | undefined,
     user: AuthUser,
   ) {
-    const where: any = { deletedAt: null, ...(await this.companyScope.companyWhereFor(user, companyId)) };
+    const where: any = {
+      deletedAt: null,
+      ...(await this.companyScope.companyWhereFor(user, companyId)),
+    };
     if (divisionId) where.divisionId = divisionId;
     if (dateFrom || dateTo) {
       where.orderDate = {};
@@ -94,7 +93,10 @@ export class OperationsReportsService {
     divisionId: string | undefined,
     user: AuthUser,
   ) {
-    const where: any = { deletedAt: null, ...(await this.companyScope.companyWhereFor(user, companyId)) };
+    const where: any = {
+      deletedAt: null,
+      ...(await this.companyScope.companyWhereFor(user, companyId)),
+    };
     if (divisionId) where.divisionId = divisionId;
     if (dateFrom || dateTo) {
       where.orderDate = {};
@@ -149,7 +151,7 @@ export class OperationsReportsService {
         : {};
     if (divisionId) where.divisionId = divisionId;
     if (productId) where.productId = productId;
-    if (locationId) where.inventoryLocationId = locationId;
+    if (locationId) where.branchId = locationId;
     if (dateFrom || dateTo) {
       where.movementDate = {};
       if (dateFrom) where.movementDate.gte = new Date(dateFrom);
@@ -162,7 +164,7 @@ export class OperationsReportsService {
         where,
         include: {
           product: { select: { id: true, productCode: true, name: true } },
-          inventoryLocation: { select: { id: true, name: true } },
+          branch: { select: { id: true, name: true } },
           unit: { select: { id: true, name: true } },
         },
         orderBy: { movementDate: 'desc' },
@@ -181,7 +183,7 @@ export class OperationsReportsService {
         movementType: m.movementType,
         movementDate: m.movementDate,
         product: m.product,
-        location: m.inventoryLocation,
+        location: m.branch,
         quantity: Number(m.quantity),
         unit: m.unit,
         unitCost: m.unitCost !== null ? Number(m.unitCost) : null,

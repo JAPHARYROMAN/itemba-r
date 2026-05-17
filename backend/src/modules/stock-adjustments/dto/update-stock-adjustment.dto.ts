@@ -3,7 +3,7 @@ import { Type } from 'class-transformer';
 import { StockAdjustmentLineDto } from './create-stock-adjustment.dto';
 
 export class UpdateStockAdjustmentDto {
-  @IsOptional() @IsString() inventoryLocationId?: string;
+  @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsString() reason?: string;
   @IsOptional() @IsString() notes?: string;
 

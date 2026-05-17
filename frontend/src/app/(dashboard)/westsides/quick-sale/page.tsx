@@ -26,12 +26,6 @@ interface CashAccount {
   accountName: string;
   accountType: string;
 }
-interface InventoryLocation {
-  id: string;
-  name: string;
-  locationCode: string;
-  branchId?: string | null;
-}
 interface Unit {
   id: string;
   name: string;
@@ -60,7 +54,6 @@ interface CartLine {
   unitId: string;
   unitSymbol: string;
   unitPrice: number;
-  inventoryLocationId: string;
 }
 
 interface ConfirmedOrder {
@@ -100,7 +93,6 @@ interface Settings {
   companyId: string;
   branchId: string;
   divisionId: string;
-  inventoryLocationId: string;
   cashAccountId: string;
   paymentMethod: string;
 }
@@ -109,7 +101,6 @@ const blankSettings: Settings = {
   companyId: '',
   branchId: '',
   divisionId: '',
-  inventoryLocationId: '',
   cashAccountId: '',
   paymentMethod: 'CASH',
 };
@@ -158,7 +149,6 @@ export default function QuickSalePage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
-  const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -193,21 +183,10 @@ export default function QuickSalePage() {
   // Open the settings drawer if anything's missing on first render.
   useEffect(() => {
     if (!hydrated) return;
-    if (
-      !settings.companyId ||
-      !settings.branchId ||
-      !settings.inventoryLocationId ||
-      !settings.cashAccountId
-    ) {
+    if (!settings.companyId || !settings.branchId || !settings.cashAccountId) {
       setSettingsOpen(true);
     }
-  }, [
-    hydrated,
-    settings.companyId,
-    settings.branchId,
-    settings.inventoryLocationId,
-    settings.cashAccountId,
-  ]);
+  }, [hydrated, settings.companyId, settings.branchId, settings.cashAccountId]);
 
   // Load companies + units once.
   useEffect(() => {
@@ -232,7 +211,6 @@ export default function QuickSalePage() {
     if (!settings.companyId) {
       setBranches([]);
       setDivisions([]);
-      setLocations([]);
       setCashAccounts([]);
       setCustomers([]);
       return;
@@ -254,14 +232,6 @@ export default function QuickSalePage() {
         ),
       )
       .catch(() => setDivisions([]));
-    fetch(`/api/backend/inventory-locations?companyId=${cid}&limit=200`)
-      .then((r) => r.json())
-      .then((j) =>
-        setLocations(
-          Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
-        ),
-      )
-      .catch(() => setLocations([]));
     fetch(`/api/backend/cash-accounts?companyId=${cid}&limit=200`)
       .then((r) => r.json())
       .then((j) =>
@@ -321,8 +291,8 @@ export default function QuickSalePage() {
   // ─── Cart actions ───────────────────────────────────────────────────────────
 
   const addProduct = (p: Product) => {
-    if (!settings.inventoryLocationId) {
-      setError('Pick an inventory location in Settings before adding items');
+    if (!settings.branchId) {
+      setError('Pick a branch/location in Settings before adding items');
       setSettingsOpen(true);
       return;
     }
@@ -343,7 +313,6 @@ export default function QuickSalePage() {
           unitId: p.defaultUnitId ?? units[0]?.id ?? '',
           unitSymbol: unit?.symbol ?? units[0]?.symbol ?? 'ea',
           unitPrice: Number(p.sellingPrice ?? 0),
-          inventoryLocationId: settings.inventoryLocationId,
         },
       ];
     });
@@ -371,7 +340,6 @@ export default function QuickSalePage() {
   const canSubmit =
     !!settings.companyId &&
     !!settings.branchId &&
-    !!settings.inventoryLocationId &&
     !!settings.cashAccountId &&
     cart.length > 0 &&
     cart.every((l) => l.productId && l.qty > 0 && l.unitId);
@@ -396,7 +364,6 @@ export default function QuickSalePage() {
           quantity: l.qty,
           unitId: l.unitId,
           unitPrice: l.unitPrice,
-          inventoryLocationId: l.inventoryLocationId,
           discountAmount: 0,
           taxAmount: 0,
         })),
@@ -434,15 +401,9 @@ export default function QuickSalePage() {
   // Settings labels for the sticky header.
   const branchName = branches.find((b) => b.id === settings.branchId)?.name;
   const divisionName = divisions.find((d) => d.id === settings.divisionId)?.name;
-  const locationName = locations.find((l) => l.id === settings.inventoryLocationId)?.name;
   const cashAccountName = cashAccounts.find((a) => a.id === settings.cashAccountId)?.accountName;
   const companyName = companies.find((c) => c.id === settings.companyId)?.name;
-  const settingsReady = !!(
-    settings.companyId &&
-    settings.branchId &&
-    settings.inventoryLocationId &&
-    settings.cashAccountId
-  );
+  const settingsReady = !!(settings.companyId && settings.branchId && settings.cashAccountId);
 
   // ─── Keyboard helpers ──────────────────────────────────────────────────────
 
@@ -469,7 +430,7 @@ export default function QuickSalePage() {
           <SettingChip label="Company" value={companyName} />
           <SettingChip label="Branch" value={branchName} />
           <SettingChip label="Division" value={divisionName ?? 'All'} />
-          <SettingChip label="Stock from" value={locationName} />
+          <SettingChip label="Stock from" value={branchName} />
           <SettingChip label="Pay to" value={cashAccountName} />
           <SettingChip label="Method" value={settings.paymentMethod} />
         </div>
@@ -706,7 +667,6 @@ export default function QuickSalePage() {
                 companyId: e.target.value,
                 branchId: '',
                 divisionId: '',
-                inventoryLocationId: '',
                 cashAccountId: '',
               }))
             }
@@ -737,17 +697,6 @@ export default function QuickSalePage() {
             ]}
             placeholder={settings.companyId ? 'All divisions' : 'Pick company first'}
             hint="Pick a division to scope the product search to that vertical (e.g. only beverages, only hardware)."
-          />
-          <FormSelect
-            label="Inventory location (stock issued from)"
-            required
-            value={settings.inventoryLocationId}
-            onChange={(e) => setSettings((s) => ({ ...s, inventoryLocationId: e.target.value }))}
-            options={locations.map((l) => ({
-              value: l.id,
-              label: `${l.locationCode ? l.locationCode + ' — ' : ''}${l.name}`,
-            }))}
-            placeholder={settings.companyId ? 'Select location' : 'Pick company first'}
           />
           <FormSelect
             label="Cash / bank account"

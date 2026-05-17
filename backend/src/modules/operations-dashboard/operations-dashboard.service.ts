@@ -32,8 +32,6 @@ export class OperationsDashboardService {
       suppliersBlocked,
       productsTotal,
       productsActive,
-      inventoryLocationsTotal,
-      inventoryLocationsActive,
       salesOrdersTotal,
       salesOrdersDraft,
       salesOrdersConfirmed,
@@ -64,9 +62,6 @@ export class OperationsDashboardService {
 
       this.prisma.product.count({ where: softWhere() }),
       this.prisma.product.count({ where: softWhere({ status: 'ACTIVE' }) }),
-
-      this.prisma.inventoryLocation.count({ where: softWhere() }),
-      this.prisma.inventoryLocation.count({ where: softWhere({ isActive: true }) }),
 
       this.prisma.salesOrder.count({ where: softWhere() }),
       this.prisma.salesOrder.count({ where: softWhere({ status: 'DRAFT' }) }),
@@ -157,10 +152,6 @@ export class OperationsDashboardService {
         total: productsTotal,
         active: productsActive,
         outOfStock: outOfStockGroups.length,
-      },
-      inventoryLocations: {
-        total: inventoryLocationsTotal,
-        active: inventoryLocationsActive,
       },
       salesOrders: {
         total: salesOrdersTotal,

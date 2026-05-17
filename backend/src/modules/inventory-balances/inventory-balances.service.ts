@@ -18,7 +18,7 @@ export class InventoryBalancesService {
     const where: any = {};
     applyCompanyScopeWhere(where, user, companyId);
     if (productId) where.productId = productId;
-    if (locationId) where.inventoryLocationId = locationId;
+    if (locationId) where.branchId = locationId;
     if (lowStock) where.quantityOnHand = { lte: 0 };
 
     const [data, total] = await Promise.all([
@@ -27,7 +27,7 @@ export class InventoryBalancesService {
         include: {
           company: { select: { id: true, name: true, code: true } },
           product: { select: { id: true, name: true, sku: true } },
-          inventoryLocation: { select: { id: true, name: true, locationCode: true } },
+          branch: { select: { id: true, name: true, code: true } },
         },
         orderBy: { updatedAt: 'desc' },
         skip,
@@ -45,7 +45,7 @@ export class InventoryBalancesService {
       include: {
         company: { select: { id: true, name: true, code: true } },
         product: { select: { id: true, name: true, sku: true } },
-        inventoryLocation: { select: { id: true, name: true, locationCode: true } },
+        branch: { select: { id: true, name: true, code: true } },
       },
     });
     if (!record) throw new NotFoundException('Inventory balance not found');
@@ -54,9 +54,9 @@ export class InventoryBalancesService {
   }
 
   /**
-   * Live stock view — every product × location pair for a company, with a
+   * Live stock view — every product × branch/location pair for a company, with a
    * status flag (OUT / LOW / OK) computed against `lowThreshold` (default 10).
-   * Grouped by location for the heatmap UI.
+   * Grouped by branch/location for the heatmap UI.
    *
    * The schema has no per-SKU reorder point today, so the threshold is a
    * single configurable knob; future work can replace it with a `Product.reorderPoint`
@@ -70,7 +70,7 @@ export class InventoryBalancesService {
     const where: any = {};
     Object.assign(where, await this.companyScope.companyWhereFor(user, query.companyId));
     if (query.branchId) {
-      where.inventoryLocation = { branchId: query.branchId };
+      where.branchId = query.branchId;
     }
     if (query.search) {
       where.product = {
@@ -85,9 +85,7 @@ export class InventoryBalancesService {
       where,
       include: {
         product: { select: { id: true, name: true, sku: true } },
-        inventoryLocation: {
-          select: { id: true, name: true, locationCode: true, branchId: true },
-        },
+        branch: { select: { id: true, name: true, code: true } },
       },
       orderBy: [{ quantityOnHand: 'asc' }, { product: { name: 'asc' } }],
     });
@@ -102,7 +100,7 @@ export class InventoryBalancesService {
         id: b.id,
         productId: b.productId,
         product: b.product,
-        location: b.inventoryLocation,
+        location: b.branch,
         quantityOnHand: onHand,
         quantityReserved: reserved,
         quantityAvailable: available,
@@ -113,7 +111,7 @@ export class InventoryBalancesService {
       };
     });
 
-    // Per-location grouping for the heatmap UI.
+    // Per-branch grouping for the heatmap UI.
     const locationMap = new Map<
       string,
       {
@@ -130,12 +128,12 @@ export class InventoryBalancesService {
       }
     >();
     for (const item of annotated) {
-      const lid = item.location.id;
+      const lid = item.location?.id ?? 'unassigned';
       const entry = locationMap.get(lid) ?? {
         locationId: lid,
-        locationName: item.location.name,
-        locationCode: item.location.locationCode,
-        branchId: item.location.branchId ?? null,
+        locationName: item.location?.name ?? 'Unassigned branch/location',
+        locationCode: item.location?.code ?? '',
+        branchId: item.location?.id ?? null,
         itemCount: 0,
         out: 0,
         low: 0,

@@ -19,20 +19,6 @@ type PurchaseOrderReferenceIds = {
   lines?: PurchaseOrderLineDto[];
 };
 
-type ReceivingLocationScope = {
-  id: string;
-  companyId: string;
-  name: string;
-  isActive: boolean;
-  divisionId: string | null;
-  branchId: string | null;
-  branch: { divisionId: string } | null;
-};
-
-type ResolvedReceivingLocationScope = ReceivingLocationScope & {
-  effectiveDivisionId: string | null;
-};
-
 function calcLineTotals(line: {
   quantity: number;
   unitCost: number;
@@ -167,7 +153,6 @@ export class PurchaseOrdersService {
         discountAmount: discount,
         taxAmount: tax,
         lineTotal,
-        inventoryLocationId: line.inventoryLocationId,
         batchNumber: line.batchNumber,
         expiryDate: line.expiryDate ? new Date(line.expiryDate) : undefined,
       };
@@ -259,7 +244,6 @@ export class PurchaseOrdersService {
           discountAmount: discount,
           taxAmount: tax,
           lineTotal,
-          inventoryLocationId: line.inventoryLocationId,
           batchNumber: line.batchNumber,
           expiryDate: line.expiryDate ? new Date(line.expiryDate) : undefined,
         };
@@ -375,24 +359,13 @@ export class PurchaseOrdersService {
     const unique = (ids: Array<string | undefined>) =>
       Array.from(new Set(ids.filter((id): id is string => Boolean(id))));
     const productIds = unique(lines.map((line) => line.productId));
-    const inventoryLocationIds = unique(lines.map((line) => line.inventoryLocationId));
     const unitIds = unique(lines.map((line) => line.unitId));
 
-    const [products, inventoryLocations, units] = await Promise.all([
+    const [products, units] = await Promise.all([
       this.prisma.product.findMany({
         where: { id: { in: productIds }, deletedAt: null },
         select: { id: true, companyId: true },
       }),
-      inventoryLocationIds.length
-        ? this.prisma.inventoryLocation.findMany({
-            where: {
-              id: { in: inventoryLocationIds },
-              deletedAt: null,
-              isActive: true,
-            },
-            select: { id: true, companyId: true, divisionId: true, branchId: true },
-          })
-        : Promise.resolve([]),
       this.prisma.unitOfMeasure.findMany({
         where: { id: { in: unitIds }, deletedAt: null, status: 'ACTIVE' },
         select: { id: true, companyId: true },
@@ -404,24 +377,6 @@ export class PurchaseOrdersService {
     );
     if (validProductIds.size !== productIds.length) {
       throw new BadRequestException('Purchase order product does not belong to this company');
-    }
-
-    const validLocationIds = new Set(
-      inventoryLocations
-        .filter((location) => {
-          if (location.companyId !== companyId) return false;
-          if (location.branchId) return !branchId || location.branchId === branchId;
-          if (location.divisionId) return !divisionId || location.divisionId === divisionId;
-          return true;
-        })
-        .map((location) => location.id),
-    );
-    if (validLocationIds.size !== inventoryLocationIds.length) {
-      throw new BadRequestException(
-        branchId
-          ? 'Purchase order inventory location is not available for the selected branch or division'
-          : 'Purchase order inventory location does not belong to this company',
-      );
     }
 
     const validUnitIds = new Set(
@@ -479,7 +434,7 @@ export class PurchaseOrdersService {
     return record;
   }
 
-  async receive(id: string, user: AuthUser, dto: ReceivePurchaseOrderDto = {}) {
+  async receive(id: string, user: AuthUser, _dto: ReceivePurchaseOrderDto = {}) {
     const userId = user.id;
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (!['CONFIRMED', 'PARTIALLY_RECEIVED'].includes(existing.status as string)) {
@@ -487,10 +442,12 @@ export class PurchaseOrdersService {
         'Only CONFIRMED or PARTIALLY_RECEIVED purchase orders can be received',
       );
     }
+    if (!existing.branchId) {
+      throw new BadRequestException('Purchase order branch/location is required to receive stock');
+    }
+    const receivingBranchId = existing.branchId;
 
     const record = await this.prisma.$transaction(async (tx) => {
-      const receivingLocations = new Map<string, ResolvedReceivingLocationScope>();
-
       for (const line of existing.lines as any[]) {
         const product = await tx.product.findUnique({
           where: { id: line.productId },
@@ -502,26 +459,9 @@ export class PurchaseOrdersService {
         }
 
         if (product.trackInventory) {
-          const inventoryLocationId = line.inventoryLocationId ?? dto.inventoryLocationId;
-          if (!inventoryLocationId) {
-            throw new BadRequestException(
-              `Receiving location is required for tracked product on line with product ${line.productId}`,
-            );
-          }
-          let receivingLocation = receivingLocations.get(inventoryLocationId);
-          if (!receivingLocation) {
-            receivingLocation = await this.resolveReceivingLocationForOrder(
-              tx,
-              inventoryLocationId,
-              existing,
-            );
-            receivingLocations.set(inventoryLocationId, receivingLocation);
-          }
-
           await this.inventoryMovements.createMovement({
             companyId: existing.companyId,
             productId: line.productId,
-            inventoryLocationId,
             movementType: 'PURCHASE_RECEIPT',
             quantity: Number(line.quantity),
             unitId: line.unitId,
@@ -532,17 +472,10 @@ export class PurchaseOrdersService {
             referenceId: id,
             batchNumber: line.batchNumber ?? undefined,
             expiryDate: line.expiryDate ?? undefined,
-            divisionId: existing.divisionId ?? receivingLocation.effectiveDivisionId ?? undefined,
-            branchId: existing.branchId ?? receivingLocation.branchId ?? undefined,
+            divisionId: existing.divisionId ?? undefined,
+            branchId: receivingBranchId,
             tx,
           });
-
-          if (!line.inventoryLocationId) {
-            await tx.purchaseOrderLine.update({
-              where: { id: line.id },
-              data: { inventoryLocationId },
-            });
-          }
         }
       }
 
@@ -611,70 +544,5 @@ export class PurchaseOrdersService {
     });
 
     return { success: true };
-  }
-
-  private async resolveReceivingLocationForOrder(
-    tx: any,
-    inventoryLocationId: string,
-    order: { companyId: string; divisionId?: string | null; branchId?: string | null },
-  ): Promise<ResolvedReceivingLocationScope> {
-    const location = (await tx.inventoryLocation.findFirst({
-      where: { id: inventoryLocationId, deletedAt: null },
-      select: {
-        id: true,
-        companyId: true,
-        name: true,
-        isActive: true,
-        divisionId: true,
-        branchId: true,
-        branch: { select: { divisionId: true } },
-      },
-    })) as ReceivingLocationScope | null;
-
-    if (!location) {
-      throw new NotFoundException(`Inventory location ${inventoryLocationId} not found`);
-    }
-    if (location.companyId !== order.companyId) {
-      throw new BadRequestException(
-        `Inventory location "${location.name}" does not belong to this purchase order company`,
-      );
-    }
-    if (!location.isActive) {
-      throw new BadRequestException(`Inventory location "${location.name}" is not active`);
-    }
-
-    const resolved = {
-      ...location,
-      effectiveDivisionId: location.divisionId ?? location.branch?.divisionId ?? null,
-    };
-
-    if (!this.receivingLocationAvailableForOrder(resolved, order)) {
-      throw new BadRequestException(
-        'Receiving location is not available for this purchase order branch or division',
-      );
-    }
-
-    return resolved;
-  }
-
-  private receivingLocationAvailableForOrder(
-    location: {
-      divisionId?: string | null;
-      effectiveDivisionId?: string | null;
-      branchId?: string | null;
-    },
-    order: { divisionId?: string | null; branchId?: string | null },
-  ) {
-    const locationDivisionId = location.effectiveDivisionId ?? location.divisionId ?? null;
-    if (order.branchId) {
-      if (location.branchId) return location.branchId === order.branchId;
-      if (locationDivisionId) return locationDivisionId === order.divisionId;
-      return true;
-    }
-    if (order.divisionId) {
-      if (locationDivisionId) return locationDivisionId === order.divisionId;
-      return !location.branchId;
-    }
-    return true;
   }
 }

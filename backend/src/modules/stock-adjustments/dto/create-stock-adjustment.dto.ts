@@ -19,8 +19,7 @@ export class StockAdjustmentLineDto {
 export class CreateStockAdjustmentDto {
   @IsNotEmpty() @IsString() companyId!: string;
   @IsOptional() @IsString() divisionId?: string;
-  @IsOptional() @IsString() branchId?: string;
-  @IsNotEmpty() @IsString() inventoryLocationId!: string;
+  @IsNotEmpty() @IsString() branchId!: string;
   @IsNotEmpty() @IsString() reason!: string;
   @IsOptional() @IsString() notes?: string;
 

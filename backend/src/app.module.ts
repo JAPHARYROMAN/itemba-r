@@ -50,7 +50,6 @@ import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { UnitsModule } from './modules/units/units.module';
 import { ProductCategoriesModule } from './modules/product-categories/product-categories.module';
 import { ProductsModule } from './modules/products/products.module';
-import { InventoryLocationsModule } from './modules/inventory-locations/inventory-locations.module';
 import { InventoryBalancesModule } from './modules/inventory-balances/inventory-balances.module';
 import { InventoryMovementsModule } from './modules/inventory-movements/inventory-movements.module';
 import { StockAdjustmentsModule } from './modules/stock-adjustments/stock-adjustments.module';
@@ -383,7 +382,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     UnitsModule,
     ProductCategoriesModule,
     ProductsModule,
-    InventoryLocationsModule,
     InventoryBalancesModule,
     InventoryMovementsModule,
     StockAdjustmentsModule,

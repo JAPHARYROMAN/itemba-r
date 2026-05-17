@@ -30,7 +30,6 @@ export class StockDamageService {
         damageNumber,
         companyId: dto.companyId,
         branchId: dto.branchId,
-        inventoryLocationId: dto.inventoryLocationId,
         productId: dto.productId,
         batchId: dto.batchId,
         quantity: dto.quantity,
@@ -63,7 +62,12 @@ export class StockDamageService {
     if (productId) where.productId = productId;
 
     const [data, total] = await Promise.all([
-      this.prisma.stockDamage.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
+      this.prisma.stockDamage.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
       this.prisma.stockDamage.count({ where }),
     ]);
     return { data, total, page, limit };
@@ -81,7 +85,7 @@ export class StockDamageService {
     const record = await this.prisma.stockDamage.update({
       where: { id },
       data: {
-        ...(dto.inventoryLocationId && { inventoryLocationId: dto.inventoryLocationId }),
+        ...(dto.branchId && { branchId: dto.branchId }),
         ...(dto.productId && { productId: dto.productId }),
         ...(dto.batchId !== undefined && { batchId: dto.batchId }),
         ...(dto.quantity !== undefined && { quantity: dto.quantity }),
@@ -105,7 +109,8 @@ export class StockDamageService {
 
   async submit(id: string, userId: string) {
     const existing = await this.findOne(id);
-    if (existing.status !== 'DRAFT') throw new BadRequestException('Only DRAFT records can be submitted');
+    if (existing.status !== 'DRAFT')
+      throw new BadRequestException('Only DRAFT records can be submitted');
     const record = await this.prisma.stockDamage.update({
       where: { id },
       data: { status: 'SUBMITTED' },
@@ -124,7 +129,8 @@ export class StockDamageService {
 
   async approve(id: string, userId: string) {
     const existing = await this.findOne(id);
-    if (existing.status !== 'SUBMITTED') throw new BadRequestException('Only SUBMITTED records can be approved');
+    if (existing.status !== 'SUBMITTED')
+      throw new BadRequestException('Only SUBMITTED records can be approved');
     const record = await this.prisma.stockDamage.update({
       where: { id },
       data: { status: 'APPROVED', approvedById: userId, approvedAt: new Date() },
@@ -141,7 +147,8 @@ export class StockDamageService {
 
   async reject(id: string, userId: string) {
     const existing = await this.findOne(id);
-    if (existing.status !== 'SUBMITTED') throw new BadRequestException('Only SUBMITTED records can be rejected');
+    if (existing.status !== 'SUBMITTED')
+      throw new BadRequestException('Only SUBMITTED records can be rejected');
     const record = await this.prisma.stockDamage.update({
       where: { id },
       data: { status: 'REJECTED' },
@@ -158,14 +165,18 @@ export class StockDamageService {
 
   async post(id: string, userId: string) {
     const existing = await this.findOne(id);
-    if (existing.status !== 'APPROVED') throw new BadRequestException('Only APPROVED records can be posted');
+    if (existing.status !== 'APPROVED')
+      throw new BadRequestException('Only APPROVED records can be posted');
 
-    const { companyId, productId, inventoryLocationId, unitId, quantity, batchId } = existing;
+    const { companyId, productId, branchId, unitId, quantity, batchId } = existing;
+    if (!branchId) {
+      throw new BadRequestException('Branch/location is required to post stock damage');
+    }
 
     await this.inventoryMovements.createMovement({
       companyId,
       productId,
-      inventoryLocationId,
+      branchId,
       movementType: 'DAMAGE',
       quantity: Number(quantity),
       unitId,
@@ -173,11 +184,6 @@ export class StockDamageService {
       createdById: userId,
       referenceType: 'StockDamage',
       referenceId: id,
-    });
-
-    await this.prisma.inventoryBalance.updateMany({
-      where: { companyId, productId, inventoryLocationId },
-      data: { quantityOnHand: { decrement: Number(quantity) } },
     });
 
     if (batchId) {
@@ -205,7 +211,8 @@ export class StockDamageService {
 
   async remove(id: string, userId: string) {
     const existing = await this.findOne(id);
-    if (existing.status !== 'DRAFT') throw new BadRequestException('Only DRAFT records can be deleted');
+    if (existing.status !== 'DRAFT')
+      throw new BadRequestException('Only DRAFT records can be deleted');
     await this.prisma.stockDamage.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.auditLogs.log({
       action: 'STOCK_DAMAGE_DELETE',

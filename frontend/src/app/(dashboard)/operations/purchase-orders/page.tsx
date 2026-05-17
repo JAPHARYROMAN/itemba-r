@@ -61,13 +61,6 @@ interface Product {
   wholesalePrice?: number | string | null;
   retailPrice?: number | string | null;
 }
-interface InventoryLocation {
-  id: string;
-  name: string;
-  locationCode: string;
-  divisionId?: string | null;
-  branchId?: string | null;
-}
 interface Unit {
   id: string;
   name: string;
@@ -83,7 +76,6 @@ interface PurchaseOrderLine {
   unitPrice: number;
   discount: number;
   tax: number;
-  inventoryLocationId: string;
   batchNumber: string;
   expiryDate: string;
 }
@@ -161,7 +153,6 @@ const BLANK_LINE = (): PurchaseOrderLine => ({
   unitPrice: 0,
   discount: 0,
   tax: 0,
-  inventoryLocationId: '',
   batchNumber: '',
   expiryDate: '',
 });
@@ -181,19 +172,6 @@ const blankForm = (): PurchaseOrderForm => ({
 
 function fmtMoney(n: number, ccy = 'TZS') {
   return `${ccy} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)}`;
-}
-
-function locationAvailableForOrder(location: InventoryLocation, order: PurchaseOrder) {
-  if (order.branchId) {
-    if (location.branchId) return location.branchId === order.branchId;
-    if (location.divisionId) return location.divisionId === order.divisionId;
-    return true;
-  }
-  if (order.divisionId) {
-    if (location.divisionId) return location.divisionId === order.divisionId;
-    return !location.branchId;
-  }
-  return true;
 }
 
 function PurchaseOrderModal({
@@ -232,7 +210,6 @@ function PurchaseOrderModal({
                 unitPrice: Number(line.unitPrice ?? line.unitCost ?? 0),
                 discount: Number(line.discount ?? line.discountAmount ?? 0),
                 tax: Number(line.tax ?? line.taxAmount ?? 0),
-                inventoryLocationId: line.inventoryLocationId ?? '',
                 batchNumber: line.batchNumber ?? '',
                 expiryDate: line.expiryDate?.slice(0, 10) ?? '',
               }))
@@ -242,7 +219,6 @@ function PurchaseOrderModal({
   );
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -269,7 +245,6 @@ function PurchaseOrderModal({
       setBranches([]);
       setSuppliers([]);
       setProducts([]);
-      setLocations([]);
       return;
     }
     let cancelled = false;
@@ -292,7 +267,6 @@ function PurchaseOrderModal({
     if (!form.companyId || !form.divisionId) {
       setSuppliers([]);
       setProducts([]);
-      setLocations([]);
       return;
     }
     let cancelled = false;
@@ -311,27 +285,10 @@ function PurchaseOrderModal({
           limit: 200,
         },
       }),
-      form.branchId
-        ? backendList<InventoryLocation>('/inventory-locations', {
-            query: {
-              companyId: form.companyId,
-              isActive: true,
-              limit: 500,
-            },
-          })
-        : Promise.resolve([]),
-    ]).then(([supplierResult, productResult, locationResult]) => {
+    ]).then(([supplierResult, productResult]) => {
       if (cancelled) return;
       setSuppliers(supplierResult.status === 'fulfilled' ? supplierResult.value : []);
       setProducts(productResult.status === 'fulfilled' ? productResult.value : []);
-      const locationRows = locationResult.status === 'fulfilled' ? locationResult.value : [];
-      setLocations(
-        locationRows.filter((location) => {
-          if (location.branchId) return location.branchId === form.branchId;
-          if (location.divisionId) return location.divisionId === form.divisionId;
-          return true;
-        }),
-      );
     });
     return () => {
       cancelled = true;
@@ -397,7 +354,6 @@ function PurchaseOrderModal({
             discountAmount: Number(l.discount) || 0,
             taxAmount: Number(l.tax) || 0,
           };
-          if (l.inventoryLocationId) out.inventoryLocationId = l.inventoryLocationId;
           if (l.batchNumber) out.batchNumber = l.batchNumber;
           if (l.expiryDate) out.expiryDate = l.expiryDate;
           return out;
@@ -458,7 +414,6 @@ function PurchaseOrderModal({
                 lines: f.lines.map((line) => ({
                   ...line,
                   productId: '',
-                  inventoryLocationId: '',
                 })),
               }));
             }}
@@ -485,7 +440,6 @@ function PurchaseOrderModal({
                 lines: f.lines.map((line) => ({
                   ...line,
                   productId: '',
-                  inventoryLocationId: '',
                 })),
               }));
             }}
@@ -506,7 +460,7 @@ function PurchaseOrderModal({
               setForm((f) => ({
                 ...f,
                 branchId,
-                lines: f.lines.map((line) => ({ ...line, inventoryLocationId: '' })),
+                lines: f.lines,
               }));
             }}
             placeholder={form.divisionId ? 'Select branch' : 'Select division first'}
@@ -590,9 +544,7 @@ function PurchaseOrderModal({
           lines={form.lines}
           products={products}
           units={units}
-          locations={locations}
           currency={form.currency}
-          requireLocation={false}
           onAddLine={addLine}
           onRemoveLine={removeLine}
           onLineChange={setLine}
@@ -663,44 +615,14 @@ function ReceiveOrderModal({
   onClose: () => void;
   onReceived: () => void;
 }) {
-  const [locations, setLocations] = useState<InventoryLocation[]>([]);
-  const [inventoryLocationId, setInventoryLocationId] = useState('');
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    backendList<InventoryLocation>('/inventory-locations', {
-      query: { companyId: order.companyId, isActive: true, limit: 500 },
-    })
-      .then((rows) => {
-        if (cancelled) return;
-        const available = rows.filter((location) => locationAvailableForOrder(location, order));
-        setLocations(available);
-        setInventoryLocationId(available.length === 1 ? available[0].id : '');
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load locations');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [order]);
-
   const handleReceive = async () => {
-    if (!inventoryLocationId) {
-      setError('Receiving location is required');
-      return;
-    }
     setSaving(true);
     setError('');
     try {
-      await backendPatch(`/purchase-orders/${order.id}/receive`, { inventoryLocationId });
+      await backendPatch(`/purchase-orders/${order.id}/receive`, {});
       onReceived();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to receive order');
@@ -720,12 +642,7 @@ function ReceiveOrderModal({
           <Btn variant="secondary" onClick={onClose}>
             Cancel
           </Btn>
-          <Btn
-            variant="success"
-            onClick={handleReceive}
-            loading={saving}
-            disabled={loading || !locations.length}
-          >
+          <Btn variant="success" onClick={handleReceive} loading={saving}>
             Receive
           </Btn>
         </>
@@ -745,27 +662,8 @@ function ReceiveOrderModal({
             Supplier:{' '}
             <span className="font-medium">{order.supplier?.name ?? order.supplierName ?? '-'}</span>
           </div>
+          <div>Inventory will be received into this order&apos;s branch/location.</div>
         </div>
-        <FormSelect
-          label="Receiving Location"
-          required
-          value={inventoryLocationId}
-          onChange={(event) => setInventoryLocationId(event.target.value)}
-          placeholder={loading ? 'Loading locations...' : 'Select receiving location'}
-          disabled={loading || !locations.length}
-        >
-          {locations.map((location) => (
-            <option key={location.id} value={location.id}>
-              {location.locationCode} - {location.name}
-            </option>
-          ))}
-        </FormSelect>
-        {!loading && !locations.length && (
-          <p className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
-            No active inventory location is available for this order branch/division. Create one in
-            Operations &gt; Inventory Locations, then receive this order.
-          </p>
-        )}
       </div>
     </Modal>
   );

@@ -53,7 +53,7 @@ export class DataQualityCheckRunnerService {
           metadata: {
             quantityOnHand: String(record.quantityOnHand),
             productId: (record as any).productId,
-            inventoryLocationId: (record as any).inventoryLocationId,
+            branchId: (record as any).branchId,
           },
         })),
       };

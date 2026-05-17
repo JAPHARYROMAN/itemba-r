@@ -22,7 +22,10 @@ export class ProjectMaterialIssuesService {
   ) {}
 
   async create(dto: CreateProjectMaterialIssueDto, userId: string) {
-    const issueNumber = await this.codes.next({ entityType: 'ProjectMaterialIssue', companyId: dto.companyId });
+    const issueNumber = await this.codes.next({
+      entityType: 'ProjectMaterialIssue',
+      companyId: dto.companyId,
+    });
     const { lines, ...issueData } = dto;
     const issue = await this.prisma.projectMaterialIssue.create({
       data: {
@@ -30,11 +33,22 @@ export class ProjectMaterialIssuesService {
         issueNumber,
         issueDate: new Date(issueData.issueDate),
         createdById: userId,
-        lines: { create: lines.map(l => ({ ...l, totalCost: l.totalCost ?? (l.unitCost ? l.unitCost * l.quantity : undefined) })) },
+        lines: {
+          create: lines.map((l) => ({
+            ...l,
+            totalCost: l.totalCost ?? (l.unitCost ? l.unitCost * l.quantity : undefined),
+          })),
+        },
       },
       include: { lines: true },
     });
-    await this.audit.log({ userId, action: 'CREATE', entityType: 'ProjectMaterialIssue', entityId: issue.id, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId,
+      action: 'CREATE',
+      entityType: 'ProjectMaterialIssue',
+      entityId: issue.id,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
     return issue;
   }
 
@@ -43,37 +57,80 @@ export class ProjectMaterialIssuesService {
     if (projectId) where.projectId = projectId;
     applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await this.prisma.$transaction([
-      this.prisma.projectMaterialIssue.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { issueDate: 'desc' }, include: { project: { select: { projectName: true, projectCode: true } }, lines: true } }),
+      this.prisma.projectMaterialIssue.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { issueDate: 'desc' },
+        include: { project: { select: { projectName: true, projectCode: true } }, lines: true },
+      }),
       this.prisma.projectMaterialIssue.count({ where }),
     ]);
     return { data, total, page, limit };
   }
 
   async findOne(id: string) {
-    const issue = await this.prisma.projectMaterialIssue.findFirst({ where: { id, deletedAt: null }, include: { project: true, site: true, lines: { include: { product: { select: { name: true, sku: true } }, unit: { select: { symbol: true } } } } } });
+    const issue = await this.prisma.projectMaterialIssue.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        project: true,
+        site: true,
+        lines: {
+          include: {
+            product: { select: { name: true, sku: true } },
+            unit: { select: { symbol: true } },
+          },
+        },
+      },
+    });
     if (!issue) throw new NotFoundException('Material issue not found');
     return issue;
   }
 
   async submit(id: string, userId: string) {
     const issue = await this.findOne(id);
-    if (issue.status !== MaterialIssueStatus.DRAFT) throw new BadRequestException('Only DRAFT issues can be submitted');
-    const updated = await this.prisma.projectMaterialIssue.update({ where: { id }, data: { status: MaterialIssueStatus.SUBMITTED } });
-    await this.audit.log({ userId, action: 'SUBMIT', entityType: 'ProjectMaterialIssue', entityId: id, newValue: {} });
+    if (issue.status !== MaterialIssueStatus.DRAFT)
+      throw new BadRequestException('Only DRAFT issues can be submitted');
+    const updated = await this.prisma.projectMaterialIssue.update({
+      where: { id },
+      data: { status: MaterialIssueStatus.SUBMITTED },
+    });
+    await this.audit.log({
+      userId,
+      action: 'SUBMIT',
+      entityType: 'ProjectMaterialIssue',
+      entityId: id,
+      newValue: {},
+    });
     return updated;
   }
 
   async approve(id: string, userId: string) {
     const issue = await this.findOne(id);
-    if (issue.status !== MaterialIssueStatus.SUBMITTED) throw new BadRequestException('Only SUBMITTED issues can be approved');
-    const updated = await this.prisma.projectMaterialIssue.update({ where: { id }, data: { status: MaterialIssueStatus.APPROVED, approvedById: userId } });
-    await this.audit.log({ userId, action: 'APPROVE', entityType: 'ProjectMaterialIssue', entityId: id, newValue: {} });
+    if (issue.status !== MaterialIssueStatus.SUBMITTED)
+      throw new BadRequestException('Only SUBMITTED issues can be approved');
+    const updated = await this.prisma.projectMaterialIssue.update({
+      where: { id },
+      data: { status: MaterialIssueStatus.APPROVED, approvedById: userId },
+    });
+    await this.audit.log({
+      userId,
+      action: 'APPROVE',
+      entityType: 'ProjectMaterialIssue',
+      entityId: id,
+      newValue: {},
+    });
     return updated;
   }
 
   async post(id: string, userId: string) {
     const issue = await this.findOne(id);
-    if (issue.status !== MaterialIssueStatus.APPROVED) throw new BadRequestException('Only APPROVED issues can be posted');
+    if (issue.status !== MaterialIssueStatus.APPROVED)
+      throw new BadRequestException('Only APPROVED issues can be posted');
+    const sourceBranchId = issue.branchId ?? issue.project.branchId;
+    if (!sourceBranchId) {
+      throw new BadRequestException('Branch/location is required to post material issue');
+    }
 
     let totalCost = 0;
     let journalEntryId: string | null = null;
@@ -85,7 +142,7 @@ export class ProjectMaterialIssuesService {
         // case where the issuer didn't record cost — we still book a real
         // cost figure based on what the warehouse paid.
         const bal = await tx.inventoryBalance.findFirst({
-          where: { productId: line.productId, inventoryLocationId: issue.inventoryLocationId },
+          where: { productId: line.productId, branchId: sourceBranchId },
         });
         const lineUnitCost = Number(line.unitCost ?? 0);
         const fallbackCost = bal ? Number(bal.averageCost) : 0;
@@ -102,16 +159,20 @@ export class ProjectMaterialIssuesService {
         }
 
         // Inventory movement — INTERNAL_USE (consumed by the project).
-        const movementNumber = await this.codes.next({ entityType: 'InventoryMovement', companyId: issue.companyId, tx });
+        const movementNumber = await this.codes.next({
+          entityType: 'InventoryMovement',
+          companyId: issue.companyId,
+          tx,
+        });
         await tx.inventoryMovement.create({
           data: {
             movementNumber,
             companyId: issue.companyId,
             divisionId: issue.divisionId,
+            branchId: sourceBranchId,
             productId: line.productId,
-            inventoryLocationId: issue.inventoryLocationId,
             movementType: InventoryMovementType.INTERNAL_USE,
-            quantity: -Number(line.quantity),
+            quantity: Number(line.quantity),
             unitId: line.unitId,
             movementDate: issue.issueDate,
             referenceType: 'ProjectMaterialIssue',
@@ -158,32 +219,39 @@ export class ProjectMaterialIssuesService {
         const materialsExpenseId = accounts.find((a) => a.accountCode === '5200')?.id;
         const inventoryAssetId = accounts.find((a) => a.accountCode === '1200')?.id;
         if (materialsExpenseId && inventoryAssetId) {
-          const journalNumber = await this.codes.next({ entityType: 'JournalEntry', companyId: issue.companyId, tx });
-          const je = await this.postingEngine.postLines({
-            journalNumber,
+          const journalNumber = await this.codes.next({
+            entityType: 'JournalEntry',
             companyId: issue.companyId,
-            transactionDate: issue.issueDate,
-            description: `Material issue ${issue.issueNumber} — ${issue.project.projectName}`,
-            referenceType: 'ProjectMaterialIssue',
-            referenceId: id,
-            status: 'DRAFT',
-            userId,
-            moduleName: 'project_material_issues',
-            lines: [
-              {
-                accountId: materialsExpenseId,
-                description: `Materials issued to ${issue.project.projectName}`,
-                debit: totalCost,
-                credit: 0,
-              },
-              {
-                accountId: inventoryAssetId,
-                description: `Inventory consumed for project`,
-                debit: 0,
-                credit: totalCost,
-              },
-            ],
-          }, tx);
+            tx,
+          });
+          const je = await this.postingEngine.postLines(
+            {
+              journalNumber,
+              companyId: issue.companyId,
+              transactionDate: issue.issueDate,
+              description: `Material issue ${issue.issueNumber} — ${issue.project.projectName}`,
+              referenceType: 'ProjectMaterialIssue',
+              referenceId: id,
+              status: 'DRAFT',
+              userId,
+              moduleName: 'project_material_issues',
+              lines: [
+                {
+                  accountId: materialsExpenseId,
+                  description: `Materials issued to ${issue.project.projectName}`,
+                  debit: totalCost,
+                  credit: 0,
+                },
+                {
+                  accountId: inventoryAssetId,
+                  description: `Inventory consumed for project`,
+                  debit: 0,
+                  credit: totalCost,
+                },
+              ],
+            },
+            tx,
+          );
           journalEntryId = je.id;
         }
       }
@@ -206,25 +274,56 @@ export class ProjectMaterialIssuesService {
 
   async reject(id: string, userId: string) {
     const issue = await this.findOne(id);
-    if (!([MaterialIssueStatus.SUBMITTED, MaterialIssueStatus.APPROVED] as string[]).includes(issue.status)) throw new BadRequestException('Cannot reject in current state');
-    const updated = await this.prisma.projectMaterialIssue.update({ where: { id }, data: { status: MaterialIssueStatus.REJECTED } });
-    await this.audit.log({ userId, action: 'REJECT', entityType: 'ProjectMaterialIssue', entityId: id, newValue: {} });
+    if (
+      !([MaterialIssueStatus.SUBMITTED, MaterialIssueStatus.APPROVED] as string[]).includes(
+        issue.status,
+      )
+    )
+      throw new BadRequestException('Cannot reject in current state');
+    const updated = await this.prisma.projectMaterialIssue.update({
+      where: { id },
+      data: { status: MaterialIssueStatus.REJECTED },
+    });
+    await this.audit.log({
+      userId,
+      action: 'REJECT',
+      entityType: 'ProjectMaterialIssue',
+      entityId: id,
+      newValue: {},
+    });
     return updated;
   }
 
   async cancel(id: string, userId: string) {
     const issue = await this.findOne(id);
-    if (issue.status === MaterialIssueStatus.POSTED) throw new BadRequestException('Cannot cancel a posted issue');
-    const updated = await this.prisma.projectMaterialIssue.update({ where: { id }, data: { status: MaterialIssueStatus.CANCELLED } });
-    await this.audit.log({ userId, action: 'CANCEL', entityType: 'ProjectMaterialIssue', entityId: id, newValue: {} });
+    if (issue.status === MaterialIssueStatus.POSTED)
+      throw new BadRequestException('Cannot cancel a posted issue');
+    const updated = await this.prisma.projectMaterialIssue.update({
+      where: { id },
+      data: { status: MaterialIssueStatus.CANCELLED },
+    });
+    await this.audit.log({
+      userId,
+      action: 'CANCEL',
+      entityType: 'ProjectMaterialIssue',
+      entityId: id,
+      newValue: {},
+    });
     return updated;
   }
 
   async update(id: string, dto: UpdateProjectMaterialIssueDto, userId: string) {
     const issue = await this.findOne(id);
-    if (issue.status !== MaterialIssueStatus.DRAFT) throw new BadRequestException('Only DRAFT issues can be updated');
+    if (issue.status !== MaterialIssueStatus.DRAFT)
+      throw new BadRequestException('Only DRAFT issues can be updated');
     const updated = await this.prisma.projectMaterialIssue.update({ where: { id }, data: dto });
-    await this.audit.log({ userId, action: 'UPDATE', entityType: 'ProjectMaterialIssue', entityId: id, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId,
+      action: 'UPDATE',
+      entityType: 'ProjectMaterialIssue',
+      entityId: id,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
     return updated;
   }
 }

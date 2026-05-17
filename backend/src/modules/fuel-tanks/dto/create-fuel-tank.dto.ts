@@ -27,10 +27,6 @@ export class CreateFuelTankDto {
   @IsString()
   branchId!: string;
 
-  @IsOptional()
-  @IsString()
-  inventoryLocationId?: string;
-
   @IsNotEmpty()
   @IsString()
   productId!: string;

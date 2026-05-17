@@ -17,7 +17,6 @@ interface DashboardSummary {
   customers: { total: number; active: number; blocked: number };
   suppliers: { total: number; active: number; blocked: number };
   products: { total: number; active: number; outOfStock: number };
-  inventoryLocations: { total: number; active: number };
   salesOrders: {
     total: number;
     draft: number;
@@ -184,11 +183,7 @@ export default function OperationsDashboardPage() {
               value={fmtNum(data.products.total)}
               hint={`${data.products.outOfStock} out of stock`}
             />
-            <StatCard
-              label="Inventory Locations"
-              value={fmtNum(data.inventoryLocations.total)}
-              hint={`${data.inventoryLocations.active} active`}
-            />
+            <StatCard label="Out of Stock" value={fmtNum(data.products.outOfStock)} />
           </div>
 
           {/* Row 2 — Financial values */}

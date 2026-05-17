@@ -27,10 +27,10 @@ interface Company {
   name: string;
   code: string;
 }
-interface InventoryLocation {
+interface Branch {
   id: string;
   name: string;
-  locationCode: string;
+  code?: string | null;
 }
 interface Product {
   id: string;
@@ -59,10 +59,11 @@ interface StockAdjustment {
   reason: string;
   notes?: string | null;
   companyId: string;
-  locationId: string;
+  branchId?: string | null;
   createdAt: string;
   company?: { name: string } | null;
   location?: { name: string; locationCode: string } | null;
+  branch?: { name: string; code?: string | null } | null;
   lines?: AdjustmentLine[];
   _count?: { lines?: number } | null;
 }
@@ -78,7 +79,7 @@ const emptyPaginated = <T,>(): Paginated<T> => ({ data: [], total: 0, page: 1, t
 
 interface AdjustmentForm {
   companyId: string;
-  locationId: string;
+  branchId: string;
   reason: string;
   notes: string;
   lines: AdjustmentLine[];
@@ -93,7 +94,7 @@ const BLANK_LINE = (): AdjustmentLine => ({
 });
 const BLANK_FORM: AdjustmentForm = {
   companyId: '',
-  locationId: '',
+  branchId: '',
   reason: '',
   notes: '',
   lines: [BLANK_LINE()],
@@ -110,7 +111,7 @@ function CreateAdjustmentModal({
 }) {
   const [form, setForm] = useState<AdjustmentForm>({ ...BLANK_FORM });
   const [products, setProducts] = useState<Product[]>([]);
-  const [locations, setLocations] = useState<InventoryLocation[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -132,18 +133,18 @@ function CreateAdjustmentModal({
 
   useEffect(() => {
     if (!form.companyId) {
-      setLocations([]);
+      setBranches([]);
       return;
     }
     let cancelled = false;
-    backendList<InventoryLocation>('/inventory-locations', {
-      query: { companyId: form.companyId, isActive: true, limit: 200 },
+    backendList<Branch>('/branches', {
+      query: { companyId: form.companyId, activeOnly: true, limit: 200 },
     })
       .then((rows) => {
-        if (!cancelled) setLocations(rows);
+        if (!cancelled) setBranches(rows);
       })
       .catch(() => {
-        if (!cancelled) setLocations([]);
+        if (!cancelled) setBranches([]);
       });
     return () => {
       cancelled = true;
@@ -166,8 +167,8 @@ function CreateAdjustmentModal({
       setError('Company is required');
       return;
     }
-    if (!form.locationId) {
-      setError('Location is required');
+    if (!form.branchId) {
+      setError('Branch/location is required');
       return;
     }
     if (!form.reason.trim()) {
@@ -187,7 +188,7 @@ function CreateAdjustmentModal({
     try {
       const body = {
         companyId: form.companyId,
-        locationId: form.locationId,
+        branchId: form.branchId,
         reason: form.reason,
         notes: form.notes || undefined,
         lines: form.lines.map((l) => ({
@@ -237,7 +238,7 @@ function CreateAdjustmentModal({
             value={form.companyId}
             onChange={(e) => {
               setField('companyId', e.target.value);
-              setField('locationId', '');
+              setField('branchId', '');
             }}
             placeholder="Select company"
           >
@@ -248,15 +249,16 @@ function CreateAdjustmentModal({
             ))}
           </FormSelect>
           <FormSelect
-            label="Location"
+            label="Branch / Location"
             required
-            value={form.locationId}
-            onChange={(e) => setField('locationId', e.target.value)}
-            placeholder={form.companyId ? 'Select location' : 'Select company first'}
+            value={form.branchId}
+            onChange={(e) => setField('branchId', e.target.value)}
+            placeholder={form.companyId ? 'Select branch/location' : 'Select company first'}
           >
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
+            {branches.map((branch) => (
+              <option key={branch.id} value={branch.id}>
+                {branch.code ? `${branch.code} - ` : ''}
+                {branch.name}
               </option>
             ))}
           </FormSelect>
@@ -745,7 +747,7 @@ export default function StockAdjustmentsPage() {
               >
                 <th className="px-4 py-3">Number</th>
                 <th className="px-4 py-3">Company</th>
-                <th className="px-4 py-3">Location</th>
+                <th className="px-4 py-3">Branch / Location</th>
                 <th className="px-4 py-3">Reason</th>
                 <th className="px-4 py-3">Lines</th>
                 <th className="px-4 py-3">Status</th>
@@ -776,7 +778,9 @@ export default function StockAdjustmentsPage() {
                       {a.adjustmentNumber ?? a.id.slice(0, 8)}
                     </td>
                     <td className="px-4 py-3 text-xs">{a.company?.name ?? '—'}</td>
-                    <td className="px-4 py-3 text-xs">{a.location?.name ?? '—'}</td>
+                    <td className="px-4 py-3 text-xs">
+                      {a.branch?.name ?? a.location?.name ?? '—'}
+                    </td>
                     <td className="px-4 py-3 text-xs truncate max-w-[200px]" title={a.reason}>
                       {a.reason}
                     </td>

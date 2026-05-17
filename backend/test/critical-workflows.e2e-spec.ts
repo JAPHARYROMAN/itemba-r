@@ -6,7 +6,6 @@ import {
   BranchType,
   DivisionType,
   ExternalPaymentMethod,
-  InventoryLocationType,
   ProductCategoryType,
   ProductType,
   RoleScope,
@@ -64,7 +63,6 @@ describe('Critical Business Workflows (e2e)', () => {
   const journalEntryIds: string[] = [];
   const unitIds: string[] = [];
   const productCategoryIds: string[] = [];
-  const inventoryLocationIds: string[] = [];
   const productIds: string[] = [];
   const inventoryBalanceIds: string[] = [];
   const stockAdjustmentIds: string[] = [];
@@ -83,7 +81,6 @@ describe('Critical Business Workflows (e2e)', () => {
   let apiKeyValue = '';
   let unitBId = '';
   let productCategoryBId = '';
-  let inventoryLocationBId = '';
   let productBId = '';
   let inventoryBalanceBId = '';
   let externalPaymentBId = '';
@@ -150,27 +147,47 @@ describe('Critical Business Workflows (e2e)', () => {
     companyBId = companyB.id;
     companyIds.push(companyA.id, companyB.id);
 
-    const divisionA = await prisma.division.create({
-      data: {
-        companyId: companyA.id,
-        code: `DIVA${short}`,
-        name: `E2E Critical Division A ${suffix}`,
-        type: DivisionType.OTHER,
-      },
-    });
+    const [divisionA, divisionB] = await Promise.all([
+      prisma.division.create({
+        data: {
+          companyId: companyA.id,
+          code: `DIVA${short}`,
+          name: `E2E Critical Division A ${suffix}`,
+          type: DivisionType.OTHER,
+        },
+      }),
+      prisma.division.create({
+        data: {
+          companyId: companyB.id,
+          code: `DIVB${short}`,
+          name: `E2E Critical Division B ${suffix}`,
+          type: DivisionType.OTHER,
+        },
+      }),
+    ]);
     divisionAId = divisionA.id;
-    divisionIds.push(divisionA.id);
+    divisionIds.push(divisionA.id, divisionB.id);
 
-    const branchA = await prisma.branch.create({
-      data: {
-        divisionId: divisionA.id,
-        code: `BRA${short}`,
-        name: `E2E Critical Branch A ${suffix}`,
-        type: BranchType.BRANCH,
-      },
-    });
+    const [branchA, branchB] = await Promise.all([
+      prisma.branch.create({
+        data: {
+          divisionId: divisionA.id,
+          code: `BRA${short}`,
+          name: `E2E Critical Branch A ${suffix}`,
+          type: BranchType.BRANCH,
+        },
+      }),
+      prisma.branch.create({
+        data: {
+          divisionId: divisionB.id,
+          code: `BRB${short}`,
+          name: `E2E Critical Branch B ${suffix}`,
+          type: BranchType.BRANCH,
+        },
+      }),
+    ]);
     branchAId = branchA.id;
-    branchIds.push(branchA.id);
+    branchIds.push(branchA.id, branchB.id);
 
     const fiscalYear = await prisma.fiscalYear.create({
       data: {
@@ -225,7 +242,7 @@ describe('Critical Business Workflows (e2e)', () => {
     ]);
     userIds.push(creator.id, poster.id);
 
-    const [unitB, productCategoryB, inventoryLocationB, externalPaymentB] = await Promise.all([
+    const [unitB, productCategoryB, externalPaymentB] = await Promise.all([
       prisma.unitOfMeasure.create({
         data: {
           companyId: companyB.id,
@@ -241,14 +258,6 @@ describe('Critical Business Workflows (e2e)', () => {
           categoryType: ProductCategoryType.OTHER,
         },
       }),
-      prisma.inventoryLocation.create({
-        data: {
-          companyId: companyB.id,
-          locationCode: `LOCB${short}`,
-          name: `E2E Location B ${suffix}`,
-          locationType: InventoryLocationType.STORE,
-        },
-      }),
       prisma.externalPayment.create({
         data: {
           companyId: companyB.id,
@@ -260,11 +269,9 @@ describe('Critical Business Workflows (e2e)', () => {
     ]);
     unitBId = unitB.id;
     productCategoryBId = productCategoryB.id;
-    inventoryLocationBId = inventoryLocationB.id;
     externalPaymentBId = externalPaymentB.id;
     unitIds.push(unitB.id);
     productCategoryIds.push(productCategoryB.id);
-    inventoryLocationIds.push(inventoryLocationB.id);
     externalPaymentIds.push(externalPaymentB.id);
 
     const productB = await prisma.product.create({
@@ -285,7 +292,7 @@ describe('Critical Business Workflows (e2e)', () => {
       data: {
         companyId: companyB.id,
         productId: productB.id,
-        inventoryLocationId: inventoryLocationB.id,
+        branchId: branchB.id,
         quantityOnHand: 9,
       },
     });
@@ -371,20 +378,12 @@ describe('Critical Business Workflows (e2e)', () => {
     await prisma.journalEntry.deleteMany({ where: { id: { in: journalEntryIds } } });
     await prisma.inventoryMovement.deleteMany({
       where: {
-        OR: [
-          { referenceId: { in: stockAdjustmentIds } },
-          { productId: { in: productIds } },
-          { inventoryLocationId: { in: inventoryLocationIds } },
-        ],
+        OR: [{ referenceId: { in: stockAdjustmentIds } }, { productId: { in: productIds } }],
       },
     });
     await prisma.inventoryBalance.deleteMany({
       where: {
-        OR: [
-          { id: { in: inventoryBalanceIds } },
-          { productId: { in: productIds } },
-          { inventoryLocationId: { in: inventoryLocationIds } },
-        ],
+        OR: [{ id: { in: inventoryBalanceIds } }, { productId: { in: productIds } }],
       },
     });
     await prisma.stockAdjustmentLine.deleteMany({
@@ -393,7 +392,6 @@ describe('Critical Business Workflows (e2e)', () => {
     await prisma.stockAdjustment.deleteMany({ where: { id: { in: stockAdjustmentIds } } });
     await prisma.product.deleteMany({ where: { id: { in: productIds } } });
     await prisma.productCategory.deleteMany({ where: { id: { in: productCategoryIds } } });
-    await prisma.inventoryLocation.deleteMany({ where: { id: { in: inventoryLocationIds } } });
     await prisma.unitOfMeasure.deleteMany({ where: { id: { in: unitIds } } });
     await prisma.chartOfAccount.deleteMany({ where: { id: { in: chartAccountIds } } });
     await prisma.accountingPeriod.deleteMany({ where: { id: { in: accountingPeriodIds } } });
@@ -561,24 +559,6 @@ describe('Critical Business Workflows (e2e)', () => {
     );
     productCategoryIds.push(category.id);
 
-    const location = unwrap<any>(
-      (
-        await request(app.getHttpServer())
-          .post('/api/v1/inventory-locations')
-          .set('Authorization', authorization(companyToken))
-          .send({
-            companyId: companyAId,
-            divisionId: divisionAId,
-            branchId: branchAId,
-            locationCode: `LOCA${short}`,
-            name: `E2E Location A ${suffix}`,
-            locationType: InventoryLocationType.STORE,
-          })
-          .expect(201)
-      ).body,
-    );
-    inventoryLocationIds.push(location.id);
-
     const product = unwrap<any>(
       (
         await request(app.getHttpServer())
@@ -607,7 +587,6 @@ describe('Critical Business Workflows (e2e)', () => {
             companyId: companyAId,
             divisionId: divisionAId,
             branchId: branchAId,
-            inventoryLocationId: location.id,
             reason: `E2E stock count ${suffix}`,
             lines: [
               {
@@ -646,7 +625,7 @@ describe('Critical Business Workflows (e2e)', () => {
       (
         await request(app.getHttpServer())
           .get('/api/v1/inventory-balances')
-          .query({ companyId: companyAId, productId: product.id, locationId: location.id })
+          .query({ companyId: companyAId, productId: product.id, locationId: branchAId })
           .set('Authorization', authorization(companyToken))
           .expect(200)
       ).body,
@@ -664,7 +643,7 @@ describe('Critical Business Workflows (e2e)', () => {
           .expect(200)
       ).body,
     );
-    expect(live.locations.map((item: any) => item.locationId)).toContain(location.id);
+    expect(live.locations.map((item: any) => item.locationId)).toContain(branchAId);
 
     await request(app.getHttpServer())
       .get(`/api/v1/inventory-balances/${inventoryBalanceBId}`)

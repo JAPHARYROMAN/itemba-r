@@ -21,7 +21,6 @@ import {
   UnitType,
   ProductCategoryType,
   ProductType,
-  InventoryLocationType,
   FuelTankStatus,
   FuelPumpStatus,
   FuelNozzleStatus,
@@ -210,7 +209,6 @@ const ALL_PERMISSIONS: PermDef[] = [
   ...perms('products', ['view', 'create', 'update', 'delete']),
   ...perms('product_categories', ['view', 'manage']),
   ...perms('units', ['view', 'manage']),
-  ...perms('inventory_locations', ['view', 'manage']),
   {
     code: 'inventory.view',
     description: 'View inventory balances and movements',
@@ -811,7 +809,6 @@ const OPERATIONS_MODULES = [
   'products',
   'product_categories',
   'units',
-  'inventory_locations',
   'inventory',
   'sales',
   'purchases',
@@ -1455,7 +1452,6 @@ const ROLES: RoleDef[] = [
         'customers',
         'suppliers',
         'products',
-        'inventory_locations',
         'operations',
         // Petroleum branch manager access
         'petroleum',
@@ -1567,14 +1563,7 @@ const ROLES: RoleDef[] = [
     description: 'Manages stock levels and inventory records.',
     scope: RoleScope.BRANCH,
     filter: combine(
-      inModules(
-        'inventory',
-        'inventory_locations',
-        'products',
-        'product_categories',
-        'units',
-        'purchases',
-      ),
+      inModules('inventory', 'products', 'product_categories', 'units', 'purchases'),
       (p) => inModules('reports', 'documents', 'suppliers', 'operations')(p) && readExport(p),
       inModules('fuel_tanks', 'tank_dips', 'fuel_deliveries'),
       (p) => inModules('petroleum')(p) && readExport(p),
@@ -4350,51 +4339,6 @@ const COMPANY_CATEGORIES: Record<string, ProductCatDef[]> = {
   ],
 };
 
-interface LocationDef {
-  locationCode: string;
-  name: string;
-  locationType: InventoryLocationType;
-}
-
-const COMPANY_LOCATIONS: Record<string, LocationDef[]> = {
-  MWANJALISI: [
-    {
-      locationCode: 'MAIN-STORE',
-      name: 'Main Station Store',
-      locationType: InventoryLocationType.STORE,
-    },
-  ],
-  ITEMBA: [
-    {
-      locationCode: 'LOG-STORE',
-      name: 'Logistics Store',
-      locationType: InventoryLocationType.STORE,
-    },
-    {
-      locationCode: 'FARM-STORE',
-      name: 'Farm Store',
-      locationType: InventoryLocationType.FARM_STORE,
-    },
-    {
-      locationCode: 'SITE-STORE',
-      name: 'Construction Site Store',
-      locationType: InventoryLocationType.CONSTRUCTION_SITE,
-    },
-  ],
-  WESTSIDES: [
-    {
-      locationCode: 'MAIN-WH',
-      name: 'Main Warehouse',
-      locationType: InventoryLocationType.WAREHOUSE,
-    },
-    {
-      locationCode: 'SHOP-FLOOR',
-      name: 'Shop Floor',
-      locationType: InventoryLocationType.SHOP_FLOOR,
-    },
-  ],
-};
-
 interface ProductDef {
   productCode: string;
   name: string;
@@ -4594,25 +4538,7 @@ async function seedOperations() {
       }
     }
 
-    // 3. Inventory locations
-    const locDefs = COMPANY_LOCATIONS[code] ?? [];
-    for (const loc of locDefs) {
-      const existing = await prisma.inventoryLocation.findFirst({
-        where: { companyId: company.id, locationCode: loc.locationCode },
-      });
-      if (!existing) {
-        await prisma.inventoryLocation.create({
-          data: {
-            companyId: company.id,
-            locationCode: loc.locationCode,
-            name: loc.name,
-            locationType: loc.locationType,
-          },
-        });
-      }
-    }
-
-    // 4. Sample products
+    // 3. Sample products
     const prodDefs = COMPANY_PRODUCTS[code] ?? [];
     for (const prod of prodDefs) {
       const categoryId = catIdByName.get(prod.categoryName);
@@ -5085,43 +5011,6 @@ async function seedWestsides() {
           retailPrice: sp.retail,
           wholesalePrice: sp.wholesale,
           defaultSellingPrice: sp.retail,
-        },
-      });
-    }
-  }
-
-  // ── 7. Ensure inventory location (Main Warehouse) ──────────────────────────
-  const westsidesMainBranch = await prisma.branch.findFirst({
-    where: { division: { companyId: company.id } },
-  });
-  if (westsidesMainBranch) {
-    const locExisting = await prisma.inventoryLocation.findFirst({
-      where: { companyId: company.id, name: 'Main Warehouse' },
-    });
-    if (!locExisting) {
-      await prisma.inventoryLocation.create({
-        data: {
-          companyId: company.id,
-          branchId: westsidesMainBranch.id,
-          name: 'Main Warehouse',
-          locationCode: 'WH-MAIN',
-          locationType: InventoryLocationType.WAREHOUSE,
-          isActive: true,
-        },
-      });
-    }
-    const shopLocExisting = await prisma.inventoryLocation.findFirst({
-      where: { companyId: company.id, name: 'Shop Floor' },
-    });
-    if (!shopLocExisting) {
-      await prisma.inventoryLocation.create({
-        data: {
-          companyId: company.id,
-          branchId: westsidesMainBranch.id,
-          name: 'Shop Floor',
-          locationCode: 'WH-SHOP',
-          locationType: InventoryLocationType.SHOP_FLOOR,
-          isActive: true,
         },
       });
     }

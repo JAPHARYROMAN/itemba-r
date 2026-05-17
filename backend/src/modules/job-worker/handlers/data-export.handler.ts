@@ -291,7 +291,7 @@ export class DataExportJobHandler implements OnModuleInit {
           companyId,
           ...(dateRange ? { movementDate: dateRange } : {}),
           ...(filters.productId ? { productId: String(filters.productId) } : {}),
-          ...(filters.locationId ? { inventoryLocationId: String(filters.locationId) } : {}),
+          ...(filters.locationId ? { branchId: String(filters.locationId) } : {}),
         };
         return this.prisma.inventoryMovement.findMany({
           where,
@@ -303,7 +303,7 @@ export class DataExportJobHandler implements OnModuleInit {
             movementDate: true,
             movementType: true,
             productId: true,
-            inventoryLocationId: true,
+            branchId: true,
             quantity: true,
             unitCost: true,
             totalCost: true,

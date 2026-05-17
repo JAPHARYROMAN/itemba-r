@@ -312,17 +312,6 @@ export const SETTINGS_CATALOG: SettingEntry[] = [
     scope: 'COMPANY',
     status: 'BUILT_IN',
   },
-  {
-    id: 'ops.inventory-locations',
-    category: 'OPERATIONS',
-    name: 'Inventory Locations',
-    description: 'Stores, warehouses, transit points. Per division.',
-    href: '/operations/inventory-locations',
-    permission: 'inventory_locations.view',
-    scope: 'COMPANY',
-    status: 'BUILT_IN',
-  },
-
   // ── TEMPLATES ────────────────────────────────────────────────────────────
   {
     id: 'tpl.document-templates',

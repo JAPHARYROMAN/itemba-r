@@ -1,4 +1,11 @@
-import { IsString, IsOptional, IsDateString, IsArray, ValidateNested, IsNumber } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsDateString,
+  IsArray,
+  ValidateNested,
+  IsNumber,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class MaterialIssueLineDto {
@@ -14,9 +21,12 @@ export class CreateProjectMaterialIssueDto {
   @IsString() companyId!: string;
   @IsString() divisionId!: string;
   @IsString() projectId!: string;
+  @IsString() @IsOptional() branchId?: string;
   @IsString() @IsOptional() siteId?: string;
-  @IsString() inventoryLocationId!: string;
   @IsDateString() issueDate!: string;
   @IsString() @IsOptional() notes?: string;
-  @IsArray() @ValidateNested({ each: true }) @Type(() => MaterialIssueLineDto) lines!: MaterialIssueLineDto[];
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => MaterialIssueLineDto)
+  lines!: MaterialIssueLineDto[];
 }

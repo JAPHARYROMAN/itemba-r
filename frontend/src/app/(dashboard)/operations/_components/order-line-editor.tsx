@@ -24,12 +24,6 @@ export interface OrderUnitOption {
   symbol: string;
 }
 
-export interface OrderLocationOption {
-  id: string;
-  name: string;
-  locationCode: string;
-}
-
 export interface EditableOrderLine {
   productId: string;
   description: string;
@@ -38,7 +32,6 @@ export interface EditableOrderLine {
   unitPrice: number;
   discount: number;
   tax: number;
-  inventoryLocationId: string;
   batchNumber?: string;
   expiryDate?: string;
   batchId?: string;
@@ -51,9 +44,7 @@ interface OrderLineEditorProps<TLine extends EditableOrderLine> {
   lines: TLine[];
   products: OrderProductOption[];
   units: OrderUnitOption[];
-  locations: OrderLocationOption[];
   currency: string;
-  requireLocation?: boolean;
   onAddLine: () => void;
   onRemoveLine: (index: number) => void;
   onLineChange: (index: number, patch: Partial<TLine>) => void;
@@ -107,11 +98,10 @@ function lineTotal(line: EditableOrderLine) {
   return subtotal - numberOrZero(line.discount) + numberOrZero(line.tax);
 }
 
-function missingFields(line: EditableOrderLine, requireLocation: boolean) {
+function missingFields(line: EditableOrderLine) {
   const missing: string[] = [];
   if (!line.productId) missing.push('product');
   if (!line.unitId) missing.push('unit');
-  if (requireLocation && !line.inventoryLocationId) missing.push('location');
   if (numberOrZero(line.qty) <= 0) missing.push('quantity');
   return missing;
 }
@@ -121,9 +111,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
   lines,
   products,
   units,
-  locations,
   currency,
-  requireLocation = true,
   onAddLine,
   onRemoveLine,
   onLineChange,
@@ -145,9 +133,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
     [lines],
   );
   const total = totals.subtotal - totals.discount + totals.tax;
-  const invalidCount = lines.filter(
-    (line) => missingFields(line, requireLocation).length > 0,
-  ).length;
+  const invalidCount = lines.filter((line) => missingFields(line).length > 0).length;
   const unitPriceLabel = variant === 'purchase' ? 'Unit Cost' : 'Unit Price';
 
   function patchLine(index: number, patch: Partial<EditableOrderLine>) {
@@ -164,9 +150,6 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
       if (product.baseUnitId && !line.unitId) patch.unitId = product.baseUnitId;
       const defaultPrice = defaultPriceForProduct(product, variant);
       if (defaultPrice > 0 && numberOrZero(line.unitPrice) === 0) patch.unitPrice = defaultPrice;
-      if (requireLocation && locations.length === 1 && !line.inventoryLocationId) {
-        patch.inventoryLocationId = locations[0].id;
-      }
     }
 
     patchLine(index, patch);
@@ -200,7 +183,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
               !filteredProducts.some((product) => product.id === selectedProduct.id)
                 ? [selectedProduct, ...filteredProducts]
                 : filteredProducts;
-            const missing = missingFields(line, requireLocation);
+            const missing = missingFields(line);
 
             return (
               <div
@@ -381,32 +364,6 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         className={fieldClass}
                       />
                     </label>
-                    {requireLocation && (
-                      <label className="block">
-                        <span
-                          className="mb-1 block text-[12px] font-medium"
-                          style={{ color: 'var(--aurora-text-secondary)' }}
-                        >
-                          Location *
-                        </span>
-                        <select
-                          value={line.inventoryLocationId}
-                          onChange={(event) =>
-                            patchLine(index, { inventoryLocationId: event.target.value })
-                          }
-                          className={fieldClass}
-                        >
-                          <option value="">
-                            {locations.length ? 'Select location' : 'No locations loaded'}
-                          </option>
-                          {locations.map((location) => (
-                            <option key={location.id} value={location.id}>
-                              {location.locationCode} - {location.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    )}
                     <label className="block">
                       <span
                         className="mb-1 block text-[12px] font-medium"

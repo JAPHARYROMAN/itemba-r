@@ -52,13 +52,6 @@ interface Product {
   wholesalePrice?: number | string | null;
   retailPrice?: number | string | null;
 }
-interface InventoryLocation {
-  id: string;
-  name: string;
-  locationCode: string;
-  divisionId?: string | null;
-  branchId?: string | null;
-}
 interface Unit {
   id: string;
   name: string;
@@ -85,7 +78,6 @@ interface SalesOrderLine {
   unitPrice: number;
   discount: number;
   tax: number;
-  inventoryLocationId: string;
   batchId: string;
 }
 
@@ -186,7 +178,6 @@ const BLANK_LINE = (): SalesOrderLine => ({
   unitPrice: 0,
   discount: 0,
   tax: 0,
-  inventoryLocationId: '',
   batchId: '',
 });
 const blankForm = (): SalesOrderForm => ({
@@ -251,7 +242,6 @@ function SalesOrderModal({
                 unitPrice: Number(line.unitPrice ?? 0),
                 discount: Number(line.discount ?? line.discountAmount ?? 0),
                 tax: Number(line.tax ?? line.taxAmount ?? 0),
-                inventoryLocationId: line.inventoryLocationId ?? '',
                 batchId: line.batchId ?? '',
               }))
             : [BLANK_LINE()],
@@ -260,7 +250,6 @@ function SalesOrderModal({
   );
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
@@ -286,7 +275,6 @@ function SalesOrderModal({
   useEffect(() => {
     if (!form.companyId) {
       setCustomers([]);
-      setLocations([]);
       setEmployees([]);
       setCashAccounts([]);
       setDivisions([]);
@@ -316,7 +304,6 @@ function SalesOrderModal({
   useEffect(() => {
     if (!form.companyId || !form.branchId) {
       setCustomers([]);
-      setLocations([]);
       setEmployees([]);
       return;
     }
@@ -325,21 +312,12 @@ function SalesOrderModal({
       backendList<Customer>('/customers', {
         query: { companyId: form.companyId, branchId: form.branchId, limit: 200 },
       }),
-      backendList<InventoryLocation>('/inventory-locations', {
-        query: {
-          companyId: form.companyId,
-          divisionId: form.divisionId || undefined,
-          branchId: form.branchId,
-          limit: 200,
-        },
-      }),
       backendList<Employee>('/hr/employees', {
         query: { companyId: form.companyId, branchId: form.branchId, limit: 500 },
       }),
-    ]).then(([customerResult, locationResult, employeeResult]) => {
+    ]).then(([customerResult, employeeResult]) => {
       if (cancelled) return;
       setCustomers(customerResult.status === 'fulfilled' ? customerResult.value : []);
-      setLocations(locationResult.status === 'fulfilled' ? locationResult.value : []);
       setEmployees(employeeResult.status === 'fulfilled' ? employeeResult.value : []);
     });
     return () => {
@@ -404,8 +382,8 @@ function SalesOrderModal({
       setError('Add at least one line');
       return;
     }
-    if (form.lines.some((l) => !l.productId || !l.unitId || !l.inventoryLocationId)) {
-      setError('Each line needs product, unit, and location');
+    if (form.lines.some((l) => !l.productId || !l.unitId)) {
+      setError('Each line needs product and unit');
       return;
     }
     if (form.paymentMethod !== 'CREDIT' && !form.cashAccountId) {
@@ -431,7 +409,6 @@ function SalesOrderModal({
           unitPrice: Number(l.unitPrice) || 0,
           discountAmount: Number(l.discount) || 0,
           taxAmount: Number(l.tax) || 0,
-          inventoryLocationId: l.inventoryLocationId,
           ...(l.batchId ? { batchId: l.batchId } : {}),
         })),
       };
@@ -494,7 +471,6 @@ function SalesOrderModal({
                 lines: f.lines.map((line) => ({
                   ...line,
                   productId: '',
-                  inventoryLocationId: '',
                 })),
               }));
             }}
@@ -534,7 +510,6 @@ function SalesOrderModal({
                 lines: f.lines.map((line) => ({
                   ...line,
                   productId: '',
-                  inventoryLocationId: '',
                 })),
               }));
             }}
@@ -557,7 +532,7 @@ function SalesOrderModal({
                 branchId,
                 customerId: '',
                 salespersonId: '',
-                lines: f.lines.map((line) => ({ ...line, inventoryLocationId: '' })),
+                lines: f.lines,
               }));
             }}
             placeholder={form.divisionId ? 'Select branch' : 'Select division first'}
@@ -682,7 +657,6 @@ function SalesOrderModal({
           lines={form.lines}
           products={products}
           units={units}
-          locations={locations}
           currency={form.currency}
           onAddLine={addLine}
           onRemoveLine={removeLine}

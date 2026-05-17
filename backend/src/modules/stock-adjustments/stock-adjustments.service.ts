@@ -15,7 +15,6 @@ import { UpdateStockAdjustmentDto } from './dto/update-stock-adjustment.dto';
 type StockAdjustmentReferenceIds = {
   divisionId?: string | null;
   branchId?: string | null;
-  inventoryLocationId?: string | null;
   lines?: StockAdjustmentLineDto[];
 };
 
@@ -57,7 +56,7 @@ export class StockAdjustmentsService {
     if (divisionId) where.divisionId = divisionId;
     if (branchId) where.branchId = branchId;
     if (status) where.status = status;
-    if (locationId) where.inventoryLocationId = locationId;
+    if (locationId) where.branchId = locationId;
     if (dateFrom || dateTo) {
       where.createdAt = {};
       if (dateFrom) where.createdAt.gte = new Date(dateFrom);
@@ -69,7 +68,7 @@ export class StockAdjustmentsService {
         where,
         include: {
           company: { select: { id: true, name: true, code: true } },
-          inventoryLocation: { select: { id: true, name: true, locationCode: true } },
+          branch: { select: { id: true, name: true, code: true } },
           createdBy: { select: { id: true, fullName: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -87,7 +86,7 @@ export class StockAdjustmentsService {
       where: { id, deletedAt: null },
       include: {
         company: { select: { id: true, name: true, code: true } },
-        inventoryLocation: { select: { id: true, name: true, locationCode: true } },
+        branch: { select: { id: true, name: true, code: true } },
         createdBy: { select: { id: true, fullName: true } },
         approvedBy: { select: { id: true, fullName: true } },
         postedBy: { select: { id: true, fullName: true } },
@@ -116,7 +115,6 @@ export class StockAdjustmentsService {
         companyId: dto.companyId,
         divisionId: dto.divisionId,
         branchId: dto.branchId,
-        inventoryLocationId: dto.inventoryLocationId,
         reason: dto.reason,
         notes: dto.notes,
         status: 'DRAFT',
@@ -155,8 +153,7 @@ export class StockAdjustmentsService {
     }
     await this.assertReferencesBelongToCompany(existing.companyId, {
       divisionId: existing.divisionId,
-      branchId: existing.branchId,
-      inventoryLocationId: dto.inventoryLocationId ?? existing.inventoryLocationId,
+      branchId: dto.branchId ?? existing.branchId,
       lines: dto.lines,
     });
 
@@ -165,9 +162,7 @@ export class StockAdjustmentsService {
       data: {
         ...(dto.reason !== undefined && { reason: dto.reason }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
-        ...(dto.inventoryLocationId !== undefined && {
-          inventoryLocationId: dto.inventoryLocationId,
-        }),
+        ...(dto.branchId !== undefined && { branchId: dto.branchId }),
         ...(dto.lines && {
           lines: {
             deleteMany: {},
@@ -279,6 +274,9 @@ export class StockAdjustmentsService {
     if (existing.status !== 'APPROVED') {
       throw new BadRequestException('Only APPROVED adjustments can be posted');
     }
+    if (!existing.branchId) {
+      throw new BadRequestException('Branch/location is required to post stock adjustment');
+    }
 
     for (const line of existing.lines) {
       const variance = Number(line.varianceQuantity);
@@ -288,7 +286,6 @@ export class StockAdjustmentsService {
       await this.inventoryMovements.createMovement({
         companyId: existing.companyId,
         productId: line.productId,
-        inventoryLocationId: existing.inventoryLocationId,
         movementType: movementType as any,
         quantity: Math.abs(variance),
         unitId: line.unitId,
@@ -358,20 +355,13 @@ export class StockAdjustmentsService {
     if (refs.branchId) {
       const branch = await this.prisma.branch.findFirst({
         where: { id: refs.branchId, deletedAt: null },
-        select: { division: { select: { companyId: true } } },
+        select: { divisionId: true, division: { select: { companyId: true } } },
       });
       if (!branch || branch.division.companyId !== companyId) {
         throw new BadRequestException('Branch does not belong to this company');
       }
-    }
-
-    if (refs.inventoryLocationId) {
-      const location = await this.prisma.inventoryLocation.findFirst({
-        where: { id: refs.inventoryLocationId, deletedAt: null, isActive: true },
-        select: { companyId: true },
-      });
-      if (!location || location.companyId !== companyId) {
-        throw new BadRequestException('Inventory location does not belong to this company');
+      if (refs.divisionId && branch.divisionId !== refs.divisionId) {
+        throw new BadRequestException('Branch does not belong to the selected division');
       }
     }
 

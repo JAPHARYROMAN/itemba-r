@@ -28,9 +28,9 @@ export class ProductBatchesService {
         batchNumber,
         companyId: dto.companyId,
         productId: dto.productId,
+        branchId: dto.branchId,
         supplierId: dto.supplierId,
         purchaseOrderId: dto.purchaseOrderId,
-        inventoryLocationId: dto.inventoryLocationId,
         manufactureDate: dto.manufactureDate ? new Date(dto.manufactureDate) : undefined,
         expiryDate: dto.expiryDate ? new Date(dto.expiryDate) : undefined,
         receivedDate: dto.receivedDate ? new Date(dto.receivedDate) : undefined,
@@ -54,16 +54,21 @@ export class ProductBatchesService {
   }
 
   async findAll(query: QueryProductBatchDto, user?: any) {
-    const { page = 1, limit = 20, companyId, productId, status, inventoryLocationId } = query;
+    const { page = 1, limit = 20, companyId, productId, status, branchId } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
     applyCompanyScopeWhere(where, user, companyId);
     if (productId) where.productId = productId;
     if (status) where.status = status;
-    if (inventoryLocationId) where.inventoryLocationId = inventoryLocationId;
+    if (branchId) where.branchId = branchId;
 
     const [data, total] = await Promise.all([
-      this.prisma.productBatch.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
+      this.prisma.productBatch.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
       this.prisma.productBatch.count({ where }),
     ]);
     return { data, total, page, limit };
@@ -71,14 +76,22 @@ export class ProductBatchesService {
 
   async findExpiring(companyId?: string, user?: any) {
     const cutoff = new Date(Date.now() + 30 * 24 * 3600 * 1000);
-    const where: any = { status: 'ACTIVE', expiryDate: { lte: cutoff, not: null }, deletedAt: null };
+    const where: any = {
+      status: 'ACTIVE',
+      expiryDate: { lte: cutoff, not: null },
+      deletedAt: null,
+    };
     applyCompanyScopeWhere(where, user, companyId);
     return this.prisma.productBatch.findMany({ where, orderBy: { expiryDate: 'asc' } });
   }
 
   async findExpired(companyId?: string, user?: any) {
     const now = new Date();
-    const where: any = { expiryDate: { lt: now }, status: { in: ['ACTIVE', 'EXPIRED'] }, deletedAt: null };
+    const where: any = {
+      expiryDate: { lt: now },
+      status: { in: ['ACTIVE', 'EXPIRED'] },
+      deletedAt: null,
+    };
     applyCompanyScopeWhere(where, user, companyId);
     return this.prisma.productBatch.findMany({ where, orderBy: { expiryDate: 'asc' } });
   }
@@ -101,10 +114,16 @@ export class ProductBatchesService {
     const record = await this.prisma.productBatch.update({
       where: { id },
       data: {
-        ...(dto.inventoryLocationId !== undefined && { inventoryLocationId: dto.inventoryLocationId }),
-        ...(dto.expiryDate !== undefined && { expiryDate: dto.expiryDate ? new Date(dto.expiryDate) : null }),
-        ...(dto.manufactureDate !== undefined && { manufactureDate: dto.manufactureDate ? new Date(dto.manufactureDate) : null }),
-        ...(dto.receivedDate !== undefined && { receivedDate: dto.receivedDate ? new Date(dto.receivedDate) : null }),
+        ...(dto.branchId !== undefined && { branchId: dto.branchId }),
+        ...(dto.expiryDate !== undefined && {
+          expiryDate: dto.expiryDate ? new Date(dto.expiryDate) : null,
+        }),
+        ...(dto.manufactureDate !== undefined && {
+          manufactureDate: dto.manufactureDate ? new Date(dto.manufactureDate) : null,
+        }),
+        ...(dto.receivedDate !== undefined && {
+          receivedDate: dto.receivedDate ? new Date(dto.receivedDate) : null,
+        }),
         ...(dto.unitCost !== undefined && { unitCost: dto.unitCost }),
         ...(dto.status && { status: dto.status }),
         ...(dto.notes !== undefined && { notes: dto.notes }),

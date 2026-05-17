@@ -42,10 +42,6 @@ export class PurchaseOrderLineDto {
 
   @IsOptional()
   @IsString()
-  inventoryLocationId?: string;
-
-  @IsOptional()
-  @IsString()
   batchNumber?: string;
 
   @IsOptional()

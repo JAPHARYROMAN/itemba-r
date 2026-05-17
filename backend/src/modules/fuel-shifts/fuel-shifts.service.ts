@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
@@ -50,8 +46,16 @@ export class FuelShiftsService {
     },
     user: AuthUser,
   ) {
-    const { page = 1, limit = 20, companyId, divisionId, branchId, status, dateFrom, dateTo } =
-      query;
+    const {
+      page = 1,
+      limit = 20,
+      companyId,
+      divisionId,
+      branchId,
+      status,
+      dateFrom,
+      dateTo,
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {
@@ -76,20 +80,20 @@ export class FuelShiftsService {
           supervisorApproved: { select: { id: true, fullName: true } },
           managerApproved: { select: { id: true, fullName: true } },
           attendants: {
-          include: {
-            attendant: { select: { id: true, fullName: true, email: true } },
-            employee: {
-              select: {
-                id: true,
-                fullName: true,
-                employeeCode: true,
-                email: true,
-                branchId: true,
+            include: {
+              attendant: { select: { id: true, fullName: true, email: true } },
+              employee: {
+                select: {
+                  id: true,
+                  fullName: true,
+                  employeeCode: true,
+                  email: true,
+                  branchId: true,
+                },
               },
+              assignedPump: { select: { id: true, pumpCode: true, pumpName: true } },
             },
-            assignedPump: { select: { id: true, pumpCode: true, pumpName: true } },
           },
-        },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -136,7 +140,10 @@ export class FuelShiftsService {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
 
     const userId = user.id;
-    const shiftNumber = await this.codes.next({ entityType: 'FuelShift', companyId: dto.companyId });
+    const shiftNumber = await this.codes.next({
+      entityType: 'FuelShift',
+      companyId: dto.companyId,
+    });
 
     // Find active nozzles for branch
     const nozzles = await this.prisma.fuelNozzle.findMany({
@@ -354,9 +361,7 @@ export class FuelShiftsService {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     const userId = user.id;
     if (!['SUBMITTED', 'SUPERVISOR_APPROVED'].includes(existing.status)) {
-      throw new BadRequestException(
-        'Only SUBMITTED or SUPERVISOR_APPROVED shifts can be rejected',
-      );
+      throw new BadRequestException('Only SUBMITTED or SUPERVISOR_APPROVED shifts can be rejected');
     }
 
     const record = await this.prisma.fuelShift.update({
@@ -422,7 +427,9 @@ export class FuelShiftsService {
       );
 
       const tankIds = Array.from(new Set(validatedReadings.map(({ reading }) => reading.tankId)));
-      const productIds = Array.from(new Set(validatedReadings.map(({ reading }) => reading.productId)));
+      const productIds = Array.from(
+        new Set(validatedReadings.map(({ reading }) => reading.productId)),
+      );
 
       const [tanks, products] = await Promise.all([
         tx.fuelTank.findMany({
@@ -433,7 +440,6 @@ export class FuelShiftsService {
             companyId: true,
             branchId: true,
             productId: true,
-            inventoryLocationId: true,
           },
         }),
         tx.product.findMany({
@@ -445,31 +451,47 @@ export class FuelShiftsService {
       const productById = new Map(products.map((product) => [product.id, product]));
 
       for (const { reading, litresSold } of validatedReadings) {
-        if (reading.companyId !== lockedShift.companyId || reading.branchId !== lockedShift.branchId) {
-          throw new BadRequestException(`Nozzle reading ${reading.id} does not belong to this shift company/branch`);
+        if (
+          reading.companyId !== lockedShift.companyId ||
+          reading.branchId !== lockedShift.branchId
+        ) {
+          throw new BadRequestException(
+            `Nozzle reading ${reading.id} does not belong to this shift company/branch`,
+          );
         }
 
         if (litresSold <= 0) continue;
 
         const tank = tankById.get(reading.tankId);
-        if (!tank) throw new BadRequestException(`Fuel tank ${reading.tankId} for reading ${reading.id} was not found`);
-        if (!tank.inventoryLocationId) {
-          throw new BadRequestException(`Fuel tank "${tank.tankName}" is missing an inventory location`);
-        }
+        if (!tank)
+          throw new BadRequestException(
+            `Fuel tank ${reading.tankId} for reading ${reading.id} was not found`,
+          );
         if (tank.companyId !== reading.companyId || tank.branchId !== reading.branchId) {
-          throw new BadRequestException(`Fuel tank "${tank.tankName}" does not belong to this shift company/branch`);
+          throw new BadRequestException(
+            `Fuel tank "${tank.tankName}" does not belong to this shift company/branch`,
+          );
         }
         if (tank.productId !== reading.productId) {
-          throw new BadRequestException(`Fuel tank "${tank.tankName}" product does not match nozzle reading ${reading.id}`);
+          throw new BadRequestException(
+            `Fuel tank "${tank.tankName}" product does not match nozzle reading ${reading.id}`,
+          );
         }
 
         const product = productById.get(reading.productId);
-        if (!product) throw new BadRequestException(`Product ${reading.productId} for reading ${reading.id} was not found`);
+        if (!product)
+          throw new BadRequestException(
+            `Product ${reading.productId} for reading ${reading.id} was not found`,
+          );
         if (product.companyId !== reading.companyId) {
-          throw new BadRequestException(`Product "${product.name}" does not belong to this shift company`);
+          throw new BadRequestException(
+            `Product "${product.name}" does not belong to this shift company`,
+          );
         }
         if (!product.baseUnitId) {
-          throw new BadRequestException(`Product "${product.name}" has no base unit for inventory movement`);
+          throw new BadRequestException(
+            `Product "${product.name}" has no base unit for inventory movement`,
+          );
         }
       }
 
@@ -496,7 +518,6 @@ export class FuelShiftsService {
             companyId: reading.companyId,
             branchId: reading.branchId,
             productId: reading.productId,
-            inventoryLocationId: tank.inventoryLocationId!,
             movementType: 'SALE_ISSUE',
             quantity: litresSold,
             unitId: product.baseUnitId,
@@ -639,7 +660,9 @@ export class FuelShiftsService {
       },
       include: {
         attendant: { select: { id: true, fullName: true, email: true } },
-        employee: { select: { id: true, fullName: true, employeeCode: true, email: true, branchId: true } },
+        employee: {
+          select: { id: true, fullName: true, employeeCode: true, email: true, branchId: true },
+        },
         assignedPump: { select: { id: true, pumpCode: true, pumpName: true } },
       },
     });
@@ -680,7 +703,9 @@ export class FuelShiftsService {
       },
       include: {
         attendant: { select: { id: true, fullName: true, email: true } },
-        employee: { select: { id: true, fullName: true, employeeCode: true, email: true, branchId: true } },
+        employee: {
+          select: { id: true, fullName: true, employeeCode: true, email: true, branchId: true },
+        },
         assignedPump: { select: { id: true, pumpCode: true, pumpName: true } },
       },
     });
@@ -786,9 +811,7 @@ export class FuelShiftsService {
       const explicit = shift.nozzleReadings.filter((r) => r.attendantId === row.attendantId);
       // Step 2: readings on this attendant's assigned pump that have no explicit attendant
       const fromPump = row.assignedPumpId
-        ? shift.nozzleReadings.filter(
-            (r) => !r.attendantId && r.pumpId === row.assignedPumpId,
-          )
+        ? shift.nozzleReadings.filter((r) => !r.attendantId && r.pumpId === row.assignedPumpId)
         : [];
       const readings = [...explicit, ...fromPump];
       const litresSold = readings.reduce((s, r) => s + Number(r.litresSold), 0);
@@ -879,7 +902,10 @@ export class FuelShiftsService {
     ]);
 
     const totalLitresSold = readings.reduce((sum, reading) => sum + Number(reading.litresSold), 0);
-    const totalExpectedSales = readings.reduce((sum, reading) => sum + Number(reading.expectedAmount), 0);
+    const totalExpectedSales = readings.reduce(
+      (sum, reading) => sum + Number(reading.expectedAmount),
+      0,
+    );
     const totalCollections = Number(collectionsAgg._sum.amount ?? 0);
 
     return {

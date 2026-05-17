@@ -1,6 +1,18 @@
-import { IsString, IsOptional, IsEnum, IsNumber, IsDateString, IsArray, ValidateNested } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsNumber,
+  IsDateString,
+  IsArray,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
-import { RestaurantOrderType, RestaurantOrderStatus, RestaurantOrderPaymentStatus } from '@prisma/client';
+import {
+  RestaurantOrderType,
+  RestaurantOrderStatus,
+  RestaurantOrderPaymentStatus,
+} from '@prisma/client';
 
 export class CreateRestaurantOrderLineDto {
   @IsString() menuItemId!: string;
@@ -10,7 +22,6 @@ export class CreateRestaurantOrderLineDto {
   @IsNumber() @IsOptional() @Type(() => Number) discountAmount?: number;
   @IsNumber() @IsOptional() @Type(() => Number) taxAmount?: number;
   @IsString() @IsOptional() productId?: string;
-  @IsString() @IsOptional() inventoryLocationId?: string;
   @IsString() @IsOptional() notes?: string;
 }
 
@@ -35,6 +46,9 @@ export class CreateRestaurantOrderDto {
   @IsString() @IsOptional() waiterId?: string;
   @IsString() @IsOptional() cashierId?: string;
   @IsString() @IsOptional() notes?: string;
-  @IsArray() @IsOptional() @ValidateNested({ each: true }) @Type(() => CreateRestaurantOrderLineDto)
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => CreateRestaurantOrderLineDto)
   lines?: CreateRestaurantOrderLineDto[];
 }

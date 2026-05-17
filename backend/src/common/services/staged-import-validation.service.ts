@@ -58,8 +58,8 @@ const IMPORT_RULES: Record<ImportEntityType, ImportRule> = {
     uniqueFieldSets: [['accountCode']],
   },
   stock: {
-    requiredFields: ['companyId', 'productCode', 'inventoryLocationCode', 'quantityOnHand'],
-    uniqueFieldSets: [['productCode', 'inventoryLocationCode']],
+    requiredFields: ['companyId', 'productCode', 'branchCode', 'quantityOnHand'],
+    uniqueFieldSets: [['productCode', 'branchCode']],
   },
 };
 

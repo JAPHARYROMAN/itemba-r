@@ -6,7 +6,6 @@ const HARDENED_OPERATION_PAGES = [
   'src/app/(dashboard)/operations/page.tsx',
   'src/app/(dashboard)/operations/customers/page.tsx',
   'src/app/(dashboard)/operations/inventory-balances/page.tsx',
-  'src/app/(dashboard)/operations/inventory-locations/page.tsx',
   'src/app/(dashboard)/operations/inventory-movements/page.tsx',
   'src/app/(dashboard)/operations/product-categories/page.tsx',
   'src/app/(dashboard)/operations/products/page.tsx',

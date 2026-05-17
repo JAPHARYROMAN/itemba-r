@@ -27,45 +27,94 @@ export class HarvestRecordsService {
   ) {}
 
   async create(dto: CreateHarvestRecordDto, userId: string) {
-    const harvestNumber = await this.codes.next({ entityType: 'HarvestRecord', companyId: dto.companyId });
+    const harvestNumber = await this.codes.next({
+      entityType: 'HarvestRecord',
+      companyId: dto.companyId,
+    });
     const harvest = await this.prisma.harvestRecord.create({
       data: { ...dto, harvestNumber, harvestDate: new Date(dto.harvestDate), createdById: userId },
     });
-    await this.audit.log({ userId, action: 'CREATE', entityType: 'HarvestRecord', entityId: harvest.id, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId,
+      action: 'CREATE',
+      entityType: 'HarvestRecord',
+      entityId: harvest.id,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
     return harvest;
   }
 
-  async findAll(cropSeasonId?: string, farmId?: string, companyId?: string, page = 1, limit = 20, user?: any) {
+  async findAll(
+    cropSeasonId?: string,
+    farmId?: string,
+    companyId?: string,
+    page = 1,
+    limit = 20,
+    user?: any,
+  ) {
     const where: any = { deletedAt: null };
     if (cropSeasonId) where.cropSeasonId = cropSeasonId;
     if (farmId) where.farmId = farmId;
     applyCompanyScopeWhere(where, user, companyId);
     const [data, total] = await this.prisma.$transaction([
-      this.prisma.harvestRecord.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { harvestDate: 'desc' }, include: { farm: { select: { name: true } }, cropSeason: { select: { seasonName: true } }, unit: { select: { symbol: true } } } }),
+      this.prisma.harvestRecord.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { harvestDate: 'desc' },
+        include: {
+          farm: { select: { name: true } },
+          cropSeason: { select: { seasonName: true } },
+          unit: { select: { symbol: true } },
+        },
+      }),
       this.prisma.harvestRecord.count({ where }),
     ]);
     return { data, total, page, limit };
   }
 
   async findOne(id: string) {
-    const h = await this.prisma.harvestRecord.findFirst({ where: { id, deletedAt: null }, include: { farm: true, field: true, cropSeason: true, product: true, unit: true } });
+    const h = await this.prisma.harvestRecord.findFirst({
+      where: { id, deletedAt: null },
+      include: { farm: true, field: true, cropSeason: true, product: true, unit: true },
+    });
     if (!h) throw new NotFoundException('Harvest record not found');
     return h;
   }
 
   async submit(id: string, userId: string) {
     const h = await this.findOne(id);
-    if (h.status !== HarvestRecordStatus.DRAFT) throw new BadRequestException('Only DRAFT harvests can be submitted');
-    const updated = await this.prisma.harvestRecord.update({ where: { id }, data: { status: HarvestRecordStatus.SUBMITTED } });
-    await this.audit.log({ userId, action: 'SUBMIT', entityType: 'HarvestRecord', entityId: id, newValue: {} });
+    if (h.status !== HarvestRecordStatus.DRAFT)
+      throw new BadRequestException('Only DRAFT harvests can be submitted');
+    const updated = await this.prisma.harvestRecord.update({
+      where: { id },
+      data: { status: HarvestRecordStatus.SUBMITTED },
+    });
+    await this.audit.log({
+      userId,
+      action: 'SUBMIT',
+      entityType: 'HarvestRecord',
+      entityId: id,
+      newValue: {},
+    });
     return updated;
   }
 
   async approve(id: string, userId: string) {
     const h = await this.findOne(id);
-    if (h.status !== HarvestRecordStatus.SUBMITTED) throw new BadRequestException('Only SUBMITTED harvests can be approved');
-    const updated = await this.prisma.harvestRecord.update({ where: { id }, data: { status: HarvestRecordStatus.APPROVED, approvedById: userId } });
-    await this.audit.log({ userId, action: 'APPROVE', entityType: 'HarvestRecord', entityId: id, newValue: {} });
+    if (h.status !== HarvestRecordStatus.SUBMITTED)
+      throw new BadRequestException('Only SUBMITTED harvests can be approved');
+    const updated = await this.prisma.harvestRecord.update({
+      where: { id },
+      data: { status: HarvestRecordStatus.APPROVED, approvedById: userId },
+    });
+    await this.audit.log({
+      userId,
+      action: 'APPROVE',
+      entityType: 'HarvestRecord',
+      entityId: id,
+      newValue: {},
+    });
     return updated;
   }
 
@@ -90,8 +139,10 @@ export class HarvestRecordsService {
    */
   async post(id: string, userId: string) {
     const h = await this.findOne(id);
-    if (h.status !== HarvestRecordStatus.APPROVED) throw new BadRequestException('Only APPROVED harvests can be posted');
-    if (!h.productId || !h.inventoryLocationId) throw new BadRequestException('Product and inventory location required to post harvest');
+    if (h.status !== HarvestRecordStatus.APPROVED)
+      throw new BadRequestException('Only APPROVED harvests can be posted');
+    if (!h.productId || !h.branchId)
+      throw new BadRequestException('Product and branch/location are required to post harvest');
 
     const quantity = Number(h.quantity);
     const unitValue = Number(h.estimatedUnitValue ?? 0);
@@ -104,14 +155,18 @@ export class HarvestRecordsService {
 
     await this.prisma.$transaction(async (tx) => {
       // Inventory movement — PRODUCTION_IN. Carry cost so downstream COGS works.
-      const movementNumber = await this.codes.next({ entityType: 'InventoryMovement', companyId: h.companyId, tx });
+      const movementNumber = await this.codes.next({
+        entityType: 'InventoryMovement',
+        companyId: h.companyId,
+        tx,
+      });
       await tx.inventoryMovement.create({
         data: {
           movementNumber,
           companyId: h.companyId,
           divisionId: h.divisionId,
+          branchId: h.branchId,
           productId: h.productId!,
-          inventoryLocationId: h.inventoryLocationId!,
           movementType: InventoryMovementType.PRODUCTION_IN,
           quantity,
           unitId: h.unitId,
@@ -131,13 +186,14 @@ export class HarvestRecordsService {
         where: {
           companyId: h.companyId,
           productId: h.productId!,
-          inventoryLocationId: h.inventoryLocationId!,
+          branchId: h.branchId,
         },
       });
       if (existing) {
         const newQty = round4(Number(existing.quantityOnHand) + quantity);
         const newTotalValue = round2(Number(existing.totalValue) + (hasCostBasis ? totalValue : 0));
-        const newAverage = newQty > 0 ? round4(newTotalValue / newQty) : Number(existing.averageCost);
+        const newAverage =
+          newQty > 0 ? round4(newTotalValue / newQty) : Number(existing.averageCost);
         await tx.inventoryBalance.update({
           where: { id: existing.id },
           data: {
@@ -152,7 +208,7 @@ export class HarvestRecordsService {
           data: {
             companyId: h.companyId,
             productId: h.productId!,
-            inventoryLocationId: h.inventoryLocationId!,
+            branchId: h.branchId,
             quantityOnHand: quantity,
             totalValue: hasCostBasis ? totalValue : 0,
             averageCost: hasCostBasis ? unitValue : 0,
@@ -180,37 +236,42 @@ export class HarvestRecordsService {
         const inventoryAssetId = accounts.find((a) => a.accountCode === '1200')?.id;
         const cropIncomeId = accounts.find((a) => a.accountCode === '4200')?.id;
         if (inventoryAssetId && cropIncomeId) {
-          const journalNumber = await this.codes.next({ entityType: 'JournalEntry', companyId: h.companyId, tx });
-          const je = await this.postingEngine.postLines({
-            journalNumber,
+          const journalNumber = await this.codes.next({
+            entityType: 'JournalEntry',
             companyId: h.companyId,
-            transactionDate: h.harvestDate,
-            description: `Harvest ${h.harvestNumber} — ${h.farm.name}`,
-            referenceType: 'HarvestRecord',
-            referenceId: id,
-            status: 'DRAFT',
-            userId,
-            moduleName: 'harvest_records',
-            lines: [
-              {
-                accountId: inventoryAssetId,
-                description: `Harvested produce — ${h.product?.name ?? 'crop'}`,
-                debit: totalValue,
-                credit: 0,
-              },
-              {
-                accountId: cropIncomeId,
-                description: `Production income — ${h.harvestNumber}`,
-                debit: 0,
-                credit: totalValue,
-              },
-            ],
-          }, tx);
+            tx,
+          });
+          const je = await this.postingEngine.postLines(
+            {
+              journalNumber,
+              companyId: h.companyId,
+              transactionDate: h.harvestDate,
+              description: `Harvest ${h.harvestNumber} — ${h.farm.name}`,
+              referenceType: 'HarvestRecord',
+              referenceId: id,
+              status: 'DRAFT',
+              userId,
+              moduleName: 'harvest_records',
+              lines: [
+                {
+                  accountId: inventoryAssetId,
+                  description: `Harvested produce — ${h.product?.name ?? 'crop'}`,
+                  debit: totalValue,
+                  credit: 0,
+                },
+                {
+                  accountId: cropIncomeId,
+                  description: `Production income — ${h.harvestNumber}`,
+                  debit: 0,
+                  credit: totalValue,
+                },
+              ],
+            },
+            tx,
+          );
           journalEntryId = je.id;
         } else {
-          this.logger.warn(
-            `Harvest ${h.harvestNumber}: COA missing 1200 or 4200 — JE skipped`,
-          );
+          this.logger.warn(`Harvest ${h.harvestNumber}: COA missing 1200 or 4200 — JE skipped`);
         }
       } else {
         this.logger.warn(
@@ -241,26 +302,56 @@ export class HarvestRecordsService {
 
   async reject(id: string, userId: string) {
     const h = await this.findOne(id);
-    if (!([HarvestRecordStatus.SUBMITTED, HarvestRecordStatus.APPROVED] as string[]).includes(h.status)) throw new BadRequestException('Cannot reject in current state');
-    const updated = await this.prisma.harvestRecord.update({ where: { id }, data: { status: HarvestRecordStatus.REJECTED } });
-    await this.audit.log({ userId, action: 'REJECT', entityType: 'HarvestRecord', entityId: id, newValue: {} });
+    if (
+      !([HarvestRecordStatus.SUBMITTED, HarvestRecordStatus.APPROVED] as string[]).includes(
+        h.status,
+      )
+    )
+      throw new BadRequestException('Cannot reject in current state');
+    const updated = await this.prisma.harvestRecord.update({
+      where: { id },
+      data: { status: HarvestRecordStatus.REJECTED },
+    });
+    await this.audit.log({
+      userId,
+      action: 'REJECT',
+      entityType: 'HarvestRecord',
+      entityId: id,
+      newValue: {},
+    });
     return updated;
   }
 
   async update(id: string, dto: UpdateHarvestRecordDto, userId: string) {
     const h = await this.findOne(id);
-    if (h.status === HarvestRecordStatus.POSTED) throw new BadRequestException('Cannot update a posted harvest record');
-    const updated = await this.prisma.harvestRecord.update({ where: { id }, data: { ...dto, harvestDate: dto.harvestDate ? new Date(dto.harvestDate) : undefined } });
-    await this.audit.log({ userId, action: 'UPDATE', entityType: 'HarvestRecord', entityId: id, newValue: dto as unknown as Record<string, unknown> });
+    if (h.status === HarvestRecordStatus.POSTED)
+      throw new BadRequestException('Cannot update a posted harvest record');
+    const updated = await this.prisma.harvestRecord.update({
+      where: { id },
+      data: { ...dto, harvestDate: dto.harvestDate ? new Date(dto.harvestDate) : undefined },
+    });
+    await this.audit.log({
+      userId,
+      action: 'UPDATE',
+      entityType: 'HarvestRecord',
+      entityId: id,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
     return updated;
   }
 
   async remove(id: string, userId: string) {
     const h = await this.findOne(id);
-    if (h.status === HarvestRecordStatus.POSTED) throw new BadRequestException('Cannot delete a posted harvest record');
+    if (h.status === HarvestRecordStatus.POSTED)
+      throw new BadRequestException('Cannot delete a posted harvest record');
     await this.prisma.harvestRecord.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.audit.log({ userId, action: 'DELETE', entityType: 'HarvestRecord', entityId: id, newValue: {} });
+    await this.audit.log({
+      userId,
+      action: 'DELETE',
+      entityType: 'HarvestRecord',
+      entityId: id,
+      newValue: {},
+    });
     return { message: 'Harvest record deleted' };
   }
-
 }

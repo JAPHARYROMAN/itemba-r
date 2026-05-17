@@ -18,7 +18,10 @@ export class FuelDeliveriesService {
   ) {}
 
   async create(dto: CreateFuelDeliveryDto, user: AuthUser) {
-    const deliveryNumber = await this.codes.next({ entityType: 'FuelDelivery', companyId: dto.companyId });
+    const deliveryNumber = await this.codes.next({
+      entityType: 'FuelDelivery',
+      companyId: dto.companyId,
+    });
     const totalCost =
       dto.totalCost ?? (dto.unitCost != null ? dto.acceptedLitres * dto.unitCost : undefined);
 
@@ -109,7 +112,8 @@ export class FuelDeliveriesService {
     }
 
     const acceptedLitres = dto.acceptedLitres ?? Number(existing.acceptedLitres);
-    const unitCost = dto.unitCost ?? (existing.unitCost != null ? Number(existing.unitCost) : undefined);
+    const unitCost =
+      dto.unitCost ?? (existing.unitCost != null ? Number(existing.unitCost) : undefined);
     const totalCost = dto.totalCost ?? (unitCost != null ? acceptedLitres * unitCost : undefined);
 
     const updated = await this.prisma.fuelDelivery.update({
@@ -203,7 +207,7 @@ export class FuelDeliveriesService {
 
     const notes = reason
       ? `[REJECTED] ${reason}${existing.notes ? `\n${existing.notes}` : ''}`
-      : existing.notes ?? undefined;
+      : (existing.notes ?? undefined);
 
     const updated = await this.prisma.fuelDelivery.update({
       where: { id },
@@ -231,7 +235,7 @@ export class FuelDeliveriesService {
 
     const notes = reason
       ? `[CANCELLED] ${reason}${existing.notes ? `\n${existing.notes}` : ''}`
-      : existing.notes ?? undefined;
+      : (existing.notes ?? undefined);
 
     const updated = await this.prisma.fuelDelivery.update({
       where: { id },
@@ -270,7 +274,6 @@ export class FuelDeliveriesService {
       companyId: delivery.companyId,
       branchId: delivery.branchId,
       productId: delivery.productId,
-      inventoryLocationId: tank.inventoryLocationId ?? '',
       movementType: InventoryMovementType.PURCHASE_RECEIPT,
       quantity: Number(delivery.acceptedLitres),
       unitId: (product as unknown as { unitId?: string })?.unitId ?? '',

@@ -231,12 +231,6 @@ const NAV: NavItem[] = [
         permission: 'units.view',
       },
       {
-        href: '/operations/inventory-locations',
-        label: 'Inventory Locations',
-        iconKey: 'building',
-        permission: 'inventory.view',
-      },
-      {
         href: '/operations/inventory-balances',
         label: 'Inventory Balances',
         iconKey: 'barChart',

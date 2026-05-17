@@ -76,13 +76,13 @@ describe('StagedImportValidationService', () => {
       {
         companyId: 'company-1',
         productCode: 'SKU-001',
-        inventoryLocationCode: 'MAIN',
+        branchCode: 'MAIN',
         quantityOnHand: 10,
       },
       {
         companyId: 'company-1',
         productCode: 'SKU-001',
-        inventoryLocationCode: 'MAIN',
+        branchCode: 'MAIN',
         quantityOnHand: 5,
       },
     ]);
@@ -90,7 +90,7 @@ describe('StagedImportValidationService', () => {
     expect(report.canCommit).toBe(false);
     expect(report.issues).toEqual([
       expect.objectContaining({
-        field: 'productCode+inventoryLocationCode',
+        field: 'productCode+branchCode',
         code: 'DUPLICATE_VALUE',
       }),
     ]);

@@ -47,7 +47,10 @@ export class FoliosService {
     });
     if (!booking) throw new NotFoundException('Booking not found');
 
-    const folioNumber = await this.codes.next({ entityType: 'GuestFolio', companyId: booking.companyId });
+    const folioNumber = await this.codes.next({
+      entityType: 'GuestFolio',
+      companyId: booking.companyId,
+    });
     const folio = await this.prisma.guestFolio.create({
       data: {
         folioNumber,
@@ -269,7 +272,9 @@ export class FoliosService {
       throw new BadRequestException('Cannot settle a CANCELLED folio');
     }
     if (folio.charges.length === 0) {
-      throw new BadRequestException('Cannot settle an empty folio — post at least one charge first.');
+      throw new BadRequestException(
+        'Cannot settle an empty folio — post at least one charge first.',
+      );
     }
     if (dto.paymentMethod !== 'CREDIT' && !dto.cashAccountId) {
       throw new BadRequestException('Pick a cash / bank account for non-CREDIT payments.');
@@ -279,7 +284,8 @@ export class FoliosService {
         where: { id: dto.cashAccountId, companyId: folio.companyId, deletedAt: null },
         select: { id: true },
       });
-      if (!acct) throw new BadRequestException('Selected cash account does not belong to this company.');
+      if (!acct)
+        throw new BadRequestException('Selected cash account does not belong to this company.');
     }
 
     const product = await this.ensureHospitalityProduct(folio.companyId);
@@ -297,9 +303,8 @@ export class FoliosService {
       unitPrice: Number(c.unitPrice),
       taxAmount: Number(c.taxAmount),
       discountAmount: 0,
-      // Hospitality services don't issue inventory; inventoryLocationId is
-      // intentionally omitted so SalesOrder.confirm() skips the stock
-      // movement (the service is non-inventory).
+      // Hospitality services don't issue stock, so SalesOrder.confirm()
+      // skips movement for non-inventory services.
     }));
 
     // Create the SalesOrder (DRAFT) then confirm it — this triggers the
@@ -347,7 +352,11 @@ export class FoliosService {
       entityType: 'GuestFolio',
       entityId: folio.id,
       companyId: folio.companyId,
-      newValue: { paymentMethod: dto.paymentMethod, salesOrderId: confirmed.id, total: subtotal + taxAmount } as unknown as Record<string, unknown>,
+      newValue: {
+        paymentMethod: dto.paymentMethod,
+        salesOrderId: confirmed.id,
+        total: subtotal + taxAmount,
+      } as unknown as Record<string, unknown>,
     });
 
     return this.findOne(folio.id);
@@ -390,9 +399,7 @@ export class FoliosService {
       select: { id: true },
     });
     if (!unit) {
-      throw new BadRequestException(
-        'System "Service" unit (svc) is missing — re-run the seed.',
-      );
+      throw new BadRequestException('System "Service" unit (svc) is missing — re-run the seed.');
     }
 
     const product = await this.prisma.product.create({
@@ -423,7 +430,10 @@ export class FoliosService {
     });
     if (!folio) throw new NotFoundException('Folio not found');
     if (folio.status !== 'OPEN') throw new BadRequestException('Only OPEN folios can be cancelled');
-    if (folio._count.charges > 0) throw new BadRequestException('Cannot cancel a folio with posted charges; check it out instead.');
+    if (folio._count.charges > 0)
+      throw new BadRequestException(
+        'Cannot cancel a folio with posted charges; check it out instead.',
+      );
 
     return this.prisma.guestFolio.update({
       where: { id: folioId },
@@ -454,7 +464,6 @@ export class FoliosService {
       closedBy: { select: { id: true, fullName: true } },
     } as const;
   }
-
 }
 
 function round2(n: number): number {

@@ -29,7 +29,6 @@ function calculateLineTotals(
     unitPrice: number;
     discountAmount?: number;
     taxAmount?: number;
-    inventoryLocationId?: string;
     batchId?: string;
   }[],
 ) {
@@ -140,7 +139,16 @@ export class SalesOrdersService {
             email: true,
             website: true,
             logoUrl: true,
-            group: { select: { name: true, code: true, address: true, phone: true, email: true, website: true } },
+            group: {
+              select: {
+                name: true,
+                code: true,
+                address: true,
+                phone: true,
+                email: true,
+                website: true,
+              },
+            },
             profile: {
               select: {
                 registeredName: true,
@@ -228,7 +236,6 @@ export class SalesOrdersService {
           discountAmount: line.discountAmount ?? 0,
           taxAmount: line.taxAmount ?? 0,
           lineTotal: line.lineTotal,
-          inventoryLocationId: line.inventoryLocationId,
           batchId: line.batchId,
         })),
       });
@@ -281,7 +288,6 @@ export class SalesOrdersService {
             discountAmount: line.discountAmount ?? 0,
             taxAmount: line.taxAmount ?? 0,
             lineTotal: line.lineTotal,
-            inventoryLocationId: line.inventoryLocationId,
             batchId: line.batchId,
           })),
         });
@@ -403,25 +409,14 @@ export class SalesOrdersService {
     const unique = (ids: Array<string | undefined>) =>
       Array.from(new Set(ids.filter((id): id is string => Boolean(id))));
     const productIds = unique(lines.map((line) => line.productId));
-    const inventoryLocationIds = unique(lines.map((line) => line.inventoryLocationId));
     const unitIds = unique(lines.map((line) => line.unitId));
     const batchIds = unique(lines.map((line) => line.batchId));
 
-    const [products, inventoryLocations, units, batches] = await Promise.all([
+    const [products, units, batches] = await Promise.all([
       this.prisma.product.findMany({
         where: { id: { in: productIds }, deletedAt: null },
         select: { id: true, companyId: true },
       }),
-      inventoryLocationIds.length
-        ? this.prisma.inventoryLocation.findMany({
-            where: {
-              id: { in: inventoryLocationIds },
-              deletedAt: null,
-              isActive: true,
-            },
-            select: { id: true, companyId: true, branchId: true },
-          })
-        : Promise.resolve([]),
       this.prisma.unitOfMeasure.findMany({
         where: { id: { in: unitIds }, deletedAt: null, status: 'ACTIVE' },
         select: { id: true, companyId: true },
@@ -439,19 +434,6 @@ export class SalesOrdersService {
     );
     if (validProductIds.size !== productIds.length) {
       throw new BadRequestException('Sales order product does not belong to this company');
-    }
-
-    const validLocationIds = new Set(
-      inventoryLocations
-        .filter((location) => location.companyId === companyId && (!branchId || location.branchId === branchId))
-        .map((location) => location.id),
-    );
-    if (validLocationIds.size !== inventoryLocationIds.length) {
-      throw new BadRequestException(
-        branchId
-          ? 'Sales order inventory location does not belong to the selected branch'
-          : 'Sales order inventory location does not belong to this company',
-      );
     }
 
     const validUnitIds = new Set(
@@ -479,23 +461,20 @@ export class SalesOrdersService {
     if (existing.status !== 'DRAFT') {
       throw new BadRequestException('Only DRAFT sales orders can be confirmed');
     }
+    if (!existing.branchId) {
+      throw new BadRequestException('Sales order branch/location is required to issue stock');
+    }
+    const issuingBranchId = existing.branchId;
 
     const record = await this.prisma.$transaction(async (tx) => {
       for (const line of existing.lines as any[]) {
         const product = await tx.product.findUnique({ where: { id: line.productId } });
         if (!product?.trackInventory) continue;
 
-        if (!line.inventoryLocationId) {
-          throw new BadRequestException(
-            `Product "${product.name}" is inventory-tracked but line has no inventoryLocationId`,
-          );
-        }
-
         try {
           await this.inventoryMovements.createMovement({
             companyId: existing.companyId,
             productId: line.productId,
-            inventoryLocationId: line.inventoryLocationId,
             movementType: 'SALE_ISSUE',
             quantity: Number(line.quantity),
             unitId: line.unitId,
@@ -504,7 +483,7 @@ export class SalesOrdersService {
             referenceType: 'SalesOrder',
             referenceId: id,
             divisionId: existing.divisionId ?? undefined,
-            branchId: existing.branchId ?? undefined,
+            branchId: issuingBranchId,
             tx,
           });
         } catch (err: any) {
@@ -709,13 +688,17 @@ export class SalesOrdersService {
       if (existing.status === 'CONFIRMED') {
         for (const line of existing.lines as any[]) {
           const product = await tx.product.findUnique({ where: { id: line.productId } });
-          if (!product?.trackInventory || !line.inventoryLocationId) continue;
+          if (!product?.trackInventory) continue;
+          if (!existing.branchId) {
+            throw new BadRequestException(
+              'Sales order branch/location is required to reverse stock',
+            );
+          }
 
           try {
             await this.inventoryMovements.createMovement({
               companyId: existing.companyId,
               productId: line.productId,
-              inventoryLocationId: line.inventoryLocationId,
               movementType: 'SALES_RETURN',
               quantity: Number(line.quantity),
               unitId: line.unitId,
@@ -725,7 +708,7 @@ export class SalesOrdersService {
               referenceId: id,
               notes: `Reversal: cancellation of sales order ${existing.salesOrderNumber}`,
               divisionId: existing.divisionId ?? undefined,
-              branchId: existing.branchId ?? undefined,
+              branchId: existing.branchId,
               tx,
             });
           } catch (err: any) {
