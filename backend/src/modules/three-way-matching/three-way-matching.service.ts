@@ -4,6 +4,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
+import { AccountResolverService } from '../../common/services/account-resolver.service';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 
 @Injectable()
 export class ThreeWayMatchingService {
@@ -11,6 +13,8 @@ export class ThreeWayMatchingService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly accountResolver: AccountResolverService,
+    private readonly postingEngine: PostingEngineService,
   ) {}
 
   async findAll(query: any, user: AuthUser) {
@@ -46,9 +50,77 @@ export class ThreeWayMatchingService {
   async approve(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (!['MATCHED', 'PARTIAL_MATCH', 'VARIANCE'].includes(existing.matchStatus)) throw new BadRequestException('Cannot approve in current status');
-    const updated = await this.prisma.threeWayMatch.update({ where: { id }, data: { approvedAt: new Date(), approvedById: user.id } });
+    if (existing.approvedAt) throw new BadRequestException('Three-way match is already approved');
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const approved = await tx.threeWayMatch.update({ where: { id }, data: { approvedAt: new Date(), approvedById: user.id } });
+      await this.postVarianceIfNeeded(existing, user.id, tx);
+      return approved;
+    });
     await this.auditLogs.log({ action: 'APPROVE', entityType: 'ThreeWayMatch', entityId: id, userId: user.id, companyId: existing.companyId });
     return updated;
+  }
+
+  private async postVarianceIfNeeded(
+    match: {
+      id: string;
+      matchNumber: string;
+      companyId: string;
+      purchaseOrderId: string;
+      amountVariance: any;
+      matchDate: Date;
+    },
+    userId: string,
+    tx: any,
+  ) {
+    const amount = Number(match.amountVariance ?? 0);
+    if (Math.abs(amount) < 0.01) return;
+
+    const existingJournal = await tx.journalEntry.findFirst({
+      where: {
+        companyId: match.companyId,
+        referenceType: 'ThreeWayMatchVariance',
+        referenceId: match.id,
+        status: 'POSTED',
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (existingJournal) return;
+
+    const purchaseOrder = await tx.purchaseOrder.findFirst({
+      where: { id: match.purchaseOrderId, companyId: match.companyId, deletedAt: null },
+      select: { divisionId: true, branchId: true },
+    });
+    const varianceAccount = await this.accountResolver.resolve(match.companyId, 'PURCHASE_VARIANCE', tx);
+    const apAccount = await this.accountResolver.resolve(match.companyId, 'AP_CONTROL', tx);
+    const absAmount = Math.abs(amount);
+    const description = `Three-way match variance ${match.matchNumber}`;
+
+    await this.postingEngine.postLines(
+      {
+        journalNumber: `JE-TWM-${match.matchNumber}`,
+        companyId: match.companyId,
+        divisionId: purchaseOrder?.divisionId,
+        branchId: purchaseOrder?.branchId,
+        transactionDate: match.matchDate,
+        description,
+        referenceType: 'ThreeWayMatchVariance',
+        referenceId: match.id,
+        moduleName: 'three-way-matching',
+        userId,
+        lines:
+          amount > 0
+            ? [
+                { accountId: varianceAccount.id, description, debit: absAmount, credit: 0 },
+                { accountId: apAccount.id, description, debit: 0, credit: absAmount },
+              ]
+            : [
+                { accountId: apAccount.id, description, debit: absAmount, credit: 0 },
+                { accountId: varianceAccount.id, description, debit: 0, credit: absAmount },
+              ],
+      },
+      tx,
+    );
   }
 
   private async assertProcurementReferencesInCompany(dto: any) {

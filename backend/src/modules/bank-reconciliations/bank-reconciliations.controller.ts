@@ -73,6 +73,24 @@ export class BankReconciliationsController {
     return this.service.unmatch(id, body.statementLineId, user);
   }
 
+  @Post(':id/adjustments')
+  @RequirePermissions('bank_reconciliations.update')
+  postAdjustment(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      statementLineId?: string;
+      amount: number;
+      direction: 'INCREASE_CASH' | 'DECREASE_CASH';
+      offsetAccountId?: string;
+      description?: string;
+      transactionDate?: string;
+    },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.postAdjustment(id, body, user);
+  }
+
   @Post(':id/approve')
   @RequirePermissions('bank_reconciliations.approve')
   approve(@Param('id') id: string, @CurrentUser() user: AuthUser) {

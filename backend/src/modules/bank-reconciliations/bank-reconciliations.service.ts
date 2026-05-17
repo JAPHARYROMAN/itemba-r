@@ -4,6 +4,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { AccountResolverService } from '../../common/services/account-resolver.service';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 
 /**
  * JournalEntry.referenceType values that should win disambiguation when
@@ -40,6 +42,8 @@ export class BankReconciliationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
+    private readonly accountResolver: AccountResolverService,
+    private readonly postingEngine: PostingEngineService,
   ) {}
 
   async findAll(query: any, user?: AuthUser) {
@@ -364,6 +368,125 @@ export class BankReconciliationsService {
       entityId: statementLineId,
       userId: user.id,
     });
+  }
+
+  async postAdjustment(
+    reconciliationId: string,
+    dto: {
+      statementLineId?: string;
+      amount: number;
+      direction: 'INCREASE_CASH' | 'DECREASE_CASH';
+      offsetAccountId?: string;
+      description?: string;
+      transactionDate?: string;
+    },
+    user: AuthUser,
+  ) {
+    const reconciliation = await this.findOne(reconciliationId, user);
+    if (reconciliation.status !== 'DRAFT') {
+      throw new BadRequestException('Adjustments can only be posted on DRAFT reconciliations');
+    }
+
+    const amount = Number(dto.amount ?? 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new BadRequestException('Adjustment amount must be greater than zero');
+    }
+    if (!['INCREASE_CASH', 'DECREASE_CASH'].includes(dto.direction)) {
+      throw new BadRequestException('Adjustment direction is invalid');
+    }
+
+    const cashAccount = await this.prisma.cashAccount.findFirst({
+      where: { id: reconciliation.cashAccountId, companyId: reconciliation.companyId, deletedAt: null },
+      select: { accountType: true, divisionId: true, branchId: true },
+    });
+    const cashRole = cashAccount?.accountType === 'BANK' ? 'BANK' : 'CASH_ON_HAND';
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const cashChart = await this.accountResolver.resolve(reconciliation.companyId, cashRole, tx);
+      const offsetChart = dto.offsetAccountId
+        ? await tx.chartOfAccount.findFirst({
+            where: {
+              id: dto.offsetAccountId,
+              companyId: reconciliation.companyId,
+              deletedAt: null,
+              isActive: true,
+            },
+          })
+        : await this.accountResolver.resolve(reconciliation.companyId, 'GENERAL_EXPENSE', tx);
+      if (!offsetChart) throw new BadRequestException('Offset account not found');
+
+      const description = dto.description || `Bank reconciliation adjustment ${reconciliation.reconciliationNumber}`;
+      const je = await this.postingEngine.postLines(
+        {
+          journalNumber: `JE-BR-${reconciliation.reconciliationNumber}-${Date.now().toString(36).toUpperCase()}`,
+          companyId: reconciliation.companyId,
+          divisionId: cashAccount?.divisionId,
+          branchId: cashAccount?.branchId,
+          transactionDate: dto.transactionDate ? new Date(dto.transactionDate) : new Date(),
+          description,
+          referenceType: 'BankReconciliationAdjustment',
+          referenceId: reconciliation.id,
+          moduleName: 'bank-reconciliations',
+          userId: user.id,
+          lines:
+            dto.direction === 'INCREASE_CASH'
+              ? [
+                  { accountId: cashChart.id, description, debit: amount, credit: 0 },
+                  { accountId: offsetChart.id, description, debit: 0, credit: amount },
+                ]
+              : [
+                  { accountId: offsetChart.id, description, debit: amount, credit: 0 },
+                  { accountId: cashChart.id, description, debit: 0, credit: amount },
+                ],
+        },
+        tx,
+      );
+
+      let matchId: string | undefined;
+      if (dto.statementLineId) {
+        const line = reconciliation.statementLines.find((l) => l.id === dto.statementLineId);
+        if (!line) throw new NotFoundException('Statement line not on this reconciliation');
+        const cashLine = await tx.journalEntryLine.findFirst({
+          where: { journalEntryId: je.id, accountId: cashChart.id },
+          select: { id: true },
+        });
+        if (cashLine) {
+          const match = await tx.bankReconciliationMatch.create({
+            data: {
+              bankReconciliationId: reconciliation.id,
+              bankStatementLineId: dto.statementLineId,
+              matchedEntityType: 'JournalEntryLine',
+              matchedEntityId: cashLine.id,
+              matchType: 'MANUAL',
+              amount,
+              matchedById: user.id,
+            },
+          });
+          matchId = match.id;
+          await tx.bankStatementLine.update({
+            where: { id: dto.statementLineId },
+            data: {
+              matched: true,
+              matchedTransactionType: 'JournalEntryLine',
+              matchedTransactionId: cashLine.id,
+            },
+          });
+        }
+      }
+
+      return { journalEntryId: je.id, journalNumber: je.journalNumber, matchId };
+    });
+
+    await this.recomputeBalances(reconciliationId);
+    await this.auditLogs.log({
+      action: 'POST_ADJUSTMENT',
+      entityType: 'BankReconciliation',
+      entityId: reconciliationId,
+      userId: user.id,
+      companyId: reconciliation.companyId,
+      metadata: { amount, direction: dto.direction, journalEntryId: result.journalEntryId },
+    });
+    return result;
   }
 
   async approve(id: string, user: AuthUser) {

@@ -1,6 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AccountResolverService } from '../../common/services/account-resolver.service';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 
 /**
  * TaxAutoApplyService — Sprint C2.
@@ -37,7 +39,11 @@ import { PrismaService } from '../../prisma/prisma.service';
 @Injectable()
 export class TaxAutoApplyService {
   private readonly logger = new Logger(TaxAutoApplyService.name);
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly accountResolver: AccountResolverService,
+    private readonly postingEngine: PostingEngineService,
+  ) {}
 
   private isEnabled(): boolean {
     return (process.env.TAX_AUTO_APPLY ?? 'false').toLowerCase() === 'true';
@@ -82,13 +88,22 @@ export class TaxAutoApplyService {
     const client = input.tx ?? this.prisma;
     const result: TaxApplyResult = { skipped: 0, booked: 0, total: 0 };
 
-    let order: { companyId: string; orderDate?: Date; transactionDate?: Date; lines: Array<{ id: string; taxAmount: any; lineTotal: any }> } | null = null;
+    let order: {
+      companyId: string;
+      divisionId?: string | null;
+      branchId?: string | null;
+      orderDate?: Date;
+      transactionDate?: Date;
+      lines: Array<{ id: string; taxAmount: any; lineTotal: any }>;
+    } | null = null;
     try {
       if (input.sourceType === 'SALES_ORDER') {
         const o = await client.salesOrder.findUnique({
           where: { id: input.sourceId },
           select: {
             companyId: true,
+            divisionId: true,
+            branchId: true,
             orderDate: true,
             lines: { select: { id: true, taxAmount: true, lineTotal: true } },
           },
@@ -100,6 +115,8 @@ export class TaxAutoApplyService {
           where: { id: input.sourceId },
           select: {
             companyId: true,
+            divisionId: true,
+            branchId: true,
             orderDate: true,
             lines: { select: { id: true, taxAmount: true, lineTotal: true } },
           },
@@ -116,7 +133,7 @@ export class TaxAutoApplyService {
     // wins within each scope. We only resolve once per call — every line in
     // a single auto-apply pass shares the same code (operators that need
     // mixed rates will move to per-line taxCodeId in a future iteration).
-    let defaultCode: { id: string; taxTypeId: string; taxRateId: string | null } | null;
+    let defaultCode: { id: string; taxTypeId: string; taxRateId: string | null; taxType: { taxCategory: string; taxTypeCode: string } } | null;
     try {
       const candidates = await client.taxCode.findMany({
         where: {
@@ -130,7 +147,15 @@ export class TaxAutoApplyService {
           { isDefault: 'desc' },
           { createdAt: 'asc' },
         ],
-        select: { id: true, taxTypeId: true, taxRateId: true, taxCode: true, isDefault: true, companyId: true },
+        select: {
+          id: true,
+          taxTypeId: true,
+          taxRateId: true,
+          taxCode: true,
+          isDefault: true,
+          companyId: true,
+          taxType: { select: { taxCategory: true, taxTypeCode: true } },
+        },
         take: 5,
       });
       defaultCode = candidates.find((c) => c.isDefault) ?? candidates[0] ?? null;
@@ -169,7 +194,7 @@ export class TaxAutoApplyService {
 
       const taxableAmount = Math.max(round2(lineTotal - taxAmount), 0);
       try {
-        await client.taxTransaction.create({
+        const taxTransaction = await client.taxTransaction.create({
           data: {
             taxTransactionNumber: txNumber,
             companyId: order.companyId,
@@ -188,6 +213,22 @@ export class TaxAutoApplyService {
             notes: `Auto-captured from line ${line.id}`,
           },
         });
+        await this.postTaxTransaction({
+          tx: input.tx,
+          taxTransactionId: taxTransaction.id,
+          taxTransactionNumber: taxTransaction.taxTransactionNumber,
+          companyId: order.companyId,
+          divisionId: order.divisionId,
+          branchId: order.branchId,
+          direction: input.direction,
+          taxCategory: defaultCode.taxType.taxCategory,
+          taxTypeCode: defaultCode.taxType.taxTypeCode,
+          sourceType: input.sourceType,
+          sourceId: input.sourceId,
+          transactionDate: order.transactionDate ?? new Date(),
+          amount: round2(taxAmount),
+          userId: input.userId,
+        });
         result.booked += 1;
         result.total += taxAmount;
       } catch (err) {
@@ -205,6 +246,86 @@ export class TaxAutoApplyService {
       );
     }
     return result;
+  }
+
+  private async postTaxTransaction(input: {
+    tx?: Prisma.TransactionClient;
+    taxTransactionId: string;
+    taxTransactionNumber: string;
+    companyId: string;
+    divisionId?: string | null;
+    branchId?: string | null;
+    direction: 'OUTPUT' | 'INPUT';
+    taxCategory: string;
+    taxTypeCode: string;
+    sourceType: string;
+    sourceId: string;
+    transactionDate: Date;
+    amount: number;
+    userId: string;
+  }) {
+    const db = input.tx ?? this.prisma;
+    const existingJournal = await db.journalEntry.findFirst({
+      where: {
+        companyId: input.companyId,
+        referenceType: 'TaxTransaction',
+        referenceId: input.taxTransactionId,
+        status: 'POSTED',
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (existingJournal) return;
+
+    const isVat = input.taxCategory === 'VAT';
+    const taxAccount =
+      input.direction === 'INPUT'
+        ? await this.accountResolver.resolve(input.companyId, 'TAX_VAT_RECEIVABLE', input.tx)
+        : await this.accountResolver.resolve(
+            input.companyId,
+            isVat ? 'TAX_VAT_PAYABLE' : 'TAX_WITHHOLDING_PAYABLE',
+            input.tx,
+          );
+    const contraAccount =
+      input.direction === 'INPUT'
+        ? await this.accountResolver.resolve(input.companyId, 'AP_CONTROL', input.tx)
+        : await this.accountResolver.resolve(input.companyId, 'AR_CONTROL', input.tx);
+    const description = `Tax ${input.taxTypeCode} ${input.taxTransactionNumber}`;
+    const journal = await this.postingEngine.postLines(
+      {
+        journalNumber: `JE-TAX-${input.taxTransactionNumber}`,
+        companyId: input.companyId,
+        divisionId: input.divisionId,
+        branchId: input.branchId,
+        transactionDate: input.transactionDate,
+        description,
+        referenceType: 'TaxTransaction',
+        referenceId: input.taxTransactionId,
+        moduleName: 'tax-auto-apply',
+        userId: input.userId,
+        lines:
+          input.direction === 'INPUT'
+            ? [
+                { accountId: taxAccount.id, description, debit: input.amount, credit: 0 },
+                { accountId: contraAccount.id, description, debit: 0, credit: input.amount },
+              ]
+            : [
+                { accountId: contraAccount.id, description, debit: input.amount, credit: 0 },
+                { accountId: taxAccount.id, description, debit: 0, credit: input.amount },
+              ],
+      },
+      input.tx,
+    );
+
+    await db.taxTransaction.update({
+      where: { id: input.taxTransactionId },
+      data: {
+        status: 'POSTED',
+        journalEntryId: journal.id,
+        postedById: input.userId,
+        postedAt: new Date(),
+      },
+    });
   }
 }
 

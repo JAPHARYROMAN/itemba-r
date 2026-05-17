@@ -83,6 +83,7 @@ export class PeriodCloseService {
         where: { id: existing.accountingPeriodId },
         data: { status: 'CLOSED' },
       });
+      await this.ensurePeriodLock(tx, existing, user.id);
       return close;
     });
     await this.auditLogs.log({
@@ -105,6 +106,16 @@ export class PeriodCloseService {
       await tx.accountingPeriod.update({
         where: { id: existing.accountingPeriodId },
         data: { status: 'OPEN' },
+      });
+      await tx.accountingLock.updateMany({
+        where: {
+          companyId: existing.companyId,
+          accountingPeriodId: existing.accountingPeriodId,
+          lockType: 'PERIOD_LOCK',
+          status: 'ACTIVE',
+          deletedAt: null,
+        },
+        data: { status: 'RELEASED', releasedById: user.id, releasedAt: new Date() },
       });
       return close;
     });
@@ -140,5 +151,37 @@ export class PeriodCloseService {
     if (draftCount > 0) {
       throw new BadRequestException('Cannot close an accounting period with draft journal entries');
     }
+  }
+
+  private async ensurePeriodLock(
+    tx: any,
+    close: { companyId: string; fiscalYearId: string; accountingPeriodId: string; closeNumber: string },
+    userId: string,
+  ) {
+    const existingLock = await tx.accountingLock.findFirst({
+      where: {
+        companyId: close.companyId,
+        accountingPeriodId: close.accountingPeriodId,
+        lockType: 'PERIOD_LOCK',
+        status: 'ACTIVE',
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (existingLock) return;
+
+    await tx.accountingLock.create({
+      data: {
+        lockCode: `LOCK-${close.closeNumber}`,
+        companyId: close.companyId,
+        lockType: 'PERIOD_LOCK',
+        fiscalYearId: close.fiscalYearId,
+        accountingPeriodId: close.accountingPeriodId,
+        moduleName: 'accounting',
+        reason: `Period closed by ${close.closeNumber}`,
+        status: 'ACTIVE',
+        createdById: userId,
+      },
+    });
   }
 }

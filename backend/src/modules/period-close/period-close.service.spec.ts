@@ -27,6 +27,11 @@ function makePrisma() {
       findFirst: jest.fn(),
       update: jest.fn(async (args: any) => ({ id: args.where.id, ...args.data })),
     },
+    accountingLock: {
+      findFirst: jest.fn(async () => null),
+      create: jest.fn(async (args: any) => ({ id: 'lock-1', ...args.data })),
+      updateMany: jest.fn(async () => ({ count: 1 })),
+    },
     journalEntry: {
       count: jest.fn(async () => 0),
     },
@@ -72,6 +77,16 @@ describe('PeriodCloseService GL controls', () => {
       where: { id: 'period-1' },
       data: { status: 'CLOSED' },
     });
+    expect(prisma.accountingLock.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          companyId: 'company-1',
+          accountingPeriodId: 'period-1',
+          lockType: 'PERIOD_LOCK',
+          status: 'ACTIVE',
+        }),
+      }),
+    );
   });
 
   it('blocks period close while draft journals remain in the period', async () => {

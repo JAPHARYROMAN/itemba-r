@@ -1,176 +1,346 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { unwrapList } from '@/lib/unwrap';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Btn,
+  Card,
+  FormInput,
+  FormSelect,
+  Modal,
+  PageHeader,
+  PageSpinner,
+  StatCard,
+  StatusBadge,
+} from '@/components/ui';
+import { unwrapList, unwrapOne } from '@/lib/unwrap';
+
+interface Company {
+  id: string;
+  name: string;
+  code?: string | null;
+}
+
+interface StatementRun {
+  id: string;
+  statementRunNumber: string;
+  companyId?: string | null;
+  statementType: string;
+  periodStart: string;
+  periodEnd: string;
+  currency?: string | null;
+  status: string;
+  generatedAt?: string | null;
+  resultSummary?: unknown;
+  errorMessage?: string | null;
+}
+
+interface TrialBalanceRow {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  debit: number;
+  credit: number;
+}
+
+const today = new Date().toISOString().slice(0, 10);
+const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+  .toISOString()
+  .slice(0, 10);
+
+const STATEMENT_TYPES = [
+  'TRIAL_BALANCE',
+  'PROFIT_AND_LOSS',
+  'BALANCE_SHEET',
+  'CASH_FLOW',
+  'EQUITY_STATEMENT',
+  'GENERAL_LEDGER',
+  'CUSTOM',
+];
+
+function optionLabel(row: { name: string; code?: string | null }) {
+  return row.code ? `${row.code} - ${row.name}` : row.name;
+}
+
+function fmtDate(value?: string | null) {
+  return value ? new Date(value).toLocaleDateString('en-GB') : '-';
+}
+
+function fmtMoney(value: number | string | null | undefined, currency = 'TZS') {
+  return `${currency} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(Number(value ?? 0))}`;
+}
+
+function errorMessage(json: any, fallback: string) {
+  if (Array.isArray(json?.message)) return json.message.join(', ');
+  return json?.message ?? json?.error ?? fallback;
+}
+
+function trialRows(summary: unknown): TrialBalanceRow[] {
+  if (!Array.isArray(summary)) return [];
+  return summary.filter((row): row is TrialBalanceRow => Boolean(row && typeof row === 'object' && 'accountId' in row));
+}
 
 export default function FinancialStatementsPage() {
-  const [data, setData] = useState<any[]>([]);
+  const [rows, setRows] = useState<StatementRun[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyId, setCompanyId] = useState('');
+  const [status, setStatus] = useState('');
+  const [selected, setSelected] = useState<StatementRun | null>(null);
   const [loading, setLoading] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [form, setForm] = useState({ statementType: 'BALANCE_SHEET', periodStart: '', periodEnd: '', companyId: '' });
-  const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({
+    companyId: '',
+    statementType: 'TRIAL_BALANCE',
+    periodStart: monthStart,
+    periodEnd: today,
+    currency: 'TZS',
+  });
 
   useEffect(() => {
-    fetch('/api/backend/financial-statements')
-      .then(r => r.json())
-      .then(res => setData(unwrapList(res)))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    fetch('/api/backend/companies?limit=100')
+      .then((r) => r.json())
+      .then((j) => setCompanies(unwrapList<Company>(j)))
+      .catch(() => setCompanies([]));
   }, []);
 
-  async function handleGenerate(e: React.FormEvent) {
-    e.preventDefault();
-    setSubmitting(true);
-    setMessage('');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
     try {
-      const res = await fetch('/api/backend/financial-statements', {
+      const params = new URLSearchParams({ limit: '100' });
+      if (companyId) params.set('companyId', companyId);
+      const json = await fetch(`/api/backend/financial-statements?${params}`).then((r) => r.json());
+      const list = unwrapList<StatementRun>(json);
+      setRows(list);
+      setSelected((current) => current ? list.find((row) => row.id === current.id) ?? current : null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load financial statement runs');
+    } finally {
+      setLoading(false);
+    }
+  }, [companyId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const companyById = useMemo(() => new Map(companies.map((company) => [company.id, company])), [companies]);
+  const filteredRows = status ? rows.filter((row) => row.status === status) : rows;
+  const generatedCount = rows.filter((row) => row.status === 'GENERATED').length;
+  const failedCount = rows.filter((row) => row.status === 'FAILED').length;
+  const selectedRows = trialRows(selected?.resultSummary);
+
+  const openCreate = () => {
+    setForm({
+      companyId,
+      statementType: 'TRIAL_BALANCE',
+      periodStart: monthStart,
+      periodEnd: today,
+      currency: 'TZS',
+    });
+    setCreating(true);
+  };
+
+  const generate = async () => {
+    if (!form.companyId || !form.periodStart || !form.periodEnd) {
+      setError('Company, period start, and period end are required');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    try {
+      const response = await fetch('/api/backend/financial-statements/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          companyId: form.companyId,
+          statementType: form.statementType,
+          periodStart: form.periodStart,
+          periodEnd: form.periodEnd,
+          currency: form.currency || undefined,
+        }),
       });
-      const json = await res.json();
-      if (res.ok) {
-        setMessage('Statement generation initiated successfully.');
-        setModalOpen(false);
-        const refreshed = await fetch('/api/backend/financial-statements').then(r => r.json());
-        setData(unwrapList(refreshed));
-      } else {
-        setMessage(json.message ?? 'Failed to generate statement.');
-      }
-    } catch {
-      setMessage('An error occurred.');
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(errorMessage(json, 'Statement generation failed'));
+      const payload = unwrapOne<{ run?: StatementRun }>(json);
+      setSelected(payload?.run ?? null);
+      setCreating(false);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Statement generation failed');
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
-  }
+  };
 
   return (
-    <div className="p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Financial Statements</h1>
-          <p className="text-gray-500 mt-1">Generate and view financial statements</p>
-        </div>
-        <button
-          onClick={() => setModalOpen(true)}
-          className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
-        >
-          Generate Statement
-        </button>
+    <div className="p-6 space-y-6">
+      <PageHeader
+        title="Financial Statements"
+        subtitle="Generate statement runs from posted journal entries and review the generated balances"
+      />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="Runs" value={rows.length} />
+        <StatCard label="Generated" value={generatedCount} />
+        <StatCard label="Failed" value={failedCount} />
+        <StatCard label="Selected Lines" value={selectedRows.length} />
       </div>
 
-      {message && (
-        <div className="mb-4 px-4 py-3 rounded-lg text-sm bg-blue-50 border border-blue-200 text-blue-700">{message}</div>
-      )}
+      <Card className="p-4">
+        <div className="grid md:grid-cols-[1fr_180px_auto] gap-3 items-end">
+          <FormSelect
+            label="Company"
+            value={companyId}
+            onChange={(e) => {
+              setCompanyId(e.target.value);
+              setSelected(null);
+            }}
+            placeholder="All companies"
+          >
+            {companies.map((company) => (
+              <option key={company.id} value={company.id}>
+                {optionLabel(company)}
+              </option>
+            ))}
+          </FormSelect>
+          <FormSelect label="Status" value={status} onChange={(e) => setStatus(e.target.value)} placeholder="All statuses">
+            {['REQUESTED', 'GENERATED', 'FAILED', 'CANCELLED'].map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </FormSelect>
+          <Btn onClick={openCreate}>Generate Statement</Btn>
+        </div>
+      </Card>
 
-      {loading ? (
-        <div className="text-center py-10 text-gray-500">Loading...</div>
-      ) : (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
-                <th className="px-4 py-3">Run #</th>
-                <th className="px-4 py-3">Company</th>
-                <th className="px-4 py-3">Statement Type</th>
-                <th className="px-4 py-3">Period Start</th>
-                <th className="px-4 py-3">Period End</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Generated At</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No records found</td></tr>
-              ) : data.map((row: any) => (
-                <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs">{row.statementRunNumber}</td>
-                  <td className="px-4 py-3">{row.companyId}</td>
-                  <td className="px-4 py-3">{row.statementType}</td>
-                  <td className="px-4 py-3 text-gray-500">{row.periodStart ? new Date(row.periodStart).toLocaleDateString() : '—'}</td>
-                  <td className="px-4 py-3 text-gray-500">{row.periodEnd ? new Date(row.periodEnd).toLocaleDateString() : '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${row.status === 'GENERATED' ? 'bg-green-100 text-green-700' : row.status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                      {row.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-400">{row.generatedAt ? new Date(row.generatedAt).toLocaleDateString() : '—'}</td>
-                </tr>
+      {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+
+      <div className="grid xl:grid-cols-[minmax(0,1fr)_460px] gap-5">
+        <Card className="overflow-hidden">
+          {loading ? (
+            <PageSpinner />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
+                    <th className="px-4 py-3">Run</th>
+                    <th className="px-4 py-3">Company</th>
+                    <th className="px-4 py-3">Statement</th>
+                    <th className="px-4 py-3">Period</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Generated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                        No statement runs
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredRows.map((row) => (
+                      <tr
+                        key={row.id}
+                        onClick={() => setSelected(row)}
+                        className="border-t cursor-pointer hover:bg-slate-50"
+                        style={{ borderColor: 'var(--aurora-border)' }}
+                      >
+                        <td className="px-4 py-3 font-mono text-xs">{row.statementRunNumber}</td>
+                        <td className="px-4 py-3">{row.companyId ? optionLabel(companyById.get(row.companyId) ?? { name: row.companyId }) : 'Group / all companies'}</td>
+                        <td className="px-4 py-3">{row.statementType}</td>
+                        <td className="px-4 py-3 text-xs">{fmtDate(row.periodStart)} to {fmtDate(row.periodEnd)}</td>
+                        <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
+                        <td className="px-4 py-3 text-xs">{fmtDate(row.generatedAt)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+
+        <Card className="p-4 space-y-4">
+          {!selected ? (
+            <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+              Select a generated run to inspect its summarized accounts.
+            </div>
+          ) : (
+            <>
+              <div>
+                <div className="font-semibold">{selected.statementRunNumber}</div>
+                <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                  {selected.statementType} - {fmtDate(selected.periodStart)} to {fmtDate(selected.periodEnd)}
+                </div>
+              </div>
+              {selected.errorMessage && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {selected.errorMessage}
+                </div>
+              )}
+              <div className="max-h-[480px] overflow-auto border rounded-lg" style={{ borderColor: 'var(--aurora-border)' }}>
+                {selectedRows.length === 0 ? (
+                  <div className="p-4 text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                    No account rows were stored for this statement run.
+                  </div>
+                ) : (
+                  selectedRows.map((row) => (
+                    <div key={row.accountId} className="border-b p-3 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
+                      <div className="font-medium">{row.accountCode} - {row.accountName}</div>
+                      <div className="mt-1 grid grid-cols-2 gap-2 font-mono text-xs">
+                        <span>DR {fmtMoney(row.debit, selected.currency ?? 'TZS')}</span>
+                        <span>CR {fmtMoney(row.credit, selected.currency ?? 'TZS')}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+        </Card>
+      </div>
+
+      {creating && (
+        <Modal
+          open
+          title="Generate Financial Statement"
+          onClose={() => setCreating(false)}
+          size="lg"
+          footer={
+            <>
+              <Btn variant="secondary" onClick={() => setCreating(false)}>Cancel</Btn>
+              <Btn loading={saving} onClick={generate}>Generate</Btn>
+            </>
+          }
+        >
+          <div className="grid md:grid-cols-2 gap-3">
+            <FormSelect
+              label="Company"
+              required
+              value={form.companyId}
+              onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value }))}
+              placeholder="Select company"
+            >
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>{optionLabel(company)}</option>
               ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {modalOpen && (
-        <div className="fixed inset-0 flex items-center justify-center p-4 z-50">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setModalOpen(false)} />
-          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Generate Financial Statement</h2>
-            <form onSubmit={handleGenerate} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Statement Type</label>
-                <select
-                  value={form.statementType}
-                  onChange={e => setForm(f => ({ ...f, statementType: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                >
-                  <option value="BALANCE_SHEET">Balance Sheet</option>
-                  <option value="INCOME_STATEMENT">Income Statement</option>
-                  <option value="CASH_FLOW">Cash Flow Statement</option>
-                  <option value="EQUITY_CHANGES">Changes in Equity</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Period Start</label>
-                <input
-                  type="date"
-                  value={form.periodStart}
-                  onChange={e => setForm(f => ({ ...f, periodStart: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Period End</label>
-                <input
-                  type="date"
-                  value={form.periodEnd}
-                  onChange={e => setForm(f => ({ ...f, periodEnd: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Company ID</label>
-                <input
-                  type="text"
-                  value={form.companyId}
-                  onChange={e => setForm(f => ({ ...f, companyId: e.target.value }))}
-                  placeholder="Enter company ID"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {submitting ? 'Generating…' : 'Generate'}
-                </button>
-              </div>
-            </form>
+            </FormSelect>
+            <FormSelect
+              label="Statement Type"
+              value={form.statementType}
+              onChange={(e) => setForm((f) => ({ ...f, statementType: e.target.value }))}
+            >
+              {STATEMENT_TYPES.map((item) => <option key={item} value={item}>{item}</option>)}
+            </FormSelect>
+            <FormInput label="Period Start" required type="date" value={form.periodStart} onChange={(e) => setForm((f) => ({ ...f, periodStart: e.target.value }))} />
+            <FormInput label="Period End" required type="date" value={form.periodEnd} onChange={(e) => setForm((f) => ({ ...f, periodEnd: e.target.value }))} />
+            <FormInput label="Currency" value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value.toUpperCase() }))} />
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
