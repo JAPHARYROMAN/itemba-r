@@ -14,6 +14,7 @@ import {
   StatCard,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { backendDelete, backendPatch, backendPost } from '@/lib/api-client';
 
 interface Company {
   id: string;
@@ -212,23 +213,15 @@ function CashAccountModal({
         accountType: form.accountType,
         currency: form.currency,
         openingBalance: Number(form.openingBalance) || 0,
-        linkedBankAccountId: form.accountType === 'BANK' ? form.linkedBankAccountId : '',
+        linkedBankAccountId:
+          form.accountType === 'BANK' ? form.linkedBankAccountId || undefined : undefined,
         notes: form.notes || undefined,
         isActive: form.isActive,
       };
-      const res = await fetch(
-        mode === 'create'
-          ? '/api/backend/cash-accounts'
-          : `/api/backend/cash-accounts/${initial!.id}`,
-        {
-          method: mode === 'create' ? 'POST' : 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        },
-      );
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.message ?? 'Save failed');
+      if (mode === 'create') {
+        await backendPost('/cash-accounts', body);
+      } else {
+        await backendPatch(`/cash-accounts/${initial!.id}`, body);
       }
       onSaved();
     } catch (err: unknown) {
@@ -404,8 +397,12 @@ function DeleteConfirm({
   const [deleting, setDeleting] = useState(false);
   const confirm = async () => {
     setDeleting(true);
-    await fetch(`/api/backend/cash-accounts/${acc.id}`, { method: 'DELETE' });
-    onDeleted();
+    try {
+      await backendDelete(`/cash-accounts/${acc.id}`);
+      onDeleted();
+    } finally {
+      setDeleting(false);
+    }
   };
   return (
     <Modal
