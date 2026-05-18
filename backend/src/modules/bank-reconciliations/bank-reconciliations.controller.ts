@@ -33,7 +33,11 @@ export class BankReconciliationsController {
 
   @Put(':id')
   @RequirePermissions('bank_reconciliations.update')
-  update(@Param('id') id: string, @Body() dto: UpsertBankReconciliationDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpsertBankReconciliationDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 
@@ -45,7 +49,11 @@ export class BankReconciliationsController {
 
   @Post(':id/lines')
   @RequirePermissions('bank_reconciliations.update')
-  addLine(@Param('id') id: string, @Body() dto: AddBankStatementLineDto, @CurrentUser() user: AuthUser) {
+  addLine(
+    @Param('id') id: string,
+    @Body() dto: AddBankStatementLineDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.addLine(id, dto, user);
   }
 

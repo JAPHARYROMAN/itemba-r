@@ -69,7 +69,10 @@ describe('PrintEngineService PDF and Excel materialization', () => {
 
   it('renderExcel handles empty sheetData', async () => {
     const { service } = makeService();
-    const result = await service.renderExcel({ templateId: 'tmpl-1', sheetData: [] }, { id: 'user-1' });
+    const result = await service.renderExcel(
+      { templateId: 'tmpl-1', sheetData: [] },
+      { id: 'user-1' },
+    );
 
     expect(result.buffer.length).toBeGreaterThan(0);
   });

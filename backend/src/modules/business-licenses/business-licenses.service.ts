@@ -38,11 +38,28 @@ export class BusinessLicensesService {
         renewalDate: dto.renewalDate ? new Date(dto.renewalDate) : undefined,
       },
     });
-    await this.audit.log({ userId: user.id, action: 'CREATE', entityType: 'BusinessLicense', entityId: license.id, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId: user.id,
+      action: 'CREATE',
+      entityType: 'BusinessLicense',
+      entityId: license.id,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
     return license;
   }
 
-  async findAll(companyId?: string, divisionId?: string, branchId?: string, licensedBusinessUnitId?: string, status?: BusinessLicenseStatus, licenseType?: BusinessLicenseType, search?: string, page = 1, limit = 20, user?: any) {
+  async findAll(
+    companyId?: string,
+    divisionId?: string,
+    branchId?: string,
+    licensedBusinessUnitId?: string,
+    status?: BusinessLicenseStatus,
+    licenseType?: BusinessLicenseType,
+    search?: string,
+    page = 1,
+    limit = 20,
+    user?: any,
+  ) {
     const where: any = { deletedAt: null };
     applyCompanyScopeWhere(where, user, companyId);
     if (divisionId) where.divisionId = divisionId;
@@ -50,11 +67,12 @@ export class BusinessLicensesService {
     if (licensedBusinessUnitId) where.licensedBusinessUnitId = licensedBusinessUnitId;
     if (status) where.status = status;
     if (licenseType) where.licenseType = licenseType;
-    if (search) where.OR = [
-      { licenseCode: { contains: search, mode: 'insensitive' } },
-      { licenseNumber: { contains: search, mode: 'insensitive' } },
-      { issuingAuthority: { contains: search, mode: 'insensitive' } },
-    ];
+    if (search)
+      where.OR = [
+        { licenseCode: { contains: search, mode: 'insensitive' } },
+        { licenseNumber: { contains: search, mode: 'insensitive' } },
+        { issuingAuthority: { contains: search, mode: 'insensitive' } },
+      ];
     const [data, total] = await this.prisma.$transaction([
       this.prisma.businessLicense.findMany({
         where,
@@ -117,7 +135,8 @@ export class BusinessLicensesService {
     const scope = await this.resolveLicenseScope(existing.companyId, {
       divisionId: dto.divisionId ?? existing.divisionId ?? undefined,
       branchId: dto.branchId ?? existing.branchId ?? undefined,
-      licensedBusinessUnitId: dto.licensedBusinessUnitId ?? existing.licensedBusinessUnitId ?? undefined,
+      licensedBusinessUnitId:
+        dto.licensedBusinessUnitId ?? existing.licensedBusinessUnitId ?? undefined,
     });
     const license = await this.prisma.businessLicense.update({
       where: { id },
@@ -132,7 +151,13 @@ export class BusinessLicensesService {
         renewalDate: dto.renewalDate ? new Date(dto.renewalDate) : undefined,
       },
     });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'BusinessLicense', entityId: id, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'BusinessLicense',
+      entityId: id,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
     return license;
   }
 
@@ -152,8 +177,16 @@ export class BusinessLicensesService {
       action: 'RENEW',
       entityType: 'BusinessLicense',
       entityId: id,
-      oldValue: { expiryDate: old.expiryDate, renewalDate: old.renewalDate, status: old.status } as unknown as Record<string, unknown>,
-      newValue: { expiryDate: dto.newExpiryDate, renewalDate: dto.newRenewalDate, status: BusinessLicenseStatus.ACTIVE } as unknown as Record<string, unknown>,
+      oldValue: {
+        expiryDate: old.expiryDate,
+        renewalDate: old.renewalDate,
+        status: old.status,
+      } as unknown as Record<string, unknown>,
+      newValue: {
+        expiryDate: dto.newExpiryDate,
+        renewalDate: dto.newRenewalDate,
+        status: BusinessLicenseStatus.ACTIVE,
+      } as unknown as Record<string, unknown>,
     });
     return license;
   }
@@ -162,7 +195,13 @@ export class BusinessLicensesService {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
     await this.prisma.businessLicense.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'BusinessLicense', entityId: id, newValue: {} });
+    await this.audit.log({
+      userId: user.id,
+      action: 'DELETE',
+      entityType: 'BusinessLicense',
+      entityId: id,
+      newValue: {},
+    });
     return { message: 'Business license deleted' };
   }
 
@@ -172,14 +211,15 @@ export class BusinessLicensesService {
   ) {
     let divisionId = refs.divisionId;
     let branchId = refs.branchId;
-    let licensedBusinessUnitId = refs.licensedBusinessUnitId;
+    const licensedBusinessUnitId = refs.licensedBusinessUnitId;
 
     if (licensedBusinessUnitId) {
       const unit = await this.prisma.licensedBusinessUnit.findFirst({
         where: { id: licensedBusinessUnitId, companyId, deletedAt: null },
         select: { id: true, divisionId: true, branchId: true },
       });
-      if (!unit) throw new BadRequestException('Licensed business unit must belong to this company');
+      if (!unit)
+        throw new BadRequestException('Licensed business unit must belong to this company');
       divisionId = divisionId ?? unit.divisionId ?? undefined;
       branchId = branchId ?? unit.branchId ?? undefined;
     }
@@ -206,7 +246,9 @@ export class BusinessLicensesService {
         select: { branchId: true },
       });
       if (unit?.branchId && unit.branchId !== branchId) {
-        throw new BadRequestException('Business license branch must match the licensed business unit branch');
+        throw new BadRequestException(
+          'Business license branch must match the licensed business unit branch',
+        );
       }
     }
 

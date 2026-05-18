@@ -1,9 +1,6 @@
 import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import {
-  ANY_PERMISSIONS_KEY,
-  PERMISSIONS_KEY,
-} from '../decorators/require-permissions.decorator';
+import { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY } from '../decorators/require-permissions.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { PermissionsGuard } from './permissions.guard';
 

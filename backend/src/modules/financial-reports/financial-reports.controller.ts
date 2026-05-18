@@ -145,10 +145,7 @@ export class FinancialReportsController {
 
   @Get('group/consolidated/cash-flow')
   @RequirePermissions('finance.reports.view')
-  getConsolidatedCashFlow(
-    @Query() q: ReportQueryDto,
-    @CurrentUser() user: AuthUser,
-  ) {
+  getConsolidatedCashFlow(@Query() q: ReportQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.getConsolidatedCashFlow(q.periodStart!, q.periodEnd!, user);
   }
 

@@ -4,14 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 // /api/backend/* is excluded: the proxy route handler validates auth via the
 // httpOnly itemba_access cookie forwarded as a Bearer token to the backend.
 // The backend enforces all permission checks; middleware should not block these.
-const PUBLIC_PATHS = [
-  '/login',
-  '/signup',
-  '/api/auth/',
-  '/api/backend/',
-  '/api/health',
-  '/brand/',
-];
+const PUBLIC_PATHS = ['/login', '/signup', '/api/auth/', '/api/backend/', '/api/health', '/brand/'];
 
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;

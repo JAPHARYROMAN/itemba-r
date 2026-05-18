@@ -92,7 +92,9 @@ export function ScopeSelector({
         className="min-w-[180px] flex-1"
         label={labels?.company ?? 'Company'}
         value={value.companyId}
-        onChange={(event) => onChange({ companyId: event.target.value, divisionId: '', branchId: '' })}
+        onChange={(event) =>
+          onChange({ companyId: event.target.value, divisionId: '', branchId: '' })
+        }
         disabled={disabled}
         placeholder="All companies"
       >
