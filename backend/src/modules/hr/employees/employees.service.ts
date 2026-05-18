@@ -1,11 +1,19 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { applyCompanyScopeWhere } from '../../../common/services';
 
-const SENSITIVE_FIELDS = ['baseSalary', 'bankAccountNumber', 'bankName', 'bankBranch', 'tin', 'nssfNumber', 'nhifNumber'];
+const SENSITIVE_FIELDS = [
+  'baseSalary',
+  'bankAccountNumber',
+  'bankName',
+  'bankBranch',
+  'tin',
+  'nssfNumber',
+  'nhifNumber',
+];
 
 function hasSensitivePermission(user: any): boolean {
   const perms: string[] = user.permissions ?? [];
@@ -21,7 +29,10 @@ function stripSensitive(employee: any, user?: any): any {
 
 @Injectable()
 export class EmployeesService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditLogsService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditLogsService,
+  ) {}
 
   private companyFilter(user: any) {
     if (user.role?.scope === 'GROUP') return {};
@@ -57,7 +68,10 @@ export class EmployeesService {
     }
     const [data, total] = await Promise.all([
       this.prisma.employee.findMany({
-        where, skip, take: Number(limit), orderBy: { fullName: 'asc' },
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { fullName: 'asc' },
         include: {
           company: { select: { id: true, name: true } },
           department: { select: { id: true, name: true } },
@@ -66,7 +80,12 @@ export class EmployeesService {
       }),
       this.prisma.employee.count({ where }),
     ]);
-    return { data: data.map(e => stripSensitive(e, user)), total, page: Number(page), limit: Number(limit) };
+    return {
+      data: data.map((e) => stripSensitive(e, user)),
+      total,
+      page: Number(page),
+      limit: Number(limit),
+    };
   }
 
   async findOne(id: string, user: any) {
@@ -87,7 +106,13 @@ export class EmployeesService {
       ? dto.employeeCode.trim()
       : await this.nextEmployeeCode(dto.companyId);
     const record = await this.prisma.employee.create({ data: { ...dto, employeeCode } });
-    await this.audit.log({ userId: user.id, action: 'CREATE', entityType: 'Employee', entityId: record.id, newValue: { ...dto, employeeCode } as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId: user.id,
+      action: 'CREATE',
+      entityType: 'Employee',
+      entityId: record.id,
+      newValue: { ...dto, employeeCode } as unknown as Record<string, unknown>,
+    });
     return stripSensitive(record, user);
   }
 
@@ -115,15 +140,153 @@ export class EmployeesService {
 
   async update(id: string, dto: UpdateEmployeeDto, user: any) {
     await this.findOne(id, user);
+    if ((dto as any).employmentStatus === 'TERMINATED') {
+      throw new BadRequestException(
+        'Employee termination must use the termination request and dual approval workflow',
+      );
+    }
     const record = await this.prisma.employee.update({ where: { id }, data: dto });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'Employee', entityId: id, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'Employee',
+      entityId: id,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
+    return stripSensitive(record, user);
+  }
+
+  async requestTermination(
+    id: string,
+    body: { reason?: string; terminationDate?: string },
+    user: any,
+  ) {
+    const existing = await this.findOne(id, user);
+    if ((existing as any).employmentStatus === 'TERMINATED') {
+      throw new BadRequestException('Employee is already terminated');
+    }
+    if (!body.reason?.trim()) {
+      throw new BadRequestException('Termination reason is required');
+    }
+    const pendingTerminationDate = body.terminationDate
+      ? new Date(body.terminationDate)
+      : new Date();
+    if (Number.isNaN(pendingTerminationDate.getTime())) {
+      throw new BadRequestException('Invalid termination date');
+    }
+    const record = await this.prisma.employee.update({
+      where: { id },
+      data: {
+        pendingTerminationDate,
+        terminationReason: body.reason.trim(),
+        terminationRequestedById: user.id,
+        terminationRequestedAt: new Date(),
+        terminationHrApprovedById: null,
+        terminationHrApprovedAt: null,
+        terminationGmApprovedById: null,
+        terminationGmApprovedAt: null,
+      } as any,
+    });
+    await this.audit.log({
+      userId: user.id,
+      action: 'TERMINATION_REQUEST',
+      entityType: 'Employee',
+      entityId: id,
+      newValue: {
+        terminationReason: body.reason.trim(),
+        pendingTerminationDate,
+      },
+    });
+    return stripSensitive(record, user);
+  }
+
+  async approveTerminationHr(id: string, user: any) {
+    const existing = await this.findOne(id, user);
+    this.assertTerminationPending(existing, user.id);
+    if ((existing as any).terminationGmApprovedById === user.id) {
+      throw new BadRequestException('Maker-checker: HR and GM termination approvers must differ');
+    }
+    const record = await this.applyTerminationApproval(id, existing, user, {
+      terminationHrApprovedById: user.id,
+      terminationHrApprovedAt: new Date(),
+    });
+    await this.audit.log({
+      userId: user.id,
+      action: 'TERMINATION_HR_APPROVE',
+      entityType: 'Employee',
+      entityId: id,
+      newValue: { employmentStatus: (record as any).employmentStatus },
+    });
+    return stripSensitive(record, user);
+  }
+
+  async approveTerminationGm(id: string, user: any) {
+    const existing = await this.findOne(id, user);
+    this.assertTerminationPending(existing, user.id);
+    if ((existing as any).terminationHrApprovedById === user.id) {
+      throw new BadRequestException('Maker-checker: GM and HR termination approvers must differ');
+    }
+    const record = await this.applyTerminationApproval(id, existing, user, {
+      terminationGmApprovedById: user.id,
+      terminationGmApprovedAt: new Date(),
+    });
+    await this.audit.log({
+      userId: user.id,
+      action: 'TERMINATION_GM_APPROVE',
+      entityType: 'Employee',
+      entityId: id,
+      newValue: { employmentStatus: (record as any).employmentStatus },
+    });
     return stripSensitive(record, user);
   }
 
   async remove(id: string, user: any) {
     await this.findOne(id, user);
     await this.prisma.employee.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'Employee', entityId: id, newValue: {} });
+    await this.audit.log({
+      userId: user.id,
+      action: 'DELETE',
+      entityType: 'Employee',
+      entityId: id,
+      newValue: {},
+    });
     return { message: 'Employee deleted' };
+  }
+
+  private assertTerminationPending(employee: any, approverId: string) {
+    if (!employee.terminationRequestedAt) {
+      throw new BadRequestException('No termination request is pending for this employee');
+    }
+    if (employee.employmentStatus === 'TERMINATED') {
+      throw new BadRequestException('Employee is already terminated');
+    }
+    if (employee.terminationRequestedById === approverId) {
+      throw new BadRequestException('Maker-checker: termination requester cannot approve');
+    }
+  }
+
+  private async applyTerminationApproval(
+    id: string,
+    existing: any,
+    user: any,
+    approvalData: Record<string, unknown>,
+  ) {
+    const hasHrApproval = Boolean(
+      approvalData.terminationHrApprovedById ?? existing.terminationHrApprovedById,
+    );
+    const hasGmApproval = Boolean(
+      approvalData.terminationGmApprovedById ?? existing.terminationGmApprovedById,
+    );
+    const finalData =
+      hasHrApproval && hasGmApproval
+        ? {
+            employmentStatus: 'TERMINATED',
+            terminationDate: existing.pendingTerminationDate ?? new Date(),
+          }
+        : {};
+    return this.prisma.employee.update({
+      where: { id },
+      data: { ...approvalData, ...finalData } as any,
+    });
   }
 }

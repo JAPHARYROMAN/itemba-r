@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Patch } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Patch,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
@@ -32,7 +43,11 @@ export class LeaveRequestsController {
 
   @Put(':id')
   @RequirePermissions('leave_requests.create')
-  update(@Param('id') id: string, @Body() dto: UpdateLeaveRequestDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateLeaveRequestDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 
@@ -44,13 +59,31 @@ export class LeaveRequestsController {
 
   @Patch(':id/approve')
   @RequirePermissions('leave_requests.approve')
-  approve(@Param('id') id: string, @Body() body: { notes?: string }, @CurrentUser() user: AuthUser) {
+  approve(
+    @Param('id') id: string,
+    @Body() body: { notes?: string },
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.approve(id, body.notes, user);
+  }
+
+  @Patch(':id/approve-hr')
+  @RequirePermissions('leave_requests.approve.hr')
+  approveHr(
+    @Param('id') id: string,
+    @Body() body: { notes?: string },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.approveHr(id, body.notes, user);
   }
 
   @Patch(':id/reject')
   @RequirePermissions('leave_requests.reject')
-  reject(@Param('id') id: string, @Body() body: { reason?: string }, @CurrentUser() user: AuthUser) {
+  reject(
+    @Param('id') id: string,
+    @Body() body: { reason?: string },
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.reject(id, body.reason, user);
   }
 

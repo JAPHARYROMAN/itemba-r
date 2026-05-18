@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../../entity-code-generator/entity-code-generator.service';
@@ -16,14 +16,23 @@ export class DisciplinaryActionsService {
 
   private include() {
     return {
-      employee: { select: { id: true, employeeCode: true, fullName: true, firstName: true, lastName: true } },
+      employee: {
+        select: { id: true, employeeCode: true, fullName: true, firstName: true, lastName: true },
+      },
       issuedBy: { select: { id: true, fullName: true } },
       approvedBy: { select: { id: true, fullName: true } },
       dispute: { select: { id: true, disputeNumber: true, status: true } },
     };
   }
 
-  async findAll(query: { page?: number; limit?: number; companyId?: string; employeeId?: string; status?: string; type?: string }) {
+  async findAll(query: {
+    page?: number;
+    limit?: number;
+    companyId?: string;
+    employeeId?: string;
+    status?: string;
+    type?: string;
+  }) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 50;
     const where: Record<string, unknown> = { deletedAt: null };
@@ -33,7 +42,10 @@ export class DisciplinaryActionsService {
     if (query.type) where.type = query.type;
     const [data, total] = await Promise.all([
       this.prisma.disciplinaryAction.findMany({
-        where, skip: (page - 1) * limit, take: limit, orderBy: { issuedAt: 'desc' },
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { issuedAt: 'desc' },
         include: this.include(),
       }),
       this.prisma.disciplinaryAction.count({ where }),
@@ -51,7 +63,11 @@ export class DisciplinaryActionsService {
   }
 
   async create(dto: CreateDisciplinaryActionDto, userId: string) {
-    const actionNumber = await this.codes.next({ entityType: 'DisciplinaryAction', companyId: dto.companyId });
+    const actionNumber = await this.codes.next({
+      entityType: 'DisciplinaryAction',
+      companyId: dto.companyId,
+    });
+    const status = requiresHrApproval(dto.type) ? 'PENDING_HR_APPROVAL' : 'ACTIVE';
     const row = await this.prisma.disciplinaryAction.create({
       data: {
         actionNumber,
@@ -68,16 +84,20 @@ export class DisciplinaryActionsService {
         notes: dto.notes,
         fineAmount: dto.fineAmount,
         issuedById: userId,
+        status,
       },
       include: this.include(),
     });
     await this.audit.log({
-      userId, action: 'CREATE', entityType: 'DisciplinaryAction', entityId: row.id,
+      userId,
+      action: 'CREATE',
+      entityType: 'DisciplinaryAction',
+      entityId: row.id,
       newValue: row as unknown as Record<string, unknown>,
     });
 
-    // Auto-create the deduction if a fine was specified at creation time.
-    if (dto.fineAmount && dto.fineAmount > 0) {
+    // Auto-create the deduction only once the action is active/approved.
+    if (status === 'ACTIVE' && dto.fineAmount && dto.fineAmount > 0) {
       try {
         await this.applyFine(row.id, userId);
       } catch (err) {
@@ -86,6 +106,77 @@ export class DisciplinaryActionsService {
         );
       }
     }
+    return row;
+  }
+
+  async approveHr(actionId: string, userId: string) {
+    const action = await this.findOne(actionId);
+    this.assertCanApprove(action, userId);
+    if (action.status !== 'PENDING_HR_APPROVAL') {
+      throw new BadRequestException('Disciplinary action is not pending Group HR approval');
+    }
+    if ((action as any).gmApprovedById === userId) {
+      throw new BadRequestException('Maker-checker: Group HR and Company GM approvers must differ');
+    }
+    const now = new Date();
+    const finalStatus = requiresGmApproval(action.type) ? 'PENDING_GM_APPROVAL' : 'ACTIVE';
+    const row = await this.prisma.disciplinaryAction.update({
+      where: { id: actionId },
+      data: {
+        status: finalStatus,
+        hrApprovedById: userId,
+        hrApprovedAt: now,
+        ...(finalStatus === 'ACTIVE' ? { approvedById: userId, approvedAt: now } : {}),
+      } as any,
+      include: this.include(),
+    });
+    if (finalStatus === 'ACTIVE' && row.fineAmount && Number(row.fineAmount) > 0) {
+      await this.applyFine(actionId, userId);
+    }
+    await this.audit.log({
+      userId,
+      action: 'DISCIPLINARY_HR_APPROVE',
+      entityType: 'DisciplinaryAction',
+      entityId: actionId,
+      newValue: { status: finalStatus },
+    });
+    return row;
+  }
+
+  async approveGm(actionId: string, userId: string) {
+    const action = await this.findOne(actionId);
+    this.assertCanApprove(action, userId);
+    if (action.status !== 'PENDING_GM_APPROVAL') {
+      throw new BadRequestException('Disciplinary action is not pending Company GM approval');
+    }
+    if (!action.hrApprovedById) {
+      throw new BadRequestException('Group HR approval is required before Company GM approval');
+    }
+    if ((action as any).hrApprovedById === userId) {
+      throw new BadRequestException('Maker-checker: Company GM and Group HR approvers must differ');
+    }
+    const now = new Date();
+    const row = await this.prisma.disciplinaryAction.update({
+      where: { id: actionId },
+      data: {
+        status: 'ACTIVE',
+        gmApprovedById: userId,
+        gmApprovedAt: now,
+        approvedById: userId,
+        approvedAt: now,
+      } as any,
+      include: this.include(),
+    });
+    if (row.fineAmount && Number(row.fineAmount) > 0) {
+      await this.applyFine(actionId, userId);
+    }
+    await this.audit.log({
+      userId,
+      action: 'DISCIPLINARY_GM_APPROVE',
+      entityType: 'DisciplinaryAction',
+      entityId: actionId,
+      newValue: { status: 'ACTIVE' },
+    });
     return row;
   }
 
@@ -163,17 +254,37 @@ export class DisciplinaryActionsService {
     if (dto.type !== undefined) data.type = dto.type;
     if (dto.disputeId !== undefined) data.disputeId = dto.disputeId;
     if (dto.issuedAt !== undefined) data.issuedAt = new Date(dto.issuedAt);
-    if (dto.effectiveFrom !== undefined) data.effectiveFrom = dto.effectiveFrom ? new Date(dto.effectiveFrom) : null;
-    if (dto.effectiveTo !== undefined) data.effectiveTo = dto.effectiveTo ? new Date(dto.effectiveTo) : null;
+    if (dto.effectiveFrom !== undefined)
+      data.effectiveFrom = dto.effectiveFrom ? new Date(dto.effectiveFrom) : null;
+    if (dto.effectiveTo !== undefined)
+      data.effectiveTo = dto.effectiveTo ? new Date(dto.effectiveTo) : null;
     if (dto.reason !== undefined) data.reason = dto.reason;
     if (dto.evidence !== undefined) data.evidence = dto.evidence;
     if (dto.employeeResponse !== undefined) data.employeeResponse = dto.employeeResponse;
     if (dto.notes !== undefined) data.notes = dto.notes;
-    if (dto.status !== undefined) data.status = dto.status;
+    if (dto.status !== undefined) {
+      if (
+        dto.status === 'ACTIVE' &&
+        requiresHrApproval(existing.type) &&
+        !(existing as any).hrApprovedById
+      ) {
+        throw new BadRequestException(
+          'Group HR approval is required before activating this action',
+        );
+      }
+      data.status = dto.status;
+    }
     if (dto.fineAmount !== undefined) data.fineAmount = dto.fineAmount;
-    const row = await this.prisma.disciplinaryAction.update({ where: { id }, data, include: this.include() });
+    const row = await this.prisma.disciplinaryAction.update({
+      where: { id },
+      data,
+      include: this.include(),
+    });
     await this.audit.log({
-      userId, action: 'UPDATE', entityType: 'DisciplinaryAction', entityId: id,
+      userId,
+      action: 'UPDATE',
+      entityType: 'DisciplinaryAction',
+      entityId: id,
       oldValue: existing as unknown as Record<string, unknown>,
       newValue: row as unknown as Record<string, unknown>,
     });
@@ -200,9 +311,28 @@ export class DisciplinaryActionsService {
     const existing = await this.findOne(id);
     await this.prisma.disciplinaryAction.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.audit.log({
-      userId, action: 'DELETE', entityType: 'DisciplinaryAction', entityId: id,
+      userId,
+      action: 'DELETE',
+      entityType: 'DisciplinaryAction',
+      entityId: id,
       oldValue: existing as unknown as Record<string, unknown>,
     });
     return { success: true };
   }
+
+  private assertCanApprove(action: { issuedById: string }, userId: string) {
+    if (action.issuedById === userId) {
+      throw new BadRequestException('Maker-checker: issuer cannot approve the disciplinary action');
+    }
+  }
+}
+
+function requiresHrApproval(type: string): boolean {
+  return type !== 'VERBAL_WARNING';
+}
+
+function requiresGmApproval(type: string): boolean {
+  return ['TERMINATION', 'SUSPENSION_WITH_PAY', 'SUSPENSION_WITHOUT_PAY', 'DEMOTION'].includes(
+    type,
+  );
 }

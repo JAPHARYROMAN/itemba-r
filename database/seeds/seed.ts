@@ -453,6 +453,55 @@ const ALL_PERMISSIONS: PermDef[] = [
   ...perms('positions', ['view', 'manage']),
   ...perms('employees', ['view', 'create', 'update', 'delete']),
   {
+    code: 'employees.termination.request',
+    description: 'Request employee termination for approval',
+    module: 'employees',
+    action: 'termination.request',
+    isGroupControl: false,
+  },
+  {
+    code: 'employees.termination.approve.hr',
+    description: 'Group HR approval for employee termination',
+    module: 'hr_governance',
+    action: 'termination.approve.hr',
+    isGroupControl: false,
+  },
+  {
+    code: 'employees.termination.approve.gm',
+    description: 'Company GM approval for employee termination',
+    module: 'hr_governance',
+    action: 'termination.approve.gm',
+    isGroupControl: false,
+  },
+  {
+    code: 'employees.transfer.approve.division',
+    description: 'Division Manager approval for employee transfer',
+    module: 'hr_governance',
+    action: 'transfer.approve.division',
+    isGroupControl: false,
+  },
+  {
+    code: 'employees.transfer.approve.hr',
+    description: 'Group HR approval for employee transfer',
+    module: 'hr_governance',
+    action: 'transfer.approve.hr',
+    isGroupControl: false,
+  },
+  {
+    code: 'employees.transfer.approve.gm',
+    description: 'Company GM approval for employee transfer',
+    module: 'hr_governance',
+    action: 'transfer.approve.gm',
+    isGroupControl: false,
+  },
+  {
+    code: 'employees.transfer.approve.finance',
+    description: 'Group Finance approval for inter-company employee transfer',
+    module: 'hr_governance',
+    action: 'transfer.approve.finance',
+    isGroupControl: false,
+  },
+  {
     code: 'employees.sensitive.view',
     description: 'View sensitive employee data (salary, bank)',
     module: 'employees',
@@ -472,6 +521,13 @@ const ALL_PERMISSIONS: PermDef[] = [
   ...perms('attendance', ['view', 'create', 'update', 'approve']),
   ...perms('leave_types', ['view', 'manage']),
   ...perms('leave_requests', ['view', 'create', 'approve', 'reject']),
+  {
+    code: 'leave_requests.approve.hr',
+    description: 'Group HR approval for long leave requests',
+    module: 'hr_governance',
+    action: 'leave.approve.hr',
+    isGroupControl: false,
+  },
   ...perms('allowances', ['view', 'manage']),
   ...perms('deductions', ['view', 'manage']),
   ...perms('payroll', ['view', 'manage', 'calculate', 'submit', 'approve', 'pay', 'cancel']),
@@ -500,6 +556,21 @@ const ALL_PERMISSIONS: PermDef[] = [
   ...perms('salary_advances', ['view', 'create', 'approve', 'pay']),
   ...perms('performance', ['view', 'manage']),
   ...perms('hr_documents', ['view', 'manage', 'download']),
+  ...perms('disciplinary_actions', ['view', 'create', 'update', 'delete']),
+  {
+    code: 'disciplinary_actions.approve.hr',
+    description: 'Group HR co-sign for disciplinary actions',
+    module: 'hr_governance',
+    action: 'disciplinary.approve.hr',
+    isGroupControl: false,
+  },
+  {
+    code: 'disciplinary_actions.approve.gm',
+    description: 'Company GM co-sign for disciplinary actions',
+    module: 'hr_governance',
+    action: 'disciplinary.approve.gm',
+    isGroupControl: false,
+  },
 
   // ── Tax, Compliance, Regulatory (Milestone 10) ─────────────────────────────
   ...perms('tax_authorities', ['view', 'manage']),
@@ -789,7 +860,7 @@ const readExport: PermFilter = (p) =>
   p.action === 'view' ||
   p.action === 'reports.view';
 const groupCtrl: PermFilter = (p) => p.isGroupControl;
-const notGroupCtrl: PermFilter = (p) => !p.isGroupControl;
+const notGroupCtrl: PermFilter = (p) => !p.isGroupControl && p.module !== 'hr_governance';
 const inModules =
   (...mods: string[]): PermFilter =>
   (p) =>
@@ -975,7 +1046,20 @@ const HR_PAYROLL_MODULES = [
   'salary_payments',
   'salary_advances',
 ];
-const HR_OTHER_MODULES = ['performance', 'hr_documents'];
+const HR_OTHER_MODULES = ['performance', 'hr_documents', 'disciplinary_actions'];
+const HR_GROUP_APPROVAL_CODES = [
+  'leave_requests.approve.hr',
+  'employees.termination.approve.hr',
+  'employees.transfer.approve.hr',
+  'disciplinary_actions.approve.hr',
+];
+const HR_COMPANY_GM_APPROVAL_CODES = [
+  'employees.termination.approve.gm',
+  'employees.transfer.approve.gm',
+  'disciplinary_actions.approve.gm',
+];
+const HR_DIVISION_MANAGER_APPROVAL_CODES = ['employees.transfer.approve.division'];
+const HR_FINANCE_APPROVAL_CODES = ['employees.transfer.approve.finance'];
 
 const ALL_M9_MODULES = [
   ...HR_CORE_MODULES,
@@ -1308,6 +1392,7 @@ const ROLES: RoleDef[] = [
       inModules(...ACCOUNTING_ENGINE_MODULES, ...PROCUREMENT_MODULES),
       (p) => inModules(...OPERATIONS_MODULES)(p) && readExport(p),
       (p) => p.code === 'payroll.approve.finance',
+      (p) => HR_FINANCE_APPROVAL_CODES.includes(p.code),
       (p) =>
         inModules('fuel_collections', 'fuel_credit_sales', 'fuel_reconciliation', 'petroleum')(p) &&
         !['manage', 'approve', 'post'].includes(p.action),
@@ -1447,6 +1532,7 @@ const ROLES: RoleDef[] = [
         'final_qa',
       ),
       notGroupCtrl,
+      (p) => HR_COMPANY_GM_APPROVAL_CODES.includes(p.code),
     ),
   },
   {
@@ -1753,6 +1839,7 @@ const ROLES: RoleDef[] = [
     scope: RoleScope.GROUP,
     filter: combine(
       inModules(...HR_CORE_MODULES, ...HR_ATTENDANCE_MODULES, ...HR_OTHER_MODULES),
+      (p) => HR_GROUP_APPROVAL_CODES.includes(p.code),
       (p) =>
         inModules(...HR_PAYROLL_MODULES)(p) &&
         (readExport(p) || ['payroll.approve.hr', 'payroll.sensitive.view'].includes(p.code)),
@@ -1768,6 +1855,32 @@ const ROLES: RoleDef[] = [
     ),
   },
   {
+    name: 'DIVISION_MANAGER',
+    displayName: 'Division Manager',
+    description:
+      'Division-level operational manager with line-authority HR execution and first-stage approvals.',
+    scope: RoleScope.DIVISION,
+    filter: combine(
+      (p) =>
+        inModules(
+          'companies',
+          'divisions',
+          'branches',
+          'departments',
+          'positions',
+          'employees',
+          'employment_contracts',
+          'attendance',
+          'leave_requests',
+          'shift_schedules',
+          'shifts',
+          'reports',
+        )(p) && !p.isGroupControl,
+      (p) => HR_DIVISION_MANAGER_APPROVAL_CODES.includes(p.code),
+      (p) => ['employees.termination.request', 'leave_requests.approve'].includes(p.code),
+    ),
+  },
+  {
     name: 'HR_MANAGER',
     displayName: 'HR Manager',
     description:
@@ -1776,7 +1889,6 @@ const ROLES: RoleDef[] = [
     filter: combine(
       inModules(...HR_CORE_MODULES, ...HR_ATTENDANCE_MODULES, ...HR_OTHER_MODULES),
       (p) => inModules(...HR_PAYROLL_MODULES)(p) && readExport(p),
-      (p) => p.code === 'payroll.approve.hr',
       (p) =>
         [
           'companies.read',

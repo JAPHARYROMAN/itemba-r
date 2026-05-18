@@ -1,4 +1,14 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
@@ -12,7 +22,8 @@ import { UpdateDisciplinaryActionDto } from './dto/update-disciplinary-action.dt
 export class DisciplinaryActionsController {
   constructor(private readonly service: DisciplinaryActionsService) {}
 
-  @Get() @RequirePermissions('employees.view')
+  @Get()
+  @RequirePermissions('disciplinary_actions.view')
   findAll(@Query() q: Record<string, string>) {
     return this.service.findAll({
       page: q.page ? Number(q.page) : undefined,
@@ -24,20 +35,42 @@ export class DisciplinaryActionsController {
     });
   }
 
-  @Get(':id') @RequirePermissions('employees.view')
-  findOne(@Param('id') id: string) { return this.service.findOne(id); }
+  @Get(':id')
+  @RequirePermissions('disciplinary_actions.view')
+  findOne(@Param('id') id: string) {
+    return this.service.findOne(id);
+  }
 
-  @Post() @RequirePermissions('employees.update')
+  @Post()
+  @RequirePermissions('disciplinary_actions.create')
   create(@Body() dto: CreateDisciplinaryActionDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user.id);
   }
 
-  @Patch(':id') @RequirePermissions('employees.update')
-  update(@Param('id') id: string, @Body() dto: UpdateDisciplinaryActionDto, @CurrentUser() user: AuthUser) {
+  @Patch(':id')
+  @RequirePermissions('disciplinary_actions.update')
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateDisciplinaryActionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user.id);
   }
 
-  @Delete(':id') @RequirePermissions('employees.delete')
+  @Patch(':id/approve-hr')
+  @RequirePermissions('disciplinary_actions.approve.hr')
+  approveHr(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.approveHr(id, user.id);
+  }
+
+  @Patch(':id/approve-gm')
+  @RequirePermissions('disciplinary_actions.approve.gm')
+  approveGm(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.approveGm(id, user.id);
+  }
+
+  @Delete(':id')
+  @RequirePermissions('disciplinary_actions.delete')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.remove(id, user.id);
   }

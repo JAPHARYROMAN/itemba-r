@@ -7248,6 +7248,14 @@ model Employee {
   employmentStatus        EmploymentStatus     @default(ACTIVE)
   hireDate                DateTime?
   terminationDate         DateTime?
+  pendingTerminationDate  DateTime?
+  terminationRequestedById String?
+  terminationRequestedAt  DateTime?
+  terminationReason       String?
+  terminationHrApprovedById String?
+  terminationHrApprovedAt DateTime?
+  terminationGmApprovedById String?
+  terminationGmApprovedAt DateTime?
   baseSalary              Decimal              @default(0) @db.Decimal(18, 2)
   salaryCurrency          String               @default("TZS")
   paymentFrequency        HRPaymentFrequency   @default(MONTHLY)
@@ -7334,6 +7342,19 @@ model EmployeeAssignment {
   endDate                DateTime?
   isPrimary              Boolean               @default(false)
   status                 AssignmentStatus      @default(ACTIVE)
+  approvalStatus         String                @default("APPROVED")
+  transferRequestedById  String?
+  transferRequestedAt    DateTime?
+  sourceDivisionApprovedById String?
+  sourceDivisionApprovedAt DateTime?
+  targetDivisionApprovedById String?
+  targetDivisionApprovedAt DateTime?
+  companyGmApprovedById  String?
+  companyGmApprovedAt    DateTime?
+  groupHrApprovedById    String?
+  groupHrApprovedAt      DateTime?
+  groupCfoApprovedById   String?
+  groupCfoApprovedAt     DateTime?
   notes                  String?
   createdAt              DateTime              @default(now())
   updatedAt              DateTime              @updatedAt
@@ -7351,6 +7372,7 @@ model EmployeeAssignment {
   @@index([employeeId, status])
   @@index([divisionId, status])
   @@index([branchId, status])
+  @@index([companyId, approvalStatus])
   @@index([startDate])
   @@map("employee_assignments")
 }
@@ -7519,11 +7541,16 @@ model LeaveRequest {
   totalDays          Decimal            @db.Decimal(5, 2)
   reason             String?
   status             LeaveRequestStatus @default(DRAFT)
+  lineApprovedById   String?
+  lineApprovedAt     DateTime?
+  groupHrApprovedById String?
+  groupHrApprovedAt  DateTime?
   approvedById       String?
   approvedAt         DateTime?
   rejectedById       String?
   rejectedAt         DateTime?
   rejectionReason    String?
+  approvalNotes      String?
   createdById        String
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
@@ -7537,6 +7564,7 @@ model LeaveRequest {
   rejectedBy User?     @relation("LeaveRequestRejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
 
   @@unique([companyId, leaveRequestNumber])
+  @@index([companyId, status, startDate])
   @@map("leave_requests")
 }
 
@@ -8191,6 +8219,10 @@ model DisciplinaryAction {
   evidence         String?
   employeeResponse String?
   issuedById       String
+  hrApprovedById   String?
+  hrApprovedAt     DateTime?
+  gmApprovedById   String?
+  gmApprovedAt     DateTime?
   approvedById     String?
   approvedAt       DateTime?
   /// Optional financial fine attached to the action. When set and the action
@@ -8230,6 +8262,8 @@ enum DisciplinaryActionType {
 }
 
 enum DisciplinaryActionStatus {
+  PENDING_HR_APPROVAL
+  PENDING_GM_APPROVAL
   ACTIVE
   EXPIRED
   OVERTURNED
