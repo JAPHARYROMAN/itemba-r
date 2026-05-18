@@ -1,8 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { AccessLevel, AssetOwnershipLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
+import { AccountResolverService } from '../../common/services/account-resolver.service';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateFixedAssetDto } from './dto/create-fixed-asset.dto';
 import { UpdateFixedAssetDto } from './dto/update-fixed-asset.dto';
@@ -19,10 +21,14 @@ const ASSET_INCLUDES = {
 
 @Injectable()
 export class FixedAssetsService {
+  private readonly logger = new Logger(FixedAssetsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly postingEngine: PostingEngineService,
+    private readonly accountResolver: AccountResolverService,
   ) {}
 
   async findAll(query: QueryFixedAssetDto, user: AuthUser) {
@@ -112,6 +118,7 @@ export class FixedAssetsService {
       depreciationRate,
       residualValue,
       acquisitionDate,
+      skipCapitalization,
       ...rest
     } = dto;
 
@@ -123,18 +130,62 @@ export class FixedAssetsService {
     }
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const createdById = user.id;
+    const cost = new Prisma.Decimal(acquisitionCost);
 
-    const asset = await this.prisma.fixedAsset.create({
-      data: {
-        ...rest,
-        acquisitionCost: new Prisma.Decimal(acquisitionCost),
-        currentBookValue: new Prisma.Decimal(currentBookValue),
-        acquisitionDate: new Date(acquisitionDate),
-        ...(depreciationRate && { depreciationRate: new Prisma.Decimal(depreciationRate) }),
-        ...(residualValue && { residualValue: new Prisma.Decimal(residualValue) }),
-        createdById,
-      },
-      include: ASSET_INCLUDES,
+    // Phase 2 — wrap create + capitalization JE in a single transaction so a
+    // failed posting rolls the asset back too.
+    const asset = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.fixedAsset.create({
+        data: {
+          ...rest,
+          acquisitionCost: cost,
+          currentBookValue: new Prisma.Decimal(currentBookValue),
+          acquisitionDate: new Date(acquisitionDate),
+          ...(depreciationRate && { depreciationRate: new Prisma.Decimal(depreciationRate) }),
+          ...(residualValue && { residualValue: new Prisma.Decimal(residualValue) }),
+          createdById,
+        },
+        include: ASSET_INCLUDES,
+      });
+
+      // Capitalize: DR Fixed Asset / CR Cash. Skipped for historical-data imports
+      // (skipCapitalization=true) or for group-level assets without a companyId
+      // (no company context to anchor the journal entry against).
+      if (!skipCapitalization && created.companyId && cost.gt(0)) {
+        const [fixedAssetAccount, cashAccount] = await Promise.all([
+          this.accountResolver.resolve(created.companyId, 'FIXED_ASSET_COST', tx),
+          this.accountResolver.resolve(created.companyId, 'CASH_ON_HAND', tx),
+        ]);
+
+        await this.postingEngine.postLines(
+          {
+            companyId: created.companyId,
+            divisionId: created.divisionId ?? undefined,
+            branchId: created.branchId ?? undefined,
+            transactionDate: new Date(acquisitionDate),
+            description: `Capitalization — ${created.name} (${created.assetCode})`,
+            referenceType: 'FixedAsset',
+            referenceId: created.id,
+            moduleName: 'fixed-assets',
+            userId: createdById,
+            lines: [
+              {
+                accountId: fixedAssetAccount.id,
+                debit: cost,
+                description: `Acquisition cost — ${created.name}`,
+              },
+              {
+                accountId: cashAccount.id,
+                credit: cost,
+                description: `Payment for ${created.assetCode}`,
+              },
+            ],
+          },
+          tx,
+        );
+      }
+
+      return created;
     });
 
     await this.audit.log({

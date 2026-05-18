@@ -30,4 +30,14 @@ export class ThreeWayMatchingController {
   approve(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.approve(id, user);
   }
+
+  /**
+   * Phase 2 — post the variance from a VARIANCE / PARTIAL_MATCH three-way
+   * match as an adjustment JE. Idempotent; safe to retry.
+   */
+  @Post(':id/post-variance-adjustment')
+  @RequirePermissions('three_way_match.approve')
+  postVarianceAdjustment(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.postVarianceAdjustment(id, user);
+  }
 }

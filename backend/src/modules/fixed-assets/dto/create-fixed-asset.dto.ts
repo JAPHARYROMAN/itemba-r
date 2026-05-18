@@ -1,4 +1,4 @@
-import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import {
   AssetCollateralStatus, AssetCondition, AssetFinancingStatus,
   AssetInsuranceStatus, AssetOwnershipLevel,
@@ -33,4 +33,9 @@ export class CreateFixedAssetDto {
   @IsOptional() @IsEnum(AssetInsuranceStatus) insuranceStatus?: AssetInsuranceStatus;
   @IsOptional() @IsEnum(FixedAssetStatus) status?: FixedAssetStatus;
   @IsOptional() @IsString() notes?: string;
+  /**
+   * Phase 2 — when true, skip the automatic DR Fixed Asset / CR Cash capitalization JE.
+   * Use for historical-data imports of assets that were already capitalized in the legacy ledger.
+   */
+  @IsOptional() @IsBoolean() skipCapitalization?: boolean;
 }
