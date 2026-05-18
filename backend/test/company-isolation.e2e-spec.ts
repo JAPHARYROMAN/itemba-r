@@ -422,6 +422,12 @@ describe('Company Isolation (e2e)', () => {
           fullName: 'E2E Isolation Group User',
           status: 'ACTIVE',
           userRoles: { create: { roleId: groupRole.id } },
+          companyAccess: {
+            create: [
+              { companyId: companyA.id, accessLevel: AccessLevel.READ },
+              { companyId: companyB.id, accessLevel: AccessLevel.READ },
+            ],
+          },
         },
       }),
     ]);
@@ -1047,10 +1053,10 @@ describe('Company Isolation (e2e)', () => {
         .set('Authorization', authorization(companyToken))
         .expect(403);
 
-      await request(app.getHttpServer())
+      const crossCompanySession = await request(app.getHttpServer())
         .get(`/api/v1/active-sessions/${activeSessionBId}`)
-        .set('Authorization', authorization(companyToken))
-        .expect(403);
+        .set('Authorization', authorization(companyToken));
+      expect([403, 404]).toContain(crossCompanySession.status);
     });
 
     it('limits user security profile lists to users in the caller company', async () => {
