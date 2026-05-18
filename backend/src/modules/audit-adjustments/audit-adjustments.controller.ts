@@ -2,6 +2,11 @@ import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { AuditAdjustmentsService } from './audit-adjustments.service';
+import {
+  CreateAuditAdjustmentDto,
+  QueryAuditAdjustmentDto,
+  ReverseAuditAdjustmentDto,
+} from './dto/audit-adjustment.dto';
 
 @Controller('audit-adjustments')
 export class AuditAdjustmentsController {
@@ -9,19 +14,19 @@ export class AuditAdjustmentsController {
 
   @Get()
   @RequirePermissions('audit_adjustments.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: QueryAuditAdjustmentDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
   @Get(':id')
   @RequirePermissions('audit_adjustments.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()
   @RequirePermissions('audit_adjustments.create')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreateAuditAdjustmentDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
   }
 
@@ -47,7 +52,7 @@ export class AuditAdjustmentsController {
   @RequirePermissions('audit_adjustments.post')
   reverse(
     @Param('id') id: string,
-    @Body() body: { reason: string },
+    @Body() body: ReverseAuditAdjustmentDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.reverse(id, body?.reason, user);

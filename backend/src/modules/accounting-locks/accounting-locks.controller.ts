@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { AccountingLocksService } from './accounting-locks.service';
+import { CreateAccountingLockDto, QueryAccountingLockDto } from './dto/accounting-lock.dto';
 
 @Controller('accounting-locks')
 export class AccountingLocksController {
@@ -9,7 +10,7 @@ export class AccountingLocksController {
 
   @Get()
   @RequirePermissions('accounting_locks.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: QueryAccountingLockDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
@@ -21,7 +22,7 @@ export class AccountingLocksController {
 
   @Post()
   @RequirePermissions('accounting_locks.create')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreateAccountingLockDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
   }
 

@@ -89,13 +89,13 @@ export function companyWhereForUser(
   return { companyId: { in: companyIds } };
 }
 
-export function applyCompanyScopeWhere(
-  where: Record<string, unknown>,
+export function applyCompanyScopeWhere<T extends object>(
+  where: T,
   user: AuthUser | undefined,
   requestedCompanyId?: string | null,
 ) {
   Object.assign(where, companyWhereForUser(user, requestedCompanyId));
-  return where;
+  return where as T & CompanyScopedWhere;
 }
 
 @Injectable()

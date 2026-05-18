@@ -5,8 +5,16 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
+import { auditRecord } from '../../common/utils/audit-record';
 import { pagination } from '../../common/utils/pagination';
+import { paginatedResponse } from '../../common/utils/paginated-response';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import {
+  AddBankStatementLineDto,
+  CreateBankReconciliationDto,
+  QueryBankReconciliationDto,
+  UpsertBankReconciliationDto,
+} from './dto/bank-reconciliation.dto';
 
 /**
  * JournalEntry.referenceType values that should win disambiguation when
@@ -47,10 +55,10 @@ export class BankReconciliationsService {
     private readonly postingEngine: PostingEngineService,
   ) {}
 
-  async findAll(query: any, user?: AuthUser) {
+  async findAll(query: QueryBankReconciliationDto, user?: AuthUser) {
     const { companyId, bankAccountId, status, page = 1, limit = 20 } = query;
     const paging = pagination({ page, limit });
-    const where: any = { deletedAt: null };
+    const where: Prisma.BankReconciliationWhereInput = { deletedAt: null };
     applyCompanyScopeWhere(where, user, companyId);
     if (bankAccountId) where.bankAccountId = bankAccountId;
     if (status) where.status = status;
@@ -63,7 +71,7 @@ export class BankReconciliationsService {
       }),
       this.prisma.bankReconciliation.count({ where }),
     ]);
-    return { items, total, page: paging.page, limit: paging.limit };
+    return paginatedResponse({ data: items, total, page: paging.page, limit: paging.limit });
   }
 
   async findOne(id: string, user: AuthUser) {
@@ -76,7 +84,7 @@ export class BankReconciliationsService {
     return item;
   }
 
-  async create(dto: any, user: AuthUser) {
+  async create(dto: CreateBankReconciliationDto, user: AuthUser) {
     assertCanAccessCompanyFromUser(user, dto.companyId);
     const item = await this.prisma.bankReconciliation.create({
       data: { ...dto, status: 'DRAFT', preparedById: user.id },
@@ -91,7 +99,7 @@ export class BankReconciliationsService {
     return item;
   }
 
-  async update(id: string, dto: any, user: AuthUser) {
+  async update(id: string, dto: UpsertBankReconciliationDto, user: AuthUser) {
     const existing = await this.findOne(id, user);
     if (dto.companyId && dto.companyId !== existing.companyId) {
       assertCanAccessCompanyFromUser(user, dto.companyId);
@@ -102,8 +110,8 @@ export class BankReconciliationsService {
       entityType: 'BankReconciliation',
       entityId: id,
       userId: user.id,
-      oldValue: existing as any,
-      newValue: updated as any,
+      oldValue: auditRecord(existing),
+      newValue: auditRecord(updated),
     });
     return updated;
   }
@@ -116,7 +124,7 @@ export class BankReconciliationsService {
     });
   }
 
-  async addLine(reconciliationId: string, dto: any, user: AuthUser) {
+  async addLine(reconciliationId: string, dto: AddBankStatementLineDto, user: AuthUser) {
     await this.findOne(reconciliationId, user);
     const line = await this.prisma.bankStatementLine.create({
       data: { ...dto, bankReconciliationId: reconciliationId },

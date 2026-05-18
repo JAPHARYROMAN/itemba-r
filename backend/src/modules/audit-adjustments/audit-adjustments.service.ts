@@ -1,10 +1,16 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AccessLevel, AuditAdjustmentStatus, Prisma } from '@prisma/client';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { AccountingControlService } from '../../common/services/accounting-control.service';
+import { AccountingControlService, CompanyScopeService } from '../../common/services';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { pagination } from '../../common/utils/pagination';
+import { paginatedResponse } from '../../common/utils/paginated-response';
+import {
+  CreateAuditAdjustmentDto,
+  QueryAuditAdjustmentDto,
+} from './dto/audit-adjustment.dto';
 
 /**
  * Audit adjustments — manual journal entries booked by auditors after the
@@ -25,37 +31,42 @@ export class AuditAdjustmentsService {
     private readonly auditLogs: AuditLogsService,
     private readonly accountingControl: AccountingControlService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
-  async findAll(query: any, user?: any) {
+  async findAll(query: QueryAuditAdjustmentDto, user: AuthUser) {
     const { companyId, status, page = 1, limit = 20 } = query;
-    const skip = (Number(page) - 1) * Number(limit);
-    const where: any = { deletedAt: null };
-    applyCompanyScopeWhere(where, user, companyId);
+    const paging = pagination({ page, limit });
+    const where: Prisma.AuditAdjustmentWhereInput = {
+      deletedAt: null,
+      ...(await this.companyScope.companyWhereFor(user, companyId)),
+    };
     if (status) where.status = status;
     const [items, total] = await Promise.all([
       this.prisma.auditAdjustment.findMany({
         where,
-        skip,
-        take: Number(limit),
+        skip: paging.skip,
+        take: paging.limit,
         orderBy: { createdAt: 'desc' },
         include: { lines: true },
       }),
       this.prisma.auditAdjustment.count({ where }),
     ]);
-    return { items, total, page: Number(page), limit: Number(limit) };
+    return paginatedResponse({ data: items, total, page: paging.page, limit: paging.limit });
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const item = await this.prisma.auditAdjustment.findFirst({
       where: { id, deletedAt: null },
       include: { lines: true },
     });
     if (!item) throw new NotFoundException('Audit adjustment not found');
+    await this.companyScope.assertCanAccessCompany(user, item.companyId, minimum);
     return item;
   }
 
-  async create(dto: any, user: any) {
+  async create(dto: CreateAuditAdjustmentDto, user: AuthUser) {
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const lines = Array.isArray(dto.lines) ? dto.lines : [];
 
     const adjustmentNumber = dto.adjustmentNumber ?? await this.codes.next({ entityType: 'AuditAdjustment', companyId: dto.companyId });
@@ -67,12 +78,12 @@ export class AuditAdjustmentsService {
         accountingPeriodId: dto.accountingPeriodId,
         description: dto.description,
         reason: dto.reason,
-        status: 'DRAFT',
+        status: AuditAdjustmentStatus.DRAFT,
         createdById: user.id,
         ...(lines.length > 0 && {
           lines: {
             createMany: {
-              data: lines.map((l: any) => ({
+              data: lines.map((l) => ({
                 accountId: l.accountId,
                 description: l.description,
                 debit: Number(l.debit ?? 0),
@@ -94,17 +105,17 @@ export class AuditAdjustmentsService {
     return item;
   }
 
-  async submit(id: string, user: any) {
-    const existing = await this.findOne(id);
-    if (existing.status !== 'DRAFT') throw new BadRequestException('Only DRAFT adjustments can be submitted');
-    const updated = await this.prisma.auditAdjustment.update({ where: { id }, data: { status: 'SUBMITTED' } });
+  async submit(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (existing.status !== AuditAdjustmentStatus.DRAFT) throw new BadRequestException('Only DRAFT adjustments can be submitted');
+    const updated = await this.prisma.auditAdjustment.update({ where: { id }, data: { status: AuditAdjustmentStatus.SUBMITTED } });
     await this.auditLogs.log({ action: 'SUBMIT', entityType: 'AuditAdjustment', entityId: id, userId: user.id });
     return updated;
   }
 
-  async approve(id: string, user: any) {
-    const existing = await this.findOne(id);
-    if (existing.status !== 'SUBMITTED') throw new BadRequestException('Only SUBMITTED adjustments can be approved');
+  async approve(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (existing.status !== AuditAdjustmentStatus.SUBMITTED) throw new BadRequestException('Only SUBMITTED adjustments can be approved');
     if (existing.createdById === user.id) {
       throw new BadRequestException(
         'Maker-checker: you cannot approve an adjustment you submitted. Another approver must act.',
@@ -112,7 +123,7 @@ export class AuditAdjustmentsService {
     }
     const updated = await this.prisma.auditAdjustment.update({
       where: { id },
-      data: { status: 'APPROVED', approvedAt: new Date(), approvedById: user.id },
+      data: { status: AuditAdjustmentStatus.APPROVED, approvedAt: new Date(), approvedById: user.id },
     });
     await this.auditLogs.log({ action: 'APPROVE', entityType: 'AuditAdjustment', entityId: id, userId: user.id });
     return updated;
@@ -122,9 +133,9 @@ export class AuditAdjustmentsService {
    * Post: enforces period lock, balances debits=credits, generates the
    * balanced journal entry, and atomically links it back.
    */
-  async post(id: string, user: any) {
-    const existing = await this.findOne(id);
-    if (existing.status !== 'APPROVED') throw new BadRequestException('Only APPROVED adjustments can be posted');
+  async post(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (existing.status !== AuditAdjustmentStatus.APPROVED) throw new BadRequestException('Only APPROVED adjustments can be posted');
     if (existing.lines.length === 0) {
       throw new BadRequestException(
         'Cannot post an adjustment with no lines. Add adjustment lines before posting.',
@@ -158,7 +169,7 @@ export class AuditAdjustmentsService {
           description: `Audit Adjustment: ${existing.description}`,
           totalDebit,
           totalCredit,
-          status: 'POSTED',
+          status: AuditAdjustmentStatus.POSTED,
           createdById: user.id,
           postedById: user.id,
           postedAt: new Date(),
@@ -203,9 +214,9 @@ export class AuditAdjustmentsService {
    * Reverse a POSTED adjustment by booking an offsetting journal entry.
    * The original JE stays — both are visible in the audit trail.
    */
-  async reverse(id: string, reason: string, user: any) {
-    const existing = await this.findOne(id);
-    if (existing.status !== 'POSTED') {
+  async reverse(id: string, reason: string, user: AuthUser) {
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (existing.status !== AuditAdjustmentStatus.POSTED) {
       throw new BadRequestException('Only POSTED adjustments can be reversed');
     }
     if (!existing.journalEntryId) {
@@ -261,7 +272,7 @@ export class AuditAdjustmentsService {
       return tx.auditAdjustment.update({
         where: { id },
         data: {
-          status: 'REVERSED',
+          status: AuditAdjustmentStatus.REVERSED,
           reversedAt: new Date(),
           reversedById: user.id,
           reversalReason: reason,

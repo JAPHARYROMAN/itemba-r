@@ -1,22 +1,29 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, AnalyticsRunType, AnalyticsRunStatus } from '@prisma/client';
+import { AccessLevel, Prisma, AnalyticsRunType, AnalyticsRunStatus, KPISnapshot } from '@prisma/client';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { GenerateSnapshotDto } from './dto/generate-snapshot.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { CompanyScopeService } from '../../common/services';
+import { auditRecord } from '../../common/utils/audit-record';
+import { pagination } from '../../common/utils/pagination';
+import { paginatedResponse } from '../../common/utils/paginated-response';
+import { QueryKpiSnapshotDto } from './dto/query-kpi-snapshot.dto';
 
 @Injectable()
 export class KpiSnapshotsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   private calculateKpiValue(): number {
     return 0;
   }
 
-  async generate(dto: GenerateSnapshotDto, user: any) {
+  async generate(dto: GenerateSnapshotDto, user: AuthUser) {
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const run = await this.prisma.analyticsSnapshotRun.create({
       data: {
         runNumber: `SNAP-${Date.now()}`,
@@ -30,7 +37,7 @@ export class KpiSnapshotsService {
       },
     });
 
-    const snapshots: any[] = [];
+    const snapshots: KPISnapshot[] = [];
     for (const kpiIndicatorId of dto.kpiIndicatorIds) {
       this.calculateKpiValue();
       const snapshot = await this.prisma.kPISnapshot.create({
@@ -55,16 +62,16 @@ export class KpiSnapshotsService {
       data: { status: AnalyticsRunStatus.COMPLETED, completedAt: new Date() },
     });
 
-    await this.audit.log({ userId: user.id, action: 'CREATE', entityType: 'KPISnapshot', entityId: run.id, newValue: dto as any });
+    await this.audit.log({ userId: user.id, action: 'CREATE', entityType: 'KPISnapshot', entityId: run.id, newValue: auditRecord(dto) });
     return { run: completedRun, snapshots };
   }
 
-  async findAll(user: any, query: any) {
+  async findAll(user: AuthUser, query: QueryKpiSnapshotDto) {
     const { page = 1, limit = 20, kpiIndicatorId, companyId, periodType, from, to } = query;
-    const skip = (Number(page) - 1) * Number(limit);
-    const where: any = {};
+    const paging = pagination({ page, limit });
+    const where: Prisma.KPISnapshotWhereInput = {};
     if (kpiIndicatorId) where.kpiIndicatorId = kpiIndicatorId;
-    applyCompanyScopeWhere(where, user, companyId);
+    Object.assign(where, await this.companyScope.companyWhereFor(user, companyId));
     if (periodType) where.periodType = periodType;
     if (from || to) {
       where.snapshotDate = {};
@@ -72,22 +79,28 @@ export class KpiSnapshotsService {
       if (to) where.snapshotDate.lte = new Date(to);
     }
     const [data, total] = await Promise.all([
-      this.prisma.kPISnapshot.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' } }),
+      this.prisma.kPISnapshot.findMany({
+        where,
+        skip: paging.skip,
+        take: paging.limit,
+        orderBy: { createdAt: 'desc' },
+      }),
       this.prisma.kPISnapshot.count({ where }),
     ]);
-    return { data, total, page: Number(page), limit: Number(limit) };
+    return paginatedResponse({ data, total, page: paging.page, limit: paging.limit });
   }
 
-  async findOne(id: string, user: any) {
+  async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const record = await this.prisma.kPISnapshot.findFirst({ where: { id } });
     if (!record) throw new NotFoundException('KPI Snapshot not found');
+    await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
     return record;
   }
 
-  async remove(id: string, user: any) {
-    await this.findOne(id, user);
+  async remove(id: string, user: AuthUser) {
+    await this.findOne(id, user, AccessLevel.WRITE);
     await this.prisma.kPISnapshot.delete({ where: { id } });
-    await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'KPISnapshot', entityId: id, newValue: {} as any });
+    await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'KPISnapshot', entityId: id, newValue: {} });
     return { message: 'Deleted' };
   }
 }

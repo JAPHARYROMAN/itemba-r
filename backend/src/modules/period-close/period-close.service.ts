@@ -1,10 +1,12 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { AccessLevel } from '@prisma/client';
+import { AccessLevel, PeriodCloseStatus, Prisma } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
 import { pagination } from '../../common/utils/pagination';
+import { paginatedResponse } from '../../common/utils/paginated-response';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { CreatePeriodCloseDto, QueryPeriodCloseDto } from './dto/period-close.dto';
 
 @Injectable()
 export class PeriodCloseService {
@@ -14,10 +16,10 @@ export class PeriodCloseService {
     private readonly companyScope: CompanyScopeService,
   ) {}
 
-  async findAll(query: any, user: AuthUser) {
+  async findAll(query: QueryPeriodCloseDto, user: AuthUser) {
     const { companyId, page = 1, limit = 20 } = query;
     const paging = pagination({ page, limit });
-    const where: any = {
+    const where: Prisma.AccountingPeriodCloseWhereInput = {
       deletedAt: null,
       ...(await this.companyScope.companyWhereFor(user, companyId)),
     };
@@ -30,7 +32,7 @@ export class PeriodCloseService {
       }),
       this.prisma.accountingPeriodClose.count({ where }),
     ]);
-    return { items, total, page: paging.page, limit: paging.limit };
+    return paginatedResponse({ data: items, total, page: paging.page, limit: paging.limit });
   }
 
   async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
@@ -42,7 +44,7 @@ export class PeriodCloseService {
     return item;
   }
 
-  async create(dto: any, user: AuthUser) {
+  async create(dto: CreatePeriodCloseDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     await this.assertCloseScope(dto.companyId, dto.fiscalYearId, dto.accountingPeriodId);
     const existing = await this.prisma.accountingPeriodClose.findFirst({
@@ -51,7 +53,7 @@ export class PeriodCloseService {
         fiscalYearId: dto.fiscalYearId,
         accountingPeriodId: dto.accountingPeriodId,
         deletedAt: null,
-        status: { in: ['DRAFT', 'REVIEWING', 'CLOSED'] },
+        status: { in: [PeriodCloseStatus.DRAFT, PeriodCloseStatus.REVIEWING, PeriodCloseStatus.CLOSED] },
       },
     });
     if (existing) {
@@ -59,7 +61,7 @@ export class PeriodCloseService {
     }
 
     const item = await this.prisma.accountingPeriodClose.create({
-      data: { ...dto, status: 'DRAFT', createdById: user.id },
+      data: { ...dto, status: PeriodCloseStatus.DRAFT, createdById: user.id },
     });
     await this.auditLogs.log({
       action: 'CREATE',
@@ -73,12 +75,12 @@ export class PeriodCloseService {
 
   async close(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
-    if (existing.status === 'CLOSED') throw new BadRequestException('Period already closed');
+    if (existing.status === PeriodCloseStatus.CLOSED) throw new BadRequestException('Period already closed');
     await this.assertNoDraftJournals(existing.companyId, existing.accountingPeriodId);
     const updated = await this.prisma.$transaction(async (tx) => {
       const close = await tx.accountingPeriodClose.update({
         where: { id },
-        data: { status: 'CLOSED', closedAt: new Date(), closedById: user.id },
+        data: { status: PeriodCloseStatus.CLOSED, closedAt: new Date(), closedById: user.id },
       });
       await tx.accountingPeriod.update({
         where: { id: existing.accountingPeriodId },
@@ -98,11 +100,11 @@ export class PeriodCloseService {
 
   async reopen(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
-    if (existing.status !== 'CLOSED') throw new BadRequestException('Period is not closed');
+    if (existing.status !== PeriodCloseStatus.CLOSED) throw new BadRequestException('Period is not closed');
     const updated = await this.prisma.$transaction(async (tx) => {
       const close = await tx.accountingPeriodClose.update({
         where: { id },
-        data: { status: 'REOPENED' as any, reopenedById: user.id, reopenedAt: new Date() },
+        data: { status: PeriodCloseStatus.REOPENED, reopenedById: user.id, reopenedAt: new Date() },
       });
       await tx.accountingPeriod.update({
         where: { id: existing.accountingPeriodId },
@@ -155,7 +157,7 @@ export class PeriodCloseService {
   }
 
   private async ensurePeriodLock(
-    tx: any,
+    tx: Prisma.TransactionClient,
     close: {
       companyId: string;
       fiscalYearId: string;

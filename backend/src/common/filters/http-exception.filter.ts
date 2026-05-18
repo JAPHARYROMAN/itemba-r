@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { scrubLogText } from '../utils/log-scrubber';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -45,8 +46,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     if (status >= 500) {
       this.logger.error(
-        `[${request.method}] ${request.url} → ${status}`,
-        exception instanceof Error ? exception.stack : undefined,
+        scrubLogText(`[${request.method}] ${request.url} → ${status}`),
+        scrubLogText(exception instanceof Error ? exception.stack : undefined),
       );
     } else {
       this.logger.warn(`[${request.method}] ${request.url} → ${status}`);

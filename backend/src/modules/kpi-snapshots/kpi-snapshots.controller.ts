@@ -6,6 +6,7 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { KpiSnapshotsService } from './kpi-snapshots.service';
 import { GenerateSnapshotDto } from './dto/generate-snapshot.dto';
+import { QueryKpiSnapshotDto } from './dto/query-kpi-snapshot.dto';
 
 @ApiTags('KPI Snapshots')
 @ApiBearerAuth()
@@ -22,7 +23,7 @@ export class KpiSnapshotsController {
 
   @Get()
   @RequirePermissions('kpi_snapshots.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: QueryKpiSnapshotDto) {
     return this.service.findAll(user, query);
   }
 

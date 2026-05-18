@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { ThreeWayMatchingService } from './three-way-matching.service';
+import { CreateThreeWayMatchDto, QueryThreeWayMatchDto } from './dto/three-way-matching.dto';
 
 @Controller('three-way-matching')
 export class ThreeWayMatchingController {
@@ -9,7 +10,7 @@ export class ThreeWayMatchingController {
 
   @Get()
   @RequirePermissions('three_way_match.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: QueryThreeWayMatchDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
@@ -21,7 +22,7 @@ export class ThreeWayMatchingController {
 
   @Post()
   @RequirePermissions('three_way_match.create')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreateThreeWayMatchDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
   }
 

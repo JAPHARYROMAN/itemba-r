@@ -5,6 +5,7 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { AnalyticsSnapshotRunsService } from './analytics-snapshot-runs.service';
+import { QueryAnalyticsSnapshotRunDto } from './dto/analytics-snapshot-run.dto';
 
 @ApiTags('Analytics Snapshot Runs')
 @ApiBearerAuth()
@@ -15,7 +16,7 @@ export class AnalyticsSnapshotRunsController {
 
   @Get()
   @RequirePermissions('kpi_snapshots.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: QueryAnalyticsSnapshotRunDto) {
     return this.service.findAll(user, query);
   }
 

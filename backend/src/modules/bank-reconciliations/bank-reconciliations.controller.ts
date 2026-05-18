@@ -2,6 +2,12 @@ import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { BankReconciliationsService } from './bank-reconciliations.service';
+import {
+  AddBankStatementLineDto,
+  CreateBankReconciliationDto,
+  QueryBankReconciliationDto,
+  UpsertBankReconciliationDto,
+} from './dto/bank-reconciliation.dto';
 
 @Controller('bank-reconciliations')
 export class BankReconciliationsController {
@@ -9,7 +15,7 @@ export class BankReconciliationsController {
 
   @Get()
   @RequirePermissions('bank_reconciliations.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: QueryBankReconciliationDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
@@ -21,13 +27,13 @@ export class BankReconciliationsController {
 
   @Post()
   @RequirePermissions('bank_reconciliations.create')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreateBankReconciliationDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
   }
 
   @Put(':id')
   @RequirePermissions('bank_reconciliations.update')
-  update(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+  update(@Param('id') id: string, @Body() dto: UpsertBankReconciliationDto, @CurrentUser() user: AuthUser) {
     return this.service.update(id, dto, user);
   }
 
@@ -39,7 +45,7 @@ export class BankReconciliationsController {
 
   @Post(':id/lines')
   @RequirePermissions('bank_reconciliations.update')
-  addLine(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+  addLine(@Param('id') id: string, @Body() dto: AddBankStatementLineDto, @CurrentUser() user: AuthUser) {
     return this.service.addLine(id, dto, user);
   }
 

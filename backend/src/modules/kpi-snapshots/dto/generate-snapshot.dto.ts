@@ -6,9 +6,8 @@ export class GenerateSnapshotDto {
   @IsString({ each: true })
   kpiIndicatorIds!: string[];
 
-  @IsOptional()
   @IsString()
-  companyId?: string;
+  companyId!: string;
 
   @IsOptional()
   @IsString()

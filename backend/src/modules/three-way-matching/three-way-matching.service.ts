@@ -1,11 +1,14 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { AccessLevel } from '@prisma/client';
+import { AccessLevel, Prisma, ThreeWayMatchStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { pagination } from '../../common/utils/pagination';
+import { paginatedResponse } from '../../common/utils/paginated-response';
+import { CreateThreeWayMatchDto, QueryThreeWayMatchDto } from './dto/three-way-matching.dto';
 
 @Injectable()
 export class ThreeWayMatchingService {
@@ -17,19 +20,24 @@ export class ThreeWayMatchingService {
     private readonly postingEngine: PostingEngineService,
   ) {}
 
-  async findAll(query: any, user: AuthUser) {
+  async findAll(query: QueryThreeWayMatchDto, user: AuthUser) {
     const { companyId, status, page = 1, limit = 20 } = query;
-    const skip = (Number(page) - 1) * Number(limit);
-    const where: any = {
+    const paging = pagination({ page, limit });
+    const where: Prisma.ThreeWayMatchWhereInput = {
       deletedAt: null,
       ...(await this.companyScope.companyWhereFor(user, companyId)),
     };
-    if (status) where.status = status;
+    if (status) where.matchStatus = status;
     const [items, total] = await Promise.all([
-      this.prisma.threeWayMatch.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' } }),
+      this.prisma.threeWayMatch.findMany({
+        where,
+        skip: paging.skip,
+        take: paging.limit,
+        orderBy: { createdAt: 'desc' },
+      }),
       this.prisma.threeWayMatch.count({ where }),
     ]);
-    return { items, total, page: Number(page), limit: Number(limit) };
+    return paginatedResponse({ data: items, total, page: paging.page, limit: paging.limit });
   }
 
   async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
@@ -39,7 +47,7 @@ export class ThreeWayMatchingService {
     return item;
   }
 
-  async create(dto: any, user: AuthUser) {
+  async create(dto: CreateThreeWayMatchDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     await this.assertProcurementReferencesInCompany(dto);
     const item = await this.prisma.threeWayMatch.create({ data: { ...dto, matchedById: user.id } });
@@ -49,7 +57,14 @@ export class ThreeWayMatchingService {
 
   async approve(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
-    if (!['MATCHED', 'PARTIAL_MATCH', 'VARIANCE'].includes(existing.matchStatus)) throw new BadRequestException('Cannot approve in current status');
+    const approvableStatuses: ThreeWayMatchStatus[] = [
+      ThreeWayMatchStatus.MATCHED,
+      ThreeWayMatchStatus.PARTIAL_MATCH,
+      ThreeWayMatchStatus.VARIANCE,
+    ];
+    if (!approvableStatuses.includes(existing.matchStatus)) {
+      throw new BadRequestException('Cannot approve in current status');
+    }
     if (existing.approvedAt) throw new BadRequestException('Three-way match is already approved');
     const updated = await this.prisma.$transaction(async (tx) => {
       const approved = await tx.threeWayMatch.update({ where: { id }, data: { approvedAt: new Date(), approvedById: user.id } });
@@ -66,11 +81,11 @@ export class ThreeWayMatchingService {
       matchNumber: string;
       companyId: string;
       purchaseOrderId: string;
-      amountVariance: any;
+      amountVariance: Prisma.Decimal | number | string | null;
       matchDate: Date;
     },
     userId: string,
-    tx: any,
+    tx: Prisma.TransactionClient,
   ) {
     const amount = Number(match.amountVariance ?? 0);
     if (Math.abs(amount) < 0.01) return;
@@ -123,7 +138,7 @@ export class ThreeWayMatchingService {
     );
   }
 
-  private async assertProcurementReferencesInCompany(dto: any) {
+  private async assertProcurementReferencesInCompany(dto: CreateThreeWayMatchDto) {
     const checks: Array<Promise<{ companyId: string } | null>> = [];
     if (dto.purchaseOrderId) {
       checks.push(this.prisma.purchaseOrder.findFirst({

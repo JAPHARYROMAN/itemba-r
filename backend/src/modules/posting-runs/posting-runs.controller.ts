@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { PostingRunsService } from './posting-runs.service';
+import { CreatePostingRunDto, QueryPostingRunDto } from './dto/posting-run.dto';
 
 @Controller('posting-runs')
 export class PostingRunsController {
@@ -9,19 +10,19 @@ export class PostingRunsController {
 
   @Get()
   @RequirePermissions('posting_runs.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: QueryPostingRunDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
   @Get(':id')
   @RequirePermissions('posting_runs.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()
   @RequirePermissions('posting_runs.create')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreatePostingRunDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
   }
 

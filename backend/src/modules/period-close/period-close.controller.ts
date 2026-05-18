@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { PeriodCloseService } from './period-close.service';
+import { CreatePeriodCloseDto, QueryPeriodCloseDto } from './dto/period-close.dto';
 
 @Controller('period-close')
 export class PeriodCloseController {
@@ -9,7 +10,7 @@ export class PeriodCloseController {
 
   @Get()
   @RequirePermissions('period_close.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: QueryPeriodCloseDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
@@ -21,7 +22,7 @@ export class PeriodCloseController {
 
   @Post()
   @RequirePermissions('period_close.create')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreatePeriodCloseDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
   }
 

@@ -1,21 +1,28 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { AccessLevel, PostingRunStatus, Prisma } from '@prisma/client';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { CompanyScopeService } from '../../common/services';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { applyCompanyScopeWhere } from '../../common/services';
 import { pagination } from '../../common/utils/pagination';
+import { paginatedResponse } from '../../common/utils/paginated-response';
+import { CreatePostingRunDto, QueryPostingRunDto } from './dto/posting-run.dto';
 
 @Injectable()
 export class PostingRunsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
-  async findAll(query: any, user?: any) {
+  async findAll(query: QueryPostingRunDto, user: AuthUser) {
     const { companyId, status, page = 1, limit = 20 } = query;
     const paging = pagination({ page, limit });
-    const where: any = { deletedAt: null };
-    applyCompanyScopeWhere(where, user, companyId);
+    const where: Prisma.PostingRunWhereInput = {
+      deletedAt: null,
+      ...(await this.companyScope.companyWhereFor(user, companyId)),
+    };
     if (status) where.status = status;
     const [items, total] = await Promise.all([
       this.prisma.postingRun.findMany({
@@ -26,18 +33,20 @@ export class PostingRunsService {
       }),
       this.prisma.postingRun.count({ where }),
     ]);
-    return { items, total, page: paging.page, limit: paging.limit };
+    return paginatedResponse({ data: items, total, page: paging.page, limit: paging.limit });
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const item = await this.prisma.postingRun.findFirst({ where: { id, deletedAt: null } });
     if (!item) throw new NotFoundException('Posting run not found');
+    await this.companyScope.assertCanAccessCompany(user, item.companyId, minimum);
     return item;
   }
 
-  async create(dto: any, user: any) {
+  async create(dto: CreatePostingRunDto, user: AuthUser) {
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const item = await this.prisma.postingRun.create({
-      data: { ...dto, status: 'DRAFT', createdById: user.id },
+      data: { ...dto, status: PostingRunStatus.DRAFT },
     });
     await this.auditLogs.log({
       action: 'CREATE',
@@ -49,12 +58,12 @@ export class PostingRunsService {
     return item;
   }
 
-  async postRun(id: string, user: any) {
-    const existing = await this.findOne(id);
-    if (existing.status !== 'DRAFT') throw new BadRequestException('Only DRAFT runs can be posted');
+  async postRun(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (existing.status !== PostingRunStatus.DRAFT) throw new BadRequestException('Only DRAFT runs can be posted');
     const updated = await this.prisma.postingRun.update({
       where: { id },
-      data: { status: 'POSTED', postedAt: new Date(), postedById: user.id },
+      data: { status: PostingRunStatus.POSTED, postedAt: new Date(), postedById: user.id },
     });
     await this.auditLogs.log({
       action: 'POST',
@@ -65,13 +74,13 @@ export class PostingRunsService {
     return updated;
   }
 
-  async reverseRun(id: string, user: any) {
-    const existing = await this.findOne(id);
-    if (existing.status !== 'POSTED')
+  async reverseRun(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (existing.status !== PostingRunStatus.POSTED)
       throw new BadRequestException('Only POSTED runs can be reversed');
     const updated = await this.prisma.postingRun.update({
       where: { id },
-      data: { status: 'REVERSED', reversedAt: new Date(), reversedById: user.id },
+      data: { status: PostingRunStatus.REVERSED, reversedAt: new Date(), reversedById: user.id },
     });
     await this.auditLogs.log({
       action: 'REVERSE',

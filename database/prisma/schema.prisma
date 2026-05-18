@@ -525,6 +525,7 @@ model Company {
   internalControlRules      InternalControlRule[]
   // Milestone 12 — BI & Reporting
   kpiSnapshots              KPISnapshot[]
+  analyticsSnapshotRuns     AnalyticsSnapshotRun[]
   executiveInsights         ExecutiveInsight[]
   dataQualityIssues         DataQualityIssue[]
 
@@ -1187,7 +1188,7 @@ model User {
 }
 
 model PasswordResetToken {
-  id        String    @id @default(cuid())
+  id        String    @id @default(uuid())
   userId    String
   tokenHash String
   expiresAt DateTime
@@ -1202,7 +1203,7 @@ model PasswordResetToken {
 }
 
 model TwoFactorBackupCode {
-  id       String    @id @default(cuid())
+  id       String    @id @default(uuid())
   userId   String
   codeHash String
   usedAt   DateTime?
@@ -3011,7 +3012,7 @@ enum SalesPaymentMethod {
 /// rows. `notes` carries free-text justification (manager override, tier,
 /// etc.).
 model SalesCommission {
-  id                 String                @id @default(cuid())
+  id                 String                @id @default(uuid())
   companyId          String
   employeeId         String
   salesOrderId       String
@@ -5292,7 +5293,7 @@ model ConstructionProject {
 /// Powers project P&L without re-running the read-only labour-cost report
 /// against historical payroll data.
 model ProjectCostAllocation {
-  id                         String   @id @default(cuid())
+  id                         String   @id @default(uuid())
   companyId                  String
   projectId                  String
   payrollEntryId             String
@@ -5906,7 +5907,7 @@ enum HospitalityPaymentMethod {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model LicensedBusinessUnit {
-  id               String             @id @default(cuid())
+  id               String             @id @default(uuid())
   businessUnitCode String
   companyId        String
   divisionId       String?
@@ -5949,7 +5950,7 @@ model LicensedBusinessUnit {
 }
 
 model BusinessLicense {
-  id                     String                @id @default(cuid())
+  id                     String                @id @default(uuid())
   licenseCode            String
   companyId              String
   divisionId             String?
@@ -5987,7 +5988,7 @@ model BusinessLicense {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model RentalProperty {
-  id                     String               @id @default(cuid())
+  id                     String               @id @default(uuid())
   propertyCode           String
   companyId              String
   divisionId             String?
@@ -6021,7 +6022,7 @@ model RentalProperty {
 }
 
 model RentalUnit {
-  id                    String           @id @default(cuid())
+  id                    String           @id @default(uuid())
   unitCode              String
   companyId             String
   propertyId            String
@@ -6050,7 +6051,7 @@ model RentalUnit {
 }
 
 model Tenant {
-  id                   String       @id @default(cuid())
+  id                   String       @id @default(uuid())
   tenantCode           String
   companyId            String
   tenantType           TenantType   @default(INDIVIDUAL)
@@ -6081,7 +6082,7 @@ model Tenant {
 }
 
 model LeaseAgreement {
-  id                    String           @id @default(cuid())
+  id                    String           @id @default(uuid())
   leaseCode             String
   companyId             String
   propertyId            String
@@ -6118,7 +6119,7 @@ model LeaseAgreement {
 }
 
 model RentInvoice {
-  id                 String            @id @default(cuid())
+  id                 String            @id @default(uuid())
   rentInvoiceNumber  String
   companyId          String
   propertyId         String
@@ -6158,7 +6159,7 @@ model RentInvoice {
 }
 
 model RentPayment {
-  id                String               @id @default(cuid())
+  id                String               @id @default(uuid())
   rentPaymentNumber String
   companyId         String
   rentInvoiceId     String
@@ -6189,7 +6190,7 @@ model RentPayment {
 }
 
 model PropertyMaintenance {
-  id                String                    @id @default(cuid())
+  id                String                    @id @default(uuid())
   maintenanceNumber String
   companyId         String
   propertyId        String
@@ -6225,7 +6226,7 @@ model PropertyMaintenance {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model ParkingFacility {
-  id                     String                @id @default(cuid())
+  id                     String                @id @default(uuid())
   facilityCode           String
   companyId              String
   divisionId             String?
@@ -6255,7 +6256,7 @@ model ParkingFacility {
 }
 
 model ParkingZone {
-  id          String                 @id @default(cuid())
+  id          String                 @id @default(uuid())
   zoneCode    String
   companyId   String
   facilityId  String
@@ -6278,7 +6279,7 @@ model ParkingZone {
 }
 
 model ParkingRate {
-  id            String            @id @default(cuid())
+  id            String            @id @default(uuid())
   rateCode      String
   companyId     String
   facilityId    String
@@ -6310,7 +6311,7 @@ model ParkingRate {
 }
 
 model ParkingSession {
-  id                String               @id @default(cuid())
+  id                String               @id @default(uuid())
   sessionNumber     String
   companyId         String
   facilityId        String
@@ -6355,7 +6356,7 @@ model ParkingSession {
 }
 
 model ParkingPayment {
-  id               String               @id @default(cuid())
+  id               String               @id @default(uuid())
   paymentNumber    String
   companyId        String
   parkingSessionId String
@@ -6387,7 +6388,7 @@ model ParkingPayment {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model HospitalityFacility {
-  id                     String                    @id @default(cuid())
+  id                     String                    @id @default(uuid())
   facilityCode           String
   companyId              String
   divisionId             String?
@@ -6421,7 +6422,7 @@ model HospitalityFacility {
 }
 
 model Room {
-  id                    String     @id @default(cuid())
+  id                    String     @id @default(uuid())
   roomCode              String
   companyId             String
   hospitalityFacilityId String
@@ -6447,7 +6448,7 @@ model Room {
 }
 
 model Guest {
-  id                   String      @id @default(cuid())
+  id                   String      @id @default(uuid())
   guestCode            String
   companyId            String
   customerId           String?
@@ -6475,7 +6476,7 @@ model Guest {
 }
 
 model RoomBooking {
-  id                    String               @id @default(cuid())
+  id                    String               @id @default(uuid())
   bookingNumber         String
   companyId             String
   hospitalityFacilityId String
@@ -6535,7 +6536,7 @@ model RoomBooking {
 /// created (W5.5 will wire that in); for the MVP it remains null and the
 /// folio stands as the audit record.
 model GuestFolio {
-  id                     String           @id @default(cuid())
+  id                     String           @id @default(uuid())
   folioNumber            String
   companyId              String
   bookingId              String           @unique
@@ -6578,7 +6579,7 @@ enum GuestFolioStatus {
 /// charge can come from a room-night (auto-posted on checkout), a restaurant
 /// order, a bar order, or a manual entry by the front-desk operator.
 model FolioCharge {
-  id          String          @id @default(cuid())
+  id          String          @id @default(uuid())
   folioId     String
   chargeType  FolioChargeType
   /// Optional opaque pointer to the source record (e.g. RestaurantOrder.id,
@@ -6614,7 +6615,7 @@ enum FolioChargeType {
 }
 
 model HousekeepingTask {
-  id                    String                 @id @default(cuid())
+  id                    String                 @id @default(uuid())
   taskNumber            String
   companyId             String
   hospitalityFacilityId String
@@ -6641,7 +6642,7 @@ model HousekeepingTask {
 }
 
 model MenuCategory {
-  id                    String           @id @default(cuid())
+  id                    String           @id @default(uuid())
   companyId             String
   hospitalityFacilityId String?
   name                  String
@@ -6659,7 +6660,7 @@ model MenuCategory {
 }
 
 model MenuItem {
-  id                    String       @id @default(cuid())
+  id                    String       @id @default(uuid())
   menuItemCode          String
   companyId             String
   hospitalityFacilityId String?
@@ -6688,7 +6689,7 @@ model MenuItem {
 }
 
 model RestaurantTable {
-  id                    String                @id @default(cuid())
+  id                    String                @id @default(uuid())
   tableCode             String
   companyId             String
   hospitalityFacilityId String
@@ -6708,7 +6709,7 @@ model RestaurantTable {
 }
 
 model RestaurantOrder {
-  id                    String                       @id @default(cuid())
+  id                    String                       @id @default(uuid())
   orderNumber           String
   companyId             String
   hospitalityFacilityId String
@@ -6750,7 +6751,7 @@ model RestaurantOrder {
 }
 
 model RestaurantOrderLine {
-  id                String   @id @default(cuid())
+  id                String   @id @default(uuid())
   restaurantOrderId String
   menuItemId        String
   productId         String?
@@ -6771,7 +6772,7 @@ model RestaurantOrderLine {
 }
 
 model HospitalityPayment {
-  id                 String                        @id @default(cuid())
+  id                 String                        @id @default(uuid())
   paymentNumber      String
   companyId          String
   paymentContextType HospitalityPaymentContextType
@@ -6807,7 +6808,7 @@ model HospitalityPayment {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model BusinessUnitAttachment {
-  id                     String   @id @default(cuid())
+  id                     String   @id @default(uuid())
   companyId              String
   entityType             String
   entityId               String
@@ -7125,7 +7126,7 @@ enum HRDocumentCategory {
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model Department {
-  id                     String           @id @default(cuid())
+  id                     String           @id @default(uuid())
   departmentCode         String
   companyId              String
   divisionId             String?
@@ -7153,7 +7154,7 @@ model Department {
 }
 
 model Position {
-  id            String         @id @default(cuid())
+  id            String         @id @default(uuid())
   positionCode  String
   companyId     String
   departmentId  String?
@@ -7177,7 +7178,7 @@ model Position {
 }
 
 model Employee {
-  id                      String               @id @default(cuid())
+  id                      String               @id @default(uuid())
   employeeCode            String
   companyId               String
   divisionId              String?
@@ -7296,7 +7297,7 @@ model Employee {
 /// `msisdn` should be stored in E.164 format (e.g. +255712345678) — the
 /// provider APIs (M-Pesa B2C, Tigo Pesa) all accept that shape.
 model MobileMoneyAccount {
-  id          String                   @id @default(cuid())
+  id          String                   @id @default(uuid())
   employeeId  String
   provider    MobileMoneyProvider
   msisdn      String
@@ -7317,7 +7318,7 @@ model MobileMoneyAccount {
 }
 
 model EmployeeAssignment {
-  id                     String                @id @default(cuid())
+  id                     String                @id @default(uuid())
   employeeId             String
   companyId              String
   divisionId             String?
@@ -7353,7 +7354,7 @@ model EmployeeAssignment {
 }
 
 model EmploymentContract {
-  id               String                   @id @default(cuid())
+  id               String                   @id @default(uuid())
   contractCode     String
   companyId        String
   employeeId       String
@@ -7385,7 +7386,7 @@ model EmploymentContract {
 }
 
 model WorkShift {
-  id                     String    @id @default(cuid())
+  id                     String    @id @default(uuid())
   shiftCode              String
   companyId              String
   divisionId             String?
@@ -7414,7 +7415,7 @@ model WorkShift {
 }
 
 model ShiftSchedule {
-  id                     String                 @id @default(cuid())
+  id                     String                 @id @default(uuid())
   scheduleNumber         String
   companyId              String
   employeeId             String
@@ -7449,7 +7450,7 @@ model ShiftSchedule {
 }
 
 model AttendanceRecord {
-  id                String           @id @default(cuid())
+  id                String           @id @default(uuid())
   attendanceNumber  String
   companyId         String
   employeeId        String
@@ -7485,7 +7486,7 @@ model AttendanceRecord {
 }
 
 model LeaveType {
-  id                  String    @id @default(cuid())
+  id                  String    @id @default(uuid())
   companyId           String
   name                String
   code                String
@@ -7506,7 +7507,7 @@ model LeaveType {
 }
 
 model LeaveRequest {
-  id                 String             @id @default(cuid())
+  id                 String             @id @default(uuid())
   leaveRequestNumber String
   companyId          String
   employeeId         String
@@ -7538,7 +7539,7 @@ model LeaveRequest {
 }
 
 model AllowanceType {
-  id            String    @id @default(cuid())
+  id            String    @id @default(uuid())
   companyId     String
   name          String
   code          String
@@ -7560,7 +7561,7 @@ model AllowanceType {
 }
 
 model DeductionType {
-  id                String    @id @default(cuid())
+  id                String    @id @default(uuid())
   companyId         String
   name              String
   code              String
@@ -7583,7 +7584,7 @@ model DeductionType {
 }
 
 model EmployeeAllowance {
-  id              String                   @id @default(cuid())
+  id              String                   @id @default(uuid())
   companyId       String
   employeeId      String
   allowanceTypeId String
@@ -7608,7 +7609,7 @@ model EmployeeAllowance {
 }
 
 model EmployeeDeduction {
-  id              String                   @id @default(cuid())
+  id              String                   @id @default(uuid())
   companyId       String
   employeeId      String
   deductionTypeId String
@@ -7634,7 +7635,7 @@ model EmployeeDeduction {
 }
 
 model PayrollPeriod {
-  id                String              @id @default(cuid())
+  id                String              @id @default(uuid())
   payrollPeriodCode String
   companyId         String
   name              String
@@ -7662,7 +7663,7 @@ model PayrollPeriod {
 }
 
 model PayrollRun {
-  id                         String           @id @default(cuid())
+  id                         String           @id @default(uuid())
   payrollRunNumber           String
   companyId                  String
   payrollPeriodId            String
@@ -7711,7 +7712,7 @@ model PayrollRun {
 }
 
 model PayrollEntry {
-  id              String             @id @default(cuid())
+  id              String             @id @default(uuid())
   payrollRunId    String
   companyId       String
   employeeId      String
@@ -7750,7 +7751,7 @@ model PayrollEntry {
 }
 
 model PayrollEntryAllowance {
-  id                String   @id @default(cuid())
+  id                String   @id @default(uuid())
   payrollEntryId    String
   allowanceTypeId   String
   description       String?
@@ -7771,7 +7772,7 @@ model PayrollEntryAllowance {
 }
 
 model PayrollEntryDeduction {
-  id              String   @id @default(cuid())
+  id              String   @id @default(uuid())
   payrollEntryId  String
   deductionTypeId String
   description     String?
@@ -7804,7 +7805,7 @@ model PayrollEntryDeduction {
 /// `basis` records what the calculation was applied to (gross / basic / etc.)
 /// so the math is reproducible without reading code.
 model PayrollStatutoryLine {
-  id                       String                @id @default(cuid())
+  id                       String                @id @default(uuid())
   payrollEntryId           String
   taxTypeId                String
   statutoryDeductionRuleId String?
@@ -7839,7 +7840,7 @@ enum PayrollStatutoryBasis {
 }
 
 model SalaryPayment {
-  id                  String              @id @default(cuid())
+  id                  String              @id @default(uuid())
   salaryPaymentNumber String
   companyId           String
   payrollRunId        String
@@ -7873,7 +7874,7 @@ model SalaryPayment {
 }
 
 model SalaryAdvance {
-  id                    String                 @id @default(cuid())
+  id                    String                 @id @default(uuid())
   advanceNumber         String
   companyId             String
   employeeId            String
@@ -7913,7 +7914,7 @@ model SalaryAdvance {
 }
 
 model PerformanceRecord {
-  id                String                  @id @default(cuid())
+  id                String                  @id @default(uuid())
   performanceNumber String
   companyId         String
   employeeId        String
@@ -7951,7 +7952,7 @@ model PerformanceRecord {
 }
 
 model HRDocument {
-  id               String             @id @default(cuid())
+  id               String             @id @default(uuid())
   companyId        String
   employeeId       String?
   entityType       String?
@@ -7977,7 +7978,7 @@ model HRDocument {
 /// Tracking these in-system lets the dashboard surface upcoming expiries the
 /// same way contracts and documents do.
 model OshaRegistration {
-  id                 String                  @id @default(cuid())
+  id                 String                  @id @default(uuid())
   companyId          String
   branchId           String
   certificateNumber  String
@@ -8038,7 +8039,7 @@ enum OshaRiskClassification {
 /// employee can be assigned to certain work shifts (e.g. driver rosters skip
 /// UNFIT employees).
 model MedicalExamRecord {
-  id            String               @id @default(cuid())
+  id            String               @id @default(uuid())
   companyId     String
   employeeId    String
   examType      MedicalExamType      @default(ANNUAL)
@@ -8087,7 +8088,7 @@ enum MedicalFitnessStatus {
 /// CMA = Commission for Mediation & Arbitration. Cases that don't resolve
 /// internally must be filed with CMA within 30 days using Form CMA-F1.
 model EmploymentDispute {
-  id                 String                       @id @default(cuid())
+  id                 String                       @id @default(uuid())
   disputeNumber      String
   companyId          String
   employeeId         String
@@ -8168,7 +8169,7 @@ enum EmploymentDisputeResolution {
 /// May or may not link to an `EmploymentDispute` depending on whether the
 /// employee is contesting it.
 model DisciplinaryAction {
-  id               String                   @id @default(cuid())
+  id               String                   @id @default(uuid())
   actionNumber     String
   companyId        String
   employeeId       String
@@ -8533,7 +8534,7 @@ enum DataExportStatus {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model TaxAuthority {
-  id            String             @id @default(cuid())
+  id            String             @id @default(uuid())
   authorityCode String             @unique
   name          String
   country       String
@@ -8554,7 +8555,7 @@ model TaxAuthority {
 }
 
 model CompanyTaxRegistration {
-  id                 String                @id @default(cuid())
+  id                 String                @id @default(uuid())
   registrationCode   String
   companyId          String
   authorityId        String?
@@ -8580,7 +8581,7 @@ model CompanyTaxRegistration {
 }
 
 model TaxType {
-  id                 String        @id @default(cuid())
+  id                 String        @id @default(uuid())
   taxTypeCode        String        @unique
   name               String
   taxCategory        TaxCategory   @default(OTHER)
@@ -8608,7 +8609,7 @@ model TaxType {
 }
 
 model TaxRate {
-  id                String                   @id @default(cuid())
+  id                String                   @id @default(uuid())
   taxTypeId         String
   companyId         String?
   rateName          String
@@ -8647,7 +8648,7 @@ model TaxRate {
 ///
 /// `toAmount = null` denotes the open-ended top tier ("above X").
 model TaxRateBracket {
-  id           String   @id @default(cuid())
+  id           String   @id @default(uuid())
   taxRateId    String
   tierOrder    Int
   fromAmount   Decimal  @db.Decimal(18, 2)
@@ -8666,7 +8667,7 @@ model TaxRateBracket {
 }
 
 model TaxCode {
-  id          String           @id @default(cuid())
+  id          String           @id @default(uuid())
   taxCode     String
   companyId   String?
   taxTypeId   String
@@ -8691,7 +8692,7 @@ model TaxCode {
 }
 
 model TaxTransaction {
-  id                   String                   @id @default(cuid())
+  id                   String                   @id @default(uuid())
   taxTransactionNumber String
   companyId            String
   taxTypeId            String
@@ -8726,7 +8727,7 @@ model TaxTransaction {
 }
 
 model TaxFilingPeriod {
-  id               String                @id @default(cuid())
+  id               String                @id @default(uuid())
   filingPeriodCode String
   companyId        String
   taxTypeId        String
@@ -8762,7 +8763,7 @@ model TaxFilingPeriod {
 }
 
 model TaxReturn {
-  id                  String          @id @default(cuid())
+  id                  String          @id @default(uuid())
   taxReturnNumber     String
   companyId           String
   taxFilingPeriodId   String
@@ -8808,7 +8809,7 @@ model TaxReturn {
 }
 
 model ComplianceObligation {
-  id                     String                         @id @default(cuid())
+  id                     String                         @id @default(uuid())
   obligationCode         String
   companyId              String
   divisionId             String?
@@ -8845,7 +8846,7 @@ model ComplianceObligation {
 }
 
 model ComplianceEvent {
-  id                     String              @id @default(cuid())
+  id                     String              @id @default(uuid())
   eventNumber            String
   companyId              String
   complianceObligationId String?
@@ -8868,7 +8869,7 @@ model ComplianceEvent {
 }
 
 model StatutoryDeductionRule {
-  id                       String                       @id @default(cuid())
+  id                       String                       @id @default(uuid())
   ruleCode                 String                       @unique
   companyId                String?
   deductionTypeId          String?
@@ -8905,7 +8906,7 @@ model StatutoryDeductionRule {
 /// on moon sighting; the seeded value should be treated as a planning date and
 /// confirmed by the religious authority each year.
 model PublicHoliday {
-  id                  String        @id @default(cuid())
+  id                  String        @id @default(uuid())
   companyId           String?
   region              HolidayRegion @default(MAINLAND)
   name                String
@@ -8930,7 +8931,7 @@ model PublicHoliday {
 /// distinct minima for sectors (mining, agriculture, services, domestic, etc.)
 /// — payroll uses this as the floor for any new contract in that sector.
 model MinimumWageRule {
-  id             String            @id @default(cuid())
+  id             String            @id @default(uuid())
   sectorCode     String
   sectorName     String
   region         HolidayRegion     @default(MAINLAND)
@@ -8962,7 +8963,7 @@ enum MinimumWageStatus {
 }
 
 model ComplianceDocumentRequirement {
-  id                     String               @id @default(cuid())
+  id                     String               @id @default(uuid())
   requirementCode        String
   companyId              String?
   divisionId             String?
@@ -8987,7 +8988,7 @@ model ComplianceDocumentRequirement {
 }
 
 model ComplianceDocumentStatus {
-  id               String                  @id @default(cuid())
+  id               String                  @id @default(uuid())
   companyId        String
   requirementId    String
   linkedEntityType String?
@@ -9008,7 +9009,7 @@ model ComplianceDocumentStatus {
 }
 
 model AuditEvidencePack {
-  id                 String                  @id @default(cuid())
+  id                 String                  @id @default(uuid())
   evidencePackNumber String
   companyId          String
   title              String
@@ -9035,7 +9036,7 @@ model AuditEvidencePack {
 }
 
 model AuditEvidencePackItem {
-  id               String                    @id @default(cuid())
+  id               String                    @id @default(uuid())
   evidencePackId   String
   itemType         AuditEvidencePackItemType @default(DOCUMENT)
   linkedEntityType String?
@@ -9051,7 +9052,7 @@ model AuditEvidencePackItem {
 }
 
 model DataExportLog {
-  id           String           @id @default(cuid())
+  id           String           @id @default(uuid())
   exportNumber String
   companyId    String?
   exportedById String
@@ -9285,7 +9286,7 @@ enum EnforcementLevel {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model ApprovalWorkflow {
-  id                     String                @id @default(cuid())
+  id                     String                @id @default(uuid())
   workflowCode           String
   companyId              String?
   divisionId             String?
@@ -9321,7 +9322,7 @@ model ApprovalWorkflow {
 }
 
 model ApprovalStep {
-  id                   String       @id @default(cuid())
+  id                   String       @id @default(uuid())
   workflowId           String
   stepOrder            Int
   stepName             String
@@ -9350,7 +9351,7 @@ model ApprovalStep {
 }
 
 model ApprovalRequest {
-  id                     String                    @id @default(cuid())
+  id                     String                    @id @default(uuid())
   approvalRequestNumber  String
   workflowId             String?
   companyId              String?
@@ -9396,7 +9397,7 @@ model ApprovalRequest {
 }
 
 model ApprovalAction {
-  id                String             @id @default(cuid())
+  id                String             @id @default(uuid())
   approvalRequestId String
   stepId            String?
   stepOrder         Int
@@ -9419,7 +9420,7 @@ model ApprovalAction {
 }
 
 model ApprovalDelegation {
-  id              String           @id @default(cuid())
+  id              String           @id @default(uuid())
   delegatorUserId String
   delegateUserId  String
   companyId       String?
@@ -9444,7 +9445,7 @@ model ApprovalDelegation {
 }
 
 model ApprovalAttachment {
-  id                String   @id @default(cuid())
+  id                String   @id @default(uuid())
   approvalRequestId String
   documentId        String
   uploadedById      String
@@ -9457,7 +9458,7 @@ model ApprovalAttachment {
 }
 
 model Notification {
-  id                 String               @id @default(cuid())
+  id                 String               @id @default(uuid())
   notificationNumber String               @unique
   companyId          String?
   recipientUserId    String
@@ -9485,7 +9486,7 @@ model Notification {
 }
 
 model AlertRule {
-  id                     String               @id @default(cuid())
+  id                     String               @id @default(uuid())
   alertRuleCode          String               @unique
   companyId              String?
   divisionId             String?
@@ -9521,7 +9522,7 @@ model AlertRule {
 }
 
 model AlertEvent {
-  id               String               @id @default(cuid())
+  id               String               @id @default(uuid())
   alertEventNumber String
   alertRuleId      String?
   companyId        String?
@@ -9555,7 +9556,7 @@ model AlertEvent {
 }
 
 model Task {
-  id                     String       @id @default(cuid())
+  id                     String       @id @default(uuid())
   taskNumber             String
   companyId              String?
   divisionId             String?
@@ -9589,7 +9590,7 @@ model Task {
 }
 
 model InternalControlRule {
-  id                     String           @id @default(cuid())
+  id                     String           @id @default(uuid())
   controlCode            String           @unique
   companyId              String?
   divisionId             String?
@@ -9818,7 +9819,7 @@ enum DataQualityIssueStatus {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model KPIIndicator {
-  id                 String             @id @default(cuid())
+  id                 String             @id @default(uuid())
   kpiCode            String             @unique
   name               String
   description        String?
@@ -9844,7 +9845,7 @@ model KPIIndicator {
 }
 
 model KPISnapshot {
-  id                     String             @id @default(cuid())
+  id                     String             @id @default(uuid())
   kpiIndicatorId         String
   companyId              String?
   divisionId             String?
@@ -9870,7 +9871,7 @@ model KPISnapshot {
 }
 
 model ReportDefinition {
-  id                 String         @id @default(cuid())
+  id                 String         @id @default(uuid())
   reportCode         String         @unique
   name               String
   description        String?
@@ -9899,7 +9900,7 @@ model ReportDefinition {
 }
 
 model SavedReportView {
-  id                 String    @id @default(cuid())
+  id                 String    @id @default(uuid())
   reportDefinitionId String
   userId             String
   companyId          String?
@@ -9923,7 +9924,7 @@ model SavedReportView {
 }
 
 model ReportRun {
-  id                 String          @id @default(cuid())
+  id                 String          @id @default(uuid())
   reportRunNumber    String          @unique
   reportDefinitionId String
   savedReportViewId  String?
@@ -9947,7 +9948,7 @@ model ReportRun {
 }
 
 model ScheduledReport {
-  id                 String             @id @default(cuid())
+  id                 String             @id @default(uuid())
   scheduleCode       String             @unique
   reportDefinitionId String
   savedReportViewId  String?
@@ -9975,7 +9976,7 @@ model ScheduledReport {
 }
 
 model DashboardDefinition {
-  id                 String        @id @default(cuid())
+  id                 String        @id @default(uuid())
   dashboardCode      String        @unique
   name               String
   description        String?
@@ -9998,7 +9999,7 @@ model DashboardDefinition {
 }
 
 model DashboardWidget {
-  id                    String               @id @default(cuid())
+  id                    String               @id @default(uuid())
   dashboardDefinitionId String
   widgetCode            String
   title                 String
@@ -10024,7 +10025,7 @@ model DashboardWidget {
 }
 
 model UserDashboardPreference {
-  id                    String   @id @default(cuid())
+  id                    String   @id @default(uuid())
   userId                String
   dashboardDefinitionId String
   layoutOverride        Json?
@@ -10066,10 +10067,10 @@ model UserPreference {
 }
 
 model AnalyticsSnapshotRun {
-  id           String             @id @default(cuid())
+  id           String             @id @default(uuid())
   runNumber    String             @unique
   runType      AnalyticsRunType   @default(KPI_SNAPSHOT)
-  companyId    String?
+  companyId    String
   periodStart  DateTime?
   periodEnd    DateTime?
   status       AnalyticsRunStatus @default(REQUESTED)
@@ -10080,14 +10081,16 @@ model AnalyticsSnapshotRun {
   metadata     Json?
   createdAt    DateTime           @default(now())
 
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   startedBy User? @relation("SnapshotRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
 
+  @@index([companyId, runType, status, createdAt])
   @@index([runType, status, createdAt])
   @@map("analytics_snapshot_runs")
 }
 
 model ExecutiveInsight {
-  id                     String             @id @default(cuid())
+  id                     String             @id @default(uuid())
   insightNumber          String             @unique
   companyId              String?
   divisionId             String?
@@ -10122,7 +10125,7 @@ model ExecutiveInsight {
 }
 
 model DataQualityIssue {
-  id           String                   @id @default(cuid())
+  id           String                   @id @default(uuid())
   issueNumber  String                   @unique
   companyId    String?
   entityType   String
@@ -10422,7 +10425,7 @@ enum IntegrationMappingStatus {
 // ─── M13: Integration Providers ───────────────────────────────────────────────
 
 model IntegrationProvider {
-  id               String                    @id @default(cuid())
+  id               String                    @id @default(uuid())
   providerCode     String                    @unique
   name             String
   providerType     IntegrationProviderType
@@ -10449,7 +10452,7 @@ model IntegrationProvider {
 }
 
 model IntegrationConnection {
-  id                     String                           @id @default(cuid())
+  id                     String                           @id @default(uuid())
   connectionCode         String                           @unique
   companyId              String?
   divisionId             String?
@@ -10486,7 +10489,7 @@ model IntegrationConnection {
 }
 
 model IntegrationEvent {
-  id              String                    @id @default(cuid())
+  id              String                    @id @default(uuid())
   eventNumber     String                    @unique
   companyId       String?
   providerId      String?
@@ -10515,7 +10518,7 @@ model IntegrationEvent {
 }
 
 model WebhookEndpoint {
-  id            String                @id @default(cuid())
+  id            String                @id @default(uuid())
   webhookCode   String                @unique
   companyId     String?
   providerId    String?
@@ -10541,7 +10544,7 @@ model WebhookEndpoint {
 }
 
 model WebhookEvent {
-  id                 String                    @id @default(cuid())
+  id                 String                    @id @default(uuid())
   webhookEventNumber String                    @unique
   webhookEndpointId  String?
   providerId         String?
@@ -10572,7 +10575,7 @@ model WebhookEvent {
 }
 
 model ApiClient {
-  id                 String          @id @default(cuid())
+  id                 String          @id @default(uuid())
   clientCode         String          @unique
   companyId          String?
   name               String
@@ -10598,7 +10601,7 @@ model ApiClient {
 }
 
 model ApiKey {
-  id          String       @id @default(cuid())
+  id          String       @id @default(uuid())
   apiKeyCode  String       @unique
   apiClientId String
   keyPrefix   String
@@ -10624,7 +10627,7 @@ model ApiKey {
 }
 
 model ApiRequestLog {
-  id            String   @id @default(cuid())
+  id            String   @id @default(uuid())
   requestNumber String   @unique
   apiClientId   String?
   apiKeyId      String?
@@ -10652,7 +10655,7 @@ model ApiRequestLog {
 }
 
 model DeviceRegistration {
-  id                   String         @id @default(cuid())
+  id                   String         @id @default(uuid())
   deviceCode           String         @unique
   userId               String?
   employeeId           String?
@@ -10681,7 +10684,7 @@ model DeviceRegistration {
 }
 
 model MobileSession {
-  id               String              @id @default(cuid())
+  id               String              @id @default(uuid())
   sessionCode      String              @unique
   userId           String
   deviceId         String?
@@ -10707,7 +10710,7 @@ model MobileSession {
 }
 
 model OfflineSyncBatch {
-  id             String                 @id @default(cuid())
+  id             String                 @id @default(uuid())
   batchNumber    String                 @unique
   clientBatchId  String                 @unique
   userId         String
@@ -10735,7 +10738,7 @@ model OfflineSyncBatch {
 }
 
 model OfflineSyncRecord {
-  id                String                  @id @default(cuid())
+  id                String                  @id @default(uuid())
   syncBatchId       String
   clientRecordId    String
   entityType        String
@@ -10760,7 +10763,7 @@ model OfflineSyncRecord {
 }
 
 model SyncCheckpoint {
-  id               String   @id @default(cuid())
+  id               String   @id @default(uuid())
   userId           String
   deviceId         String?
   companyId        String?
@@ -10781,7 +10784,7 @@ model SyncCheckpoint {
 }
 
 model ExternalPayment {
-  id                  String                 @id @default(cuid())
+  id                  String                 @id @default(uuid())
   paymentNumber       String                 @unique
   companyId           String
   providerId          String?
@@ -10820,7 +10823,7 @@ model ExternalPayment {
 }
 
 model ExternalMessage {
-  id                String                       @id @default(cuid())
+  id                String                       @id @default(uuid())
   messageNumber     String                       @unique
   companyId         String?
   providerId        String?
@@ -10851,7 +10854,7 @@ model ExternalMessage {
 }
 
 model MessageTemplate {
-  id           String                 @id @default(cuid())
+  id           String                 @id @default(uuid())
   templateCode String                 @unique
   companyId    String?
   name         String
@@ -10875,7 +10878,7 @@ model MessageTemplate {
 }
 
 model IntegrationMapping {
-  id                 String                   @id @default(cuid())
+  id                 String                   @id @default(uuid())
   mappingCode        String                   @unique
   companyId          String?
   providerId         String?
@@ -11201,7 +11204,7 @@ enum EnvironmentConfigStatus {
 // ─── M14 Models ───────────────────────────────────────────────────────────────
 
 model SecurityPolicy {
-  id           String             @id @default(cuid())
+  id           String             @id @default(uuid())
   policyCode   String             @unique
   companyId    String?
   name         String
@@ -11224,7 +11227,7 @@ model SecurityPolicy {
 }
 
 model UserSecurityProfile {
-  id                       String            @id @default(cuid())
+  id                       String            @id @default(uuid())
   userId                   String            @unique
   passwordChangedAt        DateTime?
   passwordExpiresAt        DateTime?
@@ -11252,7 +11255,7 @@ model UserSecurityProfile {
 }
 
 model PasswordHistory {
-  id           String   @id @default(cuid())
+  id           String   @id @default(uuid())
   userId       String
   passwordHash String
   createdAt    DateTime @default(now())
@@ -11264,7 +11267,7 @@ model PasswordHistory {
 }
 
 model SecurityEvent {
-  id              String                @id @default(cuid())
+  id              String                @id @default(uuid())
   eventNumber     String                @unique
   companyId       String?
   userId          String?
@@ -11297,7 +11300,7 @@ model SecurityEvent {
 }
 
 model ActiveSession {
-  id             String              @id @default(cuid())
+  id             String              @id @default(uuid())
   sessionCode    String              @unique
   userId         String
   companyId      String?
@@ -11323,7 +11326,7 @@ model ActiveSession {
 }
 
 model BackupJob {
-  id                     String              @id @default(cuid())
+  id                     String              @id @default(uuid())
   backupJobCode          String              @unique
   name                   String
   backupType             BackupType
@@ -11348,7 +11351,7 @@ model BackupJob {
 }
 
 model BackupRun {
-  id              String          @id @default(cuid())
+  id              String          @id @default(uuid())
   backupRunNumber String          @unique
   backupJobId     String?
   backupType      BackupType
@@ -11374,7 +11377,7 @@ model BackupRun {
 }
 
 model RestoreTest {
-  id                String            @id @default(cuid())
+  id                String            @id @default(uuid())
   restoreTestNumber String            @unique
   backupRunId       String?
   testDate          DateTime
@@ -11398,7 +11401,7 @@ model RestoreTest {
 }
 
 model DisasterRecoveryPlan {
-  id                            String                     @id @default(cuid())
+  id                            String                     @id @default(uuid())
   drPlanCode                    String                     @unique
   companyId                     String?
   name                          String
@@ -11427,7 +11430,7 @@ model DisasterRecoveryPlan {
 }
 
 model SystemHealthCheck {
-  id               String            @id @default(cuid())
+  id               String            @id @default(uuid())
   healthCheckCode  String            @unique
   name             String
   checkType        HealthCheckType
@@ -11448,7 +11451,7 @@ model SystemHealthCheck {
 }
 
 model SystemMetric {
-  id         String           @id @default(cuid())
+  id         String           @id @default(uuid())
   metricCode String
   metricType SystemMetricType
   value      Decimal          @db.Decimal(18, 4)
@@ -11465,7 +11468,7 @@ model SystemMetric {
 }
 
 model ErrorLog {
-  id            String           @id @default(cuid())
+  id            String           @id @default(uuid())
   errorNumber   String           @unique
   companyId     String?
   userId        String?
@@ -11496,7 +11499,7 @@ model ErrorLog {
 }
 
 model RetentionPolicy {
-  id                  String                @id @default(cuid())
+  id                  String                @id @default(uuid())
   retentionPolicyCode String                @unique
   companyId           String?
   name                String
@@ -11524,7 +11527,7 @@ model RetentionPolicy {
 }
 
 model DataArchiveJob {
-  id                String                @id @default(cuid())
+  id                String                @id @default(uuid())
   archiveJobNumber  String                @unique
   retentionPolicyId String?
   companyId         String?
@@ -11553,7 +11556,7 @@ model DataArchiveJob {
 }
 
 model ProductionReadinessCheck {
-  id                 String                      @id @default(cuid())
+  id                 String                      @id @default(uuid())
   checkCode          String                      @unique
   category           ProductionReadinessCategory
   title              String
@@ -11578,7 +11581,7 @@ model ProductionReadinessCheck {
 }
 
 model EnvironmentConfigCheck {
-  id            String                    @id @default(cuid())
+  id            String                    @id @default(uuid())
   configKey     String                    @unique
   category      EnvironmentConfigCategory
   description   String?
@@ -12029,7 +12032,7 @@ enum LoanPaymentMethod {
 // ─── Advanced Accounting Models ───────────────────────────────────────────────
 
 model AccountingPostingRule {
-  id            String               @id @default(cuid())
+  id            String               @id @default(uuid())
   ruleCode      String               @unique
   companyId     String?
   name          String
@@ -12056,7 +12059,7 @@ model AccountingPostingRule {
 }
 
 model AccountingPostingRuleLine {
-  id                  String              @id @default(cuid())
+  id                  String              @id @default(uuid())
   postingRuleId       String
   lineOrder           Int
   debitCredit         DebitCredit
@@ -12075,7 +12078,7 @@ model AccountingPostingRuleLine {
 }
 
 model PostingRun {
-  id               String            @id @default(cuid())
+  id               String            @id @default(uuid())
   postingRunNumber String            @unique
   companyId        String
   sourceType       PostingSourceType
@@ -12106,7 +12109,7 @@ model PostingRun {
 }
 
 model AccountingPeriodClose {
-  id                 String            @id @default(cuid())
+  id                 String            @id @default(uuid())
   closeNumber        String            @unique
   companyId          String
   fiscalYearId       String
@@ -12134,7 +12137,7 @@ model AccountingPeriodClose {
 }
 
 model AccountingLock {
-  id                 String               @id @default(cuid())
+  id                 String               @id @default(uuid())
   lockCode           String               @unique
   companyId          String
   lockType           AccountingLockType
@@ -12163,7 +12166,7 @@ model AccountingLock {
 }
 
 model BankReconciliation {
-  id                      String                   @id @default(cuid())
+  id                      String                   @id @default(uuid())
   reconciliationNumber    String
   companyId               String
   cashAccountId           String
@@ -12202,7 +12205,7 @@ model BankReconciliation {
 }
 
 model BankStatementLine {
-  id                     String   @id @default(cuid())
+  id                     String   @id @default(uuid())
   bankReconciliationId   String
   transactionDate        DateTime
   description            String
@@ -12224,7 +12227,7 @@ model BankStatementLine {
 }
 
 model BankReconciliationMatch {
-  id                   String   @id @default(cuid())
+  id                   String   @id @default(uuid())
   bankReconciliationId String
   bankStatementLineId  String
   matchedEntityType    String
@@ -12245,7 +12248,7 @@ model BankReconciliationMatch {
 }
 
 model DepreciationSchedule {
-  id                      String                     @id @default(cuid())
+  id                      String                     @id @default(uuid())
   scheduleNumber          String                     @unique
   companyId               String
   fixedAssetId            String
@@ -12273,7 +12276,7 @@ model DepreciationSchedule {
 }
 
 model DepreciationEntry {
-  id                           String                  @id @default(cuid())
+  id                           String                  @id @default(uuid())
   depreciationScheduleId       String
   companyId                    String
   fixedAssetId                 String
@@ -12298,7 +12301,7 @@ model DepreciationEntry {
 }
 
 model LoanRepaymentSchedule {
-  id                      String              @id @default(cuid())
+  id                      String              @id @default(uuid())
   repaymentScheduleNumber String              @unique
   companyId               String
   loanDebtId              String
@@ -12325,7 +12328,7 @@ model LoanRepaymentSchedule {
 }
 
 model LoanRepaymentPayment {
-  id                      String            @id @default(cuid())
+  id                      String            @id @default(uuid())
   repaymentPaymentNumber  String            @unique
   companyId               String
   loanRepaymentScheduleId String
@@ -12350,7 +12353,7 @@ model LoanRepaymentPayment {
 }
 
 model FinancialStatementRun {
-  id                 String                 @id @default(cuid())
+  id                 String                 @id @default(uuid())
   statementRunNumber String                 @unique
   companyId          String?
   statementType      FinancialStatementType
@@ -12374,7 +12377,7 @@ model FinancialStatementRun {
 }
 
 model AuditAdjustment {
-  id                     String                @id @default(cuid())
+  id                     String                @id @default(uuid())
   adjustmentNumber       String                @unique
   companyId              String
   fiscalYearId           String?
@@ -12413,7 +12416,7 @@ model AuditAdjustment {
 }
 
 model AuditAdjustmentLine {
-  id                String   @id @default(cuid())
+  id                String   @id @default(uuid())
   auditAdjustmentId String
   accountId         String
   description       String?
@@ -12433,7 +12436,7 @@ model AuditAdjustmentLine {
 // ─── Procurement Models ───────────────────────────────────────────────────────
 
 model PurchaseRequisition {
-  id                   String              @id @default(cuid())
+  id                   String              @id @default(uuid())
   requisitionNumber    String
   companyId            String
   divisionId           String?
@@ -12468,7 +12471,7 @@ model PurchaseRequisition {
 }
 
 model PurchaseRequisitionLine {
-  id                    String   @id @default(cuid())
+  id                    String   @id @default(uuid())
   purchaseRequisitionId String
   productId             String?
   description           String
@@ -12487,7 +12490,7 @@ model PurchaseRequisitionLine {
 }
 
 model RequestForQuotation {
-  id                    String    @id @default(cuid())
+  id                    String    @id @default(uuid())
   rfqNumber             String
   companyId             String
   purchaseRequisitionId String?
@@ -12516,7 +12519,7 @@ model RequestForQuotation {
 }
 
 model RFQSupplier {
-  id             String                    @id @default(cuid())
+  id             String                    @id @default(uuid())
   rfqId          String
   supplierId     String
   sentAt         DateTime?
@@ -12532,7 +12535,7 @@ model RFQSupplier {
 }
 
 model SupplierQuotation {
-  id                      String                  @id @default(cuid())
+  id                      String                  @id @default(uuid())
   supplierQuotationNumber String                  @unique
   companyId               String
   rfqId                   String?
@@ -12566,7 +12569,7 @@ model SupplierQuotation {
 }
 
 model SupplierQuotationLine {
-  id                  String   @id @default(cuid())
+  id                  String   @id @default(uuid())
   supplierQuotationId String
   productId           String?
   description         String
@@ -12588,7 +12591,7 @@ model SupplierQuotationLine {
 }
 
 model BidComparison {
-  id                    String              @id @default(cuid())
+  id                    String              @id @default(uuid())
   comparisonNumber      String              @unique
   companyId             String
   rfqId                 String
@@ -12617,7 +12620,7 @@ model BidComparison {
 }
 
 model BidComparisonLine {
-  id                  String   @id @default(cuid())
+  id                  String   @id @default(uuid())
   bidComparisonId     String
   supplierQuotationId String
   supplierId          String
@@ -12638,7 +12641,7 @@ model BidComparisonLine {
 }
 
 model GoodsReceivedNote {
-  id              String    @id @default(cuid())
+  id              String    @id @default(uuid())
   grnNumber       String
   companyId       String
   divisionId      String?
@@ -12674,7 +12677,7 @@ model GoodsReceivedNote {
 }
 
 model GoodsReceivedNoteLine {
-  id                  String   @id @default(cuid())
+  id                  String   @id @default(uuid())
   goodsReceivedNoteId String
   productId           String
   orderedQuantity     Decimal? @db.Decimal(18, 4)
@@ -12694,7 +12697,7 @@ model GoodsReceivedNoteLine {
 }
 
 model SupplierInvoice {
-  id                    String                @id @default(cuid())
+  id                    String                @id @default(uuid())
   supplierInvoiceNumber String
   companyId             String
   divisionId            String?
@@ -12740,7 +12743,7 @@ model SupplierInvoice {
 }
 
 model SupplierInvoiceLine {
-  id                String   @id @default(cuid())
+  id                String   @id @default(uuid())
   supplierInvoiceId String
   productId         String?
   description       String
@@ -12760,7 +12763,7 @@ model SupplierInvoiceLine {
 }
 
 model ThreeWayMatch {
-  id                  String              @id @default(cuid())
+  id                  String              @id @default(uuid())
   matchNumber         String              @unique
   companyId           String
   purchaseOrderId     String
@@ -12789,7 +12792,7 @@ model ThreeWayMatch {
 }
 
 model ProcurementPlan {
-  id           String                @id @default(cuid())
+  id           String                @id @default(uuid())
   planNumber   String                @unique
   companyId    String
   fiscalYearId String?
@@ -12816,7 +12819,7 @@ model ProcurementPlan {
 }
 
 model ProcurementPlanLine {
-  id                  String    @id @default(cuid())
+  id                  String    @id @default(uuid())
   procurementPlanId   String
   productId           String?
   description         String
@@ -12837,7 +12840,7 @@ model ProcurementPlanLine {
 // ─── CRM / SRM Models ─────────────────────────────────────────────────────────
 
 model ContactPerson {
-  id         String            @id @default(cuid())
+  id         String            @id @default(uuid())
   companyId  String
   entityType ContactEntityType
   entityId   String
@@ -12858,7 +12861,7 @@ model ContactPerson {
 }
 
 model CommunicationLog {
-  id                  String                 @id @default(cuid())
+  id                  String                 @id @default(uuid())
   communicationNumber String                 @unique
   companyId           String
   entityType          ContactEntityType
@@ -12886,7 +12889,7 @@ model CommunicationLog {
 }
 
 model CustomerCreditProfile {
-  id                 String           @id @default(cuid())
+  id                 String           @id @default(uuid())
   companyId          String
   customerId         String
   creditLimit        Decimal          @default(0) @db.Decimal(18, 4)
@@ -12912,7 +12915,7 @@ model CustomerCreditProfile {
 }
 
 model SupplierPerformanceProfile {
-  id                        String         @id @default(cuid())
+  id                        String         @id @default(uuid())
   companyId                 String
   supplierId                String
   rating                    SupplierRating @default(UNKNOWN)
@@ -12938,7 +12941,7 @@ model SupplierPerformanceProfile {
 }
 
 model CustomerSegment {
-  id          String    @id @default(cuid())
+  id          String    @id @default(uuid())
   segmentCode String    @unique
   companyId   String
   name        String
@@ -12957,7 +12960,7 @@ model CustomerSegment {
 }
 
 model CustomerSegmentMembership {
-  id                String   @id @default(cuid())
+  id                String   @id @default(uuid())
   customerSegmentId String
   customerId        String
   assignedById      String?
@@ -12972,7 +12975,7 @@ model CustomerSegmentMembership {
 }
 
 model CustomerStatementRun {
-  id                 String                  @id @default(cuid())
+  id                 String                  @id @default(uuid())
   statementRunNumber String                  @unique
   companyId          String
   customerId         String
@@ -12998,7 +13001,7 @@ model CustomerStatementRun {
 }
 
 model SupplierStatementRun {
-  id                 String                  @id @default(cuid())
+  id                 String                  @id @default(uuid())
   statementRunNumber String                  @unique
   companyId          String
   supplierId         String
@@ -13026,7 +13029,7 @@ model SupplierStatementRun {
 // ─── Document Template Models ─────────────────────────────────────────────────
 
 model DocumentTemplate {
-  id           String                 @id @default(cuid())
+  id           String                 @id @default(uuid())
   templateCode String                 @unique
   companyId    String?
   name         String
@@ -13056,7 +13059,7 @@ model DocumentTemplate {
 }
 
 model GeneratedDocument {
-  id                      String                  @id @default(cuid())
+  id                      String                  @id @default(uuid())
   generatedDocumentNumber String                  @unique
   companyId               String?
   templateId              String
@@ -13083,7 +13086,7 @@ model GeneratedDocument {
 }
 
 model DocumentNumberSequence {
-  id             String                 @id @default(cuid())
+  id             String                 @id @default(uuid())
   sequenceCode   String                 @unique
   companyId      String?
   entityType     String
@@ -13107,7 +13110,7 @@ model DocumentNumberSequence {
 // ─── Business Automation Models ───────────────────────────────────────────────
 
 model AutomationRule {
-  id                 String                @id @default(cuid())
+  id                 String                @id @default(uuid())
   automationRuleCode String                @unique
   companyId          String?
   name               String
@@ -13136,7 +13139,7 @@ model AutomationRule {
 }
 
 model AutomationRun {
-  id                  String              @id @default(cuid())
+  id                  String              @id @default(uuid())
   automationRunNumber String              @unique
   automationRuleId    String?
   companyId           String?
@@ -13162,7 +13165,7 @@ model AutomationRun {
 }
 
 model AutomationRunItem {
-  id              String                  @id @default(cuid())
+  id              String                  @id @default(uuid())
   automationRunId String
   entityType      String?
   entityId        String?
@@ -13328,7 +13331,7 @@ enum LoadTestStatus {
 // ─── M15 Models ───────────────────────────────────────────────────────────────
 
 model BackgroundJob {
-  id             String                @id @default(cuid())
+  id             String                @id @default(uuid())
   jobNumber      String                @unique
   jobType        BackgroundJobType
   queueName      String
@@ -13360,7 +13363,7 @@ model BackgroundJob {
 }
 
 model JobQueueConfig {
-  id                  String   @id @default(cuid())
+  id                  String   @id @default(uuid())
   queueName           String   @unique
   description         String?
   concurrency         Int      @default(1)
@@ -13376,7 +13379,7 @@ model JobQueueConfig {
 }
 
 model CacheEntry {
-  id        String         @id @default(cuid())
+  id        String         @id @default(uuid())
   cacheKey  String         @unique
   companyId String?
   scopeHash String?
@@ -13394,7 +13397,7 @@ model CacheEntry {
 }
 
 model PerformanceTrace {
-  id            String                 @id @default(cuid())
+  id            String                 @id @default(uuid())
   traceNumber   String                 @unique
   traceType     PerformanceTraceType
   companyId     String?
@@ -13416,7 +13419,7 @@ model PerformanceTrace {
 }
 
 model DataIsolationTestRun {
-  id            String                 @id @default(cuid())
+  id            String                 @id @default(uuid())
   testRunNumber String                 @unique
   runType       DataIsolationRunType
   status        DataIsolationRunStatus @default(RUNNING)
@@ -13439,7 +13442,7 @@ model DataIsolationTestRun {
 }
 
 model DataIsolationTestIssue {
-  id          String                     @id @default(cuid())
+  id          String                     @id @default(uuid())
   testRunId   String
   issueType   DataIsolationIssueType
   severity    DataIsolationIssueSeverity
@@ -13457,7 +13460,7 @@ model DataIsolationTestIssue {
 }
 
 model DeploymentRelease {
-  id              String                  @id @default(cuid())
+  id              String                  @id @default(uuid())
   releaseNumber   String                  @unique
   version         String
   environment     DeploymentEnvironment
@@ -13482,7 +13485,7 @@ model DeploymentRelease {
 }
 
 model LoadTestRun {
-  id                    String              @id @default(cuid())
+  id                    String              @id @default(uuid())
   loadTestNumber        String              @unique
   testName              String
   environment           LoadTestEnvironment @default(DEVELOPMENT)
@@ -13815,7 +13818,7 @@ enum SupportTicketStatus {
 // ---- Models ----
 
 model QATestSuite {
-  id          String          @id @default(cuid())
+  id          String          @id @default(uuid())
   suiteCode   String          @unique
   name        String
   description String?
@@ -13840,7 +13843,7 @@ model QATestSuite {
 }
 
 model QATestCase {
-  id                  String         @id @default(cuid())
+  id                  String         @id @default(uuid())
   testCaseCode        String         @unique
   testSuiteId         String
   title               String
@@ -13870,7 +13873,7 @@ model QATestCase {
 }
 
 model QATestRun {
-  id            String               @id @default(cuid())
+  id            String               @id @default(uuid())
   testRunNumber String               @unique
   testSuiteId   String?
   runName       String
@@ -13903,7 +13906,7 @@ model QATestRun {
 }
 
 model QATestResult {
-  id                 String             @id @default(cuid())
+  id                 String             @id @default(uuid())
   testRunId          String
   testCaseId         String
   status             QATestResultStatus @default(NOT_RUN)
@@ -13927,7 +13930,7 @@ model QATestResult {
 }
 
 model LaunchBlocker {
-  id                   String              @id @default(cuid())
+  id                   String              @id @default(uuid())
   blockerNumber        String
   title                String
   description          String
@@ -13964,7 +13967,7 @@ model LaunchBlocker {
 }
 
 model LaunchReadinessAssessment {
-  id                 String                          @id @default(cuid())
+  id                 String                          @id @default(uuid())
   assessmentNumber   String                          @unique
   environment        LaunchReadinessEnvironment
   assessmentDate     DateTime
@@ -13999,7 +14002,7 @@ model LaunchReadinessAssessment {
 }
 
 model LaunchReadinessItem {
-  id                 String                      @id @default(cuid())
+  id                 String                      @id @default(uuid())
   assessmentId       String
   category           LaunchReadinessItemCategory
   title              String
@@ -14023,7 +14026,7 @@ model LaunchReadinessItem {
 }
 
 model UserManual {
-  id            String           @id @default(cuid())
+  id            String           @id @default(uuid())
   manualCode    String           @unique
   title         String
   moduleName    String?
@@ -14053,7 +14056,7 @@ model UserManual {
 }
 
 model HelpArticle {
-  id              String              @id @default(cuid())
+  id              String              @id @default(uuid())
   articleCode     String              @unique
   title           String
   category        HelpArticleCategory
@@ -14079,7 +14082,7 @@ model HelpArticle {
 }
 
 model TrainingCourse {
-  id               String                   @id @default(cuid())
+  id               String                   @id @default(uuid())
   courseCode       String                   @unique
   title            String
   description      String?
@@ -14104,7 +14107,7 @@ model TrainingCourse {
 }
 
 model TrainingLesson {
-  id                String               @id @default(cuid())
+  id                String               @id @default(uuid())
   trainingCourseId  String
   lessonCode        String               @unique
   title             String
@@ -14128,7 +14131,7 @@ model TrainingLesson {
 }
 
 model TrainingEnrollment {
-  id               String                   @id @default(cuid())
+  id               String                   @id @default(uuid())
   trainingCourseId String
   userId           String
   assignedById     String?
@@ -14151,7 +14154,7 @@ model TrainingEnrollment {
 }
 
 model TrainingLessonProgress {
-  id                   String                       @id @default(cuid())
+  id                   String                       @id @default(uuid())
   trainingEnrollmentId String
   trainingLessonId     String
   status               TrainingLessonProgressStatus @default(NOT_STARTED)
@@ -14170,7 +14173,7 @@ model TrainingLessonProgress {
 }
 
 model GuidedWalkthrough {
-  id              String                  @id @default(cuid())
+  id              String                  @id @default(uuid())
   walkthroughCode String                  @unique
   title           String
   moduleName      String?
@@ -14194,7 +14197,7 @@ model GuidedWalkthrough {
 }
 
 model UserWalkthroughProgress {
-  id                  String                        @id @default(cuid())
+  id                  String                        @id @default(uuid())
   userId              String
   guidedWalkthroughId String
   status              UserWalkthroughProgressStatus @default(NOT_STARTED)
@@ -14213,7 +14216,7 @@ model UserWalkthroughProgress {
 }
 
 model TrainingEnvironmentConfig {
-  id             String                    @id @default(cuid())
+  id             String                    @id @default(uuid())
   configCode     String                    @unique
   name           String
   description    String?
@@ -14234,7 +14237,7 @@ model TrainingEnvironmentConfig {
 }
 
 model SupportTicket {
-  id           String                @id @default(cuid())
+  id           String                @id @default(uuid())
   ticketNumber String
   companyId    String?
   reportedById String
@@ -14269,7 +14272,7 @@ model SupportTicket {
 }
 
 model SupportTicketComment {
-  id              String    @id @default(cuid())
+  id              String    @id @default(uuid())
   supportTicketId String
   userId          String
   comment         String
