@@ -410,7 +410,6 @@ describe('Critical Business Workflows (e2e)', () => {
     await prisma.branch.deleteMany({ where: { id: { in: branchIds } } });
     await prisma.division.deleteMany({ where: { id: { in: divisionIds } } });
     await prisma.company.deleteMany({ where: { id: { in: companyIds } } });
-    if (groupId) await prisma.group.deleteMany({ where: { id: groupId } });
   }
 
   it('creates, posts, and reverses a balanced journal entry through maker-checker GL controls', async () => {

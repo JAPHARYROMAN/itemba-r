@@ -157,7 +157,6 @@ describe('API read route smoke coverage (e2e)', () => {
       }
       if (groupId) {
         await prisma.company.deleteMany({ where: { groupId } });
-        await prisma.group.deleteMany({ where: { id: groupId } });
       }
     }
     if (app) {

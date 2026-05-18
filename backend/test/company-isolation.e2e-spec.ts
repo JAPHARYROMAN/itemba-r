@@ -716,9 +716,6 @@ describe('Company Isolation (e2e)', () => {
     if (companyIds.length > 0) {
       await prisma.company.deleteMany({ where: { id: { in: companyIds } } });
     }
-    if (groupId) {
-      await prisma.group.deleteMany({ where: { id: groupId } });
-    }
   }
 
   describe('Unauthenticated access', () => {

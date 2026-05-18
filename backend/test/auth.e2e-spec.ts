@@ -23,8 +23,10 @@ describe('Authentication (e2e)', () => {
   let prisma: PrismaService;
 
   const TEST_EMAIL = `e2e-auth-${Date.now()}@itemba.local`;
+  const LOCKOUT_EMAIL = `e2e-auth-lockout-${Date.now()}@itemba.local`;
   const TEST_PASS = 'TestPass123!';
   let testUserId: string;
+  let lockoutUserId: string;
 
   async function resetUserAuthState(password = TEST_PASS) {
     const passwordHash = await argon2.hash(password);
@@ -57,19 +59,30 @@ describe('Authentication (e2e)', () => {
       },
     });
     testUserId = user.id;
+
+    const lockoutUser = await prisma.user.create({
+      data: {
+        email: LOCKOUT_EMAIL,
+        passwordHash,
+        fullName: 'E2E Auth Lockout User',
+        status: 'ACTIVE',
+      },
+    });
+    lockoutUserId = lockoutUser.id;
   }, 120000);
 
   afterAll(async () => {
     if (prisma && testUserId) {
-      await prisma.refreshToken.deleteMany({ where: { userId: testUserId } });
-      await prisma.passwordResetToken.deleteMany({ where: { userId: testUserId } });
-      await prisma.twoFactorBackupCode.deleteMany({ where: { userId: testUserId } });
-      await prisma.userSecurityProfile.deleteMany({ where: { userId: testUserId } });
-      await prisma.passwordHistory.deleteMany({ where: { userId: testUserId } });
-      await prisma.activeSession.deleteMany({ where: { userId: testUserId } });
-      await prisma.auditLog.deleteMany({ where: { userId: testUserId } });
-      await prisma.securityEvent.deleteMany({ where: { userId: testUserId } });
-      await prisma.user.delete({ where: { id: testUserId } });
+      const userIds = [testUserId, lockoutUserId].filter(Boolean);
+      await prisma.refreshToken.deleteMany({ where: { userId: { in: userIds } } });
+      await prisma.passwordResetToken.deleteMany({ where: { userId: { in: userIds } } });
+      await prisma.twoFactorBackupCode.deleteMany({ where: { userId: { in: userIds } } });
+      await prisma.userSecurityProfile.deleteMany({ where: { userId: { in: userIds } } });
+      await prisma.passwordHistory.deleteMany({ where: { userId: { in: userIds } } });
+      await prisma.activeSession.deleteMany({ where: { userId: { in: userIds } } });
+      await prisma.auditLog.deleteMany({ where: { userId: { in: userIds } } });
+      await prisma.securityEvent.deleteMany({ where: { userId: { in: userIds } } });
+      await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     }
     if (app) await app.close();
   });
@@ -137,7 +150,7 @@ describe('Authentication (e2e)', () => {
     beforeEach(async () => {
       // Clean slate before each lockout test
       await prisma.user.update({
-        where: { id: testUserId },
+        where: { id: lockoutUserId },
         data: { failedLoginAttempts: 0, lockedUntil: null, status: 'ACTIVE' },
       });
     });
@@ -146,10 +159,10 @@ describe('Authentication (e2e)', () => {
       for (let i = 0; i < 5; i++) {
         await request(app.getHttpServer())
           .post('/api/v1/auth/login')
-          .send({ email: TEST_EMAIL, password: 'WrongPass!' });
+          .send({ email: LOCKOUT_EMAIL, password: 'WrongPass!' });
       }
 
-      const locked = await prisma.user.findUnique({ where: { id: testUserId } });
+      const locked = await prisma.user.findUnique({ where: { id: lockoutUserId } });
       expect(locked?.lockedUntil).not.toBeNull();
       expect(locked?.lockedUntil!.getTime()).toBeGreaterThan(Date.now());
     });
@@ -157,7 +170,7 @@ describe('Authentication (e2e)', () => {
     it('locked account cannot login even with correct password', async () => {
       // Lock manually
       await prisma.user.update({
-        where: { id: testUserId },
+        where: { id: lockoutUserId },
         data: {
           failedLoginAttempts: 5,
           lockedUntil: new Date(Date.now() + 15 * 60_000),
@@ -166,15 +179,15 @@ describe('Authentication (e2e)', () => {
 
       await request(app.getHttpServer())
         .post('/api/v1/auth/login')
-        .send({ email: TEST_EMAIL, password: TEST_PASS })
+        .send({ email: LOCKOUT_EMAIL, password: TEST_PASS })
         .expect(401);
     });
 
     afterAll(async () => {
-      if (!prisma || !testUserId) return;
+      if (!prisma || !lockoutUserId) return;
       // Ensure account is unlocked for subsequent tests
       await prisma.user.update({
-        where: { id: testUserId },
+        where: { id: lockoutUserId },
         data: { failedLoginAttempts: 0, lockedUntil: null },
       });
     });

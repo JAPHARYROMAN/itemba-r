@@ -95,7 +95,6 @@ describe('Job worker data exports (e2e)', () => {
       }
       if (groupId) {
         await prisma.company.deleteMany({ where: { groupId } });
-        await prisma.group.deleteMany({ where: { id: groupId } });
       }
     }
 
