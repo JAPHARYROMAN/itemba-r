@@ -40,8 +40,8 @@ interface CashAccount {
   accountName: string;
   accountType: string;
   currency: string;
-  currentBalance: number;
-  openingBalance: number;
+  currentBalance: number | string;
+  openingBalance: number | string;
   isActive: boolean;
   linkedBankAccountId?: string | null;
   notes?: string | null;
@@ -91,10 +91,10 @@ const TYPE_BADGE: Record<string, string> = {
   OTHER: 'bg-zinc-50 text-zinc-700 border-zinc-200',
 };
 
-function fmtMoney(amount: number, currency = 'TZS') {
+function fmtMoney(amount: number | string | null | undefined, currency = 'TZS') {
   return `${currency} ${new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
-  }).format(amount ?? 0)}`;
+  }).format(Number(amount ?? 0))}`;
 }
 
 function optionLabel(row: { code?: string | null; name: string }) {
@@ -127,7 +127,7 @@ function CashAccountModal({
           accountName: initial.accountName,
           accountType: initial.accountType,
           currency: initial.currency,
-          openingBalance: initial.openingBalance,
+          openingBalance: Number(initial.openingBalance ?? 0),
           linkedBankAccountId: initial.linkedBankAccountId ?? '',
           notes: initial.notes ?? '',
           isActive: initial.isActive,
@@ -542,7 +542,7 @@ export default function CashAccountsPage() {
   const branchFilterOptions = divisionId
     ? branches.filter((branch) => branch.divisionId === divisionId)
     : [];
-  const totalBalance = list.reduce((sum, a) => sum + (a.currentBalance ?? 0), 0);
+  const totalBalance = list.reduce((sum, a) => sum + Number(a.currentBalance ?? 0), 0);
   const distinctTypes = new Set(list.map((a) => a.accountType)).size;
 
   const filterSelectCls =
