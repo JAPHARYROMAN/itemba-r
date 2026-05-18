@@ -356,6 +356,7 @@ jobs:
           docker build \
             --build-arg BACKEND_INTERNAL_URL=http://localhost:3001/api/v1 \
             --build-arg NEXT_PUBLIC_API_URL=http://localhost:3001/api/v1 \
+            --build-arg NEXT_PUBLIC_WEBSITE_URL=http://localhost:3000 \
             -t itemba-r-frontend:${{ github.sha }} \
             -t itemba-r-frontend:latest \
             ./frontend
