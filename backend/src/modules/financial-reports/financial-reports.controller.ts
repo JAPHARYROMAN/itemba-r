@@ -10,9 +10,39 @@ class ReportQueryDto {
   @IsOptional() @IsString() dateTo?: string;
   @IsOptional() @IsString() periodStart?: string;
   @IsOptional() @IsString() periodEnd?: string;
+  @IsOptional() @IsString() year?: string;
+  @IsOptional() @IsString() month?: string;
+  @IsOptional() @IsString() fromMonth?: string;
+  @IsOptional() @IsString() toMonth?: string;
   @IsOptional() @IsString() asOf?: string;
   @IsOptional() @IsString() divisionId?: string;
   @IsOptional() @IsString() branchId?: string;
+}
+
+function resolvePeriodRange(q: ReportQueryDto) {
+  const currentYear = new Date().getUTCFullYear();
+  const parsedYear = Number(q.year);
+  const year =
+    Number.isInteger(parsedYear) && parsedYear >= 1900 && parsedYear <= 3000
+      ? parsedYear
+      : currentYear;
+
+  const parseMonth = (value: string | undefined, fallback: number) => {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed >= 1 && parsed <= 12 ? parsed : fallback;
+  };
+
+  const requestedFromMonth = parseMonth(q.fromMonth ?? q.month, 1);
+  const requestedToMonth = parseMonth(q.toMonth ?? q.month, requestedFromMonth);
+  const fromMonth = Math.min(requestedFromMonth, requestedToMonth);
+  const toMonth = Math.max(requestedFromMonth, requestedToMonth);
+  const monthStart = `${year}-${String(fromMonth).padStart(2, '0')}-01`;
+  const monthEnd = new Date(Date.UTC(year, toMonth, 0)).toISOString().slice(0, 10);
+
+  return {
+    periodStart: q.periodStart ?? q.dateFrom ?? monthStart,
+    periodEnd: q.periodEnd ?? q.dateTo ?? monthEnd,
+  };
 }
 
 @Controller('financial-reports')
@@ -77,7 +107,8 @@ export class FinancialReportsController {
     @Query() q: ReportQueryDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.getCashFlow(companyId, q.periodStart!, q.periodEnd!, user, {
+    const { periodStart, periodEnd } = resolvePeriodRange(q);
+    return this.service.getCashFlow(companyId, periodStart, periodEnd, user, {
       divisionId: q.divisionId,
       branchId: q.branchId,
     });
@@ -146,7 +177,8 @@ export class FinancialReportsController {
   @Get('group/consolidated/cash-flow')
   @RequirePermissions('finance.reports.view')
   getConsolidatedCashFlow(@Query() q: ReportQueryDto, @CurrentUser() user: AuthUser) {
-    return this.service.getConsolidatedCashFlow(q.periodStart!, q.periodEnd!, user);
+    const { periodStart, periodEnd } = resolvePeriodRange(q);
+    return this.service.getConsolidatedCashFlow(periodStart, periodEnd, user);
   }
 
   @Get('group/receivables-aging')
