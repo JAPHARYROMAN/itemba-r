@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { AccessLevel, CurrencyCode, Prisma } from '@prisma/client';
@@ -9,6 +10,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { AccountResolverService } from '../../common/services/account-resolver.service';
 import {
   CreateSupplierInvoiceDto,
   SupplierInvoiceLineDto,
@@ -30,15 +33,21 @@ function generateMatchNumber(): string {
 
 @Injectable()
 export class SupplierInvoicesService {
+  private readonly logger = new Logger(SupplierInvoicesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly postingEngine: PostingEngineService,
+    private readonly accountResolver: AccountResolverService,
   ) {}
 
   async findAll(query: QuerySupplierInvoiceDto, user: AuthUser) {
     const {
       companyId,
+      divisionId,
+      branchId,
       supplierId,
       status,
       purchaseOrderId,
@@ -48,9 +57,10 @@ export class SupplierInvoicesService {
       limit = 20,
     } = query;
     const skip = (Number(page) - 1) * Number(limit);
+    // Phase 1: hierarchy-scoped where clause covers company + optional division + branch.
     const where: Prisma.SupplierInvoiceWhereInput = {
       deletedAt: null,
-      ...(await this.companyScope.companyWhereFor(user, companyId)),
+      ...(await this.companyScope.scopedWhereFor(user, { companyId, divisionId, branchId })),
     };
 
     if (supplierId) where.supplierId = supplierId;
@@ -107,6 +117,12 @@ export class SupplierInvoicesService {
 
   async create(dto: CreateSupplierInvoiceDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    if (dto.divisionId) {
+      this.companyScope.assertCanAccessDivision(user, dto.divisionId, AccessLevel.WRITE);
+    }
+    if (dto.branchId) {
+      this.companyScope.assertCanAccessBranch(user, dto.branchId, AccessLevel.WRITE);
+    }
     await this.assertInvoiceNumberAvailable(dto.companyId, dto.supplierInvoiceNumber);
 
     const refs = await this.assertProcurementReferences({
@@ -117,10 +133,16 @@ export class SupplierInvoicesService {
     });
     const totals = this.buildInvoiceLines(dto.lines, dto.totalAmount);
 
+    // Phase 1: auto-derive division/branch from GRN (preferred) or PO when not supplied.
+    const divisionId = dto.divisionId ?? refs.divisionId;
+    const branchId = dto.branchId ?? refs.branchId;
+
     const item = await this.prisma.supplierInvoice.create({
       data: {
         supplierInvoiceNumber: dto.supplierInvoiceNumber.trim(),
         companyId: dto.companyId,
+        divisionId,
+        branchId,
         supplierId: dto.supplierId,
         purchaseOrderId: refs.purchaseOrderId,
         goodsReceivedNoteId: dto.goodsReceivedNoteId,
@@ -275,6 +297,9 @@ export class SupplierInvoicesService {
             data: {
               supplierId: supplier.id,
               supplierName: supplier.name,
+              // Phase 1: keep payable's division/branch aligned with the invoice's.
+              divisionId: existing.divisionId,
+              branchId: existing.branchId,
               amount: new Prisma.Decimal(existing.totalAmount).toDecimalPlaces(2),
               outstandingAmount: new Prisma.Decimal(existing.totalAmount)
                 .minus(existing.paidAmount ?? 0)
@@ -291,6 +316,9 @@ export class SupplierInvoicesService {
             data: {
               payableNumber: generatePayableNumber(),
               companyId: existing.companyId,
+              // Phase 1: propagate hierarchy scope from the supplier invoice.
+              divisionId: existing.divisionId,
+              branchId: existing.branchId,
               supplierId: supplier.id,
               supplierName: supplier.name,
               sourceType: 'SupplierInvoice',
@@ -312,6 +340,66 @@ export class SupplierInvoicesService {
           data: { payableId: payable.id },
         });
       }
+
+      // Phase 2 — GL posting: DR Inventory (net of tax) + DR Tax VAT Receivable
+      // (if any) / CR AP_CONTROL. Posted inside the same transaction so the
+      // invoice approval, payable creation, and journal entry are atomic.
+      // Idempotency: invoice status transitions to APPROVED at the end of this
+      // transaction; a second approve() call hits the status guard above and
+      // throws before it gets here, so the JE is created at most once per invoice.
+      const totalAmount = new Prisma.Decimal(existing.totalAmount);
+      const taxAmount = new Prisma.Decimal(existing.taxAmount ?? 0);
+      const netOfTax = totalAmount.minus(taxAmount);
+
+      const [inventoryAccount, apAccount, taxAccount] = await Promise.all([
+        this.accountResolver.resolve(existing.companyId, 'INVENTORY', tx),
+        this.accountResolver.resolve(existing.companyId, 'AP_CONTROL', tx),
+        taxAmount.gt(0)
+          ? this.accountResolver.resolve(existing.companyId, 'TAX_VAT_RECEIVABLE', tx)
+          : Promise.resolve(null),
+      ]);
+
+      const lines: Array<{ accountId: string; debit?: Prisma.Decimal; credit?: Prisma.Decimal; description?: string }> = [
+        {
+          accountId: inventoryAccount.id,
+          debit: netOfTax,
+          description: `Inventory received — ${existing.supplierInvoiceNumber}`,
+        },
+        {
+          accountId: apAccount.id,
+          credit: totalAmount,
+          description: `Supplier invoice ${existing.supplierInvoiceNumber}`,
+        },
+      ];
+      if (taxAmount.gt(0) && taxAccount) {
+        lines.push({
+          accountId: taxAccount.id,
+          debit: taxAmount,
+          description: `Input VAT on ${existing.supplierInvoiceNumber}`,
+        });
+      }
+
+      const journalEntry = await this.postingEngine.postLines(
+        {
+          companyId: existing.companyId,
+          divisionId: existing.divisionId ?? undefined,
+          branchId: existing.branchId ?? undefined,
+          transactionDate: existing.invoiceDate,
+          description: `Supplier invoice ${existing.supplierInvoiceNumber}`,
+          referenceType: 'SupplierInvoice',
+          referenceId: existing.id,
+          moduleName: 'supplier-invoices',
+          userId: user.id,
+          lines,
+        },
+        tx,
+      );
+
+      // Link the Payable to the journal entry so the GL audit trail closes.
+      await tx.payable.update({
+        where: { id: payable.id },
+        data: { journalEntryId: journalEntry.id },
+      });
 
       return tx.supplierInvoice.update({
         where: { id },
@@ -429,21 +517,35 @@ export class SupplierInvoicesService {
     if (!supplier) throw new BadRequestException('Supplier does not belong to this company');
 
     let purchaseOrderId = refs.purchaseOrderId || undefined;
+    // Phase 1: collect division/branch from the strongest source (GRN first, then PO).
+    let derivedDivisionId: string | undefined;
+    let derivedBranchId: string | undefined;
+    let poDivisionId: string | undefined;
+    let poBranchId: string | undefined;
+
     if (refs.purchaseOrderId) {
       const po = await this.prisma.purchaseOrder.findFirst({
         where: { id: refs.purchaseOrderId, companyId: refs.companyId, deletedAt: null },
-        select: { id: true, supplierId: true },
+        select: { id: true, supplierId: true, divisionId: true, branchId: true },
       });
       if (!po) throw new BadRequestException('Purchase order does not belong to this company');
       if (po.supplierId && po.supplierId !== refs.supplierId) {
         throw new BadRequestException('Purchase order supplier does not match invoice supplier');
       }
+      poDivisionId = po.divisionId ?? undefined;
+      poBranchId = po.branchId ?? undefined;
     }
 
     if (refs.goodsReceivedNoteId) {
       const grn = await this.prisma.goodsReceivedNote.findFirst({
         where: { id: refs.goodsReceivedNoteId, companyId: refs.companyId, deletedAt: null },
-        select: { id: true, supplierId: true, purchaseOrderId: true },
+        select: {
+          id: true,
+          supplierId: true,
+          purchaseOrderId: true,
+          divisionId: true,
+          branchId: true,
+        },
       });
       if (!grn) throw new BadRequestException('GRN does not belong to this company');
       if (grn.supplierId !== refs.supplierId) {
@@ -453,9 +555,15 @@ export class SupplierInvoicesService {
         throw new BadRequestException('GRN is not linked to the selected purchase order');
       }
       purchaseOrderId = purchaseOrderId || grn.purchaseOrderId || undefined;
+      derivedDivisionId = grn.divisionId ?? undefined;
+      derivedBranchId = grn.branchId ?? undefined;
     }
 
-    return { purchaseOrderId };
+    return {
+      purchaseOrderId,
+      divisionId: derivedDivisionId ?? poDivisionId,
+      branchId: derivedBranchId ?? poBranchId,
+    };
   }
 
   private async createThreeWayMatch(invoice: any, userId: string) {

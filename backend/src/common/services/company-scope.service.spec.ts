@@ -140,4 +140,125 @@ describe('CompanyScopeService', () => {
       companyId: { in: ['company-1'] },
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 1 — hierarchy scope (division/branch) regressions
+  // ─────────────────────────────────────────────────────────────────────────
+
+  it('Phase 1: branch-scoped user sees only branches they were granted', async () => {
+    const branchUser = user({
+      roleScopes: ['BRANCH'],
+      companyId: 'company-1',
+      companyAccess: [{ companyId: 'company-1', accessLevel: AccessLevel.WRITE }],
+      branchAccess: [
+        { branchId: 'branch-A', accessLevel: AccessLevel.WRITE },
+        { branchId: 'branch-B', accessLevel: AccessLevel.READ },
+      ],
+    });
+
+    await expect(service.scopedWhereFor(branchUser)).resolves.toEqual({
+      companyId: { in: ['company-1'] },
+      branchId: { in: ['branch-A', 'branch-B'] },
+    });
+  });
+
+  it('Phase 1: division-scoped user sees only divisions they were granted', async () => {
+    const divisionUser = user({
+      roleScopes: ['DIVISION'],
+      companyId: 'company-1',
+      divisionAccess: [{ divisionId: 'div-A', accessLevel: AccessLevel.WRITE }],
+    });
+
+    await expect(service.scopedWhereFor(divisionUser)).resolves.toEqual({
+      companyId: { in: ['company-1'] },
+      divisionId: { in: ['div-A'] },
+    });
+  });
+
+  it('Phase 1: group-scoped user sees everything across granted companies (no division/branch filter)', async () => {
+    const groupUser = user({
+      roleScopes: ['GROUP'],
+      companyId: null,
+      companyAccess: [
+        { companyId: 'company-1', accessLevel: AccessLevel.MANAGE },
+        { companyId: 'company-2', accessLevel: AccessLevel.MANAGE },
+      ],
+      branchAccess: [{ branchId: 'branch-A', accessLevel: AccessLevel.READ }],
+    });
+
+    const where = await service.scopedWhereFor(groupUser);
+    expect(where.companyId).toEqual({ in: ['company-1', 'company-2'] });
+    // Group users are NOT restricted to their branchAccess list.
+    expect(where.branchId).toBeUndefined();
+    expect(where.divisionId).toBeUndefined();
+  });
+
+  it('Phase 1: company-level user without branch grants sees the whole company', async () => {
+    const companyUser = user({
+      roleScopes: ['COMPANY'],
+      companyId: 'company-1',
+      // No divisionAccess, no branchAccess.
+    });
+
+    const where = await service.scopedWhereFor(companyUser);
+    expect(where.companyId).toEqual({ in: ['company-1'] });
+    expect(where.divisionId).toBeUndefined();
+    expect(where.branchId).toBeUndefined();
+  });
+
+  it('Phase 1: rejects requested branch the user has no access to', async () => {
+    const branchUser = user({
+      roleScopes: ['BRANCH'],
+      companyId: 'company-1',
+      branchAccess: [{ branchId: 'branch-A', accessLevel: AccessLevel.WRITE }],
+    });
+
+    await expect(
+      service.scopedWhereFor(branchUser, { branchId: 'branch-B' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('Phase 1: rejects requested division the user has no access to', async () => {
+    const divisionUser = user({
+      roleScopes: ['DIVISION'],
+      companyId: 'company-1',
+      divisionAccess: [{ divisionId: 'div-A', accessLevel: AccessLevel.WRITE }],
+    });
+
+    await expect(
+      service.scopedWhereFor(divisionUser, { divisionId: 'div-B' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('Phase 1: assertCanAccessBranch / Division enforce minimum access level', () => {
+    const u = user({
+      roleScopes: ['BRANCH'],
+      branchAccess: [{ branchId: 'branch-A', accessLevel: AccessLevel.READ }],
+      divisionAccess: [{ divisionId: 'div-A', accessLevel: AccessLevel.READ }],
+    });
+
+    expect(() => service.assertCanAccessBranch(u, 'branch-A', AccessLevel.WRITE)).toThrow(
+      ForbiddenException,
+    );
+    expect(() => service.assertCanAccessDivision(u, 'div-A', AccessLevel.WRITE)).toThrow(
+      ForbiddenException,
+    );
+    expect(() =>
+      service.assertCanAccessBranch(u, 'branch-A', AccessLevel.READ),
+    ).not.toThrow();
+  });
+
+  it('Phase 1: empty branchAccess for a user with no branch grants does NOT restrict — falls through to company scope', async () => {
+    // A user without ANY branch grants is implicitly company-level for branch-aware tables.
+    // Scoping ONLY kicks in when they have explicit grants (otherwise everyone needs
+    // to be tagged everywhere, which is operationally impossible).
+    const u = user({
+      roleScopes: ['COMPANY'],
+      companyId: 'company-1',
+      branchAccess: [],
+    });
+
+    const where = await service.scopedWhereFor(u);
+    expect(where.branchId).toBeUndefined();
+  });
 });

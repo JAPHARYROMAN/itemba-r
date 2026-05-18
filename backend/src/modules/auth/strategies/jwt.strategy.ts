@@ -9,7 +9,10 @@ import {
   CachedAuthPayload,
 } from '../../../common/services';
 
-const SCOPE_PRIORITY = ['GROUP', 'COMPANY', 'BRANCH', 'DIVISION'] as const;
+// Phase 0 fix: priority follows the documented hierarchy chain
+// (Group → Company → Division → Branch). Previously BRANCH was ranked above
+// DIVISION which contradicted the org model.
+const SCOPE_PRIORITY = ['GROUP', 'COMPANY', 'DIVISION', 'BRANCH'] as const;
 
 function pickHighestScope(scopes: string[]): { scope: string } | null {
   for (const s of SCOPE_PRIORITY) {
@@ -69,6 +72,14 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
         companyAccess: {
           select: { companyId: true, accessLevel: true },
         },
+        // Phase 1: load Division and Branch access grants alongside companyAccess
+        // so non-group users can be scoped to specific divisions/branches.
+        divisionAccess: {
+          select: { divisionId: true, accessLevel: true },
+        },
+        branchAccess: {
+          select: { branchId: true, accessLevel: true },
+        },
       },
     });
     if (!user || user.status !== 'ACTIVE') {
@@ -94,6 +105,8 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       permissions,
       companyId: user.companyId,
       companyAccess: user.companyAccess,
+      divisionAccess: user.divisionAccess,
+      branchAccess: user.branchAccess,
     };
 
     this.permissionCache.set(payload.sub, result, PERMISSION_CACHE_TTL_MS);

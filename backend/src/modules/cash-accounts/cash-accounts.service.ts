@@ -17,12 +17,14 @@ export class CashAccountsService {
   ) {}
 
   async findAll(query: QueryCashAccountDto, user: AuthUser) {
-    const { page = 1, limit = 20, companyId, accountType, isActive } = query;
+    const { page = 1, limit = 20, companyId, branchId, accountType, isActive } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {
       deletedAt: null,
-      ...(await this.companyScope.companyWhereFor(user, companyId)),
+      // Phase 1: branch-scoped where applies when the user has explicit branch grants
+      // or when a specific branchId is requested.
+      ...(await this.companyScope.scopedWhereFor(user, { companyId, branchId })),
     };
     if (accountType) where.accountType = accountType;
     if (isActive !== undefined) where.isActive = isActive;
@@ -67,6 +69,9 @@ export class CashAccountsService {
 
   async create(dto: CreateCashAccountDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    if (dto.branchId) {
+      this.companyScope.assertCanAccessBranch(user, dto.branchId, AccessLevel.WRITE);
+    }
     const record = await this.prisma.cashAccount.create({ data: dto });
     await this.auditLogs.log({
       action: 'CASH_ACCOUNT_CREATE',

@@ -22,6 +22,8 @@ const samplePayload: CachedAuthPayload = {
   permissions: ['users.read'],
   companyId: null,
   companyAccess: [],
+  divisionAccess: [],
+  branchAccess: [],
 };
 
 function noRedisConfig() {

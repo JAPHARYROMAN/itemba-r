@@ -12,13 +12,35 @@ export class InventoryBalancesService {
   ) {}
 
   async findAll(query: QueryInventoryBalanceDto, user?: any) {
-    const { page = 1, limit = 20, companyId, productId, locationId, lowStock } = query;
+    const {
+      page = 1,
+      limit = 20,
+      companyId,
+      divisionId,
+      branchId,
+      productId,
+      locationId,
+      lowStock,
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
-    applyCompanyScopeWhere(where, user, companyId);
+    // Phase 1: hierarchy-scoped where (company + optional division + branch).
+    // `locationId` is a legacy alias for `branchId` and is honored if branchId is not supplied.
+    if (user) {
+      Object.assign(
+        where,
+        await this.companyScope.scopedWhereFor(user, {
+          companyId,
+          divisionId,
+          branchId: branchId ?? locationId,
+        }),
+      );
+    } else {
+      applyCompanyScopeWhere(where, user, companyId);
+      if (branchId ?? locationId) where.branchId = branchId ?? locationId;
+    }
     if (productId) where.productId = productId;
-    if (locationId) where.branchId = locationId;
     if (lowStock) where.quantityOnHand = { lte: 0 };
 
     const [data, total] = await Promise.all([

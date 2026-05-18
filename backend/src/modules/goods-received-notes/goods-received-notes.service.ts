@@ -14,11 +14,12 @@ export class GoodsReceivedNotesService {
   ) {}
 
   async findAll(query: any, user: AuthUser) {
-    const { companyId, status, supplierId, page = 1, limit = 20 } = query;
+    const { companyId, divisionId, branchId, status, supplierId, page = 1, limit = 20 } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = {
       deletedAt: null,
-      ...(await this.companyScope.companyWhereFor(user, companyId)),
+      // Phase 1: hierarchy-scoped where covers company + optional division + branch.
+      ...(await this.companyScope.scopedWhereFor(user, { companyId, divisionId, branchId })),
     };
     if (status) where.status = status;
     if (supplierId) where.supplierId = supplierId;
@@ -40,9 +41,32 @@ export class GoodsReceivedNotesService {
     if (dto.companyId) {
       await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     }
+    if (dto.divisionId) {
+      this.companyScope.assertCanAccessDivision(user, dto.divisionId, AccessLevel.WRITE);
+    }
+    if (dto.branchId) {
+      this.companyScope.assertCanAccessBranch(user, dto.branchId, AccessLevel.WRITE);
+    }
     const { lines, ...rest } = dto;
+
+    // Phase 1: auto-derive divisionId from the linked PurchaseOrder if not supplied.
+    let divisionId = rest.divisionId as string | undefined;
+    if (!divisionId && rest.purchaseOrderId) {
+      const po = await this.prisma.purchaseOrder.findFirst({
+        where: { id: rest.purchaseOrderId, companyId: rest.companyId, deletedAt: null },
+        select: { divisionId: true },
+      });
+      divisionId = po?.divisionId ?? undefined;
+    }
+
     const item = await this.prisma.goodsReceivedNote.create({
-      data: { ...rest, status: 'DRAFT', receivedById: user.id, lines: lines ? { create: lines } : undefined },
+      data: {
+        ...rest,
+        divisionId,
+        status: 'DRAFT',
+        receivedById: user.id,
+        lines: lines ? { create: lines } : undefined,
+      },
       include: { lines: true },
     });
     await this.auditLogs.log({ action: 'GOODS_RECEIVED_NOTE_CREATE', entityType: 'GoodsReceivedNote', entityId: item.id, userId: user.id, companyId: item.companyId });

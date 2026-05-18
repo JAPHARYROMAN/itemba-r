@@ -14,11 +14,12 @@ export class SupplierQuotationsService {
   ) {}
 
   async findAll(query: any, user: AuthUser) {
-    const { companyId, supplierId, status, page = 1, limit = 20 } = query;
+    const { companyId, divisionId, branchId, supplierId, status, page = 1, limit = 20 } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = {
       deletedAt: null,
-      ...(await this.companyScope.companyWhereFor(user, companyId)),
+      // Phase 1: hierarchy-scoped where (company + optional division + branch).
+      ...(await this.companyScope.scopedWhereFor(user, { companyId, divisionId, branchId })),
     };
     if (supplierId) where.supplierId = supplierId;
     if (status) where.status = status;
@@ -40,9 +41,24 @@ export class SupplierQuotationsService {
     const { lines, ...rest } = dto;
     await this.companyScope.assertCanAccessCompany(user, rest.companyId, AccessLevel.WRITE);
     await this.assertSupplierBelongsToCompany(rest.supplierId, rest.companyId);
+
+    // Phase 1: auto-derive division/branch from the linked RFQ when not supplied.
+    let divisionId = rest.divisionId as string | undefined;
+    let branchId = rest.branchId as string | undefined;
+    if (rest.rfqId && (!divisionId || !branchId)) {
+      const rfq = await this.prisma.requestForQuotation.findFirst({
+        where: { id: rest.rfqId, companyId: rest.companyId, deletedAt: null },
+        select: { divisionId: true, branchId: true },
+      });
+      divisionId = divisionId ?? rfq?.divisionId ?? undefined;
+      branchId = branchId ?? rfq?.branchId ?? undefined;
+    }
+
     const item = await this.prisma.supplierQuotation.create({
       data: {
         ...rest,
+        divisionId,
+        branchId,
         status: 'DRAFT',
         createdById: user.id,
         lines: lines ? { create: lines } : undefined,

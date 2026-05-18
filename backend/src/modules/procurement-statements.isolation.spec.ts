@@ -150,6 +150,8 @@ describe('Procurement and statement company isolation (P0-01 regression)', () =>
       prisma,
       auditLogs(),
       new CompanyScopeService(prisma),
+      {} as any, // postingEngine — not exercised by this isolation test
+      {} as any, // accountResolver — not exercised by this isolation test
     );
 
     await expect(

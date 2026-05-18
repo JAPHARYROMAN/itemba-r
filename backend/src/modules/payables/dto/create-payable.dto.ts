@@ -13,6 +13,16 @@ export class CreatePayableDto {
   @IsString()
   companyId!: string;
 
+  /** Phase 1 — optional Division scope for hierarchy roll-up. */
+  @IsOptional()
+  @IsString()
+  divisionId?: string;
+
+  /** Phase 1 — optional Branch scope for hierarchy roll-up. */
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
   @IsOptional()
   @IsString()
   supplierId?: string;

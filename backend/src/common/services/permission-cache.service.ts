@@ -21,6 +21,10 @@ export type CachedAuthPayload = {
   permissions: string[];
   companyId: string | null;
   companyAccess: Array<{ companyId: string; accessLevel: string }>;
+  /** Phase 1 — Division access grants resolved from UserDivisionAccess. */
+  divisionAccess: Array<{ divisionId: string; accessLevel: string }>;
+  /** Phase 1 — Branch access grants resolved from UserBranchAccess. */
+  branchAccess: Array<{ branchId: string; accessLevel: string }>;
 };
 
 interface LocalEntry {

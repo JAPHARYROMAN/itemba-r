@@ -13,6 +13,11 @@ export class CreateCashAccountDto {
   @IsString()
   companyId!: string;
 
+  /** Phase 1 — optional Branch scope. Null = company-wide cash; set for branch petty cash / till drawer. */
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
   @IsOptional()
   @IsString()
   linkedBankAccountId?: string;

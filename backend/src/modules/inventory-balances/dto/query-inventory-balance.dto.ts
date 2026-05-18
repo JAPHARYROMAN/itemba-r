@@ -3,6 +3,10 @@ import { Type, Transform } from 'class-transformer';
 
 export class QueryInventoryBalanceDto {
   @IsOptional() @IsString() companyId?: string;
+  /** Phase 1 — filter by Division. */
+  @IsOptional() @IsString() divisionId?: string;
+  /** Phase 1 — explicit branch filter (alias for locationId; either works). */
+  @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsString() productId?: string;
   @IsOptional() @IsString() locationId?: string;
   @IsOptional() @Transform(({ value }) => value === 'true') @IsBoolean() lowStock?: boolean;

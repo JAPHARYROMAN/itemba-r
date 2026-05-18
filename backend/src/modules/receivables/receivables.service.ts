@@ -1,12 +1,15 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
+import { AccountResolverService } from '../../common/services/account-resolver.service';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateReceivableDto } from './dto/create-receivable.dto';
 import { UpdateReceivableDto } from './dto/update-receivable.dto';
@@ -20,24 +23,39 @@ function generateReceivableNumber(): string {
 
 @Injectable()
 export class ReceivablesService {
+  private readonly logger = new Logger(ReceivablesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly postingEngine: PostingEngineService,
+    private readonly accountResolver: AccountResolverService,
   ) {}
 
   async findAll(query: QueryReceivableDto, user: AuthUser) {
-    const { page = 1, limit = 20, companyId, status, customerId, dateFrom, dateTo } = query;
+    const {
+      page = 1,
+      limit = 20,
+      companyId,
+      divisionId,
+      branchId,
+      status,
+      customerId,
+      dateFrom,
+      dateTo,
+    } = query;
     const skip = (page - 1) * limit;
 
-    const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
-    const where: Prisma.ReceivableWhereInput = { deletedAt: null };
-    if (companyId) {
-      await this.companyScope.assertCanAccessCompany(user, companyId);
-      where.companyId = companyId;
-    } else if (accessibleIds !== null) {
-      where.companyId = { in: accessibleIds };
-    }
+    // Phase 1: hierarchy-scoped where clause covers company + optional division + branch.
+    // The scopedWhereFor helper enforces user access at every level it filters on.
+    const scopeWhere = await this.companyScope.scopedWhereFor(user, {
+      companyId,
+      divisionId,
+      branchId,
+    });
+
+    const where: Prisma.ReceivableWhereInput = { ...scopeWhere, deletedAt: null };
     if (status) where.status = status;
     if (customerId) where.customerId = customerId;
     if (dateFrom || dateTo) {
@@ -74,24 +92,74 @@ export class ReceivablesService {
 
   async create(dto: CreateReceivableDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    if (dto.divisionId) {
+      this.companyScope.assertCanAccessDivision(user, dto.divisionId, AccessLevel.WRITE);
+    }
+    if (dto.branchId) {
+      this.companyScope.assertCanAccessBranch(user, dto.branchId, AccessLevel.WRITE);
+    }
     const userId = user.id;
-    const record = await this.prisma.receivable.create({
-      data: {
-        receivableNumber: generateReceivableNumber(),
-        companyId: dto.companyId,
-        customerId: dto.customerId,
-        customerName: dto.customerName,
-        sourceType: dto.sourceType,
-        sourceId: dto.sourceId,
-        amount: dto.amount,
-        paidAmount: 0,
-        outstandingAmount: dto.amount,
-        currency: dto.currency,
-        issueDate: new Date(dto.issueDate),
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
-        status: 'OPEN',
-        notes: dto.notes,
-      },
+    const amount = new Prisma.Decimal(dto.amount);
+
+    // Phase 2 — wrap manual receivable creation + AR control posting in one transaction.
+    // Skipped when the receivable is a downstream artefact of a SalesOrder/Trip/Project
+    // (those already post their own JE). The `sourceType` field signals upstream origin.
+    const shouldPost = !dto.sourceType && amount.gt(0);
+    const record = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.receivable.create({
+        data: {
+          receivableNumber: generateReceivableNumber(),
+          companyId: dto.companyId,
+          divisionId: dto.divisionId,
+          branchId: dto.branchId,
+          customerId: dto.customerId,
+          customerName: dto.customerName,
+          sourceType: dto.sourceType,
+          sourceId: dto.sourceId,
+          amount: dto.amount,
+          paidAmount: 0,
+          outstandingAmount: dto.amount,
+          currency: dto.currency,
+          issueDate: new Date(dto.issueDate),
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+          status: 'OPEN',
+          notes: dto.notes,
+        },
+      });
+
+      if (shouldPost) {
+        const [arAccount, revenueAccount] = await Promise.all([
+          this.accountResolver.resolve(dto.companyId, 'AR_CONTROL', tx),
+          this.accountResolver.resolve(dto.companyId, 'GENERAL_REVENUE', tx),
+        ]);
+
+        const journalEntry = await this.postingEngine.postLines(
+          {
+            companyId: dto.companyId,
+            divisionId: dto.divisionId ?? undefined,
+            branchId: dto.branchId ?? undefined,
+            transactionDate: new Date(dto.issueDate),
+            description: `Manual receivable — ${created.receivableNumber} (${dto.customerName})`,
+            referenceType: 'Receivable',
+            referenceId: created.id,
+            moduleName: 'receivables',
+            userId,
+            lines: [
+              { accountId: arAccount.id, debit: amount, description: `AR — ${dto.customerName}` },
+              { accountId: revenueAccount.id, credit: amount, description: dto.notes ?? 'Manual receivable' },
+            ],
+          },
+          tx,
+        );
+
+        await tx.receivable.update({
+          where: { id: created.id },
+          data: { journalEntryId: journalEntry.id },
+        });
+        return { ...created, journalEntryId: journalEntry.id };
+      }
+
+      return created;
     });
 
     await this.auditLogs.log({

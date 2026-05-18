@@ -11,6 +11,10 @@ export interface AuthUser {
   permissions: string[];
   companyId?: string | null;
   companyAccess?: Array<{ companyId: string; accessLevel: string }>;
+  /** Phase 1 — explicit Division access grants. Empty/undefined means no per-division grants. */
+  divisionAccess?: Array<{ divisionId: string; accessLevel: string }>;
+  /** Phase 1 — explicit Branch access grants. Empty/undefined means no per-branch grants. */
+  branchAccess?: Array<{ branchId: string; accessLevel: string }>;
   rawRefreshToken?: string;
   /** Active session id, if the access token was issued with one (P1-01). */
   sid?: string;

@@ -1,20 +1,29 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
 
 @Injectable()
 export class BidComparisonsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   async findAll(query: any, user?: any) {
-    const { companyId, status, page = 1, limit = 20 } = query;
+    const { companyId, divisionId, branchId, status, page = 1, limit = 20 } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
-    applyCompanyScopeWhere(where, user, companyId);
+    // Phase 1: hierarchy-scoped where (company + optional division + branch).
+    if (user) {
+      Object.assign(
+        where,
+        await this.companyScope.scopedWhereFor(user, { companyId, divisionId, branchId }),
+      );
+    } else {
+      applyCompanyScopeWhere(where, user, companyId);
+    }
     if (status) where.status = status;
     const [items, total] = await Promise.all([
       this.prisma.bidComparison.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' }, include: { lines: true } }),
@@ -31,8 +40,28 @@ export class BidComparisonsService {
 
   async create(dto: any, user: any) {
     const { lines, ...rest } = dto;
+
+    // Phase 1: auto-derive division/branch from the linked RFQ when not supplied.
+    let divisionId = rest.divisionId as string | undefined;
+    let branchId = rest.branchId as string | undefined;
+    if (rest.rfqId && (!divisionId || !branchId)) {
+      const rfq = await this.prisma.requestForQuotation.findFirst({
+        where: { id: rest.rfqId, companyId: rest.companyId, deletedAt: null },
+        select: { divisionId: true, branchId: true },
+      });
+      divisionId = divisionId ?? rfq?.divisionId ?? undefined;
+      branchId = branchId ?? rfq?.branchId ?? undefined;
+    }
+
     const item = await this.prisma.bidComparison.create({
-      data: { ...rest, status: 'DRAFT', createdById: user.id, lines: lines ? { create: lines } : undefined },
+      data: {
+        ...rest,
+        divisionId,
+        branchId,
+        status: 'DRAFT',
+        createdById: user.id,
+        lines: lines ? { create: lines } : undefined,
+      },
       include: { lines: true },
     });
     await this.auditLogs.log({ action: 'CREATE', entityType: 'BidComparison', entityId: item.id, userId: user.id, companyId: item.companyId });

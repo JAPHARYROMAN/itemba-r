@@ -60,6 +60,16 @@ export class CreateSupplierInvoiceDto {
   @IsString()
   companyId!: string;
 
+  /** Phase 1 — optional Division scope. Auto-derived from GRN→PO when omitted. */
+  @IsOptional()
+  @IsString()
+  divisionId?: string;
+
+  /** Phase 1 — optional Branch scope. Auto-derived from GRN when omitted. */
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
   @IsNotEmpty()
   @IsString()
   supplierId!: string;

@@ -23,6 +23,7 @@ export class BankAccountsService {
       limit = 20,
       companyId,
       groupId,
+      branchId,
       accountType,
       currency,
       isActive,
@@ -33,6 +34,8 @@ export class BankAccountsService {
     const where: any = { deletedAt: null };
     applyCompanyScopeWhere(where, user, companyId);
     if (groupId) where.groupId = groupId;
+    // Phase 1: optional branch filter for branch-operated accounts.
+    if (branchId) where.branchId = branchId;
     if (accountType) where.accountType = accountType;
     if (currency) where.currency = currency;
     if (isActive !== undefined) where.isActive = isActive;

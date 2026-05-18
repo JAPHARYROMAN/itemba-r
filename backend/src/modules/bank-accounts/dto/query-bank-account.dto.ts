@@ -5,6 +5,8 @@ import { BankAccountType, CurrencyCode } from '@prisma/client';
 export class QueryBankAccountDto {
   @IsOptional() @IsString() companyId?: string;
   @IsOptional() @IsString() groupId?: string;
+  /** Phase 1 — filter by Branch. */
+  @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsEnum(BankAccountType) accountType?: BankAccountType;
   @IsOptional() @IsEnum(CurrencyCode) currency?: CurrencyCode;
   @IsOptional() @Transform(({ value }) => value === 'true') @IsBoolean() isActive?: boolean;

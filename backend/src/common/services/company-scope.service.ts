@@ -8,6 +8,26 @@ export type CompanyScopedWhere = {
   id?: { in: string[] };
 };
 
+/**
+ * Phase 1 — hierarchy-aware scope clause. Used by services querying entities
+ * that carry optional `divisionId` / `branchId` columns (Receivable, Payable,
+ * SupplierInvoice, GRN, etc.). Each axis is applied independently:
+ *  - companyId: enforced as today (required for non-group users).
+ *  - divisionId: if the requested division is bound, scope to it; otherwise
+ *    if the user has any UserDivisionAccess grants AND no group/company-wide
+ *    grant, restrict to their accessible divisions.
+ *  - branchId: same logic, one level down.
+ *
+ * Group-scoped users see everything they have company access to. Non-group
+ * users with NO division/branch grants fall back to their company access
+ * (so a Company-level user sees the whole company; this preserves existing
+ * behavior for entities where division/branch is optional).
+ */
+export type HierarchyScopedWhere = CompanyScopedWhere & {
+  divisionId?: string | { in: string[] };
+  branchId?: string | { in: string[] };
+};
+
 const ACCESS_RANK: Record<AccessLevel, number> = {
   READ: 1,
   WRITE: 2,
@@ -28,6 +48,16 @@ export function accessibleCompanyIdsFromUser(user: AuthUser): string[] {
   }
 
   return Array.from(companyIds);
+}
+
+/** Phase 1 — explicit Division access IDs from the user payload. */
+export function accessibleDivisionIdsFromUser(user: AuthUser): string[] {
+  return Array.from(new Set((user.divisionAccess ?? []).map((entry) => entry.divisionId)));
+}
+
+/** Phase 1 — explicit Branch access IDs from the user payload. */
+export function accessibleBranchIdsFromUser(user: AuthUser): string[] {
+  return Array.from(new Set((user.branchAccess ?? []).map((entry) => entry.branchId)));
 }
 
 export function assertCanAccessCompanyFromUser(
@@ -160,6 +190,115 @@ export class CompanyScopeService {
 
   async accessibleCompanyIds(user: AuthUser): Promise<string[]> {
     return (await this.getAccessibleCompanyAccess(user)).map((a) => a.companyId);
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Phase 1 — Division & Branch scope helpers
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /** True if the user has any explicit Division grants. */
+  hasDivisionGrants(user: AuthUser): boolean {
+    return (user.divisionAccess?.length ?? 0) > 0;
+  }
+
+  /** True if the user has any explicit Branch grants. */
+  hasBranchGrants(user: AuthUser): boolean {
+    return (user.branchAccess?.length ?? 0) > 0;
+  }
+
+  /** Resolved accessible Division IDs from the user payload. */
+  accessibleDivisionIds(user: AuthUser): string[] {
+    return accessibleDivisionIdsFromUser(user);
+  }
+
+  /** Resolved accessible Branch IDs from the user payload. */
+  accessibleBranchIds(user: AuthUser): string[] {
+    return accessibleBranchIdsFromUser(user);
+  }
+
+  /**
+   * Assert the user has at least `minimum` access to the requested Division.
+   * Group-scoped users skip the per-division check (they're covered by the
+   * company-level assertion); non-group users with explicit divisionAccess
+   * must list the requested division at the required level.
+   */
+  assertCanAccessDivision(
+    user: AuthUser,
+    divisionId: string,
+    minimum: AccessLevel = AccessLevel.READ,
+  ) {
+    if (isGroupScopedUser(user)) return;
+
+    const grant = (user.divisionAccess ?? []).find((d) => d.divisionId === divisionId);
+    // If the user has NO division grants at all, fall through to company-level access
+    // (preserves existing behavior for entities where division scope is optional).
+    if (!this.hasDivisionGrants(user)) return;
+
+    if (!grant || ACCESS_RANK[grant.accessLevel as AccessLevel] < ACCESS_RANK[minimum]) {
+      throw new ForbiddenException('You do not have access to this division');
+    }
+  }
+
+  /**
+   * Assert the user has at least `minimum` access to the requested Branch.
+   * Same fall-through logic as {@link assertCanAccessDivision}.
+   */
+  assertCanAccessBranch(
+    user: AuthUser,
+    branchId: string,
+    minimum: AccessLevel = AccessLevel.READ,
+  ) {
+    if (isGroupScopedUser(user)) return;
+
+    const grant = (user.branchAccess ?? []).find((b) => b.branchId === branchId);
+    if (!this.hasBranchGrants(user)) return;
+
+    if (!grant || ACCESS_RANK[grant.accessLevel as AccessLevel] < ACCESS_RANK[minimum]) {
+      throw new ForbiddenException('You do not have access to this branch');
+    }
+  }
+
+  /**
+   * Build a hierarchy-scoped Prisma where clause spanning company, division,
+   * and branch. Used by entities that carry optional `divisionId` / `branchId`
+   * columns (Phase 1 tables: Receivable, Payable, SupplierInvoice, GRN,
+   * InventoryBalance, RFQ, SupplierQuotation, BidComparison, CashAccount,
+   * BankAccount).
+   *
+   * Each axis is enforced only when the user has explicit grants at that
+   * level. A user with company access but no division/branch grants sees
+   * the full company. A user with branch grants sees only their branches.
+   */
+  async scopedWhereFor(
+    user: AuthUser,
+    requested?: {
+      companyId?: string | null;
+      divisionId?: string | null;
+      branchId?: string | null;
+    },
+  ): Promise<HierarchyScopedWhere> {
+    const baseCompanyClause = await this.companyWhereFor(user, requested?.companyId);
+    const where: HierarchyScopedWhere = { ...baseCompanyClause };
+
+    // Division axis
+    if (requested?.divisionId) {
+      this.assertCanAccessDivision(user, requested.divisionId);
+      where.divisionId = requested.divisionId;
+    } else if (!isGroupScopedUser(user) && this.hasDivisionGrants(user)) {
+      const ids = this.accessibleDivisionIds(user);
+      where.divisionId = ids.length > 0 ? { in: ids } : { in: [] };
+    }
+
+    // Branch axis
+    if (requested?.branchId) {
+      this.assertCanAccessBranch(user, requested.branchId);
+      where.branchId = requested.branchId;
+    } else if (!isGroupScopedUser(user) && this.hasBranchGrants(user)) {
+      const ids = this.accessibleBranchIds(user);
+      where.branchId = ids.length > 0 ? { in: ids } : { in: [] };
+    }
+
+    return where;
   }
 
   private async getAccessibleCompanyAccess(

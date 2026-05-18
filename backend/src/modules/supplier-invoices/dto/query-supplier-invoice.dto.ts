@@ -7,6 +7,16 @@ export class QuerySupplierInvoiceDto {
   @IsString()
   companyId?: string;
 
+  /** Phase 1 — filter by Division. */
+  @IsOptional()
+  @IsString()
+  divisionId?: string;
+
+  /** Phase 1 — filter by Branch. */
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
   @IsOptional()
   @IsString()
   supplierId?: string;

@@ -372,6 +372,7 @@ model Company {
 
   // Finance (Milestone 3)
   chartOfAccounts      ChartOfAccount[]
+  costCenters          CostCenter[]
   fiscalYears          FiscalYear[]
   accountingPeriods    AccountingPeriod[]
   journalEntries       JournalEntry[]
@@ -711,6 +712,17 @@ model Division {
   products               Product[]          @relation("DivisionProducts")
   userPreferenceDefaults UserPreference[]   @relation("UserPrefDefaultDivision")
 
+  // Phase 1 — hierarchy scope back-relations for financial & procurement tables
+  receivables         Receivable[]
+  payables            Payable[]
+  supplierInvoices    SupplierInvoice[]
+  goodsReceivedNotes  GoodsReceivedNote[]
+  inventoryBalances   InventoryBalance[]
+  rfqs                RequestForQuotation[]
+  supplierQuotations  SupplierQuotation[]
+  bidComparisons      BidComparison[]
+  costCenters         CostCenter[]
+
   @@unique([companyId, code])
   @@index([companyId])
   @@index([type])
@@ -794,6 +806,18 @@ model Branch {
 
   approvalWorkflows      ApprovalWorkflow[]
   userPreferenceDefaults UserPreference[]   @relation("UserPrefDefaultBranch")
+
+  // Phase 1 — hierarchy scope back-relations for financial & procurement tables
+  receivables        Receivable[]
+  payables           Payable[]
+  supplierInvoices   SupplierInvoice[]
+  goodsReceivedNotes GoodsReceivedNote[]
+  cashAccounts       CashAccount[]
+  bankAccounts       BankAccount[]
+  rfqs               RequestForQuotation[]
+  supplierQuotations SupplierQuotation[]
+  bidComparisons     BidComparison[]
+  costCenters        CostCenter[]
 
   @@unique([divisionId, code])
   @@index([divisionId])
@@ -969,6 +993,9 @@ model User {
   closedPayrollPeriods        PayrollPeriod[]           @relation("PayrollPeriodClosedBy")
   createdPayrollRuns          PayrollRun[]              @relation("PayrollRunCreatedBy")
   submittedPayrollRuns        PayrollRun[]              @relation("PayrollRunSubmittedBy")
+  // Phase 3A — dual sign-off back-relations on the people side and finance side of payroll.
+  hrApprovedPayrollRuns       PayrollRun[]              @relation("PayrollRunHrApprovedBy")
+  financeApprovedPayrollRuns  PayrollRun[]              @relation("PayrollRunFinanceApprovedBy")
   approvedPayrollRuns         PayrollRun[]              @relation("PayrollRunApprovedBy")
   paidPayrollRuns             PayrollRun[]              @relation("PayrollRunPaidBy")
   paidSalaryPayments          SalaryPayment[]           @relation("SalaryPaymentPaidBy")
@@ -1329,6 +1356,9 @@ model BankAccount {
   companyId     String?
   /// Set only when companyId is null (pure group-level account).
   groupId       String?
+  /// Optional branch scope for branch-operated accounts (e.g., petty cash float account, branch deposit account).
+  /// Null = company- or group-level. Only meaningful when companyId is set.
+  branchId      String?
   bankName      String
   branchName    String?
   accountName   String
@@ -1348,12 +1378,14 @@ model BankAccount {
 
   company      Company?      @relation(fields: [companyId], references: [id], onDelete: Restrict)
   group        Group?        @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  branch       Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
   documents    Document[]    @relation("BankAccountDocuments")
   cashAccounts CashAccount[]
 
   @@unique([bankName, accountNumber])
   @@index([companyId])
   @@index([groupId])
+  @@index([companyId, branchId])
   @@map("bank_accounts")
 }
 
@@ -1838,6 +1870,39 @@ enum InterCompanyTxStatus {
 // CHART OF ACCOUNTS / FISCAL PERIODS
 // ───────────────────────────────────────────────────────────────────────────────
 
+/// Cost center / segment dimension used to tag journal entry lines with the
+/// branch, division, project, or product line they belong to without bloating
+/// the Chart of Accounts itself.
+/// A CostCenter belongs to a Company and is optionally bound to a Division
+/// and/or Branch. Phase 1 seeds one CostCenter per Branch so existing posting
+/// flows can tag entries to the originating Branch transparently.
+model CostCenter {
+  id          String    @id @default(uuid())
+  companyId   String
+  /// Optional Division binding; if set, this cost center represents the Division.
+  divisionId  String?
+  /// Optional Branch binding; if set, this cost center represents the Branch.
+  branchId    String?
+  code        String
+  name        String
+  description String?
+  isActive    Boolean   @default(true)
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  company           Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division          Division?          @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch            Branch?            @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  journalEntryLines JournalEntryLine[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([companyId, divisionId])
+  @@index([companyId, branchId])
+  @@map("cost_centers")
+}
+
 model ChartOfAccount {
   id              String      @id @default(uuid())
   companyId       String
@@ -1979,16 +2044,22 @@ model JournalEntryLine {
   companyId      String
   divisionId     String?
   branchId       String?
+  /// Optional cost-center dimension. When set, this line is tagged to the
+  /// cost center for drill-down and segment reporting. Independent of the
+  /// branchId/divisionId scope fields (which are pure row-level access scope).
+  costCenterId   String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   journalEntry JournalEntry   @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   account      ChartOfAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
   company      Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  costCenter   CostCenter?    @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
 
   @@index([journalEntryId])
   @@index([accountId])
   @@index([companyId])
+  @@index([costCenterId])
   @@map("journal_entry_lines")
 }
 
@@ -1999,6 +2070,8 @@ model JournalEntryLine {
 model CashAccount {
   id                  String          @id @default(uuid())
   companyId           String
+  /// Optional Branch scope. Null = company-wide cash. Set for branch-level petty cash / till drawers.
+  branchId            String?
   linkedBankAccountId String?
   accountName         String
   accountType         CashAccountType @default(CASH_ON_HAND)
@@ -2012,6 +2085,7 @@ model CashAccount {
   updatedAt           DateTime        @updatedAt
 
   company              Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch               Branch?               @relation(fields: [branchId], references: [id], onDelete: SetNull)
   linkedBank           BankAccount?          @relation(fields: [linkedBankAccountId], references: [id], onDelete: SetNull)
   expenses             Expense[]
   fuelShiftCollections FuelShiftCollection[]
@@ -2021,6 +2095,7 @@ model CashAccount {
   bankReconciliations BankReconciliation[]
 
   @@index([companyId])
+  @@index([companyId, branchId])
   @@map("cash_accounts")
 }
 
@@ -2098,6 +2173,10 @@ model Receivable {
   id                String           @id @default(uuid())
   receivableNumber  String
   companyId         String
+  /// Optional Division scope. Backfilled from source SalesOrder.divisionId when present.
+  divisionId        String?
+  /// Optional Branch scope. Backfilled from source SalesOrder.branchId when present.
+  branchId          String?
   customerId        String?
   customerName      String
   sourceType        String?
@@ -2116,6 +2195,8 @@ model Receivable {
   updatedAt         DateTime         @updatedAt
 
   company         Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division        Division?        @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch          Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
   journalEntry    JournalEntry?    @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   salesOrders     SalesOrder[]
   fuelCreditSales FuelCreditSale[]
@@ -2128,6 +2209,8 @@ model Receivable {
   @@index([dueDate])
   @@index([companyId, customerId, dueDate, status])
   @@index([companyId, outstandingAmount, status])
+  @@index([companyId, divisionId, status])
+  @@index([companyId, branchId, status])
   @@map("receivables")
 }
 
@@ -2135,6 +2218,10 @@ model Payable {
   id                String        @id @default(uuid())
   payableNumber     String
   companyId         String
+  /// Optional Division scope. Backfilled from source PurchaseOrder.divisionId when present.
+  divisionId        String?
+  /// Optional Branch scope. Backfilled from source PurchaseOrder.branchId when present.
+  branchId          String?
   supplierId        String?
   supplierName      String
   sourceType        String?
@@ -2153,6 +2240,8 @@ model Payable {
   updatedAt         DateTime      @updatedAt
 
   company        Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division       Division?       @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch         Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
   journalEntry   JournalEntry?   @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   purchaseOrders PurchaseOrder[]
   fuelDeliveries FuelDelivery[]
@@ -2163,6 +2252,8 @@ model Payable {
   @@index([dueDate])
   @@index([companyId, supplierId, dueDate, status])
   @@index([companyId, outstandingAmount, status])
+  @@index([companyId, divisionId, status])
+  @@index([companyId, branchId, status])
   @@map("payables")
 }
 
@@ -2733,6 +2824,8 @@ model InventoryBalance {
   id               String    @id @default(uuid())
   companyId        String
   productId        String
+  /// Optional Division scope. Backfilled from branch.divisionId when present.
+  divisionId       String?
   branchId         String?
   quantityOnHand   Decimal   @default(0) @db.Decimal(18, 4)
   quantityReserved Decimal   @default(0) @db.Decimal(18, 4)
@@ -2742,14 +2835,16 @@ model InventoryBalance {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
-  branch  Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  product  Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  division Division? @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch   Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   @@unique([companyId, productId, branchId])
   @@index([companyId])
   @@index([productId])
   @@index([branchId])
+  @@index([companyId, divisionId])
   @@map("inventory_balances")
 }
 
@@ -7623,6 +7718,16 @@ model PayrollRun {
   createdById                String
   submittedById              String?
   submittedAt                DateTime?
+  /// Phase 3A — Group HR Director sign-off on the people side of the run.
+  /// Required alongside `financeApprovedById` (Company CFO) before `approvedAt`
+  /// is set and the accrual JE posts.
+  hrApprovedById             String?
+  hrApprovedAt               DateTime?
+  /// Phase 3A — Company CFO sign-off on the finance side of the run.
+  /// Maker-checker enforced against `hrApprovedById` (the same user cannot hold
+  /// both signatures).
+  financeApprovedById        String?
+  financeApprovedAt          DateTime?
   approvedById               String?
   approvedAt                 DateTime?
   paidById                   String?
@@ -7636,6 +7741,8 @@ model PayrollRun {
   payrollPeriod   PayrollPeriod           @relation(fields: [payrollPeriodId], references: [id], onDelete: Restrict)
   createdBy       User                    @relation("PayrollRunCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   submittedBy     User?                   @relation("PayrollRunSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  hrApprovedBy    User?                   @relation("PayrollRunHrApprovedBy", fields: [hrApprovedById], references: [id], onDelete: SetNull)
+  financeApprovedBy User?                 @relation("PayrollRunFinanceApprovedBy", fields: [financeApprovedById], references: [id], onDelete: SetNull)
   approvedBy      User?                   @relation("PayrollRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   paidBy          User?                   @relation("PayrollRunPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
   entries         PayrollEntry[]
@@ -12427,6 +12534,10 @@ model RequestForQuotation {
   id                    String    @id @default(cuid())
   rfqNumber             String
   companyId             String
+  /// Optional Division scope. Backfilled from purchaseRequisition.divisionId.
+  divisionId            String?
+  /// Optional Branch scope. Backfilled from purchaseRequisition.branchId.
+  branchId              String?
   purchaseRequisitionId String?
   rfqDate               DateTime  @default(now())
   closingDate           DateTime?
@@ -12442,6 +12553,8 @@ model RequestForQuotation {
   deletedAt             DateTime?
 
   company            Company             @relation(fields: [companyId], references: [id])
+  division           Division?           @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch             Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
   createdBy          User                @relation("RFQCreatedBy", fields: [createdById], references: [id])
   rfqSuppliers       RFQSupplier[]
   supplierQuotations SupplierQuotation[]
@@ -12449,6 +12562,8 @@ model RequestForQuotation {
 
   @@unique([companyId, rfqNumber])
   @@index([companyId, status, rfqDate])
+  @@index([companyId, divisionId, status])
+  @@index([companyId, branchId, status])
   @@map("request_for_quotations")
 }
 
@@ -12472,6 +12587,10 @@ model SupplierQuotation {
   id                      String                  @id @default(cuid())
   supplierQuotationNumber String                  @unique
   companyId               String
+  /// Optional Division scope. Backfilled from rfq.divisionId.
+  divisionId              String?
+  /// Optional Branch scope. Backfilled from rfq.branchId.
+  branchId                String?
   rfqId                   String?
   supplierId              String
   quotationDate           DateTime                @default(now())
@@ -12492,6 +12611,8 @@ model SupplierQuotation {
   deletedAt               DateTime?
 
   company            Company                 @relation(fields: [companyId], references: [id])
+  division           Division?               @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch             Branch?                 @relation(fields: [branchId], references: [id], onDelete: SetNull)
   rfq                RequestForQuotation?    @relation(fields: [rfqId], references: [id], onDelete: SetNull)
   createdBy          User                    @relation("SupplierQuotCreatedBy", fields: [createdById], references: [id])
   acceptedBy         User?                   @relation("SupplierQuotAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
@@ -12499,6 +12620,8 @@ model SupplierQuotation {
   bidComparisonLines BidComparisonLine[]
 
   @@index([companyId, supplierId, status])
+  @@index([companyId, divisionId, status])
+  @@index([companyId, branchId, status])
   @@map("supplier_quotations")
 }
 
@@ -12528,6 +12651,10 @@ model BidComparison {
   id                    String              @id @default(cuid())
   comparisonNumber      String              @unique
   companyId             String
+  /// Optional Division scope. Backfilled from rfq.divisionId.
+  divisionId            String?
+  /// Optional Branch scope. Backfilled from rfq.branchId.
+  branchId              String?
   rfqId                 String
   title                 String
   comparisonDate        DateTime            @default(now())
@@ -12544,12 +12671,16 @@ model BidComparison {
   deletedAt             DateTime?
 
   company    Company             @relation(fields: [companyId], references: [id])
+  division   Division?           @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch     Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
   rfq        RequestForQuotation @relation(fields: [rfqId], references: [id])
   preparedBy User                @relation("BidCompPreparedBy", fields: [preparedById], references: [id])
   approvedBy User?               @relation("BidCompApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   lines      BidComparisonLine[]
 
   @@index([companyId, rfqId, status])
+  @@index([companyId, divisionId, status])
+  @@index([companyId, branchId, status])
   @@map("bid_comparisons")
 }
 
@@ -12578,6 +12709,8 @@ model GoodsReceivedNote {
   id              String    @id @default(cuid())
   grnNumber       String
   companyId       String
+  /// Optional Division scope. Backfilled from purchaseOrder.divisionId when present.
+  divisionId      String?
   branchId        String?
   purchaseOrderId String?
   supplierId      String
@@ -12594,6 +12727,8 @@ model GoodsReceivedNote {
   deletedAt       DateTime?
 
   company          Company                 @relation(fields: [companyId], references: [id])
+  division         Division?               @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch           Branch?                 @relation(fields: [branchId], references: [id], onDelete: SetNull)
   receivedBy       User                    @relation("GRNReceivedBy", fields: [receivedById], references: [id])
   approvedBy       User?                   @relation("GRNApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   lines            GoodsReceivedNoteLine[]
@@ -12602,6 +12737,8 @@ model GoodsReceivedNote {
 
   @@unique([companyId, grnNumber])
   @@index([companyId, supplierId, status, receivedDate])
+  @@index([companyId, divisionId, status])
+  @@index([companyId, branchId, status])
   @@map("goods_received_notes")
 }
 
@@ -12629,6 +12766,10 @@ model SupplierInvoice {
   id                    String                @id @default(cuid())
   supplierInvoiceNumber String
   companyId             String
+  /// Optional Division scope. Backfilled from GRN→PO.divisionId when present.
+  divisionId            String?
+  /// Optional Branch scope. Backfilled from GRN.branchId when present.
+  branchId              String?
   supplierId            String
   purchaseOrderId       String?
   goodsReceivedNoteId   String?
@@ -12654,6 +12795,8 @@ model SupplierInvoice {
   deletedAt             DateTime?
 
   company           Company               @relation(fields: [companyId], references: [id])
+  division          Division?             @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch            Branch?               @relation(fields: [branchId], references: [id], onDelete: SetNull)
   goodsReceivedNote GoodsReceivedNote?    @relation(fields: [goodsReceivedNoteId], references: [id], onDelete: SetNull)
   createdBy         User                  @relation("SupplierInvCreatedBy", fields: [createdById], references: [id])
   approvedBy        User?                 @relation("SupplierInvApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
@@ -12662,6 +12805,8 @@ model SupplierInvoice {
 
   @@unique([companyId, supplierInvoiceNumber])
   @@index([companyId, supplierId, status, invoiceDate])
+  @@index([companyId, divisionId, status])
+  @@index([companyId, branchId, status])
   @@map("supplier_invoices")
 }
 
@@ -13122,6 +13267,8 @@ enum BackgroundJobType {
   BACKUP_RUN
   EMAIL_SEND
   SMS_SEND
+  /// Phase 4 — recurring rent-invoice generation per active LeaseAgreement.
+  RENT_INVOICE_GENERATION
   CUSTOM
 }
 

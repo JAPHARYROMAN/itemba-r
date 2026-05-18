@@ -16,6 +16,11 @@ export class CreateBankAccountDto {
   @IsString()
   groupId?: string;
 
+  /** Phase 1 — optional branch scope for branch-operated accounts (e.g., petty cash float). */
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
   @IsNotEmpty()
   @IsString()
   bankName!: string;

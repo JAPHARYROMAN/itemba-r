@@ -2049,7 +2049,7 @@ async function seedCompanyBranches(companyId: string, companyCode: string) {
       where: { companyId, code: b.divisionCode },
     });
     if (!division) continue;
-    await prisma.branch.upsert({
+    const branch = await prisma.branch.upsert({
       where: { divisionId_code: { divisionId: division.id, code: b.code } },
       update: { name: b.name, type: b.type, location: b.location },
       create: {
@@ -2058,6 +2058,27 @@ async function seedCompanyBranches(companyId: string, companyCode: string) {
         type: b.type,
         location: b.location,
         divisionId: division.id,
+        isActive: true,
+      },
+    });
+
+    // Phase 1: every branch gets a default CostCenter for JE line tagging.
+    const costCenterCode = `CC-${branch.code}`;
+    await prisma.costCenter.upsert({
+      where: { companyId_code: { companyId, code: costCenterCode } },
+      update: {
+        name: `Cost Centre — ${branch.name}`,
+        divisionId: division.id,
+        branchId: branch.id,
+        isActive: true,
+      },
+      create: {
+        companyId,
+        divisionId: division.id,
+        branchId: branch.id,
+        code: costCenterCode,
+        name: `Cost Centre — ${branch.name}`,
+        description: `Default cost centre for branch ${branch.name}`,
         isActive: true,
       },
     });
