@@ -475,6 +475,119 @@ export class PayrollRunsService {
     return updated;
   }
 
+  /**
+   * Phase 3A — HR-side sign-off (Group HR Director).
+   * Sets `hrApprovedById`/`hrApprovedAt`. When the Finance side has already
+   * signed (and is held by a different user), this finalizes the run: posts
+   * the accrual JE and transitions to APPROVED.
+   */
+  async approveHr(id: string, user: AuthUser) {
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const run = await this.lockPayrollRun(id, tx);
+      if (!run) throw new NotFoundException('Payroll run not found');
+      await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.WRITE);
+      if (run.status !== 'SUBMITTED') {
+        throw new BadRequestException('Payroll run must be submitted before HR approval');
+      }
+      const full = await tx.payrollRun.findUnique({
+        where: { id },
+        select: { hrApprovedById: true, financeApprovedById: true },
+      });
+      if (full?.hrApprovedById) {
+        throw new BadRequestException('HR approval already recorded for this payroll run');
+      }
+      if (full?.financeApprovedById === user.id) {
+        throw new BadRequestException(
+          'Maker-checker: HR and Finance approvals must be held by different users',
+        );
+      }
+
+      const now = new Date();
+      const stamped = await tx.payrollRun.update({
+        where: { id },
+        data: { hrApprovedById: user.id, hrApprovedAt: now },
+      });
+
+      // If Finance has already signed, finalize: post JE and transition status.
+      if (stamped.financeApprovedById) {
+        await this.postings.postRun(id, user.id, tx);
+        return tx.payrollRun.update({
+          where: { id },
+          data: { status: 'APPROVED', approvedById: user.id, approvedAt: now },
+        });
+      }
+      return stamped;
+    }, { timeout: 60_000 });
+
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'PayrollRun',
+      entityId: id,
+      newValue: { hrApprovedById: user.id, finalized: updated.status === 'APPROVED' },
+    });
+    return updated;
+  }
+
+  /**
+   * Phase 3A — Finance-side sign-off (Company CFO).
+   * Sets `financeApprovedById`/`financeApprovedAt`. When the HR side has
+   * already signed (and is held by a different user), this finalizes the run.
+   */
+  async approveFinance(id: string, user: AuthUser) {
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const run = await this.lockPayrollRun(id, tx);
+      if (!run) throw new NotFoundException('Payroll run not found');
+      await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.WRITE);
+      if (run.status !== 'SUBMITTED') {
+        throw new BadRequestException('Payroll run must be submitted before Finance approval');
+      }
+      const full = await tx.payrollRun.findUnique({
+        where: { id },
+        select: { hrApprovedById: true, financeApprovedById: true },
+      });
+      if (full?.financeApprovedById) {
+        throw new BadRequestException('Finance approval already recorded for this payroll run');
+      }
+      if (full?.hrApprovedById === user.id) {
+        throw new BadRequestException(
+          'Maker-checker: HR and Finance approvals must be held by different users',
+        );
+      }
+
+      const now = new Date();
+      const stamped = await tx.payrollRun.update({
+        where: { id },
+        data: { financeApprovedById: user.id, financeApprovedAt: now },
+      });
+
+      if (stamped.hrApprovedById) {
+        await this.postings.postRun(id, user.id, tx);
+        return tx.payrollRun.update({
+          where: { id },
+          data: { status: 'APPROVED', approvedById: user.id, approvedAt: now },
+        });
+      }
+      return stamped;
+    }, { timeout: 60_000 });
+
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'PayrollRun',
+      entityId: id,
+      newValue: { financeApprovedById: user.id, finalized: updated.status === 'APPROVED' },
+    });
+    return updated;
+  }
+
+  /**
+   * @deprecated Phase 3A — single-signature approve replaced by approveHr +
+   * approveFinance. Retained as a thin shim that records BOTH sign-offs at
+   * once for emergency / migration scenarios. Callers should prefer the
+   * two-step path; this shim requires that hrApprovedById and
+   * financeApprovedById are both already set, or it rejects.
+   */
   async approve(id: string, user: AuthUser) {
     const updated = await this.prisma.$transaction(async (tx) => {
       const run = await this.lockPayrollRun(id, tx);
@@ -482,6 +595,15 @@ export class PayrollRunsService {
       await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.WRITE);
       if (run.status !== 'SUBMITTED') {
         throw new BadRequestException('Payroll run must be submitted before approving');
+      }
+      const full = await tx.payrollRun.findUnique({
+        where: { id },
+        select: { hrApprovedById: true, financeApprovedById: true },
+      });
+      if (!full?.hrApprovedById || !full?.financeApprovedById) {
+        throw new BadRequestException(
+          'Payroll run requires both HR and Finance approvals before final posting',
+        );
       }
 
       await this.postings.postRun(id, user.id, tx);

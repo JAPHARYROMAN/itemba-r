@@ -48,6 +48,30 @@ export class PayrollRunsController {
     return this.service.submit(id, user);
   }
 
+  /**
+   * Phase 3A — HR-side sign-off (Group HR Director). Requires `payroll.approve.hr`.
+   */
+  @Patch(':id/approve-hr')
+  @RequirePermissions('payroll.approve.hr')
+  approveHr(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.approveHr(id, user);
+  }
+
+  /**
+   * Phase 3A — Finance-side sign-off (Company CFO). Requires `payroll.approve.finance`.
+   * Maker-checker enforced: same user cannot hold both signatures.
+   */
+  @Patch(':id/approve-finance')
+  @RequirePermissions('payroll.approve.finance')
+  approveFinance(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.approveFinance(id, user);
+  }
+
+  /**
+   * @deprecated Use `approve-hr` + `approve-finance` instead. Retained for
+   * legacy callers; the underlying service shim requires both signatures to
+   * already be present before it will finalize.
+   */
   @Patch(':id/approve')
   @RequirePermissions('payroll.approve')
   approve(@Param('id') id: string, @CurrentUser() user: AuthUser) {
