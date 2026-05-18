@@ -1,7 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, PageHeader, Btn, PageSpinner, FormSelect } from '@/components/ui';
+import {
+  Card,
+  PageHeader,
+  Btn,
+  PageSpinner,
+  FormSelect,
+  ScopeSelector,
+  scopeToQueryString,
+  type ScopeValue,
+} from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 
 interface Company { id: string; name: string; code: string }
@@ -13,13 +22,28 @@ interface BalanceSheetData { assets: PnLLine[]; liabilities: PnLLine[]; equity: 
 interface AgingBucket { current: number; days1_30: number; days31_60: number; days61_90: number; days90plus: number; total: number }
 interface IntercompanyBalance { fromCompany: string; toCompany: string; amount: number; currency: string }
 interface GroupCompany { companyId: string; companyName: string; totalIncome: number; totalExpenses: number; netPosition: number; cashBalance: number }
+interface CashFlowSection { items: { description: string; amount: number }[]; total: number }
+interface CashFlowData {
+  operating: CashFlowSection;
+  investing: CashFlowSection;
+  financing: CashFlowSection;
+  netChange: number;
+  openingCash: number;
+  closingCash: number;
+  unexplainedDelta?: number;
+  periodStart?: string;
+  periodEnd?: string;
+}
 
-type ReportTab = 'trial-balance' | 'pnl' | 'balance-sheet' | 'ar-aging' | 'ap-aging' | 'intercompany' | 'group-summary';
+type ReportTab =
+  | 'trial-balance' | 'pnl' | 'balance-sheet' | 'cash-flow'
+  | 'ar-aging' | 'ap-aging' | 'intercompany' | 'group-summary';
 
 const TABS: { key: ReportTab; label: string; needsCompany: boolean }[] = [
   { key: 'trial-balance', label: 'Trial Balance', needsCompany: true },
   { key: 'pnl', label: 'Profit & Loss', needsCompany: true },
   { key: 'balance-sheet', label: 'Balance Sheet', needsCompany: true },
+  { key: 'cash-flow', label: 'Cash Flow', needsCompany: true },
   { key: 'ar-aging', label: 'AR Aging', needsCompany: true },
   { key: 'ap-aging', label: 'AP Aging', needsCompany: true },
   { key: 'intercompany', label: 'Inter-Company Balances', needsCompany: false },
@@ -32,19 +56,16 @@ function fmtMoney(amount: number, currency = 'TZS') {
 
 export default function FinanceReportsPage() {
   const { hasPermission } = useAuth();
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [companyId, setCompanyId] = useState('');
+  // Phase 4 — full hierarchy scope. ScopeSelector handles its own company list.
+  const [scope, setScope] = useState<ScopeValue>({ companyId: '', divisionId: '', branchId: '' });
+  const companyId = scope.companyId;
   const [activeTab, setActiveTab] = useState<ReportTab>('trial-balance');
+  const [comparePeriod, setComparePeriod] = useState<'NONE' | 'PRIOR_PERIOD' | 'PRIOR_YEAR' | 'YTD'>('NONE');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [report, setReport] = useState<unknown>(null);
 
   const canView = hasPermission('finance.reports.view');
-
-  useEffect(() => {
-    fetch('/api/backend/companies?limit=100').then((r) => r.json())
-      .then((j) => setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
-  }, []);
 
   const loadReport = async () => {
     const tab = TABS.find((t) => t.key === activeTab)!;
@@ -52,12 +73,21 @@ export default function FinanceReportsPage() {
     setLoading(true); setError(''); setReport(null);
     try {
       let url = '';
+      // Phase 4: branch/division scope query params for the reports that support them.
+      const scopeQs = scopeToQueryString(scope);
+      const withScope = (base: string) => scopeQs ? `${base}${base.includes('?') ? '&' : '?'}${scopeQs}` : base;
+
       switch (activeTab) {
         case 'trial-balance': url = `/api/backend/financial-reports/trial-balance/${companyId}`; break;
-        case 'pnl': url = `/api/backend/financial-reports/profit-and-loss/${companyId}`; break;
+        case 'pnl':
+          // Phase 4: optional comparative column.
+          url = `/api/backend/financial-reports/profit-and-loss/${companyId}`;
+          if (comparePeriod !== 'NONE') url += `?comparePeriod=${comparePeriod}`;
+          break;
         case 'balance-sheet': url = `/api/backend/financial-reports/balance-sheet/${companyId}`; break;
-        case 'ar-aging': url = `/api/backend/financial-reports/receivables-aging/${companyId}`; break;
-        case 'ap-aging': url = `/api/backend/financial-reports/payables-aging/${companyId}`; break;
+        case 'cash-flow': url = `/api/backend/financial-reports/cash-flow/${companyId}`; break;
+        case 'ar-aging': url = withScope(`/api/backend/financial-reports/receivables-aging/${companyId}`); break;
+        case 'ap-aging': url = withScope(`/api/backend/financial-reports/payables-aging/${companyId}`); break;
         case 'intercompany': url = '/api/backend/financial-reports/intercompany-balances'; break;
         case 'group-summary': url = '/api/backend/financial-reports/group-summary'; break;
       }
@@ -87,11 +117,30 @@ export default function FinanceReportsPage() {
 
       <Card className="p-4">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="flex-1 min-w-[200px]">
-            <FormSelect label="Company" value={companyId} onChange={(e) => setCompanyId(e.target.value)} placeholder="Select company…" disabled={!currentTab.needsCompany}>
-              {companies.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
-            </FormSelect>
+          {/* Phase 4: Company → Division → Branch cascading scope selector.
+              AR/AP aging endpoints honor division/branch; other reports
+              ignore them (no harm in passing extras). */}
+          <div className="flex-1 min-w-[600px]">
+            <ScopeSelector
+              value={scope}
+              onChange={setScope}
+              disabled={!currentTab.needsCompany}
+            />
           </div>
+          {activeTab === 'pnl' ? (
+            <div className="min-w-[180px]">
+              <FormSelect
+                label="Compare to"
+                value={comparePeriod}
+                onChange={(e) => setComparePeriod(e.target.value as typeof comparePeriod)}
+              >
+                <option value="NONE">No comparison</option>
+                <option value="PRIOR_PERIOD">Prior period</option>
+                <option value="PRIOR_YEAR">Prior year</option>
+                <option value="YTD">Year-to-date prior</option>
+              </FormSelect>
+            </div>
+          ) : null}
           <Btn variant="primary" onClick={loadReport} loading={loading}>Load Report</Btn>
         </div>
       </Card>
@@ -119,6 +168,7 @@ export default function FinanceReportsPage() {
           {activeTab === 'trial-balance' && <TrialBalanceView data={report as TrialBalanceLine[]} />}
           {activeTab === 'pnl' && <PnLView data={report as PnLData} />}
           {activeTab === 'balance-sheet' && <BalanceSheetView data={report as BalanceSheetData} />}
+          {activeTab === 'cash-flow' && <CashFlowView data={report as CashFlowData} />}
           {activeTab === 'ar-aging' && <AgingView data={report as AgingBucket} title="Accounts Receivable Aging" />}
           {activeTab === 'ap-aging' && <AgingView data={report as AgingBucket} title="Accounts Payable Aging" />}
           {activeTab === 'intercompany' && <IntercompanyView data={report as IntercompanyBalance[]} />}
@@ -217,6 +267,59 @@ function BalanceSheetView({ data }: { data: BalanceSheetData }) {
             <span className="font-mono">{fmtMoney(data.totalLiabilities + data.totalEquity)}</span>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function CashFlowView({ data }: { data: CashFlowData }) {
+  const renderSection = (label: string, section: CashFlowSection) => (
+    <div className="mb-5">
+      <div className="text-sm font-semibold mb-2">{label}</div>
+      <div className="space-y-1">
+        {(section.items ?? []).map((it, i) => (
+          <div key={i} className="flex justify-between text-sm">
+            <span className="text-slate-600">{it.description}</span>
+            <span className="font-mono">{fmtMoney(it.amount)}</span>
+          </div>
+        ))}
+        <div className="flex justify-between text-sm font-semibold pt-1 border-t border-slate-200">
+          <span>Total {label}</span>
+          <span className="font-mono">{fmtMoney(section.total)}</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <h3 className="text-lg font-semibold mb-1">Cash Flow Statement</h3>
+      <p className="text-xs text-slate-500 mb-4">
+        Indirect method — derived from posted journal entries for the selected period.
+        {data.periodStart && data.periodEnd ? ` ${data.periodStart} → ${data.periodEnd}` : null}
+      </p>
+      {renderSection('Operating Activities', data.operating ?? { items: [], total: 0 })}
+      {renderSection('Investing Activities', data.investing ?? { items: [], total: 0 })}
+      {renderSection('Financing Activities', data.financing ?? { items: [], total: 0 })}
+      <div className="border-t border-slate-300 pt-3 mt-3 space-y-1 text-sm">
+        <div className="flex justify-between">
+          <span>Opening Cash</span>
+          <span className="font-mono">{fmtMoney(data.openingCash)}</span>
+        </div>
+        <div className="flex justify-between font-semibold">
+          <span>Net Change in Cash</span>
+          <span className="font-mono">{fmtMoney(data.netChange)}</span>
+        </div>
+        <div className="flex justify-between font-semibold">
+          <span>Closing Cash</span>
+          <span className="font-mono">{fmtMoney(data.closingCash)}</span>
+        </div>
+        {data.unexplainedDelta !== undefined && Math.abs(data.unexplainedDelta) > 0.01 ? (
+          <div className="flex justify-between text-amber-700 text-xs pt-2">
+            <span>⚠ Unexplained delta (review)</span>
+            <span className="font-mono">{fmtMoney(data.unexplainedDelta)}</span>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -33,3 +33,7 @@ export { PageToolbar, SectionHeader } from './page-toolbar';
 
 // Audit
 export { AuditTimeline } from './audit-timeline';
+
+// Hierarchy scope (Company → Division → Branch)
+export { ScopeSelector, scopeToQueryString } from './scope-selector';
+export type { ScopeValue } from './scope-selector';
