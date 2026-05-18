@@ -1,12 +1,20 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateRentPaymentDto } from './dto/create-rent-payment.dto';
 import { applyCompanyScopeWhere } from '../../common/services';
+import { AccountResolverService } from '../../common/services/account-resolver.service';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 
 @Injectable()
 export class RentPaymentsService {
-  constructor(private prisma: PrismaService, private audit: AuditLogsService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditLogsService,
+    private readonly postingEngine: PostingEngineService,
+    private readonly accountResolver: AccountResolverService,
+  ) {}
 
   async create(dto: CreateRentPaymentDto, userId: string) {
     // Idempotency: if the caller has supplied a key and a payment already exists
@@ -22,8 +30,9 @@ export class RentPaymentsService {
       if (existing) return existing;
     }
 
-    // Payment + invoice update must be atomic — otherwise a successful payment
-    // followed by a failed invoice update leaves the ledger out of sync.
+    // Payment + invoice update + receivable update + JE posting must be atomic
+    // — otherwise a successful payment followed by a failed downstream step
+    // leaves the ledger out of sync.
     const payment = await this.prisma.$transaction(async (tx) => {
       const created = await tx.rentPayment.create({
         data: { ...dto, paymentDate: new Date(dto.paymentDate) },
@@ -33,9 +42,11 @@ export class RentPaymentsService {
         where: { id: dto.rentInvoiceId, deletedAt: null },
       });
       if (invoice) {
-        const newPaidAmount = Number(invoice.paidAmount || 0) + Number(dto.amount);
-        const newOutstandingAmount = Number(invoice.outstandingAmount) - Number(dto.amount);
-        const newStatus = newOutstandingAmount <= 0 ? 'PAID' : 'PARTIALLY_PAID';
+        const amount = new Prisma.Decimal(dto.amount);
+        const newPaidAmount = new Prisma.Decimal(invoice.paidAmount || 0).plus(amount);
+        const newOutstandingAmount = new Prisma.Decimal(invoice.outstandingAmount).minus(amount);
+        const newStatus = newOutstandingAmount.lte(0) ? 'PAID' : 'PARTIALLY_PAID';
+
         await tx.rentInvoice.update({
           where: { id: dto.rentInvoiceId },
           data: {
@@ -44,6 +55,57 @@ export class RentPaymentsService {
             status: newStatus as any,
           },
         });
+
+        // Mirror the payment against the linked Receivable (created when the
+        // invoice was issued). Keeps AR aging accurate without the user having
+        // to record the payment twice.
+        if (invoice.receivableId) {
+          const receivable = await tx.receivable.findUnique({
+            where: { id: invoice.receivableId },
+          });
+          if (receivable) {
+            const arPaid = new Prisma.Decimal(receivable.paidAmount).plus(amount);
+            const arOutstanding = new Prisma.Decimal(receivable.outstandingAmount).minus(amount);
+            await tx.receivable.update({
+              where: { id: receivable.id },
+              data: {
+                paidAmount: arPaid,
+                outstandingAmount: arOutstanding,
+                status: arOutstanding.lte(0) ? 'PAID' : 'PARTIALLY_PAID',
+              },
+            });
+          }
+        }
+
+        // Post DR Cash (or CashAccount-linked) / CR AR Control for the receipt.
+        const [arAccount, cashAccount] = await Promise.all([
+          this.accountResolver.resolve(invoice.companyId, 'AR_CONTROL', tx),
+          this.accountResolver.resolve(invoice.companyId, 'CASH_ON_HAND', tx),
+        ]);
+        await this.postingEngine.postLines(
+          {
+            companyId: invoice.companyId,
+            transactionDate: new Date(dto.paymentDate),
+            description: `Rent payment ${created.rentPaymentNumber} for ${invoice.rentInvoiceNumber}`,
+            referenceType: 'RentPayment',
+            referenceId: created.id,
+            moduleName: 'rent-payments',
+            userId,
+            lines: [
+              {
+                accountId: cashAccount.id,
+                debit: amount,
+                description: `Cash received — rent`,
+              },
+              {
+                accountId: arAccount.id,
+                credit: amount,
+                description: `AR settlement — ${invoice.rentInvoiceNumber}`,
+              },
+            ],
+          },
+          tx,
+        );
       }
 
       return created;
