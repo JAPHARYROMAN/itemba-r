@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel, Prisma } from '@prisma/client';
+import { AccessLevel, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService, CompanyScopeService } from '../../common/services';
@@ -14,6 +14,15 @@ import { WriteOffReceivableDto } from './dto/write-off-receivable.dto';
 function generateReceivableNumber(): string {
   return `AR-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`;
 }
+
+type ReceivableSalesOrderSnapshot = {
+  id: string;
+  sourceType: string | null;
+  sourceId: string | null;
+  amount: Prisma.Decimal | number | string;
+  paidAmount: Prisma.Decimal | number | string;
+  outstandingAmount: Prisma.Decimal | number | string;
+};
 
 @Injectable()
 export class ReceivablesService {
@@ -222,13 +231,18 @@ export class ReceivablesService {
     const newPaid = Math.round((Number(existing.paidAmount) + dto.amount) * 100) / 100;
     const newStatus = newOutstanding === 0 ? 'PAID' : 'PARTIALLY_PAID';
 
-    const record = await this.prisma.receivable.update({
-      where: { id },
-      data: {
-        outstandingAmount: newOutstanding,
-        paidAmount: newPaid,
-        status: newStatus,
-      },
+    const record = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.receivable.update({
+        where: { id },
+        data: {
+          outstandingAmount: newOutstanding,
+          paidAmount: newPaid,
+          status: newStatus,
+        },
+      });
+
+      await this.syncSalesOrderPaymentFromReceivable(tx, updated);
+      return updated;
     });
 
     await this.auditLogs.log({
@@ -348,5 +362,32 @@ export class ReceivablesService {
     }
 
     return { divisionId, branchId };
+  }
+
+  private async syncSalesOrderPaymentFromReceivable(
+    tx: Prisma.TransactionClient,
+    receivable: ReceivableSalesOrderSnapshot,
+  ) {
+    if (receivable.sourceType !== 'SalesOrder' || !receivable.sourceId) return;
+
+    const paidAmount = new Prisma.Decimal(receivable.paidAmount ?? 0).toDecimalPlaces(2);
+    const outstandingAmount = new Prisma.Decimal(receivable.outstandingAmount ?? 0).toDecimalPlaces(
+      2,
+    );
+    const paymentStatus = outstandingAmount.isZero()
+      ? PaymentStatus.PAID
+      : paidAmount.gt(0)
+        ? PaymentStatus.PARTIALLY_PAID
+        : PaymentStatus.UNPAID;
+
+    await tx.salesOrder.updateMany({
+      where: { id: receivable.sourceId, deletedAt: null },
+      data: {
+        receivableId: receivable.id,
+        paidAmount,
+        outstandingAmount,
+        paymentStatus,
+      },
+    });
   }
 }

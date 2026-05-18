@@ -14,6 +14,8 @@ import {
   AuditSeverity,
   CashAccountType,
   CurrencyCode,
+  PaymentStatus,
+  Prisma,
   SalesPaymentMethod,
 } from '@prisma/client';
 
@@ -25,6 +27,14 @@ type SalesOrderReferenceIds = {
   cashAccountId?: string | null;
   paymentMethod?: SalesPaymentMethod | null;
   lines?: SalesOrderLineDto[];
+};
+
+type LinkedReceivableSnapshot = {
+  id: string;
+  sourceId: string | null;
+  paidAmount: Prisma.Decimal | number | string;
+  outstandingAmount: Prisma.Decimal | number | string;
+  status: string;
 };
 
 function accountTypesForPaymentMethod(method?: SalesPaymentMethod | null): CashAccountType[] {
@@ -139,6 +149,15 @@ export class SalesOrdersService {
         include: {
           company: { select: { id: true, name: true, code: true } },
           customer: { select: { id: true, name: true } },
+          receivable: {
+            select: {
+              id: true,
+              sourceId: true,
+              paidAmount: true,
+              outstandingAmount: true,
+              status: true,
+            },
+          },
           lines: {
             include: {
               product: { select: { id: true, name: true } },
@@ -153,7 +172,19 @@ export class SalesOrdersService {
       this.prisma.salesOrder.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    const sourceReceivables = await this.findSalesOrderSourceReceivables(
+      data.map((order) => order.id),
+    );
+
+    return {
+      data: data.map((order) =>
+        this.withReceivablePaymentSnapshot(order, sourceReceivables.get(order.id)),
+      ),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   async findOne(id: string, user?: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
@@ -194,6 +225,15 @@ export class SalesOrdersService {
         },
         branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
         customer: { select: { id: true, name: true } },
+        receivable: {
+          select: {
+            id: true,
+            sourceId: true,
+            paidAmount: true,
+            outstandingAmount: true,
+            status: true,
+          },
+        },
         createdBy: { select: { id: true, fullName: true } },
         confirmedBy: { select: { id: true, fullName: true } },
         cashAccount: { select: { id: true, accountName: true, accountType: true } },
@@ -209,7 +249,75 @@ export class SalesOrdersService {
     if (user) {
       await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
     }
-    return record;
+
+    const sourceReceivable = record.receivable
+      ? null
+      : await this.prisma.receivable.findFirst({
+          where: { sourceType: 'SalesOrder', sourceId: id, deletedAt: null },
+          select: {
+            id: true,
+            sourceId: true,
+            paidAmount: true,
+            outstandingAmount: true,
+            status: true,
+          },
+          orderBy: { updatedAt: 'desc' },
+        });
+
+    return this.withReceivablePaymentSnapshot(record, sourceReceivable);
+  }
+
+  private async findSalesOrderSourceReceivables(salesOrderIds: string[]) {
+    if (salesOrderIds.length === 0) return new Map<string, LinkedReceivableSnapshot>();
+
+    const receivables = await this.prisma.receivable.findMany({
+      where: { sourceType: 'SalesOrder', sourceId: { in: salesOrderIds }, deletedAt: null },
+      select: {
+        id: true,
+        sourceId: true,
+        paidAmount: true,
+        outstandingAmount: true,
+        status: true,
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const bySalesOrderId = new Map<string, LinkedReceivableSnapshot>();
+    for (const receivable of receivables) {
+      if (receivable.sourceId && !bySalesOrderId.has(receivable.sourceId)) {
+        bySalesOrderId.set(receivable.sourceId, receivable);
+      }
+    }
+    return bySalesOrderId;
+  }
+
+  private withReceivablePaymentSnapshot<
+    T extends {
+      receivable?: LinkedReceivableSnapshot | null;
+      receivableId?: string | null;
+    },
+  >(order: T, sourceReceivable?: LinkedReceivableSnapshot | null): T {
+    const receivable = order.receivable ?? sourceReceivable;
+    if (!receivable) return order;
+
+    const paidAmount = new Prisma.Decimal(receivable.paidAmount ?? 0).toDecimalPlaces(2);
+    const outstandingAmount = new Prisma.Decimal(receivable.outstandingAmount ?? 0).toDecimalPlaces(
+      2,
+    );
+    const paymentStatus = outstandingAmount.isZero()
+      ? PaymentStatus.PAID
+      : paidAmount.gt(0)
+        ? PaymentStatus.PARTIALLY_PAID
+        : PaymentStatus.UNPAID;
+
+    return {
+      ...order,
+      receivableId: order.receivableId ?? receivable.id,
+      receivable: order.receivable ?? receivable,
+      paidAmount,
+      outstandingAmount,
+      paymentStatus,
+    } as T;
   }
 
   async findReceiptAccounts(
@@ -243,7 +351,9 @@ export class SalesOrdersService {
       include: {
         division: { select: { id: true, name: true, code: true } },
         branch: { select: { id: true, name: true, code: true } },
-        linkedBank: { select: { id: true, bankName: true, accountName: true, accountNumber: true } },
+        linkedBank: {
+          select: { id: true, bankName: true, accountName: true, accountNumber: true },
+        },
       },
       orderBy: { accountName: 'asc' },
       take: 1000,
@@ -421,6 +531,18 @@ export class SalesOrdersService {
   }
 
   private async assertReferencesBelongToCompany(companyId: string, refs: SalesOrderReferenceIds) {
+    if (
+      refs.paymentMethod &&
+      refs.paymentMethod !== SalesPaymentMethod.CREDIT &&
+      !refs.cashAccountId
+    ) {
+      throw new BadRequestException('Receipt account is required for non-credit sales');
+    }
+
+    if (refs.paymentMethod === SalesPaymentMethod.CREDIT && refs.cashAccountId) {
+      throw new BadRequestException('Receipt account is only valid for non-credit sales');
+    }
+
     if (refs.divisionId) {
       const division = await this.prisma.division.findFirst({
         where: { id: refs.divisionId, deletedAt: null },
