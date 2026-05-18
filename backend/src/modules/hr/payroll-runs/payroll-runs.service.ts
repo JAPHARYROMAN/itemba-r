@@ -148,6 +148,8 @@ export class PayrollRunsService {
     const period = await this.prisma.payrollPeriod.findFirst({
       where: { id: run.payrollPeriodId },
     });
+    const periodStart = period?.startDate ? startOfDay(period.startDate) : null;
+    const periodEnd = period?.endDate ? endOfDay(period.endDate) : null;
 
     // Delete existing entries for recalculation (cascade clears lines + allowances + deductions)
     await this.prisma.payrollEntry.updateMany({
@@ -180,12 +182,12 @@ export class PayrollRunsService {
       const attendancePay = 0;
       let overtimePay = 0;
 
-      if (period?.startDate && period?.endDate) {
+      if (periodStart && periodEnd) {
         const attendance = await this.prisma.attendanceRecord.findMany({
           where: {
             employeeId: employee.id,
             companyId,
-            attendanceDate: { gte: period.startDate, lte: period.endDate },
+            attendanceDate: { gte: periodStart, lte: periodEnd },
             deletedAt: null,
           },
         });
@@ -200,7 +202,7 @@ export class PayrollRunsService {
       // period reduce gross pay. Daily rate = baseSalary / 22 (standard
       // working days for monthly-paid employees in Tanzania).
       let lwopDays = 0;
-      if (period?.startDate && period?.endDate) {
+      if (periodStart && periodEnd) {
         const lwopRequests = await this.prisma.leaveRequest.findMany({
           where: {
             companyId,
@@ -210,8 +212,8 @@ export class PayrollRunsService {
             leaveType: { paid: false },
             // Request overlaps the period if it starts before period end AND
             // ends on/after period start.
-            startDate: { lte: period.endDate },
-            endDate: { gte: period.startDate },
+            startDate: { lte: periodEnd },
+            endDate: { gte: periodStart },
           },
           select: {
             startDate: true,
@@ -223,9 +225,9 @@ export class PayrollRunsService {
           // For requests fully inside the period, use their stored totalDays.
           // For requests that straddle the period boundary, count only the
           // days that fall inside the period (calendar-day approximation).
-          const reqStart = req.startDate > period.startDate ? req.startDate : period.startDate;
-          const reqEnd = req.endDate < period.endDate ? req.endDate : period.endDate;
-          const fullyInside = req.startDate >= period.startDate && req.endDate <= period.endDate;
+          const reqStart = req.startDate > periodStart ? req.startDate : periodStart;
+          const reqEnd = req.endDate < periodEnd ? req.endDate : periodEnd;
+          const fullyInside = req.startDate >= periodStart && req.endDate <= periodEnd;
           if (fullyInside) {
             lwopDays += Number(req.totalDays);
           } else {
@@ -321,7 +323,7 @@ export class PayrollRunsService {
           employeeId: employee.id,
           deletedAt: null,
           status: { in: ['PAID', 'DEDUCTING'] },
-          paidAt: { not: null, ...(period?.endDate ? { lte: period.endDate } : {}) },
+          paidAt: { not: null, ...(periodEnd ? { lte: periodEnd } : {}) },
         },
         orderBy: { paidAt: 'asc' },
       });
@@ -329,16 +331,16 @@ export class PayrollRunsService {
       const advanceRecoveries: Array<{ advanceId: string; advanceNumber: string; amount: number }> =
         [];
       for (const adv of outstandingAdvances) {
-        const remaining = Number(adv.amount) - Number(adv.recoveredAmount);
-        if (remaining <= 0) continue;
+        const remaining = decimal(adv.amount).minus(decimal(adv.recoveredAmount));
+        if (remaining.lte(0)) continue;
         const installment =
-          adv.installmentAmount != null ? Number(adv.installmentAmount) : Number(adv.amount);
-        const thisPeriod = Math.min(installment, remaining);
-        if (thisPeriod > 0) {
+          adv.installmentAmount != null ? decimal(adv.installmentAmount) : decimal(adv.amount);
+        const thisPeriod = money(installment.lt(remaining) ? installment : remaining);
+        if (thisPeriod.gt(0)) {
           advanceRecoveries.push({
             advanceId: adv.id,
             advanceNumber: adv.advanceNumber,
-            amount: Math.round(thisPeriod * 100) / 100,
+            amount: thisPeriod.toNumber(),
           });
         }
       }
@@ -644,11 +646,16 @@ export class PayrollRunsService {
   }
 
   async pay(id: string, user: AuthUser, body?: { disbursingChartOfAccountId?: string }) {
+    let alreadyPaid = false;
     const updated = await this.prisma.$transaction(
       async (tx) => {
         const run = await this.lockPayrollRun(id, tx);
         if (!run) throw new NotFoundException('Payroll run not found');
         await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.WRITE);
+        if (run.status === 'PAID') {
+          alreadyPaid = true;
+          return tx.payrollRun.findUniqueOrThrow({ where: { id } });
+        }
         if (run.status !== 'APPROVED') {
           throw new BadRequestException('Payroll run must be approved before paying');
         }
@@ -692,13 +699,15 @@ export class PayrollRunsService {
       },
       { timeout: 60_000 },
     );
-    await this.audit.log({
-      userId: user.id,
-      action: 'UPDATE',
-      entityType: 'PayrollRun',
-      entityId: id,
-      newValue: { status: 'PAID', disbursingChartOfAccountId: body?.disbursingChartOfAccountId },
-    });
+    if (!alreadyPaid) {
+      await this.audit.log({
+        userId: user.id,
+        action: 'UPDATE',
+        entityType: 'PayrollRun',
+        entityId: id,
+        newValue: { status: 'PAID', disbursingChartOfAccountId: body?.disbursingChartOfAccountId },
+      });
+    }
     return updated;
   }
 
@@ -724,12 +733,12 @@ export class PayrollRunsService {
       },
     });
 
-    const byAdvance = new Map<string, number>();
+    const byAdvance = new Map<string, Prisma.Decimal>();
     for (const deduction of recoveryDeductions) {
       if (!deduction.salaryAdvanceId) continue;
       byAdvance.set(
         deduction.salaryAdvanceId,
-        (byAdvance.get(deduction.salaryAdvanceId) ?? 0) + Number(deduction.amount),
+        (byAdvance.get(deduction.salaryAdvanceId) ?? decimal(0)).plus(decimal(deduction.amount)),
       );
     }
 
@@ -746,8 +755,8 @@ export class PayrollRunsService {
         throw new BadRequestException(`Salary advance ${advanceId} no longer exists.`);
       }
 
-      const newRecovered = round2(Number(advance.recoveredAmount) + recoveredThisRun);
-      const fullyRecovered = newRecovered >= Number(advance.amount);
+      const newRecovered = money(decimal(advance.recoveredAmount).plus(recoveredThisRun));
+      const fullyRecovered = newRecovered.gte(decimal(advance.amount));
       await tx.salaryAdvance.update({
         where: { id: advanceId },
         data: {
@@ -794,6 +803,9 @@ export class PayrollRunsService {
         throw new BadRequestException(
           `Sales commission ${commission.id} is ${commission.status} and cannot be settled by this payroll run.`,
         );
+      }
+      if (commission.status === 'PAID' && commission.paidPayrollEntryId === payout.payrollEntryId) {
+        continue;
       }
 
       await tx.salesCommission.update({
@@ -855,6 +867,25 @@ export class PayrollRunsService {
   }
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+type DecimalInput = ConstructorParameters<typeof Prisma.Decimal>[0];
+
+function decimal(value: DecimalInput | null | undefined): Prisma.Decimal {
+  if (value instanceof Prisma.Decimal) return value;
+  return new Prisma.Decimal(value ?? 0);
+}
+
+function money(value: Prisma.Decimal): Prisma.Decimal {
+  return value.toDecimalPlaces(2);
+}
+
+function startOfDay(value: Date): Date {
+  const d = new Date(value);
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+}
+
+function endOfDay(value: Date): Date {
+  const d = new Date(value);
+  d.setUTCHours(23, 59, 59, 999);
+  return d;
 }

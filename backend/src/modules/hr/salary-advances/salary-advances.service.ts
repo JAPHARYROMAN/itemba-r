@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { AccessLevel } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { PayrollPostingsService } from '../payroll-postings/payroll-postings.service';
@@ -7,6 +7,12 @@ import { CompanyScopeService } from '../../../common/services';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
 import { CreateSalaryAdvanceDto } from './dto/create-salary-advance.dto';
 import { UpdateSalaryAdvanceDto } from './dto/update-salary-advance.dto';
+
+interface LockedSalaryAdvancePayRow {
+  id: string;
+  companyId: string;
+  status: string;
+}
 
 @Injectable()
 export class SalaryAdvancesService {
@@ -28,7 +34,10 @@ export class SalaryAdvancesService {
     if (status) where.status = status;
     const [data, total] = await Promise.all([
       this.prisma.salaryAdvance.findMany({
-        where, skip, take: Number(limit), orderBy: { requestDate: 'desc' },
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { requestDate: 'desc' },
         include: {
           employee: { select: { id: true, fullName: true, employeeCode: true } },
           company: { select: { id: true, name: true } },
@@ -54,7 +63,11 @@ export class SalaryAdvancesService {
 
   async create(dto: CreateSalaryAdvanceDto, user: AuthUser) {
     if ((dto as any).companyId) {
-      await this.companyScope.assertCanAccessCompany(user, (dto as any).companyId, AccessLevel.WRITE);
+      await this.companyScope.assertCanAccessCompany(
+        user,
+        (dto as any).companyId,
+        AccessLevel.WRITE,
+      );
     }
     const record = await this.prisma.salaryAdvance.create({
       data: { ...dto, requestDate: new Date(dto.requestDate) } as any,
@@ -89,9 +102,11 @@ export class SalaryAdvancesService {
 
   async approve(id: string, approvedAmount: number | undefined, user: AuthUser) {
     const record = await this.findOne(id, user, AccessLevel.WRITE);
-    if (record.status !== 'REQUESTED') throw new BadRequestException('Only requested advances can be approved');
+    if (record.status !== 'REQUESTED')
+      throw new BadRequestException('Only requested advances can be approved');
     if (approvedAmount !== undefined) {
-      if (approvedAmount <= 0) throw new BadRequestException('Approved amount must be greater than zero');
+      if (approvedAmount <= 0)
+        throw new BadRequestException('Approved amount must be greater than zero');
       if (approvedAmount > Number(record.amount)) {
         throw new BadRequestException('Approved amount cannot exceed the requested amount');
       }
@@ -117,31 +132,55 @@ export class SalaryAdvancesService {
   }
 
   async pay(id: string, user: AuthUser) {
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const record = await tx.salaryAdvance.findFirst({
-        where: { id, deletedAt: null },
-      });
-      if (!record) throw new NotFoundException('Salary advance not found');
-      await this.companyScope.assertCanAccessCompany(user, record.companyId, AccessLevel.WRITE);
-      if (record.status !== 'APPROVED') throw new BadRequestException('Only approved advances can be paid');
+    let alreadyPaid = false;
+    const updated = await this.prisma.$transaction(
+      async (tx) => {
+        const record = await this.lockSalaryAdvanceForPay(id, tx);
+        if (!record) throw new NotFoundException('Salary advance not found');
+        await this.companyScope.assertCanAccessCompany(user, record.companyId, AccessLevel.WRITE);
+        if (['PAID', 'DEDUCTING', 'SETTLED'].includes(record.status)) {
+          alreadyPaid = true;
+          return tx.salaryAdvance.findUniqueOrThrow({ where: { id } });
+        }
+        if (record.status !== 'APPROVED') {
+          throw new BadRequestException('Only approved advances can be paid');
+        }
 
-      const paid = await tx.salaryAdvance.update({
-        where: { id },
-        data: { status: 'PAID', paidAt: new Date(), paidById: user.id },
-      });
+        const paid = await tx.salaryAdvance.update({
+          where: { id },
+          data: { status: 'PAID', paidAt: new Date(), paidById: user.id },
+        });
 
-      await this.postings.postAdvancePayment(id, user.id, tx);
-      return paid;
-    }, { timeout: 60_000 });
-    await this.audit.log({
-      userId: user.id,
-      action: 'SALARY_ADVANCE_PAY',
-      entityType: 'SalaryAdvance',
-      entityId: id,
-      companyId: (updated as any).companyId,
-      newValue: { status: 'PAID' },
-    });
+        await this.postings.postAdvancePayment(id, user.id, tx);
+        return paid;
+      },
+      { timeout: 60_000 },
+    );
+    if (!alreadyPaid) {
+      await this.audit.log({
+        userId: user.id,
+        action: 'SALARY_ADVANCE_PAY',
+        entityType: 'SalaryAdvance',
+        entityId: id,
+        companyId: (updated as any).companyId,
+        newValue: { status: 'PAID' },
+      });
+    }
     return updated;
+  }
+
+  private async lockSalaryAdvanceForPay(
+    id: string,
+    tx: Prisma.TransactionClient,
+  ): Promise<LockedSalaryAdvancePayRow | null> {
+    const rows = await tx.$queryRaw<LockedSalaryAdvancePayRow[]>`
+      SELECT id, "companyId", status
+      FROM "salary_advances"
+      WHERE id = ${id}
+        AND "deletedAt" IS NULL
+      FOR UPDATE
+    `;
+    return rows[0] ?? null;
   }
 
   async remove(id: string, user: AuthUser) {

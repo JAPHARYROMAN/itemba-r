@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateMobileMoneyAccountDto } from './dto/create-mobile-money-account.dto';
@@ -41,45 +42,44 @@ export class MobileMoneyAccountsService {
   async create(dto: CreateMobileMoneyAccountDto, userId: string) {
     const msisdn = normaliseMsisdn(dto.msisdn);
 
-    // If primary requested, demote any existing primary for this employee.
-    if (dto.isPrimary) {
-      await this.prisma.mobileMoneyAccount.updateMany({
-        where: { employeeId: dto.employeeId, isPrimary: true, deletedAt: null },
-        data: { isPrimary: false },
+    try {
+      const row = await this.prisma.$transaction(async (tx) => {
+        // If primary requested, demote any existing primary for this employee.
+        if (dto.isPrimary) {
+          await tx.mobileMoneyAccount.updateMany({
+            where: { employeeId: dto.employeeId, isPrimary: true, deletedAt: null },
+            data: { isPrimary: false },
+          });
+        }
+
+        return tx.mobileMoneyAccount.create({
+          data: {
+            employeeId: dto.employeeId,
+            provider: dto.provider,
+            msisdn,
+            accountName: dto.accountName,
+            isPrimary: dto.isPrimary ?? false,
+            status: dto.status ?? 'ACTIVE',
+            notes: dto.notes,
+          },
+        });
       });
+
+      await this.audit.log({
+        userId,
+        action: 'CREATE',
+        entityType: 'MobileMoneyAccount',
+        entityId: row.id,
+        newValue: row as unknown as Record<string, unknown>,
+      });
+      return row;
+    } catch (error) {
+      this.handleUniqueConstraint(error);
     }
-
-    const row = await this.prisma.mobileMoneyAccount.create({
-      data: {
-        employeeId: dto.employeeId,
-        provider: dto.provider,
-        msisdn,
-        accountName: dto.accountName,
-        isPrimary: dto.isPrimary ?? false,
-        status: dto.status ?? 'ACTIVE',
-        notes: dto.notes,
-      },
-    });
-
-    await this.audit.log({
-      userId,
-      action: 'CREATE',
-      entityType: 'MobileMoneyAccount',
-      entityId: row.id,
-      newValue: row as unknown as Record<string, unknown>,
-    });
-    return row;
   }
 
   async update(id: string, dto: UpdateMobileMoneyAccountDto, userId: string) {
     const existing = await this.findOne(id);
-
-    if (dto.isPrimary === true) {
-      await this.prisma.mobileMoneyAccount.updateMany({
-        where: { employeeId: existing.employeeId, isPrimary: true, NOT: { id }, deletedAt: null },
-        data: { isPrimary: false },
-      });
-    }
 
     const data: Record<string, unknown> = {};
     if (dto.provider !== undefined) data.provider = dto.provider;
@@ -89,17 +89,35 @@ export class MobileMoneyAccountsService {
     if (dto.status !== undefined) data.status = dto.status;
     if (dto.notes !== undefined) data.notes = dto.notes;
 
-    const row = await this.prisma.mobileMoneyAccount.update({ where: { id }, data });
+    try {
+      const row = await this.prisma.$transaction(async (tx) => {
+        if (dto.isPrimary === true) {
+          await tx.mobileMoneyAccount.updateMany({
+            where: {
+              employeeId: existing.employeeId,
+              isPrimary: true,
+              NOT: { id },
+              deletedAt: null,
+            },
+            data: { isPrimary: false },
+          });
+        }
 
-    await this.audit.log({
-      userId,
-      action: 'UPDATE',
-      entityType: 'MobileMoneyAccount',
-      entityId: id,
-      oldValue: existing as unknown as Record<string, unknown>,
-      newValue: row as unknown as Record<string, unknown>,
-    });
-    return row;
+        return tx.mobileMoneyAccount.update({ where: { id }, data });
+      });
+
+      await this.audit.log({
+        userId,
+        action: 'UPDATE',
+        entityType: 'MobileMoneyAccount',
+        entityId: id,
+        oldValue: existing as unknown as Record<string, unknown>,
+        newValue: row as unknown as Record<string, unknown>,
+      });
+      return row;
+    } catch (error) {
+      this.handleUniqueConstraint(error);
+    }
   }
 
   async remove(id: string, userId: string) {
@@ -121,5 +139,14 @@ export class MobileMoneyAccountsService {
       oldValue: existing as unknown as Record<string, unknown>,
     });
     return { success: true };
+  }
+
+  private handleUniqueConstraint(error: unknown): never {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new BadRequestException(
+        'Only one active primary mobile money account is allowed per employee',
+      );
+    }
+    throw error;
   }
 }

@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PayrollRunsService } from './payroll-runs.service';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
@@ -43,15 +44,37 @@ function makeServiceWithRun(initial: Partial<RunRow> = {}) {
     ...initial,
   };
   const postedRuns: string[] = [];
+  const advanceRow = {
+    id: 'advance-1',
+    amount: new Prisma.Decimal('1.00'),
+    recoveredAmount: new Prisma.Decimal('0.00'),
+  };
 
   const tx = {
-    $queryRaw: jest.fn().mockResolvedValue([row]),
+    $queryRaw: jest.fn().mockImplementation(async (strings: TemplateStringsArray) => {
+      const sql = strings.join('');
+      if (sql.includes('salary_advances')) return [advanceRow];
+      return [row];
+    }),
     payrollRun: {
       findUnique: jest.fn().mockResolvedValue(row),
+      findUniqueOrThrow: jest.fn().mockResolvedValue(row),
       update: jest.fn().mockImplementation(async ({ data }: any) => {
         Object.assign(row, data);
         return { ...row };
       }),
+    },
+    payrollEntryDeduction: {
+      findMany: jest.fn().mockResolvedValue([
+        { salaryAdvanceId: 'advance-1', amount: new Prisma.Decimal('0.10') },
+        { salaryAdvanceId: 'advance-1', amount: new Prisma.Decimal('0.20') },
+      ]),
+    },
+    salaryAdvance: {
+      update: jest.fn().mockResolvedValue(undefined),
+    },
+    payrollEntryAllowance: {
+      findMany: jest.fn().mockResolvedValue([]),
     },
   };
 
@@ -62,13 +85,18 @@ function makeServiceWithRun(initial: Partial<RunRow> = {}) {
   const postings: any = {
     postRun: jest.fn().mockImplementation(async (id: string) => postedRuns.push(id)),
     reverseAccrual: jest.fn().mockResolvedValue(null),
+    postPayment: jest.fn().mockResolvedValue(null),
+    postLabourReclass: jest.fn().mockResolvedValue(null),
   };
-  const labourCost: any = { reverseForRun: jest.fn().mockResolvedValue({ reversed: 0 }) };
+  const labourCost: any = {
+    allocateForRun: jest.fn().mockResolvedValue({ allocated: 0, skipped: 0 }),
+    reverseForRun: jest.fn().mockResolvedValue({ reversed: 0 }),
+  };
   const service = new PayrollRunsService(prisma, audit, {} as any, postings, labourCost, {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
   } as any);
 
-  return { service, row, postedRuns, postings, labourCost };
+  return { service, row, postedRuns, postings, labourCost, tx, audit };
 }
 
 describe('PayrollRunsService dual sign-off', () => {
@@ -139,5 +167,26 @@ describe('PayrollRunsService dual sign-off', () => {
     expect(labourCost.reverseForRun).toHaveBeenCalledWith('run-1', expect.any(Object));
     expect(row.status).toBe('CANCELLED');
     expect(result?.status).toBe('CANCELLED');
+  });
+
+  it('treats repeat payroll pay calls as idempotent no-ops', async () => {
+    const { service, postings, labourCost, audit } = makeServiceWithRun({ status: 'PAID' });
+
+    const result = await service.pay('run-1', user('pay-user'));
+
+    expect(result.status).toBe('PAID');
+    expect(postings.postPayment).not.toHaveBeenCalled();
+    expect(labourCost.allocateForRun).not.toHaveBeenCalled();
+    expect(audit.log).not.toHaveBeenCalled();
+  });
+
+  it('uses Decimal arithmetic when syncing salary advance recoveries', async () => {
+    const { service, tx } = makeServiceWithRun({ status: 'APPROVED' });
+
+    await service.pay('run-1', user('pay-user'));
+
+    const updateCall = tx.salaryAdvance.update.mock.calls[0][0];
+    expect(Number(updateCall.data.recoveredAmount)).toBe(0.3);
+    expect(updateCall.data.status).toBe('DEDUCTING');
   });
 });
