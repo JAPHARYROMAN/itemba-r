@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, PageHeader, StatCard, StatusBadge, PageSpinner } from '@/components/ui';
 
-function fmtCurrency(n: number) { return `TZS ${new Intl.NumberFormat('en-US').format(n)}`; }
+function fmtCurrency(n: number | string | null | undefined) { const value = Number(n ?? 0); return `TZS ${new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0)}`; }
 function fmtDateTime(d: string) { return d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'; }
 function fmtDuration(entryTime: string) {
   const mins = Math.round((Date.now() - new Date(entryTime).getTime()) / 60000);
@@ -68,9 +68,13 @@ export default function ParkingDashboardPage() {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const todayRevenue = payments.filter(p => p.paymentDate && new Date(p.paymentDate) >= today).reduce((acc, p) => acc + (p.amount ?? 0), 0);
+  const todayRevenue = payments
+    .filter(p => p.paymentDate && new Date(p.paymentDate) >= today)
+    .reduce((acc, p) => acc + (Number(p.amount ?? 0) || 0), 0);
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-  const monthRevenue = payments.filter(p => p.paymentDate && new Date(p.paymentDate) >= monthStart).reduce((acc, p) => acc + (p.amount ?? 0), 0);
+  const monthRevenue = payments
+    .filter(p => p.paymentDate && new Date(p.paymentDate) >= monthStart)
+    .reduce((acc, p) => acc + (Number(p.amount ?? 0) || 0), 0);
   const totalCapacity = zones.reduce((acc, z) => acc + (z.capacity ?? 0), 0);
   const utilPct = totalCapacity > 0 ? Math.round((activeSessions.length / totalCapacity) * 100) : 0;
 

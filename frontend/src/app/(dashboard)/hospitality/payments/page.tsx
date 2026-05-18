@@ -5,7 +5,7 @@ import { useAuth } from '@/hooks/use-auth';
 
 const PAYMENT_METHODS = ['CASH', 'MOBILE_MONEY', 'BANK_TRANSFER', 'BANK_CARD', 'CREDIT', 'OTHER'];
 const CONTEXT_TYPES = ['ROOM_BOOKING', 'RESTAURANT_ORDER', 'BAR_ORDER', 'GENERAL'];
-const fmtCurrency = (n: number, cur: string) => `${cur} ${new Intl.NumberFormat('en-US').format(n)}`;
+const fmtCurrency = (n: number | string | null | undefined, cur: string) => { const value = Number(n ?? 0); return `${cur} ${new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0)}`; };
 const fmtDate = (s: string) => s ? new Date(s).toLocaleDateString('en-GB') : '—';
 
 interface Company { id: string; name: string; }
@@ -90,7 +90,7 @@ export default function HospitalityPaymentsPage() {
     setDeleteId(null); load();
   };
 
-  const totalAmount = rows.reduce((s, r) => s + (r.amount ?? 0), 0);
+  const totalAmount = rows.reduce((s, r) => s + (Number(r.amount ?? 0) || 0), 0);
   const sf = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm(f => ({ ...f, [k]: e.target.value }));
 
   return (

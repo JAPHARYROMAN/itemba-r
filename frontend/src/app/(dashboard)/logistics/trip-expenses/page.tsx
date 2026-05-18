@@ -53,8 +53,9 @@ function fmtDate(d: string) {
     year: 'numeric',
   });
 }
-function fmtCurrency(n: number, cur = 'TZS') {
-  return `${cur} ${new Intl.NumberFormat('en-US').format(n)}`;
+function fmtCurrency(n: number | string | null | undefined, cur = 'TZS') {
+  const value = Number(n ?? 0);
+  return `${cur} ${new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0)}`;
 }
 
 const EMPTY_FORM = {

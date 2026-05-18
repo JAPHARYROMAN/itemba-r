@@ -1,4 +1,5 @@
 import type { DocumentOrganization } from './DocumentShell';
+import { toFiniteNumber } from '@/lib/design-system/formatters';
 
 interface CompanyLike {
   name?: string | null;
@@ -38,7 +39,7 @@ export function formatDocumentMoney(value: number | string | null | undefined, c
   return `${currency} ${new Intl.NumberFormat('en-TZ', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(Number(value ?? 0))}`;
+  }).format(toFiniteNumber(value))}`;
 }
 
 export function formatDocumentDate(value: string | Date | null | undefined) {

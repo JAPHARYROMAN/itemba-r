@@ -454,8 +454,14 @@ export default function ShiftDetailPage() {
   if (error) return <div className="p-6"><div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div></div>;
   if (!shift) return null;
 
-  const totalSales = (shift.nozzleReadings ?? []).reduce((s, r) => s + r.expectedAmount, 0);
-  const totalCollections = (shift.collections ?? []).reduce((s, c) => s + c.amount, 0);
+  const totalSales = (shift.nozzleReadings ?? []).reduce(
+    (s, r) => s + (Number(r.expectedAmount ?? 0) || 0),
+    0,
+  );
+  const totalCollections = (shift.collections ?? []).reduce(
+    (s, c) => s + (Number(c.amount ?? 0) || 0),
+    0,
+  );
 
   return (
     <div className="p-6 space-y-6">

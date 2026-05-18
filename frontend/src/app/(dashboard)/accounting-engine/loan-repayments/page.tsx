@@ -87,7 +87,7 @@ function fmtDate(value?: string | null) {
 }
 
 function fmtMoney(value: number | string | null | undefined, currency = 'TZS') {
-  return `${currency} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(Number(value ?? 0))}`;
+  return `${currency} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(Number.isFinite(Number(value ?? 0)) ? Number(value ?? 0) : 0)}`;
 }
 
 function errorMessage(json: any, fallback: string) {

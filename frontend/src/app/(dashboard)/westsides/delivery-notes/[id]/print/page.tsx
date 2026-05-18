@@ -192,5 +192,5 @@ function ErrorCard({ message }: { message: string }) {
 }
 
 function formatQty(value: number | string | null | undefined) {
-  return new Intl.NumberFormat('en-GB', { maximumFractionDigits: 4 }).format(Number(value ?? 0));
+  return new Intl.NumberFormat('en-GB', { maximumFractionDigits: 4 }).format(Number.isFinite(Number(value ?? 0)) ? Number(value ?? 0) : 0);
 }

@@ -21,7 +21,7 @@ const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercas
 const tdCls = 'px-4 py-2 text-sm text-slate-700';
 const inputCls = 'w-full text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-300';
 const labelCls = 'block text-xs font-medium text-slate-600 mb-1';
-const fmtCurrency = (n: number) => `TZS ${new Intl.NumberFormat('en-US').format(Math.round(n))}`;
+const fmtCurrency = (n: number | string | null | undefined) => { const value = Number(n ?? 0); return `TZS ${new Intl.NumberFormat('en-US').format(Math.round(Number.isFinite(value) ? value : 0))}`; };
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
 const EMPTY_FORM = { workerName: '', role: '', laborDate: '', hoursWorked: '', dayRate: '', totalAmount: '', currency: 'TZS', paymentStatus: 'UNPAID', notes: '', laborContextId: '' };

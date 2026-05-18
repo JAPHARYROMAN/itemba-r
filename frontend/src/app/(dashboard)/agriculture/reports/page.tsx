@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Card, PageHeader } from '@/components/ui';
 
-const fmtCurrency = (n: number) => `TZS ${new Intl.NumberFormat('en-US').format(Math.round(n))}`;
+const fmtCurrency = (n: number | string | null | undefined) => { const value = Number(n ?? 0); return `TZS ${new Intl.NumberFormat('en-US').format(Math.round(Number.isFinite(value) ? value : 0))}`; };
 const fmtNum = (n: number) => new Intl.NumberFormat('en-US').format(Math.round(n * 100) / 100);
 const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
@@ -136,15 +136,15 @@ export default function AgricultureReportsPage() {
                         </div>
                         <div className="bg-red-50 rounded-lg p-3 text-center">
                           <div className="text-xs text-red-600 mb-1">Total Cost</div>
-                          <div className="text-lg font-bold text-red-700">{fmtCurrency(reportData.reduce((s: number, r: any) => s + r.actualCost, 0))}</div>
+                          <div className="text-lg font-bold text-red-700">{fmtCurrency(reportData.reduce((s: number, r: any) => s + (Number(r.actualCost ?? 0) || 0), 0))}</div>
                         </div>
                         <div className="bg-emerald-50 rounded-lg p-3 text-center">
                           <div className="text-xs text-emerald-600 mb-1">Total Revenue</div>
-                          <div className="text-lg font-bold text-emerald-700">{fmtCurrency(reportData.reduce((s: number, r: any) => s + r.revenue, 0))}</div>
+                          <div className="text-lg font-bold text-emerald-700">{fmtCurrency(reportData.reduce((s: number, r: any) => s + (Number(r.revenue ?? 0) || 0), 0))}</div>
                         </div>
                         <div className="bg-blue-50 rounded-lg p-3 text-center">
                           <div className="text-xs text-blue-600 mb-1">Net Profit</div>
-                          <div className="text-lg font-bold text-blue-700">{fmtCurrency(reportData.reduce((s: number, r: any) => s + r.profit, 0))}</div>
+                          <div className="text-lg font-bold text-blue-700">{fmtCurrency(reportData.reduce((s: number, r: any) => s + (Number(r.profit ?? 0) || 0), 0))}</div>
                         </div>
                       </div>
                     )}

@@ -35,10 +35,13 @@ interface PurchaseSummary {
 
 type Tab = 'stock-valuation' | 'sales-summary' | 'purchase-summary';
 
-function fmtTZS(n: number) {
+function fmtTZS(n: number | string | null | undefined) {
+  const value = Number(n ?? 0);
   return (
     'TZS ' +
-    new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
+    new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
+      Number.isFinite(value) ? value : 0,
+    )
   );
 }
 
@@ -155,7 +158,7 @@ export default function OperationsReportsPage() {
     color: 'var(--aurora-text)',
   } as const;
 
-  const stockTotal = stockRows?.reduce((acc, r) => acc + r.totalValue, 0) ?? 0;
+  const stockTotal = stockRows?.reduce((acc, r) => acc + (Number(r.totalValue ?? 0) || 0), 0) ?? 0;
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'stock-valuation', label: 'Stock Valuation' },

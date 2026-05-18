@@ -5,7 +5,7 @@ import { Card, PageHeader, StatusBadge, Modal, Btn, FormInput, FormSelect, FormT
 import { useAuth } from '@/hooks/use-auth';
 
 const BOOKING_SOURCES = ['WALK_IN', 'PHONE', 'ONLINE', 'COMPANY', 'AGENT', 'OTHER'];
-const fmtCurrency = (n: number) => `TZS ${new Intl.NumberFormat('en-US').format(n)}`;
+const fmtCurrency = (n: number | string | null | undefined) => { const value = Number(n ?? 0); return `TZS ${new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0)}`; };
 const fmtDate = (s: string) => s ? new Date(s).toLocaleDateString('en-GB') : '—';
 const fmtDateTime = (s: string) => s ? new Date(s).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
 

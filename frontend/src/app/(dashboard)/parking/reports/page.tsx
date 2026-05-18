@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Card, PageHeader, StatCard, PageSpinner } from '@/components/ui';
 
-function fmtCurrency(n: number) { return `TZS ${new Intl.NumberFormat('en-US').format(n)}`; }
+function fmtCurrency(n: number | string | null | undefined) { const value = Number(n ?? 0); return `TZS ${new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0)}`; }
 function fmtDate(d: string) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
 function toDateStr(d: Date) { return d.toISOString().slice(0, 10); }
 const subDays = (d: Date, n: number) => { const r = new Date(d); r.setDate(r.getDate() - n); return r; };
@@ -57,7 +57,7 @@ export default function ParkingReportsPage() {
     return d && d >= from && d <= to;
   });
 
-  const totalRevenue = filteredPayments.reduce((acc, p) => acc + (p.amount ?? 0), 0);
+  const totalRevenue = filteredPayments.reduce((acc, p) => acc + (Number(p.amount ?? 0) || 0), 0);
   const activeSessions = filteredSessions.filter(s => s.status === 'ACTIVE').length;
   const completedSessions = filteredSessions.filter(s => s.status === 'COMPLETED').length;
 

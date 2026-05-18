@@ -111,7 +111,7 @@ export default function EmployeeAllowancesPage() {
                   <tr key={a.id} className="border-b border-slate-50 hover:bg-slate-50">
                     <td className={`${tdCls} font-medium`}>{a.employee ?? a.employeeId ?? '—'}</td>
                     <td className={tdCls}>{a.allowanceType ?? a.allowanceTypeId ?? '—'}</td>
-                    <td className={tdCls}>TZS {Number(a.amount).toLocaleString('en-TZ')}</td>
+                    <td className={tdCls}>TZS {(Number.isFinite(Number(a.amount)) ? Number(a.amount).toLocaleString('en-TZ') : '0')}</td>
                     <td className={tdCls}>{a.effectiveFrom ? new Date(a.effectiveFrom).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}>{a.effectiveTo ? new Date(a.effectiveTo).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}><StatusBadge status={a.status} /></td>

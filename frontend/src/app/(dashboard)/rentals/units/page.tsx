@@ -18,7 +18,7 @@ interface Unit {
   property?: { propertyName: string };
 }
 
-function fmtCurrency(n: number) { return `TZS ${new Intl.NumberFormat('en-US').format(n)}`; }
+function fmtCurrency(n: number | string | null | undefined) { const value = Number(n ?? 0); return `TZS ${new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0)}`; }
 
 const thCls = 'px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide';
 const tdCls = 'px-3 py-3 text-[13px]';

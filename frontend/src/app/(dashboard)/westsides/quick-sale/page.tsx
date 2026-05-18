@@ -129,7 +129,7 @@ function fmt(n: number | string | undefined | null): string {
   return new Intl.NumberFormat('en-TZ', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(Number(n ?? 0));
+  }).format(Number.isFinite(Number(n ?? 0)) ? Number(n ?? 0) : 0);
 }
 
 function getSettingsKey(userId: string): string {

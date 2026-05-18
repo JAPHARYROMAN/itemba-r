@@ -39,8 +39,9 @@ function fmtDate(d: string) {
     year: 'numeric',
   });
 }
-function fmtCurrency(n: number) {
-  return `TZS ${new Intl.NumberFormat('en-US').format(n)}`;
+function fmtCurrency(n: number | string | null | undefined) {
+  const value = Number(n ?? 0);
+  return `TZS ${new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0)}`;
 }
 
 const EMPTY_FORM = {

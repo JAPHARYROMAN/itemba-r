@@ -115,7 +115,7 @@ export default function DeductionTypesPage() {
                     <td className={`${tdCls} font-medium`}>{d.name}</td>
                     <td className={`${tdCls} font-mono`}>{d.code}</td>
                     <td className={tdCls}>{bool(d.isStatutory)}</td>
-                    <td className={tdCls}>{d.defaultAmount != null ? `TZS ${Number(d.defaultAmount).toLocaleString('en-TZ')}` : '—'}</td>
+                    <td className={tdCls}>{d.defaultAmount != null ? `TZS ${(Number.isFinite(Number(d.defaultAmount)) ? Number(d.defaultAmount).toLocaleString('en-TZ') : '0')}` : '—'}</td>
                     <td className={tdCls}>{d.defaultPercentage != null ? `${d.defaultPercentage}%` : '—'}</td>
                     <td className={tdCls}>{bool(d.isActive)}</td>
                     <td className={tdCls}>

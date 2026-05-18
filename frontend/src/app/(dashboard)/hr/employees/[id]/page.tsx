@@ -340,7 +340,7 @@ export default function EmployeeDetailPage() {
                 [
                   'Base Salary',
                   emp.baseSalary != null
-                    ? `${emp.salaryCurrency ?? 'TZS'} ${Number(emp.baseSalary).toLocaleString('en-TZ')}`
+                    ? `${emp.salaryCurrency ?? 'TZS'} ${(Number.isFinite(Number(emp.baseSalary)) ? Number(emp.baseSalary).toLocaleString('en-TZ') : '0')}`
                     : undefined,
                 ],
                 ['Payment Frequency', emp.paymentFrequency],

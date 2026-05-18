@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Card, PageHeader, StatCard, PageSpinner } from '@/components/ui';
 
 const fmtNum = (n: number) => new Intl.NumberFormat('en-US').format(n);
-const fmtCurrency = (n: number) => `TZS ${new Intl.NumberFormat('en-US').format(Math.round(n))}`;
+const fmtCurrency = (n: number | string | null | undefined) => { const value = Number(n ?? 0); return `TZS ${new Intl.NumberFormat('en-US').format(Math.round(Number.isFinite(value) ? value : 0))}`; };
 const fmtDate = (d: string | Date | null) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
 const STATUS_CLR: Record<string, string> = {

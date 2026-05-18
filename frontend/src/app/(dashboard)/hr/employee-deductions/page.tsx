@@ -114,7 +114,7 @@ export default function EmployeeDeductionsPage() {
                   <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50">
                     <td className={`${tdCls} font-medium`}>{d.employee ?? d.employeeId ?? '—'}</td>
                     <td className={tdCls}>{d.deductionType ?? d.deductionTypeId ?? '—'}</td>
-                    <td className={tdCls}>{d.amount != null ? `TZS ${Number(d.amount).toLocaleString('en-TZ')}` : '—'}</td>
+                    <td className={tdCls}>{d.amount != null ? `TZS ${(Number.isFinite(Number(d.amount)) ? Number(d.amount).toLocaleString('en-TZ') : '0')}` : '—'}</td>
                     <td className={tdCls}>{d.percentage != null ? `${d.percentage}%` : '—'}</td>
                     <td className={tdCls}>{d.effectiveFrom ? new Date(d.effectiveFrom).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}>{d.effectiveTo ? new Date(d.effectiveTo).toLocaleDateString('en-GB') : '—'}</td>

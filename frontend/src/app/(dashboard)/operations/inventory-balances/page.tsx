@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Card, PageHeader, StatCard, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendList, backendPage } from '@/lib/api-client';
+import { toFiniteNumber } from '@/lib/design-system/formatters';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,14 +49,14 @@ function emptyPaginated<T>(page = 1): Paginated<T> {
 const tdCls = 'px-4 py-2 text-sm text-slate-700';
 const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';
 
-function fmtNum(n: number, decimals = 2) {
+function fmtNum(n: number | string | null | undefined, decimals = 2) {
   return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
-  }).format(n);
+  }).format(toFiniteNumber(n));
 }
 
-function fmtTZS(n: number) {
+function fmtTZS(n: number | string | null | undefined) {
   return 'TZS ' + fmtNum(n);
 }
 
@@ -69,7 +70,8 @@ function fmtDate(d?: string | null) {
 }
 
 function StockBadge({ balance }: { balance: InventoryBalance }) {
-  if (balance.quantityOnHand <= 0) {
+  const quantityOnHand = toFiniteNumber(balance.quantityOnHand);
+  if (quantityOnHand <= 0) {
     return (
       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
         Out of Stock
@@ -77,7 +79,7 @@ function StockBadge({ balance }: { balance: InventoryBalance }) {
     );
   }
   const reorderLevel = balance.product?.reorderLevel;
-  if (reorderLevel != null && balance.quantityOnHand <= reorderLevel) {
+  if (reorderLevel != null && quantityOnHand <= toFiniteNumber(reorderLevel)) {
     return (
       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
         Low Stock
@@ -168,11 +170,12 @@ export default function InventoryBalancesPage() {
   }
 
   const rows = data?.data ?? [];
-  const totalValue = rows.reduce((s, r) => s + (r.totalValue ?? 0), 0);
-  const outOfStock = rows.filter((r) => r.quantityOnHand <= 0).length;
+  const totalValue = rows.reduce((s, r) => s + toFiniteNumber(r.totalValue), 0);
+  const outOfStock = rows.filter((r) => toFiniteNumber(r.quantityOnHand) <= 0).length;
   const lowStockCount = rows.filter((r) => {
     const rl = r.product?.reorderLevel;
-    return r.quantityOnHand > 0 && rl != null && r.quantityOnHand <= rl;
+    const quantityOnHand = toFiniteNumber(r.quantityOnHand);
+    return quantityOnHand > 0 && rl != null && quantityOnHand <= toFiniteNumber(rl);
   }).length;
 
   return (
@@ -302,7 +305,7 @@ export default function InventoryBalancesPage() {
                     </td>
                     <td className={tdCls}>{bal.company?.name ?? '—'}</td>
                     <td
-                      className={`${tdCls} text-right font-mono ${bal.quantityOnHand <= 0 ? 'text-red-600 font-semibold' : ''}`}
+                      className={`${tdCls} text-right font-mono ${toFiniteNumber(bal.quantityOnHand) <= 0 ? 'text-red-600 font-semibold' : ''}`}
                     >
                       {fmtNum(bal.quantityOnHand)}
                     </td>

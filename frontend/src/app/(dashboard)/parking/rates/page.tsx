@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/use-auth';
 const RATE_TYPES = ['HOURLY', 'DAILY', 'OVERNIGHT', 'WEEKLY', 'MONTHLY', 'FLAT', 'CUSTOM'];
 const RATE_STATUSES = ['ACTIVE', 'INACTIVE', 'EXPIRED'];
 
-function fmtCurrency(n: number) { return `TZS ${new Intl.NumberFormat('en-US').format(n)}`; }
+function fmtCurrency(n: number | string | null | undefined) { const value = Number(n ?? 0); return `TZS ${new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0)}`; }
 function fmtDate(d: string) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 

@@ -95,14 +95,15 @@ function MovementBadge({ type }: { type: string }) {
   );
 }
 
-function fmtNum(n: number, decimals = 2) {
+function fmtNum(n: number | string | null | undefined, decimals = 2) {
+  const value = Number(n ?? 0);
   return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
-  }).format(n);
+  }).format(Number.isFinite(value) ? value : 0);
 }
 
-function fmtTZS(n: number) {
+function fmtTZS(n: number | string | null | undefined) {
   return 'TZS ' + fmtNum(n);
 }
 
@@ -200,7 +201,7 @@ export default function InventoryMovementsPage() {
   }
 
   const rows = data?.data ?? [];
-  const totalCost = rows.reduce((s, r) => s + (r.totalCost ?? 0), 0);
+  const totalCost = rows.reduce((s, r) => s + (Number(r.totalCost ?? 0) || 0), 0);
 
   return (
     <div className="p-6 space-y-6">

@@ -5,7 +5,7 @@ import { useAuth } from '@/hooks/use-auth';
 
 const ROOM_TYPES = ['SINGLE', 'DOUBLE', 'TWIN', 'DELUXE', 'FAMILY', 'SUITE', 'OTHER'];
 const ROOM_STATUSES = ['AVAILABLE', 'OCCUPIED', 'RESERVED', 'DIRTY', 'UNDER_MAINTENANCE', 'OUT_OF_SERVICE'];
-const fmtCurrency = (n: number) => `TZS ${new Intl.NumberFormat('en-US').format(n)}`;
+const fmtCurrency = (n: number | string | null | undefined) => { const value = Number(n ?? 0); return `TZS ${new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0)}`; };
 
 interface Company { id: string; name: string; }
 interface Facility { id: string; facilityName: string; }

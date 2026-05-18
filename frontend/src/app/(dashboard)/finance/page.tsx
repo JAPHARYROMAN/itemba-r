@@ -22,8 +22,9 @@ interface DashboardData {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtTZS(n: number) {
-  return 'TZS ' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+function fmtTZS(n: number | string | null | undefined) {
+  const value = Number(n ?? 0);
+  return 'TZS ' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0);
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────

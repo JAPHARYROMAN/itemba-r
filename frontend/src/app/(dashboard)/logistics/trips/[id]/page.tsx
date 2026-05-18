@@ -29,7 +29,7 @@ const inputCls = 'w-full border border-slate-200 rounded-md px-3 py-2 text-sm te
 const labelCls = 'block text-xs font-medium text-slate-600 mb-1';
 
 function fmtDate(d: string) { return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
-function fmtCurrency(n: number) { return `TZS ${new Intl.NumberFormat('en-US').format(n)}`; }
+function fmtCurrency(n: number | string | null | undefined) { const value = Number(n ?? 0); return `TZS ${new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0)}`; }
 
 const EXPENSE_TYPES = ['FUEL','TOLL','ACCOMMODATION','FOOD','LOADING','OFFLOADING','REPAIR','VEHICLE_WASH','PARKING','BORDER_CROSSING','PORT_CHARGES','OTHER'];
 const FUEL_SOURCES = ['PETROL_STATION','OWN_PUMP','VOUCHER','EMERGENCY'];

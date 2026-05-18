@@ -104,7 +104,7 @@ export default function PositionsPage() {
                     <td className={`${tdCls} font-mono`}>{p.code}</td>
                     <td className={`${tdCls} font-medium`}>{p.title}</td>
                     <td className={tdCls}>{p.type ?? '—'}</td>
-                    <td className={tdCls}>{p.defaultSalary != null ? `TZS ${Number(p.defaultSalary).toLocaleString('en-TZ')}` : '—'}</td>
+                    <td className={tdCls}>{p.defaultSalary != null ? `TZS ${(Number.isFinite(Number(p.defaultSalary)) ? Number(p.defaultSalary).toLocaleString('en-TZ') : '0')}` : '—'}</td>
                     <td className={tdCls}><StatusBadge status={p.status} /></td>
                     <td className={tdCls}>
                       <div className="flex gap-2">

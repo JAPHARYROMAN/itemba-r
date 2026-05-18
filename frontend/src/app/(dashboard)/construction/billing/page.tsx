@@ -6,7 +6,7 @@ import { Btn, Card, ConfirmDialog, FormInput, FormSelect, FormTextarea, Modal, P
 import { useOrgScope } from '@/hooks/use-org-scope';
 
 const fmtCurrency = (n: number | string | null | undefined) =>
-  `TZS ${new Intl.NumberFormat('en-TZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n ?? 0))}`;
+  `TZS ${new Intl.NumberFormat('en-TZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(Number(n ?? 0)) ? Number(n ?? 0) : 0)}`;
 const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
 
 interface Project { id: string; projectName: string; projectCode: string; divisionId?: string; customerId?: string | null }

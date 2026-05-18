@@ -43,7 +43,13 @@ export default function PendingApprovalsPage() {
                   <td className="px-6 py-4 text-sm text-gray-600">{item.entityType}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{item.requester?.fullName || item.requester?.email}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">
-                    {item.amount ? `${item.currency || ''} ${Number(item.amount).toLocaleString()}` : '—'}
+                    {item.amount
+                      ? `${item.currency || ''} ${
+                          Number.isFinite(Number(item.amount))
+                            ? Number(item.amount).toLocaleString()
+                            : '0'
+                        }`
+                      : '—'}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-600">
                     {item.createdAt ? (

@@ -42,8 +42,9 @@ const BLANK_FORM: PayableForm = {
 
 const CURRENCIES = ['TZS', 'USD', 'EUR', 'KES', 'UGX', 'GBP'];
 
-function fmtTZS(n: number) {
-  return 'TZS ' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+function fmtTZS(n: number | string | null | undefined) {
+  const value = Number(n ?? 0);
+  return 'TZS ' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0);
 }
 
 function fmtDate(d?: string | null) {
@@ -274,8 +275,12 @@ export default function PayablesPage() {
 
   const reset = (setter: (v: string) => void) => (v: string) => { setter(v); setPage(1); };
 
-  const totalOutstanding = data?.data.reduce((s, p) => s + p.outstandingAmount, 0) ?? 0;
-  const totalOverdue = data?.data.filter((p) => p.status === 'OVERDUE').reduce((s, p) => s + p.outstandingAmount, 0) ?? 0;
+  const totalOutstanding =
+    data?.data.reduce((s, p) => s + (Number(p.outstandingAmount ?? 0) || 0), 0) ?? 0;
+  const totalOverdue =
+    data?.data
+      .filter((p) => p.status === 'OVERDUE')
+      .reduce((s, p) => s + (Number(p.outstandingAmount ?? 0) || 0), 0) ?? 0;
 
   if (!canView) {
     return (

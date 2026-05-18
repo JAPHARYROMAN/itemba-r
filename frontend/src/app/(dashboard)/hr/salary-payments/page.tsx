@@ -100,7 +100,7 @@ export default function SalaryPaymentsPage() {
                   <tr key={p.id} className="border-b border-slate-50 hover:bg-slate-50">
                     <td className={`${tdCls} font-mono font-medium`}>{p.paymentNumber}</td>
                     <td className={`${tdCls} font-medium`}>{p.employee ?? p.employeeId ?? '—'}</td>
-                    <td className={`${tdCls} font-semibold text-green-700`}>TZS {Number(p.amount).toLocaleString('en-TZ')}</td>
+                    <td className={`${tdCls} font-semibold text-green-700`}>TZS {(Number.isFinite(Number(p.amount)) ? Number(p.amount).toLocaleString('en-TZ') : '0')}</td>
                     <td className={tdCls}>{p.paymentMethod}</td>
                     <td className={tdCls}>{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}><StatusBadge status={p.status} /></td>

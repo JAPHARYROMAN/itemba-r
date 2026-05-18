@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, PageHeader, StatCard, PageSpinner, StatusBadge } from '@/components/ui';
 
-function fmtCurrency(n: number) {
-  return `TZS ${new Intl.NumberFormat('en-US').format(Math.round(n))}`;
+function fmtCurrency(n: number | string | null | undefined) {
+  const value = Number(n ?? 0);
+  return `TZS ${new Intl.NumberFormat('en-US').format(Math.round(Number.isFinite(value) ? value : 0))}`;
 }
 
 function fmtDate(d: string | null) {

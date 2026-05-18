@@ -156,7 +156,7 @@ const fmt = (n: number | string | undefined | null) =>
     Number(n ?? 0),
   );
 const fmtInt = (n: number | string | undefined | null) =>
-  new Intl.NumberFormat('en-TZ').format(Number(n ?? 0));
+  new Intl.NumberFormat('en-TZ').format(Number.isFinite(Number(n ?? 0)) ? Number(n ?? 0) : 0);
 const timeAgo = (iso: string) => {
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.floor(ms / 60000);

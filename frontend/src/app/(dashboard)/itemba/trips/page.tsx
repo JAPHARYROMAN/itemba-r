@@ -20,6 +20,12 @@ function Spinner() {
   return <div className="flex justify-center py-10"><div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" /></div>;
 }
 
+function fmtCurrency(value: number | string | null | undefined) {
+  if (value == null) return '—';
+  const amount = Number(value);
+  return `TZS ${new Intl.NumberFormat('en-US').format(Number.isFinite(amount) ? amount : 0)}`;
+}
+
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide' as const;
 const tdCls = 'px-4 py-3 text-sm' as const;
 
@@ -123,7 +129,7 @@ export default function TripsPage() {
                   <td className={tdCls} style={{ color: 'var(--aurora-text)' }}>{t.driverName ?? '—'}</td>
                   <td className={tdCls} style={{ color: 'var(--aurora-text)' }}>{[t.origin, t.destination].filter(Boolean).join(' → ') || '—'}</td>
                   <td className={tdCls} style={{ color: 'var(--aurora-text)' }}>{t.departureDate ? new Date(t.departureDate).toLocaleDateString() : '—'}</td>
-                  <td className={tdCls} style={{ color: 'var(--aurora-text)' }}>{t.revenueAmount != null ? `TZS ${new Intl.NumberFormat('en-US').format(t.revenueAmount)}` : '—'}</td>
+                  <td className={tdCls} style={{ color: 'var(--aurora-text)' }}>{fmtCurrency(t.revenueAmount)}</td>
                   <td className={tdCls}><Badge status={t.status} /></td>
                   <td className={tdCls}>
                     <div className="flex gap-2 flex-wrap">

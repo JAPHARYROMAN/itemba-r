@@ -108,7 +108,10 @@ export default function ExternalPaymentsPage() {
                   <td className="px-4 py-3">{p.provider?.name ?? '—'}</td>
                   <td className="px-4 py-3">{p.paymentContextType}</td>
                   <td className="px-4 py-3">{p.payerName}</td>
-                  <td className="px-4 py-3 text-right font-medium">{p.currency} {Number(p.amount).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right font-medium">
+                    {p.currency}{' '}
+                    {Number.isFinite(Number(p.amount)) ? Number(p.amount).toLocaleString() : '0'}
+                  </td>
                   <td className="px-4 py-3"><StatusBadge status={p.status} /></td>
                   <td className="px-4 py-3">{p.paymentMethod}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{p.initiatedAt ? new Date(p.initiatedAt).toLocaleString() : '—'}</td>

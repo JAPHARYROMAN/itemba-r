@@ -46,7 +46,7 @@ function Badge({ status }: { status: string }) {
   );
 }
 
-function fmtCurrency(n: number) { return `TZS ${new Intl.NumberFormat('en-US').format(n)}`; }
+function fmtCurrency(n: number | string | null | undefined) { const value = Number(n ?? 0); return `TZS ${new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0)}`; }
 function fmtNum(n: number) { return new Intl.NumberFormat('en-US').format(n); }
 
 function Spinner() {

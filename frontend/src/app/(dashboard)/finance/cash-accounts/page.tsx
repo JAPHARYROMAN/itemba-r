@@ -94,7 +94,7 @@ const TYPE_BADGE: Record<string, string> = {
 function fmtMoney(amount: number | string | null | undefined, currency = 'TZS') {
   return `${currency} ${new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
-  }).format(Number(amount ?? 0))}`;
+  }).format(Number.isFinite(Number(amount ?? 0)) ? Number(amount ?? 0) : 0)}`;
 }
 
 function optionLabel(row: { code?: string | null; name: string }) {

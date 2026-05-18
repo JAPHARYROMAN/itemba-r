@@ -39,7 +39,7 @@ function PayrollEntriesContent() {
     load();
   }, [load]);
 
-  const fmt = (n?: number) => (n != null ? `TZS ${Number(n).toLocaleString('en-TZ')}` : '—');
+  const fmt = (n?: number) => (n != null ? `TZS ${(Number.isFinite(Number(n)) ? Number(n).toLocaleString('en-TZ') : '0')}` : '—');
 
   return (
     <div className="p-6">

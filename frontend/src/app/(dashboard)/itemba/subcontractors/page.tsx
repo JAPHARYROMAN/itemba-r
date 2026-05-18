@@ -82,7 +82,11 @@ export default function SubcontractorsPage() {
     }
   };
 
-  const fmt = (v?: number) => v != null ? `TZS ${new Intl.NumberFormat('en-US').format(v)}` : '—';
+  const fmt = (v?: number | string | null) => {
+    if (v == null) return '—';
+    const value = Number(v);
+    return `TZS ${new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0)}`;
+  };
 
   return (
     <div className="p-6 space-y-5">

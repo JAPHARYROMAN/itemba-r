@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, PageHeader, StatCard, StatusBadge, PageSpinner } from '@/components/ui';
 
-const fmtCurrency = (n: number) => `TZS ${new Intl.NumberFormat('en-US').format(n)}`;
+const fmtCurrency = (n: number | string | null | undefined) => { const value = Number(n ?? 0); return `TZS ${new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0)}`; };
 const fmtDate = (s: string) => s ? new Date(s).toLocaleDateString('en-GB') : '—';
 
 const thCls = 'px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide';

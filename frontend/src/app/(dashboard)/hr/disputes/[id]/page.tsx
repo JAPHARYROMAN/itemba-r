@@ -245,7 +245,7 @@ export default function DisputeDetailPage() {
               [
                 'Resolution amount',
                 dispute.resolutionAmount != null
-                  ? `TZS ${Number(dispute.resolutionAmount).toLocaleString('en-TZ')}`
+                  ? `TZS ${(Number.isFinite(Number(dispute.resolutionAmount)) ? Number(dispute.resolutionAmount).toLocaleString('en-TZ') : '0')}`
                   : null,
               ],
               ['Resolution notes', dispute.resolutionNotes],

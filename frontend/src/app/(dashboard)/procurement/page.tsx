@@ -159,6 +159,7 @@ export default function ProcurementDashboardPage() {
   );
 }
 
-function formatMoney(value: number) {
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
+function formatMoney(value: number | string | null | undefined) {
+  const num = Number(value ?? 0);
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Number.isFinite(num) ? num : 0);
 }

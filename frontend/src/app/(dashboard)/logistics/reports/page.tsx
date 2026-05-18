@@ -41,8 +41,9 @@ interface MaintenanceRow {
 const thCls = 'px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide';
 const tdCls = 'px-3 py-3 text-[13px]';
 
-function fmtCurrency(n: number) {
-  return `TZS ${new Intl.NumberFormat('en-US').format(Math.round(n))}`;
+function fmtCurrency(n: number | string | null | undefined) {
+  const value = Number(n ?? 0);
+  return `TZS ${new Intl.NumberFormat('en-US').format(Math.round(Number.isFinite(value) ? value : 0))}`;
 }
 function fmtDate(d: string | null) {
   if (!d) return '—';

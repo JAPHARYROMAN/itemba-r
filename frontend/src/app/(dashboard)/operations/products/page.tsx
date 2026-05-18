@@ -164,11 +164,14 @@ const BLANK: ProductForm = {
   description: '',
 };
 
-function fmtTZS(n?: number | null) {
+function fmtTZS(n?: number | string | null) {
   if (n == null) return '—';
+  const value = Number(n);
   return (
     'TZS ' +
-    new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
+    new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
+      Number.isFinite(value) ? value : 0,
+    )
   );
 }
 

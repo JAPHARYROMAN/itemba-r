@@ -277,12 +277,12 @@ function PayrollRunsContent() {
                     <td className={tdCls}>{r.runType}</td>
                     <td className={tdCls}>
                       {r.totalGross != null
-                        ? `TZS ${Number(r.totalGross).toLocaleString('en-TZ')}`
+                        ? `TZS ${(Number.isFinite(Number(r.totalGross)) ? Number(r.totalGross).toLocaleString('en-TZ') : '0')}`
                         : '—'}
                     </td>
                     <td className={tdCls}>
                       {r.totalNet != null
-                        ? `TZS ${Number(r.totalNet).toLocaleString('en-TZ')}`
+                        ? `TZS ${(Number.isFinite(Number(r.totalNet)) ? Number(r.totalNet).toLocaleString('en-TZ') : '0')}`
                         : '—'}
                     </td>
                     <td className={tdCls}>
@@ -439,7 +439,9 @@ function PayrollRunsContent() {
                       <td className={`${tdCls} font-mono text-xs`}>{file.filename}</td>
                       <td className={tdCls}>{file.rowCount}</td>
                       <td className={tdCls}>
-                        {Number(file.total).toLocaleString('en-TZ', { minimumFractionDigits: 2 })}
+                        {Number.isFinite(Number(file.total))
+                          ? Number(file.total).toLocaleString('en-TZ', { minimumFractionDigits: 2 })
+                          : '0.00'}
                       </td>
                       <td className={tdCls + ' text-right'}>
                         <Btn variant="primary" size="xs" onClick={() => downloadCsv(file)}>

@@ -19,6 +19,12 @@ function Spinner() {
   return <div className="flex justify-center py-10"><div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" /></div>;
 }
 
+function fmtCurrency(value: number | string | null | undefined) {
+  if (value == null) return '—';
+  const amount = Number(value);
+  return `TZS ${new Intl.NumberFormat('en-US').format(Number.isFinite(amount) ? amount : 0)}`;
+}
+
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide' as const;
 const tdCls = 'px-4 py-3 text-sm' as const;
 
@@ -126,7 +132,7 @@ export default function ConstructionProjectsPage() {
                     <td className={tdCls} style={{ color: 'var(--aurora-text)' }}>
                       {p.startDate ? new Date(p.startDate).toLocaleDateString() : '?'} → {p.endDate ? new Date(p.endDate).toLocaleDateString() : '?'}
                     </td>
-                    <td className={tdCls} style={{ color: 'var(--aurora-text)' }}>{p.contractValue != null ? `TZS ${new Intl.NumberFormat('en-US').format(p.contractValue)}` : '—'}</td>
+                    <td className={tdCls} style={{ color: 'var(--aurora-text)' }}>{fmtCurrency(p.contractValue)}</td>
                     <td className={tdCls}><Badge status={p.status} /></td>
                     <td className={tdCls}>
                       {next && (

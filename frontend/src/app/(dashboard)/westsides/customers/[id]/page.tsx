@@ -69,7 +69,7 @@ interface Profile {
 }
 
 const fmt = (n: number | string | undefined | null) =>
-  new Intl.NumberFormat('en-TZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n ?? 0));
+  new Intl.NumberFormat('en-TZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(Number(n ?? 0)) ? Number(n ?? 0) : 0);
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 

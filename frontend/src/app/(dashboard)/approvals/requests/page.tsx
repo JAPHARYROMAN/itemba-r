@@ -79,7 +79,15 @@ export default function ApprovalRequestsPage() {
                     </span>
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-600">{req.requester?.fullName || req.requester?.email}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{req.amount ? `${req.currency || ''} ${Number(req.amount).toLocaleString()}` : '—'}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">
+                    {req.amount
+                      ? `${req.currency || ''} ${
+                          Number.isFinite(Number(req.amount))
+                            ? Number(req.amount).toLocaleString()
+                            : '0'
+                        }`
+                      : '—'}
+                  </td>
                   <td className="px-6 py-4 text-sm text-gray-400">{req.createdAt ? new Date(req.createdAt).toLocaleDateString() : '—'}</td>
                   <td className="px-6 py-4 text-sm space-x-2">
                     <button className="text-blue-600 hover:underline">View</button>

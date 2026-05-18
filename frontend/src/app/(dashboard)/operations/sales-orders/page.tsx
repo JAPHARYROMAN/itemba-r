@@ -256,8 +256,9 @@ const blankForm = (): SalesOrderForm => ({
   lines: [BLANK_LINE()],
 });
 
-function fmtMoney(n: number, ccy = 'TZS') {
-  return `${ccy} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)}`;
+function fmtMoney(n: number | string | null | undefined, ccy = 'TZS') {
+  const value = Number(n ?? 0);
+  return `${ccy} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0)}`;
 }
 
 function SalesOrderModal({

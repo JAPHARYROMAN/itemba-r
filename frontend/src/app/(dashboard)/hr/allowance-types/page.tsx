@@ -106,7 +106,7 @@ export default function AllowanceTypesPage() {
                     <td className={`${tdCls} font-medium`}>{a.name}</td>
                     <td className={`${tdCls} font-mono`}>{a.code}</td>
                     <td className={tdCls}>{bool(a.isTaxable)}</td>
-                    <td className={tdCls}>{a.defaultAmount != null ? `TZS ${Number(a.defaultAmount).toLocaleString('en-TZ')}` : '—'}</td>
+                    <td className={tdCls}>{a.defaultAmount != null ? `TZS ${(Number.isFinite(Number(a.defaultAmount)) ? Number(a.defaultAmount).toLocaleString('en-TZ') : '0')}` : '—'}</td>
                     <td className={tdCls}>{bool(a.isActive)}</td>
                     <td className={tdCls}>
                       <div className="flex gap-2">

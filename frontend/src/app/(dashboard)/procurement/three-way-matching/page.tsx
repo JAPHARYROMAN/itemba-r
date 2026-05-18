@@ -84,7 +84,7 @@ function invoiceLabel(row: SupplierInvoice) {
 }
 
 function fmtMoney(amount: number | string | null | undefined, currency = 'TZS') {
-  return `${currency} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(Number(amount ?? 0))}`;
+  return `${currency} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(Number.isFinite(Number(amount ?? 0)) ? Number(amount ?? 0) : 0)}`;
 }
 
 function matchCode() {

@@ -1,5 +1,11 @@
 // ITEMBA-R Aurora Design System — Formatters
 
+export function toFiniteNumber(value: number | string | null | undefined, fallback = 0): number {
+  if (value === null || value === undefined || value === '') return fallback;
+  const num = typeof value === 'string' ? Number(value) : value;
+  return Number.isFinite(num) ? num : fallback;
+}
+
 /**
  * Format a number as Tanzanian Shillings (or any currency)
  */
@@ -9,8 +15,8 @@ export function formatMoney(
   options?: { compact?: boolean; decimals?: number }
 ): string {
   if (value === null || value === undefined || value === '') return '—';
-  const num = typeof value === 'string' ? parseFloat(value) : value;
-  if (isNaN(num)) return '—';
+  const num = toFiniteNumber(value, Number.NaN);
+  if (!Number.isFinite(num)) return '—';
 
   if (options?.compact) {
     if (Math.abs(num) >= 1_000_000_000) return `${currency} ${(num / 1_000_000_000).toFixed(1)}B`;
@@ -53,8 +59,8 @@ export function formatDateTime(value: string | Date | null | undefined): string 
  */
 export function formatNumber(value: number | string | null | undefined, decimals = 0): string {
   if (value === null || value === undefined || value === '') return '—';
-  const num = typeof value === 'string' ? parseFloat(value) : value;
-  if (isNaN(num)) return '—';
+  const num = toFiniteNumber(value, Number.NaN);
+  if (!Number.isFinite(num)) return '—';
   return num.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
@@ -63,8 +69,8 @@ export function formatNumber(value: number | string | null | undefined, decimals
  */
 export function formatPercent(value: number | string | null | undefined, decimals = 1): string {
   if (value === null || value === undefined || value === '') return '—';
-  const num = typeof value === 'string' ? parseFloat(value) : value;
-  if (isNaN(num)) return '—';
+  const num = toFiniteNumber(value, Number.NaN);
+  if (!Number.isFinite(num)) return '—';
   return `${num.toFixed(decimals)}%`;
 }
 
@@ -73,8 +79,8 @@ export function formatPercent(value: number | string | null | undefined, decimal
  */
 export function formatQuantity(value: number | string | null | undefined, unit = '', decimals = 0): string {
   if (value === null || value === undefined || value === '') return '—';
-  const num = typeof value === 'string' ? parseFloat(value) : value;
-  if (isNaN(num)) return '—';
+  const num = toFiniteNumber(value, Number.NaN);
+  if (!Number.isFinite(num)) return '—';
   const formatted = num.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
   return unit ? `${formatted} ${unit}` : formatted;
 }

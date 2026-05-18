@@ -113,7 +113,7 @@ export default function EmploymentContractsPage() {
                     <td className={tdCls}>{c.contractType}</td>
                     <td className={tdCls}>{c.startDate ? new Date(c.startDate).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}>{c.endDate ? new Date(c.endDate).toLocaleDateString('en-GB') : '—'}</td>
-                    <td className={tdCls}>{c.baseSalary != null ? `TZS ${Number(c.baseSalary).toLocaleString('en-TZ')}` : '—'}</td>
+                    <td className={tdCls}>{c.baseSalary != null ? `TZS ${(Number.isFinite(Number(c.baseSalary)) ? Number(c.baseSalary).toLocaleString('en-TZ') : '0')}` : '—'}</td>
                     <td className={tdCls}><StatusBadge status={c.status} /></td>
                     <td className={tdCls}>
                       <div className="flex flex-wrap gap-1">

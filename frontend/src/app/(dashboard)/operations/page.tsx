@@ -46,15 +46,19 @@ interface DashboardSummary {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtTZS(n: number) {
+function fmtTZS(n: number | string | null | undefined) {
+  const value = Number(n ?? 0);
   return (
     'TZS ' +
-    new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
+    new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
+      Number.isFinite(value) ? value : 0,
+    )
   );
 }
 
-function fmtNum(n: number) {
-  return new Intl.NumberFormat('en-US').format(n);
+function fmtNum(n: number | string | null | undefined) {
+  const value = Number(n ?? 0);
+  return new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0);
 }
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';

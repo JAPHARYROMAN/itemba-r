@@ -101,9 +101,9 @@ function PayrollReport({ data }: { data: any[] }) {
               <td className={`${tdCls} font-medium`}>{r.period ?? '—'}</td>
               <td className={tdCls}>{r.company ?? '—'}</td>
               <td className={tdCls}>{r.employeeCount ?? '—'}</td>
-              <td className={tdCls}>TZS {Number(r.totalGross ?? 0).toLocaleString('en-TZ')}</td>
-              <td className={`${tdCls} text-red-600`}>TZS {Number(r.totalDeductions ?? 0).toLocaleString('en-TZ')}</td>
-              <td className={`${tdCls} font-semibold text-green-700`}>TZS {Number(r.totalNet ?? 0).toLocaleString('en-TZ')}</td>
+              <td className={tdCls}>TZS {(Number.isFinite(Number(r.totalGross ?? 0)) ? Number(r.totalGross ?? 0).toLocaleString('en-TZ') : '0')}</td>
+              <td className={`${tdCls} text-red-600`}>TZS {(Number.isFinite(Number(r.totalDeductions ?? 0)) ? Number(r.totalDeductions ?? 0).toLocaleString('en-TZ') : '0')}</td>
+              <td className={`${tdCls} font-semibold text-green-700`}>TZS {(Number.isFinite(Number(r.totalNet ?? 0)) ? Number(r.totalNet ?? 0).toLocaleString('en-TZ') : '0')}</td>
             </tr>
           ))}
         </tbody>

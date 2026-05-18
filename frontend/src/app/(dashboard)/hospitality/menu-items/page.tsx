@@ -4,7 +4,7 @@ import { Card, PageHeader, Modal, Btn, FormInput, FormSelect, FormTextarea, Conf
 import { useAuth } from '@/hooks/use-auth';
 
 const ITEM_TYPES = ['FOOD', 'DRINK', 'BAR_ITEM', 'SERVICE', 'OTHER'];
-const fmtCurrency = (n: number, cur: string) => `${cur} ${new Intl.NumberFormat('en-US').format(n)}`;
+const fmtCurrency = (n: number | string | null | undefined, cur: string) => { const value = Number(n ?? 0); return `${cur} ${new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0)}`; };
 
 interface Company { id: string; name: string; }
 interface Facility { id: string; facilityName: string; }
