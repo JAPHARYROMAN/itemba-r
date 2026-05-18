@@ -54,6 +54,18 @@ export class PayrollRunsController {
     return this.service.approve(id, user);
   }
 
+  @Patch(':id/approve-hr')
+  @RequirePermissions('payroll.approve.hr')
+  approveHr(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.approveHr(id, user);
+  }
+
+  @Patch(':id/approve-finance')
+  @RequirePermissions('payroll.approve.finance')
+  approveFinance(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.approveFinance(id, user);
+  }
+
   @Patch(':id/pay')
   @RequirePermissions('payroll.pay')
   pay(

@@ -8,6 +8,7 @@ import { DataExportJobHandler } from './handlers/data-export.handler';
 import { BackupRunJobHandler } from './handlers/backup-run.handler';
 import { NotificationDispatchJobHandler } from './handlers/notification-dispatch.handler';
 import { RestoreTestJobHandler } from './handlers/restore-test.handler';
+import { RentInvoiceGenerationJobHandler } from './handlers/rent-invoice-generation.handler';
 
 /**
  * Job worker module — owns the BackgroundJob runtime and registers default
@@ -30,6 +31,7 @@ import { RestoreTestJobHandler } from './handlers/restore-test.handler';
     BackupRunJobHandler,
     NotificationDispatchJobHandler,
     RestoreTestJobHandler,
+    RentInvoiceGenerationJobHandler,
   ],
   exports: [JobHandlerRegistry, JobWorkerService],
 })

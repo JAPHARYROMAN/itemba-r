@@ -21,6 +21,8 @@ export { Modal } from './modal';
 
 // Access control
 export { PermissionGate } from './permission-gate';
+export { ScopeSelector, scopeToQueryString } from './scope-selector';
+export type { ScopeValue } from './scope-selector';
 
 // Forms
 export { FormInput, FormSelect, FormTextarea, DateInput, FileUpload } from './forms';

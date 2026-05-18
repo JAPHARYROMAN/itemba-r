@@ -987,6 +987,8 @@ model User {
   closedPayrollPeriods        PayrollPeriod[]           @relation("PayrollPeriodClosedBy")
   createdPayrollRuns          PayrollRun[]              @relation("PayrollRunCreatedBy")
   submittedPayrollRuns        PayrollRun[]              @relation("PayrollRunSubmittedBy")
+  hrApprovedPayrollRuns       PayrollRun[]              @relation("PayrollRunHrApprovedBy")
+  financeApprovedPayrollRuns  PayrollRun[]              @relation("PayrollRunFinanceApprovedBy")
   approvedPayrollRuns         PayrollRun[]              @relation("PayrollRunApprovedBy")
   paidPayrollRuns             PayrollRun[]              @relation("PayrollRunPaidBy")
   paidSalaryPayments          SalaryPayment[]           @relation("SalaryPaymentPaidBy")
@@ -7687,6 +7689,10 @@ model PayrollRun {
   createdById                String
   submittedById              String?
   submittedAt                DateTime?
+  hrApprovedById             String?
+  hrApprovedAt               DateTime?
+  financeApprovedById        String?
+  financeApprovedAt          DateTime?
   approvedById               String?
   approvedAt                 DateTime?
   paidById                   String?
@@ -7700,6 +7706,8 @@ model PayrollRun {
   payrollPeriod   PayrollPeriod           @relation(fields: [payrollPeriodId], references: [id], onDelete: Restrict)
   createdBy       User                    @relation("PayrollRunCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   submittedBy     User?                   @relation("PayrollRunSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  hrApprovedBy    User?                   @relation("PayrollRunHrApprovedBy", fields: [hrApprovedById], references: [id], onDelete: SetNull)
+  financeApprovedBy User?                 @relation("PayrollRunFinanceApprovedBy", fields: [financeApprovedById], references: [id], onDelete: SetNull)
   approvedBy      User?                   @relation("PayrollRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   paidBy          User?                   @relation("PayrollRunPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
   entries         PayrollEntry[]
@@ -11957,6 +11965,7 @@ enum GeneratedDocumentStatus {
 enum GeneratedDocumentFormat {
   HTML
   PDF
+  EXCEL
   TEXT
   JSON
 }
@@ -13199,6 +13208,7 @@ enum BackgroundJobType {
   BACKUP_RUN
   EMAIL_SEND
   SMS_SEND
+  RENT_INVOICE_GENERATION
   CUSTOM
 }
 
