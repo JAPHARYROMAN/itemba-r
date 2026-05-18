@@ -521,6 +521,7 @@ const ALL_PERMISSIONS: PermDef[] = [
   ...perms('attendance', ['view', 'create', 'update', 'approve']),
   ...perms('leave_types', ['view', 'manage']),
   ...perms('leave_requests', ['view', 'create', 'approve', 'reject']),
+  ...perms('leave_balances', ['view', 'manage']),
   {
     code: 'leave_requests.approve.hr',
     description: 'Group HR approval for long leave requests',
@@ -1038,6 +1039,7 @@ const HR_ATTENDANCE_MODULES = [
   'attendance',
   'leave_types',
   'leave_requests',
+  'leave_balances',
 ];
 const HR_PAYROLL_MODULES = [
   'payroll',

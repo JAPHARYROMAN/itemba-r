@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
@@ -35,7 +36,15 @@ export class LeaveRequestsService {
         orderBy: { createdAt: 'desc' },
         include: {
           employee: { select: { id: true, fullName: true, employeeCode: true } },
-          leaveType: { select: { id: true, name: true } },
+          leaveType: {
+            select: {
+              id: true,
+              name: true,
+              paid: true,
+              annualAllowanceDays: true,
+              carryForwardAllowed: true,
+            },
+          },
           company: { select: { id: true, name: true } },
         },
       }),
@@ -49,7 +58,15 @@ export class LeaveRequestsService {
       where: { id, deletedAt: null, ...this.companyFilter(user) },
       include: {
         employee: { select: { id: true, fullName: true, employeeCode: true } },
-        leaveType: { select: { id: true, name: true } },
+        leaveType: {
+          select: {
+            id: true,
+            name: true,
+            paid: true,
+            annualAllowanceDays: true,
+            carryForwardAllowed: true,
+          },
+        },
         company: { select: { id: true, name: true } },
       },
     });
@@ -76,7 +93,18 @@ export class LeaveRequestsService {
   }
 
   async update(id: string, dto: UpdateLeaveRequestDto, user: any) {
-    await this.findOne(id, user);
+    const existing = await this.findOne(id, user);
+    if (
+      existing.status === 'APPROVED' &&
+      (dto.leaveTypeId !== undefined ||
+        dto.startDate !== undefined ||
+        dto.endDate !== undefined ||
+        dto.totalDays !== undefined)
+    ) {
+      throw new BadRequestException(
+        'Approved leave requests cannot change leave type, dates, or days. Cancel and recreate the request.',
+      );
+    }
     const record = await this.prisma.leaveRequest.update({
       where: { id },
       data: {
@@ -134,9 +162,15 @@ export class LeaveRequestsService {
       data.approvedById = record.groupHrApprovedById ?? user.id;
       data.approvedAt = now;
     }
-    const updated = await this.prisma.leaveRequest.update({
-      where: { id },
-      data,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const next = await tx.leaveRequest.update({
+        where: { id },
+        data,
+      });
+      if (data.status === 'APPROVED') {
+        await this.applyLeaveBalanceUsage(id, tx);
+      }
+      return next;
     });
     await this.audit.log({
       userId: user.id,
@@ -175,9 +209,15 @@ export class LeaveRequestsService {
       data.approvedById = user.id;
       data.approvedAt = now;
     }
-    const updated = await this.prisma.leaveRequest.update({
-      where: { id },
-      data,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const next = await tx.leaveRequest.update({
+        where: { id },
+        data,
+      });
+      if (data.status === 'APPROVED') {
+        await this.applyLeaveBalanceUsage(id, tx);
+      }
+      return next;
     });
     await this.audit.log({
       userId: user.id,
@@ -216,8 +256,19 @@ export class LeaveRequestsService {
   }
 
   async remove(id: string, user: any) {
-    await this.findOne(id, user);
-    await this.prisma.leaveRequest.update({ where: { id }, data: { deletedAt: new Date() } });
+    const existing = await this.findOne(id, user);
+    await this.prisma.$transaction(async (tx) => {
+      if (existing.status === 'APPROVED') {
+        await this.reverseLeaveBalanceUsage(id, tx);
+      }
+      await tx.leaveRequest.update({
+        where: { id },
+        data: {
+          deletedAt: new Date(),
+          ...(existing.status === 'APPROVED' ? { status: 'CANCELLED' as const } : {}),
+        },
+      });
+    });
     await this.audit.log({
       userId: user.id,
       action: 'DELETE',
@@ -227,9 +278,117 @@ export class LeaveRequestsService {
     });
     return { message: 'Leave request deleted' };
   }
+
+  private async applyLeaveBalanceUsage(leaveRequestId: string, tx: Prisma.TransactionClient) {
+    const request = await tx.leaveRequest.findUnique({
+      where: { id: leaveRequestId },
+      include: { leaveType: true },
+    });
+    if (!request || request.deletedAt) return;
+
+    const allowance = request.leaveType.annualAllowanceDays;
+    if (!request.leaveType.paid || allowance == null) return;
+
+    const year = request.startDate.getUTCFullYear();
+    await tx.leaveBalance.upsert({
+      where: {
+        companyId_employeeId_leaveTypeId_year: {
+          companyId: request.companyId,
+          employeeId: request.employeeId,
+          leaveTypeId: request.leaveTypeId,
+          year,
+        },
+      },
+      create: {
+        companyId: request.companyId,
+        employeeId: request.employeeId,
+        leaveTypeId: request.leaveTypeId,
+        year,
+        allocatedDays: allowance,
+        carriedForwardDays: 0,
+        usedDays: 0,
+      },
+      update: { deletedAt: null },
+    });
+
+    const rows = await tx.$queryRaw<
+      Array<{
+        id: string;
+        allocatedDays: Prisma.Decimal;
+        carriedForwardDays: Prisma.Decimal;
+        usedDays: Prisma.Decimal;
+      }>
+    >`
+      SELECT id, "allocatedDays", "carriedForwardDays", "usedDays"
+      FROM "leave_balances"
+      WHERE "companyId" = ${request.companyId}
+        AND "employeeId" = ${request.employeeId}
+        AND "leaveTypeId" = ${request.leaveTypeId}
+        AND "year" = ${year}
+        AND "deletedAt" IS NULL
+      FOR UPDATE
+    `;
+    const balance = rows[0];
+    if (!balance) throw new BadRequestException('Leave balance could not be created');
+
+    const totalDays = decimal(request.totalDays);
+    const newUsed = decimal(balance.usedDays).plus(totalDays);
+    const available = decimal(balance.allocatedDays).plus(decimal(balance.carriedForwardDays));
+    if (newUsed.gt(available)) {
+      throw new BadRequestException(
+        `Insufficient leave balance: available ${available.toFixed(2)} day(s), requested ${totalDays.toFixed(2)} day(s).`,
+      );
+    }
+
+    await tx.leaveBalance.update({
+      where: { id: balance.id },
+      data: { usedDays: newUsed },
+    });
+  }
+
+  private async reverseLeaveBalanceUsage(leaveRequestId: string, tx: Prisma.TransactionClient) {
+    const request = await tx.leaveRequest.findUnique({
+      where: { id: leaveRequestId },
+      include: { leaveType: true },
+    });
+    if (!request) return;
+
+    const year = request.startDate.getUTCFullYear();
+    const rows = await tx.$queryRaw<
+      Array<{
+        id: string;
+        usedDays: Prisma.Decimal;
+      }>
+    >`
+      SELECT id, "usedDays"
+      FROM "leave_balances"
+      WHERE "companyId" = ${request.companyId}
+        AND "employeeId" = ${request.employeeId}
+        AND "leaveTypeId" = ${request.leaveTypeId}
+        AND "year" = ${year}
+        AND "deletedAt" IS NULL
+      FOR UPDATE
+    `;
+    const balance = rows[0];
+    if (!balance) return;
+
+    const reducedUsed = decimal(balance.usedDays).minus(decimal(request.totalDays));
+    const newUsed = reducedUsed.lt(0) ? decimal(0) : reducedUsed;
+    await tx.leaveBalance.update({
+      where: { id: balance.id },
+      data: { usedDays: newUsed },
+    });
+  }
 }
 
 function mergeNotes(existing?: string | null, incoming?: string): string | undefined {
   if (!incoming?.trim()) return existing ?? undefined;
   return [existing, incoming.trim()].filter(Boolean).join('\n');
+}
+
+type DecimalInput = ConstructorParameters<typeof Prisma.Decimal>[0];
+
+function decimal(value: DecimalInput | null | undefined): Prisma.Decimal {
+  if (value instanceof Prisma.Decimal) return value;
+  return new Prisma.Decimal(value ?? 0);
 }

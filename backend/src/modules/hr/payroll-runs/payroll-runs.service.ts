@@ -150,6 +150,7 @@ export class PayrollRunsService {
     });
     const periodStart = period?.startDate ? startOfDay(period.startDate) : null;
     const periodEnd = period?.endDate ? endOfDay(period.endDate) : null;
+    const taxFilingPeriodIdsByTaxType = new Map<string, string>();
 
     // Delete existing entries for recalculation (cascade clears lines + allowances + deductions)
     await this.prisma.payrollEntry.updateMany({
@@ -454,10 +455,24 @@ export class PayrollRunsService {
 
       // Statutory breakdown
       for (const line of breakdown.lines) {
+        let taxFilingPeriodId: string | undefined;
+        if (periodStart && periodEnd) {
+          taxFilingPeriodId = taxFilingPeriodIdsByTaxType.get(line.taxTypeId);
+          if (!taxFilingPeriodId) {
+            taxFilingPeriodId = await this.ensurePayrollTaxFilingPeriod(
+              companyId,
+              line.taxTypeId,
+              periodStart,
+              periodEnd,
+            );
+            taxFilingPeriodIdsByTaxType.set(line.taxTypeId, taxFilingPeriodId);
+          }
+        }
         await this.prisma.payrollStatutoryLine.create({
           data: {
             payrollEntryId: entry.id,
             taxTypeId: line.taxTypeId,
+            taxFilingPeriodId,
             statutoryDeductionRuleId: line.ruleId,
             taxRateId: line.taxRateId,
             basis: line.basis,
@@ -496,6 +511,53 @@ export class PayrollRunsService {
       newValue: { status: 'CALCULATED', totalEmployees: employees.length },
     });
     return updated;
+  }
+
+  private async ensurePayrollTaxFilingPeriod(
+    companyId: string,
+    taxTypeId: string,
+    periodStart: Date,
+    periodEnd: Date,
+  ): Promise<string> {
+    const taxType = await this.prisma.taxType.findUnique({
+      where: { id: taxTypeId },
+      select: { taxTypeCode: true, name: true },
+    });
+    if (!taxType) throw new BadRequestException(`Tax type ${taxTypeId} no longer exists.`);
+
+    const taxCode = filingCodeSegment(taxType.taxTypeCode);
+    const startCode = formatDateYmd(periodStart);
+    const endCode = formatDateYmd(periodEnd);
+    const filingPeriodCode = `PAYROLL-${taxCode}-${startCode}-${endCode}`;
+
+    const period = await this.prisma.taxFilingPeriod.upsert({
+      where: {
+        companyId_filingPeriodCode: {
+          companyId,
+          filingPeriodCode,
+        },
+      },
+      create: {
+        companyId,
+        taxTypeId,
+        filingPeriodCode,
+        name: `${taxType.name} payroll ${startCode} to ${endCode}`,
+        periodStart,
+        periodEnd,
+        filingFrequency: 'MONTHLY',
+        status: 'OPEN',
+        notes: 'Auto-created from payroll calculation; set statutory due date before submission.',
+      },
+      update: {
+        taxTypeId,
+        periodStart,
+        periodEnd,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+
+    return period.id;
   }
 
   async submit(id: string, user: any) {
@@ -888,4 +950,15 @@ function endOfDay(value: Date): Date {
   const d = new Date(value);
   d.setUTCHours(23, 59, 59, 999);
   return d;
+}
+
+function formatDateYmd(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+function filingCodeSegment(value: string): string {
+  return value
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
 }

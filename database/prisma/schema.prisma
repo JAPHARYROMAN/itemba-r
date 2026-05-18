@@ -493,6 +493,7 @@ model Company {
   attendanceRecords         AttendanceRecord[]
   leaveTypes                LeaveType[]
   leaveRequests             LeaveRequest[]
+  leaveBalances             LeaveBalance[]
   allowanceTypes            AllowanceType[]
   deductionTypes            DeductionType[]
   employeeAllowances        EmployeeAllowance[]
@@ -7276,6 +7277,7 @@ model Employee {
   shiftSchedules       ShiftSchedule[]
   attendance           AttendanceRecord[]
   leaveRequests        LeaveRequest[]
+  leaveBalances        LeaveBalance[]
   allowances           EmployeeAllowance[]
   deductions           EmployeeDeduction[]
   payrollEntries       PayrollEntry[]
@@ -7524,6 +7526,7 @@ model LeaveType {
 
   company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
   leaveRequests LeaveRequest[]
+  leaveBalances LeaveBalance[]
 
   @@unique([companyId, code])
   @@index([companyId, isActive])
@@ -7566,6 +7569,30 @@ model LeaveRequest {
   @@unique([companyId, leaveRequestNumber])
   @@index([companyId, status, startDate])
   @@map("leave_requests")
+}
+
+model LeaveBalance {
+  id                 String    @id @default(uuid())
+  companyId          String
+  employeeId         String
+  leaveTypeId        String
+  year               Int
+  allocatedDays      Decimal   @default(0) @db.Decimal(8, 2)
+  carriedForwardDays Decimal   @default(0) @db.Decimal(8, 2)
+  usedDays           Decimal   @default(0) @db.Decimal(8, 2)
+  notes              String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, employeeId, leaveTypeId, year])
+  @@index([companyId, year])
+  @@index([employeeId, year])
+  @@map("leave_balances")
 }
 
 model AllowanceType {
@@ -7844,6 +7871,7 @@ model PayrollStatutoryLine {
   id                       String                @id @default(uuid())
   payrollEntryId           String
   taxTypeId                String
+  taxFilingPeriodId        String?
   statutoryDeductionRuleId String?
   taxRateId                String?
   basis                    PayrollStatutoryBasis @default(GROSS)
@@ -7859,11 +7887,13 @@ model PayrollStatutoryLine {
 
   payrollEntry           PayrollEntry            @relation(fields: [payrollEntryId], references: [id], onDelete: Cascade)
   taxType                TaxType                 @relation(fields: [taxTypeId], references: [id], onDelete: Restrict)
+  taxFilingPeriod        TaxFilingPeriod?        @relation(fields: [taxFilingPeriodId], references: [id], onDelete: SetNull)
   statutoryDeductionRule StatutoryDeductionRule? @relation(fields: [statutoryDeductionRuleId], references: [id], onDelete: SetNull)
   taxRate                TaxRate?                @relation(fields: [taxRateId], references: [id], onDelete: SetNull)
 
   @@index([payrollEntryId])
   @@index([taxTypeId])
+  @@index([taxFilingPeriodId])
   @@map("payroll_statutory_lines")
 }
 
@@ -8798,7 +8828,8 @@ model TaxFilingPeriod {
   approvedBy  User?   @relation("FilingPeriodApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   closedBy    User?   @relation("FilingPeriodClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
 
-  taxReturns TaxReturn[]
+  taxReturns            TaxReturn[]
+  payrollStatutoryLines PayrollStatutoryLine[]
 
   @@unique([companyId, filingPeriodCode])
   @@map("tax_filing_periods")

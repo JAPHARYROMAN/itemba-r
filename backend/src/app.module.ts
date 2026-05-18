@@ -150,6 +150,7 @@ import { ShiftSchedulesModule } from './modules/hr/shift-schedules/shift-schedul
 import { AttendanceModule } from './modules/hr/attendance/attendance.module';
 import { LeaveTypesModule } from './modules/hr/leave-types/leave-types.module';
 import { LeaveRequestsModule } from './modules/hr/leave-requests/leave-requests.module';
+import { LeaveBalancesModule } from './modules/hr/leave-balances/leave-balances.module';
 import { AllowanceTypesModule } from './modules/hr/allowance-types/allowance-types.module';
 import { DeductionTypesModule } from './modules/hr/deduction-types/deduction-types.module';
 import { EmployeeAllowancesModule } from './modules/hr/employee-allowances/employee-allowances.module';
@@ -482,6 +483,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     AttendanceModule,
     LeaveTypesModule,
     LeaveRequestsModule,
+    LeaveBalancesModule,
     AllowanceTypesModule,
     DeductionTypesModule,
     EmployeeAllowancesModule,
