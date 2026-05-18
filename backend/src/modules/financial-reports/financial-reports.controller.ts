@@ -43,7 +43,18 @@ export class FinancialReportsController {
     @Param('companyId') companyId: string,
     @Query() q: ReportQueryDto,
     @CurrentUser() user: AuthUser,
+    @Query('comparePeriod') comparePeriod?: 'NONE' | 'PRIOR_PERIOD' | 'PRIOR_YEAR' | 'YTD',
   ) {
+    // Phase 4: optional comparative column. Defaults to no comparison.
+    if (comparePeriod && comparePeriod !== 'NONE') {
+      return this.service.getProfitAndLossWithComparison(
+        companyId,
+        q.dateFrom,
+        q.dateTo,
+        comparePeriod,
+        user,
+      );
+    }
     return this.service.getProfitAndLoss(companyId, q.dateFrom, q.dateTo, user);
   }
 
@@ -70,20 +81,49 @@ export class FinancialReportsController {
 
   @Get('receivables-aging/:companyId')
   @RequirePermissions('finance.reports.view')
-  getReceivablesAging(@Param('companyId') companyId: string, @CurrentUser() user: AuthUser) {
-    return this.service.getReceivablesAging(companyId, user);
+  getReceivablesAging(
+    @Param('companyId') companyId: string,
+    @CurrentUser() user: AuthUser,
+    @Query('divisionId') divisionId?: string,
+    @Query('branchId') branchId?: string,
+  ) {
+    // Phase 1: optional Division/Branch roll-up scope.
+    return this.service.getReceivablesAging(companyId, user, { divisionId, branchId });
   }
 
   @Get('payables-aging/:companyId')
   @RequirePermissions('finance.reports.view')
-  getPayablesAging(@Param('companyId') companyId: string, @CurrentUser() user: AuthUser) {
-    return this.service.getPayablesAging(companyId, user);
+  getPayablesAging(
+    @Param('companyId') companyId: string,
+    @CurrentUser() user: AuthUser,
+    @Query('divisionId') divisionId?: string,
+    @Query('branchId') branchId?: string,
+  ) {
+    // Phase 1: optional Division/Branch roll-up scope.
+    return this.service.getPayablesAging(companyId, user, { divisionId, branchId });
   }
 
   @Get('intercompany-balances')
   @RequirePermissions('finance.reports.view')
   getIntercompanyBalances(@CurrentUser() user: AuthUser) {
     return this.service.getIntercompanyBalances(user);
+  }
+
+  /**
+   * Phase 4 — account-level drill-down. Returns every posted JE line touching
+   * the requested account, with running balance and counterpart lines for
+   * audit-trail navigation.
+   */
+  @Get('account-ledger/:companyId/:accountId')
+  @RequirePermissions('finance.reports.view')
+  getAccountLedger(
+    @Param('companyId') companyId: string,
+    @Param('accountId') accountId: string,
+    @CurrentUser() user: AuthUser,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+  ) {
+    return this.service.getAccountLedger(companyId, accountId, dateFrom, dateTo, user);
   }
 
   // ── Sprint R2 — Group-wide rollups ───────────────────────────────────────
@@ -122,5 +162,27 @@ export class FinancialReportsController {
   @RequirePermissions('finance.reports.view')
   getGroupCashPosition(@CurrentUser() user: AuthUser) {
     return this.service.getGroupCashPosition(user);
+  }
+
+  // ── Phase 4 — Consolidated group statements with intercompany elimination ──
+
+  /**
+   * Consolidated Group P&L — eliminates intercompany revenue/expense pairs
+   * so internal sales don't double-count toward group net income.
+   */
+  @Get('group/consolidated/profit-and-loss')
+  @RequirePermissions('finance.reports.view')
+  getConsolidatedGroupProfitAndLoss(@Query() q: ReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getConsolidatedGroupProfitAndLoss(q.dateFrom, q.dateTo, user);
+  }
+
+  /**
+   * Consolidated Group Balance Sheet — eliminates intercompany AR/AP positions
+   * so internal lending doesn't inflate group assets and liabilities.
+   */
+  @Get('group/consolidated/balance-sheet')
+  @RequirePermissions('finance.reports.view')
+  getConsolidatedGroupBalanceSheet(@Query() q: ReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getConsolidatedGroupBalanceSheet(q.asOf, user);
   }
 }

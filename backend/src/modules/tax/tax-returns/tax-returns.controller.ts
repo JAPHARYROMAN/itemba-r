@@ -42,6 +42,17 @@ export class TaxReturnsController {
     return this.service.prepare(id, user);
   }
 
+  /**
+   * Phase 4 — auto-compute return totals from posted TaxTransactions in the
+   * filing period. Transitions DRAFT → PREPARED with computed sums.
+   * Idempotent: re-running overwrites.
+   */
+  @Patch(':id/auto-compute')
+  @RequirePermissions('tax_returns.manage')
+  autoCompute(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.autoComputeFromTransactions(id, user);
+  }
+
   @Patch(':id/review')
   @RequirePermissions('tax_returns.manage')
   review(@Param('id') id: string, @CurrentUser() user: AuthUser) {

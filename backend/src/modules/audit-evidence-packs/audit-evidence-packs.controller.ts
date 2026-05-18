@@ -67,6 +67,20 @@ export class AuditEvidencePacksController {
     return this.service.removeItem(id, itemId, user);
   }
 
+  /**
+   * Phase 4 — auto-link every POSTED journal entry inside the named statement
+   * run's period as an evidence-pack item. Idempotent on retry.
+   */
+  @Post(':id/auto-link-statement-run/:statementRunId')
+  @RequirePermissions('audit_evidence_packs.manage')
+  autoLinkStatementRun(
+    @Param('id') id: string,
+    @Param('statementRunId') statementRunId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.autoLinkStatementRun(id, statementRunId, user);
+  }
+
   @Delete(':id')
   @RequirePermissions('audit_evidence_packs.manage')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {

@@ -89,4 +89,85 @@ export class AuditEvidencePacksService {
     await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'AuditEvidencePackItem', entityId: itemId, newValue: {} });
     return { message: 'Audit evidence pack item deleted' };
   }
+
+  /**
+   * Phase 4 — auto-link evidence: given a FinancialStatementRun, attach every
+   * POSTED journal entry inside the run's period as an AuditEvidencePackItem.
+   * This turns a manually-curated evidence pack into a reproducible artifact
+   * tied to a specific statement run.
+   *
+   * Idempotency: items with matching `linkedEntityType='JournalEntry'` and
+   * `linkedEntityId` are skipped, so the action can be retried safely.
+   */
+  async autoLinkStatementRun(packId: string, statementRunId: string, user: any) {
+    const pack = await this.findOne(packId, user);
+
+    const run = await this.prisma.financialStatementRun.findFirst({
+      where: { id: statementRunId },
+    });
+    if (!run) {
+      throw new NotFoundException('Financial statement run not found');
+    }
+    if (run.companyId && run.companyId !== pack.companyId) {
+      throw new NotFoundException(
+        'Statement run belongs to a different company than the evidence pack',
+      );
+    }
+
+    // Pull every posted JE inside the run's period for the pack's company.
+    const jes = await this.prisma.journalEntry.findMany({
+      where: {
+        companyId: pack.companyId,
+        status: 'POSTED',
+        deletedAt: null,
+        transactionDate: { gte: run.periodStart, lte: run.periodEnd },
+      },
+      select: { id: true, journalNumber: true, transactionDate: true, description: true },
+      orderBy: { transactionDate: 'asc' },
+    });
+
+    // De-dupe against existing items in the pack.
+    const existingLinks = await this.prisma.auditEvidencePackItem.findMany({
+      where: { evidencePackId: packId, linkedEntityType: 'JournalEntry' },
+      select: { linkedEntityId: true },
+    });
+    const linked = new Set(existingLinks.map((l) => l.linkedEntityId));
+
+    const toCreate = jes.filter((je) => !linked.has(je.id));
+    if (toCreate.length === 0) {
+      return { packId, statementRunId, linkedCount: 0, skipped: jes.length };
+    }
+
+    await this.prisma.auditEvidencePackItem.createMany({
+      data: toCreate.map((je) => ({
+        evidencePackId: packId,
+        itemType: 'TRANSACTION' as any,
+        linkedEntityType: 'JournalEntry',
+        linkedEntityId: je.id,
+        title: `${je.journalNumber} — ${je.description ?? 'JE'}`,
+        notes: `Auto-linked from FinancialStatementRun ${run.statementRunNumber}`,
+      })),
+    });
+
+    await this.audit.log({
+      userId: user.id,
+      action: 'AUTO_LINK_EVIDENCE',
+      entityType: 'AuditEvidencePack',
+      entityId: packId,
+      newValue: {
+        statementRunId,
+        statementRunNumber: run.statementRunNumber,
+        linkedCount: toCreate.length,
+        skipped: jes.length - toCreate.length,
+      },
+    });
+
+    return {
+      packId,
+      statementRunId,
+      statementRunNumber: run.statementRunNumber,
+      linkedCount: toCreate.length,
+      skipped: jes.length - toCreate.length,
+    };
+  }
 }

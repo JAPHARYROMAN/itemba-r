@@ -215,14 +215,27 @@ export class FinancialReportsService {
     return { companyId, assets, liabilities, equity, asOf: asOfDate };
   }
 
-  async getReceivablesAging(companyId: string, user?: AuthUser) {
+  async getReceivablesAging(
+    companyId: string,
+    user?: AuthUser,
+    scope?: { divisionId?: string; branchId?: string },
+  ) {
     if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
+    if (user && scope?.divisionId) {
+      this.companyScope.assertCanAccessDivision(user, scope.divisionId);
+    }
+    if (user && scope?.branchId) {
+      this.companyScope.assertCanAccessBranch(user, scope.branchId);
+    }
     const now = new Date();
     const receivables = await this.prisma.receivable.findMany({
       where: {
         companyId,
         deletedAt: null,
         status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+        // Phase 1: optional Division/Branch roll-up scope.
+        ...(scope?.divisionId && { divisionId: scope.divisionId }),
+        ...(scope?.branchId && { branchId: scope.branchId }),
       },
     });
 
@@ -243,17 +256,35 @@ export class FinancialReportsService {
       buckets.total += amount;
     }
 
-    return { companyId, ...buckets };
+    return {
+      companyId,
+      divisionId: scope?.divisionId,
+      branchId: scope?.branchId,
+      ...buckets,
+    };
   }
 
-  async getPayablesAging(companyId: string, user?: AuthUser) {
+  async getPayablesAging(
+    companyId: string,
+    user?: AuthUser,
+    scope?: { divisionId?: string; branchId?: string },
+  ) {
     if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
+    if (user && scope?.divisionId) {
+      this.companyScope.assertCanAccessDivision(user, scope.divisionId);
+    }
+    if (user && scope?.branchId) {
+      this.companyScope.assertCanAccessBranch(user, scope.branchId);
+    }
     const now = new Date();
     const payables = await this.prisma.payable.findMany({
       where: {
         companyId,
         deletedAt: null,
         status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+        // Phase 1: optional Division/Branch roll-up scope.
+        ...(scope?.divisionId && { divisionId: scope.divisionId }),
+        ...(scope?.branchId && { branchId: scope.branchId }),
       },
     });
 
@@ -274,7 +305,12 @@ export class FinancialReportsService {
       buckets.total += amount;
     }
 
-    return { companyId, ...buckets };
+    return {
+      companyId,
+      divisionId: scope?.divisionId,
+      branchId: scope?.branchId,
+      ...buckets,
+    };
   }
 
   /**
@@ -423,6 +459,182 @@ export class FinancialReportsService {
         'Financing activities are loan-principal movements only; equity raises are not yet categorized.',
         'Multi-currency and FX revaluation are not included.',
       ],
+    };
+  }
+
+  /**
+   * Phase 4 — comparative range helper. Given a primary [dateFrom, dateTo]
+   * range and a comparePeriod hint, computes the matching comparison window.
+   *
+   *  NONE          → no comparison.
+   *  PRIOR_PERIOD  → an equal-length window immediately preceding dateFrom.
+   *  PRIOR_YEAR    → same range, one calendar year earlier.
+   *  YTD           → from Jan 1 of dateFrom's year up to dateFrom-1.
+   */
+  private deriveComparisonRange(
+    dateFrom?: string,
+    dateTo?: string,
+    comparePeriod: 'NONE' | 'PRIOR_PERIOD' | 'PRIOR_YEAR' | 'YTD' = 'NONE',
+  ): { compareFrom?: string; compareTo?: string; label?: string } {
+    if (comparePeriod === 'NONE' || !dateFrom) return {};
+    const from = new Date(dateFrom);
+    const to = dateTo ? new Date(dateTo) : new Date();
+
+    switch (comparePeriod) {
+      case 'PRIOR_PERIOD': {
+        const windowMs = to.getTime() - from.getTime();
+        const priorTo = new Date(from.getTime() - 1);
+        const priorFrom = new Date(priorTo.getTime() - windowMs);
+        return {
+          compareFrom: priorFrom.toISOString(),
+          compareTo: priorTo.toISOString(),
+          label: 'Prior period',
+        };
+      }
+      case 'PRIOR_YEAR': {
+        const priorFrom = new Date(from);
+        priorFrom.setFullYear(priorFrom.getFullYear() - 1);
+        const priorTo = new Date(to);
+        priorTo.setFullYear(priorTo.getFullYear() - 1);
+        return {
+          compareFrom: priorFrom.toISOString(),
+          compareTo: priorTo.toISOString(),
+          label: 'Prior year',
+        };
+      }
+      case 'YTD': {
+        const yearStart = new Date(from.getFullYear(), 0, 1);
+        const ytdEnd = new Date(from.getTime() - 1);
+        return {
+          compareFrom: yearStart.toISOString(),
+          compareTo: ytdEnd.toISOString(),
+          label: 'Year-to-date (prior)',
+        };
+      }
+      default:
+        return {};
+    }
+  }
+
+  /**
+   * Phase 4 — P&L with optional comparative column.
+   * Calls getProfitAndLoss twice (current + comparison) and computes variance %.
+   */
+  async getProfitAndLossWithComparison(
+    companyId: string,
+    dateFrom?: string,
+    dateTo?: string,
+    comparePeriod: 'NONE' | 'PRIOR_PERIOD' | 'PRIOR_YEAR' | 'YTD' = 'NONE',
+    user?: AuthUser,
+  ) {
+    const current = await this.getProfitAndLoss(companyId, dateFrom, dateTo, user);
+    const range = this.deriveComparisonRange(dateFrom, dateTo, comparePeriod);
+    if (!range.compareFrom) return { ...current, comparison: null };
+
+    const comparison = await this.getProfitAndLoss(
+      companyId,
+      range.compareFrom,
+      range.compareTo,
+      user,
+    );
+
+    const pct = (cur: number, prior: number) =>
+      prior === 0 ? null : Math.round(((cur - prior) / Math.abs(prior)) * 1000) / 10;
+
+    return {
+      ...current,
+      comparison: {
+        label: range.label,
+        dateFrom: range.compareFrom,
+        dateTo: range.compareTo,
+        income: comparison.income,
+        cogs: comparison.cogs,
+        expenses: comparison.expenses,
+        grossProfit: comparison.grossProfit,
+        netIncome: comparison.netIncome,
+        variancePct: {
+          income: pct(current.income, comparison.income),
+          cogs: pct(current.cogs, comparison.cogs),
+          expenses: pct(current.expenses, comparison.expenses),
+          grossProfit: pct(current.grossProfit, comparison.grossProfit),
+          netIncome: pct(current.netIncome, comparison.netIncome),
+        },
+      },
+    };
+  }
+
+  /**
+   * Phase 4 — account-level drill-down. Given a company + account + optional
+   * date range, return every posted journal-entry line touching that account
+   * with full context (JE number, date, description, counterpart accounts).
+   * This is the endpoint the UI calls when a user clicks a Trial Balance row.
+   */
+  async getAccountLedger(
+    companyId: string,
+    accountId: string,
+    dateFrom?: string,
+    dateTo?: string,
+    user?: AuthUser,
+  ) {
+    if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
+    const jeWhere: any = { companyId, status: 'POSTED', deletedAt: null };
+    if (dateFrom || dateTo) {
+      jeWhere.transactionDate = {};
+      if (dateFrom) jeWhere.transactionDate.gte = new Date(dateFrom);
+      if (dateTo) jeWhere.transactionDate.lte = new Date(dateTo);
+    }
+
+    const lines = await this.prisma.journalEntryLine.findMany({
+      where: { companyId, accountId, journalEntry: jeWhere },
+      include: {
+        journalEntry: {
+          select: {
+            id: true,
+            journalNumber: true,
+            transactionDate: true,
+            description: true,
+            referenceType: true,
+            referenceId: true,
+            lines: {
+              where: { accountId: { not: accountId } },
+              include: { account: { select: { accountCode: true, accountName: true } } },
+            },
+          },
+        },
+        account: { select: { accountCode: true, accountName: true, accountType: true } },
+      },
+      orderBy: { journalEntry: { transactionDate: 'asc' } },
+    });
+
+    let runningBalance = 0;
+    const rows = lines.map((line) => {
+      runningBalance += Number(line.debit) - Number(line.credit);
+      return {
+        journalEntryId: line.journalEntry.id,
+        journalNumber: line.journalEntry.journalNumber,
+        transactionDate: line.journalEntry.transactionDate,
+        description: line.description ?? line.journalEntry.description,
+        debit: Number(line.debit),
+        credit: Number(line.credit),
+        runningBalance,
+        counterpartLines: line.journalEntry.lines.map((cl) => ({
+          accountCode: cl.account.accountCode,
+          accountName: cl.account.accountName,
+          debit: Number(cl.debit),
+          credit: Number(cl.credit),
+        })),
+        referenceType: line.journalEntry.referenceType,
+        referenceId: line.journalEntry.referenceId,
+      };
+    });
+
+    return {
+      companyId,
+      account: lines[0]?.account ?? null,
+      rows,
+      totalDebit: rows.reduce((s, r) => s + r.debit, 0),
+      totalCredit: rows.reduce((s, r) => s + r.credit, 0),
+      closingBalance: runningBalance,
     };
   }
 
@@ -660,6 +872,163 @@ export class FinancialReportsService {
       groupTotal,
       byCompany: Array.from(byCompany.values()),
       assumptions: ['Balances are summed at face value — no FX translation across currency.'],
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Phase 4 — Consolidated group financial statements WITH intercompany
+  //   elimination. These are distinct from the pre-consolidation rollups
+  //   (getGroupTrialBalance, getGroupProfitAndLoss, getGroupBalanceSheet)
+  //   which return honest sums without netting.
+  //
+  // Elimination model (textbook consolidation):
+  //   • Intercompany receivables (Company A's AR pointing at Company B) are
+  //     netted against intercompany payables (Company B's AP pointing at A).
+  //   • Intercompany revenue / expense pairs are eliminated to avoid
+  //     double-counting internal sales.
+  //   • Intercompany loans (via the InterCompanyTransaction ledger) are
+  //     netted out by reducing both sides' balances by the matched principal.
+  //
+  // The implementation uses the canonical InterCompanyTransaction.POSTED rows
+  // as the elimination source so the math is fully traceable.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Compute the elimination matrix from posted InterCompanyTransactions.
+   * Returns a flat list of "eliminate $X from receivables, $X from payables,
+   * $X from revenue, $X from expense" — applied at consolidation time.
+   */
+  private async computeIntercompanyEliminations() {
+    const txs = await this.prisma.interCompanyTransaction.findMany({
+      where: { deletedAt: null, status: 'POSTED' },
+      select: {
+        amount: true,
+        transactionType: true,
+        fromCompanyId: true,
+        toCompanyId: true,
+      },
+    });
+
+    let totalEliminated = 0;
+    let receivablesEliminated = 0;
+    let payablesEliminated = 0;
+    let revenueEliminated = 0;
+    let expensesEliminated = 0;
+
+    for (const tx of txs) {
+      const amount = Number(tx.amount);
+      totalEliminated += amount;
+      // For LOAN / SERVICE_CHARGE / INTERNAL_SALE / INTERNAL_PURCHASE: one side
+      // shows AR/Revenue, the other AP/Expense. Eliminate both.
+      switch (tx.transactionType) {
+        case 'INTERNAL_SALE':
+        case 'INTERNAL_PURCHASE':
+        case 'SERVICE_CHARGE':
+          receivablesEliminated += amount;
+          payablesEliminated += amount;
+          revenueEliminated += amount;
+          expensesEliminated += amount;
+          break;
+        case 'LOAN':
+        case 'PAYMENT_ON_BEHALF':
+        case 'EXPENSE_ALLOCATION':
+          receivablesEliminated += amount;
+          payablesEliminated += amount;
+          break;
+        // STOCK_TRANSFER / ASSET_TRANSFER eliminate at balance-sheet level only
+        // (inventory/asset stays in the group; one company gains, one loses).
+        case 'STOCK_TRANSFER':
+        case 'ASSET_TRANSFER':
+        default:
+          break;
+      }
+    }
+
+    return {
+      totalEliminated,
+      receivablesEliminated,
+      payablesEliminated,
+      revenueEliminated,
+      expensesEliminated,
+      txCount: txs.length,
+    };
+  }
+
+  /**
+   * Consolidated Group P&L — pre-consolidation sums minus intercompany
+   * revenue/expense pairs. Preserves the per-company breakdown so reviewers
+   * can see the eliminations.
+   */
+  async getConsolidatedGroupProfitAndLoss(
+    dateFrom?: string,
+    dateTo?: string,
+    user?: AuthUser,
+  ) {
+    if (user) this.companyScope.assertGroupScoped(user, 'view consolidated group reports');
+    const preConsolidation = await this.getGroupProfitAndLoss(dateFrom, dateTo, user);
+    const eliminations = await this.computeIntercompanyEliminations();
+
+    return {
+      scope: 'GROUP_CONSOLIDATED',
+      preConsolidation: {
+        income: preConsolidation.income,
+        expenses: preConsolidation.expenses,
+        cogs: preConsolidation.cogs,
+        netIncome: preConsolidation.netIncome,
+      },
+      eliminations,
+      consolidated: {
+        income: preConsolidation.income - eliminations.revenueEliminated,
+        expenses: preConsolidation.expenses - eliminations.expensesEliminated,
+        cogs: preConsolidation.cogs,
+        grossProfit:
+          preConsolidation.income -
+          eliminations.revenueEliminated -
+          preConsolidation.cogs,
+        netIncome:
+          preConsolidation.netIncome -
+          (eliminations.revenueEliminated - eliminations.expensesEliminated),
+      },
+      byCompany: preConsolidation.byCompany,
+      dateFrom,
+      dateTo,
+      assumptions: [
+        'Intercompany revenue/expense pairs eliminated based on POSTED InterCompanyTransactions.',
+        'No FX translation; sums assume single base currency.',
+      ],
+    };
+  }
+
+  /**
+   * Consolidated Group Balance Sheet — pre-consolidation sums minus
+   * intercompany AR/AP positions.
+   */
+  async getConsolidatedGroupBalanceSheet(asOf?: string, user?: AuthUser) {
+    if (user) this.companyScope.assertGroupScoped(user, 'view consolidated group reports');
+    const preConsolidation = await this.getGroupBalanceSheet(asOf, user);
+    const eliminations = await this.computeIntercompanyEliminations();
+
+    return {
+      scope: 'GROUP_CONSOLIDATED',
+      preConsolidation: {
+        assets: preConsolidation.assets,
+        liabilities: preConsolidation.liabilities,
+        equity: preConsolidation.equity,
+      },
+      eliminations,
+      consolidated: {
+        // Intercompany AR is removed from group assets; intercompany AP
+        // from group liabilities. Equity is unchanged.
+        assets: preConsolidation.assets - eliminations.receivablesEliminated,
+        liabilities: preConsolidation.liabilities - eliminations.payablesEliminated,
+        equity: preConsolidation.equity,
+      },
+      byCompany: preConsolidation.byCompany,
+      asOf: preConsolidation.asOf,
+      assumptions: [
+        'Intercompany receivable/payable pairs eliminated based on POSTED InterCompanyTransactions.',
+        'No FX translation; sums assume single base currency.',
+      ],
     };
   }
 }

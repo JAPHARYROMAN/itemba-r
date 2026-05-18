@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateTaxReturnDto } from './dto/create-tax-return.dto';
@@ -52,6 +53,108 @@ export class TaxReturnsService {
     const record = await this.prisma.taxReturn.update({ where: { id }, data: { status: 'PREPARED' as any, preparedById: user.id } });
     await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'TaxReturn', entityId: id, newValue: { status: 'PREPARED' } });
     return record;
+  }
+
+  /**
+   * Phase 4 — auto-compute return totals from posted TaxTransactions inside
+   * the return's filing period.
+   *
+   * Sums:
+   *   taxableAmount     = Σ taxableAmount (POSTED, in-period, matching taxTypeId)
+   *   taxPayable        = Σ taxAmount where direction = OUTPUT
+   *   taxRecoverable    = Σ taxAmount where direction = INPUT
+   *   netTaxDue         = taxPayable − taxRecoverable
+   *   totalDue          = netTaxDue + penalties + interest
+   *   outstandingAmount = totalDue − amountPaid
+   *
+   * Also transitions status DRAFT → PREPARED and stamps preparedById.
+   * Idempotent: re-running on a PREPARED return recomputes and overwrites.
+   */
+  async autoComputeFromTransactions(id: string, user: any) {
+    const record = await this.findOne(id, user);
+    if (record.status === 'SUBMITTED' || record.status === 'PAID' || record.status === 'CLOSED') {
+      throw new BadRequestException(
+        'Cannot recompute a return that has been submitted, paid, or closed',
+      );
+    }
+
+    const filingPeriod = await this.prisma.taxFilingPeriod.findUnique({
+      where: { id: record.taxFilingPeriodId },
+      select: { periodStart: true, periodEnd: true },
+    });
+    if (!filingPeriod) throw new NotFoundException('Tax filing period not found');
+
+    const txs = await this.prisma.taxTransaction.findMany({
+      where: {
+        companyId: record.companyId,
+        taxTypeId: record.taxTypeId,
+        deletedAt: null,
+        status: 'POSTED' as any,
+        transactionDate: { gte: filingPeriod.periodStart, lte: filingPeriod.periodEnd },
+      },
+      select: { taxableAmount: true, taxAmount: true, direction: true },
+    });
+
+    let taxableAmount = new Prisma.Decimal(0);
+    let taxPayable = new Prisma.Decimal(0);
+    let taxRecoverable = new Prisma.Decimal(0);
+    let outputCount = 0;
+    let inputCount = 0;
+    for (const t of txs) {
+      taxableAmount = taxableAmount.plus(t.taxableAmount);
+      if (t.direction === 'OUTPUT') {
+        taxPayable = taxPayable.plus(t.taxAmount);
+        outputCount++;
+      } else {
+        taxRecoverable = taxRecoverable.plus(t.taxAmount);
+        inputCount++;
+      }
+    }
+
+    const netTaxDue = taxPayable.minus(taxRecoverable);
+    const penalties = new Prisma.Decimal(record.penalties);
+    const interest = new Prisma.Decimal(record.interest);
+    const totalDue = netTaxDue.plus(penalties).plus(interest);
+    const amountPaid = new Prisma.Decimal(record.amountPaid);
+    const outstandingAmount = totalDue.minus(amountPaid);
+
+    const updated = await this.prisma.taxReturn.update({
+      where: { id },
+      data: {
+        taxableAmount,
+        taxPayable,
+        taxRecoverable,
+        netTaxDue,
+        totalDue,
+        outstandingAmount,
+        status: 'PREPARED' as any,
+        preparedById: user.id,
+      },
+    });
+
+    await this.audit.log({
+      userId: user.id,
+      action: 'AUTO_COMPUTE',
+      entityType: 'TaxReturn',
+      entityId: id,
+      newValue: {
+        txCount: txs.length,
+        outputCount,
+        inputCount,
+        taxPayable: taxPayable.toString(),
+        taxRecoverable: taxRecoverable.toString(),
+        netTaxDue: netTaxDue.toString(),
+      },
+    });
+
+    return {
+      ...updated,
+      _audit: {
+        transactionsScanned: txs.length,
+        outputCount,
+        inputCount,
+      },
+    };
   }
 
   async review(id: string, user: any) {

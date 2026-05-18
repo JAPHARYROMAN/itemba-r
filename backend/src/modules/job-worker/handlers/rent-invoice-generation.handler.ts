@@ -1,0 +1,184 @@
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../../../prisma/prisma.service';
+import { JobContext, JobHandlerRegistry, JobResult } from '../job-handler.registry';
+
+/**
+ * RENT_INVOICE_GENERATION handler — generates the next rent invoice for every
+ * ACTIVE LeaseAgreement whose billing cycle is due.
+ *
+ * Payload shape (all optional):
+ *   {
+ *     companyId?: string       // limit to a single company
+ *     leaseAgreementId?: string // limit to a single lease (for ad-hoc runs)
+ *     asOf?: string             // ISO date — pretend "today" is this date
+ *     dryRun?: boolean          // when true, count but don't create
+ *   }
+ *
+ * Algorithm: for each candidate lease, find the most recent RentInvoice (if
+ * any). If none exists, generate the first one starting from lease.startDate.
+ * Otherwise generate the next one if at least one billingFrequency interval
+ * has passed since the last invoice's billingPeriodEnd.
+ *
+ * Idempotency: two consecutive runs on the same "asOf" date produce the same
+ * outcome because we check the last invoice's period before creating a new one.
+ *
+ * Invoices are created in DRAFT status; a separate workflow (manual or
+ * scheduled) issues them via RentInvoicesService.issue() which creates the
+ * Receivable and posts the AR JE.
+ */
+@Injectable()
+export class RentInvoiceGenerationJobHandler implements OnModuleInit {
+  private readonly logger = new Logger(RentInvoiceGenerationJobHandler.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly registry: JobHandlerRegistry,
+  ) {}
+
+  onModuleInit(): void {
+    this.registry.register('RENT_INVOICE_GENERATION', (ctx) => this.handle(ctx));
+  }
+
+  private async handle(ctx: JobContext): Promise<JobResult> {
+    const companyId = ctx.payload.companyId as string | undefined;
+    const leaseAgreementId = ctx.payload.leaseAgreementId as string | undefined;
+    const asOf = ctx.payload.asOf ? new Date(ctx.payload.asOf as string) : new Date();
+    const dryRun = (ctx.payload.dryRun as boolean | undefined) ?? false;
+
+    const leases = await this.prisma.leaseAgreement.findMany({
+      where: {
+        deletedAt: null,
+        status: 'ACTIVE' as any,
+        ...(companyId && { companyId }),
+        ...(leaseAgreementId && { id: leaseAgreementId }),
+        // Honor end dates — don't generate invoices for expired leases.
+        OR: [{ endDate: null }, { endDate: { gte: asOf } }],
+      },
+      include: {
+        invoices: {
+          where: { deletedAt: null },
+          orderBy: { billingPeriodEnd: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    const created: string[] = [];
+    const skipped: Array<{ leaseId: string; reason: string }> = [];
+    let scanned = 0;
+
+    for (const lease of leases) {
+      scanned += 1;
+      const last = lease.invoices[0];
+
+      // Establish the next billing period.
+      const nextStart = last
+        ? this.addOneFrequency(last.billingPeriodEnd, lease.billingFrequency)
+        : new Date(lease.startDate);
+      const nextEnd = this.endOfFrequency(nextStart, lease.billingFrequency);
+
+      // Skip if next period hasn't matured yet — wait until at least the
+      // start of the next period (i.e., bill at the start of the period,
+      // due by end of period or per lease.dueDay).
+      if (nextStart > asOf) {
+        skipped.push({ leaseId: lease.id, reason: 'next period not yet due' });
+        continue;
+      }
+
+      if (dryRun) {
+        created.push(`would-create:${lease.id}`);
+        continue;
+      }
+
+      try {
+        const rentAmount = new Prisma.Decimal(lease.rentAmount);
+        // Use the EntityCodeGenerator equivalent: simple deterministic number.
+        const rentInvoiceNumber = `RI-${nextStart.getFullYear()}-${String(nextStart.getMonth() + 1).padStart(2, '0')}-${lease.leaseCode}`;
+        // Idempotency: check for an existing invoice with this number.
+        const existing = await this.prisma.rentInvoice.findFirst({
+          where: { companyId: lease.companyId, rentInvoiceNumber },
+        });
+        if (existing) {
+          skipped.push({ leaseId: lease.id, reason: 'invoice already exists for period' });
+          continue;
+        }
+        await this.prisma.rentInvoice.create({
+          data: {
+            rentInvoiceNumber,
+            companyId: lease.companyId,
+            propertyId: lease.propertyId,
+            rentalUnitId: lease.rentalUnitId,
+            tenantId: lease.tenantId,
+            leaseAgreementId: lease.id,
+            invoiceDate: nextStart,
+            billingPeriodStart: nextStart,
+            billingPeriodEnd: nextEnd,
+            rentAmount,
+            totalAmount: rentAmount,
+            outstandingAmount: rentAmount,
+            currency: 'TZS',
+            status: 'DRAFT' as any,
+            createdById: lease.createdById ?? (lease as any).approvedById ?? '',
+            notes: `Auto-generated by recurring job for ${lease.leaseCode}`,
+          },
+        });
+        created.push(lease.id);
+      } catch (err) {
+        this.logger.error(
+          `Failed to generate rent invoice for lease ${lease.id}: ${(err as Error).message}`,
+        );
+        skipped.push({ leaseId: lease.id, reason: (err as Error).message });
+      }
+    }
+
+    return {
+      data: {
+        scanned,
+        createdCount: created.length,
+        skippedCount: skipped.length,
+        dryRun,
+        asOf: asOf.toISOString(),
+      },
+    };
+  }
+
+  /**
+   * Advance a date by one billing-frequency interval.
+   * billingFrequency on LeaseAgreement is one of MONTHLY / QUARTERLY /
+   * SEMI_ANNUAL / ANNUAL / WEEKLY / CUSTOM. CUSTOM defaults to monthly.
+   */
+  private addOneFrequency(from: Date, freq: string | null): Date {
+    const next = new Date(from);
+    switch (freq) {
+      case 'WEEKLY':
+        next.setDate(next.getDate() + 7);
+        break;
+      case 'QUARTERLY':
+        next.setMonth(next.getMonth() + 3);
+        break;
+      case 'SEMI_ANNUAL':
+        next.setMonth(next.getMonth() + 6);
+        break;
+      case 'ANNUAL':
+        next.setFullYear(next.getFullYear() + 1);
+        break;
+      case 'MONTHLY':
+      case 'CUSTOM':
+      default:
+        next.setMonth(next.getMonth() + 1);
+        break;
+    }
+    return next;
+  }
+
+  /**
+   * End of the period that begins at `start` for the given billing frequency.
+   * Returns the day before the next period's start (so periods don't overlap).
+   */
+  private endOfFrequency(start: Date, freq: string | null): Date {
+    const nextStart = this.addOneFrequency(start, freq);
+    const end = new Date(nextStart.getTime() - 86400000);
+    return end;
+  }
+}
