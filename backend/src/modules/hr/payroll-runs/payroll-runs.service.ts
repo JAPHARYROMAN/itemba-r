@@ -14,9 +14,7 @@ interface LockedPayrollRunRow {
   id: string;
   companyId: string;
   status: string;
-}
-
-interface PayrollRunSignoffRow {
+  journalEntryId: string | null;
   hrApprovedById: string | null;
   financeApprovedById: string | null;
 }
@@ -56,7 +54,10 @@ export class PayrollRunsService {
     if (payrollPeriodId) where.payrollPeriodId = payrollPeriodId;
     const [data, total] = await Promise.all([
       this.prisma.payrollRun.findMany({
-        where, skip, take: Number(limit), orderBy: { createdAt: 'desc' },
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
         include: {
           payrollPeriod: { select: { id: true, name: true, startDate: true, endDate: true } },
           company: { select: { id: true, name: true } },
@@ -98,7 +99,14 @@ export class PayrollRunsService {
     const record = await this.prisma.payrollRun.create({
       data: { ...dto, runDate: dto.runDate ? new Date(dto.runDate) : new Date() } as any,
     });
-    await this.audit.log({ userId: user.id, action: 'PAYROLL_RUN_CREATE', entityType: 'PayrollRun', entityId: record.id, companyId: record.companyId, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId: user.id,
+      action: 'PAYROLL_RUN_CREATE',
+      entityType: 'PayrollRun',
+      entityId: record.id,
+      companyId: record.companyId,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
     return record;
   }
 
@@ -112,7 +120,14 @@ export class PayrollRunsService {
       where: { id },
       data: { ...dto, runDate: dto.runDate ? new Date(dto.runDate) : undefined } as any,
     });
-    await this.audit.log({ userId: user.id, action: 'PAYROLL_RUN_UPDATE', entityType: 'PayrollRun', entityId: id, companyId: existing.companyId, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId: user.id,
+      action: 'PAYROLL_RUN_UPDATE',
+      entityType: 'PayrollRun',
+      entityId: id,
+      companyId: existing.companyId,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
     return record;
   }
 
@@ -130,7 +145,9 @@ export class PayrollRunsService {
     });
 
     // Get payroll period for date range
-    const period = await this.prisma.payrollPeriod.findFirst({ where: { id: run.payrollPeriodId } });
+    const period = await this.prisma.payrollPeriod.findFirst({
+      where: { id: run.payrollPeriodId },
+    });
 
     // Delete existing entries for recalculation (cascade clears lines + allowances + deductions)
     await this.prisma.payrollEntry.updateMany({
@@ -140,7 +157,10 @@ export class PayrollRunsService {
 
     // Load reference data once per region — most TZ companies are single-region.
     const regionsInRun = Array.from(new Set(employees.map((e) => e.payrollRegion)));
-    const refDataByRegion = new Map<string, Awaited<ReturnType<typeof this.calculator.loadReferenceData>>>();
+    const refDataByRegion = new Map<
+      string,
+      Awaited<ReturnType<typeof this.calculator.loadReferenceData>>
+    >();
     for (const r of regionsInRun) {
       refDataByRegion.set(r, await this.calculator.loadReferenceData(r as 'MAINLAND' | 'ZANZIBAR'));
     }
@@ -205,8 +225,7 @@ export class PayrollRunsService {
           // days that fall inside the period (calendar-day approximation).
           const reqStart = req.startDate > period.startDate ? req.startDate : period.startDate;
           const reqEnd = req.endDate < period.endDate ? req.endDate : period.endDate;
-          const fullyInside =
-            req.startDate >= period.startDate && req.endDate <= period.endDate;
+          const fullyInside = req.startDate >= period.startDate && req.endDate <= period.endDate;
           if (fullyInside) {
             lwopDays += Number(req.totalDays);
           } else {
@@ -307,11 +326,13 @@ export class PayrollRunsService {
         orderBy: { paidAt: 'asc' },
       });
 
-      const advanceRecoveries: Array<{ advanceId: string; advanceNumber: string; amount: number }> = [];
+      const advanceRecoveries: Array<{ advanceId: string; advanceNumber: string; amount: number }> =
+        [];
       for (const adv of outstandingAdvances) {
         const remaining = Number(adv.amount) - Number(adv.recoveredAmount);
         if (remaining <= 0) continue;
-        const installment = adv.installmentAmount != null ? Number(adv.installmentAmount) : Number(adv.amount);
+        const installment =
+          adv.installmentAmount != null ? Number(adv.installmentAmount) : Number(adv.amount);
         const thisPeriod = Math.min(installment, remaining);
         if (thisPeriod > 0) {
           advanceRecoveries.push({
@@ -465,81 +486,104 @@ export class PayrollRunsService {
       },
     });
 
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'PayrollRun', entityId: id, newValue: { status: 'CALCULATED', totalEmployees: employees.length } });
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'PayrollRun',
+      entityId: id,
+      newValue: { status: 'CALCULATED', totalEmployees: employees.length },
+    });
     return updated;
   }
 
   async submit(id: string, user: any) {
     const run = await this.findOne(id, user);
-    if (run.status !== 'CALCULATED') throw new BadRequestException('Payroll run must be calculated before submitting');
+    if (run.status !== 'CALCULATED')
+      throw new BadRequestException('Payroll run must be calculated before submitting');
     const updated = await this.prisma.payrollRun.update({
       where: { id },
       data: { status: 'SUBMITTED', submittedById: user.id, submittedAt: new Date() },
     });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'PayrollRun', entityId: id, newValue: { status: 'SUBMITTED' } });
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'PayrollRun',
+      entityId: id,
+      newValue: { status: 'SUBMITTED' },
+    });
     return updated;
   }
 
   async approve(id: string, user: AuthUser) {
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const run = await this.lockPayrollRun(id, tx);
-      if (!run) throw new NotFoundException('Payroll run not found');
-      await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.WRITE);
-      if (run.status !== 'SUBMITTED') {
-        throw new BadRequestException('Payroll run must be submitted before approving');
-      }
+    const updated = await this.prisma.$transaction(
+      async (tx) => {
+        const run = await this.lockPayrollRun(id, tx);
+        if (!run) throw new NotFoundException('Payroll run not found');
+        await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.WRITE);
+        if (run.status !== 'SUBMITTED') {
+          throw new BadRequestException('Payroll run must be submitted before approving');
+        }
 
-      const signoffs = await this.findPayrollRunSignoffs(id, tx);
-      if (!signoffs?.hrApprovedById || !signoffs.financeApprovedById) {
-        throw new BadRequestException(
-          'Payroll run requires both HR and Finance sign-off before approval',
-        );
-      }
+        if (!run.hrApprovedById || !run.financeApprovedById) {
+          throw new BadRequestException(
+            'Payroll run requires both HR and Finance sign-off before approval',
+          );
+        }
 
-      await this.postings.postRun(id, user.id, tx);
+        await this.postings.postRun(id, user.id, tx);
 
-      return tx.payrollRun.update({
-        where: { id },
-        data: { status: 'APPROVED', approvedById: user.id, approvedAt: new Date() },
-      });
-    }, { timeout: 60_000 });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'PayrollRun', entityId: id, newValue: { status: 'APPROVED' } });
+        return tx.payrollRun.update({
+          where: { id },
+          data: { status: 'APPROVED', approvedById: user.id, approvedAt: new Date() },
+        });
+      },
+      { timeout: 60_000 },
+    );
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'PayrollRun',
+      entityId: id,
+      newValue: { status: 'APPROVED' },
+    });
     return updated;
   }
 
   async approveHr(id: string, user: AuthUser) {
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const run = await this.lockPayrollRun(id, tx);
-      if (!run) throw new NotFoundException('Payroll run not found');
-      await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.WRITE);
-      if (run.status !== 'SUBMITTED') {
-        throw new BadRequestException('Payroll run must be submitted before HR sign-off');
-      }
+    const updated = await this.prisma.$transaction(
+      async (tx) => {
+        const run = await this.lockPayrollRun(id, tx);
+        if (!run) throw new NotFoundException('Payroll run not found');
+        await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.WRITE);
+        if (run.status !== 'SUBMITTED') {
+          throw new BadRequestException('Payroll run must be submitted before HR sign-off');
+        }
 
-      const signoffs = await this.findPayrollRunSignoffs(id, tx);
-      if (signoffs?.hrApprovedById) {
-        throw new BadRequestException('HR sign-off is already recorded for this payroll run');
-      }
-      if (signoffs?.financeApprovedById === user.id) {
-        throw new BadRequestException('The same user cannot sign off both HR and Finance');
-      }
+        if (run.hrApprovedById) {
+          throw new BadRequestException('HR sign-off is already recorded for this payroll run');
+        }
+        if (run.financeApprovedById === user.id) {
+          throw new BadRequestException('The same user cannot sign off both HR and Finance');
+        }
 
-      const now = new Date();
-      const stamped = await tx.payrollRun.update({
-        where: { id },
-        data: { hrApprovedById: user.id, hrApprovedAt: now },
-      });
-
-      if (stamped.financeApprovedById) {
-        await this.postings.postRun(id, user.id, tx);
-        return tx.payrollRun.update({
+        const now = new Date();
+        const stamped = await tx.payrollRun.update({
           where: { id },
-          data: { status: 'APPROVED', approvedById: user.id, approvedAt: now },
+          data: { hrApprovedById: user.id, hrApprovedAt: now },
         });
-      }
 
-      return stamped;
-    }, { timeout: 60_000 });
+        if (run.financeApprovedById) {
+          await this.postings.postRun(id, user.id, tx);
+          return tx.payrollRun.update({
+            where: { id },
+            data: { status: 'APPROVED', approvedById: user.id, approvedAt: now },
+          });
+        }
+
+        return stamped;
+      },
+      { timeout: 60_000 },
+    );
 
     await this.audit.log({
       userId: user.id,
@@ -552,38 +596,42 @@ export class PayrollRunsService {
   }
 
   async approveFinance(id: string, user: AuthUser) {
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const run = await this.lockPayrollRun(id, tx);
-      if (!run) throw new NotFoundException('Payroll run not found');
-      await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.WRITE);
-      if (run.status !== 'SUBMITTED') {
-        throw new BadRequestException('Payroll run must be submitted before Finance sign-off');
-      }
+    const updated = await this.prisma.$transaction(
+      async (tx) => {
+        const run = await this.lockPayrollRun(id, tx);
+        if (!run) throw new NotFoundException('Payroll run not found');
+        await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.WRITE);
+        if (run.status !== 'SUBMITTED') {
+          throw new BadRequestException('Payroll run must be submitted before Finance sign-off');
+        }
 
-      const signoffs = await this.findPayrollRunSignoffs(id, tx);
-      if (signoffs?.financeApprovedById) {
-        throw new BadRequestException('Finance sign-off is already recorded for this payroll run');
-      }
-      if (signoffs?.hrApprovedById === user.id) {
-        throw new BadRequestException('The same user cannot sign off both HR and Finance');
-      }
+        if (run.financeApprovedById) {
+          throw new BadRequestException(
+            'Finance sign-off is already recorded for this payroll run',
+          );
+        }
+        if (run.hrApprovedById === user.id) {
+          throw new BadRequestException('The same user cannot sign off both HR and Finance');
+        }
 
-      const now = new Date();
-      const stamped = await tx.payrollRun.update({
-        where: { id },
-        data: { financeApprovedById: user.id, financeApprovedAt: now },
-      });
-
-      if (stamped.hrApprovedById) {
-        await this.postings.postRun(id, user.id, tx);
-        return tx.payrollRun.update({
+        const now = new Date();
+        const stamped = await tx.payrollRun.update({
           where: { id },
-          data: { status: 'APPROVED', approvedById: user.id, approvedAt: now },
+          data: { financeApprovedById: user.id, financeApprovedAt: now },
         });
-      }
 
-      return stamped;
-    }, { timeout: 60_000 });
+        if (run.hrApprovedById) {
+          await this.postings.postRun(id, user.id, tx);
+          return tx.payrollRun.update({
+            where: { id },
+            data: { status: 'APPROVED', approvedById: user.id, approvedAt: now },
+          });
+        }
+
+        return stamped;
+      },
+      { timeout: 60_000 },
+    );
 
     await this.audit.log({
       userId: user.id,
@@ -596,68 +644,76 @@ export class PayrollRunsService {
   }
 
   async pay(id: string, user: AuthUser, body?: { disbursingChartOfAccountId?: string }) {
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const run = await this.lockPayrollRun(id, tx);
-      if (!run) throw new NotFoundException('Payroll run not found');
-      await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.WRITE);
-      if (run.status !== 'APPROVED') {
-        throw new BadRequestException('Payroll run must be approved before paying');
-      }
-
-      if (body?.disbursingChartOfAccountId) {
-        const acct = await tx.chartOfAccount.findFirst({
-          where: { id: body.disbursingChartOfAccountId, companyId: run.companyId, deletedAt: null },
-          select: { id: true },
-        });
-        if (!acct) {
-          throw new BadRequestException('Selected disbursing account does not belong to this company.');
+    const updated = await this.prisma.$transaction(
+      async (tx) => {
+        const run = await this.lockPayrollRun(id, tx);
+        if (!run) throw new NotFoundException('Payroll run not found');
+        await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.WRITE);
+        if (run.status !== 'APPROVED') {
+          throw new BadRequestException('Payroll run must be approved before paying');
         }
-      }
 
-      const paidAt = new Date();
-      const paid = await tx.payrollRun.update({
-        where: { id },
-        data: {
-          status: 'PAID',
-          paidById: user.id,
-          paidAt,
-          ...(body?.disbursingChartOfAccountId
-            ? { disbursingChartOfAccountId: body.disbursingChartOfAccountId }
-            : {}),
-        },
-      });
+        if (body?.disbursingChartOfAccountId) {
+          const acct = await tx.chartOfAccount.findFirst({
+            where: {
+              id: body.disbursingChartOfAccountId,
+              companyId: run.companyId,
+              deletedAt: null,
+            },
+            select: { id: true },
+          });
+          if (!acct) {
+            throw new BadRequestException(
+              'Selected disbursing account does not belong to this company.',
+            );
+          }
+        }
 
-      await this.syncAdvanceRecoveries(id, tx);
-      await this.settleSalesCommissions(id, tx);
-      await this.postings.postPayment(id, user.id, tx);
-      await this.labourCost.allocateForRun(id, tx);
-      await this.postings.postLabourReclass(id, user.id, tx);
+        const paidAt = new Date();
+        const paid = await tx.payrollRun.update({
+          where: { id },
+          data: {
+            status: 'PAID',
+            paidById: user.id,
+            paidAt,
+            ...(body?.disbursingChartOfAccountId
+              ? { disbursingChartOfAccountId: body.disbursingChartOfAccountId }
+              : {}),
+          },
+        });
 
-      return paid;
-    }, { timeout: 60_000 });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'PayrollRun', entityId: id, newValue: { status: 'PAID', disbursingChartOfAccountId: body?.disbursingChartOfAccountId } });
+        await this.syncAdvanceRecoveries(id, tx);
+        await this.settleSalesCommissions(id, tx);
+        await this.postings.postPayment(id, user.id, tx);
+        await this.labourCost.allocateForRun(id, tx);
+        await this.postings.postLabourReclass(id, user.id, tx);
+
+        return paid;
+      },
+      { timeout: 60_000 },
+    );
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'PayrollRun',
+      entityId: id,
+      newValue: { status: 'PAID', disbursingChartOfAccountId: body?.disbursingChartOfAccountId },
+    });
     return updated;
   }
 
-  private async lockPayrollRun(id: string, tx: Prisma.TransactionClient): Promise<LockedPayrollRunRow | null> {
+  private async lockPayrollRun(
+    id: string,
+    tx: Prisma.TransactionClient,
+  ): Promise<LockedPayrollRunRow | null> {
     const rows = await tx.$queryRaw<LockedPayrollRunRow[]>`
-      SELECT id, "companyId", status
+      SELECT id, "companyId", status, "journalEntryId", "hrApprovedById", "financeApprovedById"
       FROM "payroll_runs"
       WHERE id = ${id}
         AND "deletedAt" IS NULL
       FOR UPDATE
     `;
     return rows[0] ?? null;
-  }
-
-  private async findPayrollRunSignoffs(
-    id: string,
-    tx: Prisma.TransactionClient,
-  ): Promise<PayrollRunSignoffRow | null> {
-    return tx.payrollRun.findUnique({
-      where: { id },
-      select: { hrApprovedById: true, financeApprovedById: true },
-    });
   }
 
   private async syncAdvanceRecoveries(payrollRunId: string, tx: Prisma.TransactionClient) {
@@ -722,7 +778,9 @@ export class PayrollRunsService {
       `;
       const commission = rows[0];
       if (!commission) {
-        throw new BadRequestException(`Sales commission ${payout.salesCommissionId} no longer exists.`);
+        throw new BadRequestException(
+          `Sales commission ${payout.salesCommissionId} no longer exists.`,
+        );
       }
       if (
         commission.paidPayrollEntryId &&
@@ -746,13 +804,37 @@ export class PayrollRunsService {
   }
 
   async cancel(id: string, reason: string | undefined, user: any) {
-    const run = await this.findOne(id, user);
-    if (run.status === 'PAID') throw new BadRequestException('Cannot cancel a paid payroll run');
-    const updated = await this.prisma.payrollRun.update({
-      where: { id },
-      data: { status: 'CANCELLED', notes: reason },
+    const updated = await this.prisma.$transaction(
+      async (tx) => {
+        const run = await this.lockPayrollRun(id, tx);
+        if (!run) throw new NotFoundException('Payroll run not found');
+        await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.WRITE);
+        if (run.status === 'PAID')
+          throw new BadRequestException('Cannot cancel a paid payroll run');
+        if (run.status === 'CANCELLED') {
+          return tx.payrollRun.update({
+            where: { id },
+            data: reason ? { notes: reason } : {},
+          });
+        }
+
+        await this.postings.reverseAccrual(id, user.id, reason, tx);
+        await this.labourCost.reverseForRun(id, tx);
+
+        return tx.payrollRun.update({
+          where: { id },
+          data: { status: 'CANCELLED', notes: reason },
+        });
+      },
+      { timeout: 60_000 },
+    );
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'PayrollRun',
+      entityId: id,
+      newValue: { status: 'CANCELLED', reason },
     });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'PayrollRun', entityId: id, newValue: { status: 'CANCELLED', reason } });
     return updated;
   }
 
@@ -762,7 +844,13 @@ export class PayrollRunsService {
       throw new BadRequestException('Only draft or cancelled payroll runs can be deleted');
     }
     await this.prisma.payrollRun.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'PayrollRun', entityId: id, newValue: {} });
+    await this.audit.log({
+      userId: user.id,
+      action: 'DELETE',
+      entityType: 'PayrollRun',
+      entityId: id,
+      newValue: {},
+    });
     return { message: 'Payroll run deleted' };
   }
 }

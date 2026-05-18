@@ -14,6 +14,7 @@ import {
   PageToolbar,
   PageSpinner,
 } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
 
 interface DisbursementFile {
   filename: string;
@@ -55,6 +56,8 @@ interface PayrollRun {
   totalGross?: number;
   totalNet?: number;
   status: string;
+  hrApprovedById?: string | null;
+  financeApprovedById?: string | null;
 }
 
 interface FormState {
@@ -71,8 +74,33 @@ interface ChartAccount {
   accountType: string;
 }
 
+type RawPayrollRun = Partial<PayrollRun> & {
+  payrollRunNumber?: string;
+  payrollPeriod?: { name?: string };
+  payrollPeriodId?: string;
+  payrollType?: string;
+  totalGrossPay?: number | string;
+  totalNetPay?: number | string;
+};
+
+function normalizePayrollRun(row: RawPayrollRun): PayrollRun {
+  return {
+    id: row.id ?? '',
+    runNumber: row.runNumber ?? row.payrollRunNumber ?? '—',
+    period: row.period ?? row.payrollPeriod?.name ?? row.periodId ?? row.payrollPeriodId,
+    periodId: row.periodId ?? row.payrollPeriodId,
+    runType: row.runType ?? row.payrollType ?? 'REGULAR',
+    totalGross: Number(row.totalGross ?? row.totalGrossPay ?? 0),
+    totalNet: Number(row.totalNet ?? row.totalNetPay ?? 0),
+    status: row.status ?? 'DRAFT',
+    hrApprovedById: row.hrApprovedById ?? null,
+    financeApprovedById: row.financeApprovedById ?? null,
+  };
+}
+
 function PayrollRunsContent() {
   const searchParams = useSearchParams();
+  const { hasPermission } = useAuth();
   const [rows, setRows] = useState<PayrollRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -125,7 +153,8 @@ function PayrollRunsContent() {
     if (periodFilter) params.set('periodId', periodFilter);
     const r = await fetch(`/api/backend/hr/payroll-runs?${params}`);
     const j = await r.json();
-    setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
+    const list = Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [];
+    setRows(list.map(normalizePayrollRun));
     setLoading(false);
   }, [periodFilter]);
 
@@ -205,17 +234,38 @@ function PayrollRunsContent() {
   const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((p) => ({ ...p, [k]: e.target.value }));
 
-  const ACTIONS: Record<
-    string,
-    { action: string; label: string; variant: 'primary' | 'warning' | 'success' | 'danger' }[]
-  > = {
-    DRAFT: [{ action: 'calculate', label: 'Calculate', variant: 'primary' }],
-    CALCULATED: [{ action: 'submit', label: 'Submit', variant: 'warning' }],
-    SUBMITTED: [
-      { action: 'approve', label: 'Approve', variant: 'success' },
-      { action: 'cancel', label: 'Cancel', variant: 'danger' },
-    ],
-    APPROVED: [{ action: 'pay', label: 'Pay', variant: 'success' }],
+  const actionsFor = (
+    run: PayrollRun,
+  ): { action: string; label: string; variant: 'primary' | 'warning' | 'success' | 'danger' }[] => {
+    if (run.status === 'DRAFT') {
+      return hasPermission('payroll.calculate')
+        ? [{ action: 'calculate', label: 'Calculate', variant: 'primary' }]
+        : [];
+    }
+    if (run.status === 'CALCULATED') {
+      return hasPermission('payroll.submit')
+        ? [{ action: 'submit', label: 'Submit', variant: 'warning' }]
+        : [];
+    }
+    if (run.status === 'SUBMITTED') {
+      const actions: { action: string; label: string; variant: 'success' | 'danger' }[] = [];
+      if (!run.hrApprovedById && hasPermission('payroll.approve.hr')) {
+        actions.push({ action: 'approve-hr', label: 'HR Sign', variant: 'success' });
+      }
+      if (!run.financeApprovedById && hasPermission('payroll.approve.finance')) {
+        actions.push({ action: 'approve-finance', label: 'Finance Sign', variant: 'success' });
+      }
+      if (hasPermission('payroll.cancel')) {
+        actions.push({ action: 'cancel', label: 'Cancel', variant: 'danger' });
+      }
+      return actions;
+    }
+    if (run.status === 'APPROVED') {
+      return hasPermission('payroll.pay')
+        ? [{ action: 'pay', label: 'Pay', variant: 'success' }]
+        : [];
+    }
+    return [];
   };
 
   return (
@@ -266,6 +316,8 @@ function PayrollRunsContent() {
                   <th className={thCls}>Total Gross</th>
                   <th className={thCls}>Total Net</th>
                   <th className={thCls}>Status</th>
+                  <th className={thCls}>HR</th>
+                  <th className={thCls}>Finance</th>
                   <th className={thCls}>Actions</th>
                 </tr>
               </thead>
@@ -277,20 +329,26 @@ function PayrollRunsContent() {
                     <td className={tdCls}>{r.runType}</td>
                     <td className={tdCls}>
                       {r.totalGross != null
-                        ? `TZS ${(Number.isFinite(Number(r.totalGross)) ? Number(r.totalGross).toLocaleString('en-TZ') : '0')}`
+                        ? `TZS ${Number.isFinite(Number(r.totalGross)) ? Number(r.totalGross).toLocaleString('en-TZ') : '0'}`
                         : '—'}
                     </td>
                     <td className={tdCls}>
                       {r.totalNet != null
-                        ? `TZS ${(Number.isFinite(Number(r.totalNet)) ? Number(r.totalNet).toLocaleString('en-TZ') : '0')}`
+                        ? `TZS ${Number.isFinite(Number(r.totalNet)) ? Number(r.totalNet).toLocaleString('en-TZ') : '0'}`
                         : '—'}
                     </td>
                     <td className={tdCls}>
                       <StatusBadge status={r.status} />
                     </td>
                     <td className={tdCls}>
+                      <StatusBadge status={r.hrApprovedById ? 'SIGNED' : 'PENDING'} />
+                    </td>
+                    <td className={tdCls}>
+                      <StatusBadge status={r.financeApprovedById ? 'SIGNED' : 'PENDING'} />
+                    </td>
+                    <td className={tdCls}>
                       <div className="flex flex-wrap gap-1">
-                        {(ACTIONS[r.status] ?? []).map((act) => (
+                        {actionsFor(r).map((act) => (
                           <Btn
                             key={act.action}
                             variant={act.variant}
@@ -324,7 +382,7 @@ function PayrollRunsContent() {
                 {rows.length === 0 && (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={9}
                       className="text-center py-8 text-sm"
                       style={{ color: 'var(--aurora-text-muted)' }}
                     >

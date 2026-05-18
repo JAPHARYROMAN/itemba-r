@@ -476,6 +476,20 @@ const ALL_PERMISSIONS: PermDef[] = [
   ...perms('deductions', ['view', 'manage']),
   ...perms('payroll', ['view', 'manage', 'calculate', 'submit', 'approve', 'pay', 'cancel']),
   {
+    code: 'payroll.approve.hr',
+    description: 'Record HR sign-off for payroll runs',
+    module: 'payroll',
+    action: 'approve.hr',
+    isGroupControl: false,
+  },
+  {
+    code: 'payroll.approve.finance',
+    description: 'Record Finance sign-off for payroll runs',
+    module: 'payroll',
+    action: 'approve.finance',
+    isGroupControl: false,
+  },
+  {
     code: 'payroll.sensitive.view',
     description: 'View sensitive payroll data',
     module: 'payroll',
@@ -1293,6 +1307,7 @@ const ROLES: RoleDef[] = [
       inModules(...FINANCE_MODULES, 'expenses'),
       inModules(...ACCOUNTING_ENGINE_MODULES, ...PROCUREMENT_MODULES),
       (p) => inModules(...OPERATIONS_MODULES)(p) && readExport(p),
+      (p) => p.code === 'payroll.approve.finance',
       (p) =>
         inModules('fuel_collections', 'fuel_credit_sales', 'fuel_reconciliation', 'petroleum')(p) &&
         !['manage', 'approve', 'post'].includes(p.action),
@@ -1732,6 +1747,27 @@ const ROLES: RoleDef[] = [
 
   // ── Milestone 9 — HR & Payroll Roles ────────────────────────────────────────
   {
+    name: 'GROUP_HR_DIRECTOR',
+    displayName: 'Group HR Director',
+    description: 'Group-level HR oversight with HR sign-off authority for payroll runs.',
+    scope: RoleScope.GROUP,
+    filter: combine(
+      inModules(...HR_CORE_MODULES, ...HR_ATTENDANCE_MODULES, ...HR_OTHER_MODULES),
+      (p) =>
+        inModules(...HR_PAYROLL_MODULES)(p) &&
+        (readExport(p) || ['payroll.approve.hr', 'payroll.sensitive.view'].includes(p.code)),
+      (p) =>
+        [
+          'companies.read',
+          'divisions.read',
+          'branches.read',
+          'users.read',
+          'documents.read',
+          'documents.create',
+        ].includes(p.code),
+    ),
+  },
+  {
     name: 'HR_MANAGER',
     displayName: 'HR Manager',
     description:
@@ -1740,6 +1776,7 @@ const ROLES: RoleDef[] = [
     filter: combine(
       inModules(...HR_CORE_MODULES, ...HR_ATTENDANCE_MODULES, ...HR_OTHER_MODULES),
       (p) => inModules(...HR_PAYROLL_MODULES)(p) && readExport(p),
+      (p) => p.code === 'payroll.approve.hr',
       (p) =>
         [
           'companies.read',
@@ -1772,7 +1809,9 @@ const ROLES: RoleDef[] = [
     description: 'Processes payroll, manages allowances, deductions, salary payments and advances.',
     scope: RoleScope.COMPANY,
     filter: combine(
-      inModules(...HR_PAYROLL_MODULES),
+      (p) =>
+        inModules(...HR_PAYROLL_MODULES)(p) &&
+        !['payroll.approve.hr', 'payroll.approve.finance'].includes(p.code),
       (p) => inModules(...HR_CORE_MODULES)(p) && readExport(p),
       (p) => ['companies.read', 'divisions.read', 'branches.read'].includes(p.code),
     ),

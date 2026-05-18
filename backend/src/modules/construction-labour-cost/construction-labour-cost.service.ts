@@ -153,6 +153,17 @@ export class ConstructionLabourCostService {
     return { allocated, skipped };
   }
 
+  async reverseForRun(
+    payrollRunId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<{ reversed: number }> {
+    const db: DbClient = tx ?? this.prisma;
+    const result = await db.projectCostAllocation.deleteMany({
+      where: { payrollRunId },
+    });
+    return { reversed: result.count };
+  }
+
   async report(filter: LabourCostFilter) {
     if (!filter.companyId) throw new BadRequestException('companyId is required');
     const periodStart = new Date(filter.periodStart);
@@ -191,13 +202,21 @@ export class ConstructionLabourCostService {
     }
 
     // Resolve project metadata.
-    const projectIds = Array.from(new Set(assignments.map((a) => a.assignmentContextId).filter(Boolean) as string[]));
+    const projectIds = Array.from(
+      new Set(assignments.map((a) => a.assignmentContextId).filter(Boolean) as string[]),
+    );
     const projectsRaw = await this.prisma.constructionProject.findMany({
       where: { id: { in: projectIds }, deletedAt: null },
       select: { id: true, projectCode: true, projectName: true, status: true },
     });
-    const projectMap = new Map<string, { id: string; projectCode: string; name: string; status: string }>(
-      projectsRaw.map((p) => [p.id, { id: p.id, projectCode: p.projectCode, name: p.projectName, status: p.status }]),
+    const projectMap = new Map<
+      string,
+      { id: string; projectCode: string; name: string; status: string }
+    >(
+      projectsRaw.map((p) => [
+        p.id,
+        { id: p.id, projectCode: p.projectCode, name: p.projectName, status: p.status },
+      ]),
     );
 
     // Pull payroll entries paid in the period for these employees.
@@ -252,7 +271,10 @@ export class ConstructionLabourCostService {
       const periodEndDate = new Date(period.endDate);
       const periodDays = daysBetween(periodStartDate, periodEndDate);
 
-      const employerStatutory = entry.statutoryLines.reduce((s, l) => s + Number(l.employerContribution), 0);
+      const employerStatutory = entry.statutoryLines.reduce(
+        (s, l) => s + Number(l.employerContribution),
+        0,
+      );
       const grossPlusEr = Number(entry.grossPay) + employerStatutory;
 
       // Find every project assignment overlapping the period for this employee.
@@ -265,7 +287,10 @@ export class ConstructionLabourCostService {
         const overlapEnd = aEnd < periodEndDate ? aEnd : periodEndDate;
         const overlapDays = Math.max(0, daysBetween(overlapStart, overlapEnd));
         if (overlapDays > 0 && a.assignmentContextId) {
-          projectOverlaps.set(a.assignmentContextId, (projectOverlaps.get(a.assignmentContextId) ?? 0) + overlapDays);
+          projectOverlaps.set(
+            a.assignmentContextId,
+            (projectOverlaps.get(a.assignmentContextId) ?? 0) + overlapDays,
+          );
         }
       }
       const totalOverlapDays = Array.from(projectOverlaps.values()).reduce((s, d) => s + d, 0);
@@ -318,21 +343,25 @@ export class ConstructionLabourCostService {
     }
 
     // Round at the boundary.
-    const rounded = Array.from(projectRows.values()).map((r) => ({
-      ...r,
-      employeeRows: r.employeeRows.sort((a, b) => b.totalCost - a.totalCost).map((er) => ({
-        ...er,
-        gross: round2(er.gross),
-        employerStatutory: round2(er.employerStatutory),
-        totalCost: round2(er.totalCost),
-      })),
-      totals: {
-        days: r.totals.days,
-        gross: round2(r.totals.gross),
-        employerStatutory: round2(r.totals.employerStatutory),
-        totalCost: round2(r.totals.totalCost),
-      },
-    })).sort((a, b) => b.totals.totalCost - a.totals.totalCost);
+    const rounded = Array.from(projectRows.values())
+      .map((r) => ({
+        ...r,
+        employeeRows: r.employeeRows
+          .sort((a, b) => b.totalCost - a.totalCost)
+          .map((er) => ({
+            ...er,
+            gross: round2(er.gross),
+            employerStatutory: round2(er.employerStatutory),
+            totalCost: round2(er.totalCost),
+          })),
+        totals: {
+          days: r.totals.days,
+          gross: round2(r.totals.gross),
+          employerStatutory: round2(r.totals.employerStatutory),
+          totalCost: round2(r.totals.totalCost),
+        },
+      }))
+      .sort((a, b) => b.totals.totalCost - a.totals.totalCost);
 
     const totals = rounded.reduce(
       (acc, p) => ({

@@ -19,6 +19,7 @@ interface RunRow {
   id: string;
   companyId: string;
   status: string;
+  journalEntryId: string | null;
   hrApprovedById: string | null;
   hrApprovedAt: Date | null;
   financeApprovedById: string | null;
@@ -32,6 +33,7 @@ function makeServiceWithRun(initial: Partial<RunRow> = {}) {
     id: 'run-1',
     companyId: 'company-1',
     status: 'SUBMITTED',
+    journalEntryId: null,
     hrApprovedById: null,
     hrApprovedAt: null,
     financeApprovedById: null,
@@ -59,17 +61,14 @@ function makeServiceWithRun(initial: Partial<RunRow> = {}) {
   const audit: any = { log: jest.fn().mockResolvedValue(undefined) };
   const postings: any = {
     postRun: jest.fn().mockImplementation(async (id: string) => postedRuns.push(id)),
+    reverseAccrual: jest.fn().mockResolvedValue(null),
   };
-  const service = new PayrollRunsService(
-    prisma,
-    audit,
-    {} as any,
-    postings,
-    {} as any,
-    { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) } as any,
-  );
+  const labourCost: any = { reverseForRun: jest.fn().mockResolvedValue({ reversed: 0 }) };
+  const service = new PayrollRunsService(prisma, audit, {} as any, postings, labourCost, {
+    assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
+  } as any);
 
-  return { service, row, postedRuns };
+  return { service, row, postedRuns, postings, labourCost };
 }
 
 describe('PayrollRunsService dual sign-off', () => {
@@ -119,5 +118,26 @@ describe('PayrollRunsService dual sign-off', () => {
       BadRequestException,
     );
     expect(postedRuns).toHaveLength(0);
+  });
+
+  it('reverses accrual postings and labour allocations before cancelling an approved run', async () => {
+    const { service, row, postings, labourCost } = makeServiceWithRun({
+      status: 'APPROVED',
+      journalEntryId: 'je-1',
+      hrApprovedById: 'hr-user',
+      financeApprovedById: 'finance-user',
+    });
+
+    const result = await service.cancel('run-1', 'wrong period', user('admin-user'));
+
+    expect(postings.reverseAccrual).toHaveBeenCalledWith(
+      'run-1',
+      'admin-user',
+      'wrong period',
+      expect.any(Object),
+    );
+    expect(labourCost.reverseForRun).toHaveBeenCalledWith('run-1', expect.any(Object));
+    expect(row.status).toBe('CANCELLED');
+    expect(result?.status).toBe('CANCELLED');
   });
 });

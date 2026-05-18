@@ -93,56 +93,56 @@ export class PayrollPostingsService {
     }
 
     const totals = {
-      grossPay: 0,
-      netPay: 0,
+      grossPay: decimal(0),
+      netPay: decimal(0),
       // Employee-side (credit payables)
-      paye: 0,
-      nssfEmployee: 0,
-      psssfEmployee: 0,
-      wcfEmployee: 0,
-      sdlEmployee: 0,
-      nhifEmployee: 0,
-      heslb: 0,
+      paye: decimal(0),
+      nssfEmployee: decimal(0),
+      psssfEmployee: decimal(0),
+      wcfEmployee: decimal(0),
+      sdlEmployee: decimal(0),
+      nhifEmployee: decimal(0),
+      heslb: decimal(0),
       // Employer-side (debit expenses, credit payables)
-      nssfEmployer: 0,
-      psssfEmployer: 0,
-      wcfEmployer: 0,
-      sdlEmployer: 0,
-      nhifEmployer: 0,
+      nssfEmployer: decimal(0),
+      psssfEmployer: decimal(0),
+      wcfEmployer: decimal(0),
+      sdlEmployer: decimal(0),
+      nhifEmployer: decimal(0),
     };
 
     for (const e of entries) {
-      totals.grossPay += Number(e.grossPay);
-      totals.netPay += Number(e.netPay);
+      totals.grossPay = totals.grossPay.plus(decimal(e.grossPay));
+      totals.netPay = totals.netPay.plus(decimal(e.netPay));
       for (const l of e.statutoryLines) {
         const code = l.taxType.taxTypeCode;
-        const ee = Number(l.employeeContribution);
-        const er = Number(l.employerContribution);
+        const ee = decimal(l.employeeContribution);
+        const er = decimal(l.employerContribution);
         switch (code) {
           case 'PAYE_MAINLAND':
           case 'PAYE_ZANZIBAR':
-            totals.paye += ee;
+            totals.paye = totals.paye.plus(ee);
             break;
           case 'NSSF':
-            totals.nssfEmployee += ee;
-            totals.nssfEmployer += er;
+            totals.nssfEmployee = totals.nssfEmployee.plus(ee);
+            totals.nssfEmployer = totals.nssfEmployer.plus(er);
             break;
           case 'PSSSF':
-            totals.psssfEmployee += ee;
-            totals.psssfEmployer += er;
+            totals.psssfEmployee = totals.psssfEmployee.plus(ee);
+            totals.psssfEmployer = totals.psssfEmployer.plus(er);
             break;
           case 'WCF':
-            totals.wcfEmployer += er;
+            totals.wcfEmployer = totals.wcfEmployer.plus(er);
             break;
           case 'SDL':
-            totals.sdlEmployer += er;
+            totals.sdlEmployer = totals.sdlEmployer.plus(er);
             break;
           case 'NHIF':
-            totals.nhifEmployee += ee;
-            totals.nhifEmployer += er;
+            totals.nhifEmployee = totals.nhifEmployee.plus(ee);
+            totals.nhifEmployer = totals.nhifEmployer.plus(er);
             break;
           case 'HESLB':
-            totals.heslb += ee;
+            totals.heslb = totals.heslb.plus(ee);
             break;
         }
       }
@@ -150,7 +150,11 @@ export class PayrollPostingsService {
 
     // Resolve all required account ids on the company.
     const accounts = await db.chartOfAccount.findMany({
-      where: { companyId: run.companyId, deletedAt: null, accountCode: { in: Object.values(ACCOUNT_CODES) } },
+      where: {
+        companyId: run.companyId,
+        deletedAt: null,
+        accountCode: { in: Object.values(ACCOUNT_CODES) },
+      },
       select: { id: true, accountCode: true },
     });
     const accountId = (code: string) => {
@@ -164,12 +168,31 @@ export class PayrollPostingsService {
     };
 
     // Build lines — only include rows with non-zero amounts to keep the JE tidy.
-    const lines: Array<{ accountId: string; debit: number; credit: number; description: string }> = [];
-    const dr = (code: keyof typeof ACCOUNT_CODES, amount: number, description: string) => {
-      if (amount > 0) lines.push({ accountId: accountId(ACCOUNT_CODES[code]), debit: round2(amount), credit: 0, description });
+    const lines: Array<{
+      accountId: string;
+      debit: Prisma.Decimal;
+      credit: Prisma.Decimal;
+      description: string;
+    }> = [];
+    const dr = (code: keyof typeof ACCOUNT_CODES, amount: Prisma.Decimal, description: string) => {
+      const rounded = money(amount);
+      if (rounded.gt(0))
+        lines.push({
+          accountId: accountId(ACCOUNT_CODES[code]),
+          debit: rounded,
+          credit: decimal(0),
+          description,
+        });
     };
-    const cr = (code: keyof typeof ACCOUNT_CODES, amount: number, description: string) => {
-      if (amount > 0) lines.push({ accountId: accountId(ACCOUNT_CODES[code]), debit: 0, credit: round2(amount), description });
+    const cr = (code: keyof typeof ACCOUNT_CODES, amount: Prisma.Decimal, description: string) => {
+      const rounded = money(amount);
+      if (rounded.gt(0))
+        lines.push({
+          accountId: accountId(ACCOUNT_CODES[code]),
+          debit: decimal(0),
+          credit: rounded,
+          description,
+        });
     };
 
     // ── Debits ──────────────────────────────────────────────────────────────
@@ -182,25 +205,33 @@ export class PayrollPostingsService {
 
     // ── Credits ─────────────────────────────────────────────────────────────
     cr('PAYE_PAYABLE', totals.paye, 'PAYE withheld — to TRA');
-    cr('NSSF_PAYABLE', totals.nssfEmployee + totals.nssfEmployer, 'NSSF (employee + employer)');
-    cr('PSSSF_PAYABLE', totals.psssfEmployee + totals.psssfEmployer, 'PSSSF (employee + employer)');
+    cr('NSSF_PAYABLE', totals.nssfEmployee.plus(totals.nssfEmployer), 'NSSF (employee + employer)');
+    cr(
+      'PSSSF_PAYABLE',
+      totals.psssfEmployee.plus(totals.psssfEmployer),
+      'PSSSF (employee + employer)',
+    );
     cr('WCF_PAYABLE', totals.wcfEmployer, 'WCF payable');
     cr('SDL_PAYABLE', totals.sdlEmployer, 'SDL payable — to TRA');
-    cr('NHIF_PAYABLE', totals.nhifEmployee + totals.nhifEmployer, 'NHIF (employee + employer)');
+    cr('NHIF_PAYABLE', totals.nhifEmployee.plus(totals.nhifEmployer), 'NHIF (employee + employer)');
     cr('HESLB_PAYABLE', totals.heslb, 'HESLB — to Loans Board');
     cr('SALARIES_PAYABLE', totals.netPay, 'Net pay accrued — to be disbursed');
 
-    const totalDebit = round2(lines.reduce((s, l) => s + l.debit, 0));
-    const totalCredit = round2(lines.reduce((s, l) => s + l.credit, 0));
-    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+    const totalDebit = money(lines.reduce((s, l) => s.plus(l.debit), decimal(0)));
+    const totalCredit = money(lines.reduce((s, l) => s.plus(l.credit), decimal(0)));
+    if (totalDebit.minus(totalCredit).abs().gt(0.01)) {
       throw new BadRequestException(
-        `Journal entry would not balance: Dr ${totalDebit} vs Cr ${totalCredit}. Aborting post.`,
+        `Journal entry would not balance: Dr ${totalDebit.toFixed(2)} vs Cr ${totalCredit.toFixed(2)}. Aborting post.`,
       );
     }
 
     // Create the JE.
     const txDate = run.payrollPeriod?.paymentDate ?? run.payrollPeriod?.endDate ?? run.runDate;
-    const journalNumber = await this.codes.next({ entityType: 'JournalEntry', companyId: run.companyId, tx });
+    const journalNumber = await this.codes.next({
+      entityType: 'JournalEntry',
+      companyId: run.companyId,
+      tx,
+    });
     const je = await db.journalEntry.create({
       data: {
         journalNumber,
@@ -233,6 +264,95 @@ export class PayrollPostingsService {
     });
 
     return je;
+  }
+
+  async reverseAccrual(
+    payrollRunId: string,
+    userId: string,
+    reason = 'Payroll run cancelled',
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db: DbClient = tx ?? this.prisma;
+    const run = await db.payrollRun.findFirst({
+      where: { id: payrollRunId, deletedAt: null },
+      select: { id: true, companyId: true, payrollRunNumber: true, journalEntryId: true },
+    });
+    if (!run) throw new NotFoundException('Payroll run not found');
+    if (!run.journalEntryId) return null;
+
+    const original = await db.journalEntry.findFirst({
+      where: { id: run.journalEntryId, companyId: run.companyId, deletedAt: null },
+      include: { lines: true },
+    });
+    if (!original) return null;
+
+    const existing = await db.journalEntry.findFirst({
+      where: { companyId: run.companyId, reversalOfId: original.id, deletedAt: null },
+      include: { lines: true },
+    });
+    if (existing) return existing;
+
+    if (original.status === 'REVERSED') return null;
+    if (!['DRAFT', 'POSTED'].includes(original.status)) {
+      throw new BadRequestException(
+        `Payroll accrual journal entry is ${original.status} and cannot be reversed.`,
+      );
+    }
+    if (original.lines.length === 0) {
+      throw new BadRequestException('Payroll accrual journal entry has no lines to reverse.');
+    }
+
+    const now = new Date();
+    const journalNumber = await this.codes.next({
+      entityType: 'JournalEntry',
+      companyId: run.companyId,
+      tx,
+    });
+    const reversal = await db.journalEntry.create({
+      data: {
+        journalNumber,
+        companyId: original.companyId,
+        divisionId: original.divisionId,
+        branchId: original.branchId,
+        accountingPeriodId: original.accountingPeriodId,
+        transactionDate: now,
+        description: `Payroll accrual reversal — ${run.payrollRunNumber}: ${reason}`,
+        referenceType: original.referenceType,
+        referenceId: original.referenceId,
+        status: original.status,
+        totalDebit: original.totalCredit,
+        totalCredit: original.totalDebit,
+        createdById: userId,
+        ...(original.status === 'POSTED' ? { postedById: userId, postedAt: now } : {}),
+        reversalOfId: original.id,
+        lines: {
+          create: original.lines.map((line) => ({
+            accountId: line.accountId,
+            description: line.description
+              ? `Reversal: ${line.description}`
+              : 'Payroll accrual reversal',
+            debit: line.credit,
+            credit: line.debit,
+            companyId: line.companyId,
+            divisionId: line.divisionId,
+            branchId: line.branchId,
+          })),
+        },
+      },
+      include: { lines: true },
+    });
+
+    await db.journalEntry.update({
+      where: { id: original.id },
+      data: {
+        status: 'REVERSED',
+        reversedById: userId,
+        reversedAt: now,
+        reversalReason: reason,
+      },
+    });
+
+    return reversal;
   }
 
   /**
@@ -308,7 +428,9 @@ export class PayrollPostingsService {
       where: { companyId: run.companyId, deletedAt: null, accountCode: { in: codesToFetch } },
       select: { id: true, accountCode: true },
     });
-    const salariesPayableId = accounts.find((a) => a.accountCode === ACCOUNT_CODES.SALARIES_PAYABLE)?.id;
+    const salariesPayableId = accounts.find(
+      (a) => a.accountCode === ACCOUNT_CODES.SALARIES_PAYABLE,
+    )?.id;
     if (!salariesPayableId) {
       throw new BadRequestException(
         'Missing chart of accounts entry — Salaries Payable (2270). Re-run the seed.',
@@ -324,7 +446,11 @@ export class PayrollPostingsService {
     }
 
     const txDate = run.payrollPeriod?.paymentDate ?? new Date();
-    const journalNumber = await this.codes.next({ entityType: 'JournalEntry', companyId: run.companyId, tx });
+    const journalNumber = await this.codes.next({
+      entityType: 'JournalEntry',
+      companyId: run.companyId,
+      tx,
+    });
     const je = await db.journalEntry.create({
       data: {
         journalNumber,
@@ -400,7 +526,11 @@ export class PayrollPostingsService {
     if (amount <= 0) throw new BadRequestException('Advance has no amount to post');
 
     const accounts = await db.chartOfAccount.findMany({
-      where: { companyId: advance.companyId, deletedAt: null, accountCode: { in: ['1110', '1000'] } },
+      where: {
+        companyId: advance.companyId,
+        deletedAt: null,
+        accountCode: { in: ['1110', '1000'] },
+      },
       select: { id: true, accountCode: true },
     });
     const receivableId = accounts.find((a) => a.accountCode === '1110')?.id;
@@ -411,7 +541,11 @@ export class PayrollPostingsService {
       );
     }
 
-    const journalNumber = await this.codes.next({ entityType: 'JournalEntry', companyId: advance.companyId, tx });
+    const journalNumber = await this.codes.next({
+      entityType: 'JournalEntry',
+      companyId: advance.companyId,
+      tx,
+    });
     const je = await db.journalEntry.create({
       data: {
         journalNumber,
@@ -426,8 +560,20 @@ export class PayrollPostingsService {
         createdById: userId,
         lines: {
           create: [
-            { accountId: receivableId, description: `Advance to ${advance.employee.employeeCode}`, debit: amount, credit: 0, companyId: advance.companyId },
-            { accountId: cashId, description: 'Cash disbursed for salary advance', debit: 0, credit: amount, companyId: advance.companyId },
+            {
+              accountId: receivableId,
+              description: `Advance to ${advance.employee.employeeCode}`,
+              debit: amount,
+              credit: 0,
+              companyId: advance.companyId,
+            },
+            {
+              accountId: cashId,
+              description: 'Cash disbursed for salary advance',
+              debit: 0,
+              credit: amount,
+              companyId: advance.companyId,
+            },
           ],
         },
       },
@@ -488,11 +634,17 @@ export class PayrollPostingsService {
     }
 
     const accounts = await db.chartOfAccount.findMany({
-      where: { companyId: run.companyId, deletedAt: null, accountCode: { in: ['5100', ACCOUNT_CODES.SALARIES_EXPENSE] } },
+      where: {
+        companyId: run.companyId,
+        deletedAt: null,
+        accountCode: { in: ['5100', ACCOUNT_CODES.SALARIES_EXPENSE] },
+      },
       select: { id: true, accountCode: true },
     });
     const projectLabourId = accounts.find((a) => a.accountCode === '5100')?.id;
-    const salariesExpenseId = accounts.find((a) => a.accountCode === ACCOUNT_CODES.SALARIES_EXPENSE)?.id;
+    const salariesExpenseId = accounts.find(
+      (a) => a.accountCode === ACCOUNT_CODES.SALARIES_EXPENSE,
+    )?.id;
     if (!projectLabourId || !salariesExpenseId) {
       throw new BadRequestException(
         'Missing chart of accounts entries — Direct Project Labour Cost (5100) and/or Salaries Expense (6000). Re-run the seed.',
@@ -500,7 +652,11 @@ export class PayrollPostingsService {
     }
 
     const txDate = run.payrollPeriod?.paymentDate ?? new Date();
-    const journalNumber = await this.codes.next({ entityType: 'JournalEntry', companyId: run.companyId, tx });
+    const journalNumber = await this.codes.next({
+      entityType: 'JournalEntry',
+      companyId: run.companyId,
+      tx,
+    });
     const je = await db.journalEntry.create({
       data: {
         journalNumber,
@@ -537,9 +693,19 @@ export class PayrollPostingsService {
 
     return je;
   }
-
 }
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
+}
+
+type DecimalInput = ConstructorParameters<typeof Prisma.Decimal>[0];
+
+function decimal(value: DecimalInput | null | undefined): Prisma.Decimal {
+  if (value instanceof Prisma.Decimal) return value;
+  return new Prisma.Decimal(value ?? 0);
+}
+
+function money(value: Prisma.Decimal): Prisma.Decimal {
+  return value.toDecimalPlaces(2);
 }
