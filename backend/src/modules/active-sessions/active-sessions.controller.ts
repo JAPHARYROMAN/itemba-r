@@ -15,7 +15,7 @@ export class ActiveSessionsController {
 
   @Get('my')
   findMySessions(@CurrentUser() user: AuthUser, @Query() query: any) {
-    return this.service.findByUser(user.id, query);
+    return this.service.findByUser(user.id, query, user);
   }
 
   @Get(':id')

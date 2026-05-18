@@ -114,7 +114,11 @@ export default function PostingRunsPage() {
   useEffect(() => {
     fetch('/api/backend/companies?limit=100')
       .then((r) => r.json())
-      .then((j) => setCompanies(unwrapList<Company>(j)))
+      .then((j) => {
+        const rows = unwrapList<Company>(j);
+        setCompanies(rows);
+        if (rows.length > 0) setCompanyId((current) => current || rows[0].id);
+      })
       .catch(() => setCompanies([]));
   }, []);
 
@@ -128,7 +132,9 @@ export default function PostingRunsPage() {
       const json = await fetch(`/api/backend/posting-runs?${params}`).then((r) => r.json());
       const list = unwrapList<PostingRun>(json);
       setRows(list);
-      setSelected((current) => current ? list.find((row) => row.id === current.id) ?? current : null);
+      setSelected((current) =>
+        current ? (list.find((row) => row.id === current.id) ?? current) : null,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load posting runs');
     } finally {
@@ -140,7 +146,10 @@ export default function PostingRunsPage() {
     load();
   }, [load]);
 
-  const companyById = useMemo(() => new Map(companies.map((company) => [company.id, company])), [companies]);
+  const companyById = useMemo(
+    () => new Map(companies.map((company) => [company.id, company])),
+    [companies],
+  );
   const draftCount = rows.filter((row) => row.status === 'DRAFT').length;
   const postedCount = rows.filter((row) => row.status === 'POSTED').length;
   const failedCount = rows.filter((row) => row.status === 'FAILED').length;
@@ -161,7 +170,12 @@ export default function PostingRunsPage() {
   };
 
   const saveRun = async () => {
-    if (!form.companyId || !form.postingRunNumber.trim() || !form.sourceType || !form.sourceId.trim()) {
+    if (
+      !form.companyId ||
+      !form.postingRunNumber.trim() ||
+      !form.sourceType ||
+      !form.sourceId.trim()
+    ) {
       setError('Company, run number, source type, and source id are required');
       return;
     }
@@ -198,7 +212,9 @@ export default function PostingRunsPage() {
     setSaving(true);
     setError('');
     try {
-      const response = await fetch(`/api/backend/posting-runs/${row.id}/${action}`, { method: 'POST' });
+      const response = await fetch(`/api/backend/posting-runs/${row.id}/${action}`, {
+        method: 'POST',
+      });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorMessage(json, `${action} failed`));
       await load();
@@ -235,19 +251,32 @@ export default function PostingRunsPage() {
             placeholder="All companies"
           >
             {companies.map((company) => (
-              <option key={company.id} value={company.id}>{optionLabel(company)}</option>
+              <option key={company.id} value={company.id}>
+                {optionLabel(company)}
+              </option>
             ))}
           </FormSelect>
-          <FormSelect label="Status" value={status} onChange={(e) => setStatus(e.target.value)} placeholder="All statuses">
+          <FormSelect
+            label="Status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            placeholder="All statuses"
+          >
             {['DRAFT', 'POSTED', 'FAILED', 'REVERSED', 'CANCELLED'].map((item) => (
-              <option key={item} value={item}>{item}</option>
+              <option key={item} value={item}>
+                {item}
+              </option>
             ))}
           </FormSelect>
           <Btn onClick={openCreate}>New Run</Btn>
         </div>
       </Card>
 
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       <div className="grid xl:grid-cols-[minmax(0,1fr)_420px] gap-5">
         <Card className="overflow-hidden">
@@ -257,7 +286,10 @@ export default function PostingRunsPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
+                  <tr
+                    className="text-left text-xs uppercase bg-gray-50"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
                     <th className="px-4 py-3">Run</th>
                     <th className="px-4 py-3">Company</th>
                     <th className="px-4 py-3">Source</th>
@@ -270,7 +302,11 @@ export default function PostingRunsPage() {
                 <tbody>
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                      <td
+                        colSpan={7}
+                        className="px-4 py-8 text-center text-sm"
+                        style={{ color: 'var(--aurora-text-muted)' }}
+                      >
                         No posting runs
                       </td>
                     </tr>
@@ -284,16 +320,31 @@ export default function PostingRunsPage() {
                       >
                         <td className="px-4 py-3">
                           <div className="font-mono text-xs">{row.postingRunNumber}</div>
-                          <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{fmtDate(row.createdAt)}</div>
+                          <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                            {fmtDate(row.createdAt)}
+                          </div>
                         </td>
-                        <td className="px-4 py-3">{optionLabel(companyById.get(row.companyId) ?? { name: row.companyId })}</td>
+                        <td className="px-4 py-3">
+                          {optionLabel(companyById.get(row.companyId) ?? { name: row.companyId })}
+                        </td>
                         <td className="px-4 py-3">
                           <div>{row.sourceType}</div>
-                          <div className="font-mono text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{row.sourceId}</div>
+                          <div
+                            className="font-mono text-xs"
+                            style={{ color: 'var(--aurora-text-muted)' }}
+                          >
+                            {row.sourceId}
+                          </div>
                         </td>
-                        <td className="px-4 py-3 text-right font-mono">{fmtMoney(row.totalDebit, row.currency)}</td>
-                        <td className="px-4 py-3 text-right font-mono">{fmtMoney(row.totalCredit, row.currency)}</td>
-                        <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
+                        <td className="px-4 py-3 text-right font-mono">
+                          {fmtMoney(row.totalDebit, row.currency)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono">
+                          {fmtMoney(row.totalCredit, row.currency)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge status={row.status} />
+                        </td>
                         <td className="px-4 py-3 text-xs">{fmtDate(row.postedAt)}</td>
                       </tr>
                     ))
@@ -313,16 +364,33 @@ export default function PostingRunsPage() {
             <>
               <div>
                 <div className="font-semibold">{selected.postingRunNumber}</div>
-                <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{selected.sourceType} - {selected.sourceId}</div>
+                <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                  {selected.sourceType} - {selected.sourceId}
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <StatCard label="Debit" value={fmtMoney(selected.totalDebit, selected.currency)} />
-                <StatCard label="Credit" value={fmtMoney(selected.totalCredit, selected.currency)} />
+                <StatCard
+                  label="Credit"
+                  value={fmtMoney(selected.totalCredit, selected.currency)}
+                />
               </div>
-              <div className="rounded-lg border p-3 text-sm space-y-2" style={{ borderColor: 'var(--aurora-border)' }}>
-                <div className="flex justify-between gap-3"><span>Posting Rule</span><span className="font-mono text-xs">{selected.postingRuleId ?? '-'}</span></div>
-                <div className="flex justify-between gap-3"><span>Journal Entry</span><span className="font-mono text-xs">{selected.journalEntryId ?? '-'}</span></div>
-                <div className="flex justify-between gap-3"><span>Reversed</span><span>{fmtDate(selected.reversedAt)}</span></div>
+              <div
+                className="rounded-lg border p-3 text-sm space-y-2"
+                style={{ borderColor: 'var(--aurora-border)' }}
+              >
+                <div className="flex justify-between gap-3">
+                  <span>Posting Rule</span>
+                  <span className="font-mono text-xs">{selected.postingRuleId ?? '-'}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span>Journal Entry</span>
+                  <span className="font-mono text-xs">{selected.journalEntryId ?? '-'}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span>Reversed</span>
+                  <span>{fmtDate(selected.reversedAt)}</span>
+                </div>
               </div>
               {selected.errorMessage && (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -330,10 +398,22 @@ export default function PostingRunsPage() {
                 </div>
               )}
               <div className="flex flex-wrap gap-2">
-                <Btn size="sm" variant="success" loading={saving} disabled={selected.status !== 'DRAFT'} onClick={() => runAction(selected, 'post')}>
+                <Btn
+                  size="sm"
+                  variant="success"
+                  loading={saving}
+                  disabled={selected.status !== 'DRAFT'}
+                  onClick={() => runAction(selected, 'post')}
+                >
                   Post
                 </Btn>
-                <Btn size="sm" variant="warning" loading={saving} disabled={selected.status !== 'POSTED'} onClick={() => runAction(selected, 'reverse')}>
+                <Btn
+                  size="sm"
+                  variant="warning"
+                  loading={saving}
+                  disabled={selected.status !== 'POSTED'}
+                  onClick={() => runAction(selected, 'reverse')}
+                >
                   Reverse
                 </Btn>
               </div>
@@ -350,26 +430,80 @@ export default function PostingRunsPage() {
           size="xl"
           footer={
             <>
-              <Btn variant="secondary" onClick={() => setCreating(false)}>Cancel</Btn>
-              <Btn loading={saving} onClick={saveRun}>Create</Btn>
+              <Btn variant="secondary" onClick={() => setCreating(false)}>
+                Cancel
+              </Btn>
+              <Btn loading={saving} onClick={saveRun}>
+                Create
+              </Btn>
             </>
           }
         >
           <div className="grid md:grid-cols-2 gap-3">
-            <FormInput label="Run Number" required value={form.postingRunNumber} onChange={(e) => setForm((f) => ({ ...f, postingRunNumber: e.target.value }))} />
-            <FormSelect label="Company" required value={form.companyId} onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value }))} placeholder="Select company">
-              {companies.map((company) => <option key={company.id} value={company.id}>{optionLabel(company)}</option>)}
+            <FormInput
+              label="Run Number"
+              required
+              value={form.postingRunNumber}
+              onChange={(e) => setForm((f) => ({ ...f, postingRunNumber: e.target.value }))}
+            />
+            <FormSelect
+              label="Company"
+              required
+              value={form.companyId}
+              onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value }))}
+              placeholder="Select company"
+            >
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {optionLabel(company)}
+                </option>
+              ))}
             </FormSelect>
-            <FormSelect label="Source Type" value={form.sourceType} onChange={(e) => setForm((f) => ({ ...f, sourceType: e.target.value }))}>
-              {SOURCE_TYPES.map((item) => <option key={item} value={item}>{item}</option>)}
+            <FormSelect
+              label="Source Type"
+              value={form.sourceType}
+              onChange={(e) => setForm((f) => ({ ...f, sourceType: e.target.value }))}
+            >
+              {SOURCE_TYPES.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
             </FormSelect>
-            <FormInput label="Source ID" required value={form.sourceId} onChange={(e) => setForm((f) => ({ ...f, sourceId: e.target.value }))} />
-            <FormInput label="Posting Rule ID" value={form.postingRuleId} onChange={(e) => setForm((f) => ({ ...f, postingRuleId: e.target.value }))} />
-            <FormInput label="Currency" value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value.toUpperCase() }))} />
-            <FormInput label="Total Debit" type="number" value={form.totalDebit} onChange={(e) => setForm((f) => ({ ...f, totalDebit: e.target.value }))} />
-            <FormInput label="Total Credit" type="number" value={form.totalCredit} onChange={(e) => setForm((f) => ({ ...f, totalCredit: e.target.value }))} />
+            <FormInput
+              label="Source ID"
+              required
+              value={form.sourceId}
+              onChange={(e) => setForm((f) => ({ ...f, sourceId: e.target.value }))}
+            />
+            <FormInput
+              label="Posting Rule ID"
+              value={form.postingRuleId}
+              onChange={(e) => setForm((f) => ({ ...f, postingRuleId: e.target.value }))}
+            />
+            <FormInput
+              label="Currency"
+              value={form.currency}
+              onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value.toUpperCase() }))}
+            />
+            <FormInput
+              label="Total Debit"
+              type="number"
+              value={form.totalDebit}
+              onChange={(e) => setForm((f) => ({ ...f, totalDebit: e.target.value }))}
+            />
+            <FormInput
+              label="Total Credit"
+              type="number"
+              value={form.totalCredit}
+              onChange={(e) => setForm((f) => ({ ...f, totalCredit: e.target.value }))}
+            />
             <div className="md:col-span-2">
-              <FormTextarea label="Error Message" value={form.errorMessage} onChange={(e) => setForm((f) => ({ ...f, errorMessage: e.target.value }))} />
+              <FormTextarea
+                label="Error Message"
+                value={form.errorMessage}
+                onChange={(e) => setForm((f) => ({ ...f, errorMessage: e.target.value }))}
+              />
             </div>
           </div>
         </Modal>

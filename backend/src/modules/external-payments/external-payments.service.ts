@@ -178,6 +178,12 @@ export class ExternalPaymentsService {
     metadata?: Record<string, unknown>,
   ) {
     if (!record) throw new NotFoundException('External payment not found');
+    if (record.status === ExternalPaymentStatus.SUCCESS) {
+      return this.prisma.externalPayment.findUnique({
+        where: { id: record.id },
+        select: this.buildSelect(false),
+      });
+    }
     if (
       record.status !== ExternalPaymentStatus.INITIATED &&
       record.status !== ExternalPaymentStatus.PENDING

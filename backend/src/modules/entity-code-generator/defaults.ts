@@ -78,7 +78,8 @@ export const DEFAULT_PATTERNS: Record<string, EntityCodePattern> = {
   // ── Finance ──────────────────────────────────────────────────────────────
   JournalEntry: { prefix: 'JE-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
   Receivable: { prefix: 'REC-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
-  Payable: { prefix: 'PAY-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
+  Payable: { prefix: 'AP-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
+  ThreeWayMatch: { prefix: 'TWM-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
 
   // ── Tax ──────────────────────────────────────────────────────────────────
   TaxTransaction: { prefix: 'TX-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
@@ -107,7 +108,11 @@ export const DEFAULT_PATTERNS: Record<string, EntityCodePattern> = {
   ExpenseJournal: { prefix: 'EXP-JE-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
   AuditAdjustment: { prefix: 'ADJ-{YYYY}-', padding: 5, resetFrequency: 'YEARLY' },
   AuditAdjustmentJournal: { prefix: 'JE-ADJ-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
-  AuditAdjustmentReversalJournal: { prefix: 'JE-ADJREV-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
+  AuditAdjustmentReversalJournal: {
+    prefix: 'JE-ADJREV-{YYYY}-',
+    padding: 6,
+    resetFrequency: 'YEARLY',
+  },
   DepreciationJournal: { prefix: 'JE-DEP-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
   LoanJournal: { prefix: 'JE-LOAN-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
   LoanRepaymentPayment: { prefix: 'LRP-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },

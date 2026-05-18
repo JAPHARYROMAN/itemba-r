@@ -9,6 +9,7 @@ import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
 import { QueryJournalEntryDto } from './dto/query-journal-entry.dto';
 import { ReverseJournalEntryDto } from './dto/reverse-journal-entry.dto';
 import { AccessLevel, AuditSeverity, Prisma } from '@prisma/client';
+import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 
 @Injectable()
 export class JournalEntriesService {
@@ -147,8 +148,8 @@ export class JournalEntriesService {
     if (accountingPeriodId) where.accountingPeriodId = accountingPeriodId;
     if (dateFrom || dateTo) {
       where.transactionDate = {};
-      if (dateFrom) where.transactionDate.gte = new Date(dateFrom);
-      if (dateTo) where.transactionDate.lte = new Date(dateTo);
+      if (dateFrom) where.transactionDate.gte = dateRangeStart(dateFrom);
+      if (dateTo) where.transactionDate.lte = dateRangeEnd(dateTo);
     }
 
     const [data, total] = await Promise.all([

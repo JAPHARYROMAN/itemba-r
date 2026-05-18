@@ -1,6 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import {
+  ApprovalRequestStatus,
+  DataQualityIssueSeverity,
+  DataQualityIssueStatus,
+  InsightStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { pagination } from '../../common/utils/pagination';
 
 @Injectable()
 export class BiService {
@@ -12,19 +19,30 @@ export class BiService {
   async getExecutiveSummary(user: any) {
     const [recentInsights, openIssues, pendingApprovals] = await Promise.all([
       this.prisma.executiveInsight.findMany({
-        where: { status: 'OPEN' as any, deletedAt: null, ...(user.companyId ? { companyId: user.companyId } : {}) },
+        where: {
+          status: InsightStatus.OPEN,
+          deletedAt: null,
+          ...(user.companyId ? { companyId: user.companyId } : {}),
+        },
         orderBy: { createdAt: 'desc' },
         take: 5,
       }),
       this.prisma.dataQualityIssue.count({
         where: {
-          status: { in: ['OPEN', 'ACKNOWLEDGED'] as any[] },
-          severity: { in: ['HIGH', 'CRITICAL'] as any[] },
+          status: {
+            in: [DataQualityIssueStatus.OPEN, DataQualityIssueStatus.ACKNOWLEDGED],
+          },
+          severity: {
+            in: [DataQualityIssueSeverity.HIGH, DataQualityIssueSeverity.CRITICAL],
+          },
           ...(user.companyId ? { companyId: user.companyId } : {}),
         },
       }),
       this.prisma.approvalRequest.count({
-        where: { status: 'PENDING' as any, ...(user.companyId ? { companyId: user.companyId } : {}) },
+        where: {
+          status: ApprovalRequestStatus.PENDING,
+          ...(user.companyId ? { companyId: user.companyId } : {}),
+        },
       }),
     ]);
     return { recentInsights, openIssuesCount: openIssues, pendingApprovalsCount: pendingApprovals };
@@ -35,16 +53,24 @@ export class BiService {
       where: { deletedAt: null, ...(user.companyId ? { id: user.companyId } : {}) },
       select: { id: true, name: true, code: true },
     });
-    const companiesWithKpis = await Promise.all(
-      companies.map(async (co) => {
-        const latestSnapshots = await this.prisma.kPISnapshot.findMany({
-          where: { companyId: co.id },
-          orderBy: { createdAt: 'desc' },
-          take: 5,
-        });
-        return { ...co, latestSnapshots };
-      }),
+    const latestSnapshots = await this.prisma.kPISnapshot.findMany({
+      where: { companyId: { in: companies.map((co) => co.id) } },
+      orderBy: { createdAt: 'desc' },
+      take: Math.max(companies.length * 5, 5),
+    });
+    const snapshotsByCompany = latestSnapshots.reduce<Record<string, typeof latestSnapshots>>(
+      (acc, snapshot) => {
+        if (!snapshot.companyId) return acc;
+        acc[snapshot.companyId] = acc[snapshot.companyId] ?? [];
+        if (acc[snapshot.companyId].length < 5) acc[snapshot.companyId].push(snapshot);
+        return acc;
+      },
+      {},
     );
+    const companiesWithKpis = companies.map((co) => ({
+      ...co,
+      latestSnapshots: snapshotsByCompany[co.id] ?? [],
+    }));
     return { companies: companiesWithKpis };
   }
 
@@ -56,17 +82,25 @@ export class BiService {
       case 'cash_position': {
         const data = await this.prisma.cashAccount.findMany({
           where: { deletedAt: null, ...companyFilter },
-          select: { id: true, accountName: true, currentBalance: true, currency: true, companyId: true },
+          select: {
+            id: true,
+            accountName: true,
+            currentBalance: true,
+            currency: true,
+            companyId: true,
+          },
         });
         return { datasetKey, data };
       }
       case 'inventory_summary': {
+        const paging = pagination({ page: body.page, limit: body.limit, maxLimit: 200 });
         const data = await this.prisma.inventoryBalance.findMany({
           where: { ...(companyId ? { companyId } : {}) },
           orderBy: { updatedAt: 'desc' },
-          take: 100,
+          skip: paging.skip,
+          take: paging.limit,
         });
-        return { datasetKey, data };
+        return { datasetKey, data, page: paging.page, limit: paging.limit };
       }
       case 'asset_summary': {
         const data = await this.prisma.fixedAsset.findMany({
@@ -82,13 +116,57 @@ export class BiService {
         const d60 = new Date(today.getTime() - 60 * 24 * 60 * 60 * 1000);
         const d90 = new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000);
         const [current, days30, days60, days90, over90] = await Promise.all([
-          this.prisma.receivable.count({ where: { dueDate: { gte: today }, status: { not: 'PAID' as any }, deletedAt: null, ...companyFilter } }),
-          this.prisma.receivable.count({ where: { dueDate: { gte: d30, lt: today }, status: { not: 'PAID' as any }, deletedAt: null, ...companyFilter } }),
-          this.prisma.receivable.count({ where: { dueDate: { gte: d60, lt: d30 }, status: { not: 'PAID' as any }, deletedAt: null, ...companyFilter } }),
-          this.prisma.receivable.count({ where: { dueDate: { gte: d90, lt: d60 }, status: { not: 'PAID' as any }, deletedAt: null, ...companyFilter } }),
-          this.prisma.receivable.count({ where: { dueDate: { lt: d90 }, status: { not: 'PAID' as any }, deletedAt: null, ...companyFilter } }),
+          this.prisma.receivable.count({
+            where: {
+              dueDate: { gte: today },
+              status: { not: 'PAID' },
+              deletedAt: null,
+              ...companyFilter,
+            },
+          }),
+          this.prisma.receivable.count({
+            where: {
+              dueDate: { gte: d30, lt: today },
+              status: { not: 'PAID' },
+              deletedAt: null,
+              ...companyFilter,
+            },
+          }),
+          this.prisma.receivable.count({
+            where: {
+              dueDate: { gte: d60, lt: d30 },
+              status: { not: 'PAID' },
+              deletedAt: null,
+              ...companyFilter,
+            },
+          }),
+          this.prisma.receivable.count({
+            where: {
+              dueDate: { gte: d90, lt: d60 },
+              status: { not: 'PAID' },
+              deletedAt: null,
+              ...companyFilter,
+            },
+          }),
+          this.prisma.receivable.count({
+            where: {
+              dueDate: { lt: d90 },
+              status: { not: 'PAID' },
+              deletedAt: null,
+              ...companyFilter,
+            },
+          }),
         ]);
-        return { datasetKey, data: { current, '1-30days': days30, '31-60days': days60, '61-90days': days90, 'over90days': over90 } };
+        return {
+          datasetKey,
+          data: {
+            current,
+            '1-30days': days30,
+            '31-60days': days60,
+            '61-90days': days90,
+            over90days: over90,
+          },
+        };
       }
       case 'company_comparison': {
         const companies = await this.prisma.company.findMany({
@@ -98,7 +176,12 @@ export class BiService {
         return { datasetKey, data: companies };
       }
       default:
-        return { datasetKey, status: 'available', data: [], message: 'Query ready — filters supported' };
+        return {
+          datasetKey,
+          status: 'available',
+          data: [],
+          message: 'Query ready — filters supported',
+        };
     }
   }
 }

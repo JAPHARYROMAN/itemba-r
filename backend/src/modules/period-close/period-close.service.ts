@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { AccessLevel } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
+import { pagination } from '../../common/utils/pagination';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
@@ -15,7 +16,7 @@ export class PeriodCloseService {
 
   async findAll(query: any, user: AuthUser) {
     const { companyId, page = 1, limit = 20 } = query;
-    const skip = (Number(page) - 1) * Number(limit);
+    const paging = pagination({ page, limit });
     const where: any = {
       deletedAt: null,
       ...(await this.companyScope.companyWhereFor(user, companyId)),
@@ -23,13 +24,13 @@ export class PeriodCloseService {
     const [items, total] = await Promise.all([
       this.prisma.accountingPeriodClose.findMany({
         where,
-        skip,
-        take: Number(limit),
+        skip: paging.skip,
+        take: paging.limit,
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.accountingPeriodClose.count({ where }),
     ]);
-    return { items, total, page: Number(page), limit: Number(limit) };
+    return { items, total, page: paging.page, limit: paging.limit };
   }
 
   async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
@@ -155,7 +156,12 @@ export class PeriodCloseService {
 
   private async ensurePeriodLock(
     tx: any,
-    close: { companyId: string; fiscalYearId: string; accountingPeriodId: string; closeNumber: string },
+    close: {
+      companyId: string;
+      fiscalYearId: string;
+      accountingPeriodId: string;
+      closeNumber: string;
+    },
     userId: string,
   ) {
     const existingLock = await tx.accountingLock.findFirst({

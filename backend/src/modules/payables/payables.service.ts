@@ -10,10 +10,9 @@ import { UpdatePayableDto } from './dto/update-payable.dto';
 import { QueryPayableDto } from './dto/query-payable.dto';
 import { RecordPayablePaymentDto } from './dto/record-payable-payment.dto';
 import { WriteOffPayableDto } from './dto/write-off-payable.dto';
-
-function generatePayableNumber(): string {
-  return `AP-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`;
-}
+import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
+import { pagination } from '../../common/utils/pagination';
+import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 
 @Injectable()
 export class PayablesService {
@@ -23,6 +22,7 @@ export class PayablesService {
     private readonly companyScope: CompanyScopeService,
     private readonly accountResolver: AccountResolverService,
     private readonly postingEngine: PostingEngineService,
+    private readonly codes: EntityCodeGeneratorService,
   ) {}
 
   async findAll(query: QueryPayableDto, user: AuthUser) {
@@ -37,7 +37,7 @@ export class PayablesService {
       dateFrom,
       dateTo,
     } = query;
-    const skip = (page - 1) * limit;
+    const paging = pagination({ page, limit });
 
     const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
     const where: Prisma.PayableWhereInput = { deletedAt: null };
@@ -53,8 +53,8 @@ export class PayablesService {
     if (supplierId) where.supplierId = supplierId;
     if (dateFrom || dateTo) {
       where.issueDate = {};
-      if (dateFrom) where.issueDate.gte = new Date(dateFrom);
-      if (dateTo) where.issueDate.lte = new Date(dateTo);
+      if (dateFrom) where.issueDate.gte = dateRangeStart(dateFrom);
+      if (dateTo) where.issueDate.lte = dateRangeEnd(dateTo);
     }
 
     const [data, total] = await Promise.all([
@@ -62,13 +62,19 @@ export class PayablesService {
         where,
         include: this.includeScope(),
         orderBy: { issueDate: 'desc' },
-        skip,
-        take: limit,
+        skip: paging.skip,
+        take: paging.limit,
       }),
       this.prisma.payable.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return {
+      data,
+      total,
+      page: paging.page,
+      limit: paging.limit,
+      totalPages: Math.ceil(total / paging.limit),
+    };
   }
 
   async findOne(id: string, user?: AuthUser) {
@@ -98,7 +104,11 @@ export class PayablesService {
     const record = await this.prisma.$transaction(async (tx) => {
       const created = await tx.payable.create({
         data: {
-          payableNumber: generatePayableNumber(),
+          payableNumber: await this.codes.next({
+            entityType: 'Payable',
+            companyId: dto.companyId,
+            tx,
+          }),
           companyId: dto.companyId,
           divisionId: scope.divisionId,
           branchId: scope.branchId,

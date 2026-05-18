@@ -5,15 +5,28 @@ describe('AccountResolverService', () => {
   function makeService(rows: any[]) {
     const prisma = {
       chartOfAccount: {
+        findMany: async ({ where }: any) => {
+          const subtypeFilter = where.OR?.find((item: any) => item.accountSubType)?.accountSubType;
+          const codeFilter = where.OR?.find((item: any) => item.accountCode)?.accountCode;
+          return rows.filter((r) => {
+            if (r.companyId !== where.companyId) return false;
+            if (r.deletedAt) return false;
+            if (r.isActive === false) return false;
+            const subtypeMatch =
+              subtypeFilter?.in?.some(
+                (want: string) => r.accountSubType?.toLowerCase() === want.toLowerCase(),
+              ) ?? false;
+            const codeMatch = codeFilter?.in?.includes(r.accountCode) ?? false;
+            return subtypeMatch || codeMatch;
+          });
+        },
         findFirst: async ({ where }: any) => {
           // Match by accountSubType (case-insensitive) first.
           if (where.accountSubType?.equals) {
             const want = (where.accountSubType.equals as string).toLowerCase();
             return (
               rows.find(
-                (r) =>
-                  r.companyId === where.companyId &&
-                  r.accountSubType?.toLowerCase() === want,
+                (r) => r.companyId === where.companyId && r.accountSubType?.toLowerCase() === want,
               ) ?? null
             );
           }
@@ -34,7 +47,13 @@ describe('AccountResolverService', () => {
 
   it('resolves by accountSubType when set (preferred path)', async () => {
     const svc = makeService([
-      { id: 'a1', companyId: 'co-1', accountCode: '9999', accountName: 'Cash A', accountSubType: 'cash_on_hand' },
+      {
+        id: 'a1',
+        companyId: 'co-1',
+        accountCode: '9999',
+        accountName: 'Cash A',
+        accountSubType: 'cash_on_hand',
+      },
     ]);
     const got = await svc.resolve('co-1', 'CASH_ON_HAND');
     expect(got.id).toBe('a1');
@@ -42,7 +61,13 @@ describe('AccountResolverService', () => {
 
   it('falls back to conventional codes when subtype is unset', async () => {
     const svc = makeService([
-      { id: 'a2', companyId: 'co-1', accountCode: '1010', accountName: 'Cash on hand', accountSubType: null },
+      {
+        id: 'a2',
+        companyId: 'co-1',
+        accountCode: '1010',
+        accountName: 'Cash on hand',
+        accountSubType: null,
+      },
     ]);
     const got = await svc.resolve('co-1', 'CASH_ON_HAND');
     expect(got.accountCode).toBe('1010');

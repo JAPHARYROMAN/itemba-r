@@ -14,9 +14,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           dangerouslySetInnerHTML={{
             __html: `
               try {
-                var t = localStorage.getItem('aurora-theme') || 'system';
-                var dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-                if (dark) document.documentElement.classList.add('dark');
+                if (typeof window !== 'undefined' && window.localStorage) {
+                  var t = window.localStorage.getItem('aurora-theme') || 'system';
+                  var dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                  if (dark) document.documentElement.classList.add('dark');
+                }
               } catch(e) {}
             `,
           }}

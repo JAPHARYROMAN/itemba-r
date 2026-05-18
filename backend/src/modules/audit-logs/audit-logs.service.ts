@@ -6,6 +6,7 @@ import {
   assertCanAccessCompanyFromUser,
   companyWhereForUser,
 } from '../../common/services/company-scope.service';
+import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 
 export interface AuditLogInput {
   action: string;
@@ -233,8 +234,8 @@ export class AuditLogsService {
       }),
       ...((q.dateFrom || q.dateTo) && {
         createdAt: {
-          ...(q.dateFrom && { gte: new Date(q.dateFrom) }),
-          ...(q.dateTo && { lte: new Date(q.dateTo) }),
+          ...(q.dateFrom && { gte: dateRangeStart(q.dateFrom) }),
+          ...(q.dateTo && { lte: dateRangeEnd(q.dateTo) }),
         },
       }),
     };
@@ -318,8 +319,8 @@ export class AuditLogsService {
     const createdAt =
       dateFrom || dateTo
         ? {
-            ...(dateFrom && { gte: new Date(dateFrom) }),
-            ...(dateTo && { lte: new Date(dateTo) }),
+            ...(dateFrom && { gte: dateRangeStart(dateFrom) }),
+            ...(dateTo && { lte: dateRangeEnd(dateTo) }),
           }
         : undefined;
 

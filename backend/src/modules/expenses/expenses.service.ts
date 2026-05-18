@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
@@ -14,6 +10,7 @@ import { AccessLevel, AuditSeverity, CashAccount, Prisma } from '@prisma/client'
 import { AccountingControlService, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 
 @Injectable()
 export class ExpensesService {
@@ -60,8 +57,15 @@ export class ExpensesService {
 
   async findAll(query: QueryExpenseDto, user: AuthUser) {
     const {
-      page = 1, limit = 20, companyId, divisionId, branchId,
-      expenseCategoryId, status, dateFrom, dateTo,
+      page = 1,
+      limit = 20,
+      companyId,
+      divisionId,
+      branchId,
+      expenseCategoryId,
+      status,
+      dateFrom,
+      dateTo,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -75,8 +79,8 @@ export class ExpensesService {
     if (status) where.status = status;
     if (dateFrom || dateTo) {
       where.expenseDate = {};
-      if (dateFrom) where.expenseDate.gte = new Date(dateFrom);
-      if (dateTo) where.expenseDate.lte = new Date(dateTo);
+      if (dateFrom) where.expenseDate.gte = dateRangeStart(dateFrom);
+      if (dateTo) where.expenseDate.lte = dateRangeEnd(dateTo);
     }
 
     const [data, total] = await Promise.all([
@@ -117,7 +121,10 @@ export class ExpensesService {
   async create(dto: CreateExpenseDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const userId = user.id;
-    const expenseNumber = await this.codes.next({ entityType: 'Expense', companyId: dto.companyId });
+    const expenseNumber = await this.codes.next({
+      entityType: 'Expense',
+      companyId: dto.companyId,
+    });
     const record = await this.prisma.expense.create({
       data: {
         expenseNumber,
@@ -153,7 +160,9 @@ export class ExpensesService {
     const userId = user.id;
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (!['DRAFT', 'PENDING_APPROVAL'].includes(existing.status)) {
-      throw new BadRequestException('Expense can only be updated in DRAFT or PENDING_APPROVAL status');
+      throw new BadRequestException(
+        'Expense can only be updated in DRAFT or PENDING_APPROVAL status',
+      );
     }
 
     const record = await this.prisma.expense.update({
@@ -270,7 +279,9 @@ export class ExpensesService {
       throw new BadRequestException('Cash account is required before an expense can be paid');
     }
     if (!existing.expenseCategory?.linkedAccountId) {
-      throw new BadRequestException('Expense category must be linked to a ledger account before payment');
+      throw new BadRequestException(
+        'Expense category must be linked to a ledger account before payment',
+      );
     }
     const expenseLedgerAccountId = existing.expenseCategory.linkedAccountId;
 
@@ -301,7 +312,11 @@ export class ExpensesService {
         cashAccount,
       );
 
-      const jeNumber = await this.codes.next({ entityType: 'ExpenseJournal', companyId: existing.companyId, tx });
+      const jeNumber = await this.codes.next({
+        entityType: 'ExpenseJournal',
+        companyId: existing.companyId,
+        tx,
+      });
       const je = await this.postingEngine.postLines(
         {
           journalNumber: jeNumber,
@@ -315,19 +330,19 @@ export class ExpensesService {
           moduleName: 'expenses',
           userId,
           lines: [
-          {
-            accountId: expenseLedgerAccountId,
-            description: `Expense: ${existing.description}`,
-            debit: Number(existing.amount),
-            credit: 0,
-          },
-          {
-            accountId: cashLedgerAccountId,
-            description: `Cash payment from ${cashAccount.accountName}`,
-            debit: 0,
-            credit: Number(existing.amount),
-          },
-        ],
+            {
+              accountId: expenseLedgerAccountId,
+              description: `Expense: ${existing.description}`,
+              debit: Number(existing.amount),
+              credit: 0,
+            },
+            {
+              accountId: cashLedgerAccountId,
+              description: `Cash payment from ${cashAccount.accountName}`,
+              debit: 0,
+              credit: Number(existing.amount),
+            },
+          ],
         },
         tx,
       );

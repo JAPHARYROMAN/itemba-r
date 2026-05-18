@@ -5,6 +5,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
+import { pagination } from '../../common/utils/pagination';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 
 /**
@@ -48,7 +49,7 @@ export class BankReconciliationsService {
 
   async findAll(query: any, user?: AuthUser) {
     const { companyId, bankAccountId, status, page = 1, limit = 20 } = query;
-    const skip = (Number(page) - 1) * Number(limit);
+    const paging = pagination({ page, limit });
     const where: any = { deletedAt: null };
     applyCompanyScopeWhere(where, user, companyId);
     if (bankAccountId) where.bankAccountId = bankAccountId;
@@ -56,13 +57,13 @@ export class BankReconciliationsService {
     const [items, total] = await Promise.all([
       this.prisma.bankReconciliation.findMany({
         where,
-        skip,
-        take: Number(limit),
+        skip: paging.skip,
+        take: paging.limit,
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.bankReconciliation.count({ where }),
     ]);
-    return { items, total, page: Number(page), limit: Number(limit) };
+    return { items, total, page: paging.page, limit: paging.limit };
   }
 
   async findOne(id: string, user: AuthUser) {
@@ -396,7 +397,11 @@ export class BankReconciliationsService {
     }
 
     const cashAccount = await this.prisma.cashAccount.findFirst({
-      where: { id: reconciliation.cashAccountId, companyId: reconciliation.companyId, deletedAt: null },
+      where: {
+        id: reconciliation.cashAccountId,
+        companyId: reconciliation.companyId,
+        deletedAt: null,
+      },
       select: { accountType: true, divisionId: true, branchId: true },
     });
     const cashRole = cashAccount?.accountType === 'BANK' ? 'BANK' : 'CASH_ON_HAND';
@@ -415,7 +420,8 @@ export class BankReconciliationsService {
         : await this.accountResolver.resolve(reconciliation.companyId, 'GENERAL_EXPENSE', tx);
       if (!offsetChart) throw new BadRequestException('Offset account not found');
 
-      const description = dto.description || `Bank reconciliation adjustment ${reconciliation.reconciliationNumber}`;
+      const description =
+        dto.description || `Bank reconciliation adjustment ${reconciliation.reconciliationNumber}`;
       const je = await this.postingEngine.postLines(
         {
           journalNumber: `JE-BR-${reconciliation.reconciliationNumber}-${Date.now().toString(36).toUpperCase()}`,

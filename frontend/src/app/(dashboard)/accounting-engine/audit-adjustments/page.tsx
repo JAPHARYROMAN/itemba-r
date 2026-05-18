@@ -124,7 +124,11 @@ export default function AuditAdjustmentsPage() {
   useEffect(() => {
     fetch('/api/backend/companies?limit=100')
       .then((r) => r.json())
-      .then((j) => setCompanies(unwrapList<Company>(j)))
+      .then((j) => {
+        const rows = unwrapList<Company>(j);
+        setCompanies(rows);
+        if (rows.length > 0) setCompanyId((current) => current || rows[0].id);
+      })
       .catch(() => setCompanies([]));
   }, []);
 
@@ -140,11 +144,17 @@ export default function AuditAdjustmentsPage() {
     Promise.allSettled([
       fetch(`/api/backend/fiscal-years?companyId=${id}&limit=200`).then((r) => r.json()),
       fetch(`/api/backend/accounting-periods?companyId=${id}&limit=500`).then((r) => r.json()),
-      fetch(`/api/backend/chart-of-accounts?companyId=${id}&isActive=true&limit=500`).then((r) => r.json()),
+      fetch(`/api/backend/chart-of-accounts?companyId=${id}&isActive=true&limit=500`).then((r) =>
+        r.json(),
+      ),
     ]).then(([fyResult, periodResult, accountResult]) => {
       setFiscalYears(fyResult.status === 'fulfilled' ? unwrapList<FiscalYear>(fyResult.value) : []);
-      setPeriods(periodResult.status === 'fulfilled' ? unwrapList<AccountingPeriod>(periodResult.value) : []);
-      setAccounts(accountResult.status === 'fulfilled' ? unwrapList<Account>(accountResult.value) : []);
+      setPeriods(
+        periodResult.status === 'fulfilled' ? unwrapList<AccountingPeriod>(periodResult.value) : [],
+      );
+      setAccounts(
+        accountResult.status === 'fulfilled' ? unwrapList<Account>(accountResult.value) : [],
+      );
     });
   }, [companyId, form.companyId]);
 
@@ -158,7 +168,9 @@ export default function AuditAdjustmentsPage() {
       const json = await fetch(`/api/backend/audit-adjustments?${params}`).then((r) => r.json());
       const list = unwrapList<AuditAdjustment>(json);
       setRows(list);
-      setSelected((current) => current ? list.find((row) => row.id === current.id) ?? current : null);
+      setSelected((current) =>
+        current ? (list.find((row) => row.id === current.id) ?? current) : null,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load audit adjustments');
     } finally {
@@ -170,17 +182,32 @@ export default function AuditAdjustmentsPage() {
     load();
   }, [load]);
 
-  const companyById = useMemo(() => new Map(companies.map((company) => [company.id, company])), [companies]);
+  const companyById = useMemo(
+    () => new Map(companies.map((company) => [company.id, company])),
+    [companies],
+  );
   const fyById = useMemo(() => new Map(fiscalYears.map((fy) => [fy.id, fy])), [fiscalYears]);
-  const periodById = useMemo(() => new Map(periods.map((period) => [period.id, period])), [periods]);
-  const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
+  const periodById = useMemo(
+    () => new Map(periods.map((period) => [period.id, period])),
+    [periods],
+  );
+  const accountById = useMemo(
+    () => new Map(accounts.map((account) => [account.id, account])),
+    [accounts],
+  );
   const draftCount = rows.filter((row) => row.status === 'DRAFT').length;
   const postedCount = rows.filter((row) => row.status === 'POSTED').length;
   const submittedCount = rows.filter((row) => row.status === 'SUBMITTED').length;
   const formDebit = form.lines.reduce((sum, line) => sum + Number(line.debit || 0), 0);
   const formCredit = form.lines.reduce((sum, line) => sum + Number(line.credit || 0), 0);
-  const selectedDebit = (selected?.lines ?? []).reduce((sum, line) => sum + Number(line.debit || 0), 0);
-  const selectedCredit = (selected?.lines ?? []).reduce((sum, line) => sum + Number(line.credit || 0), 0);
+  const selectedDebit = (selected?.lines ?? []).reduce(
+    (sum, line) => sum + Number(line.debit || 0),
+    0,
+  );
+  const selectedCredit = (selected?.lines ?? []).reduce(
+    (sum, line) => sum + Number(line.credit || 0),
+    0,
+  );
   const selectablePeriods = form.fiscalYearId
     ? periods.filter((period) => period.fiscalYearId === form.fiscalYearId)
     : periods;
@@ -261,10 +288,12 @@ export default function AuditAdjustmentsPage() {
     }
   };
 
-  const runAction = async (row: AuditAdjustment, action: 'submit' | 'approve' | 'post' | 'reverse') => {
-    const body = action === 'reverse'
-      ? { reason: window.prompt('Reason for reversal')?.trim() }
-      : undefined;
+  const runAction = async (
+    row: AuditAdjustment,
+    action: 'submit' | 'approve' | 'post' | 'reverse',
+  ) => {
+    const body =
+      action === 'reverse' ? { reason: window.prompt('Reason for reversal')?.trim() } : undefined;
     if (action === 'reverse' && !body?.reason) return;
 
     setSaving(true);
@@ -311,19 +340,34 @@ export default function AuditAdjustmentsPage() {
             placeholder="All companies"
           >
             {companies.map((company) => (
-              <option key={company.id} value={company.id}>{optionLabel(company)}</option>
+              <option key={company.id} value={company.id}>
+                {optionLabel(company)}
+              </option>
             ))}
           </FormSelect>
-          <FormSelect label="Status" value={status} onChange={(e) => setStatus(e.target.value)} placeholder="All statuses">
-            {['DRAFT', 'SUBMITTED', 'APPROVED', 'POSTED', 'REVERSED', 'REJECTED', 'CANCELLED'].map((item) => (
-              <option key={item} value={item}>{item}</option>
-            ))}
+          <FormSelect
+            label="Status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            placeholder="All statuses"
+          >
+            {['DRAFT', 'SUBMITTED', 'APPROVED', 'POSTED', 'REVERSED', 'REJECTED', 'CANCELLED'].map(
+              (item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ),
+            )}
           </FormSelect>
           <Btn onClick={openCreate}>New Adjustment</Btn>
         </div>
       </Card>
 
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       <div className="grid xl:grid-cols-[minmax(0,1fr)_460px] gap-5">
         <Card className="overflow-hidden">
@@ -333,7 +377,10 @@ export default function AuditAdjustmentsPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
+                  <tr
+                    className="text-left text-xs uppercase bg-gray-50"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
                     <th className="px-4 py-3">Adjustment</th>
                     <th className="px-4 py-3">Company</th>
                     <th className="px-4 py-3">Description</th>
@@ -346,14 +393,24 @@ export default function AuditAdjustmentsPage() {
                 <tbody>
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                      <td
+                        colSpan={7}
+                        className="px-4 py-8 text-center text-sm"
+                        style={{ color: 'var(--aurora-text-muted)' }}
+                      >
                         No audit adjustments
                       </td>
                     </tr>
                   ) : (
                     rows.map((row) => {
-                      const debit = (row.lines ?? []).reduce((sum, line) => sum + Number(line.debit || 0), 0);
-                      const credit = (row.lines ?? []).reduce((sum, line) => sum + Number(line.credit || 0), 0);
+                      const debit = (row.lines ?? []).reduce(
+                        (sum, line) => sum + Number(line.debit || 0),
+                        0,
+                      );
+                      const credit = (row.lines ?? []).reduce(
+                        (sum, line) => sum + Number(line.credit || 0),
+                        0,
+                      );
                       return (
                         <tr
                           key={row.id}
@@ -363,13 +420,19 @@ export default function AuditAdjustmentsPage() {
                         >
                           <td className="px-4 py-3">
                             <div className="font-mono text-xs">{row.adjustmentNumber}</div>
-                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{fmtDate(row.createdAt)}</div>
+                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              {fmtDate(row.createdAt)}
+                            </div>
                           </td>
-                          <td className="px-4 py-3">{optionLabel(companyById.get(row.companyId) ?? { name: row.companyId })}</td>
+                          <td className="px-4 py-3">
+                            {optionLabel(companyById.get(row.companyId) ?? { name: row.companyId })}
+                          </td>
                           <td className="px-4 py-3">{row.description}</td>
                           <td className="px-4 py-3 text-right font-mono">{fmtMoney(debit)}</td>
                           <td className="px-4 py-3 text-right font-mono">{fmtMoney(credit)}</td>
-                          <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
+                          <td className="px-4 py-3">
+                            <StatusBadge status={row.status} />
+                          </td>
                           <td className="px-4 py-3 text-xs">{fmtDate(row.postedAt)}</td>
                         </tr>
                       );
@@ -398,17 +461,65 @@ export default function AuditAdjustmentsPage() {
                 <StatCard label="Debit" value={fmtMoney(selectedDebit)} />
                 <StatCard label="Credit" value={fmtMoney(selectedCredit)} />
               </div>
-              <div className="rounded-lg border p-3 text-sm space-y-2" style={{ borderColor: 'var(--aurora-border)' }}>
-                <div className="flex justify-between gap-3"><span>Fiscal Year</span><span>{selected.fiscalYearId ? fyById.get(selected.fiscalYearId)?.name ?? selected.fiscalYearId : '-'}</span></div>
-                <div className="flex justify-between gap-3"><span>Period</span><span>{selected.accountingPeriodId ? periodById.get(selected.accountingPeriodId)?.name ?? selected.accountingPeriodId : '-'}</span></div>
-                <div className="flex justify-between gap-3"><span>Journal Entry</span><span className="font-mono text-xs">{selected.journalEntryId ?? '-'}</span></div>
-                <div className="flex justify-between gap-3"><span>Reversal JE</span><span className="font-mono text-xs">{selected.reversalJournalEntryId ?? '-'}</span></div>
+              <div
+                className="rounded-lg border p-3 text-sm space-y-2"
+                style={{ borderColor: 'var(--aurora-border)' }}
+              >
+                <div className="flex justify-between gap-3">
+                  <span>Fiscal Year</span>
+                  <span>
+                    {selected.fiscalYearId
+                      ? (fyById.get(selected.fiscalYearId)?.name ?? selected.fiscalYearId)
+                      : '-'}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span>Period</span>
+                  <span>
+                    {selected.accountingPeriodId
+                      ? (periodById.get(selected.accountingPeriodId)?.name ??
+                        selected.accountingPeriodId)
+                      : '-'}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span>Journal Entry</span>
+                  <span className="font-mono text-xs">{selected.journalEntryId ?? '-'}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span>Reversal JE</span>
+                  <span className="font-mono text-xs">
+                    {selected.reversalJournalEntryId ?? '-'}
+                  </span>
+                </div>
               </div>
-              <div className="max-h-[280px] overflow-auto border rounded-lg" style={{ borderColor: 'var(--aurora-border)' }}>
+              <div
+                className="max-h-[280px] overflow-auto border rounded-lg"
+                style={{ borderColor: 'var(--aurora-border)' }}
+              >
                 {(selected.lines ?? []).map((line, index) => (
-                  <div key={line.id ?? index} className="border-b p-3 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
-                    <div className="font-medium">{line.accountId ? accountLabel(accountById.get(line.accountId) ?? { id: line.accountId, accountCode: line.accountId, accountName: 'Unknown account', accountType: '' }) : 'No account'}</div>
-                    {line.description && <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{line.description}</div>}
+                  <div
+                    key={line.id ?? index}
+                    className="border-b p-3 text-sm"
+                    style={{ borderColor: 'var(--aurora-border)' }}
+                  >
+                    <div className="font-medium">
+                      {line.accountId
+                        ? accountLabel(
+                            accountById.get(line.accountId) ?? {
+                              id: line.accountId,
+                              accountCode: line.accountId,
+                              accountName: 'Unknown account',
+                              accountType: '',
+                            },
+                          )
+                        : 'No account'}
+                    </div>
+                    {line.description && (
+                      <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                        {line.description}
+                      </div>
+                    )}
                     <div className="mt-1 grid grid-cols-2 gap-2 font-mono text-xs">
                       <span>DR {fmtMoney(line.debit)}</span>
                       <span>CR {fmtMoney(line.credit)}</span>
@@ -417,10 +528,42 @@ export default function AuditAdjustmentsPage() {
                 ))}
               </div>
               <div className="flex flex-wrap gap-2">
-                <Btn size="sm" variant="secondary" loading={saving} disabled={selected.status !== 'DRAFT'} onClick={() => runAction(selected, 'submit')}>Submit</Btn>
-                <Btn size="sm" variant="success" loading={saving} disabled={selected.status !== 'SUBMITTED'} onClick={() => runAction(selected, 'approve')}>Approve</Btn>
-                <Btn size="sm" variant="primary" loading={saving} disabled={selected.status !== 'APPROVED'} onClick={() => runAction(selected, 'post')}>Post</Btn>
-                <Btn size="sm" variant="warning" loading={saving} disabled={selected.status !== 'POSTED'} onClick={() => runAction(selected, 'reverse')}>Reverse</Btn>
+                <Btn
+                  size="sm"
+                  variant="secondary"
+                  loading={saving}
+                  disabled={selected.status !== 'DRAFT'}
+                  onClick={() => runAction(selected, 'submit')}
+                >
+                  Submit
+                </Btn>
+                <Btn
+                  size="sm"
+                  variant="success"
+                  loading={saving}
+                  disabled={selected.status !== 'SUBMITTED'}
+                  onClick={() => runAction(selected, 'approve')}
+                >
+                  Approve
+                </Btn>
+                <Btn
+                  size="sm"
+                  variant="primary"
+                  loading={saving}
+                  disabled={selected.status !== 'APPROVED'}
+                  onClick={() => runAction(selected, 'post')}
+                >
+                  Post
+                </Btn>
+                <Btn
+                  size="sm"
+                  variant="warning"
+                  loading={saving}
+                  disabled={selected.status !== 'POSTED'}
+                  onClick={() => runAction(selected, 'reverse')}
+                >
+                  Reverse
+                </Btn>
               </div>
             </>
           )}
@@ -435,11 +578,23 @@ export default function AuditAdjustmentsPage() {
           size="3xl"
           footer={
             <>
-              <div className="mr-auto text-xs" style={{ color: Math.abs(formDebit - formCredit) <= 0.01 ? 'var(--aurora-success)' : 'var(--aurora-danger)' }}>
+              <div
+                className="mr-auto text-xs"
+                style={{
+                  color:
+                    Math.abs(formDebit - formCredit) <= 0.01
+                      ? 'var(--aurora-success)'
+                      : 'var(--aurora-danger)',
+                }}
+              >
                 Debit {fmtMoney(formDebit)} / Credit {fmtMoney(formCredit)}
               </div>
-              <Btn variant="secondary" onClick={() => setCreating(false)}>Cancel</Btn>
-              <Btn loading={saving} onClick={saveAdjustment}>Create</Btn>
+              <Btn variant="secondary" onClick={() => setCreating(false)}>
+                Cancel
+              </Btn>
+              <Btn loading={saving} onClick={saveAdjustment}>
+                Create
+              </Btn>
             </>
           }
         >
@@ -449,25 +604,37 @@ export default function AuditAdjustmentsPage() {
                 label="Company"
                 required
                 value={form.companyId}
-                onChange={(e) => setForm((f) => ({
-                  ...f,
-                  companyId: e.target.value,
-                  fiscalYearId: '',
-                  accountingPeriodId: '',
-                  lines: f.lines.map((line) => ({ ...line, accountId: '' })),
-                }))}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    companyId: e.target.value,
+                    fiscalYearId: '',
+                    accountingPeriodId: '',
+                    lines: f.lines.map((line) => ({ ...line, accountId: '' })),
+                  }))
+                }
                 placeholder="Select company"
               >
-                {companies.map((company) => <option key={company.id} value={company.id}>{optionLabel(company)}</option>)}
+                {companies.map((company) => (
+                  <option key={company.id} value={company.id}>
+                    {optionLabel(company)}
+                  </option>
+                ))}
               </FormSelect>
               <FormSelect
                 label="Fiscal Year"
                 value={form.fiscalYearId}
-                onChange={(e) => setForm((f) => ({ ...f, fiscalYearId: e.target.value, accountingPeriodId: '' }))}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, fiscalYearId: e.target.value, accountingPeriodId: '' }))
+                }
                 placeholder={form.companyId ? 'Select fiscal year' : 'Select company first'}
                 disabled={!form.companyId}
               >
-                {fiscalYears.map((fy) => <option key={fy.id} value={fy.id}>{fy.name} ({fy.status})</option>)}
+                {fiscalYears.map((fy) => (
+                  <option key={fy.id} value={fy.id}>
+                    {fy.name} ({fy.status})
+                  </option>
+                ))}
               </FormSelect>
               <FormSelect
                 label="Accounting Period"
@@ -476,24 +643,43 @@ export default function AuditAdjustmentsPage() {
                 placeholder={form.fiscalYearId ? 'Select period' : 'Select fiscal year first'}
                 disabled={!form.fiscalYearId}
               >
-                {selectablePeriods.map((period) => <option key={period.id} value={period.id}>{period.name} ({period.status})</option>)}
+                {selectablePeriods.map((period) => (
+                  <option key={period.id} value={period.id}>
+                    {period.name} ({period.status})
+                  </option>
+                ))}
               </FormSelect>
               <div />
               <div className="md:col-span-2">
-                <FormInput label="Description" required value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
+                <FormInput
+                  label="Description"
+                  required
+                  value={form.description}
+                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                />
               </div>
               <div className="md:col-span-2">
-                <FormTextarea label="Reason" required value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} />
+                <FormTextarea
+                  label="Reason"
+                  required
+                  value={form.reason}
+                  onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
+                />
               </div>
             </div>
 
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div className="text-sm font-semibold">Adjustment Lines</div>
-                <Btn size="sm" variant="secondary" onClick={addLine}>Add Line</Btn>
+                <Btn size="sm" variant="secondary" onClick={addLine}>
+                  Add Line
+                </Btn>
               </div>
               {form.lines.map((line, index) => (
-                <div key={index} className="grid md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_150px_150px_auto] gap-2 items-end">
+                <div
+                  key={index}
+                  className="grid md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_150px_150px_auto] gap-2 items-end"
+                >
                   <FormSelect
                     label={index === 0 ? 'Account' : undefined}
                     value={line.accountId}
@@ -501,12 +687,37 @@ export default function AuditAdjustmentsPage() {
                     placeholder={form.companyId ? 'Select account' : 'Select company first'}
                     disabled={!form.companyId}
                   >
-                    {accounts.map((account) => <option key={account.id} value={account.id}>{accountLabel(account)}</option>)}
+                    {accounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {accountLabel(account)}
+                      </option>
+                    ))}
                   </FormSelect>
-                  <FormInput label={index === 0 ? 'Description' : undefined} value={line.description} onChange={(e) => updateLine(index, { description: e.target.value })} />
-                  <FormInput label={index === 0 ? 'Debit' : undefined} type="number" value={line.debit} onChange={(e) => updateLine(index, { debit: e.target.value })} />
-                  <FormInput label={index === 0 ? 'Credit' : undefined} type="number" value={line.credit} onChange={(e) => updateLine(index, { credit: e.target.value })} />
-                  <Btn size="sm" variant="ghost" disabled={form.lines.length <= 2} onClick={() => removeLine(index)}>Remove</Btn>
+                  <FormInput
+                    label={index === 0 ? 'Description' : undefined}
+                    value={line.description}
+                    onChange={(e) => updateLine(index, { description: e.target.value })}
+                  />
+                  <FormInput
+                    label={index === 0 ? 'Debit' : undefined}
+                    type="number"
+                    value={line.debit}
+                    onChange={(e) => updateLine(index, { debit: e.target.value })}
+                  />
+                  <FormInput
+                    label={index === 0 ? 'Credit' : undefined}
+                    type="number"
+                    value={line.credit}
+                    onChange={(e) => updateLine(index, { credit: e.target.value })}
+                  />
+                  <Btn
+                    size="sm"
+                    variant="ghost"
+                    disabled={form.lines.length <= 2}
+                    onClick={() => removeLine(index)}
+                  >
+                    Remove
+                  </Btn>
                 </div>
               ))}
             </div>

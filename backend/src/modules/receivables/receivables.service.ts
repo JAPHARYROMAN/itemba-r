@@ -10,10 +10,9 @@ import { UpdateReceivableDto } from './dto/update-receivable.dto';
 import { QueryReceivableDto } from './dto/query-receivable.dto';
 import { RecordReceivablePaymentDto } from './dto/record-receivable-payment.dto';
 import { WriteOffReceivableDto } from './dto/write-off-receivable.dto';
-
-function generateReceivableNumber(): string {
-  return `AR-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`;
-}
+import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
+import { pagination } from '../../common/utils/pagination';
+import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 
 type ReceivableSalesOrderSnapshot = {
   id: string;
@@ -32,6 +31,7 @@ export class ReceivablesService {
     private readonly companyScope: CompanyScopeService,
     private readonly accountResolver: AccountResolverService,
     private readonly postingEngine: PostingEngineService,
+    private readonly codes: EntityCodeGeneratorService,
   ) {}
 
   async findAll(query: QueryReceivableDto, user: AuthUser) {
@@ -46,7 +46,7 @@ export class ReceivablesService {
       dateFrom,
       dateTo,
     } = query;
-    const skip = (page - 1) * limit;
+    const paging = pagination({ page, limit });
 
     const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
     const where: Prisma.ReceivableWhereInput = { deletedAt: null };
@@ -62,8 +62,8 @@ export class ReceivablesService {
     if (customerId) where.customerId = customerId;
     if (dateFrom || dateTo) {
       where.issueDate = {};
-      if (dateFrom) where.issueDate.gte = new Date(dateFrom);
-      if (dateTo) where.issueDate.lte = new Date(dateTo);
+      if (dateFrom) where.issueDate.gte = dateRangeStart(dateFrom);
+      if (dateTo) where.issueDate.lte = dateRangeEnd(dateTo);
     }
 
     const [data, total] = await Promise.all([
@@ -71,13 +71,19 @@ export class ReceivablesService {
         where,
         include: this.includeScope(),
         orderBy: { issueDate: 'desc' },
-        skip,
-        take: limit,
+        skip: paging.skip,
+        take: paging.limit,
       }),
       this.prisma.receivable.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return {
+      data,
+      total,
+      page: paging.page,
+      limit: paging.limit,
+      totalPages: Math.ceil(total / paging.limit),
+    };
   }
 
   async findOne(id: string, user?: AuthUser) {
@@ -107,7 +113,11 @@ export class ReceivablesService {
     const record = await this.prisma.$transaction(async (tx) => {
       const created = await tx.receivable.create({
         data: {
-          receivableNumber: generateReceivableNumber(),
+          receivableNumber: await this.codes.next({
+            entityType: 'Receivable',
+            companyId: dto.companyId,
+            tx,
+          }),
           companyId: dto.companyId,
           divisionId: scope.divisionId,
           branchId: scope.branchId,

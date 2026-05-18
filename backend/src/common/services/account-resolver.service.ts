@@ -74,9 +74,43 @@ export class AccountResolverService {
     roles: AccountRole[],
     tx?: Prisma.TransactionClient,
   ): Promise<Record<AccountRole, ChartOfAccount>> {
-    const entries = await Promise.all(
-      roles.map(async (r) => [r, await this.resolve(companyId, r, tx)] as const),
+    const db = tx ?? this.prisma;
+    const uniqueRoles = [...new Set(roles)];
+    const subtypeKeys = uniqueRoles.map((role) => role.toLowerCase());
+    const fallbackCodes = [
+      ...new Set(uniqueRoles.flatMap((role) => CONVENTIONAL_CODES[role] ?? [])),
+    ];
+    const accounts = await db.chartOfAccount.findMany({
+      where: {
+        companyId,
+        deletedAt: null,
+        isActive: true,
+        OR: [
+          { accountSubType: { in: subtypeKeys, mode: 'insensitive' } },
+          ...(fallbackCodes.length ? [{ accountCode: { in: fallbackCodes } }] : []),
+        ],
+      },
+    });
+    const bySubtype = new Map(
+      accounts
+        .filter((account) => account.accountSubType)
+        .map((account) => [account.accountSubType!.toLowerCase(), account]),
     );
+    const byCode = new Map(accounts.map((account) => [account.accountCode, account]));
+
+    const entries = uniqueRoles.map((role) => {
+      const subtypeKey = role.toLowerCase();
+      const account =
+        bySubtype.get(subtypeKey) ??
+        (CONVENTIONAL_CODES[role] ?? []).map((code) => byCode.get(code)).find(Boolean);
+      if (!account) {
+        throw new BadRequestException(
+          `Cannot resolve chart-of-accounts entry for role "${role}" on company ${companyId}. ` +
+            `Set accountSubType="${subtypeKey}" on the relevant account, or create one with code in [${CONVENTIONAL_CODES[role]?.join(', ') ?? 'n/a'}].`,
+        );
+      }
+      return [role, account] as const;
+    });
     return Object.fromEntries(entries) as Record<AccountRole, ChartOfAccount>;
   }
 }

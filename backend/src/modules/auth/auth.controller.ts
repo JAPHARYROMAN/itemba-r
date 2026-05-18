@@ -221,6 +221,7 @@ export class AuthController {
   @UseGuards(RecentAuthGuard)
   @RecentAuth(15)
   @RequirePermissions('users.assign_roles')
+  @Throttle({ default: { ttl: 3600000, limit: 1 } })
   @HttpCode(HttpStatus.OK)
   @Post('2fa/admin/reencrypt-legacy')
   @ApiOperation({

@@ -26,8 +26,18 @@ async function bootstrap() {
   }
 
   app.use(helmet());
+  const corsOrigins = corsOrigin
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  if (
+    corsOrigins.length === 0 ||
+    corsOrigins.some((origin) => origin === '*' || origin.includes('*'))
+  ) {
+    throw new Error('CORS_ORIGIN cannot be empty or wildcard when credentialed CORS is enabled');
+  }
   app.enableCors({
-    origin: corsOrigin.split(',').map((o) => o.trim()),
+    origin: corsOrigins,
     credentials: true,
   });
 

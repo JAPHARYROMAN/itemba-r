@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { AccessLevel, AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -42,10 +47,16 @@ export class ActiveSessionsService {
     return { data, total, page: Number(page), limit: Number(limit) };
   }
 
-  async findByUser(userId: string, query: any) {
+  async findByUser(userId: string, query: any, user: AuthUser) {
+    const canManage = user.permissions?.includes('active_sessions.manage') ?? false;
+    if (userId !== user.id && !canManage) {
+      throw new ForbiddenException('You can only view your own active sessions');
+    }
+
     const { page = 1, limit = 20 } = query;
     const skip = (Number(page) - 1) * Number(limit);
-    const where: any = { userId };
+    const where: any =
+      userId === user.id ? { userId } : { userId, ...(await this.sessionScopeWhere(user)) };
 
     const [data, total] = await Promise.all([
       this.prisma.activeSession.findMany({
@@ -60,7 +71,9 @@ export class ActiveSessionsService {
   }
 
   async findOne(id: string, user?: AuthUser, minimumAccess: AccessLevel = AccessLevel.READ) {
-    const record = await this.prisma.activeSession.findFirst({ where: { id } });
+    const record = await this.prisma.activeSession.findFirst({
+      where: user ? await this.sessionScopeWhere(user, id) : { id },
+    });
     if (!record) throw new NotFoundException('Active session not found');
     if (user) {
       await this.companyScope.assertCanAccessCompany(user, record.companyId, minimumAccess);
@@ -168,5 +181,19 @@ export class ActiveSessionsService {
     if (!userCompanyIds.has(companyId)) {
       throw new BadRequestException('Session user does not belong to this company');
     }
+  }
+
+  private async sessionScopeWhere(user: AuthUser, id?: string) {
+    const where: any = id ? { id } : {};
+    if (this.companyScope.isGroupScoped(user)) {
+      const companyIds = await this.companyScope.accessibleCompanyIds(user);
+      where.OR = [
+        { companyId: null },
+        ...(companyIds.length ? [{ companyId: { in: companyIds } }] : []),
+      ];
+      return where;
+    }
+    Object.assign(where, await this.companyScope.companyWhereFor(user));
+    return where;
   }
 }

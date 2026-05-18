@@ -11,6 +11,7 @@ import { AccountResolverService, CompanyScopeService } from '../../common/servic
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import type { PostingLine } from '../accounting-engine/posting-engine.service';
+import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import {
   CreateSupplierInvoiceDto,
   SupplierInvoiceLineDto,
@@ -22,14 +23,6 @@ import { ApproveSupplierInvoiceDto } from './dto/approve-supplier-invoice.dto';
 const MONEY_TOLERANCE = new Prisma.Decimal('0.01');
 const QTY_TOLERANCE = new Prisma.Decimal('0.0001');
 
-function generatePayableNumber(): string {
-  return `AP-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`;
-}
-
-function generateMatchNumber(): string {
-  return `TWM-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`;
-}
-
 @Injectable()
 export class SupplierInvoicesService {
   constructor(
@@ -38,6 +31,7 @@ export class SupplierInvoicesService {
     private readonly companyScope: CompanyScopeService,
     private readonly accountResolver: AccountResolverService,
     private readonly postingEngine: PostingEngineService,
+    private readonly codes: EntityCodeGeneratorService,
   ) {}
 
   async findAll(query: QuerySupplierInvoiceDto, user: AuthUser) {
@@ -273,23 +267,23 @@ export class SupplierInvoicesService {
       throw new BadRequestException('Supplier invoice must have at least one line before approval');
     }
 
-    let match: any = null;
-    if (existing.purchaseOrderId) {
-      match = await this.createThreeWayMatch(existing, user.id);
-      if (match.matchStatus === 'VARIANCE' && !dto?.allowVariance) {
-        throw new BadRequestException(
-          'Supplier invoice has PO/GRN variance. Review the match or approve with variance.',
-        );
-      }
-    }
-
     const supplier = await this.prisma.supplier.findFirst({
       where: { id: existing.supplierId, companyId: existing.companyId, deletedAt: null },
       select: { id: true, name: true },
     });
     if (!supplier) throw new BadRequestException('Supplier does not belong to this company');
 
+    let match: any = null;
     const updated = await this.prisma.$transaction(async (tx) => {
+      if (existing.purchaseOrderId) {
+        match = await this.createThreeWayMatch(existing, user.id, tx);
+        if (match.matchStatus === 'VARIANCE' && !dto?.allowVariance) {
+          throw new BadRequestException(
+            'Supplier invoice has PO/GRN variance. Review the match or approve with variance.',
+          );
+        }
+      }
+
       const payable = existing.payableId
         ? await tx.payable.update({
             where: { id: existing.payableId },
@@ -312,7 +306,11 @@ export class SupplierInvoicesService {
           })
         : await tx.payable.create({
             data: {
-              payableNumber: generatePayableNumber(),
+              payableNumber: await this.codes.next({
+                entityType: 'Payable',
+                companyId: existing.companyId,
+                tx,
+              }),
               companyId: existing.companyId,
               divisionId: existing.divisionId,
               branchId: existing.branchId,
@@ -475,7 +473,9 @@ export class SupplierInvoicesService {
       }
     }
     if (inventoryCents < 0 || expenseCents < 0) {
-      throw new BadRequestException('Supplier invoice line totals cannot be reconciled to payable amount');
+      throw new BadRequestException(
+        'Supplier invoice line totals cannot be reconciled to payable amount',
+      );
     }
 
     const [inventoryAccount, expenseAccount, apAccount] = await Promise.all([
@@ -664,12 +664,13 @@ export class SupplierInvoicesService {
     return { purchaseOrderId, divisionId, branchId };
   }
 
-  private async createThreeWayMatch(invoice: any, userId: string) {
+  private async createThreeWayMatch(invoice: any, userId: string, tx?: Prisma.TransactionClient) {
     if (!invoice.purchaseOrderId) {
       throw new BadRequestException('Purchase order is required for three-way matching');
     }
+    const db = tx ?? this.prisma;
 
-    const purchaseOrder = await this.prisma.purchaseOrder.findFirst({
+    const purchaseOrder = await db.purchaseOrder.findFirst({
       where: { id: invoice.purchaseOrderId, companyId: invoice.companyId, deletedAt: null },
       include: { lines: true },
     });
@@ -679,7 +680,7 @@ export class SupplierInvoicesService {
     }
 
     const grn = invoice.goodsReceivedNoteId
-      ? await this.prisma.goodsReceivedNote.findFirst({
+      ? await db.goodsReceivedNote.findFirst({
           where: {
             id: invoice.goodsReceivedNoteId,
             companyId: invoice.companyId,
@@ -708,9 +709,13 @@ export class SupplierInvoicesService {
         ? 'MATCHED'
         : 'VARIANCE';
 
-    const match = await this.prisma.threeWayMatch.create({
+    const match = await db.threeWayMatch.create({
       data: {
-        matchNumber: generateMatchNumber(),
+        matchNumber: await this.codes.next({
+          entityType: 'ThreeWayMatch',
+          companyId: invoice.companyId,
+          ...(tx ? { tx } : {}),
+        }),
         companyId: invoice.companyId,
         purchaseOrderId: invoice.purchaseOrderId,
         goodsReceivedNoteId: invoice.goodsReceivedNoteId,

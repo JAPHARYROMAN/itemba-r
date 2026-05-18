@@ -239,10 +239,10 @@ export default function WestsidesCockpitPage() {
 
   // Opt-in 30s auto-refresh.
   useEffect(() => {
-    if (!autoRefresh || !companyId) return;
+    if (!hydrated || !autoRefresh || !companyId) return;
     const id = setInterval(load, 30_000);
     return () => clearInterval(id);
-  }, [autoRefresh, companyId, load]);
+  }, [autoRefresh, companyId, hydrated, load]);
 
   const activityFeed = useMemo<ActivityItem[]>(() => {
     if (!data) return [];

@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 
 @Injectable()
 export class GoodsReceivedNotesService {
@@ -11,6 +12,7 @@ export class GoodsReceivedNotesService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly inventoryMovements: InventoryMovementsService,
   ) {}
 
   async findAll(query: any, user: AuthUser) {
@@ -176,10 +178,70 @@ export class GoodsReceivedNotesService {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== 'APPROVED')
       throw new BadRequestException('Only APPROVED GRNs can be posted');
-    const updated = await this.prisma.goodsReceivedNote.update({
-      where: { id },
-      data: { status: 'POSTED', postedAt: new Date(), postedById: user.id },
+    if (!existing.branchId) {
+      throw new BadRequestException('GRN branch/location is required before posting inventory');
+    }
+    const branchId = existing.branchId;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const productIds = Array.from(new Set(existing.lines.map((line) => line.productId)));
+      const products = await tx.product.findMany({
+        where: { id: { in: productIds }, companyId: existing.companyId, deletedAt: null },
+        select: { id: true, name: true, trackInventory: true },
+      });
+      const productById = new Map(products.map((product) => [product.id, product]));
+      if (productById.size !== productIds.length) {
+        throw new BadRequestException('GRN contains a product outside this company');
+      }
+
+      const poLines = existing.purchaseOrderId
+        ? await tx.purchaseOrderLine.findMany({
+            where: { purchaseOrderId: existing.purchaseOrderId },
+            select: {
+              productId: true,
+              unitId: true,
+              unitCost: true,
+              batchNumber: true,
+              expiryDate: true,
+            },
+          })
+        : [];
+      const poLineByProductUnit = new Map(
+        poLines.map((line) => [`${line.productId}:${line.unitId}`, line]),
+      );
+
+      for (const line of existing.lines) {
+        const product = productById.get(line.productId);
+        if (!product?.trackInventory) continue;
+        const acceptedQuantity = Number(line.acceptedQuantity);
+        if (acceptedQuantity <= 0) continue;
+        const poLine = poLineByProductUnit.get(`${line.productId}:${line.unitId}`);
+        await this.inventoryMovements.createMovement({
+          companyId: existing.companyId,
+          divisionId: existing.divisionId ?? undefined,
+          branchId,
+          productId: line.productId,
+          movementType: 'PURCHASE_RECEIPT',
+          quantity: acceptedQuantity,
+          unitId: line.unitId,
+          unitCost: poLine ? Number(poLine.unitCost) : undefined,
+          movementDate: existing.receivedDate,
+          createdById: user.id,
+          referenceType: 'GoodsReceivedNote',
+          referenceId: existing.id,
+          batchNumber: poLine?.batchNumber ?? undefined,
+          expiryDate: poLine?.expiryDate ?? undefined,
+          notes: `GRN ${existing.grnNumber}`,
+          tx,
+        });
+      }
+
+      return tx.goodsReceivedNote.update({
+        where: { id },
+        data: { status: 'POSTED', postedAt: new Date(), postedById: user.id },
+      });
     });
+
     await this.auditLogs.log({
       action: 'GOODS_RECEIVED_NOTE_POST',
       entityType: 'GoodsReceivedNote',

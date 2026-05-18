@@ -118,6 +118,30 @@ export class EnvironmentVariables {
   @IsString()
   @IsOptional()
   SMTP_FROM?: string;
+
+  @IsString()
+  @IsOptional()
+  STORAGE_LOCAL_PATH?: string;
+
+  @IsString()
+  @IsOptional()
+  LOCAL_STORAGE_PATH?: string;
+
+  @IsString()
+  @IsOptional()
+  STORAGE_PATH?: string;
+
+  @IsString()
+  @IsOptional()
+  BACKUPS_DIR?: string;
+
+  @IsString()
+  @IsOptional()
+  BACKUP_STORAGE_PATH?: string;
+
+  @IsString()
+  @IsOptional()
+  EXPORTS_DIR?: string;
 }
 
 export function envValidate(raw: Record<string, unknown>) {
@@ -209,6 +233,9 @@ export function envValidate(raw: Record<string, unknown>) {
       if (!value || value.includes('localhost') || value.includes('127.0.0.1')) {
         throw new Error(`${name} must be set to a public HTTPS URL in ${config.NODE_ENV}.`);
       }
+      if (value.split(',').some((url) => !url.trim() || url.includes('*'))) {
+        throw new Error(`${name} cannot contain empty or wildcard origins in ${config.NODE_ENV}.`);
+      }
       if (!value.split(',').every((url) => url.trim().startsWith('https://'))) {
         throw new Error(`${name} must use HTTPS in ${config.NODE_ENV}.`);
       }
@@ -219,6 +246,21 @@ export function envValidate(raw: Record<string, unknown>) {
       throw new Error(
         `SMTP_HOST, SMTP_USER, SMTP_PASS, and SMTP_FROM must be configured together in ${config.NODE_ENV}.`,
       );
+    }
+
+    const hasStorageRoot = Boolean(
+      config.STORAGE_LOCAL_PATH || config.LOCAL_STORAGE_PATH || config.STORAGE_PATH,
+    );
+    if (!hasStorageRoot) {
+      throw new Error(
+        `STORAGE_LOCAL_PATH, LOCAL_STORAGE_PATH, or STORAGE_PATH is required in ${config.NODE_ENV}.`,
+      );
+    }
+    if (!config.BACKUPS_DIR && !config.BACKUP_STORAGE_PATH) {
+      throw new Error(`BACKUPS_DIR or BACKUP_STORAGE_PATH is required in ${config.NODE_ENV}.`);
+    }
+    if (!config.EXPORTS_DIR) {
+      throw new Error(`EXPORTS_DIR is required in ${config.NODE_ENV}.`);
     }
   }
 

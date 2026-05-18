@@ -18,6 +18,7 @@ import {
   Prisma,
   SalesPaymentMethod,
 } from '@prisma/client';
+import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 
 type SalesOrderReferenceIds = {
   divisionId?: string | null;
@@ -133,8 +134,8 @@ export class SalesOrdersService {
     if (paymentStatus) where.paymentStatus = paymentStatus;
     if (dateFrom || dateTo) {
       where.orderDate = {};
-      if (dateFrom) where.orderDate.gte = new Date(dateFrom);
-      if (dateTo) where.orderDate.lte = new Date(dateTo);
+      if (dateFrom) where.orderDate.gte = dateRangeStart(dateFrom);
+      if (dateTo) where.orderDate.lte = dateRangeEnd(dateTo);
     }
     if (search) {
       where.OR = [

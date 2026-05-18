@@ -50,6 +50,8 @@ describe('ActiveSessionsService.revoke (P1-01 regression)', () => {
     const companyScope = {
       assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
       companyWhereFor: jest.fn().mockResolvedValue({}),
+      accessibleCompanyIds: jest.fn().mockResolvedValue([]),
+      isGroupScoped: jest.fn().mockReturnValue(true),
     } as any;
     const permissionCache = {
       invalidate: jest.fn().mockResolvedValue(undefined),

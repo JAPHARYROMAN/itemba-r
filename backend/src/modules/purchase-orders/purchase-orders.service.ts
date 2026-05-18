@@ -11,6 +11,7 @@ import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { QueryPurchaseOrderDto } from './dto/query-purchase-order.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { AccessLevel, AuditSeverity, PurchaseType } from '@prisma/client';
+import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 
 type PurchaseOrderReferenceIds = {
   divisionId?: string | null;
@@ -76,8 +77,8 @@ export class PurchaseOrdersService {
     if (paymentStatus) where.paymentStatus = paymentStatus;
     if (dateFrom || dateTo) {
       where.orderDate = {};
-      if (dateFrom) where.orderDate.gte = new Date(dateFrom);
-      if (dateTo) where.orderDate.lte = new Date(dateTo);
+      if (dateFrom) where.orderDate.gte = dateRangeStart(dateFrom);
+      if (dateTo) where.orderDate.lte = dateRangeEnd(dateTo);
     }
     if (search) {
       where.OR = [

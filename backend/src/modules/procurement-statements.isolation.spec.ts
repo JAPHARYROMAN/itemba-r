@@ -72,9 +72,9 @@ describe('Procurement and statement company isolation (P0-01 regression)', () =>
       new CompanyScopeService(prisma),
     );
 
-    await expect(
-      service.findAll({ companyId: 'company-B' }, authUser()),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.findAll({ companyId: 'company-B' }, authUser())).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
     expect(prisma.customerStatementRun.findMany).not.toHaveBeenCalled();
   });
 
@@ -150,6 +150,8 @@ describe('Procurement and statement company isolation (P0-01 regression)', () =>
       prisma,
       auditLogs(),
       new CompanyScopeService(prisma),
+      { resolve: jest.fn() } as any,
+      { postLines: jest.fn() } as any,
     );
 
     await expect(

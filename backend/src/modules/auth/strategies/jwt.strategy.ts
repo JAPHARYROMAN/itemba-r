@@ -4,10 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { JwtPayload } from '../auth.service';
-import {
-  PermissionCacheService,
-  CachedAuthPayload,
-} from '../../../common/services';
+import { PermissionCacheService, CachedAuthPayload } from '../../../common/services';
 
 const SCOPE_PRIORITY = ['GROUP', 'COMPANY', 'BRANCH', 'DIVISION'] as const;
 
@@ -31,6 +28,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: config.getOrThrow<string>('JWT_ACCESS_SECRET'),
+      algorithms: ['HS256'],
     });
   }
 

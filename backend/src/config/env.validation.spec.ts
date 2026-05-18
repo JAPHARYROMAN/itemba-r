@@ -22,6 +22,9 @@ describe('envValidate', () => {
     CORS_ORIGIN: 'https://app.itembagrouptz.com',
     FRONTEND_URL: 'https://app.itembagrouptz.com',
     APP_URL: 'https://app.itembagrouptz.com',
+    STORAGE_LOCAL_PATH: '/var/lib/itemba-r/storage',
+    BACKUPS_DIR: '/var/lib/itemba-r/backups',
+    EXPORTS_DIR: '/var/lib/itemba-r/exports',
   };
 
   it('accepts a minimal valid development config', () => {
@@ -78,6 +81,31 @@ describe('envValidate', () => {
         ...validProductionExtras,
       }),
     ).not.toThrow();
+  });
+
+  it('rejects wildcard credentialed CORS origins in production', () => {
+    expect(() =>
+      envValidate({
+        ...baseValid,
+        NODE_ENV: 'production',
+        ...validProductionExtras,
+        CORS_ORIGIN: 'https://*.itembagrouptz.com',
+      }),
+    ).toThrow(/wildcard/);
+  });
+
+  it('requires explicit storage roots in production', () => {
+    const partial: Record<string, string> = { ...validProductionExtras };
+    delete partial.STORAGE_LOCAL_PATH;
+    delete partial.LOCAL_STORAGE_PATH;
+    delete partial.STORAGE_PATH;
+    expect(() =>
+      envValidate({
+        ...baseValid,
+        NODE_ENV: 'production',
+        ...partial,
+      }),
+    ).toThrow(/STORAGE_LOCAL_PATH/);
   });
 
   it('rejects known-default JWT secrets in production even if length passes', () => {

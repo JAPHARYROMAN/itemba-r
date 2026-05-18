@@ -398,7 +398,7 @@ export default function QuickSalePage() {
     cart.every((l) => l.productId && l.qty > 0 && l.unitId);
 
   const charge = async () => {
-    if (!canSubmit) return;
+    if (submitting || !canSubmit) return;
     setSubmitting(true);
     setError('');
     try {

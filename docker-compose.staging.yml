@@ -130,6 +130,7 @@ services:
       STORAGE_LOCAL_PATH: ${STORAGE_LOCAL_PATH:-/app/storage}
       BACKUP_STORAGE_PATH: ${BACKUP_STORAGE_PATH:-/app/backups}
       BACKUPS_DIR: ${BACKUPS_DIR:-/app/backups}
+      EXPORTS_DIR: ${EXPORTS_DIR:-/app/exports}
       JOB_WORKER_ENABLED: ${JOB_WORKER_ENABLED:-true}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -154,6 +155,7 @@ services:
     volumes:
       - backend_staging_storage:/app/storage
       - backend_staging_backups:/app/backups
+      - backend_staging_exports:/app/exports
     depends_on:
       backend-migrate:
         condition: service_completed_successfully
@@ -237,6 +239,7 @@ volumes:
   redis_staging_data:
   backend_staging_storage:
   backend_staging_backups:
+  backend_staging_exports:
 
 networks:
   itemba_staging_network:

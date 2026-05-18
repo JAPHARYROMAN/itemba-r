@@ -6,6 +6,7 @@ import { QueryInventoryMovementDto } from './dto/query-inventory-movement.dto';
 import { AccessLevel, InventoryMovement, InventoryMovementType, Prisma } from '@prisma/client';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 
 const INBOUND_TYPES: InventoryMovementType[] = [
   'OPENING_STOCK',
@@ -70,8 +71,8 @@ export class InventoryMovementsService {
     if (movementType) where.movementType = movementType;
     if (dateFrom || dateTo) {
       where.movementDate = {};
-      if (dateFrom) where.movementDate.gte = new Date(dateFrom);
-      if (dateTo) where.movementDate.lte = new Date(dateTo);
+      if (dateFrom) where.movementDate.gte = dateRangeStart(dateFrom);
+      if (dateTo) where.movementDate.lte = dateRangeEnd(dateTo);
     }
 
     const [data, total] = await Promise.all([

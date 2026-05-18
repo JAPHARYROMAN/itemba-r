@@ -2024,6 +2024,7 @@ model JournalEntryLine {
   @@index([journalEntryId])
   @@index([accountId])
   @@index([companyId])
+  @@index([companyId, accountId, createdAt])
   @@map("journal_entry_lines")
 }
 
@@ -2127,7 +2128,11 @@ model Expense {
   @@index([status])
   @@index([expenseDate])
   @@index([companyId, expenseDate, status])
+  @@index([companyId, status, approvedAt])
   @@index([expenseCategoryId, companyId])
+  @@index([createdById])
+  @@index([approvedById])
+  @@index([paidById])
   @@map("expenses")
 }
 
@@ -3085,6 +3090,7 @@ model SalesOrderLine {
   batch      ProductBatch? @relation("SalesOrderLineBatch", fields: [batchId], references: [id], onDelete: SetNull)
 
   @@index([salesOrderId])
+  @@index([salesOrderId, createdAt])
   @@index([batchId])
   @@map("sales_order_lines")
 }
@@ -3166,6 +3172,7 @@ model PurchaseOrderLine {
   unit          UnitOfMeasure @relation(fields: [unitId], references: [id], onDelete: Restrict)
 
   @@index([purchaseOrderId])
+  @@index([purchaseOrderId, createdAt])
   @@map("purchase_order_lines")
 }
 
@@ -10464,7 +10471,7 @@ model IntegrationConnection {
   updatedAt              DateTime                         @updatedAt
   deletedAt              DateTime?
 
-  provider         IntegrationProvider  @relation(fields: [providerId], references: [id])
+  provider         IntegrationProvider  @relation(fields: [providerId], references: [id], onDelete: Restrict)
   company          Company?             @relation(fields: [companyId], references: [id], onDelete: SetNull)
   createdBy        User                 @relation("IntegrationConnectionCreatedBy", fields: [createdById], references: [id])
   events           IntegrationEvent[]
@@ -10607,7 +10614,7 @@ model ApiKey {
   updatedAt   DateTime     @updatedAt
   deletedAt   DateTime?
 
-  apiClient   ApiClient       @relation(fields: [apiClientId], references: [id])
+  apiClient   ApiClient       @relation(fields: [apiClientId], references: [id], onDelete: Restrict)
   createdBy   User            @relation("ApiKeyCreatedBy", fields: [createdById], references: [id])
   requestLogs ApiRequestLog[]
 
@@ -10745,7 +10752,7 @@ model OfflineSyncRecord {
   createdAt         DateTime                @default(now())
   updatedAt         DateTime                @updatedAt
 
-  syncBatch  OfflineSyncBatch @relation(fields: [syncBatchId], references: [id])
+  syncBatch  OfflineSyncBatch @relation(fields: [syncBatchId], references: [id], onDelete: Restrict)
   resolvedBy User?            @relation("SyncRecordResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
 
   @@index([syncBatchId, entityType, status, operation])
@@ -10800,7 +10807,7 @@ model ExternalPayment {
   updatedAt           DateTime               @updatedAt
   deletedAt           DateTime?
 
-  company     Company                @relation(fields: [companyId], references: [id])
+  company     Company                @relation(fields: [companyId], references: [id], onDelete: Restrict)
   provider    IntegrationProvider?   @relation(fields: [providerId], references: [id], onDelete: SetNull)
   connection  IntegrationConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
   initiatedBy User?                  @relation("ExternalPaymentInitiatedBy", fields: [initiatedById], references: [id], onDelete: SetNull)
@@ -12061,7 +12068,7 @@ model AccountingPostingRuleLine {
   updatedAt           DateTime            @updatedAt
 
   postingRule AccountingPostingRule @relation(fields: [postingRuleId], references: [id], onDelete: Cascade)
-  account     ChartOfAccount        @relation(fields: [accountId], references: [id])
+  account     ChartOfAccount        @relation(fields: [accountId], references: [id], onDelete: Restrict)
 
   @@index([postingRuleId, lineOrder])
   @@map("accounting_posting_rule_lines")
@@ -12088,7 +12095,7 @@ model PostingRun {
   updatedAt        DateTime          @updatedAt
   deletedAt        DateTime?
 
-  company     Company                @relation(fields: [companyId], references: [id])
+  company     Company                @relation(fields: [companyId], references: [id], onDelete: Restrict)
   postingRule AccountingPostingRule? @relation(fields: [postingRuleId], references: [id], onDelete: SetNull)
   postedBy    User?                  @relation("PostingRunPostedBy", fields: [postedById], references: [id], onDelete: SetNull)
   reversedBy  User?                  @relation("PostingRunReversedBy", fields: [reversedById], references: [id], onDelete: SetNull)
@@ -12115,9 +12122,9 @@ model AccountingPeriodClose {
   updatedAt          DateTime          @updatedAt
   deletedAt          DateTime?
 
-  company          Company          @relation(fields: [companyId], references: [id])
-  fiscalYear       FiscalYear       @relation(fields: [fiscalYearId], references: [id])
-  accountingPeriod AccountingPeriod @relation(fields: [accountingPeriodId], references: [id])
+  company          Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  fiscalYear       FiscalYear       @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
+  accountingPeriod AccountingPeriod @relation(fields: [accountingPeriodId], references: [id], onDelete: Restrict)
   createdBy        User             @relation("PeriodCloseCreatedBy", fields: [createdById], references: [id])
   closedBy         User?            @relation("PeriodCloseClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
   reopenedBy       User?            @relation("PeriodCloseReopenedBy", fields: [reopenedById], references: [id], onDelete: SetNull)
@@ -12145,7 +12152,7 @@ model AccountingLock {
   updatedAt          DateTime             @updatedAt
   deletedAt          DateTime?
 
-  company          Company           @relation(fields: [companyId], references: [id])
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
   fiscalYear       FiscalYear?       @relation(fields: [fiscalYearId], references: [id], onDelete: SetNull)
   accountingPeriod AccountingPeriod? @relation(fields: [accountingPeriodId], references: [id], onDelete: SetNull)
   createdBy        User              @relation("AccountingLockCreatedBy", fields: [createdById], references: [id])
@@ -12181,8 +12188,8 @@ model BankReconciliation {
   updatedAt               DateTime                 @updatedAt
   deletedAt               DateTime?
 
-  company        Company                   @relation(fields: [companyId], references: [id])
-  cashAccount    CashAccount               @relation(fields: [cashAccountId], references: [id])
+  company        Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  cashAccount    CashAccount               @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
   preparedBy     User                      @relation("ReconciliationPreparedBy", fields: [preparedById], references: [id])
   approvedBy     User?                     @relation("ReconciliationApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   closedBy       User?                     @relation("ReconciliationClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
@@ -12256,8 +12263,8 @@ model DepreciationSchedule {
   updatedAt               DateTime                   @updatedAt
   deletedAt               DateTime?
 
-  company    Company             @relation(fields: [companyId], references: [id])
-  fixedAsset FixedAsset          @relation(fields: [fixedAssetId], references: [id])
+  company    Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  fixedAsset FixedAsset          @relation(fields: [fixedAssetId], references: [id], onDelete: Restrict)
   createdBy  User                @relation("DepScheduleCreatedBy", fields: [createdById], references: [id])
   entries    DepreciationEntry[]
 
@@ -12281,9 +12288,9 @@ model DepreciationEntry {
   updatedAt                    DateTime                @updatedAt
   deletedAt                    DateTime?
 
-  depreciationSchedule DepreciationSchedule @relation(fields: [depreciationScheduleId], references: [id])
-  company              Company              @relation(fields: [companyId], references: [id])
-  fixedAsset           FixedAsset           @relation(fields: [fixedAssetId], references: [id])
+  depreciationSchedule DepreciationSchedule @relation(fields: [depreciationScheduleId], references: [id], onDelete: Restrict)
+  company              Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  fixedAsset           FixedAsset           @relation(fields: [fixedAssetId], references: [id], onDelete: Restrict)
   postedBy             User?                @relation("DepEntryPostedBy", fields: [postedById], references: [id], onDelete: SetNull)
 
   @@index([depreciationScheduleId, depreciationDate, status])
@@ -12310,7 +12317,7 @@ model LoanRepaymentSchedule {
   updatedAt               DateTime            @updatedAt
   deletedAt               DateTime?
 
-  company  Company                @relation(fields: [companyId], references: [id])
+  company  Company                @relation(fields: [companyId], references: [id], onDelete: Restrict)
   payments LoanRepaymentPayment[]
 
   @@index([companyId, loanDebtId, status, dueDate])
@@ -12334,8 +12341,8 @@ model LoanRepaymentPayment {
   updatedAt               DateTime          @updatedAt
   deletedAt               DateTime?
 
-  company               Company               @relation(fields: [companyId], references: [id])
-  loanRepaymentSchedule LoanRepaymentSchedule @relation(fields: [loanRepaymentScheduleId], references: [id])
+  company               Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  loanRepaymentSchedule LoanRepaymentSchedule @relation(fields: [loanRepaymentScheduleId], references: [id], onDelete: Restrict)
   paidBy                User                  @relation("LoanPaymentPaidBy", fields: [paidById], references: [id])
 
   @@index([companyId, loanRepaymentScheduleId, paymentDate])
@@ -12392,7 +12399,7 @@ model AuditAdjustment {
   updatedAt              DateTime              @updatedAt
   deletedAt              DateTime?
 
-  company          Company               @relation(fields: [companyId], references: [id])
+  company          Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
   fiscalYear       FiscalYear?           @relation(fields: [fiscalYearId], references: [id], onDelete: SetNull)
   accountingPeriod AccountingPeriod?     @relation(fields: [accountingPeriodId], references: [id], onDelete: SetNull)
   createdBy        User                  @relation("AuditAdjCreatedBy", fields: [createdById], references: [id])
@@ -12449,7 +12456,7 @@ model PurchaseRequisition {
   updatedAt            DateTime            @updatedAt
   deletedAt            DateTime?
 
-  company     Company                   @relation(fields: [companyId], references: [id])
+  company     Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
   requestedBy User                      @relation("RequisitionRequestedBy", fields: [requestedById], references: [id])
   approvedBy  User?                     @relation("RequisitionApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   rejectedBy  User?                     @relation("RequisitionRejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
@@ -12497,7 +12504,7 @@ model RequestForQuotation {
   updatedAt             DateTime  @updatedAt
   deletedAt             DateTime?
 
-  company            Company             @relation(fields: [companyId], references: [id])
+  company            Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
   createdBy          User                @relation("RFQCreatedBy", fields: [createdById], references: [id])
   rfqSuppliers       RFQSupplier[]
   supplierQuotations SupplierQuotation[]
@@ -12547,7 +12554,7 @@ model SupplierQuotation {
   updatedAt               DateTime                @updatedAt
   deletedAt               DateTime?
 
-  company            Company                 @relation(fields: [companyId], references: [id])
+  company            Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
   rfq                RequestForQuotation?    @relation(fields: [rfqId], references: [id], onDelete: SetNull)
   createdBy          User                    @relation("SupplierQuotCreatedBy", fields: [createdById], references: [id])
   acceptedBy         User?                   @relation("SupplierQuotAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
@@ -12599,8 +12606,8 @@ model BidComparison {
   updatedAt             DateTime            @updatedAt
   deletedAt             DateTime?
 
-  company    Company             @relation(fields: [companyId], references: [id])
-  rfq        RequestForQuotation @relation(fields: [rfqId], references: [id])
+  company    Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  rfq        RequestForQuotation @relation(fields: [rfqId], references: [id], onDelete: Restrict)
   preparedBy User                @relation("BidCompPreparedBy", fields: [preparedById], references: [id])
   approvedBy User?               @relation("BidCompApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   lines      BidComparisonLine[]
@@ -12624,7 +12631,7 @@ model BidComparisonLine {
   updatedAt           DateTime @updatedAt
 
   bidComparison     BidComparison     @relation(fields: [bidComparisonId], references: [id], onDelete: Cascade)
-  supplierQuotation SupplierQuotation @relation(fields: [supplierQuotationId], references: [id])
+  supplierQuotation SupplierQuotation @relation(fields: [supplierQuotationId], references: [id], onDelete: Restrict)
 
   @@index([bidComparisonId, supplierId])
   @@map("bid_comparison_lines")
@@ -12650,7 +12657,7 @@ model GoodsReceivedNote {
   updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
 
-  company          Company                 @relation(fields: [companyId], references: [id])
+  company          Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division         Division?               @relation(fields: [divisionId], references: [id], onDelete: SetNull)
   branch           Branch?                 @relation(fields: [branchId], references: [id], onDelete: SetNull)
   receivedBy       User                    @relation("GRNReceivedBy", fields: [receivedById], references: [id])
@@ -12716,7 +12723,7 @@ model SupplierInvoice {
   updatedAt             DateTime              @updatedAt
   deletedAt             DateTime?
 
-  company           Company               @relation(fields: [companyId], references: [id])
+  company           Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division          Division?             @relation(fields: [divisionId], references: [id], onDelete: SetNull)
   branch            Branch?               @relation(fields: [branchId], references: [id], onDelete: SetNull)
   goodsReceivedNote GoodsReceivedNote?    @relation(fields: [goodsReceivedNoteId], references: [id], onDelete: SetNull)
@@ -12771,7 +12778,7 @@ model ThreeWayMatch {
   updatedAt           DateTime            @updatedAt
   deletedAt           DateTime?
 
-  company           Company            @relation(fields: [companyId], references: [id])
+  company           Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
   goodsReceivedNote GoodsReceivedNote? @relation(fields: [goodsReceivedNoteId], references: [id], onDelete: SetNull)
   supplierInvoice   SupplierInvoice?   @relation(fields: [supplierInvoiceId], references: [id], onDelete: SetNull)
   matchedBy         User               @relation("ThreeWayMatchedBy", fields: [matchedById], references: [id])
@@ -12798,7 +12805,7 @@ model ProcurementPlan {
   updatedAt    DateTime              @updatedAt
   deletedAt    DateTime?
 
-  company    Company               @relation(fields: [companyId], references: [id])
+  company    Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
   fiscalYear FiscalYear?           @relation(fields: [fiscalYearId], references: [id], onDelete: SetNull)
   createdBy  User                  @relation("ProcPlanCreatedBy", fields: [createdById], references: [id])
   approvedBy User?                 @relation("ProcPlanApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
@@ -12844,7 +12851,7 @@ model ContactPerson {
   updatedAt  DateTime          @updatedAt
   deletedAt  DateTime?
 
-  company Company @relation(fields: [companyId], references: [id])
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   @@index([companyId, entityType, entityId])
   @@map("contact_persons")
@@ -12870,7 +12877,7 @@ model CommunicationLog {
   updatedAt           DateTime               @updatedAt
   deletedAt           DateTime?
 
-  company    Company @relation(fields: [companyId], references: [id])
+  company    Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   createdBy  User    @relation("CommLogCreatedBy", fields: [createdById], references: [id])
   assignedTo User?   @relation("CommLogAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
 
@@ -12896,7 +12903,7 @@ model CustomerCreditProfile {
   updatedAt          DateTime         @updatedAt
   deletedAt          DateTime?
 
-  company    Company @relation(fields: [companyId], references: [id])
+  company    Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   reviewedBy User?   @relation("CreditProfileReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@unique([companyId, customerId])
@@ -12922,7 +12929,7 @@ model SupplierPerformanceProfile {
   updatedAt                 DateTime       @updatedAt
   deletedAt                 DateTime?
 
-  company    Company @relation(fields: [companyId], references: [id])
+  company    Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   reviewedBy User?   @relation("SupplierPerfReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@unique([companyId, supplierId])
@@ -12942,7 +12949,7 @@ model CustomerSegment {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
-  company     Company                     @relation(fields: [companyId], references: [id])
+  company     Company                     @relation(fields: [companyId], references: [id], onDelete: Restrict)
   memberships CustomerSegmentMembership[]
 
   @@index([companyId, isActive])
@@ -12983,7 +12990,7 @@ model CustomerStatementRun {
   createdAt          DateTime                @default(now())
   updatedAt          DateTime                @updatedAt
 
-  company     Company @relation(fields: [companyId], references: [id])
+  company     Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   generatedBy User    @relation("CustStatGeneratedBy", fields: [generatedById], references: [id])
 
   @@index([companyId, customerId, status])
@@ -13009,7 +13016,7 @@ model SupplierStatementRun {
   createdAt          DateTime                @default(now())
   updatedAt          DateTime                @updatedAt
 
-  company     Company @relation(fields: [companyId], references: [id])
+  company     Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   generatedBy User    @relation("SuppStatGeneratedBy", fields: [generatedById], references: [id])
 
   @@index([companyId, supplierId, status])
@@ -13068,7 +13075,7 @@ model GeneratedDocument {
   deletedAt               DateTime?
 
   company     Company?         @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  template    DocumentTemplate @relation(fields: [templateId], references: [id])
+  template    DocumentTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
   generatedBy User             @relation("GeneratedDocGeneratedBy", fields: [generatedById], references: [id])
 
   @@index([companyId, entityType, entityId, status])
@@ -13852,7 +13859,7 @@ model QATestCase {
   updatedAt           DateTime       @updatedAt
   deletedAt           DateTime?
 
-  testSuite   QATestSuite    @relation(fields: [testSuiteId], references: [id])
+  testSuite   QATestSuite    @relation(fields: [testSuiteId], references: [id], onDelete: Restrict)
   testResults QATestResult[]
 
   @@index([testSuiteId])
@@ -13884,7 +13891,7 @@ model QATestRun {
   updatedAt     DateTime             @updatedAt
   deletedAt     DateTime?
 
-  testSuite   QATestSuite?   @relation(fields: [testSuiteId], references: [id])
+  testSuite   QATestSuite?   @relation(fields: [testSuiteId], references: [id], onDelete: SetNull)
   startedBy   User           @relation("QATestRunStartedBy", fields: [startedById], references: [id])
   testResults QATestResult[]
 
@@ -13909,8 +13916,8 @@ model QATestResult {
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
-  testRun    QATestRun  @relation(fields: [testRunId], references: [id])
-  testCase   QATestCase @relation(fields: [testCaseId], references: [id])
+  testRun    QATestRun  @relation(fields: [testRunId], references: [id], onDelete: Restrict)
+  testCase   QATestCase @relation(fields: [testCaseId], references: [id], onDelete: Restrict)
   executedBy User?      @relation("QATestResultExecutedBy", fields: [executedById], references: [id])
 
   @@index([testRunId])
@@ -14006,7 +14013,7 @@ model LaunchReadinessItem {
   createdAt          DateTime                    @default(now())
   updatedAt          DateTime                    @updatedAt
 
-  assessment      LaunchReadinessAssessment @relation(fields: [assessmentId], references: [id])
+  assessment      LaunchReadinessAssessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
   responsibleUser User?                     @relation("LaunchItemResponsible", fields: [responsibleUserId], references: [id])
   completedBy     User?                     @relation("LaunchItemCompletedBy", fields: [completedById], references: [id])
 
@@ -14112,7 +14119,7 @@ model TrainingLesson {
   updatedAt         DateTime             @updatedAt
   deletedAt         DateTime?
 
-  trainingCourse   TrainingCourse           @relation(fields: [trainingCourseId], references: [id])
+  trainingCourse   TrainingCourse           @relation(fields: [trainingCourseId], references: [id], onDelete: Restrict)
   lessonProgresses TrainingLessonProgress[]
 
   @@index([trainingCourseId])
@@ -14132,7 +14139,7 @@ model TrainingEnrollment {
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
 
-  trainingCourse   TrainingCourse           @relation(fields: [trainingCourseId], references: [id])
+  trainingCourse   TrainingCourse           @relation(fields: [trainingCourseId], references: [id], onDelete: Restrict)
   user             User                     @relation("TrainingEnrollmentUser", fields: [userId], references: [id])
   assignedBy       User?                    @relation("TrainingEnrollmentAssignedBy", fields: [assignedById], references: [id])
   lessonProgresses TrainingLessonProgress[]
@@ -14154,8 +14161,8 @@ model TrainingLessonProgress {
   createdAt            DateTime                     @default(now())
   updatedAt            DateTime                     @updatedAt
 
-  trainingEnrollment TrainingEnrollment @relation(fields: [trainingEnrollmentId], references: [id])
-  trainingLesson     TrainingLesson     @relation(fields: [trainingLessonId], references: [id])
+  trainingEnrollment TrainingEnrollment @relation(fields: [trainingEnrollmentId], references: [id], onDelete: Restrict)
+  trainingLesson     TrainingLesson     @relation(fields: [trainingLessonId], references: [id], onDelete: Restrict)
 
   @@index([trainingEnrollmentId])
   @@index([trainingLessonId])
@@ -14197,7 +14204,7 @@ model UserWalkthroughProgress {
   updatedAt           DateTime                      @updatedAt
 
   user              User              @relation("UserWalkthroughProgressUser", fields: [userId], references: [id])
-  guidedWalkthrough GuidedWalkthrough @relation(fields: [guidedWalkthroughId], references: [id])
+  guidedWalkthrough GuidedWalkthrough @relation(fields: [guidedWalkthroughId], references: [id], onDelete: Restrict)
 
   @@unique([userId, guidedWalkthroughId])
   @@index([userId])
@@ -14271,7 +14278,7 @@ model SupportTicketComment {
   updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
 
-  supportTicket SupportTicket @relation(fields: [supportTicketId], references: [id])
+  supportTicket SupportTicket @relation(fields: [supportTicketId], references: [id], onDelete: Restrict)
   user          User          @relation("SupportTicketCommentUser", fields: [userId], references: [id])
 
   @@index([supportTicketId])
