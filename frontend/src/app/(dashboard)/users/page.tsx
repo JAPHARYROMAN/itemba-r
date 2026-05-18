@@ -96,13 +96,20 @@ function UserModal({
     setSaving(true);
     setError(null);
     try {
-      const body: Record<string, unknown> = {
-        fullName: form.fullName,
-        email: form.email,
-        companyId: form.companyId || undefined,
-      };
-      if (form.password) body.password = form.password;
-      if (mode === 'edit') body.status = form.status;
+      const body: Record<string, unknown> =
+        mode === 'create'
+          ? {
+              fullName: form.fullName,
+              email: form.email,
+              password: form.password,
+              companyId: form.companyId || undefined,
+            }
+          : {
+              fullName: form.fullName,
+              companyId: form.companyId || null,
+              status: form.status,
+            };
+      if (mode === 'edit' && form.password) body.password = form.password;
 
       const res = await fetch(
         mode === 'create' ? '/api/backend/users' : `/api/backend/users/${initial!.id}`,
@@ -134,7 +141,7 @@ function UserModal({
           </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
         </div>
-        <form onSubmit={submit} className="px-6 py-5 space-y-4">
+        <form onSubmit={submit} autoComplete="off" className="px-6 py-5 space-y-4">
           {error && (
             <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
           )}
@@ -143,6 +150,7 @@ function UserModal({
             <label className="block text-xs font-medium text-slate-600 mb-1">Full Name *</label>
             <input
               required value={form.fullName} onChange={set('fullName')}
+              autoComplete="off"
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="John Doe"
             />
@@ -153,6 +161,7 @@ function UserModal({
             <input
               required type="email" value={form.email} onChange={set('email')}
               disabled={mode === 'edit'}
+              autoComplete="off"
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
               placeholder="user@itemba.local"
             />
@@ -165,6 +174,7 @@ function UserModal({
             <input
               required={mode === 'create'} type="password" value={form.password} onChange={set('password')}
               minLength={8}
+              autoComplete="new-password"
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Min. 8 characters"
             />
