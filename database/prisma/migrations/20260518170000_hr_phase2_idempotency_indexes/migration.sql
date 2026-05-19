@@ -6,7 +6,7 @@ WITH ranked_attendance AS (
   SELECT
     id,
     ROW_NUMBER() OVER (
-      PARTITION BY "companyId", "employeeId", (("attendanceDate" AT TIME ZONE 'UTC')::date)
+      PARTITION BY "companyId", "employeeId", ("attendanceDate"::date)
       ORDER BY "createdAt" ASC, id ASC
     ) AS rn
   FROM "attendance_records"
@@ -27,7 +27,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "attendance_records_company_employee_day_activ
   ON "attendance_records"(
     "companyId",
     "employeeId",
-    (("attendanceDate" AT TIME ZONE 'UTC')::date)
+    ("attendanceDate"::date)
   )
   WHERE "deletedAt" IS NULL;
 
