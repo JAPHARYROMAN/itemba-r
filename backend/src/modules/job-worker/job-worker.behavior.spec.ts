@@ -479,6 +479,7 @@ describe('DataExportJobHandler artifact safety', () => {
 type BackupPathHelper = {
   safeBackupFileName(backupRunNumber: string): string;
   resolveBackupPath(backupsDir: string, fileName: string): string;
+  databaseUrlForPgTools(databaseUrl?: string): string | undefined;
 };
 
 describe('BackupRunJobHandler artifact safety', () => {
@@ -506,5 +507,15 @@ describe('BackupRunJobHandler artifact safety', () => {
     expect(() => helper.resolveBackupPath(backupsDir, '../escape.sql')).toThrow(
       'Resolved backup file path escapes BACKUPS_DIR',
     );
+  });
+
+  it('strips Prisma pool parameters before passing DATABASE_URL to pg_dump', () => {
+    const helper = createHelper();
+
+    expect(
+      helper.databaseUrlForPgTools(
+        'postgresql://user:pass@postgres:5432/itemba_r?connection_limit=20&pool_timeout=30&sslmode=require',
+      ),
+    ).toBe('postgresql://user:pass@postgres:5432/itemba_r?sslmode=require');
   });
 });

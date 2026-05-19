@@ -51,7 +51,7 @@ export class BackupRunJobHandler implements OnModuleInit {
       );
     await fs.mkdir(backupsDir, { recursive: true });
 
-    const databaseUrl = process.env.DATABASE_URL;
+    const databaseUrl = this.databaseUrlForPgTools(process.env.DATABASE_URL);
     if (!databaseUrl) throw new Error('DATABASE_URL is not set');
 
     const startedAt = new Date();
@@ -190,5 +190,35 @@ export class BackupRunJobHandler implements OnModuleInit {
       throw new Error('Resolved backup file path escapes BACKUPS_DIR');
     }
     return filePath;
+  }
+
+  private databaseUrlForPgTools(databaseUrl?: string): string | undefined {
+    if (!databaseUrl) return databaseUrl;
+    const allowedParams = new Set([
+      'application_name',
+      'channel_binding',
+      'connect_timeout',
+      'gssencmode',
+      'keepalives',
+      'keepalives_count',
+      'keepalives_idle',
+      'keepalives_interval',
+      'sslcert',
+      'sslcompression',
+      'sslcrl',
+      'sslkey',
+      'sslmode',
+      'sslrootcert',
+      'target_session_attrs',
+    ]);
+    try {
+      const url = new URL(databaseUrl);
+      for (const key of Array.from(url.searchParams.keys())) {
+        if (!allowedParams.has(key)) url.searchParams.delete(key);
+      }
+      return url.toString();
+    } catch {
+      return databaseUrl;
+    }
   }
 }
