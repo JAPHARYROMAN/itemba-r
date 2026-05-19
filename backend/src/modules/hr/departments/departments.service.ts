@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateDepartmentDto } from './dto/create-department.dto';
@@ -53,32 +53,50 @@ export class DepartmentsService {
 
   async create(dto: CreateDepartmentDto, user: any) {
     await this.assertDepartmentHierarchy(dto.companyId, dto.divisionId, dto.branchId, user);
-    const departmentCode = dto.departmentCode?.trim()
-      ? dto.departmentCode.trim()
-      : await this.nextDepartmentCode(dto.companyId);
-    const record = await this.prisma.department.create({ data: { ...dto, departmentCode } });
+    const manualCode = dto.departmentCode?.trim();
+    let departmentCode = manualCode || await this.nextDepartmentCode(dto.companyId);
+    let record;
+    try {
+      record = await this.prisma.department.create({ data: { ...dto, departmentCode } });
+    } catch (error) {
+      if (this.isDepartmentCodeConflict(error)) {
+        if (manualCode) {
+          throw new BadRequestException(`Department code ${manualCode} already exists for this company`);
+        }
+        departmentCode = await this.nextDepartmentCode(dto.companyId);
+        record = await this.prisma.department.create({ data: { ...dto, departmentCode } });
+      } else {
+        throw error;
+      }
+    }
     await this.audit.log({ userId: user.id, action: 'CREATE', entityType: 'Department', entityId: record.id, newValue: { ...dto, departmentCode } as unknown as Record<string, unknown> });
     return record;
   }
 
   /**
    * Generate the next department code for a company: `{prefix}-DEPT-{NNN}`.
-   * Same approach as `EmployeesService.nextEmployeeCode` — prefix from
-   * `Company.employeeCodePrefix` (or first 4 chars of `code`), counter from
-   * existing department count + 1, padded to 3 digits.
-   *
-   * Operators can override with a meaningful abbreviation (e.g. MWAN-OPS) by
-   * passing `departmentCode` explicitly; the override wins.
+   * Checks existing codes directly so soft-deleted records, imports, and
+   * previous failed previews cannot cause duplicate auto-generated codes.
    */
   async nextDepartmentCode(companyId: string): Promise<string> {
+    if (!companyId) throw new BadRequestException('companyId is required');
     const company = await this.prisma.company.findUnique({
       where: { id: companyId },
       select: { code: true, employeeCodePrefix: true },
     });
     if (!company) throw new NotFoundException('Company not found');
     const prefix = (company.employeeCodePrefix ?? company.code.slice(0, 4)).toUpperCase();
-    const count = await this.prisma.department.count({ where: { companyId } });
-    return `${prefix}-DEPT-${String(count + 1).padStart(3, '0')}`;
+    const codePrefix = `${prefix}-DEPT-`;
+    const existing = await this.prisma.department.findMany({
+      where: { companyId, departmentCode: { startsWith: codePrefix } },
+      select: { departmentCode: true },
+    });
+    const usedCodes = new Set(existing.map((row) => row.departmentCode));
+    for (let next = 1; next <= existing.length + 1000; next += 1) {
+      const candidate = `${codePrefix}${String(next).padStart(3, '0')}`;
+      if (!usedCodes.has(candidate)) return candidate;
+    }
+    throw new BadRequestException('Unable to generate a free department code');
   }
 
   async update(id: string, dto: UpdateDepartmentDto, user: any) {
@@ -141,5 +159,13 @@ export class DepartmentsService {
         throw new BadRequestException('Department branch/location must be active');
       }
     }
+  }
+
+  private isDepartmentCodeConflict(error: unknown): error is Prisma.PrismaClientKnownRequestError {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+      return false;
+    }
+    const target = Array.isArray(error.meta?.target) ? error.meta.target : [];
+    return target.includes('companyId') && target.includes('departmentCode');
   }
 }

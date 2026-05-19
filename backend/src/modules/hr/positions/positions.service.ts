@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreatePositionDto } from './dto/create-position.dto';
@@ -86,16 +86,34 @@ export class PositionsService {
 
   async create(dto: CreatePositionDto, user: any) {
     await this.assertPositionHierarchy(dto.companyId, dto.departmentId, user);
-    const positionCode = dto.positionCode?.trim()
-      ? dto.positionCode.trim()
-      : await this.nextPositionCode(dto.companyId);
-    const record = await this.prisma.position.create({
-      data: {
-        ...dto,
-        positionCode,
-        currency: dto.currency || 'TZS',
-      },
-    });
+    const manualCode = dto.positionCode?.trim();
+    let positionCode = manualCode || await this.nextPositionCode(dto.companyId);
+    let record;
+    try {
+      record = await this.prisma.position.create({
+        data: {
+          ...dto,
+          positionCode,
+          currency: dto.currency || 'TZS',
+        },
+      });
+    } catch (error) {
+      if (this.isPositionCodeConflict(error)) {
+        if (manualCode) {
+          throw new BadRequestException(`Position code ${manualCode} already exists for this company`);
+        }
+        positionCode = await this.nextPositionCode(dto.companyId);
+        record = await this.prisma.position.create({
+          data: {
+            ...dto,
+            positionCode,
+            currency: dto.currency || 'TZS',
+          },
+        });
+      } else {
+        throw error;
+      }
+    }
     await this.audit.log({ userId: user.id, action: 'CREATE', entityType: 'Position', entityId: record.id, newValue: { ...dto, positionCode } as unknown as Record<string, unknown> });
     return record;
   }
@@ -134,8 +152,17 @@ export class PositionsService {
     });
     if (!company) throw new NotFoundException('Company not found');
     const prefix = (company.employeeCodePrefix ?? company.code.slice(0, 4)).toUpperCase();
-    const count = await this.prisma.position.count({ where: { companyId } });
-    return `${prefix}-POS-${String(count + 1).padStart(3, '0')}`;
+    const codePrefix = `${prefix}-POS-`;
+    const existing = await this.prisma.position.findMany({
+      where: { companyId, positionCode: { startsWith: codePrefix } },
+      select: { positionCode: true },
+    });
+    const usedCodes = new Set(existing.map((row) => row.positionCode));
+    for (let next = 1; next <= existing.length + 1000; next += 1) {
+      const candidate = `${codePrefix}${String(next).padStart(3, '0')}`;
+      if (!usedCodes.has(candidate)) return candidate;
+    }
+    throw new BadRequestException('Unable to generate a free position code');
   }
 
   private async assertPositionHierarchy(companyId: string, departmentId: string, user: any) {
@@ -163,5 +190,13 @@ export class PositionsService {
     if (department.branch && (department.branch.deletedAt || !department.branch.isActive)) {
       throw new BadRequestException('Position department branch/location is not active');
     }
+  }
+
+  private isPositionCodeConflict(error: unknown): error is Prisma.PrismaClientKnownRequestError {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+      return false;
+    }
+    const target = Array.isArray(error.meta?.target) ? error.meta.target : [];
+    return target.includes('companyId') && target.includes('positionCode');
   }
 }
