@@ -23,6 +23,8 @@ export class AttendanceService {
       limit = 20,
       employeeId,
       companyId,
+      divisionId,
+      branchId,
       dateFrom,
       dateTo,
       attendanceStatus,
@@ -30,6 +32,8 @@ export class AttendanceService {
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
     applyCompanyScopeWhere(where, user, companyId);
+    if (divisionId) where.divisionId = divisionId;
+    if (branchId) where.branchId = branchId;
     if (employeeId) where.employeeId = employeeId;
     if (attendanceStatus) where.attendanceStatus = attendanceStatus;
     if (dateFrom || dateTo) {
@@ -45,6 +49,15 @@ export class AttendanceService {
         orderBy: { attendanceDate: 'desc' },
         include: {
           employee: { select: { id: true, fullName: true, employeeCode: true } },
+          division: { select: { id: true, name: true, code: true } },
+          branch: { select: { id: true, name: true, code: true } },
+          shiftSchedule: {
+            select: {
+              id: true,
+              scheduleNumber: true,
+              workShift: { select: { id: true, name: true, startTime: true, endTime: true } },
+            },
+          },
           company: { select: { id: true, name: true } },
         },
       }),
@@ -58,6 +71,15 @@ export class AttendanceService {
       where: { id, deletedAt: null, ...this.companyFilter(user) },
       include: {
         employee: { select: { id: true, fullName: true, employeeCode: true } },
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
+        shiftSchedule: {
+          select: {
+            id: true,
+            scheduleNumber: true,
+            workShift: { select: { id: true, name: true, startTime: true, endTime: true } },
+          },
+        },
         company: { select: { id: true, name: true } },
       },
     });
@@ -66,13 +88,26 @@ export class AttendanceService {
   }
 
   async create(dto: CreateAttendanceDto, user: any) {
+    const hierarchy = await this.resolveEmployeeHierarchy(
+      dto.companyId,
+      dto.employeeId,
+      dto.divisionId,
+      dto.branchId,
+    );
     await this.assertNoDailyDuplicate(dto.companyId, dto.employeeId, dto.attendanceDate);
+    const normalized = await this.normalizeAttendance(dto);
     const record = await this.prisma.attendanceRecord.create({
       data: {
         ...dto,
+        divisionId: hierarchy.divisionId,
+        branchId: hierarchy.branchId,
         attendanceDate: new Date(dto.attendanceDate),
         clockInTime: dto.clockInTime ? new Date(dto.clockInTime) : undefined,
         clockOutTime: dto.clockOutTime ? new Date(dto.clockOutTime) : undefined,
+        totalHours: normalized.totalHours,
+        lateMinutes: normalized.lateMinutes,
+        earlyLeaveMinutes: normalized.earlyLeaveMinutes,
+        attendanceStatus: normalized.attendanceStatus,
       } as any,
     });
     await this.audit.log({
@@ -87,19 +122,53 @@ export class AttendanceService {
 
   async update(id: string, dto: UpdateAttendanceDto, user: any) {
     const existing = await this.findOne(id, user);
+    const hierarchy =
+      dto.companyId !== undefined ||
+      dto.employeeId !== undefined ||
+      dto.divisionId !== undefined ||
+      dto.branchId !== undefined
+        ? await this.resolveEmployeeHierarchy(
+            (dto as any).companyId ?? existing.companyId,
+            (dto as any).employeeId ?? existing.employeeId,
+            (dto as any).divisionId ?? existing.divisionId,
+            (dto as any).branchId ?? existing.branchId,
+          )
+        : { divisionId: existing.divisionId, branchId: existing.branchId };
     await this.assertNoDailyDuplicate(
       (dto as any).companyId ?? existing.companyId,
       (dto as any).employeeId ?? existing.employeeId,
       dto.attendanceDate ?? existing.attendanceDate,
       id,
     );
+    const normalized = await this.normalizeAttendance({
+      attendanceNumber: existing.attendanceNumber,
+      companyId: (dto as any).companyId ?? existing.companyId,
+      employeeId: (dto as any).employeeId ?? existing.employeeId,
+      createdById: existing.createdById,
+      attendanceDate: String(dto.attendanceDate ?? existing.attendanceDate.toISOString()),
+      shiftScheduleId: (dto as any).shiftScheduleId ?? existing.shiftScheduleId ?? undefined,
+      clockInTime: dto.clockInTime ?? existing.clockInTime?.toISOString(),
+      clockOutTime: dto.clockOutTime ?? existing.clockOutTime?.toISOString(),
+      overtimeHours: dto.overtimeHours ?? Number(existing.overtimeHours ?? 0),
+      lateMinutes: dto.lateMinutes ?? existing.lateMinutes,
+      earlyLeaveMinutes: dto.earlyLeaveMinutes ?? existing.earlyLeaveMinutes,
+      attendanceStatus: dto.attendanceStatus ?? existing.attendanceStatus,
+      source: dto.source ?? existing.source,
+      notes: dto.notes ?? existing.notes ?? undefined,
+    });
     const record = await this.prisma.attendanceRecord.update({
       where: { id },
       data: {
         ...dto,
+        divisionId: hierarchy.divisionId,
+        branchId: hierarchy.branchId,
         attendanceDate: dto.attendanceDate ? new Date(dto.attendanceDate) : undefined,
         clockInTime: dto.clockInTime ? new Date(dto.clockInTime) : undefined,
         clockOutTime: dto.clockOutTime ? new Date(dto.clockOutTime) : undefined,
+        totalHours: normalized.totalHours,
+        lateMinutes: normalized.lateMinutes,
+        earlyLeaveMinutes: normalized.earlyLeaveMinutes,
+        attendanceStatus: normalized.attendanceStatus,
       } as any,
     });
     await this.audit.log({
@@ -162,6 +231,106 @@ export class AttendanceService {
       throw new BadRequestException('Attendance already exists for this employee on this date');
     }
   }
+
+  private async resolveEmployeeHierarchy(
+    companyId: string,
+    employeeId: string,
+    requestedDivisionId?: string | null,
+    requestedBranchId?: string | null,
+  ) {
+    const employee = await this.prisma.employee.findFirst({
+      where: { id: employeeId, companyId, deletedAt: null },
+      select: { divisionId: true, branchId: true },
+    });
+    if (!employee) {
+      throw new BadRequestException('Employee does not belong to this company');
+    }
+
+    const divisionId = requestedDivisionId ?? employee.divisionId;
+    const branchId = requestedBranchId ?? employee.branchId;
+    await this.assertHierarchyBelongsToCompany(companyId, divisionId, branchId);
+    return { divisionId, branchId };
+  }
+
+  private async assertHierarchyBelongsToCompany(
+    companyId: string,
+    divisionId?: string | null,
+    branchId?: string | null,
+  ) {
+    if (divisionId) {
+      const division = await this.prisma.division.findFirst({
+        where: { id: divisionId, companyId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!division) throw new BadRequestException('Division does not belong to this company');
+    }
+    if (branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: {
+          id: branchId,
+          deletedAt: null,
+          division: { companyId },
+          ...(divisionId ? { divisionId } : {}),
+        },
+        select: { id: true },
+      });
+      if (!branch) throw new BadRequestException('Branch does not belong to this company/division');
+    }
+  }
+
+  private async normalizeAttendance(dto: CreateAttendanceDto) {
+    const clockIn = dto.clockInTime ? new Date(dto.clockInTime) : null;
+    const clockOut = dto.clockOutTime ? new Date(dto.clockOutTime) : null;
+    if (clockOut && !clockIn) {
+      throw new BadRequestException('Clock-out requires a clock-in time');
+    }
+    if (clockIn && Number.isNaN(clockIn.getTime())) {
+      throw new BadRequestException('Invalid clock-in time');
+    }
+    if (clockOut && Number.isNaN(clockOut.getTime())) {
+      throw new BadRequestException('Invalid clock-out time');
+    }
+    if (clockIn && clockOut && clockOut <= clockIn) {
+      throw new BadRequestException('Clock-out must be after clock-in');
+    }
+
+    let totalHours = 0;
+    if (clockIn && clockOut) {
+      totalHours = round2((clockOut.getTime() - clockIn.getTime()) / 3_600_000);
+    }
+
+    let lateMinutes = dto.lateMinutes ?? 0;
+    let earlyLeaveMinutes = dto.earlyLeaveMinutes ?? 0;
+    if (dto.shiftScheduleId) {
+      const schedule = await this.prisma.shiftSchedule.findFirst({
+        where: { id: dto.shiftScheduleId, deletedAt: null },
+        include: { workShift: { select: { startTime: true, endTime: true } } },
+      });
+      if (!schedule) throw new BadRequestException('Shift schedule not found');
+      if (schedule.employeeId !== dto.employeeId || schedule.companyId !== dto.companyId) {
+        throw new BadRequestException('Shift schedule does not belong to this employee/company');
+      }
+      if (clockIn && dto.lateMinutes === undefined) {
+        lateMinutes = minutesAfterScheduledTime(clockIn, schedule.workShift.startTime);
+      }
+      if (clockOut && dto.earlyLeaveMinutes === undefined) {
+        earlyLeaveMinutes = minutesBeforeScheduledTime(clockOut, schedule.workShift.endTime);
+      }
+    }
+
+    let attendanceStatus = dto.attendanceStatus;
+    if (!attendanceStatus) {
+      attendanceStatus = clockIn ? (lateMinutes > 0 ? 'LATE' : 'PRESENT') : 'UNPAID_ABSENT';
+    }
+    if (['PRESENT', 'LATE', 'HALF_DAY'].includes(attendanceStatus) && !clockIn) {
+      throw new BadRequestException(`${attendanceStatus} attendance requires a clock-in time`);
+    }
+    if (['ABSENT', 'UNPAID_ABSENT', 'ON_LEAVE', 'HOLIDAY', 'SICK'].includes(attendanceStatus)) {
+      totalHours = 0;
+    }
+
+    return { totalHours, lateMinutes, earlyLeaveMinutes, attendanceStatus };
+  }
 }
 
 function startOfDay(value: Date): Date {
@@ -173,5 +342,26 @@ function startOfDay(value: Date): Date {
 function endOfDay(value: Date): Date {
   const d = new Date(value);
   d.setUTCHours(23, 59, 59, 999);
+  return d;
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function minutesAfterScheduledTime(actual: Date, scheduledTime: string): number {
+  const scheduled = dateWithClock(actual, scheduledTime);
+  return Math.max(0, Math.round((actual.getTime() - scheduled.getTime()) / 60_000));
+}
+
+function minutesBeforeScheduledTime(actual: Date, scheduledTime: string): number {
+  const scheduled = dateWithClock(actual, scheduledTime);
+  return Math.max(0, Math.round((scheduled.getTime() - actual.getTime()) / 60_000));
+}
+
+function dateWithClock(anchor: Date, time: string): Date {
+  const [hours = '0', minutes = '0'] = time.split(':');
+  const d = new Date(anchor);
+  d.setUTCHours(Number(hours), Number(minutes), 0, 0);
   return d;
 }

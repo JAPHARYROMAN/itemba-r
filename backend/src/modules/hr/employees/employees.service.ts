@@ -242,7 +242,11 @@ export class EmployeesService {
 
   async remove(id: string, user: any) {
     await this.findOne(id, user);
-    await this.prisma.employee.update({ where: { id }, data: { deletedAt: new Date() } });
+    await this.assertEmployeeCanBeDeleted(id);
+    await this.prisma.employee.update({
+      where: { id },
+      data: { deletedAt: new Date(), employmentStatus: 'INACTIVE' },
+    });
     await this.audit.log({
       userId: user.id,
       action: 'DELETE',
@@ -251,6 +255,61 @@ export class EmployeesService {
       newValue: {},
     });
     return { message: 'Employee deleted' };
+  }
+
+  private async assertEmployeeCanBeDeleted(employeeId: string) {
+    const [
+      activeAllowances,
+      activeDeductions,
+      openLeaveRequests,
+      openSalaryAdvances,
+      openPayrollEntries,
+    ] = await Promise.all([
+      this.prisma.employeeAllowance.count({
+        where: { employeeId, deletedAt: null, status: 'ACTIVE' },
+      }),
+      this.prisma.employeeDeduction.count({
+        where: { employeeId, deletedAt: null, status: 'ACTIVE' },
+      }),
+      this.prisma.leaveRequest.count({
+        where: {
+          employeeId,
+          deletedAt: null,
+          status: { in: ['DRAFT', 'SUBMITTED', 'APPROVED'] },
+        },
+      }),
+      this.prisma.salaryAdvance.count({
+        where: {
+          employeeId,
+          deletedAt: null,
+          status: { in: ['REQUESTED', 'APPROVED', 'PAID', 'DEDUCTING'] },
+        },
+      }),
+      this.prisma.payrollEntry.count({
+        where: {
+          employeeId,
+          deletedAt: null,
+          status: { not: 'CANCELLED' },
+          payrollRun: { deletedAt: null, status: { not: 'CANCELLED' } },
+        },
+      }),
+    ]);
+
+    const blockers = [
+      activeAllowances ? `${activeAllowances} active allowance(s)` : null,
+      activeDeductions ? `${activeDeductions} active deduction(s)` : null,
+      openLeaveRequests ? `${openLeaveRequests} open/approved leave request(s)` : null,
+      openSalaryAdvances ? `${openSalaryAdvances} unsettled salary advance(s)` : null,
+      openPayrollEntries
+        ? `${openPayrollEntries} payroll entr${openPayrollEntries === 1 ? 'y' : 'ies'}`
+        : null,
+    ].filter(Boolean);
+
+    if (blockers.length > 0) {
+      throw new BadRequestException(
+        `Employee cannot be deleted while dependent HR/payroll records are active: ${blockers.join(', ')}. Close, cancel, or settle these records first.`,
+      );
+    }
   }
 
   private assertTerminationPending(employee: any, approverId: string) {

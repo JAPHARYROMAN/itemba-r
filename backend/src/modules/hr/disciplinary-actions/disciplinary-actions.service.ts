@@ -1,4 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
+import { AuthUser } from '../../../common/decorators/current-user.decorator';
+import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../../common/services';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../../entity-code-generator/entity-code-generator.service';
@@ -25,7 +28,13 @@ export class DisciplinaryActionsService {
     };
   }
 
+  private companyFilter(user: AuthUser): Record<string, string> {
+    if (user.role?.scope === 'GROUP' || !user.companyId) return {};
+    return { companyId: user.companyId };
+  }
+
   async findAll(query: {
+    user: AuthUser;
     page?: number;
     limit?: number;
     companyId?: string;
@@ -35,8 +44,8 @@ export class DisciplinaryActionsService {
   }) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 50;
-    const where: Record<string, unknown> = { deletedAt: null };
-    if (query.companyId) where.companyId = query.companyId;
+    const where: Record<string, unknown> = { deletedAt: null, ...this.companyFilter(query.user) };
+    applyCompanyScopeWhere(where, query.user, query.companyId);
     if (query.employeeId) where.employeeId = query.employeeId;
     if (query.status) where.status = query.status;
     if (query.type) where.type = query.type;
@@ -53,16 +62,17 @@ export class DisciplinaryActionsService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser) {
     const row = await this.prisma.disciplinaryAction.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: null, ...this.companyFilter(user) },
       include: this.include(),
     });
     if (!row) throw new NotFoundException('Disciplinary action not found');
     return row;
   }
 
-  async create(dto: CreateDisciplinaryActionDto, userId: string) {
+  async create(dto: CreateDisciplinaryActionDto, user: AuthUser) {
+    assertCanAccessCompanyFromUser(user, dto.companyId, AccessLevel.WRITE);
     const actionNumber = await this.codes.next({
       entityType: 'DisciplinaryAction',
       companyId: dto.companyId,
@@ -83,13 +93,13 @@ export class DisciplinaryActionsService {
         employeeResponse: dto.employeeResponse,
         notes: dto.notes,
         fineAmount: dto.fineAmount,
-        issuedById: userId,
+        issuedById: user.id,
         status,
       },
       include: this.include(),
     });
     await this.audit.log({
-      userId,
+      userId: user.id,
       action: 'CREATE',
       entityType: 'DisciplinaryAction',
       entityId: row.id,
@@ -99,7 +109,7 @@ export class DisciplinaryActionsService {
     // Auto-create the deduction only once the action is active/approved.
     if (status === 'ACTIVE' && dto.fineAmount && dto.fineAmount > 0) {
       try {
-        await this.applyFine(row.id, userId);
+        await this.applyFine(row.id, user.id);
       } catch (err) {
         this.logger.warn(
           `Auto-fine deduction failed for ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
@@ -109,8 +119,9 @@ export class DisciplinaryActionsService {
     return row;
   }
 
-  async approveHr(actionId: string, userId: string) {
-    const action = await this.findOne(actionId);
+  async approveHr(actionId: string, user: AuthUser) {
+    const action = await this.findOne(actionId, user);
+    const userId = user.id;
     this.assertCanApprove(action, userId);
     if (action.status !== 'PENDING_HR_APPROVAL') {
       throw new BadRequestException('Disciplinary action is not pending Group HR approval');
@@ -143,8 +154,9 @@ export class DisciplinaryActionsService {
     return row;
   }
 
-  async approveGm(actionId: string, userId: string) {
-    const action = await this.findOne(actionId);
+  async approveGm(actionId: string, user: AuthUser) {
+    const action = await this.findOne(actionId, user);
+    const userId = user.id;
     this.assertCanApprove(action, userId);
     if (action.status !== 'PENDING_GM_APPROVAL') {
       throw new BadRequestException('Disciplinary action is not pending Company GM approval');
@@ -248,8 +260,9 @@ export class DisciplinaryActionsService {
     return deduction;
   }
 
-  async update(id: string, dto: UpdateDisciplinaryActionDto, userId: string) {
-    const existing = await this.findOne(id);
+  async update(id: string, dto: UpdateDisciplinaryActionDto, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    const userId = user.id;
     const data: Record<string, unknown> = {};
     if (dto.type !== undefined) data.type = dto.type;
     if (dto.disputeId !== undefined) data.disputeId = dto.disputeId;
@@ -307,8 +320,9 @@ export class DisciplinaryActionsService {
     return row;
   }
 
-  async remove(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async remove(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    const userId = user.id;
     await this.prisma.disciplinaryAction.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.audit.log({
       userId,

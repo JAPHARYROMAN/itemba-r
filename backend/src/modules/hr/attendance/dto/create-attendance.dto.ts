@@ -6,6 +6,9 @@ export class CreateAttendanceDto {
   @IsString() attendanceNumber!: string;
   @IsString() employeeId!: string;
   @IsString() companyId!: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
+  @IsOptional() @IsString() shiftScheduleId?: string;
   @IsString() createdById!: string;
   @IsDateString() attendanceDate!: string;
   @IsOptional() @IsDateString() clockInTime?: string;

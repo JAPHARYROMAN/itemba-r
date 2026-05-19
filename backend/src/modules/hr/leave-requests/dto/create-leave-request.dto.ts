@@ -6,6 +6,8 @@ export class CreateLeaveRequestDto {
   @IsString() employeeId!: string;
   @IsString() leaveTypeId!: string;
   @IsString() companyId!: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
   @IsString() createdById!: string;
   @IsDateString() startDate!: string;
   @IsDateString() endDate!: string;

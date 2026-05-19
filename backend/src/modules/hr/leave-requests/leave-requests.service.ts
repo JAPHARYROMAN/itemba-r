@@ -21,10 +21,21 @@ export class LeaveRequestsService {
   }
 
   async findAll(user: any, query: any) {
-    const { page = 1, limit = 20, employeeId, companyId, status, leaveTypeId } = query;
+    const {
+      page = 1,
+      limit = 20,
+      employeeId,
+      companyId,
+      divisionId,
+      branchId,
+      status,
+      leaveTypeId,
+    } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
     applyCompanyScopeWhere(where, user, companyId);
+    if (divisionId) where.divisionId = divisionId;
+    if (branchId) where.branchId = branchId;
     if (employeeId) where.employeeId = employeeId;
     if (status) where.status = status;
     if (leaveTypeId) where.leaveTypeId = leaveTypeId;
@@ -46,6 +57,8 @@ export class LeaveRequestsService {
             },
           },
           company: { select: { id: true, name: true } },
+          division: { select: { id: true, name: true, code: true } },
+          branch: { select: { id: true, name: true, code: true } },
         },
       }),
       this.prisma.leaveRequest.count({ where }),
@@ -68,6 +81,8 @@ export class LeaveRequestsService {
           },
         },
         company: { select: { id: true, name: true } },
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
       },
     });
     if (!record) throw new NotFoundException('Leave request not found');
@@ -75,9 +90,17 @@ export class LeaveRequestsService {
   }
 
   async create(dto: CreateLeaveRequestDto, user: any) {
+    const hierarchy = await this.resolveEmployeeHierarchy(
+      dto.companyId,
+      dto.employeeId,
+      dto.divisionId,
+      dto.branchId,
+    );
     const record = await this.prisma.leaveRequest.create({
       data: {
         ...dto,
+        divisionId: hierarchy.divisionId,
+        branchId: hierarchy.branchId,
         startDate: new Date(dto.startDate),
         endDate: new Date(dto.endDate),
       } as any,
@@ -96,19 +119,37 @@ export class LeaveRequestsService {
     const existing = await this.findOne(id, user);
     if (
       existing.status === 'APPROVED' &&
-      (dto.leaveTypeId !== undefined ||
+      ((dto as any).companyId !== undefined ||
+        dto.employeeId !== undefined ||
+        dto.divisionId !== undefined ||
+        dto.branchId !== undefined ||
+        dto.leaveTypeId !== undefined ||
         dto.startDate !== undefined ||
         dto.endDate !== undefined ||
         dto.totalDays !== undefined)
     ) {
       throw new BadRequestException(
-        'Approved leave requests cannot change leave type, dates, or days. Cancel and recreate the request.',
+        'Approved leave requests cannot change employee, hierarchy, leave type, dates, or days. Cancel and recreate the request.',
       );
     }
+    const hierarchy =
+      dto.companyId !== undefined ||
+      dto.employeeId !== undefined ||
+      dto.divisionId !== undefined ||
+      dto.branchId !== undefined
+        ? await this.resolveEmployeeHierarchy(
+            (dto as any).companyId ?? existing.companyId,
+            (dto as any).employeeId ?? existing.employeeId,
+            (dto as any).divisionId ?? existing.divisionId,
+            (dto as any).branchId ?? existing.branchId,
+          )
+        : { divisionId: existing.divisionId, branchId: existing.branchId };
     const record = await this.prisma.leaveRequest.update({
       where: { id },
       data: {
         ...dto,
+        divisionId: hierarchy.divisionId,
+        branchId: hierarchy.branchId,
         startDate: dto.startDate ? new Date(dto.startDate) : undefined,
         endDate: dto.endDate ? new Date(dto.endDate) : undefined,
       } as any,
@@ -378,6 +419,50 @@ export class LeaveRequestsService {
       where: { id: balance.id },
       data: { usedDays: newUsed },
     });
+  }
+
+  private async resolveEmployeeHierarchy(
+    companyId: string,
+    employeeId: string,
+    requestedDivisionId?: string | null,
+    requestedBranchId?: string | null,
+  ) {
+    const employee = await this.prisma.employee.findFirst({
+      where: { id: employeeId, companyId, deletedAt: null },
+      select: { divisionId: true, branchId: true },
+    });
+    if (!employee) throw new BadRequestException('Employee does not belong to this company');
+
+    const divisionId = requestedDivisionId ?? employee.divisionId;
+    const branchId = requestedBranchId ?? employee.branchId;
+    await this.assertHierarchyBelongsToCompany(companyId, divisionId, branchId);
+    return { divisionId, branchId };
+  }
+
+  private async assertHierarchyBelongsToCompany(
+    companyId: string,
+    divisionId?: string | null,
+    branchId?: string | null,
+  ) {
+    if (divisionId) {
+      const division = await this.prisma.division.findFirst({
+        where: { id: divisionId, companyId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!division) throw new BadRequestException('Division does not belong to this company');
+    }
+    if (branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: {
+          id: branchId,
+          deletedAt: null,
+          division: { companyId },
+          ...(divisionId ? { divisionId } : {}),
+        },
+        select: { id: true },
+      });
+      if (!branch) throw new BadRequestException('Branch does not belong to this company/division');
+    }
   }
 }
 

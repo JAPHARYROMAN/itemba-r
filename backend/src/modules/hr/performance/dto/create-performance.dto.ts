@@ -6,6 +6,8 @@ export class CreatePerformanceRecordDto {
   @IsString() performanceNumber!: string;
   @IsString() employeeId!: string;
   @IsString() companyId!: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
   @IsString() reviewerId!: string;
   @IsDateString() reviewDate!: string;
   @IsOptional() @IsDateString() reviewPeriodStart?: string;

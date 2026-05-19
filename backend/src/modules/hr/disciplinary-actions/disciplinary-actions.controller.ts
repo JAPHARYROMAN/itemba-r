@@ -24,8 +24,9 @@ export class DisciplinaryActionsController {
 
   @Get()
   @RequirePermissions('disciplinary_actions.view')
-  findAll(@Query() q: Record<string, string>) {
+  findAll(@CurrentUser() user: AuthUser, @Query() q: Record<string, string>) {
     return this.service.findAll({
+      user,
       page: q.page ? Number(q.page) : undefined,
       limit: q.limit ? Number(q.limit) : undefined,
       companyId: q.companyId,
@@ -37,14 +38,14 @@ export class DisciplinaryActionsController {
 
   @Get(':id')
   @RequirePermissions('disciplinary_actions.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()
   @RequirePermissions('disciplinary_actions.create')
   create(@Body() dto: CreateDisciplinaryActionDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Patch(':id')
@@ -54,24 +55,24 @@ export class DisciplinaryActionsController {
     @Body() dto: UpdateDisciplinaryActionDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 
   @Patch(':id/approve-hr')
   @RequirePermissions('disciplinary_actions.approve.hr')
   approveHr(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approveHr(id, user.id);
+    return this.service.approveHr(id, user);
   }
 
   @Patch(':id/approve-gm')
   @RequirePermissions('disciplinary_actions.approve.gm')
   approveGm(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approveGm(id, user.id);
+    return this.service.approveGm(id, user);
   }
 
   @Delete(':id')
   @RequirePermissions('disciplinary_actions.delete')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user);
   }
 }

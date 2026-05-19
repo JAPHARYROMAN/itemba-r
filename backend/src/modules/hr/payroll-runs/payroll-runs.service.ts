@@ -182,6 +182,7 @@ export class PayrollRunsService {
       let overtimeHours = 0;
       const attendancePay = 0;
       let overtimePay = 0;
+      let attendanceUnpaidAbsentDays = 0;
 
       if (periodStart && periodEnd) {
         const attendance = await this.prisma.attendanceRecord.findMany({
@@ -191,9 +192,22 @@ export class PayrollRunsService {
             attendanceDate: { gte: periodStart, lte: periodEnd },
             deletedAt: null,
           },
+          select: {
+            attendanceStatus: true,
+            overtimeHours: true,
+          },
         });
-        daysWorked = attendance.length;
-        overtimeHours = attendance.reduce((sum, a) => sum + Number(a.overtimeHours ?? 0), 0);
+        daysWorked = attendance.reduce(
+          (sum, a) => sum + attendanceDayWeight(a.attendanceStatus),
+          0,
+        );
+        attendanceUnpaidAbsentDays = attendance.reduce(
+          (sum, a) => sum + unpaidAbsenceWeight(a.attendanceStatus),
+          0,
+        );
+        overtimeHours = attendance
+          .filter((a) => attendanceDayWeight(a.attendanceStatus) > 0)
+          .reduce((sum, a) => sum + Number(a.overtimeHours ?? 0), 0);
         const hourlyRate = fullBasePay / 22 / 8;
         overtimePay = overtimeHours * hourlyRate * 1.5;
       }
@@ -241,6 +255,7 @@ export class PayrollRunsService {
           }
         }
       }
+      lwopDays += attendanceUnpaidAbsentDays;
       const dailyRate = fullBasePay / 22;
       const lwopDeduction = Math.min(fullBasePay, Math.round(lwopDays * dailyRate * 100) / 100);
       const basePay = Math.round((fullBasePay - lwopDeduction) * 100) / 100;
@@ -961,4 +976,16 @@ function filingCodeSegment(value: string): string {
     .replace(/[^A-Za-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .toUpperCase();
+}
+
+function attendanceDayWeight(status: string): number {
+  if (['PRESENT', 'LATE'].includes(status)) return 1;
+  if (status === 'HALF_DAY') return 0.5;
+  return 0;
+}
+
+function unpaidAbsenceWeight(status: string): number {
+  if (['ABSENT', 'UNPAID_ABSENT'].includes(status)) return 1;
+  if (status === 'HALF_DAY') return 0.5;
+  return 0;
 }

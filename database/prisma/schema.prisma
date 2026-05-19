@@ -712,6 +712,11 @@ model Division {
   employeeAssignments EmployeeAssignment[]
   workShifts          WorkShift[]
   shiftSchedules      ShiftSchedule[]
+  attendanceRecords   AttendanceRecord[]
+  leaveRequests       LeaveRequest[]
+  performanceRecords  PerformanceRecord[]
+  hrDocuments         HRDocument[]
+  employmentDisputes  EmploymentDispute[]
 
   approvalWorkflows      ApprovalWorkflow[]
   productFamilies        ProductFamily[]    @relation("DivisionProductFamilies")
@@ -805,6 +810,11 @@ model Branch {
   employeeAssignments EmployeeAssignment[]
   workShifts          WorkShift[]
   shiftSchedules      ShiftSchedule[]
+  attendanceRecords   AttendanceRecord[]
+  leaveRequests       LeaveRequest[]
+  performanceRecords  PerformanceRecord[]
+  hrDocuments         HRDocument[]
+  employmentDisputes  EmploymentDispute[]
   oshaRegistrations   OshaRegistration[]
 
   approvalWorkflows      ApprovalWorkflow[]
@@ -7479,6 +7489,8 @@ model AttendanceRecord {
   id                String           @id @default(uuid())
   attendanceNumber  String
   companyId         String
+  divisionId        String?
+  branchId          String?
   employeeId        String
   shiftScheduleId   String?
   attendanceDate    DateTime
@@ -7499,6 +7511,8 @@ model AttendanceRecord {
   deletedAt         DateTime?
 
   company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division      Division?      @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch        Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
   employee      Employee       @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   shiftSchedule ShiftSchedule? @relation(fields: [shiftScheduleId], references: [id], onDelete: SetNull)
   createdBy     User           @relation("AttendanceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
@@ -7508,6 +7522,8 @@ model AttendanceRecord {
   @@index([employeeId])
   @@index([attendanceDate])
   @@index([companyId, attendanceDate])
+  @@index([divisionId, attendanceDate])
+  @@index([branchId, attendanceDate])
   @@map("attendance_records")
 }
 
@@ -7537,6 +7553,8 @@ model LeaveRequest {
   id                 String             @id @default(uuid())
   leaveRequestNumber String
   companyId          String
+  divisionId         String?
+  branchId           String?
   employeeId         String
   leaveTypeId        String
   startDate          DateTime
@@ -7560,6 +7578,8 @@ model LeaveRequest {
   deletedAt          DateTime?
 
   company    Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division   Division? @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch     Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
   employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   leaveType  LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
   createdBy  User      @relation("LeaveRequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
@@ -7568,6 +7588,8 @@ model LeaveRequest {
 
   @@unique([companyId, leaveRequestNumber])
   @@index([companyId, status, startDate])
+  @@index([divisionId, status, startDate])
+  @@index([branchId, status, startDate])
   @@map("leave_requests")
 }
 
@@ -7983,6 +8005,8 @@ model PerformanceRecord {
   id                String                  @id @default(uuid())
   performanceNumber String
   companyId         String
+  divisionId        String?
+  branchId          String?
   employeeId        String
   reviewDate        DateTime
   reviewPeriodStart DateTime?
@@ -8007,12 +8031,16 @@ model PerformanceRecord {
   deletedAt         DateTime?
 
   company  Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division Division? @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch   Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   reviewer User     @relation("PerformanceReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
 
   @@unique([companyId, performanceNumber])
   @@index([employeeId, reviewDate])
   @@index([companyId, reviewDate])
+  @@index([divisionId, reviewDate])
+  @@index([branchId, reviewDate])
   @@index([reviewerId])
   @@map("performance_records")
 }
@@ -8020,6 +8048,8 @@ model PerformanceRecord {
 model HRDocument {
   id               String             @id @default(uuid())
   companyId        String
+  divisionId       String?
+  branchId         String?
   employeeId       String?
   entityType       String?
   entityId         String?
@@ -8027,12 +8057,20 @@ model HRDocument {
   documentCategory HRDocumentCategory @default(OTHER)
   isSensitive      Boolean            @default(true)
   createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  deletedAt        DateTime?
 
   company  Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division Division? @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch   Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
   employee Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   document Document  @relation("HRDocumentBacking", fields: [documentId], references: [id], onDelete: Restrict)
 
   @@index([documentId])
+  @@index([companyId, documentCategory, createdAt])
+  @@index([divisionId, documentCategory, createdAt])
+  @@index([branchId, documentCategory, createdAt])
+  @@index([employeeId, documentCategory, createdAt])
   @@map("hr_documents")
 }
 
@@ -8157,10 +8195,14 @@ model EmploymentDispute {
   id                 String                       @id @default(uuid())
   disputeNumber      String
   companyId          String
+  divisionId         String?
+  branchId           String?
   employeeId         String
   raisedById         String
   type               EmploymentDisputeType
   status             EmploymentDisputeStatus      @default(RAISED)
+  directToGroupHr    Boolean                      @default(false)
+  groupHrNotifiedAt  DateTime?
   raisedAt           DateTime
   summary            String
   initialPosition    String?
@@ -8187,6 +8229,8 @@ model EmploymentDispute {
   deletedAt          DateTime?
 
   company             Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division            Division?            @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch              Branch?              @relation(fields: [branchId], references: [id], onDelete: SetNull)
   employee            Employee             @relation("DisputeEmployee", fields: [employeeId], references: [id], onDelete: Restrict)
   raisedBy            User                 @relation("DisputeRaisedBy", fields: [raisedById], references: [id], onDelete: Restrict)
   mediatedBy          User?                @relation("DisputeMediatedBy", fields: [mediatedById], references: [id], onDelete: SetNull)
@@ -8197,6 +8241,9 @@ model EmploymentDispute {
   @@unique([companyId, disputeNumber])
   @@index([employeeId])
   @@index([companyId, status])
+  @@index([divisionId, status])
+  @@index([branchId, status])
+  @@index([directToGroupHr, status])
   @@map("employment_disputes")
 }
 

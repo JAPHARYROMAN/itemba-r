@@ -3,6 +3,8 @@ import { HRDocumentCategory } from '@prisma/client';
 
 export class CreateHrDocumentDto {
   @IsString() companyId!: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsString() employeeId?: string;
   @IsOptional() @IsString() entityType?: string;
   @IsOptional() @IsString() entityId?: string;
