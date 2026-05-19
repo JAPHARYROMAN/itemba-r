@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateDepartmentDto } from './dto/create-department.dto';
 import { UpdateDepartmentDto } from './dto/update-department.dto';
-import { applyCompanyScopeWhere } from '../../../common/services';
+import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../../common/services';
 
 @Injectable()
 export class DepartmentsService {
@@ -15,10 +16,13 @@ export class DepartmentsService {
   }
 
   async findAll(user: any, query: any) {
-    const { page = 1, limit = 20, search, companyId } = query;
+    const { page = 1, limit = 20, search, companyId, divisionId, branchId, status } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
     applyCompanyScopeWhere(where, user, companyId);
+    if (divisionId) where.divisionId = divisionId;
+    if (branchId) where.branchId = branchId;
+    if (status) where.status = status;
     if (search) where.name = { contains: search, mode: 'insensitive' };
     const [data, total] = await Promise.all([
       this.prisma.department.findMany({
@@ -26,6 +30,7 @@ export class DepartmentsService {
         include: {
           company: { select: { id: true, name: true } },
           division: { select: { id: true, name: true, code: true } },
+          branch: { select: { id: true, name: true, code: true } },
         },
       }),
       this.prisma.department.count({ where }),
@@ -39,6 +44,7 @@ export class DepartmentsService {
       include: {
         company: { select: { id: true, name: true } },
         division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
       },
     });
     if (!record) throw new NotFoundException('Department not found');
@@ -46,6 +52,7 @@ export class DepartmentsService {
   }
 
   async create(dto: CreateDepartmentDto, user: any) {
+    await this.assertDepartmentHierarchy(dto.companyId, dto.divisionId, dto.branchId, user);
     const departmentCode = dto.departmentCode?.trim()
       ? dto.departmentCode.trim()
       : await this.nextDepartmentCode(dto.companyId);
@@ -75,7 +82,13 @@ export class DepartmentsService {
   }
 
   async update(id: string, dto: UpdateDepartmentDto, user: any) {
-    await this.findOne(id, user);
+    const existing = await this.findOne(id, user);
+    await this.assertDepartmentHierarchy(
+      dto.companyId ?? existing.companyId,
+      dto.divisionId ?? existing.divisionId ?? undefined,
+      dto.branchId ?? existing.branchId ?? undefined,
+      user,
+    );
     const record = await this.prisma.department.update({ where: { id }, data: dto });
     await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'Department', entityId: id, newValue: dto as unknown as Record<string, unknown> });
     return record;
@@ -86,5 +99,47 @@ export class DepartmentsService {
     await this.prisma.department.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'Department', entityId: id, newValue: {} });
     return { message: 'Department deleted' };
+  }
+
+  private async assertDepartmentHierarchy(
+    companyId: string,
+    divisionId: string | undefined,
+    branchId: string | undefined,
+    user: any,
+  ) {
+    assertCanAccessCompanyFromUser(user, companyId, AccessLevel.WRITE);
+
+    if (divisionId) {
+      const division = await this.prisma.division.findFirst({
+        where: { id: divisionId, deletedAt: null },
+        select: { companyId: true, isActive: true },
+      });
+      if (!division) throw new NotFoundException('Division not found');
+      if (division.companyId !== companyId) {
+        throw new BadRequestException('Department division must belong to the selected company');
+      }
+      if (!division.isActive) throw new BadRequestException('Department division must be active');
+    }
+
+    if (branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: branchId, deletedAt: null },
+        select: {
+          divisionId: true,
+          isActive: true,
+          division: { select: { companyId: true, isActive: true, deletedAt: true } },
+        },
+      });
+      if (!branch) throw new NotFoundException('Branch/location not found');
+      if (branch.division.companyId !== companyId) {
+        throw new BadRequestException('Department branch/location must belong to the selected company');
+      }
+      if (divisionId && branch.divisionId !== divisionId) {
+        throw new BadRequestException('Department branch/location must belong to the selected division');
+      }
+      if (!branch.isActive || !branch.division.isActive || branch.division.deletedAt) {
+        throw new BadRequestException('Department branch/location must be active');
+      }
+    }
   }
 }

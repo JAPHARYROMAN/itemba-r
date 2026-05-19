@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, PageHeader, StatusBadge, FormInput, FormSelect, ConfirmDialog, Modal, Btn, PageSpinner } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
 
@@ -15,6 +15,8 @@ interface Department {
   companyId?: string;
   division?: { id: string; name: string; code?: string | null } | null;
   divisionId?: string;
+  branch?: { id: string; name: string; code?: string | null } | null;
+  branchId?: string;
   status: string;
 }
 
@@ -23,10 +25,11 @@ interface FormState {
   name: string;
   companyId: string;
   divisionId: string;
+  branchId: string;
   status: string;
 }
 
-const empty: FormState = { departmentCode: '', name: '', companyId: '', divisionId: '', status: 'ACTIVE' };
+const empty: FormState = { departmentCode: '', name: '', companyId: '', divisionId: '', branchId: '', status: 'ACTIVE' };
 
 export default function DepartmentsPage() {
   const [rows, setRows] = useState<Department[]>([]);
@@ -38,7 +41,14 @@ export default function DepartmentsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [nextCodePreview, setNextCodePreview] = useState('');
-  const { companyOptions, divisionOptions } = useOrgScope(form.companyId, { skipBranches: true, skipEmployees: true });
+  const { branches, companyOptions, divisionOptions } = useOrgScope(form.companyId, { skipEmployees: true });
+  const branchOptions = useMemo(
+    () =>
+      branches
+        .filter((b) => !form.divisionId || b.divisionId === form.divisionId)
+        .map((b) => ({ value: b.id, label: `${b.code ? b.code + ' - ' : ''}${b.name}` })),
+    [branches, form.divisionId],
+  );
 
   useEffect(() => {
     if (!form.companyId || editing) { setNextCodePreview(''); return; }
@@ -66,6 +76,7 @@ export default function DepartmentsPage() {
       name: d.name,
       companyId,
       divisionId: d.division?.id ?? d.divisionId ?? '',
+      branchId: d.branch?.id ?? d.branchId ?? '',
       status: d.status,
     });
     setShowModal(true);
@@ -84,6 +95,7 @@ export default function DepartmentsPage() {
     };
     if (form.departmentCode.trim()) body.departmentCode = form.departmentCode.trim();
     if (form.divisionId) body.divisionId = form.divisionId;
+    if (form.branchId) body.branchId = form.branchId;
     try {
       const res = await fetch(url, {
         method: editing ? 'PUT' : 'POST',
@@ -133,6 +145,7 @@ export default function DepartmentsPage() {
                   <th className={thCls}>Name</th>
                   <th className={thCls}>Company</th>
                   <th className={thCls}>Division</th>
+                  <th className={thCls}>Branch / Location</th>
                   <th className={thCls}>Status</th>
                   <th className={thCls}>Actions</th>
                 </tr>
@@ -141,12 +154,14 @@ export default function DepartmentsPage() {
                 {rows.map(d => {
                   const companyLabel = typeof d.company === 'object' && d.company ? d.company.name : (d.company ?? '—');
                   const divisionLabel = d.division?.name ?? '—';
+                  const branchLabel = d.branch?.name ?? '—';
                   return (
                   <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50">
                     <td className={`${tdCls} font-mono`}>{d.departmentCode}</td>
                     <td className={`${tdCls} font-medium`}>{d.name}</td>
                     <td className={tdCls}>{companyLabel}</td>
                     <td className={tdCls}>{divisionLabel}</td>
+                    <td className={tdCls}>{branchLabel}</td>
                     <td className={tdCls}><StatusBadge status={d.status} /></td>
                     <td className={tdCls}>
                       <div className="flex gap-2">
@@ -158,7 +173,7 @@ export default function DepartmentsPage() {
                   );
                 })}
                 {rows.length === 0 && (
-                  <tr><td colSpan={6} className="text-center py-8 text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No departments found</td></tr>
+                  <tr><td colSpan={7} className="text-center py-8 text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No departments found</td></tr>
                 )}
               </tbody>
             </table>
@@ -182,7 +197,7 @@ export default function DepartmentsPage() {
             <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">{error}</div>
           )}
           <FormSelect label="Company" required value={form.companyId}
-            onChange={(e) => setForm(p => ({ ...p, companyId: e.target.value, divisionId: '' }))}
+            onChange={(e) => setForm(p => ({ ...p, companyId: e.target.value, divisionId: '', branchId: '' }))}
             options={companyOptions} placeholder="Select company" />
           <FormInput
             label="Department Code"
@@ -192,8 +207,16 @@ export default function DepartmentsPage() {
             hint={editing ? '' : (nextCodePreview && !form.departmentCode ? `Will be assigned ${nextCodePreview}` : 'Leave blank to auto-generate, or enter a meaningful abbreviation (e.g. MWAN-OPS)')}
           />
           <FormInput label="Name" value={form.name} onChange={f('name')} required />
-          <FormSelect label="Division" value={form.divisionId} onChange={f('divisionId')}
+          <FormSelect label="Division" value={form.divisionId}
+            onChange={(e) => setForm((p) => ({ ...p, divisionId: e.target.value, branchId: '' }))}
             options={divisionOptions} placeholder={form.companyId ? 'Select division' : 'Select company first'} />
+          <FormSelect
+            label="Branch / Location"
+            value={form.branchId}
+            onChange={f('branchId')}
+            options={branchOptions}
+            placeholder={form.divisionId ? 'Select branch/location' : 'Select division first'}
+          />
           <FormSelect label="Status" value={form.status} onChange={f('status')}
             options={[{ value: 'ACTIVE', label: 'Active' }, { value: 'INACTIVE', label: 'Inactive' }]} />
         </form>

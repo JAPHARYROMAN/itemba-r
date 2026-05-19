@@ -3,7 +3,14 @@
 import { useEffect, useMemo, useState } from 'react';
 
 export interface OrgCompany { id: string; name: string; code: string }
-export interface OrgBranch { id: string; name: string; code: string; companyId?: string }
+export interface OrgBranch {
+  id: string;
+  name: string;
+  code: string;
+  companyId?: string;
+  divisionId?: string;
+  division?: { id?: string; companyId?: string };
+}
 export interface OrgDivision { id: string; name: string; code?: string; companyId?: string }
 export interface OrgEmployee {
   id: string;
@@ -83,11 +90,16 @@ export function useOrgScope(
           .then((r) => r.json())
           .then((j) => {
             if (cancelled) return;
-            const list: OrgBranch[] = Array.isArray(j.data?.data)
+            const raw: OrgBranch[] = Array.isArray(j.data?.data)
               ? j.data.data
               : Array.isArray(j.data)
                 ? j.data
                 : [];
+            const list = raw.map((b) => ({
+              ...b,
+              companyId: b.companyId ?? b.division?.companyId,
+              divisionId: b.divisionId ?? b.division?.id,
+            }));
             setState((s) => ({ ...s, branches: list }));
           })
           .catch(() => {

@@ -1,9 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
-import { applyCompanyScopeWhere } from '../../../common/services';
+import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../../common/services';
 
 const SENSITIVE_FIELDS = [
   'baseSalary',
@@ -102,10 +103,11 @@ export class EmployeesService {
   }
 
   async create(dto: CreateEmployeeDto, user: any) {
+    const placement = await this.normalizeEmployeeHierarchy(dto, user);
     const employeeCode = dto.employeeCode?.trim()
       ? dto.employeeCode.trim()
       : await this.nextEmployeeCode(dto.companyId);
-    const record = await this.prisma.employee.create({ data: { ...dto, employeeCode } });
+    const record = await this.prisma.employee.create({ data: { ...dto, ...placement, employeeCode } });
     await this.audit.log({
       userId: user.id,
       action: 'CREATE',
@@ -139,13 +141,21 @@ export class EmployeesService {
   }
 
   async update(id: string, dto: UpdateEmployeeDto, user: any) {
-    await this.findOne(id, user);
+    const existing = await this.findOne(id, user);
     if ((dto as any).employmentStatus === 'TERMINATED') {
       throw new BadRequestException(
         'Employee termination must use the termination request and dual approval workflow',
       );
     }
-    const record = await this.prisma.employee.update({ where: { id }, data: dto });
+    const placement = await this.normalizeEmployeeHierarchy(
+      {
+        ...existing,
+        ...dto,
+        companyId: dto.companyId ?? existing.companyId,
+      } as CreateEmployeeDto,
+      user,
+    );
+    const record = await this.prisma.employee.update({ where: { id }, data: { ...dto, ...placement } });
     await this.audit.log({
       userId: user.id,
       action: 'UPDATE',
@@ -310,6 +320,105 @@ export class EmployeesService {
         `Employee cannot be deleted while dependent HR/payroll records are active: ${blockers.join(', ')}. Close, cancel, or settle these records first.`,
       );
     }
+  }
+
+  private async normalizeEmployeeHierarchy(dto: CreateEmployeeDto, user: any) {
+    assertCanAccessCompanyFromUser(user, dto.companyId, AccessLevel.WRITE);
+    const placement: {
+      divisionId?: string | null;
+      branchId?: string | null;
+      departmentId?: string | null;
+      positionId?: string | null;
+    } = {
+      divisionId: dto.divisionId,
+      branchId: dto.branchId,
+      departmentId: dto.departmentId,
+      positionId: dto.positionId,
+    };
+
+    if (placement.branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: placement.branchId, deletedAt: null },
+        select: {
+          divisionId: true,
+          isActive: true,
+          division: { select: { companyId: true, isActive: true, deletedAt: true } },
+        },
+      });
+      if (!branch) throw new NotFoundException('Branch/location not found');
+      if (branch.division.companyId !== dto.companyId) {
+        throw new BadRequestException('Employee branch/location must belong to the selected company');
+      }
+      if (!branch.isActive || !branch.division.isActive || branch.division.deletedAt) {
+        throw new BadRequestException('Employee branch/location must be active');
+      }
+      if (placement.divisionId && placement.divisionId !== branch.divisionId) {
+        throw new BadRequestException('Employee branch/location must belong to the selected division');
+      }
+      placement.divisionId = branch.divisionId;
+    }
+
+    if (placement.departmentId) {
+      const department = await this.prisma.department.findFirst({
+        where: { id: placement.departmentId, deletedAt: null },
+        select: {
+          companyId: true,
+          divisionId: true,
+          branchId: true,
+          status: true,
+          division: { select: { companyId: true, isActive: true, deletedAt: true } },
+          branch: { select: { divisionId: true, isActive: true, deletedAt: true } },
+        },
+      });
+      if (!department) throw new NotFoundException('Department not found');
+      if (department.companyId !== dto.companyId) {
+        throw new BadRequestException('Employee department must belong to the selected company');
+      }
+      if (department.status !== 'ACTIVE') {
+        throw new BadRequestException('Employee department must be active');
+      }
+      if (department.divisionId) {
+        if (placement.divisionId && placement.divisionId !== department.divisionId) {
+          throw new BadRequestException('Employee department must belong to the selected division');
+        }
+        placement.divisionId = department.divisionId;
+      }
+      if (department.branchId) {
+        if (placement.branchId && placement.branchId !== department.branchId) {
+          throw new BadRequestException('Employee department must belong to the selected branch/location');
+        }
+        placement.branchId = department.branchId;
+      }
+      if (department.division && (department.division.companyId !== dto.companyId || !department.division.isActive || department.division.deletedAt)) {
+        throw new BadRequestException('Employee department division is not active for the selected company');
+      }
+      if (department.branch && (!department.branch.isActive || department.branch.deletedAt)) {
+        throw new BadRequestException('Employee department branch/location must be active');
+      }
+    }
+
+    if (placement.positionId) {
+      const position = await this.prisma.position.findFirst({
+        where: { id: placement.positionId, deletedAt: null },
+        select: { companyId: true, departmentId: true, status: true },
+      });
+      if (!position) throw new NotFoundException('Position not found');
+      if (position.companyId !== dto.companyId) {
+        throw new BadRequestException('Employee position must belong to the selected company');
+      }
+      if (position.status !== 'ACTIVE') {
+        throw new BadRequestException('Employee position must be active');
+      }
+      if (!position.departmentId) {
+        throw new BadRequestException('Employee position must be linked to a department');
+      }
+      if (placement.departmentId && placement.departmentId !== position.departmentId) {
+        throw new BadRequestException('Employee position must belong to the selected department');
+      }
+      placement.departmentId = position.departmentId;
+    }
+
+    return placement;
   }
 
   private assertTerminationPending(employee: any, approverId: string) {

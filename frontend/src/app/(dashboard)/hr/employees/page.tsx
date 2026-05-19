@@ -244,7 +244,7 @@ export default function EmployeesPage() {
   const filteredPositions = useMemo(
     () =>
       form.departmentId
-        ? positions.filter((p) => !p.departmentId || p.departmentId === form.departmentId)
+        ? positions.filter((p) => p.departmentId === form.departmentId)
         : positions,
     [positions, form.departmentId],
   );

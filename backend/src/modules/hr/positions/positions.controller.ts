@@ -18,6 +18,12 @@ export class PositionsController {
     return this.service.findAll(user, query);
   }
 
+  @Get('next-code')
+  @RequirePermissions('positions.view')
+  nextCode(@Query('companyId') companyId: string) {
+    return this.service.nextPositionCode(companyId);
+  }
+
   @Get(':id')
   @RequirePermissions('positions.view')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
