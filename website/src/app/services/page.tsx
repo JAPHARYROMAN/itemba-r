@@ -45,6 +45,25 @@ const servicesJsonLd = {
   },
 };
 
+const serviceHeroImages = [
+  {
+    src: '/images/fuel-stations/itemba-filling-station-wide.webp',
+    alt: 'ITEMBA filling station forecourt',
+  },
+  {
+    src: '/images/beverages/westsides-warehouse-stock-wide.webp',
+    alt: 'Westsides wholesale beverage warehouse stock',
+  },
+  {
+    src: '/images/logistics/itemba-logistics-tanker-under-canopy.webp',
+    alt: 'Itemba Logistics tanker truck',
+  },
+  {
+    src: '/images/hardware/itemba-hardware-storefront.webp',
+    alt: 'ITEMBA-HARDWARE storefront and construction supply stock',
+  },
+] as const;
+
 export default function ServicesPage() {
   return (
     <>
@@ -82,10 +101,19 @@ export default function ServicesPage() {
               into the group.
             </p>
           </AnimatedSection>
-          <AnimatedSection direction="left">
-            <div className="relative h-80 overflow-hidden rounded-3xl shadow-2xl">
-              <BrandVisual variant="corridor" label="Itemba Group service coverage" className="absolute inset-0" />
-              <div className="absolute inset-0 bg-gradient-to-br from-ink-950/30 to-transparent" />
+          <AnimatedSection direction="fade">
+            <div className="grid h-80 grid-cols-2 gap-3 overflow-hidden rounded-3xl bg-ink-950 p-3 shadow-2xl ring-1 ring-white/10">
+              {serviceHeroImages.map((image) => (
+                <div key={image.src} className="relative overflow-hidden rounded-2xl bg-ink-900">
+                  <img
+                    src={image.src}
+                    alt={image.alt}
+                    className="h-full w-full object-contain"
+                    loading="eager"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-ink-950/45 via-transparent to-transparent" />
+                </div>
+              ))}
             </div>
           </AnimatedSection>
         </div>
@@ -111,11 +139,22 @@ export default function ServicesPage() {
                   className="group block h-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:border-gold-400 hover:shadow-xl"
                 >
                   <div className="relative h-44 overflow-hidden">
-                    <BrandVisual
-                      variant={service.visual}
-                      label={`${service.title} service area`}
-                      className="absolute inset-0 transition-transform duration-700 group-hover:scale-105"
-                    />
+                    {service.image ? (
+                      <div className="absolute inset-0 bg-ink-950">
+                        <img
+                          src={service.image.src}
+                          alt={service.image.alt}
+                          className="h-full w-full object-contain p-2 transition-transform duration-700 group-hover:scale-[1.02]"
+                          loading="lazy"
+                        />
+                      </div>
+                    ) : (
+                      <BrandVisual
+                        variant={service.visual}
+                        label={`${service.title} service area`}
+                        className="absolute inset-0 transition-transform duration-700 group-hover:scale-105"
+                      />
+                    )}
                     <div className="absolute inset-0 bg-gradient-to-t from-ink-950/75 via-ink-950/20 to-transparent" />
                     <div className="absolute bottom-4 left-4 right-4">
                       <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-gold-300">

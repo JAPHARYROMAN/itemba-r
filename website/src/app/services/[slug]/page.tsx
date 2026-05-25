@@ -24,6 +24,111 @@ function getService(slug: string) {
   return serviceAreas.find((service) => service.slug === slug);
 }
 
+const fuelShowcaseImages = [
+  {
+    src: '/images/fuel-stations/itemba-filling-station-wide.webp',
+    alt: 'ITEMBA-MPEMBA filling station forecourt near Tunduma Bus Station',
+    caption: 'ITEMBA-MPEMBA: a public ITEMBA station brand managed by Mwanjalisi Oil Company Ltd.',
+  },
+  {
+    src: '/images/fuel-stations/itemba-mpemba-truck-canopy.webp',
+    alt: 'Trucks refuelling at an ITEMBA station canopy',
+    caption: 'Forecourt access supports buses, trucks, private motorists, and corridor logistics operators.',
+  },
+  {
+    src: '/images/fuel-stations/itemba-uzunguni-forecourt-wide.webp',
+    alt: 'ITEMBA-UZUNGUNI fuel station canopy and forecourt',
+    caption: 'Forecourt visibility supports daily motorists, fleets, and cross-border transport demand.',
+  },
+] as const;
+
+const fuelPositioning = [
+  {
+    label: 'Route Advantage',
+    value: 'Stations positioned along major routes, including the TANZAM Highway and the Tunduma-Ileje Highway.',
+  },
+  {
+    label: 'Transit Demand',
+    value: 'Fuel access for motorists, buses, trucks, and logistics operators moving through the Tunduma corridor.',
+  },
+  {
+    label: 'Expansion Pipeline',
+    value: 'Two operating ITEMBA-branded stations with three upcoming locations under Mwanjalisi Oil management.',
+  },
+] as const;
+
+function PhotoFrame({
+  src,
+  alt,
+  caption,
+  className = '',
+}: {
+  src: string;
+  alt: string;
+  caption?: string;
+  className?: string;
+}) {
+  return (
+    <div className={`overflow-hidden rounded-2xl bg-ink-950 shadow-2xl ring-1 ring-white/10 ${className}`}>
+      <div className="flex aspect-[4/3] items-center justify-center bg-ink-950 p-2 sm:p-3">
+        <img
+          src={src}
+          alt={alt}
+          className="h-full w-full rounded-xl object-contain shadow-2xl ring-1 ring-white/15"
+        />
+      </div>
+      {caption ? (
+        <div className="border-t border-white/10 bg-ink-950/95 px-5 py-4 text-sm font-semibold leading-relaxed text-white">
+          {caption}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FuelBusinessShowcase() {
+  return (
+    <section className="bg-ink-950 px-5 py-20 text-white sm:px-8">
+      <div className="mx-auto max-w-7xl">
+        <AnimatedSection>
+          <div className="max-w-3xl">
+            <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
+              Fuel Business Presence
+            </p>
+            <h2 className="font-tight text-3xl font-black leading-tight tracking-tighter sm:text-4xl">
+              ITEMBA stations built for corridor movement
+            </h2>
+            <p className="mt-5 text-base leading-relaxed text-slate-300">
+              The fuel business is presented around visible station brands, practical access, and
+              high-traffic route positioning. ITEMBA-MPEMBA and ITEMBA-UZUNGUNI trade publicly under
+              the ITEMBA location brand while remaining managed by Mwanjalisi Oil Company Ltd.
+            </p>
+          </div>
+        </AnimatedSection>
+
+        <div className="mt-10 grid grid-cols-1 items-start gap-5 md:grid-cols-3">
+          {fuelShowcaseImages.map((image, index) => (
+            <AnimatedSection key={image.src} direction="fade" delay={0.08 + index * 0.04}>
+              <PhotoFrame src={image.src} alt={image.alt} caption={image.caption} />
+            </AnimatedSection>
+          ))}
+        </div>
+
+        <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-3">
+          {fuelPositioning.map((item, index) => (
+            <AnimatedSection key={item.label} delay={0.12 + index * 0.04}>
+              <div className="h-full rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+                <p className="text-xs font-semibold uppercase tracking-widest text-gold-400">{item.label}</p>
+                <p className="mt-3 text-sm leading-relaxed text-slate-200">{item.value}</p>
+              </div>
+            </AnimatedSection>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function generateStaticParams() {
   return serviceAreas.map((service) => ({ slug: service.slug }));
 }
@@ -61,6 +166,7 @@ export default async function ServicePage({ params }: PageProps) {
   }
 
   const pageUrl = absoluteUrl(serviceUrl(service.slug));
+  const serviceGallery = service.gallery ?? [];
   const serviceJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'Service',
@@ -69,6 +175,7 @@ export default async function ServicePage({ params }: PageProps) {
     serviceType: service.eyebrow,
     description: service.metaDescription,
     url: pageUrl,
+    image: service.image ? absoluteUrl(service.image.src) : undefined,
     provider: {
       '@type': 'Organization',
       name: service.companyName,
@@ -126,14 +233,40 @@ export default async function ServicePage({ params }: PageProps) {
             </h1>
             <p className="max-w-2xl text-lg leading-relaxed text-slate-300">{service.summary}</p>
           </AnimatedSection>
-          <AnimatedSection direction="left">
-            <div className="relative h-80 overflow-hidden rounded-3xl shadow-2xl">
-              <BrandVisual variant={service.visual} label={`${service.title} operations`} className="absolute inset-0" />
-              <div className="absolute inset-0 bg-gradient-to-br from-ink-950/40 to-transparent" />
+          <AnimatedSection direction="fade">
+            <div className="relative overflow-hidden rounded-2xl bg-ink-950 shadow-2xl ring-1 ring-white/10">
+              {service.image ? (
+                <>
+                  <img
+                    src={service.image.src}
+                    alt=""
+                    aria-hidden="true"
+                    className="absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-2xl"
+                  />
+                  <div className="relative flex min-h-[20rem] items-center justify-center p-3 sm:min-h-[24rem] sm:p-4">
+                    <img
+                      src={service.image.src}
+                      alt={service.image.alt}
+                      className="max-h-[28rem] w-full rounded-xl object-contain shadow-2xl ring-1 ring-white/15"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="relative h-80">
+                  <BrandVisual variant={service.visual} label={`${service.title} operations`} className="absolute inset-0" />
+                </div>
+              )}
+              {service.image?.caption ? (
+                <div className="relative border-t border-white/10 bg-ink-950/95 p-4 text-sm font-semibold leading-relaxed text-white">
+                  {service.image.caption}
+                </div>
+              ) : null}
             </div>
           </AnimatedSection>
         </div>
       </section>
+
+      {service.slug === 'fuel-and-lubricants' ? <FuelBusinessShowcase /> : null}
 
       <section className="bg-white px-5 py-24 sm:px-8">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-3">
@@ -155,6 +288,20 @@ export default async function ServicePage({ params }: PageProps) {
                 ))}
               </div>
             </AnimatedSection>
+
+            {serviceGallery.length > 0 ? (
+              <AnimatedSection delay={0.12} className="mt-14">
+                <div className="gold-line mb-6" />
+                <h2 className="mb-5 font-tight text-3xl font-black leading-tight tracking-tighter text-ink-900 sm:text-4xl">
+                  Operations Gallery
+                </h2>
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                  {serviceGallery.map((image) => (
+                    <PhotoFrame key={image.src} src={image.src} alt={image.alt} caption={image.caption} />
+                  ))}
+                </div>
+              </AnimatedSection>
+            ) : null}
 
             <AnimatedSection delay={0.14} className="mt-14">
               <div className="gold-line mb-6" />
@@ -183,7 +330,7 @@ export default async function ServicePage({ params }: PageProps) {
           </div>
 
           <aside className="space-y-6">
-            <AnimatedSection direction="left" delay={0.08}>
+            <AnimatedSection direction="fade" delay={0.08}>
               <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-400">
                   Operating Company
@@ -204,7 +351,7 @@ export default async function ServicePage({ params }: PageProps) {
               </div>
             </AnimatedSection>
 
-            <AnimatedSection direction="left" delay={0.14}>
+            <AnimatedSection direction="fade" delay={0.14}>
               <EnquiryRouter
                 compact
                 defaultIntentId={service.intentId}

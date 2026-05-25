@@ -16,80 +16,151 @@ const fadeUp = {
 };
 
 /* ── Data ──────────────────────────────────────────────────────────── */
+const fuelStationImages = [
+  {
+    src: '/images/fuel-stations/itemba-filling-station-wide.webp',
+    alt: 'ITEMBA-MPEMBA filling station forecourt and canopy',
+    caption: 'ITEMBA-MPEMBA: a high-visibility station serving motorists and transporters.',
+  },
+  {
+    src: '/images/fuel-stations/itemba-mpemba-truck-canopy.webp',
+    alt: 'Trucks refuelling under an ITEMBA filling station canopy',
+    caption: 'Station forecourt access supports buses, trucks, private motorists, and logistics operators.',
+  },
+  {
+    src: '/images/fuel-stations/itemba-uzunguni-roadside.webp',
+    alt: 'ITEMBA-UZUNGUNI roadside fuel station canopy and forecourt',
+    caption: 'ITEMBA-UZUNGUNI remains visible to corridor customers moving through Mpemba-Tunduma.',
+  },
+] as const;
+
+const parkingImages = [
+  {
+    src: '/images/parking/uzunguni-parking-truck-line.webp',
+    alt: 'Trucks parked at Uzunguni Parking Yard',
+    caption: 'UZUNGUNI PARKING YARD supports corridor motorists and logistics operators.',
+  },
+  {
+    src: '/images/parking/uzunguni-parking-container-trucks.webp',
+    alt: 'Container trucks at Uzunguni Parking Yard',
+    caption: 'Parking capacity for container trucks and transit vehicles in Mpemba-Tunduma.',
+  },
+] as const;
+
 const companies = [
   {
     id: 'mwanjalisi',
     name: 'Mwanjalisi Oil Co Ltd',
-    tagline: 'Energy & Fuel Distribution',
-    desc: 'Petroleum retail operations covering diesel, petrol, kerosene, and lubricants — powering businesses and communities across the Songwe region.',
+    tagline: 'Energy, Fuel & Parking',
+    desc: 'Operator of ITEMBA-branded filling stations and UZUNGUNI PARKING YARD, covering diesel, petrol, kerosene, lubricants, and corridor vehicle staging.',
     visual: 'fuel' as const,
     accentBg: 'from-amber-900/85 via-amber-900/40 to-ink-900/95',
     accentTag: 'bg-amber-500',
     accentSpotlight: 'rgba(245, 158, 11, 0.18)',
-    sectors: ['Petroleum Retail', 'Fuel Distribution', 'Lubricants'],
+    sectors: ['Petroleum Retail', 'Fuel Distribution', 'UZUNGUNI PARKING YARD'],
     href: companyUrl('mwanjalisi-oil'),
+    image: {
+      src: '/images/fuel-stations/itemba-uzunguni-front.webp',
+      alt: 'ITEMBA-UZUNGUNI filling station managed by Mwanjalisi Oil Company Ltd',
+      caption: 'ITEMBA-UZUNGUNI under Mwanjalisi Oil Company Ltd management.',
+    },
   },
   {
     id: 'westsides',
     name: 'Westsides Company Ltd',
     tagline: 'Trade & Distribution',
-    desc: 'Wholesale and retail of beverages and construction goods — serving a wide consumer and business market across the region.',
+    desc: 'Manager of wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN for 50+ stockists, bars, night clubs, cross-border buyers, and construction customers.',
     visual: 'trade' as const,
     accentBg: 'from-blue-900/85 via-blue-900/40 to-ink-900/95',
     accentTag: 'bg-blue-500',
     accentSpotlight: 'rgba(59, 130, 246, 0.18)',
-    sectors: ['Beverages', 'Hardware & Tools', 'Building Materials'],
+    sectors: ['50+ Stockists', 'Beverages', 'ITEMBA-HARDWARE', 'UZUNGUNI INN'],
     href: companyUrl('westsides-company'),
+    image: {
+      src: '/images/beverages/westsides-warehouse-stock-wide.webp',
+      alt: 'Westsides Company Ltd beverage warehouse stock for wholesale customers',
+      caption: 'Westsides supplies stockists, bars, night clubs, bulk buyers, and construction customers.',
+    },
   },
   {
     id: 'enterprises',
     name: 'Itemba Enterprises Co Ltd',
     tagline: 'Multi-Sector Operations',
-    desc: 'Logistics, manufacturing, hardware, real estate, and hospitality under one roof — the most diversified entity within the Itemba Group ecosystem.',
+    desc: 'Dar es Salaam-to-Southern Highlands logistics, cross-border transit, and emerging businesses through the Tunduma corridor.',
     visual: 'logistics' as const,
     accentBg: 'from-emerald-900/85 via-emerald-900/40 to-ink-900/95',
     accentTag: 'bg-emerald-500',
     accentSpotlight: 'rgba(16, 185, 129, 0.18)',
-    sectors: ['Logistics & Transit', 'Manufacturing', 'Real Estate', 'Hospitality', 'Hardware'],
+    sectors: ['Dar es Salaam Routes', 'Southern Highlands', 'Cross-Border Transit'],
     href: companyUrl('itemba-enterprises'),
+    image: {
+      src: '/images/logistics/itemba-logistics-tanker-under-canopy.webp',
+      alt: 'Itemba Logistics tanker at a filling station canopy',
+      caption: 'Itemba Logistics supports Dar es Salaam-to-Southern Highlands and transit movement.',
+    },
   },
 ];
 
 const sectors = [
   {
     icon: 'energy' as const,
-    name: 'Energy & Fuel',
-    desc: 'Petroleum retail, diesel, petrol, kerosene, lubricants, and fleet fuel enquiries.',
+    name: 'Energy, Fuel & Parking',
+    desc: 'ITEMBA-MPEMBA and ITEMBA-UZUNGUNI fuel stations, UZUNGUNI PARKING YARD, diesel, petrol, kerosene, lubricants, and fleet fuel enquiries.',
     proof: 'Mwanjalisi Oil Co Ltd',
     href: serviceUrl('fuel-and-lubricants'),
+    image: {
+      src: '/images/fuel-stations/itemba-mpemba-forecourt.webp',
+      alt: 'ITEMBA-MPEMBA fuel station forecourt',
+      caption: 'ITEMBA-MPEMBA filling station managed by Mwanjalisi Oil Company Ltd.',
+    },
   },
   {
     icon: 'trade' as const,
     name: 'Trade & Distribution',
-    desc: 'Beverages, building goods, consumer supply, wholesale, and retail distribution.',
+    desc: 'Wholesale beverages for Songwe stockists, bars, night clubs, cross-border bulk buyers, and construction supply customers.',
     proof: 'Westsides Company Ltd',
     href: serviceUrl('trade-and-distribution'),
+    image: {
+      src: '/images/beverages/westsides-customer-order-truck.webp',
+      alt: 'Customer beverage order loaded for Westsides distribution',
+      caption: 'Wholesale beverage orders for Songwe distribution customers.',
+    },
   },
   {
     icon: 'logistics' as const,
     name: 'Logistics & Transit',
-    desc: 'Local distribution and cross-border transit support through the Tunduma corridor.',
+    desc: 'Goods movement from Dar es Salaam into the Southern Highlands plus transit to and from Zambia, DRC, Zimbabwe, and Malawi.',
     proof: 'Itemba Enterprises Co Ltd',
     href: serviceUrl('logistics-and-cross-border-transit'),
+    image: {
+      src: '/images/logistics/itemba-logistics-truck-front.webp',
+      alt: 'Itemba Logistics truck supporting goods movement',
+      caption: 'Local and transit logistics through the Tunduma corridor.',
+    },
   },
   {
     icon: 'construction' as const,
     name: 'Construction & Hardware',
-    desc: 'Building materials, tools, electrical goods, and contractor supply enquiries.',
-    proof: 'Westsides and Itemba Hardware',
+    desc: 'Building materials, tools, construction equipment, and contractor supply enquiries through ITEMBA-HARDWARE.',
+    proof: 'ITEMBA-HARDWARE / Westsides',
     href: serviceUrl('construction-supplies-and-hardware'),
+    image: {
+      src: '/images/hardware/itemba-hardware-storefront.webp',
+      alt: 'ITEMBA-HARDWARE storefront and construction supply stock',
+      caption: 'Construction supply and hardware under Westsides Company Ltd.',
+    },
   },
   {
     icon: 'hospitality' as const,
     name: 'Hospitality & Lodging',
-    desc: 'Hotel, restaurant, lodging, and business guest support through Uzunguni Inn.',
-    proof: 'Uzunguni Inn',
+    desc: 'Hotel, restaurant, lodging, and business guest support through UZUNGUNI INN.',
+    proof: 'UZUNGUNI INN / Westsides',
     href: serviceUrl('hospitality-and-lodging'),
+    image: {
+      src: '/images/hospitality/uzunguni-lodge-room.webp',
+      alt: 'UZUNGUNI INN lodging room',
+      caption: 'Lodging, restaurant, and bar services in Mpemba-Tunduma.',
+    },
   },
   {
     icon: 'realestate' as const,
@@ -97,15 +168,58 @@ const sectors = [
     desc: 'Property development, estate services, and manufacturing-related activity.',
     proof: 'Itemba Estate',
     href: serviceUrl('real-estate-and-property'),
+    image: {
+      src: '/images/real-estate/modern-african-housing-development-wide.webp',
+      alt: 'Modern low-rise residential housing development',
+      caption: 'Property development, finished homes, and estate services under Itemba Estate.',
+    },
   },
 ];
 
 const divisions = [
-  { name: 'Itemba Logistics',      desc: 'Local distribution & cross-border transit', visual: 'logistics' as const, flagship: true },
-  { name: 'Itemba Hardware',       desc: 'Building materials, tools & electrical',     visual: 'hardware' as const },
-  { name: 'Itemba Estate',         desc: 'Property development & real estate',         visual: 'estate' as const },
-  { name: 'Uzunguni Inn',          desc: 'Hotel, restaurant & lodging',                visual: 'hospitality' as const },
-  { name: 'Uzunguni Parking Yard', desc: 'Parking yard services',                      visual: 'parking' as const },
+  {
+    name: 'Itemba Logistics',
+    desc: 'Dar es Salaam routes, Southern Highlands distribution & cross-border transit',
+    visual: 'logistics' as const,
+    flagship: true,
+    image: {
+      src: '/images/logistics/itemba-logistics-tanker-under-canopy.webp',
+      alt: 'Itemba Logistics tanker truck',
+    },
+  },
+  {
+    name: 'ITEMBA-HARDWARE',
+    desc: 'Building materials, tools & construction equipment',
+    visual: 'hardware' as const,
+    image: {
+      src: '/images/hardware/itemba-hardware-paint-stock.webp',
+      alt: 'ITEMBA-HARDWARE construction supply stock',
+    },
+  },
+  {
+    name: 'Itemba Estate',
+    desc: 'Property development & real estate',
+    visual: 'estate' as const,
+    image: {
+      src: '/images/real-estate/modern-tanzania-white-villa-wide.webp',
+      alt: 'Finished modern residential home in Tanzania',
+    },
+  },
+  {
+    name: 'UZUNGUNI INN',
+    desc: 'Hotel, restaurant & lodging under Westsides',
+    visual: 'hospitality' as const,
+    image: {
+      src: '/images/hospitality/uzunguni-bar-restaurant.webp',
+      alt: 'UZUNGUNI INN restaurant and bar seating',
+    },
+  },
+  {
+    name: 'UZUNGUNI PARKING YARD',
+    desc: 'Parking yard services under Mwanjalisi Oil',
+    visual: 'parking' as const,
+    image: parkingImages[0],
+  },
 ];
 
 const proofPoints = [
@@ -134,16 +248,46 @@ const heroProof = [
   { value: 'Songwe', label: 'Regional base' },
 ];
 
+const fuelFeaturePoints = [
+  'ITEMBA-MPEMBA and ITEMBA-UZUNGUNI trade publicly under the ITEMBA location brand.',
+  'Stations and UZUNGUNI PARKING YARD are managed by Mwanjalisi Oil Company Ltd for motorists, buses, trucks, and logistics operators.',
+  'Current locations serve major movement routes, including the Tunduma-Ileje Highway and the TANZAM Highway corridor.',
+];
+
+function BusinessPhotoCard({
+  image,
+  className = '',
+}: {
+  image: (typeof fuelStationImages)[number] | (typeof parkingImages)[number];
+  className?: string;
+}) {
+  return (
+    <div className={`overflow-hidden rounded-2xl bg-ink-950 shadow-2xl ring-1 ring-white/10 ${className}`}>
+      <div className="flex aspect-[4/3] items-center justify-center bg-ink-950 p-2 sm:p-3">
+        <img
+          src={image.src}
+          alt={image.alt}
+          className="h-full w-full rounded-xl object-contain shadow-2xl ring-1 ring-white/15"
+        />
+      </div>
+      <div className="border-t border-white/10 bg-ink-950/95 px-5 py-4 text-sm font-semibold leading-relaxed text-white">
+        {image.caption}
+      </div>
+    </div>
+  );
+}
+
 /* ── Page ──────────────────────────────────────────────────────────── */
 export default function HomePage() {
   return (
     <>
       {/* ══ HERO ════════════════════════════════════════════════════ */}
       <section className="relative overflow-hidden bg-ink-950 px-5 pt-24 sm:px-8 lg:pt-20">
-        <BrandVisual
-          variant="corridor"
-          label="Tanzania and Tunduma corridor business operations"
-          className="absolute inset-0 h-full w-full opacity-70"
+        <img
+          src="/images/fuel-stations/itemba-filling-station-wide.webp"
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full object-cover opacity-75"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-ink-950 via-ink-950/88 to-ink-950/58" />
         <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-transparent to-ink-950/70" />
@@ -301,6 +445,24 @@ export default function HomePage() {
                   href={s.href}
                   className="sector-card group flex h-full flex-col border border-slate-200 bg-white p-7 shadow-sm transition hover:border-gold-400 hover:bg-ink-900 hover:shadow-lg"
                 >
+                  {s.image ? (
+                    <div className="-mx-2 -mt-2 mb-5 overflow-hidden rounded-xl bg-ink-950">
+                      <div className="relative flex h-36 items-center justify-center p-2">
+                        <img
+                          src={s.image.src}
+                          alt=""
+                          aria-hidden="true"
+                          className="absolute inset-0 h-full w-full object-cover opacity-35 blur-xl"
+                        />
+                        <img
+                          src={s.image.src}
+                          alt={s.image.alt}
+                          className="relative max-h-32 w-full rounded-lg object-contain shadow-lg ring-1 ring-white/15"
+                          loading="lazy"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
                   <SectorIcon
                     name={s.icon}
                     className="mb-5 h-7 w-7 text-ink-700 transition-colors duration-400 group-hover:text-gold-400"
@@ -315,6 +477,50 @@ export default function HomePage() {
                     {s.proof}
                   </div>
                 </Link>
+              </AnimatedSection>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-ink-950 px-5 py-24 text-white sm:px-8">
+        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[0.86fr_1.14fr] lg:items-start">
+          <AnimatedSection>
+            <div className="gold-line mb-6" />
+            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-400">
+              Fuel Station Network
+            </p>
+            <h2 className="font-tight text-4xl font-black leading-tight tracking-tighter sm:text-5xl">
+              Real ITEMBA stations on major corridor routes.
+            </h2>
+            <p className="mt-5 text-base leading-relaxed text-slate-300">
+              The fuel business is anchored by visible station locations, practical
+              forecourt access, and route positioning that connects the ITEMBA public
+              station brands to Mwanjalisi Oil Company Ltd management.
+            </p>
+            <div className="mt-8 space-y-4">
+              {fuelFeaturePoints.map((point) => (
+                <div key={point} className="flex gap-3 text-sm leading-relaxed text-slate-300">
+                  <span className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-gold-400" />
+                  <span>{point}</span>
+                </div>
+              ))}
+            </div>
+            <Link
+              href={serviceUrl('fuel-and-lubricants')}
+              className="mt-9 inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition hover:text-gold-200"
+            >
+              View fuel and lubricants
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+              </svg>
+            </Link>
+          </AnimatedSection>
+
+          <div className="grid grid-cols-1 items-start gap-5 md:grid-cols-3 lg:grid-cols-3">
+            {fuelStationImages.map((image, index) => (
+              <AnimatedSection key={image.src} direction="fade" delay={0.08 + index * 0.04}>
+                <BusinessPhotoCard image={image} />
               </AnimatedSection>
             ))}
           </div>
@@ -358,10 +564,23 @@ export default function HomePage() {
               </Link>
             </AnimatedSection>
           </div>
-          <AnimatedSection direction="left">
-            <div className="relative h-96 rounded-3xl overflow-hidden shadow-2xl img-zoom">
-              <BrandVisual variant="group" label="Itemba Group operations" className="absolute inset-0 img-inner" />
-              <div className="absolute inset-0 bg-gradient-to-tl from-ink-900/40 to-transparent" />
+          <AnimatedSection direction="fade">
+            <div className="grid h-96 grid-cols-2 gap-3 overflow-hidden rounded-3xl bg-ink-950 p-3 shadow-2xl">
+              {[
+                { src: '/images/fuel-stations/itemba-filling-station-wide.webp', alt: 'ITEMBA filling station forecourt' },
+                { src: '/images/beverages/westsides-warehouse-stock-wide.webp', alt: 'Westsides beverage warehouse stock' },
+                { src: '/images/logistics/itemba-logistics-tanker-under-canopy.webp', alt: 'Itemba Logistics tanker' },
+                { src: '/images/hardware/itemba-hardware-storefront.webp', alt: 'ITEMBA-HARDWARE storefront' },
+              ].map((image) => (
+                <div key={image.src} className="relative overflow-hidden rounded-2xl bg-ink-900">
+                  <img
+                    src={image.src}
+                    alt={image.alt}
+                    className="h-full w-full object-contain"
+                    loading="lazy"
+                  />
+                </div>
+              ))}
             </div>
           </AnimatedSection>
         </div>
@@ -390,11 +609,30 @@ export default function HomePage() {
                     className="company-card relative h-[520px] rounded-3xl overflow-hidden cursor-pointer"
                   >
                     <div className="absolute inset-0">
-                      <BrandVisual
-                        variant={co.visual}
-                        label={`${co.name} visual`}
-                        className="h-full w-full transition-transform duration-700 group-hover:scale-105"
-                      />
+                      {co.image ? (
+                        <div className="relative h-full w-full bg-ink-950">
+                          <img
+                            src={co.image.src}
+                            alt=""
+                            aria-hidden="true"
+                            className="absolute inset-0 h-full w-full object-cover opacity-45 blur-xl"
+                          />
+                          <div className="absolute inset-x-4 top-4 flex h-64 items-center justify-center rounded-2xl bg-ink-950/75 p-2 ring-1 ring-white/10">
+                            <img
+                              src={co.image.src}
+                              alt={co.image.alt}
+                              className="max-h-60 w-full rounded-xl object-contain shadow-2xl ring-1 ring-white/15"
+                              loading="lazy"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <BrandVisual
+                          variant={co.visual}
+                          label={`${co.name} visual`}
+                          className="h-full w-full transition-transform duration-700 group-hover:scale-105"
+                        />
+                      )}
                     </div>
                     <div className={`absolute inset-0 bg-gradient-to-t ${co.accentBg}`} />
 
@@ -436,18 +674,18 @@ export default function HomePage() {
           <AnimatedSection className="mb-4">
             <div className="gold-line mb-6" />
             <p className="text-gold-600 text-xs font-semibold uppercase tracking-widest mb-3">
-              Itemba Enterprises Co Ltd
+              Operating Brands
             </p>
           </AnimatedSection>
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
             <AnimatedSection>
               <h2 className="font-tight font-black text-ink-900 text-4xl sm:text-5xl leading-none tracking-tighter">
-                Five Specialised<br />Divisions
+                Core Operating<br />Brands
               </h2>
             </AnimatedSection>
-            <AnimatedSection direction="left">
-              <Link href="/companies#enterprises" className="text-sm font-semibold text-gold-600 hover:text-gold-500 transition-colors inline-flex items-center gap-2 group">
-                View Itemba Enterprises
+            <AnimatedSection direction="fade">
+              <Link href="/companies" className="text-sm font-semibold text-gold-600 hover:text-gold-500 transition-colors inline-flex items-center gap-2 group">
+                View operating companies
                 <svg className="w-4 h-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                 </svg>
@@ -460,7 +698,18 @@ export default function HomePage() {
               <AnimatedSection key={d.name} delay={i * 0.08}>
                 <div className={`group rounded-2xl overflow-hidden border bg-white hover:shadow-xl transition-shadow duration-500 ${d.flagship ? 'border-gold-400 shadow-lg shadow-gold-500/10' : 'border-slate-200'}`}>
                   <div className="relative h-48 overflow-hidden img-zoom">
-                    <BrandVisual variant={d.visual} label={d.name} className="absolute inset-0 img-inner" />
+                    {'image' in d && d.image ? (
+                      <>
+                        <img
+                          src={d.image.src}
+                          alt={d.image.alt}
+                          className="absolute inset-0 h-full w-full bg-ink-950 object-contain p-2 transition-transform duration-700 group-hover:scale-[1.02]"
+                          loading="lazy"
+                        />
+                      </>
+                    ) : (
+                      <BrandVisual variant={d.visual} label={d.name} className="absolute inset-0 img-inner" />
+                    )}
                     <div className="absolute inset-0 bg-ink-900/40 group-hover:bg-ink-900/20 transition-colors duration-500" />
                     {d.flagship && (
                       <span className="absolute top-3 left-3 bg-gold-500 text-white text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full">
@@ -485,10 +734,15 @@ export default function HomePage() {
           <div className="hero-orb hero-orb-gold" style={{ opacity: 0.6 }} />
         </div>
         <div className="relative z-10 max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
-          <AnimatedSection direction="right">
-            <div className="relative h-96 rounded-3xl overflow-hidden shadow-2xl img-zoom">
-              <BrandVisual variant="corridor" label="Tunduma and Songwe Region trade corridor" className="absolute inset-0 img-inner" />
-              <div className="absolute inset-0 bg-gradient-to-br from-ink-900/30 to-transparent" />
+          <AnimatedSection direction="fade">
+            <div className="relative h-96 overflow-hidden rounded-3xl bg-ink-950 shadow-2xl">
+              <img
+                src="/images/fuel-stations/itemba-station-wide-yard.webp"
+                alt="Itemba station yard representing Songwe Region corridor operations"
+                className="absolute inset-0 h-full w-full object-contain p-3"
+                loading="lazy"
+              />
+              <div className="absolute inset-0 bg-gradient-to-br from-ink-950/50 via-transparent to-transparent" />
             </div>
           </AnimatedSection>
           <div>
@@ -516,7 +770,7 @@ export default function HomePage() {
                 {[
                   { label: 'Headquarters',  value: 'Mpemba-Tunduma, Songwe Region' },
                   { label: 'Border Access', value: 'Tanzania-Zambia TAZARA Corridor' },
-                  { label: 'Active Sectors', value: 'Energy · Trade · Construction · Hospitality · Real Estate · Manufacturing' },
+                  { label: 'Active Sectors', value: 'Energy · Parking · Trade · Construction · Hospitality · Real Estate · Manufacturing' },
                 ].map((item) => (
                   <div key={item.label} className="flex gap-4 text-sm border-b border-ink-600 pb-3 last:border-0">
                     <span className="text-gold-400 font-semibold w-32 flex-shrink-0">{item.label}</span>

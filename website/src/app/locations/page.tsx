@@ -81,15 +81,29 @@ export default function LocationsPage() {
             <p className="max-w-2xl text-lg leading-relaxed text-slate-300">{primaryLocation.summary}</p>
           </AnimatedSection>
           <AnimatedSection direction="left">
-            <div className="relative h-80 overflow-hidden rounded-3xl shadow-2xl">
-              <BrandVisual variant="corridor" label="Songwe and Tunduma corridor" className="absolute inset-0" />
-              <div className="absolute inset-0 bg-gradient-to-br from-ink-950/30 to-transparent" />
-            </div>
+            <figure className="relative h-80 overflow-hidden rounded-3xl bg-ink-950 shadow-2xl ring-1 ring-white/10">
+              {primaryLocation.image ? (
+                <img
+                  src={primaryLocation.image.src}
+                  alt={primaryLocation.image.alt}
+                  className="h-full w-full object-cover"
+                  loading="eager"
+                />
+              ) : (
+                <BrandVisual variant="corridor" label="Songwe and Tunduma corridor" className="absolute inset-0" />
+              )}
+              <div className="absolute inset-0 bg-gradient-to-br from-ink-950/55 via-ink-950/10 to-transparent" />
+              {primaryLocation.image?.caption ? (
+                <figcaption className="absolute bottom-3 right-3 max-w-[80%] rounded bg-ink-950/75 px-3 py-1.5 text-[10px] font-medium leading-relaxed text-slate-200 backdrop-blur">
+                  {primaryLocation.image.caption}
+                </figcaption>
+              ) : null}
+            </figure>
           </AnimatedSection>
         </div>
       </section>
 
-      <section className="bg-white px-5 py-24 sm:px-8">
+      <section className="overflow-hidden bg-white px-5 py-24 sm:px-8">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[0.9fr_1.1fr]">
           <AnimatedSection>
             <div className="gold-line mb-6" />
@@ -121,7 +135,7 @@ export default function LocationsPage() {
         </div>
       </section>
 
-      <section className="bg-slate-50 px-5 py-20 sm:px-8">
+      <section className="overflow-hidden bg-slate-50 px-5 py-20 sm:px-8">
         <div className="mx-auto max-w-7xl">
           <AnimatedSection className="mb-10">
             <div className="gold-line mb-6" />

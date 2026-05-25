@@ -20,7 +20,7 @@ const companies = [
   {
     id: 'mwanjalisi',
     name: 'Mwanjalisi Oil Co Ltd',
-    sector: 'Energy & Fuel Distribution',
+    sector: 'Energy, Fuel & Parking',
     accentColor: '#f59e0b',
     accentClass: 'text-amber-400',
     accentBg: 'bg-amber-500',
@@ -28,15 +28,41 @@ const companies = [
     accentGlow: 'shadow-amber-500/20',
     visual: 'fuel' as const,
     profileHref: companyUrl('mwanjalisi-oil'),
-    summary: "Tanzania's petroleum retail arm within Itemba Group — delivering reliable fuel supply to businesses, transport operators, and communities across the Songwe region and beyond.",
-    detail: "Positioned in a high-traffic corridor near the Tanzania-Zambia border, Mwanjalisi Oil serves a diverse customer base from individual motorists to commercial fleet operators. The company's fuel stations are designed for reliability, safety, and operational efficiency.",
-    products: ['Diesel', 'Petrol', 'Kerosene', 'Lubricants'],
+    summary: "Tanzania's petroleum retail and corridor parking arm within Itemba Group — managing ITEMBA-branded filling stations and UZUNGUNI PARKING YARD for businesses, transport operators, and communities across the Songwe region and beyond.",
+    detail: "Positioned in a high-traffic corridor near the Tanzania-Zambia border, Mwanjalisi Oil manages the legal and operational side of the fuel station business and UZUNGUNI PARKING YARD. The public-facing station names use the ITEMBA brand with the location name, including ITEMBA-MPEMBA and ITEMBA-UZUNGUNI.",
+    products: ['ITEMBA-MPEMBA', 'ITEMBA-UZUNGUNI', 'UZUNGUNI PARKING YARD', 'Diesel', 'Petrol', 'Kerosene', 'Lubricants'],
+    heroImage: {
+      src: '/images/fuel-stations/itemba-filling-station-wide.webp',
+      alt: 'ITEMBA-MPEMBA forecourt and canopy managed by Mwanjalisi Oil Company Ltd',
+    },
     gallery: [
-      { visual: 'fuel' as const, cap: 'Fuel pumps' },
-      { visual: 'corridor' as const, cap: 'Forecourt' },
-      { visual: 'hardware' as const, cap: 'Lubricants' },
+      {
+        src: '/images/fuel-stations/itemba-mpemba-truck-canopy.webp',
+        alt: 'Trucks refuelling under the ITEMBA-MPEMBA canopy',
+        cap: 'ITEMBA-MPEMBA',
+      },
+      {
+        src: '/images/fuel-stations/itemba-uzunguni-close.webp',
+        alt: 'ITEMBA-UZUNGUNI pump island',
+        cap: 'ITEMBA-UZUNGUNI',
+      },
+      {
+        src: '/images/parking/uzunguni-parking-yard-trucks.webp',
+        alt: 'Truck parking at Uzunguni Parking Yard managed by Mwanjalisi Oil Company Ltd',
+        cap: 'UZUNGUNI PARKING YARD',
+      },
     ],
-    divisions: [],
+    divisions: [
+      {
+        name: 'UZUNGUNI PARKING YARD',
+        desc: 'Parking facilities for corridor motorists and logistics operators, managed by Mwanjalisi Oil Company Ltd.',
+        visual: 'parking' as const,
+        image: {
+          src: '/images/parking/uzunguni-parking-container-trucks.webp',
+          alt: 'Container trucks at Uzunguni Parking Yard managed by Mwanjalisi Oil Company Ltd',
+        },
+      },
+    ],
   },
   {
     id: 'westsides',
@@ -49,15 +75,55 @@ const companies = [
     accentGlow: 'shadow-blue-500/20',
     visual: 'trade' as const,
     profileHref: companyUrl('westsides-company'),
-    summary: 'Wholesale and retail distribution covering beverages and construction goods — serving both consumer markets and business customers across the Songwe region.',
-    detail: "Westsides bridges two high-demand markets: beverage distribution and construction supply. Its network reaches retailers, contractors, and hospitality businesses, making it a central distribution hub in the region's trade ecosystem.",
-    products: ['Alcoholic Beverages', 'Non-Alcoholic Beverages', 'Building Materials', 'Hand & Power Tools', 'Electrical Supplies'],
+    summary: 'Wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN — serving 50+ stockists, bars, night clubs, cross-border bulk buyers, and construction customers across Songwe Region.',
+    detail: "Westsides Company Ltd manages the group's public trading and hospitality brands: wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN. Its target market includes more than 50 stockists across Songwe Region, bars and night clubs in Tunduma, Mlowo, and Vwawa, international bulk buyers moving goods through Tunduma border, and construction companies serving real estate, filling station, residential, commercial, and public infrastructure demand.",
+    products: ['Wholesale Beverages', '50+ Stockists', 'ITEMBA-HARDWARE', 'UZUNGUNI INN', 'Construction Equipment', 'Cross-Border Bulk Sales'],
+    heroImage: {
+      src: '/images/beverages/westsides-warehouse-stock-wide.webp',
+      alt: 'Westsides Company Ltd beverage warehouse stock for wholesale distribution',
+    },
     gallery: [
-      { visual: 'trade' as const, cap: 'Beverages' },
-      { visual: 'hardware' as const, cap: 'Hardware' },
-      { visual: 'logistics' as const, cap: 'Warehouse' },
+      {
+        src: '/images/beverages/westsides-customer-order-truck.webp',
+        alt: 'Customer beverage order loaded for Westsides wholesale distribution',
+        cap: 'Customer Orders',
+      },
+      {
+        src: '/images/beverages/westsides-softdrinks-warehouse.webp',
+        alt: 'Soft drinks stacked inside a Westsides warehouse',
+        cap: 'Soft Drinks',
+      },
+      {
+        src: '/images/hardware/itemba-hardware-storefront.webp',
+        alt: 'ITEMBA-HARDWARE storefront with construction supply stock',
+        cap: 'Hardware',
+      },
+      {
+        src: '/images/hospitality/uzunguni-bar-restaurant.webp',
+        alt: 'UZUNGUNI INN restaurant and bar seating',
+        cap: 'UZUNGUNI INN',
+      },
     ],
-    divisions: [],
+    divisions: [
+      {
+        name: 'ITEMBA-HARDWARE',
+        desc: 'Hardware and construction equipment sales managed by Westsides Company Ltd.',
+        visual: 'hardware' as const,
+        image: {
+          src: '/images/hardware/itemba-hardware-paint-stock.webp',
+          alt: 'ITEMBA-HARDWARE paint and construction supply stock',
+        },
+      },
+      {
+        name: 'UZUNGUNI INN',
+        desc: 'Lodging, restaurant, and bar services managed by Westsides Company Ltd.',
+        visual: 'hospitality' as const,
+        image: {
+          src: '/images/hospitality/uzunguni-lodge-room.webp',
+          alt: 'UZUNGUNI INN lodging room',
+        },
+      },
+    ],
   },
   {
     id: 'enterprises',
@@ -70,20 +136,42 @@ const companies = [
     accentGlow: 'shadow-emerald-500/20',
     visual: 'logistics' as const,
     profileHref: companyUrl('itemba-enterprises'),
-    summary: "The group's multi-sector flagship — anchored by logistics for local distribution and cross-border transit, alongside manufacturing, hardware, real estate, and hospitality — operating through five specialised business divisions.",
-    detail: "Itemba Enterprises acts as the group's growth engine across multiple consumer and service markets. Logistics is its largest line of business, leveraging the strategic Tunduma corridor for local distribution and cross-border transit between Tanzania, Zambia, and the wider region. The remaining four divisions create a self-reinforcing ecosystem of products and services — from building materials to hospitality — all under one parent entity.",
-    products: ['Local Logistics', 'Cross-Border Transit', 'Industrial Goods', 'Consumer Goods', 'Building Materials', 'Property Services', 'Hotel & Lodging', 'Parking Yard'],
+    summary: "The group's logistics and emerging-business company — anchored by Dar es Salaam-to-Southern Highlands goods movement and cross-border transit through the Tunduma corridor.",
+    detail: "Itemba Enterprises focuses on logistics services, cross-border transit, and emerging businesses. Its logistics market includes local businesses sourcing goods from Dar es Salaam into Songwe, Mbeya, Rukwa, Ruvuma, and Iringa, plus transit customers moving goods to and from Zambia, DRC, Zimbabwe, and Malawi.",
+    products: ['Dar es Salaam Logistics', 'Southern Highlands Distribution', 'Cross-Border Transit', 'Emerging Businesses'],
+    heroImage: {
+      src: '/images/logistics/itemba-logistics-tanker-under-canopy.webp',
+      alt: 'Itemba Logistics tanker truck supporting local and transit movement',
+    },
     gallery: [
-      { visual: 'logistics' as const, cap: 'Itemba Logistics' },
-      { visual: 'hardware' as const, cap: 'Itemba Hardware' },
-      { visual: 'hospitality' as const, cap: 'Uzunguni Inn' },
+      {
+        src: '/images/logistics/itemba-logistics-truck-front.webp',
+        alt: 'Itemba Logistics truck front view',
+        cap: 'Itemba Logistics',
+      },
+      {
+        src: '/images/logistics/itemba-logistics-tanker-under-canopy.webp',
+        alt: 'Itemba Logistics tanker under station canopy',
+        cap: 'Corridor operations',
+      },
+      {
+        src: '/images/logistics/itemba-logistics-truck-yard.webp',
+        alt: 'Itemba Logistics truck in yard',
+        cap: 'Fleet',
+      },
     ],
     divisions: [
-      { name: 'Itemba Logistics',    desc: 'Local distribution and cross-border transit logistics through the Tunduma corridor — the flagship business of Itemba Enterprises.', visual: 'logistics' as const, flagship: true },
-      { name: 'Itemba Hardware',     desc: 'Building materials, hand tools, power tools, and electrical supplies to contractors and retail customers.',                          visual: 'hardware' as const },
-      { name: 'Itemba Estate',       desc: 'Property development, real estate management, and property-related services in the Songwe region.',                                  visual: 'estate' as const },
-      { name: 'Uzunguni Inn',        desc: 'Hotel accommodation, restaurant dining, and lodging services for travellers and business guests.',                                    visual: 'hospitality' as const },
-      { name: 'Uzunguni Parking Yard', desc: 'Secure parking yard services supporting the movement of goods and vehicles in the region.',                                         visual: 'parking' as const },
+      {
+        name: 'Itemba Logistics',
+        desc: 'Local distribution and cross-border transit logistics through the Tunduma corridor — the flagship business of Itemba Enterprises.',
+        visual: 'logistics' as const,
+        flagship: true,
+        image: {
+          src: '/images/logistics/itemba-logistics-tanker-under-canopy.webp',
+          alt: 'Itemba Logistics tanker supporting transit operations',
+        },
+      },
+      { name: 'Emerging Businesses', desc: 'New operating opportunities developed under Itemba Enterprises as the group grows.', visual: 'operations' as const },
     ],
   },
 ];
@@ -129,7 +217,23 @@ export default function CompaniesPage() {
               {/* Company hero banner */}
               <AnimatedSection>
                 <div className="relative h-72 sm:h-96 rounded-3xl overflow-hidden shadow-2xl mb-14 img-zoom">
-                  <BrandVisual variant={co.visual} label={`${co.name} operations`} className="absolute inset-0 img-inner" />
+                  {co.heroImage ? (
+                    <div className="absolute inset-0 bg-ink-950">
+                      <img
+                        src={co.heroImage.src}
+                        alt=""
+                        aria-hidden="true"
+                        className="absolute inset-0 h-full w-full object-cover opacity-45 blur-xl"
+                      />
+                      <img
+                        src={co.heroImage.src}
+                        alt={co.heroImage.alt}
+                        className="relative h-full w-full object-contain p-4"
+                      />
+                    </div>
+                  ) : (
+                    <BrandVisual variant={co.visual} label={`${co.name} operations`} className="absolute inset-0 img-inner" />
+                  )}
                   <div className="absolute inset-0 bg-gradient-to-r from-ink-950/90 via-ink-950/60 to-transparent" />
                   <div className="absolute inset-0 flex items-end p-10">
                     <div>
@@ -184,7 +288,12 @@ export default function CompaniesPage() {
                     <div className="grid grid-cols-3 gap-3">
                       {co.gallery.map((img) => (
                         <div key={img.cap} className="relative h-32 rounded-xl overflow-hidden group img-zoom">
-                          <BrandVisual variant={img.visual} label={img.cap} className="absolute inset-0 img-inner" />
+                          <img
+                            src={img.src}
+                            alt={img.alt}
+                            className="absolute inset-0 h-full w-full object-contain bg-ink-950 p-1"
+                            loading="lazy"
+                          />
                           <div className="absolute inset-0 bg-ink-900/30 group-hover:bg-ink-900/10 transition-colors" />
                         </div>
                       ))}
@@ -194,7 +303,7 @@ export default function CompaniesPage() {
 
                 {/* Sidebar */}
                 <div className="space-y-6">
-                  <AnimatedSection delay={0.1} direction="left">
+                  <AnimatedSection delay={0.1} direction="fade">
                     <div className={`border-l-2 ${co.accentBorder} pl-5 space-y-5`}>
                       <div>
                         <div className="text-xs text-slate-400 mb-1">Sector</div>
@@ -213,7 +322,7 @@ export default function CompaniesPage() {
 
                   {/* Divisions (Itemba Enterprises only) */}
                   {co.divisions.length > 0 && (
-                    <AnimatedSection delay={0.2} direction="left">
+                    <AnimatedSection delay={0.2} direction="fade">
                       <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4">Business Divisions</p>
                       <div className="space-y-4">
                         {co.divisions.map((div) => {
@@ -226,7 +335,16 @@ export default function CompaniesPage() {
                               }`}
                             >
                               <div className="relative h-28 img-zoom">
-                                <BrandVisual variant={div.visual} label={`${div.name} operations`} className="absolute inset-0 img-inner" />
+                                {'image' in div && div.image ? (
+                                  <img
+                                    src={div.image.src}
+                                    alt={div.image.alt}
+                                    className="absolute inset-0 h-full w-full bg-ink-950 object-contain p-1"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <BrandVisual variant={div.visual} label={`${div.name} operations`} className="absolute inset-0 img-inner" />
+                                )}
                                 <div className="absolute inset-0 bg-ink-900/50 group-hover:bg-ink-900/30 transition-colors flex items-end p-4">
                                   <span className="font-tight font-bold text-white text-sm">{div.name}</span>
                                 </div>

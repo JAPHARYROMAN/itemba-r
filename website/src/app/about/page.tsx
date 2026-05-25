@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import AnimatedSection from '@/components/AnimatedSection';
-import BrandVisual from '@/components/BrandVisual';
 import { absoluteUrl } from '@/lib/site';
 
 export const metadata: Metadata = {
@@ -58,7 +57,7 @@ export default function AboutPage() {
       </section>
 
       {/* ── Who We Are ────────────────────────────────────────────── */}
-      <section className="py-28 px-5 sm:px-8 bg-white">
+      <section className="overflow-hidden py-28 px-5 sm:px-8 bg-white">
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
           <div>
             <AnimatedSection delay={0}>
@@ -88,9 +87,22 @@ export default function AboutPage() {
             </AnimatedSection>
           </div>
           <AnimatedSection direction="left">
-            <div className="relative h-[440px] rounded-3xl overflow-hidden shadow-2xl img-zoom">
-              <BrandVisual variant="group" label="Itemba Group team" className="absolute inset-0 img-inner" />
-              <div className="absolute inset-0 bg-gradient-to-tl from-ink-900/40 to-transparent" />
+            <div className="grid h-[440px] grid-cols-2 gap-3 overflow-hidden rounded-3xl bg-ink-950 p-3 shadow-2xl">
+              {[
+                { src: '/images/fuel-stations/itemba-filling-station-wide.webp', alt: 'ITEMBA filling station forecourt' },
+                { src: '/images/beverages/westsides-warehouse-stock-wide.webp', alt: 'Westsides wholesale beverage warehouse stock' },
+                { src: '/images/logistics/itemba-logistics-tanker-under-canopy.webp', alt: 'Itemba Logistics tanker truck' },
+                { src: '/images/hospitality/uzunguni-bar-restaurant.webp', alt: 'UZUNGUNI INN bar and restaurant' },
+              ].map((image) => (
+                <div key={image.src} className="relative overflow-hidden rounded-2xl bg-ink-900">
+                  <img
+                    src={image.src}
+                    alt={image.alt}
+                    className="h-full w-full object-contain"
+                    loading="lazy"
+                  />
+                </div>
+              ))}
             </div>
           </AnimatedSection>
         </div>
@@ -113,7 +125,7 @@ export default function AboutPage() {
             {[
               { level: 'Group', title: 'Itemba Group', icon: '🏛️', desc: 'The parent holding company — strategic oversight, governance, and central coordination.' },
               { level: 'Companies', title: '3 Subsidiaries', icon: '🏢', desc: 'Mwanjalisi Oil, Westsides Company, and Itemba Enterprises — legally and operationally independent.' },
-              { level: 'Divisions', title: '5 Business Units', icon: '⚙️', desc: 'Itemba Logistics (flagship), Itemba Hardware, Itemba Estate, Uzunguni Inn, and Uzunguni Parking Yard under Itemba Enterprises.' },
+              { level: 'Brands', title: 'Operating Brands', icon: '⚙️', desc: 'ITEMBA-MPEMBA, ITEMBA-UZUNGUNI, and UZUNGUNI PARKING YARD under Mwanjalisi Oil; ITEMBA-HARDWARE and UZUNGUNI INN under Westsides.' },
             ].map((item, i) => (
               <AnimatedSection key={item.level} delay={i * 0.1}>
                 <div className="bg-ink-800 border border-ink-600 rounded-2xl p-8 h-full">
@@ -132,25 +144,31 @@ export default function AboutPage() {
           <AnimatedSection>
             <div className="bg-ink-800 border border-ink-600 rounded-2xl p-8 text-sm font-mono text-slate-400 leading-loose overflow-x-auto">
               <p className="text-white font-bold text-base mb-2">ITEMBA GROUP  <span className="text-gold-400">(Parent Holding)</span></p>
-              <p className="ml-4 text-slate-300">├── Mwanjalisi Oil Co Ltd &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ <span className="text-amber-400">Fuel &amp; energy distribution</span></p>
-              <p className="ml-4 text-slate-300">├── Westsides Company Ltd &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ <span className="text-blue-400">Beverages &amp; trade</span></p>
-              <p className="ml-4 text-slate-300">└── Itemba Enterprises Co Ltd &nbsp;→ <span className="text-emerald-400">Multi-sector operations</span></p>
-              <p className="ml-16 text-gold-400">├── Itemba Logistics &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ Local &amp; cross-border transit <span className="text-gold-500">★ flagship</span></p>
-              <p className="ml-16 text-slate-500">├── Itemba Hardware &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ Hardware &amp; building materials</p>
-              <p className="ml-16 text-slate-500">├── Itemba Estate &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ Real estate &amp; property</p>
-              <p className="ml-16 text-slate-500">├── Uzunguni Inn &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ Hotel &amp; hospitality</p>
-              <p className="ml-16 text-slate-500">└── Uzunguni Parking Yard &nbsp;→ Parking yard services</p>
+              <p className="ml-4 text-slate-300">├── Mwanjalisi Oil Co Ltd &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ <span className="text-amber-400">Fuel, parking &amp; energy distribution</span></p>
+              <p className="ml-8 text-slate-500">├── ITEMBA-MPEMBA / ITEMBA-UZUNGUNI → Fuel station brands</p>
+              <p className="ml-8 text-slate-500">├── UZUNGUNI PARKING YARD → Parking facilities</p>
+              <p className="ml-4 text-slate-300">├── Westsides Company Ltd &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ <span className="text-blue-400">Beverages, hardware &amp; hospitality</span></p>
+              <p className="ml-8 text-slate-500">├── ITEMBA-HARDWARE → Hardware &amp; construction equipment</p>
+              <p className="ml-8 text-slate-500">├── UZUNGUNI INN → Lodging, restaurant &amp; bar</p>
+              <p className="ml-4 text-slate-300">└── Itemba Enterprises Co Ltd &nbsp;→ <span className="text-emerald-400">Logistics &amp; emerging businesses</span></p>
+              <p className="ml-8 text-gold-400">└── Itemba Logistics → Local &amp; cross-border transit <span className="text-gold-500">★ flagship</span></p>
             </div>
           </AnimatedSection>
         </div>
       </section>
 
       {/* ── Why Diversification ───────────────────────────────────── */}
-      <section className="py-28 px-5 sm:px-8 bg-white">
+      <section className="overflow-hidden py-28 px-5 sm:px-8 bg-white">
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
           <AnimatedSection direction="right">
-            <div className="relative h-[400px] rounded-3xl overflow-hidden shadow-2xl img-zoom">
-              <BrandVisual variant="operations" label="Itemba Group operations" className="absolute inset-0 img-inner" />
+            <div className="relative h-[400px] overflow-hidden rounded-3xl bg-ink-950 shadow-2xl">
+              <img
+                src="/images/fuel-stations/itemba-station-wide-yard.webp"
+                alt="Itemba Group filling station yard and corridor operations"
+                className="absolute inset-0 h-full w-full object-contain p-3"
+                loading="lazy"
+              />
+              <div className="absolute inset-0 bg-gradient-to-tr from-ink-950/55 via-transparent to-transparent" />
             </div>
           </AnimatedSection>
           <div>
@@ -208,9 +226,14 @@ export default function AboutPage() {
               </p>
             </AnimatedSection>
           </div>
-          <AnimatedSection direction="left">
-            <div className="relative h-[380px] rounded-3xl overflow-hidden shadow-2xl img-zoom">
-              <BrandVisual variant="fuel" label="Mpemba-Tunduma headquarters" className="absolute inset-0 img-inner" />
+          <AnimatedSection direction="fade">
+            <div className="relative h-[380px] rounded-3xl overflow-hidden bg-ink-950 shadow-2xl">
+              <img
+                src="/images/fuel-stations/itemba-filling-station-wide.webp"
+                alt="Itemba Filling Station along the Tunduma-Ileje Highway in Mpemba"
+                className="absolute inset-0 h-full w-full object-contain p-4"
+                loading="lazy"
+              />
               <div className="absolute inset-0 bg-gradient-to-bl from-ink-900/50 to-transparent" />
               <div className="absolute bottom-6 left-6 bg-ink-900/85 backdrop-blur-sm rounded-xl px-5 py-3">
                 <div className="font-tight font-bold text-white">Itemba Filling Station</div>

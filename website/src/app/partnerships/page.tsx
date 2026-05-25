@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import AnimatedSection from '@/components/AnimatedSection';
-import BrandVisual from '@/components/BrandVisual';
 import EnquiryRouter from '@/components/EnquiryRouter';
 import FaqList from '@/components/FaqList';
 import JsonLd from '@/components/JsonLd';
@@ -52,6 +51,25 @@ const partnershipsJsonLd = {
   },
 };
 
+const partnershipHeroImages = [
+  {
+    src: '/images/beverages/westsides-customer-order-truck.webp',
+    alt: 'Westsides wholesale customer order ready for distribution',
+  },
+  {
+    src: '/images/fuel-stations/itemba-mpemba-truck-canopy.webp',
+    alt: 'Truck refuelling under an ITEMBA filling station canopy',
+  },
+  {
+    src: '/images/logistics/itemba-logistics-truck-front.webp',
+    alt: 'Itemba Logistics truck for regional movement',
+  },
+  {
+    src: '/images/hardware/itemba-hardware-storefront.webp',
+    alt: 'ITEMBA-HARDWARE storefront and construction supply stock',
+  },
+] as const;
+
 function getCompanyName(slug: string) {
   return companyProfiles.find((company) => company.slug === slug)?.name ?? slug;
 }
@@ -99,15 +117,24 @@ export default function PartnershipsPage() {
             </p>
           </AnimatedSection>
           <AnimatedSection direction="left">
-            <div className="relative h-80 overflow-hidden rounded-3xl shadow-2xl">
-              <BrandVisual variant="operations" label="Itemba Group partnership routes" className="absolute inset-0" />
-              <div className="absolute inset-0 bg-gradient-to-br from-ink-950/30 to-transparent" />
+            <div className="grid h-80 grid-cols-2 gap-3 overflow-hidden rounded-3xl bg-ink-950 p-3 shadow-2xl ring-1 ring-white/10">
+              {partnershipHeroImages.map((image) => (
+                <div key={image.src} className="relative overflow-hidden rounded-2xl bg-ink-900">
+                  <img
+                    src={image.src}
+                    alt={image.alt}
+                    className="h-full w-full object-contain"
+                    loading="eager"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-ink-950/45 via-transparent to-transparent" />
+                </div>
+              ))}
             </div>
           </AnimatedSection>
         </div>
       </section>
 
-      <section className="bg-white px-5 py-24 sm:px-8">
+      <section className="overflow-hidden bg-white px-5 py-24 sm:px-8">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[1.2fr_0.8fr]">
           <div>
             <AnimatedSection className="mb-10">
@@ -207,7 +234,7 @@ export default function PartnershipsPage() {
         </div>
       </section>
 
-      <section className="bg-slate-50 px-5 py-20 sm:px-8">
+      <section className="overflow-hidden bg-slate-50 px-5 py-20 sm:px-8">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-10 lg:grid-cols-[0.75fr_1.25fr]">
           <AnimatedSection>
             <div className="gold-line mb-6" />

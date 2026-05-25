@@ -181,9 +181,14 @@ html {
 }
 
 /* ─── Print profile support ───────────────────────────────────────────── */
+.print-document-root {
+  display: none;
+}
+
 @media print {
   @page {
-    margin: 18mm;
+    margin: 14mm;
+    size: A4;
   }
 
   html,
@@ -195,6 +200,7 @@ html {
   header,
   footer,
   .print-hidden,
+  .skip-link,
   .fixed {
     display: none !important;
   }
@@ -211,5 +217,345 @@ html {
     background: none !important;
     -webkit-text-fill-color: #080f1e !important;
     color: #080f1e !important;
+  }
+
+  body.printing-company-profile,
+  body[data-print-profile] {
+    font-size: 10.5pt !important;
+    line-height: 1.5 !important;
+  }
+
+  body.printing-company-profile #main-content > div > :not(.print-document-root),
+  body.printing-company-profile #main-content > :not(div):not(.print-document-root),
+  body[data-print-profile] #main-content > div > :not(.print-document-root),
+  body[data-print-profile] #main-content > :not(div):not(.print-document-root) {
+    display: none !important;
+  }
+
+  body.printing-company-profile .print-document-root,
+  body[data-print-profile] .print-document-root {
+    display: block !important;
+    max-width: none !important;
+    width: 100% !important;
+  }
+
+  body.printing-company-profile .print-profile-document,
+  body[data-print-profile] .print-profile-document {
+    display: none !important;
+  }
+
+  body.printing-company-profile[data-print-profile='group'] .print-profile-document[data-profile='group'],
+  body.printing-company-profile[data-print-profile='westsides'] .print-profile-document[data-profile='westsides'],
+  body.printing-company-profile[data-print-profile='mwanjalisi'] .print-profile-document[data-profile='mwanjalisi'],
+  body.printing-company-profile[data-print-profile='enterprises'] .print-profile-document[data-profile='enterprises'],
+  body[data-print-profile='group'] .print-profile-document[data-profile='group'],
+  body[data-print-profile='westsides'] .print-profile-document[data-profile='westsides'],
+  body[data-print-profile='mwanjalisi'] .print-profile-document[data-profile='mwanjalisi'],
+  body[data-print-profile='enterprises'] .print-profile-document[data-profile='enterprises'] {
+    display: block !important;
+  }
+
+  .print-profile-document {
+    color: #111827 !important;
+    font-family: Arial, Helvetica, sans-serif !important;
+  }
+
+  .print-letterhead {
+    align-items: flex-start;
+    border-bottom: 2px solid #111827;
+    display: flex !important;
+    gap: 8mm;
+    justify-content: space-between;
+    margin-bottom: 5mm;
+    padding-bottom: 4mm;
+  }
+
+  .print-letterhead-brand {
+    align-items: center;
+    display: flex;
+    gap: 4mm;
+  }
+
+  .print-logo-mark {
+    align-items: center;
+    background: #ffffff !important;
+    border: 1px solid #111827;
+    display: flex !important;
+    height: 20mm;
+    justify-content: center;
+    padding: 1.5mm;
+    position: relative;
+    width: 46mm;
+  }
+
+  .print-logo-mark img {
+    height: 100%;
+    object-fit: contain;
+    width: 100%;
+  }
+
+  .print-logo-mark span,
+  .print-cover-logo span {
+    background: #080f1e !important;
+    color: #ffffff !important;
+    font-size: 6.8pt;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    padding: 1mm 1.5mm;
+    position: absolute;
+    right: 1.5mm;
+    text-transform: uppercase;
+  }
+
+  .print-logo-mark span {
+    bottom: 1.5mm;
+  }
+
+  .print-letterhead-title {
+    color: #080f1e !important;
+    font-size: 14pt;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    margin: 0;
+  }
+
+  .print-letterhead-subtitle,
+  .print-letterhead-contact p,
+  .print-document-footer {
+    color: #475569 !important;
+    font-size: 7.5pt;
+    margin: 0;
+  }
+
+  .print-letterhead-contact {
+    max-width: 82mm;
+    text-align: right;
+  }
+
+  .print-cover-panel {
+    align-items: stretch;
+    background: #080f1e !important;
+    color: #ffffff !important;
+    display: grid;
+    gap: 5mm;
+    grid-template-columns: 1.2fr 0.8fr;
+    margin-bottom: 5mm;
+    padding: 6mm;
+  }
+
+  .print-cover-identity {
+    align-items: center;
+    display: flex !important;
+    gap: 4mm;
+    margin-bottom: 5mm;
+  }
+
+  .print-cover-logo {
+    background: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    display: block !important;
+    padding: 1.5mm;
+    position: relative;
+  }
+
+  .print-cover-logo img {
+    background: #ffffff !important;
+    height: 17mm;
+    object-fit: contain;
+    width: 42mm;
+  }
+
+  .print-cover-logo span {
+    bottom: 1.5mm;
+  }
+
+  .print-cover-identity > span {
+    color: #f8fafc !important;
+    font-size: 10pt;
+    font-weight: 800;
+    letter-spacing: 0;
+  }
+
+  .print-cover-panel h1 {
+    color: #ffffff !important;
+    font-size: 24pt;
+    font-weight: 900;
+    letter-spacing: 0;
+    line-height: 0.95;
+    margin: 1.5mm 0 3mm;
+  }
+
+  .print-kicker {
+    color: #f2b544 !important;
+    font-size: 7.5pt;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    margin: 0;
+    text-transform: uppercase;
+  }
+
+  .print-subtitle {
+    color: #dbe4f0 !important;
+    font-size: 10pt;
+    margin: 0;
+  }
+
+  .print-cover-panel > img {
+    border: 1px solid rgba(255, 255, 255, 0.32);
+    height: 43mm;
+    object-fit: cover;
+    width: 100%;
+  }
+
+  .print-cover-logo img {
+    border: 0;
+    height: 17mm;
+    object-fit: contain;
+    width: 42mm;
+  }
+
+  .print-section {
+    border-top: 1px solid #cbd5e1;
+    break-inside: auto;
+    margin-top: 7mm;
+    overflow: visible !important;
+    padding-top: 5mm;
+    page-break-inside: auto;
+  }
+
+  .print-section-page {
+    border-top: 0;
+    break-before: page;
+    margin-top: 0;
+    page-break-before: always;
+    padding-top: 0;
+  }
+
+  .print-section-tight,
+  .print-mini-card,
+  .print-image-grid figure,
+  .print-fact-grid > div,
+  .print-table tr {
+    break-inside: avoid;
+  }
+
+  .print-section h2 {
+    color: #080f1e !important;
+    font-size: 13pt;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    margin: 0 0 3.5mm;
+    text-transform: uppercase;
+  }
+
+  .print-section h3 {
+    color: #111827 !important;
+    font-size: 10pt;
+    font-weight: 800;
+    margin: 0 0 1.5mm;
+  }
+
+  .print-section p,
+  .print-section li,
+  .print-section dd,
+  .print-section td,
+  .print-section th {
+    font-size: 9.5pt;
+    line-height: 1.5;
+  }
+
+  .print-fact-grid {
+    display: grid;
+    gap: 3mm;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .print-fact-grid > div,
+  .print-mini-card {
+    border: 1px solid #cbd5e1;
+    padding: 3.5mm;
+  }
+
+  .print-fact-grid dt {
+    color: #64748b !important;
+    font-size: 7pt;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    margin: 0 0 1mm;
+    text-transform: uppercase;
+  }
+
+  .print-fact-grid dd {
+    color: #111827 !important;
+    font-weight: 700;
+    margin: 0;
+  }
+
+  .print-image-grid,
+  .print-column-grid {
+    display: grid;
+    gap: 4mm;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .print-image-grid figure {
+    border: 1px solid #cbd5e1;
+    margin: 0;
+    padding: 2mm;
+  }
+
+  .print-image-grid img {
+    height: 38mm;
+    object-fit: cover;
+    width: 100%;
+  }
+
+  .print-image-grid figcaption {
+    color: #475569 !important;
+    font-size: 8pt;
+    font-weight: 700;
+    line-height: 1.25;
+    margin-top: 1.5mm;
+  }
+
+  .print-list {
+    margin: 0;
+    padding-left: 5mm;
+  }
+
+  .print-list li + li {
+    margin-top: 2.2mm;
+  }
+
+  .print-list-columns {
+    columns: 2;
+  }
+
+  .print-table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  .print-table th,
+  .print-table td {
+    border: 1px solid #cbd5e1;
+    padding: 2mm;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .print-table th {
+    background: #f1f5f9 !important;
+    color: #111827 !important;
+    font-weight: 900;
+  }
+
+  .print-document-footer {
+    border-top: 1px solid #cbd5e1;
+    display: flex !important;
+    justify-content: space-between;
+    margin-top: 5mm;
+    padding-top: 2mm;
   }
 }

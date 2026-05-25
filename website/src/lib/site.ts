@@ -1,7 +1,7 @@
 export const site = {
   name: 'Itemba Group',
   url: 'https://www.itembagrouptz.com',
-  domain: 'itembagrouptz.com',
+  domain: 'www.itembagrouptz.com',
   title: "Itemba Group | Tanzania's Diversified Business Group",
   description:
     'Itemba Group is a Tanzanian holding group headquartered in Mpemba-Tunduma, Songwe Region, operating across energy, trade, logistics, construction, hospitality, real estate, and manufacturing.',
@@ -52,6 +52,16 @@ export type ServiceArea = {
   keywords: string[];
   offerings: string[];
   audience: string[];
+  image?: {
+    src: string;
+    alt: string;
+    caption?: string;
+  };
+  gallery?: Array<{
+    src: string;
+    alt: string;
+    caption: string;
+  }>;
   faqs: Faq[];
 };
 
@@ -64,6 +74,11 @@ export type LocationProfile = {
   detail: string;
   metaDescription: string;
   visual: 'corridor' | 'operations' | 'logistics';
+  image?: {
+    src: string;
+    alt: string;
+    caption?: string;
+  };
   addressLines: string[];
   searchTerms: string[];
   advantages: Array<{ title: string; summary: string }>;
@@ -113,29 +128,50 @@ export const companyProfiles = [
     id: 'mwanjalisi',
     slug: 'mwanjalisi-oil',
     name: 'Mwanjalisi Oil Co Ltd',
-    sector: 'Energy & Fuel Distribution',
-    eyebrow: 'Petroleum Retail',
+    sector: 'Energy, Fuel & Parking',
+    eyebrow: 'Petroleum Retail & Parking',
     accentBg: 'bg-amber-500',
     accentClass: 'text-amber-400',
     accentBorder: 'border-amber-500/30',
     visual: 'fuel',
     summary:
-      "Tanzania's petroleum retail arm within Itemba Group, delivering reliable fuel supply to businesses, transport operators, and communities across Songwe Region.",
+      "Tanzania's petroleum retail and corridor support arm within Itemba Group, managing high-visibility ITEMBA-branded filling stations and UZUNGUNI PARKING YARD for motorists, fleet operators, and logistics customers across Songwe Region.",
     detail:
-      "Positioned in a high-traffic corridor near the Tanzania-Zambia border, Mwanjalisi Oil serves individual motorists, transport operators, and commercial fleet customers through fuel station operations designed around reliability, safety, and operational efficiency.",
-    services: ['Diesel', 'Petrol', 'Kerosene', 'Lubricants', 'Commercial fleet supply enquiries'],
-    highlights: ['Located on the Tunduma corridor', 'Serves retail and business customers', 'Supports transport and local trade'],
+      "Positioned along major transport routes near the Tanzania-Zambia border, Mwanjalisi Oil manages retail fuel station operations that trade publicly under the ITEMBA location brand, including ITEMBA-MPEMBA near the Tunduma Bus Station and ITEMBA-UZUNGUNI along the TANZAM Highway. It also manages UZUNGUNI PARKING YARD in Uzunguni Area, Mpemba-Tunduma for corridor motorists and logistics operators.",
+    services: ['ITEMBA-MPEMBA', 'ITEMBA-UZUNGUNI', 'UZUNGUNI PARKING YARD', 'Diesel', 'Petrol', 'Kerosene', 'Lubricants', 'Commercial fleet supply enquiries'],
+    highlights: ['ITEMBA-branded stations managed by Mwanjalisi Oil', 'UZUNGUNI PARKING YARD managed by Mwanjalisi Oil', 'Located along major corridor routes and near a major bus stand', 'Serves motorists, fleets, and logistics operators', 'Two operating stations with three upcoming fuel locations'],
+    image: {
+      src: '/images/fuel-stations/itemba-filling-station-wide.webp',
+      alt: 'ITEMBA-MPEMBA filling station forecourt and canopy managed by Mwanjalisi Oil Company Ltd',
+    },
+    gallery: [
+      {
+        src: '/images/fuel-stations/itemba-filling-station-wide.webp',
+        alt: 'ITEMBA filling station forecourt and canopy',
+        caption: 'ITEMBA-branded fuel station presence under Mwanjalisi Oil management.',
+      },
+      {
+        src: '/images/fuel-stations/itemba-mpemba-truck-canopy.webp',
+        alt: 'Truck refuelling under the ITEMBA-MPEMBA canopy',
+        caption: 'Forecourt access for trucks, buses, motorists, and corridor logistics operators.',
+      },
+      {
+        src: '/images/parking/uzunguni-parking-yard-trucks.webp',
+        alt: 'Truck parking at Uzunguni Parking Yard',
+        caption: 'UZUNGUNI PARKING YARD supports corridor vehicle staging and parking.',
+      },
+    ],
     enquiryLabel: 'Fuel supply enquiry',
     faqs: [
       {
         question: 'What products does Mwanjalisi Oil supply?',
         answer:
-          'Mwanjalisi Oil handles petroleum retail products including diesel, petrol, kerosene, and lubricants for motorists, transport operators, and business customers.',
+          'Mwanjalisi Oil manages ITEMBA-branded filling stations supplying diesel, petrol, kerosene, and lubricants, and also manages UZUNGUNI PARKING YARD for motorists, transport operators, and corridor logistics customers.',
       },
       {
         question: 'Where is Mwanjalisi Oil located?',
         answer:
-          'The company operates from Songwe Region, with group headquarters at Itemba Filling Station along the Tunduma-Ileje Highway in Mpemba, Tunduma.',
+          'The company operates from Songwe Region. Its current public-facing station brands include ITEMBA-MPEMBA near the Tunduma Bus Station and ITEMBA-UZUNGUNI in Uzunguni Area, Mpemba, with UZUNGUNI PARKING YARD also located in Uzunguni Area, Mpemba-Tunduma.',
       },
       {
         question: 'Can business fuel enquiries be submitted online?',
@@ -144,7 +180,7 @@ export const companyProfiles = [
       },
     ],
     metaDescription:
-      'Mwanjalisi Oil Co Ltd is the Itemba Group petroleum retail company serving fuel, diesel, petrol, kerosene, lubricants, and business fuel enquiries in Songwe Region, Tanzania.',
+      'Mwanjalisi Oil Co Ltd manages ITEMBA-branded filling stations including ITEMBA-MPEMBA and ITEMBA-UZUNGUNI plus UZUNGUNI PARKING YARD, serving fuel, lubricants, and parking customers in Songwe Region, Tanzania.',
   },
   {
     id: 'westsides',
@@ -157,22 +193,48 @@ export const companyProfiles = [
     accentBorder: 'border-blue-500/30',
     visual: 'trade',
     summary:
-      'Wholesale and retail distribution covering beverages and construction goods for consumer markets, contractors, retailers, and hospitality businesses across the region.',
+      'Wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN operations for stockists, bars, night clubs, contractors, hospitality customers, and cross-border bulk buyers.',
     detail:
-      "Westsides bridges two high-demand markets: beverage distribution and construction supply. Its network reaches retailers, contractors, and hospitality businesses, making it a practical distribution hub in the region's trade ecosystem.",
-    services: ['Alcoholic beverages', 'Non-alcoholic beverages', 'Building materials', 'Hand and power tools', 'Electrical supplies'],
-    highlights: ['Serves retailers and contractors', 'Combines beverage and construction supply', 'Supports Songwe regional trade'],
+      "Westsides Company Ltd manages the group's trading and hospitality brands, including wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN. Its market includes more than 50 stockists across Songwe Region, bars and night clubs in urban centres such as Tunduma, Mlowo, and Vwawa, international bulk buyers moving goods through Tunduma border, and construction companies serving the growing real estate and infrastructure market.",
+    services: ['Wholesale beverages', 'ITEMBA-HARDWARE', 'UZUNGUNI INN', 'Construction equipment sales'],
+    highlights: ['More than 50 beverage stockists across Songwe Region', 'Serves bars, night clubs, and hospitality outlets', 'Supports cross-border bulk buyers and construction companies'],
+    image: {
+      src: '/images/beverages/westsides-warehouse-stock-wide.webp',
+      alt: 'Westsides Company Ltd wholesale beverage warehouse stock for distribution customers',
+    },
+    gallery: [
+      {
+        src: '/images/beverages/westsides-customer-order-truck.webp',
+        alt: 'Customer beverage order loaded on a truck for Westsides distribution',
+        caption: 'Customer orders prepared for stockists and bulk buyers across Songwe Region.',
+      },
+      {
+        src: '/images/beverages/westsides-softdrinks-warehouse.webp',
+        alt: 'Soft drink stock inside a Westsides beverage warehouse',
+        caption: 'Soft drink stock handled through Westsides wholesale distribution.',
+      },
+      {
+        src: '/images/hardware/itemba-hardware-paint-stock.webp',
+        alt: 'ITEMBA-HARDWARE paint and construction supply stock',
+        caption: 'ITEMBA-HARDWARE supports contractors, real estate, and infrastructure customers.',
+      },
+      {
+        src: '/images/hospitality/uzunguni-bar-restaurant.webp',
+        alt: 'UZUNGUNI INN restaurant and bar seating',
+        caption: 'UZUNGUNI INN adds lodging, restaurant, and bar services under Westsides.',
+      },
+    ],
     enquiryLabel: 'Trade supply enquiry',
     faqs: [
       {
         question: 'What does Westsides Company distribute?',
         answer:
-          'Westsides Company handles wholesale and retail distribution across beverages, building materials, tools, and electrical supplies.',
+          'Westsides Company handles wholesale beverages and manages ITEMBA-HARDWARE for building materials, tools, construction equipment, and related supplies.',
       },
       {
         question: 'Who does Westsides Company serve?',
         answer:
-          'The company serves consumer markets, retailers, contractors, hospitality businesses, and regional trade customers in and around Songwe Region.',
+          'The company serves more than 50 beverage stockists across Songwe Region, bars and night clubs in urban centres, international bulk buyers, contractors, construction companies, lodging and restaurant customers, and regional trade customers.',
       },
       {
         question: 'How should supplier or bulk purchase enquiries be sent?',
@@ -181,35 +243,56 @@ export const companyProfiles = [
       },
     ],
     metaDescription:
-      'Westsides Company Ltd handles wholesale and retail distribution for beverages, building materials, tools, and electrical supplies in Songwe Region, Tanzania.',
+      'Westsides Company Ltd manages wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN for Songwe stockists, bars, cross-border buyers, and construction customers in Tanzania.',
   },
   {
     id: 'enterprises',
     slug: 'itemba-enterprises',
     name: 'Itemba Enterprises Co Ltd',
-    sector: 'Multi-Sector Operations',
-    eyebrow: 'Logistics, Property & Hospitality',
+    sector: 'Logistics and Transit Operations',
+    eyebrow: 'Logistics and Cross-Border Transit',
     accentBg: 'bg-emerald-500',
     accentClass: 'text-emerald-400',
     accentBorder: 'border-emerald-500/30',
     visual: 'logistics',
     summary:
-      "The group's multi-sector flagship, anchored by local logistics and cross-border transit alongside hardware, property, hospitality, and parking yard services.",
+      "The group's logistics and emerging-business company, anchored by Dar es Salaam-to-Southern Highlands movement and cross-border transit through the Tunduma corridor.",
     detail:
-      'Itemba Enterprises acts as the group growth engine across multiple consumer and service markets. Logistics is its largest line of business, leveraging the strategic Tunduma corridor for local distribution and cross-border transit between Tanzania, Zambia, and the wider region.',
-    services: ['Local logistics', 'Cross-border transit', 'Itemba Hardware', 'Itemba Estate', 'Uzunguni Inn', 'Uzunguni Parking Yard'],
-    highlights: ['Flagship logistics operation', 'Five specialised divisions', 'Direct access to the Tanzania-Zambia corridor'],
+      'Itemba Enterprises focuses on logistics services, cross-border transit, and emerging businesses after trading and hospitality operations were placed under Westsides Company Ltd and UZUNGUNI PARKING YARD came under Mwanjalisi Oil Co Ltd management. Its logistics target market includes local businesses sourcing goods from Dar es Salaam into the Southern Highlands regions of Songwe, Mbeya, Rukwa, Ruvuma, and Iringa, plus transit customers moving goods to and from Zambia, DRC, Zimbabwe, and Malawi.',
+    services: ['Local logistics', 'Cross-border transit', 'Emerging businesses'],
+    highlights: ['Dar es Salaam to Southern Highlands logistics', 'Transit routes to Zambia, DRC, Zimbabwe, and Malawi', 'Direct access to the Tunduma border corridor'],
+    image: {
+      src: '/images/logistics/itemba-logistics-tanker-under-canopy.webp',
+      alt: 'Itemba Logistics fuel tanker supporting goods movement and transit operations',
+    },
+    gallery: [
+      {
+        src: '/images/logistics/itemba-logistics-tanker-under-canopy.webp',
+        alt: 'Itemba Logistics tanker truck under station canopy',
+        caption: 'Itemba Logistics anchors local and cross-border movement for the group.',
+      },
+      {
+        src: '/images/logistics/itemba-logistics-truck-front.webp',
+        alt: 'Itemba Logistics truck front view',
+        caption: 'Fleet visibility for Southern Highlands and corridor operations.',
+      },
+      {
+        src: '/images/logistics/itemba-logistics-truck-yard.webp',
+        alt: 'Itemba Logistics truck in a yard',
+        caption: 'Yard-based movement support for local businesses and transit customers.',
+      },
+    ],
     enquiryLabel: 'Operations enquiry',
     faqs: [
       {
         question: 'What are the Itemba Enterprises divisions?',
         answer:
-          'Itemba Enterprises operates Itemba Logistics, Itemba Hardware, Itemba Estate, Uzunguni Inn, and Uzunguni Parking Yard.',
+          'Itemba Enterprises focuses on Itemba Logistics, cross-border transit, and emerging business opportunities.',
       },
       {
         question: 'Does Itemba Enterprises handle cross-border logistics?',
         answer:
-          'Yes. Logistics is the flagship activity and focuses on local distribution and cross-border transit through the Tunduma corridor.',
+          'Yes. Logistics is the flagship activity and focuses on local goods movement from Dar es Salaam to the Southern Highlands, plus cross-border transit to and from Zambia, DRC, Zimbabwe, and Malawi through the Tunduma corridor.',
       },
       {
         question: 'Can one enquiry cover multiple divisions?',
@@ -218,7 +301,7 @@ export const companyProfiles = [
       },
     ],
     metaDescription:
-      'Itemba Enterprises Co Ltd operates logistics, cross-border transit, hardware, real estate, hospitality, and parking yard services under Itemba Group in Tanzania.',
+      'Itemba Enterprises Co Ltd operates logistics from Dar es Salaam to the Southern Highlands and cross-border transit services through Tunduma to Zambia, DRC, Zimbabwe, and Malawi.',
   },
 ] as const;
 
@@ -238,22 +321,22 @@ export const coreRoutes = [
 
 export const capabilityAreas = [
   {
-    title: 'Energy and Fuel',
+    title: 'Energy, Fuel and Parking',
     company: 'Mwanjalisi Oil Co Ltd',
-    summary: 'Petroleum retail operations for fuel and lubricant customers in Songwe Region.',
-    points: ['Diesel, petrol, kerosene, and lubricants', 'Retail and business fuel enquiries', 'Strategic corridor location in Mpemba-Tunduma'],
+    summary: 'Petroleum retail and parking operations for fuel, lubricant, and corridor customers in Songwe Region.',
+    points: ['Diesel, petrol, kerosene, lubricants, and UZUNGUNI PARKING YARD', 'Retail, business fuel, and parking enquiries', 'Strategic corridor location in Mpemba-Tunduma'],
   },
   {
     title: 'Trade and Distribution',
     company: 'Westsides Company Ltd',
-    summary: 'Wholesale and retail distribution for beverage and construction supply customers.',
-    points: ['Alcoholic and non-alcoholic beverages', 'Building materials, tools, and electrical supplies', 'Retailer, contractor, and hospitality customer support'],
+    summary: 'Wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN operations for stockists, hospitality outlets, bulk buyers, and construction customers.',
+    points: ['More than 50 stockists across Songwe Region', 'Bars, night clubs, restaurants, and hospitality outlets in Tunduma, Mlowo, Vwawa, and other centres', 'International bulk buyers and construction companies buying hardware and materials'],
   },
   {
     title: 'Logistics and Multi-Sector Operations',
     company: 'Itemba Enterprises Co Ltd',
-    summary: 'Local distribution, cross-border transit, hardware, property, hospitality, and parking yard services.',
-    points: ['Local logistics and cross-border transit', 'Itemba Hardware, Itemba Estate, Uzunguni Inn, and Uzunguni Parking Yard', 'Operations aligned with the Tanzania-Zambia trade corridor'],
+    summary: 'Local logistics and cross-border transit for businesses sourcing goods into the Southern Highlands and neighbouring countries.',
+    points: ['Dar es Salaam to Songwe, Mbeya, Rukwa, Ruvuma, and Iringa logistics', 'Transit business to and from Zambia, DRC, Zimbabwe, and Malawi', 'Operations aligned with the Tunduma border corridor'],
   },
 ] as const;
 
@@ -271,7 +354,7 @@ export const groupFaqs: Faq[] = [
   {
     question: 'Which sectors does Itemba Group operate in?',
     answer:
-      'The group operates across energy, trade, logistics, construction supplies, hospitality, real estate, and manufacturing-related activities.',
+      'The group operates across energy, trade, logistics, construction supplies, hospitality, parking, real estate, and manufacturing-related activities.',
   },
   {
     question: 'How can business enquiries be submitted?',
@@ -298,32 +381,32 @@ export const partnershipAreas: PartnershipArea[] = [
     routeTo: 'Westsides Company Ltd',
     intentId: 'westsides',
     summary:
-      'For retailers, contractors, hospitality operators, and institutional buyers seeking beverage, construction, tool, or electrical supply support.',
-    goodFit: ['Retail buyers', 'Contractors', 'Hospitality businesses', 'Institutional purchasers'],
+      'For stockists, bars, night clubs, cross-border bulk buyers, contractors, construction companies, hospitality operators, and institutional buyers seeking beverage, construction, tool, or electrical supply support.',
+    goodFit: ['Songwe stockists', 'Bars and night clubs', 'Cross-border bulk buyers', 'Construction companies', 'Hospitality businesses'],
     serviceSlugs: ['trade-and-distribution', 'construction-supplies-and-hardware'],
     companySlugs: ['westsides-company'],
   },
   {
     id: 'fuel-logistics',
-    title: 'Fuel, Fleet, and Logistics Customers',
+    title: 'Fuel, Parking, Fleet, and Logistics Customers',
     routeTo: 'Mwanjalisi Oil Co Ltd and Itemba Enterprises Co Ltd',
     intentId: 'mwanjalisi',
     summary:
-      'For transport operators, commercial fleets, traders, and cross-border customers that need fuel, lubricants, local logistics, or transit support.',
-    goodFit: ['Transport operators', 'Commercial fleets', 'Regional traders', 'Import and export customers'],
+      'For transport operators, commercial fleets, traders, local businesses sourcing goods from Dar es Salaam, and cross-border customers that need fuel, lubricants, UZUNGUNI PARKING YARD access, local logistics, or transit support.',
+    goodFit: ['Transport operators', 'Dar es Salaam sourcing customers', 'Southern Highlands businesses', 'Parking and corridor customers', 'Cross-border traders'],
     serviceSlugs: ['fuel-and-lubricants', 'logistics-and-cross-border-transit'],
     companySlugs: ['mwanjalisi-oil', 'itemba-enterprises'],
   },
   {
     id: 'property-hospitality',
-    title: 'Property, Hospitality, and Local Services',
-    routeTo: 'Itemba Enterprises Co Ltd',
-    intentId: 'enterprises',
+    title: 'Hospitality, Parking, Property, and Local Services',
+    routeTo: 'Mwanjalisi Oil Co Ltd, Westsides Company Ltd, and Itemba Enterprises Co Ltd',
+    intentId: 'general',
     summary:
-      'For enquiries connected to hospitality, lodging, parking, property, estate services, and related local business opportunities.',
+      'For enquiries connected to UZUNGUNI PARKING YARD under Mwanjalisi Oil, UZUNGUNI INN under Westsides, property, estate services, and related local business opportunities.',
     goodFit: ['Business guests', 'Property stakeholders', 'Parking and corridor customers', 'Local service partners'],
     serviceSlugs: ['hospitality-and-lodging', 'real-estate-and-property'],
-    companySlugs: ['itemba-enterprises'],
+    companySlugs: ['mwanjalisi-oil', 'westsides-company', 'itemba-enterprises'],
   },
 ];
 
@@ -373,9 +456,9 @@ export const insightArticles: InsightArticle[] = [
         body:
           'The fastest route is to identify the operating area first. Fuel and lubricants, trade distribution, logistics, hardware, hospitality, and property enquiries each point to different teams within the group.',
         points: [
-          'Fuel or lubricant enquiries usually align with Mwanjalisi Oil Co Ltd.',
-          'Beverage, construction goods, tools, and electrical supply enquiries usually align with Westsides Company Ltd.',
-          'Logistics, cross-border transit, hardware, estate, hospitality, and parking enquiries usually align with Itemba Enterprises Co Ltd.',
+          'Fuel, lubricant, and UZUNGUNI PARKING YARD enquiries usually align with Mwanjalisi Oil Co Ltd.',
+          'Stockist, bar, night club, beverage, construction goods, tools, and electrical supply enquiries usually align with Westsides Company Ltd.',
+          'Dar es Salaam-to-Southern Highlands logistics and cross-border transit enquiries usually align with Itemba Enterprises Co Ltd. ITEMBA-HARDWARE and UZUNGUNI INN enquiries align with Westsides Company Ltd.',
         ],
       },
       {
@@ -427,8 +510,8 @@ export const insightArticles: InsightArticle[] = [
           'The same location context supports fuel customers, regional trade, construction supply demand, logistics enquiries, hospitality customers, and property-related services.',
         points: [
           'Fuel enquiries connect to corridor movement and transport activity.',
-          'Trade and construction supply enquiries connect to regional buyer demand.',
-          'Logistics and transit enquiries connect to local and cross-border movement.',
+          'Trade and construction supply enquiries connect to Songwe stockists, bars, night clubs, cross-border bulk buyers, and the real estate construction market.',
+          'Logistics and transit enquiries connect Dar es Salaam sourcing routes to the Southern Highlands and neighbouring countries.',
         ],
       },
       {
@@ -468,17 +551,17 @@ export const insightArticles: InsightArticle[] = [
       {
         heading: 'Mwanjalisi Oil Co Ltd',
         body:
-          'Mwanjalisi Oil is the petroleum retail arm of Itemba Group, serving fuel, diesel, petrol, kerosene, lubricants, and business fuel enquiries.',
+          'Mwanjalisi Oil is the petroleum retail and parking arm of Itemba Group, serving fuel, diesel, petrol, kerosene, lubricants, UZUNGUNI PARKING YARD, and business fuel enquiries.',
       },
       {
         heading: 'Westsides Company Ltd',
         body:
-          'Westsides Company handles wholesale and retail distribution across beverages, building materials, tools, and electrical supplies for regional customers.',
+          'Westsides Company handles wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN for more than 50 Songwe stockists, bars and night clubs, international bulk buyers, and construction companies serving the growing real estate market.',
       },
       {
         heading: 'Itemba Enterprises Co Ltd',
         body:
-          'Itemba Enterprises covers local logistics, cross-border transit, hardware, estate, hospitality, and parking yard services through specialised divisions.',
+          'Itemba Enterprises covers local logistics, cross-border transit, and emerging businesses. Its logistics market includes customers sourcing goods from Dar es Salaam to the Southern Highlands and transit customers moving to and from Zambia, DRC, Zimbabwe, and Malawi. ITEMBA-HARDWARE and UZUNGUNI INN are managed under Westsides Company Ltd, while UZUNGUNI PARKING YARD is managed under Mwanjalisi Oil Co Ltd.',
       },
       {
         heading: 'If the enquiry spans more than one company',
@@ -514,14 +597,14 @@ export const insightArticles: InsightArticle[] = [
           'A clear enquiry should include product category, expected volume, delivery or pickup context, timing, and the business contact person.',
         points: [
           'For supplier introductions, include product categories and supply coverage.',
-          'For bulk purchase requests, include quantities, timing, and preferred fulfilment location.',
-          'For construction supply enquiries, mention materials, tools, or electrical categories clearly.',
+          'For stockist or bulk purchase requests, include quantities, timing, preferred fulfilment location, and distribution area.',
+          'For construction supply enquiries, mention the project type, such as filling stations, residential homes, commercial properties, or public infrastructure.',
         ],
       },
       {
         heading: 'Choose the closest route',
         body:
-          'Westsides Company is usually the closest match for beverage, construction goods, tools, and electrical supply enquiries. Itemba Enterprises may be relevant for hardware, hospitality, parking, property, and logistics-related opportunities.',
+          'Westsides Company is usually the closest match for stockists, bars, night clubs, beverage, ITEMBA-HARDWARE, UZUNGUNI INN, construction goods, tools, and electrical supply enquiries. Mwanjalisi Oil is the closest match for fuel and UZUNGUNI PARKING YARD enquiries, while Itemba Enterprises is the route for Dar es Salaam-to-Southern Highlands logistics and cross-border transit opportunities.',
       },
       {
         heading: 'Use partnerships for multi-sector opportunities',
@@ -553,7 +636,7 @@ export const enquiryIntents: EnquiryIntent[] = [
     shortLabel: 'Fuel',
     subject: 'Mwanjalisi Oil fuel supply enquiry',
     routeTo: 'Mwanjalisi Oil Co Ltd',
-    summary: 'Diesel, petrol, kerosene, lubricants, and business fuel supply enquiries.',
+    summary: 'Diesel, petrol, kerosene, lubricants, UZUNGUNI PARKING YARD, and business fuel supply enquiries.',
     accentClass: 'bg-amber-500',
     ringClass: 'border-amber-400 bg-amber-50 text-amber-700',
   },
@@ -563,7 +646,7 @@ export const enquiryIntents: EnquiryIntent[] = [
     shortLabel: 'Trade',
     subject: 'Westsides Company trade supply enquiry',
     routeTo: 'Westsides Company Ltd',
-    summary: 'Beverages, building materials, tools, electrical supplies, and bulk purchase enquiries.',
+    summary: 'Stockists, bars, night clubs, beverages, building materials, tools, electrical supplies, and bulk purchase enquiries.',
     accentClass: 'bg-blue-500',
     ringClass: 'border-blue-400 bg-blue-50 text-blue-700',
   },
@@ -573,7 +656,7 @@ export const enquiryIntents: EnquiryIntent[] = [
     shortLabel: 'Logistics',
     subject: 'Itemba Enterprises operations enquiry',
     routeTo: 'Itemba Enterprises Co Ltd',
-    summary: 'Local logistics, cross-border transit, hardware, estate, hospitality, and parking yard enquiries.',
+    summary: 'Dar es Salaam-to-Southern Highlands logistics, cross-border transit, and emerging-business enquiries.',
     accentClass: 'bg-emerald-500',
     ringClass: 'border-emerald-400 bg-emerald-50 text-emerald-700',
   },
@@ -584,30 +667,35 @@ export const serviceAreas: ServiceArea[] = [
     slug: 'fuel-and-lubricants',
     title: 'Fuel and Lubricants',
     shortTitle: 'Fuel Supply',
-    eyebrow: 'Energy and Petroleum Retail',
+    eyebrow: 'Energy, Petroleum Retail and Parking',
     intentId: 'mwanjalisi',
     companySlug: 'mwanjalisi-oil',
     companyName: 'Mwanjalisi Oil Co Ltd',
     visual: 'fuel',
     summary:
-      'Petroleum retail services for motorists, commercial transport operators, local businesses, and corridor customers in Songwe Region.',
+      'Petroleum retail and parking services through high-visibility ITEMBA-branded stations and UZUNGUNI PARKING YARD managed by Mwanjalisi Oil Company Ltd for motorists, commercial transport operators, local businesses, and corridor customers.',
     detail:
-      'Mwanjalisi Oil supports everyday mobility and business movement through diesel, petrol, kerosene, lubricants, and fuel-related enquiries from the Mpemba-Tunduma corridor.',
+      'Mwanjalisi Oil manages the legal and operational side of the fuel business, while the public filling station names use the ITEMBA brand with the location name. ITEMBA-MPEMBA is positioned near the Tunduma Bus Station along the Tunduma-Ileje Highway, while ITEMBA-UZUNGUNI serves the TANZAM Highway corridor in Uzunguni Area, Mpemba. UZUNGUNI PARKING YARD is also managed by Mwanjalisi Oil for corridor motorists, buses, trucks, and logistics companies.',
     metaDescription:
-      'Fuel and lubricant supply from Mwanjalisi Oil Co Ltd under Itemba Group, serving motorists, businesses, and transport operators in Songwe Region, Tanzania.',
-    keywords: ['diesel', 'petrol', 'kerosene', 'lubricants', 'fuel supply', 'Songwe fuel station'],
-    offerings: ['Diesel and petrol retail', 'Kerosene supply', 'Lubricants', 'Business fuel enquiries'],
-    audience: ['Motorists', 'Transport operators', 'Commercial customers', 'Local businesses'],
+      'Fuel, lubricant, and UZUNGUNI PARKING YARD services from ITEMBA-MPEMBA and ITEMBA-UZUNGUNI, managed by Mwanjalisi Oil Co Ltd under Itemba Group in Songwe Region, Tanzania.',
+    keywords: ['ITEMBA-MPEMBA', 'ITEMBA-UZUNGUNI', 'UZUNGUNI PARKING YARD', 'diesel', 'petrol', 'kerosene', 'lubricants', 'parking', 'fuel supply', 'Songwe fuel station'],
+    offerings: ['ITEMBA-MPEMBA filling station', 'ITEMBA-UZUNGUNI filling station', 'UZUNGUNI PARKING YARD', 'Diesel and petrol retail', 'Kerosene supply', 'Lubricants', 'Business fuel enquiries', 'Fleet, logistics, and parking support'],
+    audience: ['Motorists', 'Transport operators', 'Commercial customers', 'Local businesses', 'Cross-border logistics companies', 'Parking and vehicle-staging customers'],
+    image: {
+      src: '/images/fuel-stations/itemba-filling-station-wide.webp',
+      alt: 'ITEMBA-MPEMBA filling station managed by Mwanjalisi Oil Company Ltd',
+      caption: 'ITEMBA-MPEMBA and ITEMBA-UZUNGUNI are managed by Mwanjalisi Oil Company Ltd.',
+    },
     faqs: [
       {
         question: 'Which fuel products are available through Itemba Group?',
         answer:
-          'Mwanjalisi Oil handles diesel, petrol, kerosene, and lubricants for retail customers and business enquiries.',
+          'ITEMBA-MPEMBA and ITEMBA-UZUNGUNI, managed by Mwanjalisi Oil, handle diesel, petrol, kerosene, and lubricants for retail customers and business enquiries. Mwanjalisi Oil also manages UZUNGUNI PARKING YARD for corridor parking and vehicle staging.',
       },
       {
-        question: 'Can transport operators submit fuel enquiries?',
+        question: 'Can transport operators submit fuel or parking enquiries?',
         answer:
-          'Yes. Transport operators can contact the group office by phone, WhatsApp, or email and the enquiry will be routed to Mwanjalisi Oil.',
+          'Yes. Transport operators can contact the group office by phone, WhatsApp, or email and fuel or UZUNGUNI PARKING YARD enquiries will be routed to Mwanjalisi Oil.',
       },
     ],
   },
@@ -621,19 +709,51 @@ export const serviceAreas: ServiceArea[] = [
     companyName: 'Westsides Company Ltd',
     visual: 'trade',
     summary:
-      'Wholesale and retail distribution across beverages, building materials, tools, and electrical supplies for regional customers.',
+      'Wholesale beverage distribution, ITEMBA-HARDWARE, and hospitality trade support for stockists, bars, night clubs, cross-border bulk buyers, and construction customers.',
     detail:
-      'Westsides Company connects retail, hospitality, contractor, and consumer markets with practical distribution coverage across beverage and construction supply categories.',
+      'Westsides Company connects more than 50 stockists across Songwe Region with large-volume beverage supply at distributor pricing. A stockist is a wholesale customer with area-based distribution ability who depends on Westsides as a distributor specialist. The same trade platform serves bars and night clubs in Tunduma, Mlowo, Vwawa, and other urban centres, international customers buying beverages and hardware for cross-border movement, and construction companies serving the growing real estate, filling station, residential, commercial, and public infrastructure markets.',
     metaDescription:
-      'Trade and distribution services from Westsides Company Ltd, including beverages, building materials, tools, and electrical supplies in Songwe Region, Tanzania.',
-    keywords: ['beverage distribution', 'building materials', 'tools', 'electrical supplies', 'wholesale Tanzania'],
-    offerings: ['Alcoholic and non-alcoholic beverages', 'Building materials', 'Tools', 'Electrical supplies'],
-    audience: ['Retailers', 'Contractors', 'Hospitality businesses', 'Bulk buyers'],
+      'Trade and distribution services from Westsides Company Ltd for Songwe stockists, bars, night clubs, cross-border bulk buyers, and construction customers in Tanzania.',
+    keywords: ['beverage distribution', 'Songwe stockists', 'bars and night clubs', 'building materials', 'tools', 'electrical supplies', 'wholesale Tanzania', 'Tunduma border trade'],
+    offerings: ['Wholesale beverage supply for stockists', 'Alcoholic and non-alcoholic beverages', 'ITEMBA-HARDWARE materials', 'Building materials', 'Tools and construction equipment', 'Cross-border bulk purchase support'],
+    audience: ['More than 50 Songwe stockists', 'Bars and night clubs', 'International bulk buyers', 'Construction companies', 'Real estate developers', 'Hospitality businesses'],
+    image: {
+      src: '/images/beverages/westsides-warehouse-stock-wide.webp',
+      alt: 'Westsides Company Ltd wholesale beverage stock prepared for distribution customers',
+      caption: 'Westsides Company Ltd supplies high-volume beverage stockists and bulk buyers across Songwe Region.',
+    },
+    gallery: [
+      {
+        src: '/images/beverages/westsides-warehouse-stock-wide.webp',
+        alt: 'Large Westsides beverage warehouse stock for wholesale distribution',
+        caption: 'Large-volume beverage stock handled for area-based stockists and retailers.',
+      },
+      {
+        src: '/images/beverages/westsides-customer-order-truck.webp',
+        alt: 'Customer beverage order loaded on a delivery truck',
+        caption: 'Customer orders prepared for wholesale buyers and cross-border movement.',
+      },
+      {
+        src: '/images/beverages/westsides-softdrinks-warehouse.webp',
+        alt: 'Soft drinks stacked in a Westsides warehouse',
+        caption: 'Soft drink supply for stockists, bars, restaurants, and retail customers.',
+      },
+      {
+        src: '/images/beverages/westsides-cocacola-crates.webp',
+        alt: 'Coca-Cola crates stored for Westsides distribution',
+        caption: 'Branded beverage crates held for wholesale distribution channels.',
+      },
+    ],
     faqs: [
       {
         question: 'What products does Westsides Company distribute?',
         answer:
-          'Westsides Company distributes beverages, building materials, tools, and electrical supplies through wholesale and retail channels.',
+          'Westsides Company distributes beverages in wholesale and manages ITEMBA-HARDWARE for building materials, tools, construction equipment, and related supply categories.',
+      },
+      {
+        question: 'Who are the main Westsides target customers?',
+        answer:
+          'The main target customers include more than 50 stockists across Songwe Region, bars and night clubs in urban centres such as Tunduma, Mlowo, and Vwawa, international bulk buyers using the Tunduma border, and construction companies serving the real estate and infrastructure market.',
       },
       {
         question: 'Can bulk purchase enquiries be sent online?',
@@ -652,19 +772,46 @@ export const serviceAreas: ServiceArea[] = [
     companyName: 'Itemba Enterprises Co Ltd',
     visual: 'logistics',
     summary:
-      'Local distribution and cross-border transit support connected to the Tanzania-Zambia trade corridor through Tunduma.',
+      'Local logistics from Dar es Salaam to the Southern Highlands and cross-border transit support connected to the Tunduma corridor.',
     detail:
-      "Itemba Enterprises anchors the group logistics capability, supporting local goods movement and cross-border transit around one of Tanzania's most active border corridors.",
+      'Itemba Enterprises anchors the group logistics capability for local businesses that buy or source goods from Dar es Salaam and need movement into Songwe, Mbeya, Rukwa, Ruvuma, and Iringa. The company also supports a growing transit market to and from neighbouring countries including Zambia, DRC, Zimbabwe, and Malawi through the Tunduma corridor.',
     metaDescription:
-      'Logistics and cross-border transit services from Itemba Enterprises Co Ltd on the Tunduma corridor in Songwe Region, Tanzania.',
-    keywords: ['Tunduma logistics', 'cross-border transit', 'local distribution', 'Tanzania Zambia corridor'],
-    offerings: ['Local logistics', 'Cross-border transit', 'Goods movement support', 'Corridor operations enquiries'],
-    audience: ['Traders', 'Transporters', 'Importers and exporters', 'Regional businesses'],
+      'Logistics from Dar es Salaam to Songwe, Mbeya, Rukwa, Ruvuma, and Iringa plus cross-border transit from Itemba Enterprises Co Ltd through Tunduma.',
+    keywords: ['Tunduma logistics', 'Dar es Salaam logistics', 'Southern Highlands transport', 'Songwe logistics', 'Mbeya logistics', 'Rukwa logistics', 'Ruvuma logistics', 'Iringa logistics', 'cross-border transit'],
+    offerings: ['Dar es Salaam to Southern Highlands logistics', 'Local goods movement support', 'Cross-border transit', 'Transit to and from Zambia, DRC, Zimbabwe, and Malawi', 'Corridor operations enquiries'],
+    audience: ['Local businesses sourcing from Dar es Salaam', 'Southern Highlands traders', 'Importers and exporters', 'Transit customers to Zambia', 'Transit customers to DRC', 'Transit customers to Zimbabwe and Malawi'],
+    image: {
+      src: '/images/logistics/itemba-logistics-tanker-under-canopy.webp',
+      alt: 'Itemba Logistics tanker supporting Dar es Salaam to Southern Highlands and transit movement',
+      caption: 'Itemba Logistics supports local movement and cross-border transit through the Tunduma corridor.',
+    },
+    gallery: [
+      {
+        src: '/images/logistics/itemba-logistics-tanker-under-canopy.webp',
+        alt: 'Itemba Logistics tanker under station canopy',
+        caption: 'Corridor-ready logistics support connected to the Tunduma border.',
+      },
+      {
+        src: '/images/logistics/itemba-logistics-truck-front.webp',
+        alt: 'Itemba Logistics truck front view',
+        caption: 'Fleet presence for Dar es Salaam to Southern Highlands movement.',
+      },
+      {
+        src: '/images/logistics/itemba-logistics-truck-yard.webp',
+        alt: 'Itemba Logistics truck parked in yard',
+        caption: 'Yard-based support for local traders and transit customers.',
+      },
+    ],
     faqs: [
       {
         question: 'Does Itemba Group handle cross-border logistics?',
         answer:
-          'Itemba Enterprises handles logistics-related enquiries focused on local distribution and cross-border transit through the Tunduma corridor.',
+          'Itemba Enterprises handles logistics-related enquiries focused on local distribution from Dar es Salaam into the Southern Highlands and cross-border transit through the Tunduma corridor.',
+      },
+      {
+        question: 'Which logistics routes are most relevant?',
+        answer:
+          'The key local route is Dar es Salaam to Southern Highlands regions including Songwe, Mbeya, Rukwa, Ruvuma, and Iringa. The growing transit market connects to and from Zambia, DRC, Zimbabwe, and Malawi.',
       },
       {
         question: 'Where are the logistics operations based?',
@@ -677,30 +824,47 @@ export const serviceAreas: ServiceArea[] = [
     slug: 'construction-supplies-and-hardware',
     title: 'Construction Supplies and Hardware',
     shortTitle: 'Hardware',
-    eyebrow: 'Building Materials and Tools',
-    intentId: 'enterprises',
-    companySlug: 'itemba-enterprises',
-    companyName: 'Itemba Enterprises Co Ltd',
+    eyebrow: 'ITEMBA-HARDWARE',
+    intentId: 'westsides',
+    companySlug: 'westsides-company',
+    companyName: 'Westsides Company Ltd',
     visual: 'hardware',
     summary:
-      'Hardware, tools, electrical goods, and construction supply support for contractors, homeowners, and retail buyers.',
+      'Hardware, tools, construction equipment, and construction supply support under the ITEMBA-HARDWARE brand managed by Westsides Company Ltd for contractors and the growing real estate market.',
     detail:
-      'Through its hardware and trade operations, Itemba Group supports practical construction demand with building materials, hand tools, power tools, and electrical supplies.',
+      'ITEMBA-HARDWARE is the public hardware and construction supply brand managed by Westsides Company Ltd, supporting demand from construction companies, contractors, property developers, cross-border bulk buyers, and the growing real estate market, including filling stations, residential homes, commercial properties, and public infrastructure.',
     metaDescription:
-      'Construction supplies, building materials, hardware, tools, and electrical goods from Itemba Group companies in Songwe Region, Tanzania.',
-    keywords: ['hardware Tanzania', 'building materials', 'construction supplies', 'electrical supplies', 'tools'],
-    offerings: ['Building materials', 'Hand and power tools', 'Electrical supplies', 'Contractor supply enquiries'],
-    audience: ['Contractors', 'Retail customers', 'Property owners', 'Construction buyers'],
+      'ITEMBA-HARDWARE under Westsides Company Ltd supplies construction materials, hardware, tools, and construction equipment in Songwe Region, Tanzania.',
+    keywords: ['ITEMBA-HARDWARE', 'hardware Tanzania', 'building materials', 'construction supplies', 'electrical supplies', 'tools'],
+    offerings: ['Nondo', 'Roofing sheets', 'Wire nails', 'Paints of all types', 'Square pipes', 'Round pipes', 'H-beams', 'I-beams', 'U-channels', 'Contractor supply enquiries'],
+    audience: ['Construction companies', 'Contractors', 'Real estate developers', 'Filling station builders', 'Residential and commercial property customers', 'Cross-border bulk buyers'],
+    image: {
+      src: '/images/hardware/itemba-hardware-storefront.webp',
+      alt: 'ITEMBA-HARDWARE storefront and construction supply stock managed by Westsides Company Ltd',
+      caption: 'ITEMBA-HARDWARE supplies construction materials and equipment under Westsides Company Ltd.',
+    },
+    gallery: [
+      {
+        src: '/images/hardware/itemba-hardware-storefront.webp',
+        alt: 'ITEMBA-HARDWARE storefront and construction stock',
+        caption: 'ITEMBA-HARDWARE serves contractors, developers, and bulk hardware buyers.',
+      },
+      {
+        src: '/images/hardware/itemba-hardware-paint-stock.webp',
+        alt: 'Paint and hardware stock inside ITEMBA-HARDWARE',
+        caption: 'Paints and construction supplies stocked for the regional market.',
+      },
+    ],
     faqs: [
       {
         question: 'Which construction goods are available?',
         answer:
-          'Relevant group companies handle building materials, hand and power tools, and electrical supplies.',
+          'ITEMBA-HARDWARE handles Nondo, roofing sheets, wire nails, paints, square pipes, round pipes, H-beams, I-beams, U-channels, and related construction supplies.',
       },
       {
         question: 'Which company handles hardware enquiries?',
         answer:
-          'Hardware and construction supply enquiries can be routed to the relevant Westsides Company or Itemba Enterprises team.',
+          'Hardware and construction supply enquiries are handled through ITEMBA-HARDWARE under Westsides Company Ltd.',
       },
     ],
   },
@@ -709,24 +873,46 @@ export const serviceAreas: ServiceArea[] = [
     title: 'Hospitality and Lodging',
     shortTitle: 'Hospitality',
     eyebrow: 'Uzunguni Inn',
-    intentId: 'enterprises',
-    companySlug: 'itemba-enterprises',
-    companyName: 'Itemba Enterprises Co Ltd',
+    intentId: 'westsides',
+    companySlug: 'westsides-company',
+    companyName: 'Westsides Company Ltd',
     visual: 'hospitality',
     summary:
-      'Hospitality, lodging, restaurant, and traveller support services connected to Itemba Enterprises operations.',
+      'Hospitality, lodging, restaurant, and bar services through UZUNGUNI INN under Westsides Company Ltd.',
     detail:
-      'Uzunguni Inn supports travellers, business guests, and regional customers through accommodation and hospitality services within the group ecosystem.',
+      'UZUNGUNI INN is the group hospitality brand for lodging, restaurant, and bar services at Mpemba-Tunduma, managed by Westsides Company Ltd.',
     metaDescription:
-      'Hospitality and lodging services through Uzunguni Inn under Itemba Enterprises Co Ltd in Songwe Region, Tanzania.',
+      'Hospitality, lodging, restaurant, and bar services through UZUNGUNI INN under Westsides Company Ltd in Songwe Region, Tanzania.',
     keywords: ['Uzunguni Inn', 'lodging Songwe', 'hospitality Tunduma', 'hotel services'],
     offerings: ['Accommodation', 'Restaurant services', 'Business guest support', 'Traveller services'],
     audience: ['Travellers', 'Business guests', 'Regional visitors', 'Transport corridor customers'],
+    image: {
+      src: '/images/hospitality/uzunguni-lodge-room.webp',
+      alt: 'UZUNGUNI INN lodging room managed by Westsides Company Ltd',
+      caption: 'UZUNGUNI INN provides lodging, restaurant, and bar services in Mpemba-Tunduma.',
+    },
+    gallery: [
+      {
+        src: '/images/hospitality/uzunguni-lodge-room.webp',
+        alt: 'UZUNGUNI INN lodging room',
+        caption: 'Accommodation for regional visitors and corridor business guests.',
+      },
+      {
+        src: '/images/hospitality/uzunguni-bar-restaurant.webp',
+        alt: 'UZUNGUNI INN bar and restaurant seating',
+        caption: 'Restaurant and bar services for local and travelling customers.',
+      },
+      {
+        src: '/images/hospitality/uzunguni-bar-night.webp',
+        alt: 'UZUNGUNI INN bar area at night',
+        caption: 'Evening hospitality environment at UZUNGUNI INN.',
+      },
+    ],
     faqs: [
       {
         question: 'Which Itemba Group division handles hospitality?',
         answer:
-          'Hospitality and lodging services are handled through Uzunguni Inn under Itemba Enterprises.',
+          'Hospitality, lodging, restaurant, and bar services are handled through UZUNGUNI INN under Westsides Company Ltd.',
       },
       {
         question: 'How can hospitality enquiries be made?',
@@ -753,6 +939,33 @@ export const serviceAreas: ServiceArea[] = [
     keywords: ['Itemba Estate', 'real estate Songwe', 'property development Tanzania', 'property services'],
     offerings: ['Property development', 'Real estate enquiries', 'Property-related services', 'Estate operations'],
     audience: ['Property customers', 'Business partners', 'Regional investors', 'Local stakeholders'],
+    image: {
+      src: '/images/real-estate/modern-african-estate-construction-wide.webp',
+      alt: 'Modern low-rise residential estate construction site with multiple homes',
+      caption: 'Modern residential estate construction progress with roads, staged homes, and active site works.',
+    },
+    gallery: [
+      {
+        src: '/images/real-estate/modern-african-estate-construction.webp',
+        alt: 'Aerial view of multiple low-rise homes under construction in a residential estate',
+        caption: 'Estate construction progress across multiple modern low-rise residential units.',
+      },
+      {
+        src: '/images/real-estate/modern-african-housing-development-wide.webp',
+        alt: 'Modern low-rise housing development with repeated residential units',
+        caption: 'Finished low-rise residential estate layout with internal access roads and shared amenities.',
+      },
+      {
+        src: '/images/real-estate/modern-tanzania-white-villa-wide.webp',
+        alt: 'Finished modern residential home in Tanzania',
+        caption: 'Finished modern residential home for private property and estate enquiries.',
+      },
+      {
+        src: '/images/real-estate/zanzibar-residential-houses-aerial-wide.webp',
+        alt: 'Aerial view of residential houses and roads in a Tanzanian coastal town',
+        caption: 'Residential housing and road layout in a Tanzanian coastal settlement.',
+      },
+    ],
     faqs: [
       {
         question: 'Which division handles real estate?',
@@ -781,6 +994,11 @@ export const locationProfiles: LocationProfile[] = [
     metaDescription:
       'Itemba Group location in Mpemba-Tunduma, Songwe Region, Tanzania, serving fuel, trade, logistics, construction supply, hospitality, and real estate enquiries.',
     visual: 'corridor',
+    image: {
+      src: '/images/locations/songwe-region-landscape.webp',
+      alt: 'Fields and mountains in Songwe Region, Tanzania',
+      caption: 'Songwe Region landscape, Richard grivas / Wikimedia Commons, CC BY-SA 4.0.',
+    },
     addressLines: [
       'Itemba Filling Station',
       'Along Tunduma-Ileje Highway',

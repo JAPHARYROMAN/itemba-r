@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 };
 
 const subsidiaries = [
-  { name: 'Mwanjalisi Oil Co Ltd',    sector: 'Energy & Fuel Distribution',  dot: 'bg-amber-400' },
+  { name: 'Mwanjalisi Oil Co Ltd',    sector: 'Energy, Fuel & Parking',  dot: 'bg-amber-400' },
   { name: 'Westsides Company Ltd',    sector: 'Trade & Distribution',         dot: 'bg-blue-400' },
   { name: 'Itemba Enterprises Co Ltd', sector: 'Multi-Sector Operations',    dot: 'bg-emerald-400' },
 ];

@@ -67,6 +67,7 @@ export default async function LocationPage({ params }: PageProps) {
   const relatedServices = serviceAreas.filter((service) => location.serviceSlugs.includes(service.slug));
   const relatedCompanies = companyProfiles.filter((company) => location.companySlugs.includes(company.slug));
   const pageUrl = absoluteUrl(locationUrl(location.slug));
+  const locationImage = location.image;
   const locationJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'Place',
@@ -74,6 +75,7 @@ export default async function LocationPage({ params }: PageProps) {
     name: location.title,
     url: pageUrl,
     description: location.metaDescription,
+    image: locationImage ? absoluteUrl(locationImage.src) : absoluteUrl('/opengraph-image'),
     address: {
       '@type': 'PostalAddress',
       streetAddress: contact.headOffice,
@@ -93,7 +95,7 @@ export default async function LocationPage({ params }: PageProps) {
     '@id': `${pageUrl}#business`,
     name: site.name,
     url: site.url,
-    image: absoluteUrl('/opengraph-image'),
+    image: locationImage ? absoluteUrl(locationImage.src) : absoluteUrl('/opengraph-image'),
     telephone: contact.primaryPhoneDisplay,
     email: contact.email,
     address: locationJsonLd.address,
@@ -148,15 +150,29 @@ export default async function LocationPage({ params }: PageProps) {
             <p className="max-w-2xl text-lg leading-relaxed text-slate-300">{location.summary}</p>
           </AnimatedSection>
           <AnimatedSection direction="left">
-            <div className="relative h-80 overflow-hidden rounded-3xl shadow-2xl">
-              <BrandVisual variant={location.visual} label={`${location.title} operations`} className="absolute inset-0" />
-              <div className="absolute inset-0 bg-gradient-to-br from-ink-950/30 to-transparent" />
-            </div>
+            <figure className="relative h-80 overflow-hidden rounded-3xl bg-ink-950 shadow-2xl ring-1 ring-white/10">
+              {locationImage ? (
+                <img
+                  src={locationImage.src}
+                  alt={locationImage.alt}
+                  className="h-full w-full object-cover"
+                  loading="eager"
+                />
+              ) : (
+                <BrandVisual variant={location.visual} label={`${location.title} operations`} className="absolute inset-0" />
+              )}
+              <div className="absolute inset-0 bg-gradient-to-br from-ink-950/55 via-ink-950/10 to-transparent" />
+              {locationImage?.caption ? (
+                <figcaption className="absolute bottom-3 right-3 max-w-[80%] rounded bg-ink-950/75 px-3 py-1.5 text-[10px] font-medium leading-relaxed text-slate-200 backdrop-blur">
+                  {locationImage.caption}
+                </figcaption>
+              ) : null}
+            </figure>
           </AnimatedSection>
         </div>
       </section>
 
-      <section className="bg-white px-5 py-24 sm:px-8">
+      <section className="overflow-hidden bg-white px-5 py-24 sm:px-8">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-3">
           <div className="lg:col-span-2">
             <AnimatedSection>

@@ -59,13 +59,14 @@ export default async function CompanyProfilePage({ params }: PageProps) {
   }
 
   const pageUrl = absoluteUrl(`/companies/${company.slug}`);
+  const companyImage = 'image' in company ? company.image : undefined;
   const businessJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'LocalBusiness',
     '@id': `${pageUrl}#business`,
     name: company.name,
     url: pageUrl,
-    image: absoluteUrl('/opengraph-image'),
+    image: companyImage ? absoluteUrl(companyImage.src) : absoluteUrl('/opengraph-image'),
     description: company.metaDescription,
     parentOrganization: {
       '@type': 'Organization',
@@ -132,9 +133,48 @@ export default async function CompanyProfilePage({ params }: PageProps) {
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-12">
           <div className="lg:col-span-2">
             <AnimatedSection>
-              <div className="relative h-72 sm:h-96 rounded-3xl overflow-hidden shadow-2xl mb-12 img-zoom">
-                <BrandVisual variant={company.visual} label={`${company.name} operations`} className="absolute inset-0 img-inner" />
-                <div className="absolute inset-0 bg-gradient-to-r from-ink-950/80 via-ink-950/20 to-transparent" />
+              <div className="relative mb-12 overflow-hidden rounded-2xl bg-ink-950 shadow-2xl ring-1 ring-slate-900/10">
+                {companyImage ? (
+                  <>
+                    <img
+                      src={companyImage.src}
+                      alt=""
+                      aria-hidden="true"
+                      className="absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-2xl"
+                    />
+                    <div className="relative flex min-h-[18rem] items-center justify-center p-3 sm:min-h-[25rem] sm:p-4">
+                      <img
+                        src={companyImage.src}
+                        alt={companyImage.alt}
+                        className="max-h-[28rem] w-full rounded-xl object-contain shadow-2xl ring-1 ring-white/15"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="relative h-72 sm:h-96">
+                    <BrandVisual variant={company.visual} label={`${company.name} operations`} className="absolute inset-0 img-inner" />
+                  </div>
+                )}
+              </div>
+            </AnimatedSection>
+
+            <AnimatedSection delay={0.06}>
+              <div className="mb-12 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                {company.gallery.map((image) => (
+                  <figure key={image.src} className="overflow-hidden rounded-2xl bg-ink-950 shadow-lg ring-1 ring-slate-900/10">
+                    <div className="flex aspect-[4/3] items-center justify-center bg-ink-950 p-2">
+                      <img
+                        src={image.src}
+                        alt={image.alt}
+                        className="h-full w-full rounded-xl object-contain"
+                        loading="lazy"
+                      />
+                    </div>
+                    <figcaption className="border-t border-white/10 bg-ink-950 px-4 py-3 text-xs font-semibold leading-relaxed text-white">
+                      {image.caption}
+                    </figcaption>
+                  </figure>
+                ))}
               </div>
             </AnimatedSection>
 
@@ -168,7 +208,7 @@ export default async function CompanyProfilePage({ params }: PageProps) {
           </div>
 
           <aside className="space-y-6">
-            <AnimatedSection direction="left" delay={0.08}>
+            <AnimatedSection direction="fade" delay={0.08}>
               <div className={`border-l-2 ${company.accentBorder} pl-5 space-y-5`}>
                 <div>
                   <div className="text-xs text-slate-400 mb-1">Sector</div>
@@ -185,7 +225,7 @@ export default async function CompanyProfilePage({ params }: PageProps) {
               </div>
             </AnimatedSection>
 
-            <AnimatedSection direction="left" delay={0.14}>
+            <AnimatedSection direction="fade" delay={0.14}>
               <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4">Key strengths</p>
                 <div className="space-y-3">
@@ -199,7 +239,7 @@ export default async function CompanyProfilePage({ params }: PageProps) {
               </div>
             </AnimatedSection>
 
-            <AnimatedSection direction="left" delay={0.2}>
+            <AnimatedSection direction="fade" delay={0.2}>
               <EnquiryRouter
                 compact
                 defaultIntentId={company.id}
