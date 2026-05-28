@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
 
   res.cookies.set('itemba_access', accessToken, {
     ...COOKIE_OPTS,
-    maxAge: 60 * 15,
+    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
   });
   setRefreshCookies(res, refreshToken);
   res.cookies.set('itemba_auth', '1', {

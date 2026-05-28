@@ -330,9 +330,10 @@ export class AuthService {
     meta?: { ipAddress?: string; userAgent?: string },
     sid?: string,
   ) {
-    // Reuse detection: scan ALL the user's tokens (active AND revoked). A
-    // recently-rotated token gets a short grace window for concurrent requests;
-    // older revoked tokens are treated as replay and revoke the whole family.
+    const persistentRefresh = this.isNonExpiringDuration(this.getRefreshExpiresIn());
+    // Reuse detection scans revoked tokens only for rotating refresh sessions.
+    // Persistent sessions deliberately do not rotate, so a normal retry cannot
+    // be misclassified as token replay and log the user out.
     const matched = await this.findRefreshTokenByRawValue(userId, rawToken, {
       includeRevoked: true,
       requireUnexpired: true,
@@ -340,7 +341,11 @@ export class AuthService {
 
     if (!matched) throw new UnauthorizedException('Invalid or expired refresh token');
 
-    if (matched.revokedAt && !this.isRecentRefreshRotation(matched)) {
+    if (persistentRefresh && matched.revokedAt && matched.revokedReason !== 'ROTATION') {
+      throw new UnauthorizedException('Session is no longer active. Please log in again.');
+    }
+
+    if (!persistentRefresh && matched.revokedAt && !this.isRecentRefreshRotation(matched)) {
       // Reuse of a revoked token detected — kill the whole family.
       if (matched.familyId) {
         await this.prisma.refreshToken.updateMany({
@@ -361,7 +366,7 @@ export class AuthService {
     }
 
     // Rotate within the same family.
-    if (!matched.revokedAt) {
+    if (!persistentRefresh && !matched.revokedAt) {
       await this.prisma.refreshToken.update({
         where: { id: matched.id },
         data: { revokedAt: new Date(), revokedReason: 'ROTATION' },
@@ -396,6 +401,15 @@ export class AuthService {
       });
     } else {
       preservedSid = undefined;
+    }
+
+    if (persistentRefresh) {
+      const accessToken = await this.jwt.signAsync({
+        sub: userId,
+        email: user.email,
+        sid: preservedSid,
+      });
+      return { accessToken, refreshToken: rawToken, tokenType: 'Bearer' };
     }
 
     return this.issueTokens(userId, user.email, meta, matched.familyId ?? undefined, preservedSid);

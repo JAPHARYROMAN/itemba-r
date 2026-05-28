@@ -38,19 +38,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // refresh-token reuse detection, kicking the user back to /login.
   const refreshInFlightRef = useRef<Promise<boolean> | null>(null);
 
-  /**
-   * When the session can't be re-established (silent refresh failed, or
-   * /me returned 401 with no recoverable token), bounce the user to login.
-   * Skip if we're already on a public page so we don't loop. Preserve the
-   * current path as ?from= so login can return them after.
-   */
-  const redirectToLogin = useCallback(() => {
-    if (typeof window === 'undefined') return;
-    if (PUBLIC_PATHS.has(pathname ?? '')) return;
-    const from = encodeURIComponent(pathname ?? '/');
-    router.replace(`/login?from=${from}`);
-  }, [router, pathname]);
-
   const armRefreshTimer = useCallback((delayMs = SESSION_REFRESH_INTERVAL_MS) => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     refreshTimerRef.current = setTimeout(() => {
@@ -77,8 +64,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   /**
    * Silently refresh the access token, then re-fetch the user profile.
-   * Returns true on success. Auth rejection clears local state and redirects;
-   * transient backend/network failures keep the current user state and retry.
+   * Returns true on success. Failures keep the current user state and retry;
+   * the app should not throw away in-progress work because a background refresh
+   * hit a race, transient backend error, or stale response.
    *
    * P1-08: Single-flight. Concurrent callers share one in-flight Promise so
    * the backend rotates the refresh token exactly once per refresh window.
@@ -93,12 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           armRefreshTimer();
           return true;
         }
-        if (AUTH_REJECTED_STATUSES.has(res.status)) {
-          setUser(null);
-          redirectToLogin();
-        } else {
-          armRefreshTimer(SESSION_REFRESH_RETRY_MS);
-        }
+        armRefreshTimer(SESSION_REFRESH_RETRY_MS);
         return false;
       } catch {
         armRefreshTimer(SESSION_REFRESH_RETRY_MS);
@@ -109,7 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
     refreshInFlightRef.current = promise;
     return promise;
-  }, [armRefreshTimer, fetchUser, redirectToLogin]);
+  }, [armRefreshTimer, fetchUser]);
 
   useEffect(() => {
     silentRefreshRef.current = silentRefresh;

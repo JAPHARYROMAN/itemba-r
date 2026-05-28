@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
   // Store tokens in httpOnly cookies — never accessible to client JS
   res.cookies.set('itemba_access', accessToken, {
     ...COOKIE_OPTS,
-    maxAge: 60 * 15, // 15 minutes
+    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
   });
   setRefreshCookies(res, refreshToken);
   // Non-httpOnly flag cookie for middleware route-protection check

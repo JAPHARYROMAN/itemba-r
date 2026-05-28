@@ -123,6 +123,48 @@ describe('AuthService.refresh rotation race handling', () => {
 });
 
 describe('AuthService persistent refresh sessions', () => {
+  it('does not rotate persistent refresh tokens during refresh', async () => {
+    const { service, prisma } = makeService({ refreshExpiresIn: 'never' });
+    prisma.refreshToken.findFirst.mockResolvedValue(refreshRecord());
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+      status: 'ACTIVE',
+    });
+
+    const result = await service.refresh('user-1', 'raw-refresh-token', undefined, 'session-1');
+
+    expect(result).toEqual({
+      accessToken: 'new-access-token',
+      refreshToken: 'raw-refresh-token',
+      tokenType: 'Bearer',
+    });
+    expect(prisma.refreshToken.update).not.toHaveBeenCalled();
+    expect(prisma.refreshToken.updateMany).not.toHaveBeenCalled();
+    expect(prisma.refreshToken.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts previously rotated tokens after switching to persistent sessions', async () => {
+    const { service, prisma } = makeService({ refreshExpiresIn: 'never' });
+    prisma.refreshToken.findFirst.mockResolvedValue(
+      refreshRecord({
+        revokedAt: new Date(Date.now() - 5 * 60_000),
+        revokedReason: 'ROTATION',
+      }),
+    );
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+      status: 'ACTIVE',
+    });
+
+    const result = await service.refresh('user-1', 'old-rotated-refresh-token', undefined, 'session-1');
+
+    expect(result.refreshToken).toBe('old-rotated-refresh-token');
+    expect(prisma.refreshToken.updateMany).not.toHaveBeenCalled();
+    expect(prisma.refreshToken.create).not.toHaveBeenCalled();
+  });
+
   it('omits refresh JWT expiration and stores a far-future expiry when configured as never', async () => {
     const { service, prisma } = makeService({ refreshExpiresIn: 'never' });
 

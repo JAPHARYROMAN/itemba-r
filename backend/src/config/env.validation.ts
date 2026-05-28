@@ -54,7 +54,7 @@ export class EnvironmentVariables {
 
   @IsString()
   @IsOptional()
-  JWT_ACCESS_EXPIRES_IN: string = '15m';
+  JWT_ACCESS_EXPIRES_IN: string = 'never';
 
   @IsString()
   @MinLength(32)

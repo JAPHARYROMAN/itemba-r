@@ -54,24 +54,6 @@ function setSessionCookies(res: NextResponse, req: NextRequest) {
   });
 }
 
-function clearRefreshCookies(res: NextResponse) {
-  res.cookies.set(REFRESH_COOKIE, '', {
-    ...COOKIE_OPTS,
-    path: AUTH_REFRESH_PATH,
-    maxAge: 0,
-  });
-  res.cookies.set(REFRESH_COOKIE, '', {
-    ...COOKIE_OPTS,
-    path: LEGACY_AUTH_REFRESH_PATH,
-    maxAge: 0,
-  });
-  res.cookies.set(BACKEND_REFRESH_COOKIE, '', {
-    ...COOKIE_OPTS,
-    path: BACKEND_REFRESH_PATH,
-    maxAge: 0,
-  });
-}
-
 function getForwardedFor(req: NextRequest) {
   return req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '';
 }
@@ -123,12 +105,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (!result.ok) {
-    // Refresh failed — clear all cookies
-    const res = NextResponse.json(result.data, { status: result.status });
-    res.cookies.delete('itemba_access');
-    clearRefreshCookies(res);
-    res.cookies.delete('itemba_auth');
-    return res;
+    return NextResponse.json(result.data, { status: result.status });
   }
 
   const { accessToken, refreshToken: newRefreshToken } = result.data.data as {
@@ -139,7 +116,7 @@ export async function POST(req: NextRequest) {
 
   res.cookies.set('itemba_access', accessToken, {
     ...COOKIE_OPTS,
-    maxAge: 60 * 15,
+    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
   });
   setRefreshCookies(res, newRefreshToken);
   setSessionCookies(res, req);

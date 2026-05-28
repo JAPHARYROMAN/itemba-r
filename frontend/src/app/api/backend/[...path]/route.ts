@@ -51,24 +51,6 @@ function setSessionCookies(res: NextResponse, req: NextRequest) {
   });
 }
 
-function clearRefreshCookies(res: NextResponse) {
-  res.cookies.set(REFRESH_COOKIE, '', {
-    ...COOKIE_OPTS,
-    path: AUTH_REFRESH_PATH,
-    maxAge: 0,
-  });
-  res.cookies.set(REFRESH_COOKIE, '', {
-    ...COOKIE_OPTS,
-    path: LEGACY_AUTH_REFRESH_PATH,
-    maxAge: 0,
-  });
-  res.cookies.set(BACKEND_REFRESH_COOKIE, '', {
-    ...COOKIE_OPTS,
-    path: BACKEND_REFRESH_PATH,
-    maxAge: 0,
-  });
-}
-
 function backendUnavailableResponse() {
   return NextResponse.json({ message: 'Backend service unavailable' }, { status: 502 });
 }
@@ -258,19 +240,10 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
   if (rotated) {
     res.cookies.set('itemba_access', rotated.accessToken, {
       ...COOKIE_OPTS,
-      maxAge: 60 * 15,
+      maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
     });
     setRefreshCookies(res, rotated.refreshToken);
     setSessionCookies(res, req);
-  }
-
-  // If the backend definitively says the session is gone, clear flag + cookies
-  // so the client redirects to login on the next navigation.
-  if (backendRes.status === 401 && !rotated) {
-    res.cookies.delete('itemba_access');
-    clearRefreshCookies(res);
-    res.cookies.delete('itemba_auth');
-    res.cookies.delete('itemba_csrf');
   }
 
   return res;

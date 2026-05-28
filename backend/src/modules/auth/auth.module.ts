@@ -17,6 +17,9 @@ import { PermissionCacheService } from '../../common/services';
 const jwtExpiresIn = (value: string): JwtSignOptions['expiresIn'] =>
   value as JwtSignOptions['expiresIn'];
 
+const isNonExpiringJwtDuration = (value: string): boolean =>
+  ['never', 'none', 'no-expiry', 'no_expiry', '0'].includes(value.trim().toLowerCase());
+
 /**
  * AuthModule is intentionally @Global so the PermissionCacheService and
  * JwtStrategy are visible to every module that needs to invalidate a user's
@@ -35,12 +38,15 @@ const jwtExpiresIn = (value: string): JwtSignOptions['expiresIn'] =>
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (cfg: ConfigService) => ({
-        secret: cfg.getOrThrow<string>('JWT_ACCESS_SECRET'),
-        signOptions: {
-          expiresIn: jwtExpiresIn(cfg.get<string>('JWT_ACCESS_EXPIRES_IN', '15m')),
-        },
-      }),
+      useFactory: (cfg: ConfigService) => {
+        const accessExpiresIn = cfg.get<string>('JWT_ACCESS_EXPIRES_IN', 'never');
+        return {
+          secret: cfg.getOrThrow<string>('JWT_ACCESS_SECRET'),
+          signOptions: isNonExpiringJwtDuration(accessExpiresIn)
+            ? {}
+            : { expiresIn: jwtExpiresIn(accessExpiresIn) },
+        };
+      },
     }),
   ],
   controllers: [AuthController],
