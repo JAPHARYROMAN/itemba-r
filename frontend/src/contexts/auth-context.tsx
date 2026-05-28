@@ -6,6 +6,9 @@ import type { AuthUser } from '@/lib/auth-types';
 
 // Pages that are reachable without a valid session — never redirect from these.
 const PUBLIC_PATHS = new Set<string>(['/login', '/forgot-password', '/reset-password']);
+const SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const SESSION_REFRESH_RETRY_MS = 30 * 1000;
+const AUTH_REJECTED_STATUSES = new Set([401, 403]);
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -27,6 +30,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const silentRefreshRef = useRef<(() => Promise<boolean>) | null>(null);
   // Single-flight: when several tabs / components see a 401 simultaneously,
   // collapse all of their `silentRefresh()` calls onto one in-flight Promise
   // so the backend's refresh-token rotation only runs once. Without this,
@@ -47,22 +51,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.replace(`/login?from=${from}`);
   }, [router, pathname]);
 
+  const armRefreshTimer = useCallback((delayMs = SESSION_REFRESH_INTERVAL_MS) => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(() => {
+      void silentRefreshRef.current?.();
+    }, delayMs);
+  }, []);
+
   const fetchUser = useCallback(async () => {
-    const res = await fetch('/api/auth/me');
-    if (res.ok) {
-      const data = await res.json();
-      setUser(data.data ?? data.user ?? data);
-      return true;
+    try {
+      const res = await fetch('/api/auth/me', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.data ?? data.user ?? data);
+        return true;
+      }
+      if (AUTH_REJECTED_STATUSES.has(res.status)) {
+        setUser(null);
+      }
+    } catch {
+      // Retryable network/backend failure. Keep any existing user state.
     }
-    setUser(null);
     return false;
   }, []);
 
   /**
    * Silently refresh the access token, then re-fetch the user profile.
-   * Returns true on success. On failure, clears local state AND bounces the
-   * user to /login so they don't get stuck on a protected page making
-   * 401-yielding API calls.
+   * Returns true on success. Auth rejection clears local state and redirects;
+   * transient backend/network failures keep the current user state and retry.
    *
    * P1-08: Single-flight. Concurrent callers share one in-flight Promise so
    * the backend rotates the refresh token exactly once per refresh window.
@@ -71,20 +87,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (refreshInFlightRef.current) return refreshInFlightRef.current;
     const promise = (async () => {
       try {
-        const res = await fetch('/api/auth/refresh', { method: 'POST' });
+        const res = await fetch('/api/auth/refresh', { method: 'POST', cache: 'no-store' });
         if (res.ok) {
           await fetchUser();
-          if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-          refreshTimerRef.current = setTimeout(
-            () => {
-              void silentRefresh();
-            },
-            14 * 60 * 1000,
-          );
+          armRefreshTimer();
           return true;
         }
-        setUser(null);
-        redirectToLogin();
+        if (AUTH_REJECTED_STATUSES.has(res.status)) {
+          setUser(null);
+          redirectToLogin();
+        } else {
+          armRefreshTimer(SESSION_REFRESH_RETRY_MS);
+        }
+        return false;
+      } catch {
+        armRefreshTimer(SESSION_REFRESH_RETRY_MS);
         return false;
       } finally {
         refreshInFlightRef.current = null;
@@ -92,23 +109,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
     refreshInFlightRef.current = promise;
     return promise;
-  }, [fetchUser, redirectToLogin]);
+  }, [armRefreshTimer, fetchUser, redirectToLogin]);
+
+  useEffect(() => {
+    silentRefreshRef.current = silentRefresh;
+  }, [silentRefresh]);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       const ok = await fetchUser();
       if (!ok) {
-        // /me returned 401 — try silent refresh; if THAT fails, redirect.
+        // /me failed — try silent refresh; only auth rejection redirects.
         await silentRefresh();
       } else {
-        if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-        refreshTimerRef.current = setTimeout(
-          () => {
-            void silentRefresh();
-          },
-          14 * 60 * 1000,
-        );
+        armRefreshTimer();
       }
       setLoading(false);
     })();
@@ -116,7 +131,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
-  }, [fetchUser, silentRefresh]);
+  }, [armRefreshTimer, fetchUser, silentRefresh]);
+
+  useEffect(() => {
+    const refreshOnResume = () => {
+      if (PUBLIC_PATHS.has(pathname ?? '')) return;
+      void silentRefresh();
+    };
+
+    const refreshOnVisibility = () => {
+      if (document.visibilityState === 'visible') refreshOnResume();
+    };
+
+    window.addEventListener('focus', refreshOnResume);
+    document.addEventListener('visibilitychange', refreshOnVisibility);
+    return () => {
+      window.removeEventListener('focus', refreshOnResume);
+      document.removeEventListener('visibilitychange', refreshOnVisibility);
+    };
+  }, [pathname, silentRefresh]);
 
   const refreshUser = useCallback(async () => {
     await fetchUser();

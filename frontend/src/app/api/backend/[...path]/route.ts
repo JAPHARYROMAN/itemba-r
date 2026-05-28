@@ -98,6 +98,10 @@ function firstHeaderValue(value: string | null): string {
     .toLowerCase() ?? '';
 }
 
+function getForwardedFor(req: NextRequest) {
+  return req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '';
+}
+
 function csrfTokenValid(req: NextRequest): boolean {
   const cookieToken = req.cookies.get('itemba_csrf')?.value;
   const headerToken = req.headers.get('x-csrf-token');
@@ -105,6 +109,7 @@ function csrfTokenValid(req: NextRequest): boolean {
 }
 
 async function refreshAccessTokenSingleFlight(
+  req: NextRequest,
   refreshToken: string,
 ): Promise<{ accessToken: string; refreshToken: string } | null> {
   // Coalesce concurrent refresh attempts for the same token.
@@ -115,7 +120,11 @@ async function refreshAccessTokenSingleFlight(
     try {
       const upstream = await fetch(`${BACKEND}/auth/refresh`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${refreshToken}` },
+        headers: {
+          Authorization: `Bearer ${refreshToken}`,
+          'x-forwarded-for': getForwardedFor(req),
+          'user-agent': req.headers.get('user-agent') ?? '',
+        },
       });
       if (!upstream.ok) return null;
       const data = await upstream.json();
@@ -206,7 +215,7 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
     refreshToken && (backendRes === null || backendRes.status === 401) && refreshToken.length > 0;
 
   if (shouldRetry && refreshToken) {
-    rotated = await refreshAccessTokenSingleFlight(refreshToken);
+    rotated = await refreshAccessTokenSingleFlight(req, refreshToken);
     if (rotated) {
       accessToken = rotated.accessToken;
       try {

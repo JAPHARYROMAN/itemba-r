@@ -65,6 +65,7 @@ const DUMMY_ARGON2_HASH_PROMISE: Promise<string> = (async () => {
 const EMAIL_LOGIN_WINDOW_MS = 15 * 60_000;
 const EMAIL_LOGIN_LOCK_MS = 15 * 60_000;
 const EMAIL_LOGIN_MAX_FAILURES = 5;
+const REFRESH_TOKEN_ROTATION_GRACE_MS = 60_000;
 
 @Injectable()
 export class AuthService {
@@ -327,9 +328,9 @@ export class AuthService {
     meta?: { ipAddress?: string; userAgent?: string },
     sid?: string,
   ) {
-    // Reuse detection: scan ALL the user's tokens (active AND revoked).
-    // If the presented token matches a previously-revoked sibling, that's a sign the
-    // refresh token was stolen and replayed — revoke the whole family.
+    // Reuse detection: scan ALL the user's tokens (active AND revoked). A
+    // recently-rotated token gets a short grace window for concurrent requests;
+    // older revoked tokens are treated as replay and revoke the whole family.
     const matched = await this.findRefreshTokenByRawValue(userId, rawToken, {
       includeRevoked: true,
       requireUnexpired: true,
@@ -337,7 +338,7 @@ export class AuthService {
 
     if (!matched) throw new UnauthorizedException('Invalid or expired refresh token');
 
-    if (matched.revokedAt) {
+    if (matched.revokedAt && !this.isRecentRefreshRotation(matched)) {
       // Reuse of a revoked token detected — kill the whole family.
       if (matched.familyId) {
         await this.prisma.refreshToken.updateMany({
@@ -358,10 +359,12 @@ export class AuthService {
     }
 
     // Rotate within the same family.
-    await this.prisma.refreshToken.update({
-      where: { id: matched.id },
-      data: { revokedAt: new Date(), revokedReason: 'ROTATION' },
-    });
+    if (!matched.revokedAt) {
+      await this.prisma.refreshToken.update({
+        where: { id: matched.id },
+        data: { revokedAt: new Date(), revokedReason: 'ROTATION' },
+      });
+    }
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || user.status !== 'ACTIVE') throw new UnauthorizedException('Account is not active');
@@ -589,6 +592,17 @@ export class AuthService {
 
   private isLegacyRefreshTokenHash(tokenHash: string): boolean {
     return tokenHash.startsWith('$argon2');
+  }
+
+  private isRecentRefreshRotation(token: {
+    revokedAt: Date | null;
+    revokedReason: string | null;
+  }): boolean {
+    return (
+      token.revokedReason === 'ROTATION' &&
+      token.revokedAt !== null &&
+      Date.now() - token.revokedAt.getTime() <= REFRESH_TOKEN_ROTATION_GRACE_MS
+    );
   }
 
   private async findRefreshTokenByRawValue(
