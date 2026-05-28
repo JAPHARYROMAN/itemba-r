@@ -45,9 +45,11 @@ interface OrderLineEditorProps<TLine extends EditableOrderLine> {
   products: OrderProductOption[];
   units: OrderUnitOption[];
   currency: string;
+  productSearchLoading?: boolean;
   onAddLine: () => void;
   onRemoveLine: (index: number) => void;
   onLineChange: (index: number, patch: Partial<TLine>) => void;
+  onProductSearch?: (query: string) => void;
 }
 
 const fieldClass =
@@ -93,6 +95,22 @@ function defaultPriceForProduct(product: OrderProductOption, variant: OrderVaria
   return numberOrZero(product.defaultSellingPrice ?? product.retailPrice ?? product.wholesalePrice);
 }
 
+export function mergeOrderProductOptions<TProduct extends OrderProductOption>(
+  incoming: TProduct[],
+  current: TProduct[],
+  selectedProductIds: string[],
+) {
+  const selected = new Set(selectedProductIds.filter(Boolean));
+  const byId = new Map<string, TProduct>();
+
+  for (const product of incoming) byId.set(product.id, product);
+  for (const product of current) {
+    if (selected.has(product.id) && !byId.has(product.id)) byId.set(product.id, product);
+  }
+
+  return Array.from(byId.values());
+}
+
 function lineTotal(line: EditableOrderLine) {
   const subtotal = numberOrZero(line.qty) * numberOrZero(line.unitPrice);
   return subtotal - numberOrZero(line.discount) + numberOrZero(line.tax);
@@ -112,9 +130,11 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
   products,
   units,
   currency,
+  productSearchLoading = false,
   onAddLine,
   onRemoveLine,
   onLineChange,
+  onProductSearch,
 }: OrderLineEditorProps<TLine>) {
   const [productSearch, setProductSearch] = useState<Record<number, string>>({});
   const totals = useMemo(
@@ -155,6 +175,23 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
     patchLine(index, patch);
   }
 
+  function handleProductSearch(index: number, value: string) {
+    setProductSearch((current) => ({
+      ...current,
+      [index]: value,
+    }));
+    onProductSearch?.(value);
+  }
+
+  function handleProductPick(index: number, productId: string) {
+    handleProductSelect(index, productId);
+    setProductSearch((current) => ({
+      ...current,
+      [index]: '',
+    }));
+    onProductSearch?.('');
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -177,12 +214,14 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
           {lines.map((line, index) => {
             const selectedProduct = products.find((product) => product.id === line.productId);
             const query = productSearch[index] ?? '';
+            const trimmedQuery = query.trim();
             const filteredProducts = products.filter((product) => productMatches(product, query));
             const productOptions =
               selectedProduct &&
               !filteredProducts.some((product) => product.id === selectedProduct.id)
                 ? [selectedProduct, ...filteredProducts]
                 : filteredProducts;
+            const searchResults = trimmedQuery ? filteredProducts.slice(0, 8) : [];
             const missing = missingFields(line);
 
             return (
@@ -234,16 +273,55 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                       </span>
                       <input
                         value={query}
-                        onChange={(event) =>
-                          setProductSearch((current) => ({
-                            ...current,
-                            [index]: event.target.value,
-                          }))
-                        }
+                        onChange={(event) => handleProductSearch(index, event.target.value)}
                         className={fieldClass}
                         placeholder="Search name, code, SKU, barcode"
                       />
                     </label>
+                    {trimmedQuery && (
+                      <div
+                        className="max-h-56 overflow-y-auto rounded-lg border"
+                        style={{
+                          borderColor: 'var(--aurora-border)',
+                          background: 'var(--aurora-card)',
+                        }}
+                      >
+                        {productSearchLoading && !searchResults.length ? (
+                          <div
+                            className="px-3 py-2 text-[12px]"
+                            style={{ color: 'var(--aurora-text-muted)' }}
+                          >
+                            Searching products...
+                          </div>
+                        ) : searchResults.length ? (
+                          searchResults.map((product) => (
+                            <button
+                              key={product.id}
+                              type="button"
+                              onClick={() => handleProductPick(index, product.id)}
+                              className="block w-full px-3 py-2 text-left text-[13px] transition hover:bg-brand-50 dark:hover:bg-slate-800"
+                              style={{ color: 'var(--aurora-text)' }}
+                            >
+                              <span className="block font-medium">{productLabel(product)}</span>
+                              <span
+                                className="block text-[11px]"
+                                style={{ color: 'var(--aurora-text-muted)' }}
+                              >
+                                {product.category?.name ?? 'Uncategorized'}
+                                {product.baseUnit?.symbol ? ` | ${product.baseUnit.symbol}` : ''}
+                              </span>
+                            </button>
+                          ))
+                        ) : (
+                          <div
+                            className="px-3 py-2 text-[12px]"
+                            style={{ color: 'var(--aurora-text-muted)' }}
+                          >
+                            No matching products
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <label className="block">
                       <span
                         className="mb-1 block text-[12px] font-medium"

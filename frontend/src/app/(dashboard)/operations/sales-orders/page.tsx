@@ -23,7 +23,7 @@ import {
   backendPost,
 } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
-import { OrderLineEditor } from '../_components/order-line-editor';
+import { OrderLineEditor, mergeOrderProductOptions } from '../_components/order-line-editor';
 
 interface Company {
   id: string;
@@ -309,6 +309,8 @@ function SalesOrderModal({
   );
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [productSearchLoading, setProductSearchLoading] = useState(false);
   const [units, setUnits] = useState<Unit[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
@@ -316,6 +318,10 @@ function SalesOrderModal({
   const [branches, setBranches] = useState<Branch[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const selectedProductIdKey = form.lines
+    .map((line) => line.productId)
+    .filter(Boolean)
+    .join('|');
 
   useEffect(() => {
     let cancelled = false;
@@ -418,22 +424,44 @@ function SalesOrderModal({
   useEffect(() => {
     if (!form.companyId || !form.divisionId) {
       setProducts([]);
+      setProductSearchLoading(false);
       return;
     }
+
     let cancelled = false;
-    backendList<Product>('/products', {
-      query: { companyId: form.companyId, divisionId: form.divisionId || undefined, limit: 200 },
-    })
-      .then((rows) => {
-        if (!cancelled) setProducts(rows);
+    const search = productSearchQuery.trim();
+    const selectedProductIds = selectedProductIdKey ? selectedProductIdKey.split('|') : [];
+    setProductSearchLoading(true);
+
+    const timer = setTimeout(() => {
+      backendList<Product>('/products', {
+        query: {
+          companyId: form.companyId,
+          divisionId: form.divisionId || undefined,
+          limit: search ? 50 : 200,
+          ...(search && { search }),
+        },
       })
-      .catch(() => {
-        if (!cancelled) setProducts([]);
-      });
+        .then((rows) => {
+          if (!cancelled) {
+            setProducts((current) =>
+              mergeOrderProductOptions(rows, current, selectedProductIds),
+            );
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setProducts([]);
+        })
+        .finally(() => {
+          if (!cancelled) setProductSearchLoading(false);
+        });
+    }, search ? 250 : 0);
+
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, [form.companyId, form.divisionId]);
+  }, [form.companyId, form.divisionId, productSearchQuery, selectedProductIdKey]);
 
   const setField = <K extends keyof SalesOrderForm>(k: K, v: SalesOrderForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
@@ -568,6 +596,7 @@ function SalesOrderModal({
             required
             value={form.companyId}
             onChange={(e) => {
+              setProductSearchQuery('');
               setForm((f) => ({
                 ...f,
                 companyId: e.target.value,
@@ -609,6 +638,7 @@ function SalesOrderModal({
             value={form.divisionId}
             onChange={(e) => {
               const divisionId = e.target.value;
+              setProductSearchQuery('');
               setForm((f) => ({
                 ...f,
                 divisionId,
@@ -790,9 +820,11 @@ function SalesOrderModal({
           products={products}
           units={units}
           currency={form.currency}
+          productSearchLoading={productSearchLoading}
           onAddLine={addLine}
           onRemoveLine={removeLine}
           onLineChange={setLine}
+          onProductSearch={setProductSearchQuery}
         />
       </div>
     </Modal>
