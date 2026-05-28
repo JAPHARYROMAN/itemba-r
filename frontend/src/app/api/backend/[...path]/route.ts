@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import { getBackendInternalUrl } from '@/lib/backend-url';
+import { SESSION_COOKIE_MAX_AGE_SECONDS } from '@/lib/auth-cookie-config';
 
 const BACKEND = getBackendInternalUrl();
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -12,7 +13,6 @@ const COOKIE_OPTS = {
 };
 const REFRESH_COOKIE = 'itemba_refresh';
 const BACKEND_REFRESH_COOKIE = 'itemba_backend_refresh';
-const REFRESH_MAX_AGE = 60 * 60 * 24 * 7;
 const AUTH_REFRESH_PATH = '/';
 const LEGACY_AUTH_REFRESH_PATH = '/api/auth/refresh';
 const BACKEND_REFRESH_PATH = '/api/backend';
@@ -21,7 +21,7 @@ function setRefreshCookies(res: NextResponse, refreshToken: string) {
   res.cookies.set(REFRESH_COOKIE, refreshToken, {
     ...COOKIE_OPTS,
     path: AUTH_REFRESH_PATH,
-    maxAge: REFRESH_MAX_AGE,
+    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
   });
   res.cookies.set(REFRESH_COOKIE, '', {
     ...COOKIE_OPTS,
@@ -31,7 +31,23 @@ function setRefreshCookies(res: NextResponse, refreshToken: string) {
   res.cookies.set(BACKEND_REFRESH_COOKIE, refreshToken, {
     ...COOKIE_OPTS,
     path: BACKEND_REFRESH_PATH,
-    maxAge: REFRESH_MAX_AGE,
+    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
+  });
+}
+
+function setSessionCookies(res: NextResponse, req: NextRequest) {
+  res.cookies.set('itemba_auth', '1', {
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
+  });
+  res.cookies.set('itemba_csrf', req.cookies.get('itemba_csrf')?.value ?? crypto.randomUUID(), {
+    httpOnly: false,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
   });
 }
 
@@ -245,6 +261,7 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
       maxAge: 60 * 15,
     });
     setRefreshCookies(res, rotated.refreshToken);
+    setSessionCookies(res, req);
   }
 
   // If the backend definitively says the session is gone, clear flag + cookies

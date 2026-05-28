@@ -66,6 +66,8 @@ const EMAIL_LOGIN_WINDOW_MS = 15 * 60_000;
 const EMAIL_LOGIN_LOCK_MS = 15 * 60_000;
 const EMAIL_LOGIN_MAX_FAILURES = 5;
 const REFRESH_TOKEN_ROTATION_GRACE_MS = 60_000;
+const DEFAULT_REFRESH_EXPIRES_IN = 'never';
+const PERSISTENT_SESSION_EXPIRES_AT = new Date('9999-12-31T23:59:59.999Z');
 
 @Injectable()
 export class AuthService {
@@ -473,9 +475,7 @@ export class AuthService {
     // JwtStrategy can verify the session is still ACTIVE on every request.
     let sid = existingSid;
     if (!sid) {
-      const refreshTtlMs = this.parseDuration(
-        this.config.get<string>('JWT_REFRESH_EXPIRES_IN', '7d'),
-      );
+      const refreshExpiresIn = this.getRefreshExpiresIn();
       const session = await this.prisma.activeSession.create({
         data: {
           sessionCode: `SS-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`,
@@ -484,7 +484,7 @@ export class AuthService {
           userAgent: meta?.userAgent,
           startedAt: new Date(),
           lastActivityAt: new Date(),
-          expiresAt: new Date(Date.now() + refreshTtlMs),
+          expiresAt: this.refreshExpiresAt(refreshExpiresIn),
           status: 'ACTIVE',
         },
       });
@@ -494,17 +494,20 @@ export class AuthService {
     const payload: JwtPayload = { sub: userId, email, sid };
     const accessToken = await this.jwt.signAsync(payload);
 
-    const refreshExpiresIn = this.config.get<string>('JWT_REFRESH_EXPIRES_IN', '7d');
+    const refreshExpiresIn = this.getRefreshExpiresIn();
+    const refreshSignOptions: JwtSignOptions = {
+      secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+    };
+    if (!this.isNonExpiringDuration(refreshExpiresIn)) {
+      refreshSignOptions.expiresIn = jwtExpiresIn(refreshExpiresIn);
+    }
     const refreshToken = await this.jwt.signAsync(
       { ...payload, jti: randomUUID() },
-      {
-        secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
-        expiresIn: jwtExpiresIn(refreshExpiresIn),
-      },
+      refreshSignOptions,
     );
 
     const tokenHash = this.hashRefreshToken(refreshToken);
-    const expiresAt = new Date(Date.now() + this.parseDuration(refreshExpiresIn));
+    const expiresAt = this.refreshExpiresAt(refreshExpiresIn);
     // New login → new family. Refresh rotation → existing family is preserved.
     const tokenFamilyId = familyId ?? randomUUID();
 
@@ -535,8 +538,8 @@ export class AuthService {
   private parseDuration(duration: string): number {
     const match = /^(\d+)([smhdw])$/.exec(duration);
     if (!match) {
-      this.logger.warn(`Unsupported duration "${duration}", falling back to 7d`);
-      return 7 * 24 * 60 * 60 * 1000;
+      this.logger.warn(`Unsupported duration "${duration}", falling back to 3650d`);
+      return 3650 * 24 * 60 * 60 * 1000;
     }
     const n = parseInt(match[1], 10);
     const unit = match[2];
@@ -548,6 +551,20 @@ export class AuthService {
       w: 7 * 86_400_000,
     };
     return n * (ms[unit] ?? 86_400_000);
+  }
+
+  private getRefreshExpiresIn(): string {
+    return this.config.get<string>('JWT_REFRESH_EXPIRES_IN', DEFAULT_REFRESH_EXPIRES_IN).trim();
+  }
+
+  private isNonExpiringDuration(duration: string): boolean {
+    return ['never', 'none', 'no-expiry', 'no_expiry', '0'].includes(duration.toLowerCase());
+  }
+
+  private refreshExpiresAt(refreshExpiresIn: string): Date {
+    return this.isNonExpiringDuration(refreshExpiresIn)
+      ? PERSISTENT_SESSION_EXPIRES_AT
+      : new Date(Date.now() + this.parseDuration(refreshExpiresIn));
   }
 
   private isEmailLoginLocked(email: string): boolean {

@@ -1,7 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 
-function makeService() {
+function makeService(overrides: { refreshExpiresIn?: string } = {}) {
   const prisma = {
     user: {
       findUnique: jest.fn(),
@@ -38,7 +38,7 @@ function makeService() {
   const config = new ConfigService({
     JWT_ACCESS_SECRET: 'a'.repeat(40),
     JWT_REFRESH_SECRET: 'b'.repeat(40),
-    JWT_REFRESH_EXPIRES_IN: '7d',
+    JWT_REFRESH_EXPIRES_IN: overrides.refreshExpiresIn ?? '7d',
   });
   const audit = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const service = new AuthService(prisma, {} as any, jwt, config, audit);
@@ -119,5 +119,33 @@ describe('AuthService.refresh rotation race handling', () => {
     });
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
     expect(prisma.refreshToken.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('AuthService persistent refresh sessions', () => {
+  it('omits refresh JWT expiration and stores a far-future expiry when configured as never', async () => {
+    const { service, prisma } = makeService({ refreshExpiresIn: 'never' });
+
+    await (service as any).issueTokens('user-1', 'user@example.com');
+
+    expect(prisma.activeSession.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          expiresAt: new Date('9999-12-31T23:59:59.999Z'),
+        }),
+      }),
+    );
+    expect(prisma.refreshToken.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          expiresAt: new Date('9999-12-31T23:59:59.999Z'),
+        }),
+      }),
+    );
+    expect((service as any).jwt.signAsync).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ jti: expect.any(String) }),
+      { secret: 'b'.repeat(40) },
+    );
   });
 });

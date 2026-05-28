@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getBackendInternalUrl } from '@/lib/backend-url';
+import { SESSION_COOKIE_MAX_AGE_SECONDS } from '@/lib/auth-cookie-config';
 
 const BACKEND = getBackendInternalUrl();
 const COOKIE_OPTS = {
@@ -10,7 +11,6 @@ const COOKIE_OPTS = {
 };
 const REFRESH_COOKIE = 'itemba_refresh';
 const BACKEND_REFRESH_COOKIE = 'itemba_backend_refresh';
-const REFRESH_MAX_AGE = 60 * 60 * 24 * 7;
 const AUTH_REFRESH_PATH = '/';
 const LEGACY_AUTH_REFRESH_PATH = '/api/auth/refresh';
 const BACKEND_REFRESH_PATH = '/api/backend';
@@ -19,7 +19,7 @@ function setRefreshCookies(res: NextResponse, refreshToken: string) {
   res.cookies.set(REFRESH_COOKIE, refreshToken, {
     ...COOKIE_OPTS,
     path: AUTH_REFRESH_PATH,
-    maxAge: REFRESH_MAX_AGE,
+    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
   });
   res.cookies.set(REFRESH_COOKIE, '', {
     ...COOKIE_OPTS,
@@ -29,7 +29,7 @@ function setRefreshCookies(res: NextResponse, refreshToken: string) {
   res.cookies.set(BACKEND_REFRESH_COOKIE, refreshToken, {
     ...COOKIE_OPTS,
     path: BACKEND_REFRESH_PATH,
-    maxAge: REFRESH_MAX_AGE,
+    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
   });
 }
 
@@ -98,14 +98,14 @@ export async function POST(req: NextRequest) {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
-    maxAge: REFRESH_MAX_AGE,
+    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
   });
   res.cookies.set('itemba_csrf', csrfToken, {
     httpOnly: false,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
-    maxAge: REFRESH_MAX_AGE,
+    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
   });
 
   return res;
