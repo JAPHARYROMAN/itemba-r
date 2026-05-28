@@ -36,6 +36,22 @@ function calcLineTotals(line: {
   };
 }
 
+function paymentStateForPurchaseType(purchaseType: PurchaseType, totalAmount: number) {
+  if (purchaseType === PurchaseType.CASH_PURCHASE) {
+    return {
+      paidAmount: totalAmount,
+      outstandingAmount: 0,
+      paymentStatus: 'PAID' as const,
+    };
+  }
+
+  return {
+    paidAmount: 0,
+    outstandingAmount: totalAmount,
+    paymentStatus: 'UNPAID' as const,
+  };
+}
+
 @Injectable()
 export class PurchaseOrdersService {
   private readonly logger = new Logger(PurchaseOrdersService.name);
@@ -160,6 +176,7 @@ export class PurchaseOrdersService {
     });
 
     const totalAmount = subtotal - totalDiscount + totalTax;
+    const paymentState = paymentStateForPurchaseType(dto.purchaseType, totalAmount);
 
     const record = await this.prisma.$transaction(async (tx) => {
       const purchaseOrderNumber = await this.codes.next({
@@ -183,10 +200,10 @@ export class PurchaseOrdersService {
           discountAmount: totalDiscount,
           taxAmount: totalTax,
           totalAmount,
-          paidAmount: 0,
-          outstandingAmount: totalAmount,
+          paidAmount: paymentState.paidAmount,
+          outstandingAmount: paymentState.outstandingAmount,
           status: 'DRAFT',
-          paymentStatus: 'UNPAID',
+          paymentStatus: paymentState.paymentStatus,
           notes: dto.notes,
           createdById: userId,
           lines: { create: linesData },
@@ -257,6 +274,12 @@ export class PurchaseOrdersService {
       if (linesData) {
         await tx.purchaseOrderLine.deleteMany({ where: { purchaseOrderId: id } });
       }
+      const nextPurchaseType = dto.purchaseType ?? existing.purchaseType;
+      const nextTotalAmount = totalAmount ?? Number(existing.totalAmount);
+      const nextPaymentState =
+        dto.purchaseType !== undefined || totalAmount !== undefined
+          ? paymentStateForPurchaseType(nextPurchaseType, nextTotalAmount)
+          : null;
 
       return tx.purchaseOrder.update({
         where: { id },
@@ -277,7 +300,11 @@ export class PurchaseOrdersService {
             discountAmount: totalDiscount,
             taxAmount: totalTax,
             totalAmount,
-            outstandingAmount: totalAmount,
+          }),
+          ...(nextPaymentState && {
+            paidAmount: nextPaymentState.paidAmount,
+            outstandingAmount: nextPaymentState.outstandingAmount,
+            paymentStatus: nextPaymentState.paymentStatus,
           }),
           ...(linesData && { lines: { create: linesData } }),
         },
@@ -482,7 +509,16 @@ export class PurchaseOrdersService {
 
       return tx.purchaseOrder.update({
         where: { id },
-        data: { status: 'RECEIVED', receivedById: userId, receivedAt: new Date() },
+        data: {
+          status: 'RECEIVED',
+          receivedById: userId,
+          receivedAt: new Date(),
+          ...(existing.purchaseType === PurchaseType.CASH_PURCHASE && {
+            paidAmount: existing.totalAmount,
+            outstandingAmount: 0,
+            paymentStatus: 'PAID',
+          }),
+        },
       });
     });
 
