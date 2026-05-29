@@ -193,8 +193,8 @@ function CreateAdjustmentModal({
         notes: form.notes || undefined,
         lines: form.lines.map((l) => ({
           productId: l.productId,
-          systemQty: Number(l.systemQty) || 0,
-          countedQty: Number(l.countedQty) || 0,
+          systemQuantity: Number(l.systemQty) || 0,
+          countedQuantity: Number(l.countedQty) || 0,
           unitId: l.unitId,
           reason: l.reason || undefined,
         })),
