@@ -112,25 +112,49 @@ function readCookie(name: string): string | undefined {
   return match ? decodeURIComponent(match.slice(encoded.length)) : undefined;
 }
 
+async function refreshSessionForBackendRetry(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  try {
+    const res = await fetch('/api/auth/refresh', { method: 'POST', cache: 'no-store' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function requestJson<T>(url: string, opts: FetchOpts = {}): Promise<T> {
   const { body, token, headers, query: _query, ...rest } = opts;
   const method = (rest.method ?? 'GET').toUpperCase();
-  const csrfToken =
-    typeof window !== 'undefined' && UNSAFE_METHODS.has(method) && url.startsWith(BACKEND_PROXY_URL)
-      ? readCookie('itemba_csrf')
-      : undefined;
+  const serializedBody = body !== undefined ? JSON.stringify(body) : undefined;
+  const fetchOnce = () => {
+    const csrfToken =
+      typeof window !== 'undefined' &&
+      UNSAFE_METHODS.has(method) &&
+      url.startsWith(BACKEND_PROXY_URL)
+        ? readCookie('itemba_csrf')
+        : undefined;
 
-  const res = await fetch(url, {
-    ...rest,
-    headers: {
-      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
-      ...headers,
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    cache: rest.cache ?? 'no-store',
-  });
+    return fetch(url, {
+      ...rest,
+      headers: {
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+        ...headers,
+      },
+      body: serializedBody,
+      cache: rest.cache ?? 'no-store',
+    });
+  };
+
+  let res = await fetchOnce();
+  if (
+    res.status === 401 &&
+    url.startsWith(BACKEND_PROXY_URL) &&
+    (await refreshSessionForBackendRetry())
+  ) {
+    res = await fetchOnce();
+  }
 
   const json = await parseJson(res);
   if (!res.ok) {
@@ -146,22 +170,35 @@ async function requestFormData<T>(
 ): Promise<T> {
   const { token, headers, query: _query, ...rest } = opts;
   const method = (rest.method ?? 'POST').toUpperCase();
-  const csrfToken =
-    typeof window !== 'undefined' && UNSAFE_METHODS.has(method) && url.startsWith(BACKEND_PROXY_URL)
-      ? readCookie('itemba_csrf')
-      : undefined;
+  const fetchOnce = () => {
+    const csrfToken =
+      typeof window !== 'undefined' &&
+      UNSAFE_METHODS.has(method) &&
+      url.startsWith(BACKEND_PROXY_URL)
+        ? readCookie('itemba_csrf')
+        : undefined;
 
-  const res = await fetch(url, {
-    ...rest,
-    method,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
-      ...headers,
-    },
-    body: formData,
-    cache: rest.cache ?? 'no-store',
-  });
+    return fetch(url, {
+      ...rest,
+      method,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+        ...headers,
+      },
+      body: formData,
+      cache: rest.cache ?? 'no-store',
+    });
+  };
+
+  let res = await fetchOnce();
+  if (
+    res.status === 401 &&
+    url.startsWith(BACKEND_PROXY_URL) &&
+    (await refreshSessionForBackendRetry())
+  ) {
+    res = await fetchOnce();
+  }
 
   const json = await parseJson(res);
   if (!res.ok) {

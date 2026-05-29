@@ -104,6 +104,48 @@ describe('api-client', () => {
     );
   });
 
+  it('refreshes the session and retries backend proxy requests after a 401', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (url === '/api/auth/refresh') {
+        document.cookie = 'itemba_csrf=csrf-456; path=/';
+        return jsonResponse({ success: true });
+      }
+      if (url === '/api/backend/purchase-orders' && fetchMock.mock.calls.length === 1) {
+        return jsonResponse({ message: 'Unauthorized' }, { status: 401 });
+      }
+      return jsonResponse({ success: true, data: { id: 'po-1' } });
+    });
+    document.cookie = 'itemba_csrf=csrf-123; path=/';
+
+    await expect(
+      backendPost<{ id: string }>('/purchase-orders', { companyId: 'c1' }),
+    ).resolves.toEqual({
+      id: 'po-1',
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/backend/purchase-orders',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'x-csrf-token': 'csrf-123' }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/auth/refresh',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/backend/purchase-orders',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'x-csrf-token': 'csrf-456' }),
+      }),
+    );
+  });
+
   it('throws ApiError with backend validation messages', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse({ message: ['name is required', 'amount must be positive'] }, { status: 400 }),

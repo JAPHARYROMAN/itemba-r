@@ -35,6 +35,8 @@ export function assertCanAccessCompanyFromUser(
   companyId: string | null | undefined,
   minimum: AccessLevel = AccessLevel.READ,
 ) {
+  if (companyId && isGroupScopedUser(user)) return;
+
   if (!companyId) {
     if (!isGroupScopedUser(user)) {
       throw new ForbiddenException('Group-scoped role required to access group-level records');
@@ -117,6 +119,8 @@ export class CompanyScopeService {
     companyId: string | null | undefined,
     minimum: AccessLevel = AccessLevel.READ,
   ) {
+    if (companyId && this.isGroupScoped(user)) return;
+
     if (!companyId) {
       this.assertGroupScoped(user, 'access group-level records');
       return;
