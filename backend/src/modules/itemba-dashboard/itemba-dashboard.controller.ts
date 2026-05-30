@@ -16,6 +16,15 @@ export class ItembaDashboardController {
     return this.service.getSummary(companyId, user);
   }
 
+  @Get('sector-readiness')
+  @RequirePermissions('itemba.dashboard.view')
+  getSectorReadiness(
+    @Query('companyId') companyId: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.getSectorReadiness(companyId, user);
+  }
+
   @Get('cockpit')
   @RequirePermissions('itemba.dashboard.view')
   cockpit(
