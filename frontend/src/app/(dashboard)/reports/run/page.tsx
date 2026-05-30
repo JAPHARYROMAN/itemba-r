@@ -90,6 +90,17 @@ interface ExplainResponse {
   basis: string;
   drivers: { label: string; value: string; interpretation: string }[];
   recommendedDrillDowns: DrillTarget[];
+  explainThisNumber?: {
+    mode: string;
+    confidence: string;
+    semanticDataset: string;
+    formulaTrace: string[];
+    sourceSystems: string[];
+    groundingSignals: string[];
+    generatedNarrative: string;
+    nextBestActions: string[];
+  };
+  promptTemplates?: { prompt: string; reportId: string; reportName: string; semanticDataset: string; href: string }[];
   caveats: string[];
 }
 
@@ -1098,6 +1109,22 @@ function ReportRunContent() {
                   <div className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
                     Basis: {explanation.basis}
                   </div>
+                  {explanation.explainThisNumber && (
+                    <div className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="font-semibold">Explain this number</div>
+                        {metaBadge(explanation.explainThisNumber.confidence, 'blue')}
+                      </div>
+                      <p className="mt-2 text-xs leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                        {explanation.explainThisNumber.generatedNarrative}
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {explanation.explainThisNumber.formulaTrace.slice(0, 4).map((item) => (
+                          <span key={item}>{metaBadge(item, 'neutral')}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {explanation.drivers.slice(0, 4).map((driver) => (
                     <div key={driver.label} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
                       <div className="font-semibold">{driver.label}</div>

@@ -271,6 +271,43 @@ interface IntegrationReadiness {
   bridges: { key: string; label: string; from: string; to: string; reports: string[]; status: string }[];
 }
 
+interface AdvancedReadiness {
+  generatedAt: string;
+  overallScore: number;
+  capabilities: {
+    key: string;
+    label: string;
+    readinessScore: number;
+    status: string;
+    counts: Record<string, number>;
+    controls: string[];
+    entryPoints: { label: string; href: string }[];
+  }[];
+  semanticLayer: {
+    objects: {
+      key: string;
+      name: string;
+      owner: string;
+      sensitivity: string;
+      refreshMode: string;
+      grain: string;
+      measures: string[];
+      dimensions: string[];
+      securityRules: string[];
+      relatedReports: { id: string; name: string; href: string }[];
+    }[];
+    securityRules: string[];
+    queryRules: string[];
+  };
+  explainPrompts: { prompt: string; reportId: string; reportName: string; semanticDataset: string; href: string }[];
+  packApprovalWorkflow: {
+    stages: { stage: string; status: string; evidence: string[] }[];
+    activeWorkflowCount: number;
+    pendingApprovalCount: number;
+    endpoints: string[];
+  };
+}
+
 interface EnterpriseOverview {
   generatedAt: string;
   summary: {
@@ -295,6 +332,7 @@ interface EnterpriseOverview {
   reportPacks: ReportPack[];
   dataQualitySurface?: DataQualitySurface;
   integrationReadiness?: IntegrationReadiness;
+  advancedReadiness?: AdvancedReadiness;
   discovery?: {
     health: DiscoveryHealth;
     commandScore: CommandCenterScore;
@@ -346,6 +384,13 @@ interface EnterpriseOverview {
     requestedRuns: number;
     dashboards: number;
     statementRuns: number;
+    savedViews?: number;
+    completedRuns?: number;
+    kpiIndicators?: number;
+    kpiSnapshots?: number;
+    dashboardWidgets?: number;
+    approvalWorkflows?: number;
+    pendingPackApprovals?: number;
   };
 }
 
@@ -768,6 +813,14 @@ export default function MasterReportsPage() {
   const [divisionId, setDivisionId] = useState('');
   const [generatingPack, setGeneratingPack] = useState('');
   const [packResult, setPackResult] = useState('');
+  const [lastPackSnapshot, setLastPackSnapshot] = useState<{
+    packKey: string;
+    snapshotId?: string;
+    statementRunNumber?: string;
+    manifestHash?: string;
+  } | null>(null);
+  const [packApprovalAction, setPackApprovalAction] = useState('');
+  const [packApprovalResult, setPackApprovalResult] = useState('');
   const [governanceAction, setGovernanceAction] = useState('');
   const [governanceResult, setGovernanceResult] = useState('');
   const [favoriteReportIds, setFavoriteReportIds] = useState<string[]>([]);
@@ -936,6 +989,7 @@ export default function MasterReportsPage() {
   const reportPacks = overview?.reportPacks ?? [];
   const dataQualitySurface = overview?.dataQualitySurface;
   const integrationReadiness = overview?.integrationReadiness;
+  const advancedReadiness = overview?.advancedReadiness;
   const governance = overview?.governance;
   const admin = overview?.admin;
   const discoveryHealth = overview?.discovery?.health ?? catalog?.discoveryHealth;
@@ -1007,11 +1061,43 @@ export default function MasterReportsPage() {
           result.dataQualityWarnings?.length ?? 0
         } warning(s). Manifest ${result.manifest?.hash ?? result.snapshot?.manifestHash ?? 'pending'}.`,
       );
+      setLastPackSnapshot({
+        packKey: pack.key,
+        snapshotId: result.snapshot?.id,
+        statementRunNumber: result.snapshot?.statementRunNumber,
+        manifestHash: result.manifest?.hash ?? result.snapshot?.manifestHash,
+      });
       void loadCatalog();
     } catch (err) {
       setPackResult(err instanceof Error ? err.message : 'Failed to generate report pack');
     } finally {
       setGeneratingPack('');
+    }
+  };
+
+  const submitPackApproval = async (pack: ReportPack) => {
+    setPackApprovalAction(pack.key);
+    setPackApprovalResult('');
+    try {
+      const snapshot = lastPackSnapshot?.packKey === pack.key ? lastPackSnapshot : null;
+      const result = await backendPost<{
+        request?: { approvalRequestNumber: string; status: string; id: string };
+        workflow?: { currentStep: string; nextActions: string[] };
+      }>(`/reports/report-packs/${pack.key}/approval-requests`, {
+        companyId: companyId || undefined,
+        snapshotId: snapshot?.snapshotId,
+        statementRunNumber: snapshot?.statementRunNumber,
+        manifestHash: snapshot?.manifestHash,
+        summary: `${pack.name} submitted from Reports command center.`,
+      });
+      setPackApprovalResult(
+        `${pack.name} approval submitted as ${result.request?.approvalRequestNumber ?? 'an approval request'} (${result.request?.status ?? 'PENDING'}).`,
+      );
+      void loadCatalog();
+    } catch (err) {
+      setPackApprovalResult(err instanceof Error ? err.message : 'Failed to submit report-pack approval');
+    } finally {
+      setPackApprovalAction('');
     }
   };
 
@@ -1324,6 +1410,38 @@ export default function MasterReportsPage() {
             </Card>
           )}
         </div>
+      )}
+
+      {advancedReadiness && (
+        <Card padding="none" className="overflow-hidden">
+          <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <SectionHeading
+                title="Advanced reporting readiness"
+                subtitle="Self-service BI, subscriptions, KPI intelligence, explain-this-number, semantic layer, and report-pack approval workflow."
+              />
+              <Badge tone="green">{advancedReadiness.overallScore}% READY</Badge>
+            </div>
+          </div>
+          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-6">
+            {advancedReadiness.capabilities.map((capability) => (
+              <div key={capability.key} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="text-sm font-semibold">{capability.label}</div>
+                  <Badge tone={toneForOperationalStatus(capability.status)}>{capability.status}</Badge>
+                </div>
+                <div className="mt-2 text-2xl font-semibold">{capability.readinessScore}%</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {capability.entryPoints.slice(0, 2).map((entryPoint) => (
+                    <Link key={`${capability.key}-${entryPoint.href}`} href={entryPoint.href} className="text-xs text-brand-500 hover:underline">
+                      {entryPoint.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
       )}
 
       {error && (
@@ -1867,12 +1985,82 @@ export default function MasterReportsPage() {
               />
               <CapabilityGrid items={capabilityAreas[activeArea] ?? []} />
 
+              {advancedReadiness && ['builder', 'subscriptions', 'kpis'].includes(activeArea) && (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {advancedReadiness.capabilities
+                    .filter((capability) =>
+                      activeArea === 'builder'
+                        ? capability.key === 'self-service-bi-builder'
+                        : activeArea === 'subscriptions'
+                          ? capability.key === 'scheduling-subscriptions'
+                          : capability.key === 'kpi-dashboard-intelligence' || capability.key === 'ai-explain-this-number',
+                    )
+                    .map((capability) => (
+                      <Card key={`active-${capability.key}`}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold">{capability.label}</div>
+                            <div className="mt-2 text-3xl font-semibold">{capability.readinessScore}%</div>
+                          </div>
+                          <Badge tone={toneForOperationalStatus(capability.status)}>{capability.status}</Badge>
+                        </div>
+                        <div className="mt-4 grid gap-2">
+                          {capability.controls.slice(0, 4).map((control) => (
+                            <div key={control} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                              {control}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {capability.entryPoints.map((entryPoint) => (
+                            <Link key={entryPoint.href} href={entryPoint.href} className="rounded-lg border px-3 py-2 text-xs font-medium" style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}>
+                              {entryPoint.label}
+                            </Link>
+                          ))}
+                        </div>
+                      </Card>
+                    ))}
+                </div>
+              )}
+
               {activeArea === 'packs' && reportPacks.length > 0 && (
                 <div className="space-y-3">
                   {packResult && (
                     <div className="rounded-lg border px-4 py-3 text-sm" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
                       {packResult}
                     </div>
+                  )}
+                  {packApprovalResult && (
+                    <div className="rounded-lg border px-4 py-3 text-sm" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                      {packApprovalResult}
+                    </div>
+                  )}
+                  {advancedReadiness?.packApprovalWorkflow && (
+                    <Card padding="none" className="overflow-hidden">
+                      <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                        <SectionHeading
+                          title="Report-pack approval workflow"
+                          subtitle={`${advancedReadiness.packApprovalWorkflow.activeWorkflowCount} active workflow(s), ${advancedReadiness.packApprovalWorkflow.pendingApprovalCount} pending approval(s).`}
+                        />
+                      </div>
+                      <div className="grid gap-3 p-4 md:grid-cols-4">
+                        {advancedReadiness.packApprovalWorkflow.stages.map((stage) => (
+                          <div key={stage.stage} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="text-sm font-semibold">{stage.stage}</div>
+                              <Badge tone={toneForOperationalStatus(stage.status)}>{stage.status}</Badge>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {stage.evidence.slice(0, 3).map((item) => (
+                                <Badge key={`${stage.stage}-${item}`} tone="blue">
+                                  {item}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
                   )}
                   <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                     {reportPacks.map((pack) => (
@@ -1976,6 +2164,15 @@ export default function MasterReportsPage() {
                           >
                             Open Source
                           </Link>
+                          <button
+                            type="button"
+                            onClick={() => submitPackApproval(pack)}
+                            disabled={packApprovalAction === pack.key}
+                            className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-60"
+                            style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
+                          >
+                            {packApprovalAction === pack.key ? 'Submitting...' : 'Submit Approval'}
+                          </button>
                         </div>
                       </div>
                     ))}
@@ -1985,6 +2182,71 @@ export default function MasterReportsPage() {
 
               {activeArea === 'catalog' && (
                 <div className="space-y-4">
+                  {advancedReadiness?.semanticLayer && (
+                    <Card padding="none" className="overflow-hidden">
+                      <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                        <SectionHeading title="Enterprise semantic layer" subtitle="Business-ready datasets, governed measures, dimensions, security rules, and report relationships." />
+                      </div>
+                      <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
+                        {advancedReadiness.semanticLayer.objects.map((object) => (
+                          <div key={object.key} className="rounded-lg border p-4" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-semibold">{object.name}</div>
+                                <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                                  {object.owner} / {object.refreshMode}
+                                </div>
+                              </div>
+                              <Badge tone={badgeToneForSecurity(object.sensitivity as SecurityClassification)}>{object.sensitivity}</Badge>
+                            </div>
+                            <p className="mt-3 text-xs leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                              Grain: {object.grain}
+                            </p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {object.measures.slice(0, 4).map((measure) => (
+                                <Badge key={`${object.key}-${measure}`} tone="blue">
+                                  {measure}
+                                </Badge>
+                              ))}
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {object.relatedReports.slice(0, 3).map((report) => (
+                                <Link key={report.id} href={report.href} className="text-xs text-brand-500 hover:underline">
+                                  {report.name}
+                                </Link>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid gap-3 border-t p-4 md:grid-cols-2" style={{ borderColor: 'var(--aurora-border)' }}>
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                            Security rules
+                          </div>
+                          <div className="mt-2 grid gap-2">
+                            {advancedReadiness.semanticLayer.securityRules.map((rule) => (
+                              <div key={rule} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
+                                {rule}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                            Query rules
+                          </div>
+                          <div className="mt-2 grid gap-2">
+                            {advancedReadiness.semanticLayer.queryRules.map((rule) => (
+                              <div key={rule} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
+                                {rule}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  )}
                   {coverageMatrix.length > 0 && (
                     <Card padding="none" className="overflow-hidden">
                       <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>

@@ -33,6 +33,11 @@ export class ReportsEnterpriseController {
     return this.service.integrationReadiness();
   }
 
+  @Get('advanced-readiness')
+  advancedReadiness() {
+    return this.service.advancedReportingReadiness();
+  }
+
   @Get('report-packs')
   reportPacks() {
     return this.service.reportPacks();
@@ -69,6 +74,24 @@ export class ReportsEnterpriseController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.generateReportPack(packKey, body ?? {}, user);
+  }
+
+  @Post('report-packs/:packKey/approval-requests')
+  submitReportPackApproval(
+    @Param('packKey') packKey: string,
+    @Body() body: Record<string, unknown>,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.submitReportPackApproval(packKey, body ?? {}, user);
+  }
+
+  @Patch('report-packs/approval-requests/:requestId')
+  actOnReportPackApproval(
+    @Param('requestId') requestId: string,
+    @Body() body: Record<string, unknown>,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.actOnReportPackApproval(requestId, body ?? {}, user);
   }
 
   @Get('lineage/:reportId')
