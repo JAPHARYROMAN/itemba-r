@@ -17,4 +17,10 @@ export class SecurityController {
   summary() {
     return this.service.getSummary();
   }
+
+  @Get('readiness')
+  @RequirePermissions('security.dashboard.view')
+  readiness() {
+    return this.service.getReadiness();
+  }
 }
