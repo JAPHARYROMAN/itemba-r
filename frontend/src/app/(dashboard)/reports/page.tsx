@@ -60,7 +60,19 @@ interface CatalogResponse {
   typeCounts: Record<string, number>;
   lifecycleCounts: Record<string, number>;
   securityCounts: Record<string, number>;
+  categoryCounts?: Record<string, number>;
+  ownerCounts?: Record<string, number>;
   generatedAt: string;
+  searchIntent?: {
+    query: string;
+    expandedTerms: string[];
+    matchedReports: number;
+  } | null;
+  facets?: Record<string, { value: string; count: number }[]>;
+  suggestedSearches?: string[];
+  businessQuestionIndex?: BusinessQuestion[];
+  featuredCollections?: FeaturedCollection[];
+  discoveryHealth?: DiscoveryHealth;
   entries: CatalogEntry[];
 }
 
@@ -116,6 +128,33 @@ interface PackGenerationResult {
   dataQualityWarnings?: unknown[];
 }
 
+interface BusinessQuestion {
+  question: string;
+  reportId: string;
+  reportName: string;
+  sector: ReportSector;
+  reportType: ReportType;
+  href: string;
+}
+
+interface FeaturedCollection {
+  key: string;
+  title: string;
+  description: string;
+  reportCount: number;
+  reports: CatalogEntry[];
+}
+
+interface DiscoveryHealth {
+  overallScore: number;
+  withOwner: number;
+  withQuestions: number;
+  withDrillPaths: number;
+  withOutputs: number;
+  certifiedOrOfficial: number;
+  status: string;
+}
+
 interface EnterpriseOverview {
   generatedAt: string;
   summary: {
@@ -138,6 +177,13 @@ interface EnterpriseOverview {
   capabilityAreas: Record<AreaKey, CapabilityItem[]>;
   metricCatalog: MetricDefinition[];
   reportPacks: ReportPack[];
+  discovery?: {
+    health: DiscoveryHealth;
+    suggestedSearches: string[];
+    businessQuestions: BusinessQuestion[];
+    featuredCollections: FeaturedCollection[];
+    certifiedHighlights: CatalogEntry[];
+  };
   governance: {
     generatedAt: string;
     certified: number;
@@ -474,11 +520,22 @@ function CapabilityGrid({ items }: { items: CapabilityItem[] }) {
   );
 }
 
-function ReportCard({ entry, href }: { entry: CatalogEntry; href: string }) {
+function ReportCard({
+  entry,
+  href,
+  isFavorite = false,
+  onToggleFavorite,
+  onOpen,
+}: {
+  entry: CatalogEntry;
+  href: string;
+  isFavorite?: boolean;
+  onToggleFavorite?: (reportId: string) => void;
+  onOpen?: (reportId: string) => void;
+}) {
   return (
-    <Link
-      href={href}
-      className="block rounded-lg border p-4 transition-colors hover:border-brand-500"
+    <div
+      className="rounded-lg border p-4 transition-colors hover:border-brand-500"
       style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
     >
       <div className="flex items-start justify-between gap-3">
@@ -490,7 +547,20 @@ function ReportCard({ entry, href }: { entry: CatalogEntry; href: string }) {
             {SECTOR_LABELS[entry.sector]} / {entry.category}
           </div>
         </div>
-        <Badge tone={badgeToneForStatus(entry.lifecycleStatus)}>{STATUS_LABELS[entry.lifecycleStatus]}</Badge>
+        <div className="flex items-center gap-2">
+          {onToggleFavorite && (
+            <button
+              type="button"
+              aria-label={isFavorite ? 'Remove favorite' : 'Add favorite'}
+              onClick={() => onToggleFavorite(entry.id)}
+              className="rounded-md border px-2 py-1 text-xs"
+              style={{ borderColor: 'var(--aurora-border)', color: isFavorite ? 'var(--aurora-warning-text)' : 'var(--aurora-text-muted)' }}
+            >
+              {isFavorite ? '★' : '☆'}
+            </button>
+          )}
+          <Badge tone={badgeToneForStatus(entry.lifecycleStatus)}>{STATUS_LABELS[entry.lifecycleStatus]}</Badge>
+        </div>
       </div>
 
       <p className="mt-3 min-h-10 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
@@ -520,7 +590,17 @@ function ReportCard({ entry, href }: { entry: CatalogEntry; href: string }) {
           </span>
         ))}
       </div>
-    </Link>
+
+      <div className="mt-4">
+        <Link
+          href={href}
+          onClick={() => onOpen?.(entry.id)}
+          className="inline-flex rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
+        >
+          Open report
+        </Link>
+      </div>
+    </div>
   );
 }
 
@@ -545,6 +625,8 @@ export default function MasterReportsPage() {
   const [divisionId, setDivisionId] = useState('');
   const [generatingPack, setGeneratingPack] = useState('');
   const [packResult, setPackResult] = useState('');
+  const [favoriteReportIds, setFavoriteReportIds] = useState<string[]>([]);
+  const [recentReportIds, setRecentReportIds] = useState<string[]>([]);
 
   const loadCatalog = useCallback(async () => {
     setLoading(true);
@@ -566,6 +648,16 @@ export default function MasterReportsPage() {
   useEffect(() => {
     loadCatalog();
   }, [loadCatalog]);
+
+  useEffect(() => {
+    try {
+      setFavoriteReportIds(JSON.parse(localStorage.getItem('itemba-report-favorites') ?? '[]'));
+      setRecentReportIds(JSON.parse(localStorage.getItem('itemba-report-recents') ?? '[]'));
+    } catch {
+      setFavoriteReportIds([]);
+      setRecentReportIds([]);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -679,6 +771,15 @@ export default function MasterReportsPage() {
       .map((row) => row.entry);
   }, [entries, selectedPersona]);
 
+  const favoriteEntries = useMemo(
+    () => favoriteReportIds.map((id) => entries.find((entry) => entry.id === id)).filter(Boolean) as CatalogEntry[],
+    [entries, favoriteReportIds],
+  );
+  const recentEntries = useMemo(
+    () => recentReportIds.map((id) => entries.find((entry) => entry.id === id)).filter(Boolean) as CatalogEntry[],
+    [entries, recentReportIds],
+  );
+
   const typeCounts = useMemo(() => countBy(entries, (entry) => entry.reportType), [entries]);
   const lifecycleCounts = useMemo(() => countBy(entries, (entry) => entry.lifecycleStatus), [entries]);
   const liveCount = entries.filter((entry) => entry.dataFreshness.toLowerCase().includes('live')).length;
@@ -690,6 +791,10 @@ export default function MasterReportsPage() {
   const reportPacks = overview?.reportPacks ?? [];
   const governance = overview?.governance;
   const admin = overview?.admin;
+  const discoveryHealth = overview?.discovery?.health ?? catalog?.discoveryHealth;
+  const suggestedSearches = overview?.discovery?.suggestedSearches ?? catalog?.suggestedSearches ?? [];
+  const businessQuestions = overview?.discovery?.businessQuestions ?? catalog?.businessQuestionIndex ?? [];
+  const featuredCollections = overview?.discovery?.featuredCollections ?? catalog?.featuredCollections ?? [];
 
   const buildLink = (entry: CatalogEntry) => {
     const params = new URLSearchParams();
@@ -705,6 +810,29 @@ export default function MasterReportsPage() {
       return suffix ? `${entry.frontendPath}?${suffix}` : entry.frontendPath;
     }
     return `/reports/run?${params.toString()}`;
+  };
+
+  const rememberReport = (reportId: string) => {
+    setRecentReportIds((current) => {
+      const next = [reportId, ...current.filter((id) => id !== reportId)].slice(0, 8);
+      localStorage.setItem('itemba-report-recents', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const toggleFavorite = (reportId: string) => {
+    setFavoriteReportIds((current) => {
+      const next = current.includes(reportId)
+        ? current.filter((id) => id !== reportId)
+        : [reportId, ...current].slice(0, 20);
+      localStorage.setItem('itemba-report-favorites', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const selectSearch = (value: string) => {
+    setSearch(value);
+    setActiveArea('reports');
   };
 
   const generatePack = async (pack: ReportPack) => {
@@ -775,7 +903,7 @@ export default function MasterReportsPage() {
                 Search governed reports, launch dashboards, build saved views, generate close evidence, and trace numbers back to operational source records.
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
               <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
                 <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
                   Reports
@@ -799,6 +927,12 @@ export default function MasterReportsPage() {
                   Sensitive
                 </div>
                 <div className="mt-1 text-xl font-semibold">{commandSummary?.sensitiveCount ?? sensitiveCount}</div>
+              </div>
+              <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Discovery
+                </div>
+                <div className="mt-1 text-xl font-semibold">{discoveryHealth?.overallScore ?? 0}%</div>
               </div>
             </div>
           </div>
@@ -886,6 +1020,139 @@ export default function MasterReportsPage() {
         <>
           {activeArea === 'reports' && (
             <div className="space-y-6">
+              <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+                <Card>
+                  <SectionHeading
+                    title="Discovery cockpit"
+                    subtitle="Ask business-style questions, jump into certified collections, or resume pinned reports."
+                  />
+                  <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_220px]">
+                    <div>
+                      <div className="flex flex-wrap gap-2">
+                        {suggestedSearches.slice(0, 8).map((item) => (
+                          <button
+                            key={item}
+                            type="button"
+                            onClick={() => selectSearch(item)}
+                            className="rounded-lg border px-3 py-2 text-sm"
+                            style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)', color: 'var(--aurora-text-secondary)' }}
+                          >
+                            {item}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="mt-4 grid gap-2 md:grid-cols-2">
+                        {businessQuestions.slice(0, 4).map((question) => (
+                          <button
+                            key={`${question.reportId}-${question.question}`}
+                            type="button"
+                            onClick={() => selectSearch(question.question)}
+                            className="rounded-lg border p-3 text-left text-sm"
+                            style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)' }}
+                          >
+                            <div className="font-medium" style={{ color: 'var(--aurora-text)' }}>
+                              {question.question}
+                            </div>
+                            <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              {question.reportName} / {REPORT_TYPE_LABELS[question.reportType]}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border p-4" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                      <div className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                        Catalog health
+                      </div>
+                      <div className="mt-2 text-3xl font-semibold">{discoveryHealth?.overallScore ?? 0}%</div>
+                      <div className="mt-3 grid gap-2 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
+                        <div>Owners: {discoveryHealth?.withOwner ?? 0}%</div>
+                        <div>Business questions: {discoveryHealth?.withQuestions ?? 0}%</div>
+                        <div>Drill paths: {discoveryHealth?.withDrillPaths ?? 0}%</div>
+                        <div>Certified/official: {discoveryHealth?.certifiedOrOfficial ?? 0}%</div>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+
+                <Card>
+                  <SectionHeading title="Pinned and recent" subtitle="Personal shortcuts stored in this browser." />
+                  <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+                    <div>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                        Favorites
+                      </div>
+                      <div className="space-y-2">
+                        {favoriteEntries.slice(0, 4).map((entry) => (
+                          <Link
+                            key={`favorite-${entry.id}`}
+                            href={buildLink(entry)}
+                            onClick={() => rememberReport(entry.id)}
+                            className="block rounded-lg border px-3 py-2 text-sm"
+                            style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
+                          >
+                            {entry.name}
+                          </Link>
+                        ))}
+                        {favoriteEntries.length === 0 && (
+                          <div className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}>
+                            Pin reports with the star button on any report card.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                        Recent
+                      </div>
+                      <div className="space-y-2">
+                        {recentEntries.slice(0, 4).map((entry) => (
+                          <Link
+                            key={`recent-${entry.id}`}
+                            href={buildLink(entry)}
+                            onClick={() => rememberReport(entry.id)}
+                            className="block rounded-lg border px-3 py-2 text-sm"
+                            style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
+                          >
+                            {entry.name}
+                          </Link>
+                        ))}
+                        {recentEntries.length === 0 && (
+                          <div className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}>
+                            Open a report to build recent history.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+
+              {featuredCollections.length > 0 && (
+                <div className="space-y-3">
+                  <SectionHeading title="Featured collections" subtitle="Curated discovery sets for close, operations, compliance, and self-service BI." />
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    {featuredCollections.map((collection) => (
+                      <button
+                        key={collection.key}
+                        type="button"
+                        onClick={() => selectSearch(collection.title)}
+                        className="rounded-lg border p-4 text-left"
+                        style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)' }}
+                      >
+                        <div className="text-sm font-semibold">{collection.title}</div>
+                        <p className="mt-2 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                          {collection.description}
+                        </p>
+                        <div className="mt-3">
+                          <Badge tone="blue">{collection.reportCount} reports</Badge>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <Card padding="none" className="overflow-hidden">
                 <div className="grid gap-4 p-4 xl:grid-cols-[1.2fr_1fr]">
                   <div>
@@ -950,7 +1217,14 @@ export default function MasterReportsPage() {
                 <SectionHeading title="Recommended for this role" subtitle="Certified and high-value reports surfaced from the catalog." />
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {recommendedEntries.map((entry) => (
-                    <ReportCard key={`recommended-${entry.id}`} entry={entry} href={buildLink(entry)} />
+                    <ReportCard
+                      key={`recommended-${entry.id}`}
+                      entry={entry}
+                      href={buildLink(entry)}
+                      isFavorite={favoriteReportIds.includes(entry.id)}
+                      onToggleFavorite={toggleFavorite}
+                      onOpen={rememberReport}
+                    />
                   ))}
                 </div>
               </div>
@@ -1110,7 +1384,14 @@ export default function MasterReportsPage() {
                       <SectionHeading title={group} subtitle={`${groupEntries.length} report${groupEntries.length === 1 ? '' : 's'}`} />
                       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                         {groupEntries.map((entry) => (
-                          <ReportCard key={entry.id} entry={entry} href={buildLink(entry)} />
+                          <ReportCard
+                            key={entry.id}
+                            entry={entry}
+                            href={buildLink(entry)}
+                            isFavorite={favoriteReportIds.includes(entry.id)}
+                            onToggleFavorite={toggleFavorite}
+                            onOpen={rememberReport}
+                          />
                         ))}
                       </div>
                     </section>

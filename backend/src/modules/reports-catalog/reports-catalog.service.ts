@@ -42,33 +42,17 @@ export class ReportsCatalogService {
     const sector = query.sector?.toUpperCase() as ReportSector | undefined;
     const scope = query.scope?.toUpperCase() as ReportScope | undefined;
     const search = query.search?.trim().toLowerCase();
+    const searchTerms = search ? this.expandSearchTerms(search) : [];
 
     let entries: EnterpriseCatalogEntry[] = catalog;
     if (sector) entries = entries.filter((e) => e.sector === sector);
     if (scope) entries = entries.filter((e) => e.scopes.includes(scope));
-    if (search) {
-      entries = entries.filter((e) => {
-        const haystack = [
-          e.id,
-          e.sector,
-          e.category,
-          e.name,
-          e.description,
-          e.permission,
-          e.reportType,
-          e.lifecycleStatus,
-          e.owner,
-          e.dataFreshness,
-          e.securityClassification,
-          ...e.tags,
-          ...e.businessQuestions,
-          ...e.drillPaths,
-          ...e.relatedCapabilities,
-        ]
-          .join(' ')
-          .toLowerCase();
-        return haystack.includes(search);
-      });
+    if (searchTerms.length) {
+      entries = entries
+        .map((entry) => ({ entry, score: this.discoveryScore(entry, searchTerms) }))
+        .filter((row) => row.score > 0)
+        .sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name))
+        .map((row) => row.entry);
     }
 
     const sectors = Array.from(new Set(catalog.map((e) => e.sector))).sort();
@@ -76,11 +60,15 @@ export class ReportsCatalogService {
     const typeCounts: Record<string, number> = {};
     const lifecycleCounts: Record<string, number> = {};
     const securityCounts: Record<string, number> = {};
+    const categoryCounts: Record<string, number> = {};
+    const ownerCounts: Record<string, number> = {};
     for (const e of catalog) {
       sectorCounts[e.sector] = (sectorCounts[e.sector] ?? 0) + 1;
       typeCounts[e.reportType] = (typeCounts[e.reportType] ?? 0) + 1;
       lifecycleCounts[e.lifecycleStatus] = (lifecycleCounts[e.lifecycleStatus] ?? 0) + 1;
       securityCounts[e.securityClassification] = (securityCounts[e.securityClassification] ?? 0) + 1;
+      categoryCounts[e.category] = (categoryCounts[e.category] ?? 0) + 1;
+      ownerCounts[e.owner] = (ownerCounts[e.owner] ?? 0) + 1;
     }
 
     return {
@@ -91,7 +79,21 @@ export class ReportsCatalogService {
       typeCounts,
       lifecycleCounts,
       securityCounts,
+      categoryCounts,
+      ownerCounts,
       generatedAt: new Date().toISOString(),
+      searchIntent: search
+        ? {
+            query: search,
+            expandedTerms: searchTerms,
+            matchedReports: entries.length,
+          }
+        : null,
+      facets: this.discoveryFacets(catalog),
+      suggestedSearches: this.suggestedSearches(),
+      businessQuestionIndex: this.businessQuestionIndex(catalog),
+      featuredCollections: this.featuredCollections(catalog),
+      discoveryHealth: this.discoveryHealth(catalog),
       entries,
     };
   }
@@ -237,6 +239,15 @@ export class ReportsCatalogService {
       metricCatalog: this.metricCatalog(),
       reportPacks: this.reportPacks(),
       governance: this.governanceSnapshot(catalog),
+      discovery: {
+        health: this.discoveryHealth(catalog),
+        suggestedSearches: this.suggestedSearches(),
+        businessQuestions: this.businessQuestionIndex(catalog).slice(0, 12),
+        featuredCollections: this.featuredCollections(catalog),
+        certifiedHighlights: catalog
+          .filter((entry) => entry.lifecycleStatus === 'CERTIFIED' || entry.lifecycleStatus === 'OFFICIAL')
+          .slice(0, 8),
+      },
       admin: {
         typeCounts,
         lifecycleCounts,
@@ -824,6 +835,187 @@ export class ReportsCatalogService {
     const entry = this.catalog().find((candidate) => candidate.id === reportId);
     if (!entry) throw new NotFoundException('Report not found in catalog');
     return entry;
+  }
+
+  private expandSearchTerms(search: string) {
+    const rawTerms = search
+      .split(/[^a-z0-9]+/)
+      .map((term) => term.trim())
+      .filter((term) => term.length > 1);
+    const phraseSynonyms: Record<string, string[]> = {
+      'who owes us money': ['receivables', 'aging', 'customer', 'balance', 'collections', 'overdue'],
+      'money we owe': ['payables', 'aging', 'supplier', 'vendor', 'open bills', 'overdue'],
+      'cash position': ['cash', 'bank', 'treasury', 'liquidity', 'working capital'],
+      'stock value': ['inventory', 'stock', 'valuation', 'warehouse', 'products'],
+      'slow moving stock': ['inventory', 'aging', 'slow', 'obsolete', 'movement'],
+      'sales performance': ['sales', 'revenue', 'customer', 'product', 'margin'],
+      'audit evidence': ['audit', 'trail', 'evidence', 'controls', 'documents'],
+      'tax readiness': ['tax', 'compliance', 'obligations', 'filing', 'statutory'],
+      'budget overspend': ['budget', 'variance', 'actual', 'expense', 'department'],
+    };
+    const tokenSynonyms: Record<string, string[]> = {
+      owe: ['payables', 'receivables', 'aging', 'balance'],
+      owed: ['receivables', 'aging', 'customer'],
+      supplier: ['vendor', 'payables', 'purchase'],
+      vendor: ['supplier', 'payables', 'purchase'],
+      customer: ['sales', 'receivables', 'collections'],
+      money: ['cash', 'receivables', 'payables'],
+      income: ['profit', 'loss', 'revenue', 'sales'],
+      expense: ['profit', 'loss', 'spend', 'cost'],
+      stock: ['inventory', 'valuation', 'movement', 'product'],
+      inventory: ['stock', 'warehouse', 'movement', 'valuation'],
+      proof: ['audit', 'evidence', 'documents', 'trail'],
+      approval: ['workflow', 'audit', 'controls'],
+      kpi: ['dashboard', 'indicator', 'snapshot', 'metric'],
+      dashboard: ['cockpit', 'kpi', 'summary'],
+    };
+
+    const expanded = new Set(rawTerms);
+    for (const [phrase, terms] of Object.entries(phraseSynonyms)) {
+      if (search.includes(phrase)) {
+        terms.forEach((term) => expanded.add(term));
+      }
+    }
+    for (const term of rawTerms) {
+      (tokenSynonyms[term] ?? []).forEach((synonym) => expanded.add(synonym));
+    }
+    return Array.from(expanded);
+  }
+
+  private discoveryScore(entry: EnterpriseCatalogEntry, terms: string[]) {
+    const weightedFields: Array<[string, number]> = [
+      [entry.name, 10],
+      [entry.id, 8],
+      [entry.description, 7],
+      [entry.category, 5],
+      [entry.owner, 4],
+      [entry.sector, 4],
+      [entry.reportType, 4],
+      [entry.lifecycleStatus, 3],
+      [entry.securityClassification, 2],
+      [entry.tags.join(' '), 6],
+      [entry.businessQuestions.join(' '), 7],
+      [entry.drillPaths.join(' '), 5],
+      [entry.relatedCapabilities.join(' '), 4],
+      [entry.outputFormats.join(' '), 2],
+    ];
+    return terms.reduce((score, term) => {
+      const normalized = term.toLowerCase();
+      const fieldScore = weightedFields.reduce((sum, [field, weight]) => {
+        return field.toLowerCase().includes(normalized) ? sum + weight : sum;
+      }, 0);
+      return score + fieldScore;
+    }, 0);
+  }
+
+  private discoveryFacets(catalog: EnterpriseCatalogEntry[]) {
+    return {
+      sectors: this.facet(catalog, (entry) => entry.sector),
+      scopes: this.facet(catalog.flatMap((entry) => entry.scopes.map((scope) => ({ scope }))), (entry) => entry.scope),
+      reportTypes: this.facet(catalog, (entry) => entry.reportType),
+      lifecycleStatuses: this.facet(catalog, (entry) => entry.lifecycleStatus),
+      securityClassifications: this.facet(catalog, (entry) => entry.securityClassification),
+      categories: this.facet(catalog, (entry) => entry.category),
+      owners: this.facet(catalog, (entry) => entry.owner),
+      tags: this.facet(
+        catalog.flatMap((entry) => entry.tags.map((tag) => ({ tag }))),
+        (entry) => entry.tag,
+      ).slice(0, 30),
+    };
+  }
+
+  private facet<T>(items: T[], pick: (item: T) => string) {
+    const counts = new Map<string, number>();
+    for (const item of items) {
+      const key = pick(item);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+  }
+
+  private suggestedSearches() {
+    return [
+      'Who owes us money?',
+      'Money we owe suppliers',
+      'Cash position',
+      'Stock value by branch',
+      'Sales performance',
+      'Audit evidence',
+      'Tax readiness',
+      'Budget overspend',
+      'Slow moving stock',
+      'Failed scheduled reports',
+    ];
+  }
+
+  private businessQuestionIndex(catalog: EnterpriseCatalogEntry[]) {
+    const rows = catalog.flatMap((entry) =>
+      entry.businessQuestions.map((question) => ({
+        question,
+        reportId: entry.id,
+        reportName: entry.name,
+        sector: entry.sector,
+        reportType: entry.reportType,
+        href: `/reports/run?reportId=${encodeURIComponent(entry.id)}`,
+      })),
+    );
+    const seen = new Set<string>();
+    return rows.filter((row) => {
+      const key = `${row.question}:${row.sector}:${row.reportType}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  private featuredCollections(catalog: EnterpriseCatalogEntry[]) {
+    const collection = (
+      key: string,
+      title: string,
+      description: string,
+      predicate: (entry: EnterpriseCatalogEntry) => boolean,
+    ) => {
+      const reports = catalog.filter(predicate).slice(0, 8);
+      return { key, title, description, reportCount: reports.length, reports };
+    };
+
+    return [
+      collection('cfo-close', 'CFO close and statements', 'Financial statements, cash, AR/AP, consolidation, and close evidence.', (entry) =>
+        entry.sector === 'FINANCE' || entry.relatedCapabilities.includes('Financial Statements Archive'),
+      ),
+      collection('operations-live', 'Operations control', 'Inventory, sales, purchases, movements, and branch execution.', (entry) =>
+        entry.sector === 'OPERATIONS' || entry.sector === 'WESTSIDES' || entry.sector === 'PETROLEUM',
+      ),
+      collection('audit-compliance', 'Audit and compliance evidence', 'Formal reports, control evidence, tax readiness, and audit trail.', (entry) =>
+        entry.reportType === 'AUDIT' || entry.reportType === 'COMPLIANCE',
+      ),
+      collection('self-service-bi', 'Self-service BI', 'Builder, saved views, report runs, scheduled delivery, and governed datasets.', (entry) =>
+        entry.reportType === 'SELF_SERVICE' || entry.sector === 'BI',
+      ),
+    ];
+  }
+
+  private discoveryHealth(catalog: EnterpriseCatalogEntry[]) {
+    const percent = (count: number) => Math.round((count / Math.max(catalog.length, 1)) * 100);
+    const withOwner = percent(catalog.filter((entry) => Boolean(entry.owner)).length);
+    const withQuestions = percent(catalog.filter((entry) => entry.businessQuestions.length > 0).length);
+    const withDrillPaths = percent(catalog.filter((entry) => entry.drillPaths.length > 0).length);
+    const withOutputs = percent(catalog.filter((entry) => entry.outputFormats.length > 0).length);
+    const certifiedOrOfficial = percent(
+      catalog.filter((entry) => entry.lifecycleStatus === 'CERTIFIED' || entry.lifecycleStatus === 'OFFICIAL').length,
+    );
+    const overallScore = Math.round((withOwner + withQuestions + withDrillPaths + withOutputs + certifiedOrOfficial) / 5);
+    return {
+      overallScore,
+      withOwner,
+      withQuestions,
+      withDrillPaths,
+      withOutputs,
+      certifiedOrOfficial,
+      status: overallScore >= 85 ? 'READY' : overallScore >= 70 ? 'IMPROVING' : 'NEEDS_WORK',
+    };
   }
 
   private reportsForPack(packKey: string, catalog: EnterpriseCatalogEntry[]) {
