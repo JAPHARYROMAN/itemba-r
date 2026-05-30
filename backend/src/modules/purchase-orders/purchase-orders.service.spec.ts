@@ -125,6 +125,16 @@ describe('PurchaseOrdersService payment state', () => {
     );
   });
 
+  it('rejects discounts greater than the purchase line amount', async () => {
+    const { service } = makeService();
+    const dto = createDto('CASH_PURCHASE');
+    dto.lines[0].discountAmount = 250;
+
+    await expect(service.create(dto, user)).rejects.toThrow(
+      'Purchase order line discount cannot exceed the line amount',
+    );
+  });
+
   it('repairs cash payment state when a cash purchase is received', async () => {
     const { service, prisma, postingEngine, accountResolver } = makeService();
     prisma.purchaseOrder.findFirst.mockResolvedValue({

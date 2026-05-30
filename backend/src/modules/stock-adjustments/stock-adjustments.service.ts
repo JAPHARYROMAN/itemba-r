@@ -22,6 +22,20 @@ function generateAdjustmentNumber(): string {
   return `SA-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`;
 }
 
+function normalizeAdjustmentLine(line: StockAdjustmentLineDto) {
+  const systemQuantity = Number(line.systemQuantity ?? line.systemQty);
+  const countedQuantity = Number(line.countedQuantity ?? line.countedQty);
+  if (!Number.isFinite(systemQuantity) || !Number.isFinite(countedQuantity)) {
+    throw new BadRequestException('Stock adjustment quantities must be valid numbers');
+  }
+  return {
+    ...line,
+    systemQuantity,
+    countedQuantity,
+    varianceQuantity: countedQuantity - systemQuantity,
+  };
+}
+
 @Injectable()
 export class StockAdjustmentsService {
   constructor(
@@ -120,14 +134,17 @@ export class StockAdjustmentsService {
         status: 'DRAFT',
         createdById: userId,
         lines: {
-          create: dto.lines.map((line) => ({
-            productId: line.productId,
-            systemQuantity: line.systemQuantity,
-            countedQuantity: line.countedQuantity,
-            varianceQuantity: line.countedQuantity - line.systemQuantity,
-            unitId: line.unitId,
-            reason: line.reason,
-          })),
+          create: dto.lines.map((line) => {
+            const normalized = normalizeAdjustmentLine(line);
+            return {
+              productId: normalized.productId,
+              systemQuantity: normalized.systemQuantity,
+              countedQuantity: normalized.countedQuantity,
+              varianceQuantity: normalized.varianceQuantity,
+              unitId: normalized.unitId,
+              reason: normalized.reason,
+            };
+          }),
         },
       },
       include: { lines: true },
@@ -166,14 +183,17 @@ export class StockAdjustmentsService {
         ...(dto.lines && {
           lines: {
             deleteMany: {},
-            create: dto.lines.map((line) => ({
-              productId: line.productId,
-              systemQuantity: line.systemQuantity,
-              countedQuantity: line.countedQuantity,
-              varianceQuantity: line.countedQuantity - line.systemQuantity,
-              unitId: line.unitId,
-              reason: line.reason,
-            })),
+            create: dto.lines.map((line) => {
+              const normalized = normalizeAdjustmentLine(line);
+              return {
+                productId: normalized.productId,
+                systemQuantity: normalized.systemQuantity,
+                countedQuantity: normalized.countedQuantity,
+                varianceQuantity: normalized.varianceQuantity,
+                unitId: normalized.unitId,
+                reason: normalized.reason,
+              };
+            }),
           },
         }),
       },
@@ -278,29 +298,44 @@ export class StockAdjustmentsService {
       throw new BadRequestException('Branch/location is required to post stock adjustment');
     }
 
-    for (const line of existing.lines) {
-      const variance = Number(line.varianceQuantity);
-      if (variance === 0) continue;
-
-      const movementType = variance > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
-      await this.inventoryMovements.createMovement({
-        companyId: existing.companyId,
-        productId: line.productId,
-        movementType: movementType as any,
-        quantity: Math.abs(variance),
-        unitId: line.unitId,
-        movementDate: new Date(),
-        createdById: userId,
-        referenceType: 'StockAdjustment',
-        referenceId: existing.id,
-        divisionId: existing.divisionId ?? undefined,
-        branchId: existing.branchId ?? undefined,
+    // ITMB-042: Apply all inventory movements and flip the status in ONE transaction so a
+    // mid-loop failure rolls back every balance change, and atomically claim the document
+    // (guarded on status === APPROVED) up front so concurrent/retried posts cannot
+    // double-apply the variances.
+    const record = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.stockAdjustment.updateMany({
+        where: { id, status: 'APPROVED' },
+        data: { status: 'POSTED', postedById: userId, postedAt: new Date() },
       });
-    }
+      if (claimed.count === 0) {
+        throw new BadRequestException('Only APPROVED adjustments can be posted');
+      }
 
-    const record = await this.prisma.stockAdjustment.update({
-      where: { id },
-      data: { status: 'POSTED', postedById: userId, postedAt: new Date() },
+      for (const line of existing.lines) {
+        const variance = Number(line.varianceQuantity);
+        if (variance === 0) continue;
+
+        const movementType = variance > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
+        await this.inventoryMovements.createMovement({
+          companyId: existing.companyId,
+          productId: line.productId,
+          movementType: movementType as any,
+          quantity: Math.abs(variance),
+          unitId: line.unitId,
+          movementDate: new Date(),
+          createdById: userId,
+          referenceType: 'StockAdjustment',
+          referenceId: existing.id,
+          divisionId: existing.divisionId ?? undefined,
+          branchId: existing.branchId ?? undefined,
+          tx,
+        });
+      }
+
+      return tx.stockAdjustment.update({
+        where: { id },
+        data: { status: 'POSTED', postedById: userId, postedAt: new Date() },
+      });
     });
 
     await this.auditLogs.log({

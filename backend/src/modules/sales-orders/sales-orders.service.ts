@@ -18,6 +18,7 @@ import {
   PaymentStatus,
   Prisma,
   SalesPaymentMethod,
+  SalesType,
 } from '@prisma/client';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 
@@ -70,6 +71,23 @@ function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
 }
 
+function normalizePaymentMethodForSalesType(
+  salesType: SalesType,
+  paymentMethod?: SalesPaymentMethod | null,
+): SalesPaymentMethod {
+  if (salesType === SalesType.CASH_SALE || salesType === SalesType.RETAIL) {
+    return paymentMethod && paymentMethod !== SalesPaymentMethod.CREDIT
+      ? paymentMethod
+      : SalesPaymentMethod.CASH;
+  }
+
+  if (salesType === SalesType.CREDIT_SALE) {
+    return SalesPaymentMethod.CREDIT;
+  }
+
+  return paymentMethod ?? SalesPaymentMethod.CREDIT;
+}
+
 function calculateLineTotals(
   lines: {
     productId: string;
@@ -91,8 +109,30 @@ function calculateLineTotals(
     const price = Number(line.unitPrice);
     const discount = Number(line.discountAmount ?? 0);
     const tax = Number(line.taxAmount ?? 0);
-    const lineTotal = qty * price - discount + tax;
-    subtotal += qty * price;
+    // Defensive server-side validation (ITMB-003/ITMB-041): reject quantities,
+    // prices, discounts or taxes that would corrupt totals or inventory. The
+    // DTO already enforces these, but recompute here so update() (which can
+    // reuse stored lines) and any future caller cannot bypass the guard.
+    if (!Number.isFinite(qty) || qty <= 0) {
+      throw new BadRequestException('Sales order line quantity must be greater than zero');
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      throw new BadRequestException('Sales order line unit price cannot be negative');
+    }
+    if (!Number.isFinite(discount) || discount < 0) {
+      throw new BadRequestException('Sales order line discount cannot be negative');
+    }
+    if (!Number.isFinite(tax) || tax < 0) {
+      throw new BadRequestException('Sales order line tax cannot be negative');
+    }
+    const extended = qty * price;
+    if (discount > extended) {
+      throw new BadRequestException(
+        'Sales order line discount cannot exceed the line amount (quantity x unit price)',
+      );
+    }
+    const lineTotal = extended - discount + tax;
+    subtotal += extended;
     totalDiscount += discount;
     totalTax += tax;
     return { ...line, lineTotal };
@@ -392,7 +432,14 @@ export class SalesOrdersService {
 
   async create(dto: CreateSalesOrderDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
-    await this.assertReferencesBelongToCompany(dto.companyId, dto);
+    const paymentMethod = normalizePaymentMethodForSalesType(dto.salesType, dto.paymentMethod);
+    const cashAccountId =
+      paymentMethod === SalesPaymentMethod.CREDIT ? undefined : dto.cashAccountId;
+    await this.assertReferencesBelongToCompany(dto.companyId, {
+      ...dto,
+      paymentMethod,
+      cashAccountId,
+    });
     const userId = user.id;
     const { computed, subtotal, totalDiscount, totalTax, totalAmount } = calculateLineTotals(
       dto.lines,
@@ -426,8 +473,8 @@ export class SalesOrdersService {
           paymentStatus: 'UNPAID',
           notes: dto.notes,
           salespersonId: dto.salespersonId,
-          paymentMethod: dto.paymentMethod ?? 'CREDIT',
-          cashAccountId: dto.cashAccountId,
+          paymentMethod,
+          cashAccountId: cashAccountId ?? null,
           paymentReference: dto.paymentReference,
           createdById: userId,
         },
@@ -469,13 +516,22 @@ export class SalesOrdersService {
     if (existing.status !== 'DRAFT') {
       throw new BadRequestException('Sales order can only be updated in DRAFT status');
     }
+    const nextSalesType = dto.salesType ?? existing.salesType;
+    const nextPaymentMethod = normalizePaymentMethodForSalesType(
+      nextSalesType,
+      dto.paymentMethod ?? ((existing as any).paymentMethod as SalesPaymentMethod),
+    );
+    const nextCashAccountId =
+      nextPaymentMethod === SalesPaymentMethod.CREDIT
+        ? null
+        : (dto.cashAccountId ?? (existing as any).cashAccountId ?? null);
     await this.assertReferencesBelongToCompany(existing.companyId, {
       divisionId: dto.divisionId ?? existing.divisionId,
       branchId: dto.branchId ?? existing.branchId,
       customerId: dto.customerId ?? existing.customerId,
       salespersonId: dto.salespersonId ?? existing.salespersonId,
-      cashAccountId: dto.cashAccountId ?? (existing as any).cashAccountId,
-      paymentMethod: dto.paymentMethod ?? ((existing as any).paymentMethod as SalesPaymentMethod),
+      cashAccountId: nextCashAccountId ?? undefined,
+      paymentMethod: nextPaymentMethod,
       lines: dto.lines,
     });
 
@@ -515,8 +571,8 @@ export class SalesOrdersService {
           ...(dto.divisionId !== undefined && { divisionId: dto.divisionId }),
           ...(dto.branchId !== undefined && { branchId: dto.branchId }),
           ...(dto.salespersonId !== undefined && { salespersonId: dto.salespersonId }),
-          ...(dto.paymentMethod !== undefined && { paymentMethod: dto.paymentMethod }),
-          ...(dto.cashAccountId !== undefined && { cashAccountId: dto.cashAccountId }),
+          paymentMethod: nextPaymentMethod,
+          cashAccountId: nextCashAccountId,
           ...(dto.paymentReference !== undefined && { paymentReference: dto.paymentReference }),
           ...(dto.lines && {
             subtotal,

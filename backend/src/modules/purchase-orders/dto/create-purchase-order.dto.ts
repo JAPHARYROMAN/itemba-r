@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -22,6 +23,7 @@ export class PurchaseOrderLineDto {
 
   @IsNotEmpty()
   @IsNumber()
+  @Min(0.0001)
   quantity!: number;
 
   @IsNotEmpty()
@@ -30,14 +32,17 @@ export class PurchaseOrderLineDto {
 
   @IsNotEmpty()
   @IsNumber()
+  @Min(0)
   unitCost!: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   discountAmount?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   taxAmount?: number;
 
   @IsOptional()

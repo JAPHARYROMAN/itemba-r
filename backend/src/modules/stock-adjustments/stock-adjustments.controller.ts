@@ -3,7 +3,10 @@ import { StockAdjustmentsService } from './stock-adjustments.service';
 import { CreateStockAdjustmentDto } from './dto/create-stock-adjustment.dto';
 import { UpdateStockAdjustmentDto } from './dto/update-stock-adjustment.dto';
 import { QueryStockAdjustmentDto } from './dto/query-stock-adjustment.dto';
-import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import {
+  RequireAnyPermissions,
+  RequirePermissions,
+} from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('stock-adjustments')
@@ -11,13 +14,13 @@ export class StockAdjustmentsController {
   constructor(private readonly service: StockAdjustmentsService) {}
 
   @Get()
-  @RequirePermissions('inventory.adjustments.create')
+  @RequireAnyPermissions('inventory.view', 'inventory.adjustments.create')
   findAll(@Query() query: QueryStockAdjustmentDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
   @Get(':id')
-  @RequirePermissions('inventory.adjustments.create')
+  @RequireAnyPermissions('inventory.view', 'inventory.adjustments.create')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.findOne(id, user);
   }

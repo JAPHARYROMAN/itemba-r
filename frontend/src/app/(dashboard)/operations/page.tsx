@@ -13,6 +13,30 @@ interface Company {
   code: string;
 }
 
+interface OperationsReadiness {
+  score: number;
+  target: number;
+  maturity: string;
+  updatedAt: string;
+  indicators: {
+    activeProducts: number;
+    activeCustomers: number;
+    activeSuppliers: number;
+    negativeBalances: number;
+    lowStockProducts: number;
+    transactionIntegrityIssues: number;
+    workflowBacklog: number;
+  };
+  checks: Array<{
+    key: string;
+    title: string;
+    status: 'PASS' | 'WARN' | 'FAIL';
+    score: number;
+    message: string;
+    details: Record<string, number | string>;
+  }>;
+}
+
 interface DashboardSummary {
   customers: { total: number; active: number; blocked: number };
   suppliers: { total: number; active: number; blocked: number };
@@ -42,6 +66,7 @@ interface DashboardSummary {
     quantityOnHand: number;
     reorderLevel: number;
   }>;
+  readiness?: OperationsReadiness;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -59,6 +84,12 @@ function fmtTZS(n: number | string | null | undefined) {
 function fmtNum(n: number | string | null | undefined) {
   const value = Number(n ?? 0);
   return new Intl.NumberFormat('en-US').format(Number.isFinite(value) ? value : 0);
+}
+
+function readinessStatusClass(status: OperationsReadiness['checks'][number]['status']) {
+  if (status === 'PASS') return 'bg-emerald-100 text-emerald-700';
+  if (status === 'WARN') return 'bg-amber-100 text-amber-700';
+  return 'bg-red-100 text-red-700';
 }
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';
@@ -170,6 +201,86 @@ export default function OperationsDashboardPage() {
 
       {companyId && !loading && data && (
         <div className="space-y-6">
+          {data.readiness && (
+            <div className="grid grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)] gap-4">
+              <Card className="p-5">
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Operations Readiness
+                </div>
+                <div className="mt-3 flex items-end gap-2">
+                  <span className="text-5xl font-bold text-slate-900">{data.readiness.score}</span>
+                  <span className="pb-2 text-sm text-slate-500">/100</span>
+                </div>
+                <div className="mt-3 text-sm font-medium text-slate-700 capitalize">
+                  {data.readiness.maturity.replace(/-/g, ' ')}
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-500">
+                  <div>
+                    <div className="font-semibold text-slate-700">
+                      {fmtNum(data.readiness.indicators.transactionIntegrityIssues)}
+                    </div>
+                    cash issues
+                  </div>
+                  <div>
+                    <div className="font-semibold text-slate-700">
+                      {fmtNum(data.readiness.indicators.negativeBalances)}
+                    </div>
+                    negative stock
+                  </div>
+                  <div>
+                    <div className="font-semibold text-slate-700">
+                      {fmtNum(data.readiness.indicators.workflowBacklog)}
+                    </div>
+                    workflow backlog
+                  </div>
+                  <div>
+                    <div className="font-semibold text-slate-700">
+                      {fmtNum(data.readiness.indicators.activeProducts)}
+                    </div>
+                    active products
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="p-5">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                      Control Checks
+                    </div>
+                    <div className="mt-1 text-sm text-slate-500">
+                      Live sales, purchases, inventory, and payment integrity checks.
+                    </div>
+                  </div>
+                  <span className="text-xs text-slate-400">Target {data.readiness.target}+</span>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {data.readiness.checks.map((check) => (
+                    <div
+                      key={check.key}
+                      className="rounded-lg border border-slate-100 bg-slate-50 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-slate-800">{check.title}</span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${readinessStatusClass(
+                            check.status,
+                          )}`}
+                        >
+                          {check.status}
+                        </span>
+                      </div>
+                      <div className="mt-2 text-xs text-slate-500">{check.message}</div>
+                      <div className="mt-3 text-xs font-semibold text-slate-700">
+                        {check.score}/100
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          )}
+
           {/* Row 1 — Entity counts */}
           <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <StatCard

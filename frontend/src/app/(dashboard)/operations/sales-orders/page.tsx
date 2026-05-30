@@ -180,6 +180,14 @@ const PAYMENT_METHODS = [
   { value: 'OTHER', label: 'Other' },
 ];
 
+function defaultPaymentMethodForSalesType(salesType: string, current?: string) {
+  if (salesType === 'CASH_SALE' || salesType === 'RETAIL') {
+    return current && current !== 'CREDIT' ? current : 'CASH';
+  }
+  if (salesType === 'CREDIT_SALE') return 'CREDIT';
+  return current ?? 'CREDIT';
+}
+
 const ACCOUNT_TYPE_LABELS: Record<string, string> = {
   CASH_ON_HAND: 'Cash on hand',
   PETTY_CASH: 'Petty cash',
@@ -250,7 +258,7 @@ const blankForm = (): SalesOrderForm => ({
   currency: 'TZS',
   notes: '',
   salespersonId: '',
-  paymentMethod: 'CREDIT',
+  paymentMethod: defaultPaymentMethodForSalesType('CASH_SALE'),
   cashAccountId: '',
   paymentReference: '',
   lines: [BLANK_LINE()],
@@ -288,7 +296,8 @@ function SalesOrderModal({
           currency: initial.currency,
           notes: initial.notes ?? '',
           salespersonId: initial.salespersonId ?? '',
-          paymentMethod: initial.paymentMethod ?? 'CREDIT',
+          paymentMethod:
+            initial.paymentMethod ?? defaultPaymentMethodForSalesType(initial.salesType),
           cashAccountId: initial.cashAccountId ?? '',
           paymentReference: initial.paymentReference ?? '',
           lines: initial.lines?.length
@@ -363,12 +372,7 @@ function SalesOrderModal({
   }, [form.companyId]);
 
   useEffect(() => {
-    if (
-      !form.companyId ||
-      !form.divisionId ||
-      !form.branchId ||
-      form.paymentMethod === 'CREDIT'
-    ) {
+    if (!form.companyId || !form.divisionId || !form.branchId || form.paymentMethod === 'CREDIT') {
       setCashAccounts([]);
       return;
     }
@@ -433,29 +437,30 @@ function SalesOrderModal({
     const selectedProductIds = selectedProductIdKey ? selectedProductIdKey.split('|') : [];
     setProductSearchLoading(true);
 
-    const timer = setTimeout(() => {
-      backendList<Product>('/products', {
-        query: {
-          companyId: form.companyId,
-          divisionId: form.divisionId || undefined,
-          limit: search ? 50 : 200,
-          ...(search && { search }),
-        },
-      })
-        .then((rows) => {
-          if (!cancelled) {
-            setProducts((current) =>
-              mergeOrderProductOptions(rows, current, selectedProductIds),
-            );
-          }
+    const timer = setTimeout(
+      () => {
+        backendList<Product>('/products', {
+          query: {
+            companyId: form.companyId,
+            divisionId: form.divisionId || undefined,
+            limit: search ? 50 : 200,
+            ...(search && { search }),
+          },
         })
-        .catch(() => {
-          if (!cancelled) setProducts([]);
-        })
-        .finally(() => {
-          if (!cancelled) setProductSearchLoading(false);
-        });
-    }, search ? 250 : 0);
+          .then((rows) => {
+            if (!cancelled) {
+              setProducts((current) => mergeOrderProductOptions(rows, current, selectedProductIds));
+            }
+          })
+          .catch(() => {
+            if (!cancelled) setProducts([]);
+          })
+          .finally(() => {
+            if (!cancelled) setProductSearchLoading(false);
+          });
+      },
+      search ? 250 : 0,
+    );
 
     return () => {
       cancelled = true;
@@ -624,7 +629,22 @@ function SalesOrderModal({
             label="Sales Type"
             required
             value={form.salesType}
-            onChange={(e) => setField('salesType', e.target.value)}
+            onChange={(e) => {
+              const salesType = e.target.value;
+              setForm((current) => {
+                const paymentMethod = defaultPaymentMethodForSalesType(
+                  salesType,
+                  current.paymentMethod,
+                );
+                return {
+                  ...current,
+                  salesType,
+                  paymentMethod,
+                  cashAccountId:
+                    paymentMethod === current.paymentMethod ? current.cashAccountId : '',
+                };
+              });
+            }}
           >
             {SALES_TYPES.map((t) => (
               <option key={t} value={t}>
@@ -782,12 +802,12 @@ function SalesOrderModal({
                   form.companyId && !form.branchId
                     ? 'Select the sale branch/location first so the form can load the correct receipt accounts.'
                     : form.companyId && receiptAccounts.length === 0
-                    ? `${emptyAccountHint(form.paymentMethod)} Create it under ${
-                        ['BANK_CARD', 'BANK_TRANSFER'].includes(form.paymentMethod)
-                          ? 'Group Control > Bank Accounts.'
-                          : 'Finance > Cash Accounts for this branch/location.'
-                      }`
-                    : undefined
+                      ? `${emptyAccountHint(form.paymentMethod)} Create it under ${
+                          ['BANK_CARD', 'BANK_TRANSFER'].includes(form.paymentMethod)
+                            ? 'Group Control > Bank Accounts.'
+                            : 'Finance > Cash Accounts for this branch/location.'
+                        }`
+                      : undefined
                 }
               >
                 {receiptAccounts.map((a) => (

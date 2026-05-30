@@ -27,11 +27,31 @@ function calcLineTotals(line: {
   discountAmount?: number;
   taxAmount?: number;
 }) {
+  const quantity = Number(line.quantity);
+  const unitCost = Number(line.unitCost);
   const discount = line.discountAmount ?? 0;
   const tax = line.taxAmount ?? 0;
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    throw new BadRequestException('Purchase order line quantity must be greater than zero');
+  }
+  if (!Number.isFinite(unitCost) || unitCost < 0) {
+    throw new BadRequestException('Purchase order line unit cost cannot be negative');
+  }
+  if (!Number.isFinite(discount) || discount < 0) {
+    throw new BadRequestException('Purchase order line discount cannot be negative');
+  }
+  if (!Number.isFinite(tax) || tax < 0) {
+    throw new BadRequestException('Purchase order line tax cannot be negative');
+  }
+  const extended = quantity * unitCost;
+  if (discount > extended) {
+    throw new BadRequestException(
+      'Purchase order line discount cannot exceed the line amount (quantity x unit cost)',
+    );
+  }
   return {
-    lineTotal: line.quantity * line.unitCost - discount + tax,
-    subtotalContrib: line.quantity * line.unitCost,
+    lineTotal: extended - discount + tax,
+    subtotalContrib: extended,
     discount,
     tax,
   };

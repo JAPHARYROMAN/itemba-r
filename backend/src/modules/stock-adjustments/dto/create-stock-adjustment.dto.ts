@@ -4,14 +4,29 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class StockAdjustmentLineDto {
   @IsNotEmpty() @IsString() productId!: string;
-  @IsNotEmpty() @IsNumber() systemQuantity!: number;
-  @IsNotEmpty() @IsNumber() countedQuantity!: number;
+  @ValidateIf((line) => line.systemQty === undefined)
+  @IsNotEmpty()
+  @IsNumber()
+  systemQuantity?: number;
+  @ValidateIf((line) => line.countedQty === undefined)
+  @IsNotEmpty()
+  @IsNumber()
+  countedQuantity?: number;
+  @ValidateIf((line) => line.systemQuantity === undefined)
+  @IsNotEmpty()
+  @IsNumber()
+  systemQty?: number;
+  @ValidateIf((line) => line.countedQuantity === undefined)
+  @IsNotEmpty()
+  @IsNumber()
+  countedQty?: number;
   @IsNotEmpty() @IsString() unitId!: string;
   @IsOptional() @IsString() reason?: string;
 }

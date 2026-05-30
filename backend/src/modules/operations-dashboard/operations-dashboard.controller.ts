@@ -17,4 +17,10 @@ export class OperationsDashboardController {
   getSummary(@Query() q: DashboardQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.getSummary(q.companyId, user);
   }
+
+  @Get('readiness')
+  @RequirePermissions('operations.dashboard.view')
+  getReadiness(@Query() q: DashboardQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getReadiness(q.companyId, user);
+  }
 }

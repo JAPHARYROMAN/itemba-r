@@ -1,7 +1,36 @@
 import { Injectable } from '@nestjs/common';
+import {
+  CashAccountType,
+  PaymentStatus,
+  PurchaseType,
+  SalesPaymentMethod,
+  SalesOrderStatus,
+  SalesType,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+
+type ReadinessStatus = 'PASS' | 'WARN' | 'FAIL';
+
+type ReadinessCheck = {
+  key: string;
+  title: string;
+  status: ReadinessStatus;
+  score: number;
+  message: string;
+  details: Record<string, number | string>;
+};
+
+function clampScore(score: number) {
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function statusFor(checkScore: number): ReadinessStatus {
+  if (checkScore >= 90) return 'PASS';
+  if (checkScore >= 70) return 'WARN';
+  return 'FAIL';
+}
 
 @Injectable()
 export class OperationsDashboardService {
@@ -182,6 +211,254 @@ export class OperationsDashboardService {
         totalValue: Number(b.totalValue),
       })),
       lowStockProducts,
+      readiness: await this.getReadiness(companyId, user),
+    };
+  }
+
+  async getReadiness(companyId: string | undefined, user: AuthUser) {
+    const companyWhere = (await this.companyScope.companyWhereFor(user, companyId)) as any;
+    const softWhere = (extra?: object) => ({
+      deletedAt: null,
+      ...companyWhere,
+      ...(extra ?? {}),
+    });
+    const balanceWhere = (extra?: object) => ({
+      ...companyWhere,
+      ...(extra ?? {}),
+    });
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const [
+      activeProducts,
+      searchableProducts,
+      activeCustomers,
+      activeSuppliers,
+      activeCashAccounts,
+      activeBankOrMobileAccounts,
+      negativeBalances,
+      lowStockCandidates,
+      recentMovements,
+      cashPurchasesUnpaid,
+      confirmedCashSalesUnpaid,
+      cashSalesMissingAccount,
+      purchaseOrdersReadyToReceive,
+      pendingStockAdjustments,
+      approvedStockAdjustments,
+      staleDraftSales,
+      staleDraftPurchases,
+    ] = await Promise.all([
+      this.prisma.product.count({ where: softWhere({ status: 'ACTIVE' }) }),
+      this.prisma.product.count({
+        where: softWhere({
+          status: 'ACTIVE',
+          OR: [{ productCode: { not: '' } }, { sku: { not: null } }, { barcode: { not: null } }],
+        }),
+      }),
+      this.prisma.customer.count({ where: softWhere({ status: 'ACTIVE' }) }),
+      this.prisma.supplier.count({ where: softWhere({ status: 'ACTIVE' }) }),
+      this.prisma.cashAccount.count({
+        where: softWhere({
+          isActive: true,
+          accountType: { in: [CashAccountType.CASH_ON_HAND, CashAccountType.PETTY_CASH] },
+        }),
+      }),
+      this.prisma.cashAccount.count({
+        where: softWhere({
+          isActive: true,
+          accountType: {
+            in: [CashAccountType.BANK, CashAccountType.MOBILE_MONEY],
+          },
+        }),
+      }),
+      this.prisma.inventoryBalance.count({
+        where: balanceWhere({ quantityOnHand: { lt: 0 } }),
+      }),
+      this.prisma.product.findMany({
+        where: softWhere({ status: 'ACTIVE', reorderLevel: { not: null } }),
+        select: {
+          id: true,
+          reorderLevel: true,
+          inventoryBalances: { where: balanceWhere(), select: { quantityOnHand: true } },
+        },
+      }),
+      this.prisma.inventoryMovement.count({
+        where: balanceWhere({ movementDate: { gte: sevenDaysAgo } }),
+      }),
+      this.prisma.purchaseOrder.count({
+        where: softWhere({
+          purchaseType: PurchaseType.CASH_PURCHASE,
+          OR: [{ paymentStatus: { not: PaymentStatus.PAID } }, { outstandingAmount: { gt: 0 } }],
+        }),
+      }),
+      this.prisma.salesOrder.count({
+        where: softWhere({
+          salesType: { in: [SalesType.CASH_SALE, SalesType.RETAIL] },
+          status: SalesOrderStatus.CONFIRMED,
+          OR: [{ paymentStatus: { not: PaymentStatus.PAID } }, { outstandingAmount: { gt: 0 } }],
+        }),
+      }),
+      this.prisma.salesOrder.count({
+        where: softWhere({
+          salesType: { in: [SalesType.CASH_SALE, SalesType.RETAIL] },
+          paymentMethod: { not: SalesPaymentMethod.CREDIT },
+          cashAccountId: null,
+          status: { in: [SalesOrderStatus.DRAFT, SalesOrderStatus.CONFIRMED] },
+        }),
+      }),
+      this.prisma.purchaseOrder.count({ where: softWhere({ status: 'CONFIRMED' }) }),
+      this.prisma.stockAdjustment.count({ where: softWhere({ status: 'PENDING_APPROVAL' }) }),
+      this.prisma.stockAdjustment.count({ where: softWhere({ status: 'APPROVED' }) }),
+      this.prisma.salesOrder.count({ where: softWhere({ status: 'DRAFT' }) }),
+      this.prisma.purchaseOrder.count({ where: softWhere({ status: 'DRAFT' }) }),
+    ]);
+
+    const lowStockProducts = lowStockCandidates.filter((product) => {
+      const quantityOnHand = product.inventoryBalances.reduce(
+        (sum, balance) => sum + Number(balance.quantityOnHand),
+        0,
+      );
+      return quantityOnHand <= Number(product.reorderLevel);
+    }).length;
+
+    const productSearchCoverage =
+      activeProducts === 0 ? 0 : Math.round((searchableProducts / activeProducts) * 100);
+    const transactionIntegrityIssues = cashPurchasesUnpaid + confirmedCashSalesUnpaid;
+    const workflowBacklog =
+      purchaseOrdersReadyToReceive + pendingStockAdjustments + approvedStockAdjustments;
+
+    const checks: ReadinessCheck[] = [
+      {
+        key: 'transaction-integrity',
+        title: 'Cash transaction integrity',
+        score: clampScore(100 - transactionIntegrityIssues * 15),
+        status: statusFor(clampScore(100 - transactionIntegrityIssues * 15)),
+        message:
+          transactionIntegrityIssues === 0
+            ? 'Cash purchases and confirmed cash sales are settling as paid.'
+            : 'Cash documents exist with unpaid or outstanding balances.',
+        details: {
+          cashPurchasesUnpaid,
+          confirmedCashSalesUnpaid,
+        },
+      },
+      {
+        key: 'product-discovery',
+        title: 'Product picker and master data',
+        score: clampScore(
+          activeProducts === 0 ? 55 : Math.min(100, 80 + productSearchCoverage / 5),
+        ),
+        status: statusFor(
+          clampScore(activeProducts === 0 ? 55 : Math.min(100, 80 + productSearchCoverage / 5)),
+        ),
+        message:
+          activeProducts > 0
+            ? 'Operational product search has active products with searchable codes.'
+            : 'No active products are available for operational transactions.',
+        details: {
+          activeProducts,
+          searchableProducts,
+          productSearchCoverage,
+        },
+      },
+      {
+        key: 'inventory-control',
+        title: 'Inventory control',
+        score: clampScore(100 - negativeBalances * 8 - lowStockProducts * 2),
+        status: statusFor(clampScore(100 - negativeBalances * 8 - lowStockProducts * 2)),
+        message:
+          negativeBalances === 0
+            ? 'No negative inventory balances were found.'
+            : 'Negative inventory balances need correction before close.',
+        details: {
+          negativeBalances,
+          lowStockProducts,
+          recentMovements,
+        },
+      },
+      {
+        key: 'cash-receipt-readiness',
+        title: 'Cash receipt configuration',
+        score: clampScore(
+          activeCashAccounts === 0 ? 60 : 92 + Math.min(activeBankOrMobileAccounts, 4),
+        ),
+        status: statusFor(
+          clampScore(activeCashAccounts === 0 ? 60 : 92 + Math.min(activeBankOrMobileAccounts, 4)),
+        ),
+        message:
+          activeCashAccounts > 0
+            ? 'Active cash/petty-cash accounts exist for receipt posting.'
+            : 'No active cash-on-hand or petty-cash account is configured.',
+        details: {
+          activeCashAccounts,
+          activeBankOrMobileAccounts,
+          cashSalesMissingAccount,
+        },
+      },
+      {
+        key: 'workflow-throughput',
+        title: 'Operational workflow throughput',
+        score: clampScore(
+          100 -
+            Math.min(25, workflowBacklog * 2) -
+            Math.min(10, staleDraftSales + staleDraftPurchases),
+        ),
+        status: statusFor(
+          clampScore(
+            100 -
+              Math.min(25, workflowBacklog * 2) -
+              Math.min(10, staleDraftSales + staleDraftPurchases),
+          ),
+        ),
+        message:
+          workflowBacklog === 0
+            ? 'No confirmed purchases or stock adjustments are waiting for the next step.'
+            : 'Some operational documents are waiting for receive, approval, or posting.',
+        details: {
+          purchaseOrdersReadyToReceive,
+          pendingStockAdjustments,
+          approvedStockAdjustments,
+          staleDraftSales,
+          staleDraftPurchases,
+        },
+      },
+      {
+        key: 'trading-master-data',
+        title: 'Trading master data',
+        score: clampScore(
+          60 + Math.min(20, activeCustomers * 2) + Math.min(20, activeSuppliers * 2),
+        ),
+        status: statusFor(
+          clampScore(60 + Math.min(20, activeCustomers * 2) + Math.min(20, activeSuppliers * 2)),
+        ),
+        message:
+          activeCustomers > 0 && activeSuppliers > 0
+            ? 'Active customers and suppliers exist for sales and purchase flows.'
+            : 'Customer or supplier master data is incomplete.',
+        details: {
+          activeCustomers,
+          activeSuppliers,
+        },
+      },
+    ];
+
+    const score = clampScore(checks.reduce((sum, check) => sum + check.score, 0) / checks.length);
+
+    return {
+      score,
+      target: 90,
+      maturity:
+        score >= 95 ? 'enterprise-ready' : score >= 90 ? 'production-ready' : 'needs-attention',
+      updatedAt: new Date().toISOString(),
+      indicators: {
+        activeProducts,
+        activeCustomers,
+        activeSuppliers,
+        negativeBalances,
+        lowStockProducts,
+        transactionIntegrityIssues,
+        workflowBacklog,
+      },
+      checks,
     };
   }
 }
