@@ -14,6 +14,16 @@ interface CatalogEntry {
   permission: string;
   apiPath: string;
   frontendPath: string;
+  reportType?: string;
+  lifecycleStatus?: string;
+  owner?: string;
+  dataFreshness?: string;
+  securityClassification?: string;
+  outputFormats?: string[];
+  tags?: string[];
+  businessQuestions?: string[];
+  drillPaths?: string[];
+  relatedCapabilities?: string[];
 }
 
 const fmtNumber = (v: unknown): string => {
@@ -113,6 +123,21 @@ function flattenForCsv(rows: Record<string, unknown>[]): { columns: string[]; da
 function toCsv(columns: string[], rows: string[][]): string {
   const escape = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
   return [columns, ...rows].map((row) => row.map(escape).join(',')).join('\n');
+}
+
+function metaBadge(label: string, tone: 'neutral' | 'green' | 'amber' | 'red' | 'blue' = 'neutral') {
+  const styles = {
+    neutral: { background: 'var(--aurora-bg-subtle)', color: 'var(--aurora-text-secondary)', borderColor: 'var(--aurora-border)' },
+    green: { background: 'var(--aurora-success-bg)', color: 'var(--aurora-success-text)', borderColor: 'var(--aurora-success)' },
+    amber: { background: 'var(--aurora-warning-bg)', color: 'var(--aurora-warning-text)', borderColor: 'var(--aurora-warning)' },
+    red: { background: 'var(--aurora-danger-bg)', color: 'var(--aurora-danger-text)', borderColor: 'var(--aurora-danger)' },
+    blue: { background: 'var(--aurora-primary-subtle)', color: 'var(--aurora-primary-text)', borderColor: 'var(--aurora-border)' },
+  }[tone];
+  return (
+    <span className="inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium" style={styles}>
+      {label}
+    </span>
+  );
 }
 
 interface Company {
@@ -370,6 +395,44 @@ function ReportRunContent() {
       />
 
       <Card className="p-4 print:hidden">
+        <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+          <div>
+            <div className="flex flex-wrap gap-2">
+              {entry.lifecycleStatus &&
+                metaBadge(
+                  entry.lifecycleStatus,
+                  entry.lifecycleStatus === 'CERTIFIED' || entry.lifecycleStatus === 'OFFICIAL'
+                    ? 'green'
+                    : 'blue',
+                )}
+              {entry.reportType && metaBadge(entry.reportType.replace(/_/g, ' '), 'neutral')}
+              {entry.securityClassification &&
+                metaBadge(
+                  entry.securityClassification,
+                  entry.securityClassification === 'SENSITIVE' || entry.securityClassification === 'RESTRICTED'
+                    ? 'red'
+                    : 'blue',
+                )}
+            </div>
+            <div className="mt-3 grid gap-2 text-xs md:grid-cols-2" style={{ color: 'var(--aurora-text-secondary)' }}>
+              <div>Owner: {entry.owner ?? 'Report owner not assigned'}</div>
+              <div>Freshness: {entry.dataFreshness ?? 'Endpoint-defined'}</div>
+              <div>Scope: {entry.scopes.join(', ')}</div>
+              <div>Outputs: {(entry.outputFormats ?? ['HTML', 'CSV', 'JSON']).join(', ')}</div>
+            </div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+              Drill and lineage path
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {(entry.drillPaths ?? ['Summary', 'Record', 'Source']).map((step) => metaBadge(step, 'blue'))}
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-4 print:hidden">
         <div className="flex flex-wrap items-end gap-3">
           {needsCompany && (
             <div>
@@ -469,7 +532,8 @@ function ReportRunContent() {
       )}
 
       {!loading && data !== null && (
-        <>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="space-y-4">
           {scalars.length > 0 && (
             <Card className="overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-100 text-xs text-slate-500 uppercase tracking-wide">
@@ -555,7 +619,44 @@ function ReportRunContent() {
               </div>
             </Card>
           ))}
-        </>
+          </div>
+          <div className="space-y-4 print:hidden">
+            <Card>
+              <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                Explain this report
+              </div>
+              <div className="mt-3 space-y-2">
+                {(entry.businessQuestions ?? [
+                  'What changed?',
+                  'Why did it happen?',
+                  'Which source records explain this number?',
+                ]).map((question) => (
+                  <div
+                    key={question}
+                    className="rounded-lg border px-3 py-2 text-sm"
+                    style={{
+                      borderColor: 'var(--aurora-border)',
+                      background: 'var(--aurora-bg-subtle)',
+                      color: 'var(--aurora-text-secondary)',
+                    }}
+                  >
+                    {question}
+                  </div>
+                ))}
+              </div>
+            </Card>
+            <Card>
+              <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                Related actions
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(entry.relatedCapabilities ?? ['Export', 'Schedule', 'Lineage']).map((action) =>
+                  metaBadge(action, 'neutral'),
+                )}
+              </div>
+            </Card>
+          </div>
+        </div>
       )}
     </div>
   );

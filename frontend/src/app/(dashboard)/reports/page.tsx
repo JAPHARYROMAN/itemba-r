@@ -77,6 +77,79 @@ interface Division {
   companyId: string;
 }
 
+interface CapabilityItem {
+  title: string;
+  desc: string;
+  href: string;
+  badge: string;
+}
+
+interface MetricDefinition {
+  metric: string;
+  definition: string;
+  owner: string;
+  formula?: string;
+  certificationStatus?: string;
+  trendDirection?: string;
+  dimensions: string[] | string;
+  href: string;
+}
+
+interface ReportPack {
+  key: string;
+  name: string;
+  owner: string;
+  status: string;
+  cadence: string;
+  href: string;
+  sections: string[];
+  prerequisites: string[];
+}
+
+interface EnterpriseOverview {
+  generatedAt: string;
+  summary: {
+    catalogReports: number;
+    activeDefinitions: number;
+    activeSchedules: number;
+    failedRuns: number;
+    requestedRuns: number;
+    dashboards: number;
+    openDataQuality: number;
+    openInsights: number;
+    statementRuns: number;
+    certifiedCount: number;
+    sensitiveCount: number;
+    liveCount: number;
+  };
+  kpiTiles: { key: string; label: string; value: number; hint: string; status: 'ok' | 'watch' | 'critical' }[];
+  dataFreshness: { source: string; mode: string; lastUpdated: string; status: string }[];
+  alerts: { title: string; severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'; message: string; href: string }[];
+  capabilityAreas: Record<AreaKey, CapabilityItem[]>;
+  metricCatalog: MetricDefinition[];
+  reportPacks: ReportPack[];
+  governance: {
+    generatedAt: string;
+    certified: number;
+    validated: number;
+    drafts: number;
+    missingOwners: number;
+    restricted: number;
+    rules: string[];
+  };
+  admin: {
+    typeCounts: Record<string, number>;
+    lifecycleCounts: Record<string, number>;
+    securityCounts: Record<string, number>;
+    activeDefinitions: number;
+    activeSchedules: number;
+    failedRuns: number;
+    requestedRuns: number;
+    dashboards: number;
+    statementRuns: number;
+  };
+}
+
 type AreaKey =
   | 'reports'
   | 'dashboards'
@@ -178,7 +251,7 @@ const PERSONAS: {
   },
 ];
 
-const CAPABILITY_LINKS: Record<AreaKey, { title: string; desc: string; href: string; badge: string }[]> = {
+const CAPABILITY_LINKS: Record<AreaKey, CapabilityItem[]> = {
   reports: [],
   dashboards: [
     { title: 'Executive BI Dashboard', desc: 'Group-level KPIs and executive intelligence.', href: '/bi/executive', badge: 'Live' },
@@ -226,40 +299,40 @@ const CAPABILITY_LINKS: Record<AreaKey, { title: string; desc: string; href: str
   ],
 };
 
-const METRIC_CATALOG = [
+const METRIC_CATALOG: MetricDefinition[] = [
   {
     metric: 'Net Sales',
     definition: 'Confirmed revenue less cancellations and approved deductions.',
     owner: 'Group Finance',
-    dimensions: 'Customer, product, company, branch, period',
+    dimensions: ['Customer', 'Product', 'Company', 'Branch', 'Period'],
     href: '/reports/run?reportId=group.sales',
   },
   {
     metric: 'Gross Margin',
     definition: 'Net sales less cost of goods sold, with drill-down to orders and ledger lines where posted.',
     owner: 'Group Finance',
-    dimensions: 'Product, customer, division, period',
+    dimensions: ['Product', 'Customer', 'Division', 'Period'],
     href: '/finance/reports',
   },
   {
     metric: 'Inventory Value',
     definition: 'Quantity on hand multiplied by average cost for the selected stock location.',
     owner: 'Operations Control',
-    dimensions: 'Product, branch, location, company',
+    dimensions: ['Product', 'Branch', 'Location', 'Company'],
     href: '/reports/run?reportId=operations.stock-valuation',
   },
   {
     metric: 'Receivables Aging',
     definition: 'Open customer balances bucketed by overdue days.',
     owner: 'Group Finance',
-    dimensions: 'Customer, company, period, currency',
+    dimensions: ['Customer', 'Company', 'Period', 'Currency'],
     href: '/reports/run?reportId=finance.receivables-aging',
   },
   {
     metric: 'Payables Aging',
     definition: 'Open supplier balances bucketed by overdue days.',
     owner: 'Group Finance',
-    dimensions: 'Supplier, company, period, currency',
+    dimensions: ['Supplier', 'Company', 'Period', 'Currency'],
     href: '/reports/run?reportId=finance.payables-aging',
   },
 ];
@@ -298,6 +371,18 @@ function formatDateTime(value?: string) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function formatList(value: string[] | string) {
+  return Array.isArray(value) ? value.join(', ') : value;
+}
+
+function toneForOperationalStatus(status: string): 'green' | 'amber' | 'red' | 'blue' | 'neutral' {
+  if (status === 'ok' || status === 'READY' || status === 'TEMPLATE_READY' || status === 'CERTIFIED') return 'green';
+  if (status === 'watch' || status === 'ATTENTION' || status === 'DESIGN_READY' || status === 'VALIDATED') return 'amber';
+  if (status === 'critical' || status === 'HIGH' || status === 'CRITICAL' || status === 'NEEDS_SETUP') return 'red';
+  if (status === 'LOW' || status === 'MEDIUM') return 'blue';
+  return 'neutral';
 }
 
 function badgeToneForStatus(status: ReportLifecycleStatus): 'green' | 'amber' | 'blue' | 'neutral' {
@@ -354,7 +439,7 @@ function SectionHeading({ title, subtitle, action }: { title: string; subtitle?:
   );
 }
 
-function CapabilityGrid({ items }: { items: { title: string; desc: string; href: string; badge: string }[] }) {
+function CapabilityGrid({ items }: { items: CapabilityItem[] }) {
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
       {items.map((item) => (
@@ -431,6 +516,7 @@ function ReportCard({ entry, href }: { entry: CatalogEntry; href: string }) {
 
 export default function MasterReportsPage() {
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
+  const [overview, setOverview] = useState<EnterpriseOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeArea, setActiveArea] = useState<AreaKey>('reports');
@@ -452,8 +538,12 @@ export default function MasterReportsPage() {
     setLoading(true);
     setError('');
     try {
-      const data = await backendGet<CatalogResponse>('/reports/catalog');
-      setCatalog(data);
+      const [catalogData, overviewData] = await Promise.all([
+        backendGet<CatalogResponse>('/reports/catalog'),
+        backendGet<EnterpriseOverview>('/reports/command-center'),
+      ]);
+      setCatalog(catalogData);
+      setOverview(overviewData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load report catalog');
     } finally {
@@ -582,6 +672,12 @@ export default function MasterReportsPage() {
   const liveCount = entries.filter((entry) => entry.dataFreshness.toLowerCase().includes('live')).length;
   const certifiedCount = (lifecycleCounts.CERTIFIED ?? 0) + (lifecycleCounts.OFFICIAL ?? 0);
   const sensitiveCount = entries.filter((entry) => entry.securityClassification === 'SENSITIVE' || entry.securityClassification === 'RESTRICTED').length;
+  const commandSummary = overview?.summary;
+  const capabilityAreas = overview?.capabilityAreas ?? CAPABILITY_LINKS;
+  const metricRows = overview?.metricCatalog ?? METRIC_CATALOG;
+  const reportPacks = overview?.reportPacks ?? [];
+  const governance = overview?.governance;
+  const admin = overview?.admin;
 
   const buildLink = (entry: CatalogEntry) => {
     const params = new URLSearchParams();
@@ -645,25 +741,25 @@ export default function MasterReportsPage() {
                 <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
                   Reports
                 </div>
-                <div className="mt-1 text-xl font-semibold">{catalog?.total ?? 0}</div>
+                <div className="mt-1 text-xl font-semibold">{commandSummary?.catalogReports ?? catalog?.total ?? 0}</div>
               </div>
               <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
                 <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
                   Certified
                 </div>
-                <div className="mt-1 text-xl font-semibold">{certifiedCount}</div>
+                <div className="mt-1 text-xl font-semibold">{commandSummary?.certifiedCount ?? certifiedCount}</div>
               </div>
               <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
                 <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
                   Live
                 </div>
-                <div className="mt-1 text-xl font-semibold">{liveCount}</div>
+                <div className="mt-1 text-xl font-semibold">{commandSummary?.liveCount ?? liveCount}</div>
               </div>
               <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
                 <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
                   Sensitive
                 </div>
-                <div className="mt-1 text-xl font-semibold">{sensitiveCount}</div>
+                <div className="mt-1 text-xl font-semibold">{commandSummary?.sensitiveCount ?? sensitiveCount}</div>
               </div>
             </div>
           </div>
@@ -689,6 +785,53 @@ export default function MasterReportsPage() {
           })}
         </div>
       </Card>
+
+      {overview && (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+          {overview.kpiTiles.map((tile) => (
+            <Card key={tile.key}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                    {tile.label}
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold">{tile.value}</div>
+                </div>
+                <Badge tone={toneForOperationalStatus(tile.status)}>{tile.status}</Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                {tile.hint}
+              </p>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {overview?.alerts && overview.alerts.length > 0 && (
+        <Card padding="none" className="overflow-hidden">
+          <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+            <SectionHeading title="Alerts and exceptions" subtitle="Report-trust and delivery signals from the enterprise reporting layer." />
+          </div>
+          <div className="grid gap-3 p-4 md:grid-cols-3">
+            {overview.alerts.map((alert) => (
+              <Link
+                key={alert.title}
+                href={alert.href}
+                className="rounded-lg border p-4 transition-colors hover:border-brand-500"
+                style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="text-sm font-semibold">{alert.title}</div>
+                  <Badge tone={toneForOperationalStatus(alert.severity)}>{alert.severity}</Badge>
+                </div>
+                <p className="mt-2 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                  {alert.message}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {error && (
         <div className="rounded-lg border px-4 py-3 text-sm" style={{ background: 'var(--aurora-danger-bg)', borderColor: 'var(--aurora-danger)', color: 'var(--aurora-danger-text)' }}>
@@ -730,16 +873,35 @@ export default function MasterReportsPage() {
                     </div>
                   </div>
                   <div>
-                    <SectionHeading title="Reporting freshness" subtitle={`Catalog refreshed ${formatDateTime(catalog?.generatedAt)}`} />
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                      <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
-                        <div style={{ color: 'var(--aurora-text-muted)' }}>Self-service assets</div>
-                        <div className="mt-1 font-semibold">{typeCounts.SELF_SERVICE ?? 0}</div>
-                      </div>
-                      <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
-                        <div style={{ color: 'var(--aurora-text-muted)' }}>Financial reports</div>
-                        <div className="mt-1 font-semibold">{typeCounts.FINANCIAL_STATEMENT ?? 0}</div>
-                      </div>
+                    <SectionHeading title="Reporting freshness" subtitle={`Catalog refreshed ${formatDateTime(overview?.generatedAt ?? catalog?.generatedAt)}`} />
+                    <div className="mt-3 grid gap-2 text-sm">
+                      {(overview?.dataFreshness ?? []).slice(0, 4).map((freshness) => (
+                        <div
+                          key={freshness.source}
+                          className="flex items-center justify-between gap-3 rounded-lg border p-3"
+                          style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}
+                        >
+                          <div>
+                            <div className="font-medium">{freshness.source}</div>
+                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              {freshness.mode} / {formatDateTime(freshness.lastUpdated)}
+                            </div>
+                          </div>
+                          <Badge tone={toneForOperationalStatus(freshness.status)}>{freshness.status}</Badge>
+                        </div>
+                      ))}
+                      {!overview?.dataFreshness?.length && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                            <div style={{ color: 'var(--aurora-text-muted)' }}>Self-service assets</div>
+                            <div className="mt-1 font-semibold">{typeCounts.SELF_SERVICE ?? 0}</div>
+                          </div>
+                          <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                            <div style={{ color: 'var(--aurora-text-muted)' }}>Financial reports</div>
+                            <div className="mt-1 font-semibold">{typeCounts.FINANCIAL_STATEMENT ?? 0}</div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -925,7 +1087,48 @@ export default function MasterReportsPage() {
                 title={AREA_NAV.find((area) => area.key === activeArea)?.label ?? 'Reports'}
                 subtitle="This area connects existing ITEMBA-R reporting capabilities into the enterprise reporting layer."
               />
-              <CapabilityGrid items={CAPABILITY_LINKS[activeArea]} />
+              <CapabilityGrid items={capabilityAreas[activeArea] ?? []} />
+
+              {activeArea === 'packs' && reportPacks.length > 0 && (
+                <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                  {reportPacks.map((pack) => (
+                    <Link
+                      key={pack.key}
+                      href={pack.href}
+                      className="block rounded-lg border p-5 transition-colors hover:border-brand-500"
+                      style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)' }}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="text-base font-semibold">{pack.name}</div>
+                          <div className="mt-1 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                            {pack.owner} / {pack.cadence}
+                          </div>
+                        </div>
+                        <Badge tone={toneForOperationalStatus(pack.status)}>{pack.status}</Badge>
+                      </div>
+                      <div className="mt-4 grid gap-4 md:grid-cols-2">
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                            Sections
+                          </div>
+                          <p className="mt-2 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                            {pack.sections.join(', ')}
+                          </p>
+                        </div>
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                            Prerequisites
+                          </div>
+                          <p className="mt-2 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                            {pack.prerequisites.join(', ')}
+                          </p>
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
 
               {activeArea === 'catalog' && (
                 <Card padding="none" className="overflow-hidden">
@@ -944,7 +1147,7 @@ export default function MasterReportsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {METRIC_CATALOG.map((metric) => (
+                        {metricRows.map((metric) => (
                           <tr key={metric.metric} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
                             <td className="px-4 py-3 font-medium">{metric.metric}</td>
                             <td className="px-4 py-3" style={{ color: 'var(--aurora-text-secondary)' }}>
@@ -954,7 +1157,7 @@ export default function MasterReportsPage() {
                               {metric.owner}
                             </td>
                             <td className="px-4 py-3" style={{ color: 'var(--aurora-text-secondary)' }}>
-                              {metric.dimensions}
+                              {formatList(metric.dimensions)}
                             </td>
                             <td className="px-4 py-3">
                               <Link className="text-brand-500 hover:underline" href={metric.href}>
@@ -970,34 +1173,57 @@ export default function MasterReportsPage() {
               )}
 
               {activeArea === 'governance' && (
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <Card>
-                    <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
-                      Certified or official
-                    </div>
-                    <div className="mt-2 text-3xl font-semibold">{certifiedCount}</div>
-                    <p className="mt-2 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
-                      Reports users can treat as governed sources of truth.
-                    </p>
-                  </Card>
-                  <Card>
-                    <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
-                      Restricted or sensitive
-                    </div>
-                    <div className="mt-2 text-3xl font-semibold">{sensitiveCount}</div>
-                    <p className="mt-2 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
-                      Reports requiring careful role and export control.
-                    </p>
-                  </Card>
-                  <Card>
-                    <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
-                      Live operational coverage
-                    </div>
-                    <div className="mt-2 text-3xl font-semibold">{liveCount}</div>
-                    <p className="mt-2 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
-                      Reports connected to live transactional modules.
-                    </p>
-                  </Card>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                    <Card>
+                      <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                        Certified or official
+                      </div>
+                      <div className="mt-2 text-3xl font-semibold">{governance?.certified ?? certifiedCount}</div>
+                      <p className="mt-2 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                        Reports users can treat as governed sources of truth.
+                      </p>
+                    </Card>
+                    <Card>
+                      <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                        Validated
+                      </div>
+                      <div className="mt-2 text-3xl font-semibold">{governance?.validated ?? lifecycleCounts.VALIDATED ?? 0}</div>
+                      <p className="mt-2 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                        Reports ready for use but still requiring certification.
+                      </p>
+                    </Card>
+                    <Card>
+                      <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                        Restricted or sensitive
+                      </div>
+                      <div className="mt-2 text-3xl font-semibold">{governance?.restricted ?? sensitiveCount}</div>
+                      <p className="mt-2 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                        Reports requiring careful role and export control.
+                      </p>
+                    </Card>
+                    <Card>
+                      <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                        Missing owners
+                      </div>
+                      <div className="mt-2 text-3xl font-semibold">{governance?.missingOwners ?? 0}</div>
+                      <p className="mt-2 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                        Ownership gaps before formal publication.
+                      </p>
+                    </Card>
+                  </div>
+                  {governance?.rules && (
+                    <Card>
+                      <SectionHeading title="Governance rules" subtitle="Rules applied to certified, official, sensitive, and self-service reporting assets." />
+                      <div className="mt-4 grid gap-2">
+                        {governance.rules.map((rule) => (
+                          <div key={rule} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                            {rule}
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  )}
                 </div>
               )}
 
@@ -1012,7 +1238,7 @@ export default function MasterReportsPage() {
                       {Object.entries(REPORT_TYPE_LABELS).map(([key, label]) => (
                         <div key={key} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
                           <span style={{ color: 'var(--aurora-text-secondary)' }}>{label}</span>
-                          <span className="font-semibold">{typeCounts[key as ReportType] ?? 0}</span>
+                          <span className="font-semibold">{admin?.typeCounts[key] ?? typeCounts[key as ReportType] ?? 0}</span>
                         </div>
                       ))}
                     </div>
@@ -1021,11 +1247,31 @@ export default function MasterReportsPage() {
                       {Object.entries(STATUS_LABELS).map(([key, label]) => (
                         <div key={key} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
                           <span style={{ color: 'var(--aurora-text-secondary)' }}>{label}</span>
-                          <span className="font-semibold">{lifecycleCounts[key as ReportLifecycleStatus] ?? 0}</span>
+                          <span className="font-semibold">{admin?.lifecycleCounts[key] ?? lifecycleCounts[key as ReportLifecycleStatus] ?? 0}</span>
                         </div>
                       ))}
                     </div>
                   </div>
+                  {admin && (
+                    <div className="border-t p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+                        {[
+                          ['Definitions', admin.activeDefinitions],
+                          ['Schedules', admin.activeSchedules],
+                          ['Dashboards', admin.dashboards],
+                          ['Statement runs', admin.statementRuns],
+                          ['Failed runs', admin.failedRuns],
+                        ].map(([label, value]) => (
+                          <div key={String(label)} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              {label}
+                            </div>
+                            <div className="mt-1 text-xl font-semibold">{value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </Card>
               )}
             </div>
