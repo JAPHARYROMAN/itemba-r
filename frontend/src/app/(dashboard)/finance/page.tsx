@@ -6,7 +6,11 @@ import { useAuth } from '@/hooks/use-auth';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Company { id: string; name: string; code: string }
+interface Company {
+  id: string;
+  name: string;
+  code: string;
+}
 
 interface DashboardData {
   totalIncome: number;
@@ -24,7 +28,12 @@ interface DashboardData {
 
 function fmtTZS(n: number | string | null | undefined) {
   const value = Number(n ?? 0);
-  return 'TZS ' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0);
+  return (
+    'TZS ' +
+    new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
+      Number.isFinite(value) ? value : 0,
+    )
+  );
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -42,7 +51,11 @@ export default function FinanceDashboardPage() {
   useEffect(() => {
     fetch('/api/backend/companies?limit=100')
       .then((r) => r.json())
-      .then((j) => setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
+      .then((j) =>
+        setCompanies(
+          Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
+        ),
+      );
   }, []);
 
   const loadDashboard = useCallback(async () => {
@@ -69,7 +82,9 @@ export default function FinanceDashboardPage() {
     }
   }, [canView, companyId]);
 
-  useEffect(() => { loadDashboard(); }, [loadDashboard]);
+  useEffect(() => {
+    loadDashboard();
+  }, [loadDashboard]);
 
   if (!canView) {
     return (
@@ -77,7 +92,9 @@ export default function FinanceDashboardPage() {
         <PageHeader title="Finance Dashboard" subtitle="Finance overview" />
         <div className="mt-8 flex flex-col items-center gap-3 text-center">
           <p className="text-sm font-medium text-slate-600">Access Restricted</p>
-          <p className="text-xs text-slate-400 max-w-sm">You do not have permission to view finance data.</p>
+          <p className="text-xs text-slate-400 max-w-sm">
+            You do not have permission to view finance data.
+          </p>
         </div>
       </div>
     );
@@ -94,13 +111,17 @@ export default function FinanceDashboardPage() {
         >
           <option value="">All Companies (Group View)</option>
           {companies.map((c) => (
-            <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
+            <option key={c.id} value={c.id}>
+              {c.name} ({c.code})
+            </option>
           ))}
         </select>
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
       )}
 
       {loading ? (
@@ -121,15 +142,17 @@ export default function FinanceDashboardPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card className="p-5">
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Receivables</div>
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+                Receivables
+              </div>
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-600">Open</span>
-                  <span className="font-semibold text-slate-800">{fmtTZS(data.receivables.open)}</span>
+                  <span className="text-slate-600">Open Count</span>
+                  <span className="font-semibold text-slate-800">{data.receivables.open}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-red-500">Overdue</span>
-                  <span className="font-semibold text-red-600">{fmtTZS(data.receivables.overdue)}</span>
+                  <span className="text-red-500">Overdue Count</span>
+                  <span className="font-semibold text-red-600">{data.receivables.overdue}</span>
                 </div>
                 <div className="flex justify-between text-sm border-t border-slate-100 pt-2">
                   <span className="text-slate-500">Total</span>
@@ -139,15 +162,17 @@ export default function FinanceDashboardPage() {
             </Card>
 
             <Card className="p-5">
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Payables</div>
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+                Payables
+              </div>
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-600">Open</span>
-                  <span className="font-semibold text-slate-800">{fmtTZS(data.payables.open)}</span>
+                  <span className="text-slate-600">Open Count</span>
+                  <span className="font-semibold text-slate-800">{data.payables.open}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-red-500">Overdue</span>
-                  <span className="font-semibold text-red-600">{fmtTZS(data.payables.overdue)}</span>
+                  <span className="text-red-500">Overdue Count</span>
+                  <span className="font-semibold text-red-600">{data.payables.overdue}</span>
                 </div>
                 <div className="flex justify-between text-sm border-t border-slate-100 pt-2">
                   <span className="text-slate-500">Total</span>
@@ -157,15 +182,21 @@ export default function FinanceDashboardPage() {
             </Card>
 
             <Card className="p-5">
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Inter-Company</div>
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+                Inter-Company
+              </div>
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">From (Receivable)</span>
-                  <span className="font-semibold text-slate-800">{fmtTZS(data.intercompany.fromTotal)}</span>
+                  <span className="font-semibold text-slate-800">
+                    {fmtTZS(data.intercompany.fromTotal)}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">To (Payable)</span>
-                  <span className="font-semibold text-slate-800">{fmtTZS(data.intercompany.toTotal)}</span>
+                  <span className="font-semibold text-slate-800">
+                    {fmtTZS(data.intercompany.toTotal)}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm border-t border-slate-100 pt-2">
                   <span className="text-slate-500">Pending Approvals</span>

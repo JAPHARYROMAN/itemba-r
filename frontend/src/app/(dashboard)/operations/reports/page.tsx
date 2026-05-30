@@ -13,7 +13,7 @@ interface Company {
 interface StockValuationRow {
   productCode: string;
   productName: string;
-  location: string;
+  locationName: string;
   quantityOnHand: number;
   averageCost: number;
   totalValue: number;
@@ -23,14 +23,14 @@ interface SalesSummary {
   totalSalesValue: number;
   totalPaid: number;
   totalOutstanding: number;
-  byType: { salesType: string; count: number; value: number }[];
+  byType: { salesType: string; count: number; totalAmount: number }[];
 }
 interface PurchaseSummary {
   totalPurchaseOrders: number;
   totalPurchaseValue: number;
   totalPaid: number;
   totalOutstanding: number;
-  byType: { purchaseType: string; count: number; value: number }[];
+  byType: { purchaseType: string; count: number; totalAmount: number }[];
 }
 
 type Tab = 'stock-valuation' | 'sales-summary' | 'purchase-summary';
@@ -50,9 +50,22 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeStockRows(payload: unknown): StockValuationRow[] {
-  if (Array.isArray(payload)) return payload as StockValuationRow[];
-  if (isObject(payload) && Array.isArray(payload.rows)) return payload.rows as StockValuationRow[];
-  return [];
+  const rows = Array.isArray(payload)
+    ? payload
+    : isObject(payload) && Array.isArray(payload.rows)
+      ? payload.rows
+      : [];
+  return rows.map((row) => {
+    const item = row as Record<string, unknown>;
+    return {
+      productCode: String(item.productCode ?? ''),
+      productName: String(item.productName ?? ''),
+      locationName: String(item.locationName ?? item.location ?? ''),
+      quantityOnHand: Number(item.quantityOnHand ?? 0),
+      averageCost: Number(item.averageCost ?? 0),
+      totalValue: Number(item.totalValue ?? 0),
+    };
+  });
 }
 
 function normalizeSalesSummary(payload: unknown): SalesSummary | null {
@@ -62,7 +75,16 @@ function normalizeSalesSummary(payload: unknown): SalesSummary | null {
     totalSalesValue: Number(payload.totalSalesValue ?? 0),
     totalPaid: Number(payload.totalPaid ?? 0),
     totalOutstanding: Number(payload.totalOutstanding ?? 0),
-    byType: Array.isArray(payload.byType) ? (payload.byType as SalesSummary['byType']) : [],
+    byType: Array.isArray(payload.byType)
+      ? payload.byType.map((row) => {
+          const item = row as Record<string, unknown>;
+          return {
+            salesType: String(item.salesType ?? ''),
+            count: Number(item.count ?? 0),
+            totalAmount: Number(item.totalAmount ?? item.value ?? 0),
+          };
+        })
+      : [],
   };
 }
 
@@ -73,7 +95,16 @@ function normalizePurchaseSummary(payload: unknown): PurchaseSummary | null {
     totalPurchaseValue: Number(payload.totalPurchaseValue ?? 0),
     totalPaid: Number(payload.totalPaid ?? 0),
     totalOutstanding: Number(payload.totalOutstanding ?? 0),
-    byType: Array.isArray(payload.byType) ? (payload.byType as PurchaseSummary['byType']) : [],
+    byType: Array.isArray(payload.byType)
+      ? payload.byType.map((row) => {
+          const item = row as Record<string, unknown>;
+          return {
+            purchaseType: String(item.purchaseType ?? ''),
+            count: Number(item.count ?? 0),
+            totalAmount: Number(item.totalAmount ?? item.value ?? 0),
+          };
+        })
+      : [],
   };
 }
 
@@ -287,7 +318,7 @@ export default function OperationsReportsPage() {
                     <tr key={i} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-mono text-xs">{r.productCode}</td>
                       <td className="px-4 py-3 font-medium">{r.productName}</td>
-                      <td className="px-4 py-3 text-xs">{r.location}</td>
+                      <td className="px-4 py-3 text-xs">{r.locationName}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{r.quantityOnHand}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{fmtTZS(r.averageCost)}</td>
                       <td className="px-4 py-3 text-right tabular-nums font-medium">
@@ -352,7 +383,9 @@ export default function OperationsReportsPage() {
                     <tr key={row.salesType} className="hover:bg-slate-50">
                       <td className="px-4 py-3">{row.salesType.replace(/_/g, ' ')}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{row.count}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{fmtTZS(row.value)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {fmtTZS(row.totalAmount)}
+                      </td>
                     </tr>
                   ))
                 )}
@@ -402,7 +435,9 @@ export default function OperationsReportsPage() {
                     <tr key={row.purchaseType} className="hover:bg-slate-50">
                       <td className="px-4 py-3">{row.purchaseType.replace(/_/g, ' ')}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{row.count}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{fmtTZS(row.value)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {fmtTZS(row.totalAmount)}
+                      </td>
                     </tr>
                   ))
                 )}

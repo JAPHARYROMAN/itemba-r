@@ -17,6 +17,6 @@ export class FinanceController {
   @Get('dashboard')
   @RequirePermissions('finance.view')
   getDashboard(@Query() q: FinanceDashboardQueryDto, @CurrentUser() user: AuthUser) {
-    return this.service.getDashboard(q.companyId, user.id);
+    return this.service.getDashboard(q.companyId, user);
   }
 }

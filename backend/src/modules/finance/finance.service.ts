@@ -2,24 +2,28 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditSeverity } from '@prisma/client';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { CompanyScopeService } from '../../common/services';
 
 @Injectable()
 export class FinanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
-  async getDashboard(companyId?: string, userId?: string) {
+  async getDashboard(companyId?: string, user?: AuthUser) {
+    const companyFilter = await this.companyFilter(companyId, user);
     const baseWhere = (cId?: string) => ({
       deletedAt: null,
-      ...(cId ? { companyId: cId } : {}),
+      ...(cId ? { companyId: cId } : companyFilter),
     });
 
     const jePostedWhere = (cId?: string) => ({
       deletedAt: null,
       status: 'POSTED' as const,
-      ...(cId ? { companyId: cId } : {}),
+      ...(cId ? { companyId: cId } : companyFilter),
     });
 
     const now = new Date();
@@ -92,6 +96,9 @@ export class FinanceService {
           deletedAt: null,
           status: 'POSTED',
           ...(companyId ? { fromCompanyId: companyId } : {}),
+          ...(!companyId && companyFilter.companyId
+            ? { fromCompanyId: companyFilter.companyId }
+            : {}),
         },
         _sum: { amount: true },
       }),
@@ -100,6 +107,9 @@ export class FinanceService {
           deletedAt: null,
           status: 'POSTED',
           ...(companyId ? { toCompanyId: companyId } : {}),
+          ...(!companyId && companyFilter.companyId
+            ? { toCompanyId: companyFilter.companyId }
+            : {}),
         },
         _sum: { amount: true },
       }),
@@ -108,11 +118,11 @@ export class FinanceService {
     const totalIncome = incomeLines.reduce((s, l) => s + Number(l.credit) - Number(l.debit), 0);
     const totalExpenses = expenseLines.reduce((s, l) => s + Number(l.debit) - Number(l.credit), 0);
 
-    if (userId) {
+    if (user?.id) {
       await this.auditLogs.log({
         action: 'FINANCE_DASHBOARD_VIEW',
         entityType: 'Finance',
-        userId,
+        userId: user.id,
         companyId,
         severity: AuditSeverity.LOW,
       });
@@ -140,5 +150,18 @@ export class FinanceService {
         toTotal: Number(icTo._sum.amount ?? 0),
       },
     };
+  }
+
+  private async companyFilter(companyId?: string, user?: AuthUser) {
+    if (!user) return companyId ? { companyId } : {};
+
+    if (companyId) {
+      await this.companyScope.assertCanAccessCompany(user, companyId);
+      return { companyId };
+    }
+
+    if (this.companyScope.isGroupScoped(user)) return {};
+    const companyIds = await this.companyScope.accessibleCompanyIds(user);
+    return { companyId: { in: companyIds } };
   }
 }

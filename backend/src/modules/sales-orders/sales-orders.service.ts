@@ -3,8 +3,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
-import { CompanyScopeService } from '../../common/services';
+import { AccountResolverService, AccountRole, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateSalesOrderDto, SalesOrderLineDto } from './dto/create-sales-order.dto';
 import { UpdateSalesOrderDto } from './dto/update-sales-order.dto';
@@ -61,6 +62,14 @@ function accountTypesForPaymentMethod(method?: SalesPaymentMethod | null): CashA
   }
 }
 
+function cashAccountRole(accountType?: CashAccountType | null): AccountRole {
+  return accountType === CashAccountType.BANK ? 'BANK' : 'CASH_ON_HAND';
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
 function calculateLineTotals(
   lines: {
     productId: string;
@@ -103,6 +112,8 @@ export class SalesOrdersService {
     private readonly taxAutoApply: TaxAutoApplyService,
     private readonly codes: EntityCodeGeneratorService,
     private readonly companyScope: CompanyScopeService,
+    private readonly postingEngine: PostingEngineService,
+    private readonly accountResolver: AccountResolverService,
   ) {}
 
   async findAll(query: QuerySalesOrderDto, user: AuthUser) {
@@ -702,17 +713,33 @@ export class SalesOrdersService {
     const issuingBranchId = existing.branchId;
 
     const record = await this.prisma.$transaction(async (tx) => {
+      let cogsAmount = 0;
+
       for (const line of existing.lines as any[]) {
         const product = await tx.product.findUnique({ where: { id: line.productId } });
         if (!product?.trackInventory) continue;
 
         try {
+          const balance = await tx.inventoryBalance.findUnique({
+            where: {
+              companyId_productId_branchId: {
+                companyId: existing.companyId,
+                productId: line.productId,
+                branchId: issuingBranchId,
+              },
+            },
+            select: { averageCost: true },
+          });
+          const unitCost = Number(balance?.averageCost ?? 0);
+          cogsAmount += Number(line.quantity) * unitCost;
+
           await this.inventoryMovements.createMovement({
             companyId: existing.companyId,
             productId: line.productId,
             movementType: 'SALE_ISSUE',
             quantity: Number(line.quantity),
             unitId: line.unitId,
+            unitCost,
             movementDate: existing.orderDate,
             createdById: userId,
             referenceType: 'SalesOrder',
@@ -746,34 +773,32 @@ export class SalesOrdersService {
       let receivableId: string | null = null;
 
       if (paymentMethod === 'CREDIT') {
-        if (existing.customerId) {
-          const recNumber = await this.codes.next({
-            entityType: 'Receivable',
+        const recNumber = await this.codes.next({
+          entityType: 'Receivable',
+          companyId: existing.companyId,
+          tx,
+        });
+        const receivable = await tx.receivable.create({
+          data: {
+            receivableNumber: recNumber,
             companyId: existing.companyId,
-            tx,
-          });
-          const receivable = await tx.receivable.create({
-            data: {
-              receivableNumber: recNumber,
-              companyId: existing.companyId,
-              divisionId: existing.divisionId ?? null,
-              branchId: existing.branchId ?? null,
-              customerId: existing.customerId,
-              customerName: existing.customerName ?? '',
-              amount: existing.totalAmount,
-              paidAmount: 0,
-              outstandingAmount: existing.totalAmount,
-              currency: existing.currency,
-              issueDate: new Date(),
-              dueDate: existing.dueDate ?? new Date(Date.now() + 30 * 24 * 3600 * 1000),
-              status: 'OPEN' as any,
-              sourceType: 'SalesOrder',
-              sourceId: id,
-              notes: `Sales Order ${existing.salesOrderNumber}`,
-            },
-          });
-          receivableId = receivable.id;
-        }
+            divisionId: existing.divisionId ?? null,
+            branchId: existing.branchId ?? null,
+            customerId: existing.customerId ?? null,
+            customerName: existing.customerName ?? 'Walk-in Customer',
+            amount: existing.totalAmount,
+            paidAmount: 0,
+            outstandingAmount: existing.totalAmount,
+            currency: existing.currency,
+            issueDate: new Date(),
+            dueDate: existing.dueDate ?? new Date(Date.now() + 30 * 24 * 3600 * 1000),
+            status: 'OPEN' as any,
+            sourceType: 'SalesOrder',
+            sourceId: id,
+            notes: `Sales Order ${existing.salesOrderNumber}`,
+          },
+        });
+        receivableId = receivable.id;
       } else if ((existing as any).cashAccountId) {
         // Credit the cash account balance.
         await tx.cashAccount.update({
@@ -783,6 +808,22 @@ export class SalesOrdersService {
         paymentStatus = 'PAID';
         paidAmount = Number(existing.totalAmount);
         outstandingAmount = 0;
+      }
+
+      const journalEntry = await this.postSalesOrderLedger({
+        order: existing as any,
+        paymentMethod,
+        cashAccountType: existing.cashAccount?.accountType ?? null,
+        cogsAmount,
+        userId,
+        tx,
+      });
+
+      if (receivableId) {
+        await tx.receivable.update({
+          where: { id: receivableId },
+          data: { journalEntryId: journalEntry.id },
+        });
       }
 
       // ── Tax auto-apply (Sprint C2) ───────────────────────────────────────
@@ -810,6 +851,7 @@ export class SalesOrdersService {
           paymentStatus,
           paidAmount,
           outstandingAmount,
+          journalEntryId: journalEntry.id,
           ...(receivableId ? { receivableId } : {}),
         },
       });
@@ -890,6 +932,104 @@ export class SalesOrdersService {
         createdById: userId,
       },
     });
+  }
+
+  private async postSalesOrderLedger(input: {
+    order: {
+      id: string;
+      salesOrderNumber: string;
+      companyId: string;
+      divisionId: string | null;
+      branchId: string | null;
+      orderDate: Date;
+      totalAmount: Prisma.Decimal | number | string;
+      taxAmount: Prisma.Decimal | number | string;
+    };
+    paymentMethod: SalesPaymentMethod | string;
+    cashAccountType?: CashAccountType | null;
+    cogsAmount: number;
+    userId: string;
+    tx: Prisma.TransactionClient;
+  }) {
+    const totalAmount = roundMoney(Number(input.order.totalAmount));
+    const taxAmount = roundMoney(Number(input.order.taxAmount ?? 0));
+    const revenueAmount = roundMoney(totalAmount - taxAmount);
+    const cogsAmount = roundMoney(input.cogsAmount);
+    if (totalAmount <= 0) {
+      throw new BadRequestException('Sales order total must be greater than zero to post');
+    }
+
+    const receivableOrCashRole: AccountRole =
+      input.paymentMethod === SalesPaymentMethod.CREDIT
+        ? 'AR_CONTROL'
+        : cashAccountRole(input.cashAccountType);
+    const roles: AccountRole[] = [receivableOrCashRole, 'SALES_REVENUE'];
+    if (taxAmount > 0) roles.push('TAX_VAT_PAYABLE');
+    if (cogsAmount > 0) roles.push('COST_OF_GOODS_SOLD', 'INVENTORY_ASSET');
+
+    const accounts = await this.accountResolver.resolveMany(input.order.companyId, roles, input.tx);
+    const description = `Sales order ${input.order.salesOrderNumber}`;
+    const lines = [
+      {
+        accountId: accounts[receivableOrCashRole].id,
+        description:
+          input.paymentMethod === SalesPaymentMethod.CREDIT ? 'Customer receivable' : 'Cash sale',
+        debit: totalAmount,
+        credit: 0,
+      },
+      ...(revenueAmount > 0
+        ? [
+            {
+              accountId: accounts.SALES_REVENUE.id,
+              description: 'Sales revenue',
+              debit: 0,
+              credit: revenueAmount,
+            },
+          ]
+        : []),
+      ...(taxAmount > 0
+        ? [
+            {
+              accountId: accounts.TAX_VAT_PAYABLE.id,
+              description: 'Output tax',
+              debit: 0,
+              credit: taxAmount,
+            },
+          ]
+        : []),
+      ...(cogsAmount > 0
+        ? [
+            {
+              accountId: accounts.COST_OF_GOODS_SOLD.id,
+              description: 'Cost of goods sold',
+              debit: cogsAmount,
+              credit: 0,
+            },
+            {
+              accountId: accounts.INVENTORY_ASSET.id,
+              description: 'Inventory issued',
+              debit: 0,
+              credit: cogsAmount,
+            },
+          ]
+        : []),
+    ];
+
+    return this.postingEngine.postLines(
+      {
+        companyId: input.order.companyId,
+        divisionId: input.order.divisionId,
+        branchId: input.order.branchId,
+        transactionDate: input.order.orderDate,
+        description,
+        referenceType: 'SalesOrder',
+        referenceId: input.order.id,
+        moduleName: 'sales-orders',
+        userId: input.userId,
+        lines,
+      },
+      input.tx,
+    );
   }
 
   /**

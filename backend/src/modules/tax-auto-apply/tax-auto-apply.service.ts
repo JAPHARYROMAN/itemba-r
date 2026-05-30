@@ -1,8 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AccountResolverService } from '../../common/services/account-resolver.service';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 
 /**
  * TaxAutoApplyService — Sprint C2.
@@ -39,11 +37,7 @@ import { PostingEngineService } from '../accounting-engine/posting-engine.servic
 @Injectable()
 export class TaxAutoApplyService {
   private readonly logger = new Logger(TaxAutoApplyService.name);
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly accountResolver: AccountResolverService,
-    private readonly postingEngine: PostingEngineService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   private isEnabled(): boolean {
     return (process.env.TAX_AUTO_APPLY ?? 'false').toLowerCase() === 'true';
@@ -133,7 +127,12 @@ export class TaxAutoApplyService {
     // wins within each scope. We only resolve once per call — every line in
     // a single auto-apply pass shares the same code (operators that need
     // mixed rates will move to per-line taxCodeId in a future iteration).
-    let defaultCode: { id: string; taxTypeId: string; taxRateId: string | null; taxType: { taxCategory: string; taxTypeCode: string } } | null;
+    let defaultCode: {
+      id: string;
+      taxTypeId: string;
+      taxRateId: string | null;
+      taxType: { taxCategory: string; taxTypeCode: string };
+    } | null;
     try {
       const candidates = await client.taxCode.findMany({
         where: {
@@ -166,7 +165,9 @@ export class TaxAutoApplyService {
 
     if (!defaultCode) {
       result.error = `No active TaxCode for appliesTo=${input.appliesTo} on company ${order.companyId}.`;
-      this.logger.warn(`Tax auto-apply skipped for ${input.sourceType} ${input.sourceId}: ${result.error}`);
+      this.logger.warn(
+        `Tax auto-apply skipped for ${input.sourceType} ${input.sourceId}: ${result.error}`,
+      );
       return result;
     }
 
@@ -277,51 +278,12 @@ export class TaxAutoApplyService {
     });
     if (existingJournal) return;
 
-    const isVat = input.taxCategory === 'VAT';
-    const taxAccount =
-      input.direction === 'INPUT'
-        ? await this.accountResolver.resolve(input.companyId, 'TAX_VAT_RECEIVABLE', input.tx)
-        : await this.accountResolver.resolve(
-            input.companyId,
-            isVat ? 'TAX_VAT_PAYABLE' : 'TAX_WITHHOLDING_PAYABLE',
-            input.tx,
-          );
-    const contraAccount =
-      input.direction === 'INPUT'
-        ? await this.accountResolver.resolve(input.companyId, 'AP_CONTROL', input.tx)
-        : await this.accountResolver.resolve(input.companyId, 'AR_CONTROL', input.tx);
-    const description = `Tax ${input.taxTypeCode} ${input.taxTransactionNumber}`;
-    const journal = await this.postingEngine.postLines(
-      {
-        journalNumber: `JE-TAX-${input.taxTransactionNumber}`,
-        companyId: input.companyId,
-        divisionId: input.divisionId,
-        branchId: input.branchId,
-        transactionDate: input.transactionDate,
-        description,
-        referenceType: 'TaxTransaction',
-        referenceId: input.taxTransactionId,
-        moduleName: 'tax-auto-apply',
-        userId: input.userId,
-        lines:
-          input.direction === 'INPUT'
-            ? [
-                { accountId: taxAccount.id, description, debit: input.amount, credit: 0 },
-                { accountId: contraAccount.id, description, debit: 0, credit: input.amount },
-              ]
-            : [
-                { accountId: contraAccount.id, description, debit: input.amount, credit: 0 },
-                { accountId: taxAccount.id, description, debit: 0, credit: input.amount },
-              ],
-      },
-      input.tx,
-    );
-
+    // The source sales/purchase journal owns the GL impact. TaxTransaction is
+    // the compliance ledger, so mark it posted without creating duplicate AR/AP.
     await db.taxTransaction.update({
       where: { id: input.taxTransactionId },
       data: {
         status: 'POSTED',
-        journalEntryId: journal.id,
         postedById: input.userId,
         postedAt: new Date(),
       },

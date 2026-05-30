@@ -125,6 +125,8 @@ export type AccountRole =
   | 'AR_CONTROL'
   | 'AP_CONTROL'
   | 'INVENTORY_ASSET'
+  | 'SALES_REVENUE'
+  | 'COST_OF_GOODS_SOLD'
   | 'FIXED_ASSET'
   | 'INTERCOMPANY_RECEIVABLE'
   | 'INTERCOMPANY_PAYABLE'
@@ -146,10 +148,12 @@ export type AccountRole =
  */
 const CONVENTIONAL_CODES: Record<AccountRole, string[]> = {
   CASH_ON_HAND: ['1010', '1000'],
-  BANK: ['1020', '1021', '1100'], // 1100 also used for AR in some legacy charts
+  BANK: ['1010', '1020', '1021', '1100'], // 1100 also used for AR in some legacy charts
   AR_CONTROL: ['1100', '1110', '1200'],
   AP_CONTROL: ['2000', '2010', '2100'],
   INVENTORY_ASSET: ['1200'],
+  SALES_REVENUE: ['4000', '4100', '4900'],
+  COST_OF_GOODS_SOLD: ['5000', '5100', '5200', '5300'],
   FIXED_ASSET: ['1500'],
   INTERCOMPANY_RECEIVABLE: ['1300', '1390', '1100'],
   INTERCOMPANY_PAYABLE: ['2300', '2390', '2000'],

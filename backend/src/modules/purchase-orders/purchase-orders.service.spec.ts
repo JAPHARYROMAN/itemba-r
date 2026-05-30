@@ -8,6 +8,10 @@ function makeService() {
       update: jest.fn(async ({ data }: any) => ({ id: 'po-1', companyId: 'company-1', ...data })),
       findFirst: jest.fn(),
     },
+    payable: {
+      create: jest.fn(async ({ data }: any) => ({ id: 'payable-1', ...data })),
+      update: jest.fn(async ({ data }: any) => ({ id: 'payable-1', ...data })),
+    },
     purchaseOrderLine: {
       deleteMany: jest.fn(),
     },
@@ -39,6 +43,14 @@ function makeService() {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
     companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-1' }),
   } as any;
+  const postingEngine = { postLines: jest.fn().mockResolvedValue({ id: 'je-1' }) } as any;
+  const accountResolver = {
+    resolveMany: jest.fn().mockResolvedValue({
+      INVENTORY_ASSET: { id: 'inventory-account' },
+      AP_CONTROL: { id: 'ap-account' },
+      CASH_ON_HAND: { id: 'cash-account' },
+    }),
+  } as any;
   const service = new PurchaseOrdersService(
     prisma,
     auditLogs,
@@ -46,9 +58,11 @@ function makeService() {
     taxAutoApply,
     codes,
     companyScope,
+    postingEngine,
+    accountResolver,
   );
 
-  return { service, prisma };
+  return { service, prisma, postingEngine, accountResolver };
 }
 
 const user = { id: 'user-1', permissions: ['purchases.create'] } as any;
@@ -112,7 +126,7 @@ describe('PurchaseOrdersService payment state', () => {
   });
 
   it('repairs cash payment state when a cash purchase is received', async () => {
-    const { service, prisma } = makeService();
+    const { service, prisma, postingEngine, accountResolver } = makeService();
     prisma.purchaseOrder.findFirst.mockResolvedValue({
       id: 'po-1',
       companyId: 'company-1',
@@ -134,8 +148,22 @@ describe('PurchaseOrdersService payment state', () => {
           paidAmount: 9400000,
           outstandingAmount: 0,
           paymentStatus: 'PAID',
+          journalEntryId: 'je-1',
         }),
       }),
+    );
+    expect(accountResolver.resolveMany).toHaveBeenCalledWith(
+      'company-1',
+      ['INVENTORY_ASSET', 'CASH_ON_HAND'],
+      prisma,
+    );
+    expect(postingEngine.postLines).toHaveBeenCalledWith(
+      expect.objectContaining({
+        companyId: 'company-1',
+        referenceType: 'PurchaseOrder',
+        referenceId: 'po-1',
+      }),
+      prisma,
     );
   });
 });

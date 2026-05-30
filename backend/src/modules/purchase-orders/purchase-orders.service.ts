@@ -3,14 +3,15 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
-import { CompanyScopeService } from '../../common/services';
+import { AccountResolverService, AccountRole, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreatePurchaseOrderDto, PurchaseOrderLineDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { QueryPurchaseOrderDto } from './dto/query-purchase-order.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
-import { AccessLevel, AuditSeverity, PurchaseType } from '@prisma/client';
+import { AccessLevel, AuditSeverity, Prisma, PurchaseType } from '@prisma/client';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 
 type PurchaseOrderReferenceIds = {
@@ -52,6 +53,23 @@ function paymentStateForPurchaseType(purchaseType: PurchaseType, totalAmount: nu
   };
 }
 
+function purchaseDebitRole(purchaseType: PurchaseType): AccountRole {
+  switch (purchaseType) {
+    case PurchaseType.ASSET_PURCHASE:
+      return 'FIXED_ASSET';
+    case PurchaseType.SERVICE_PURCHASE:
+    case PurchaseType.INTERNAL_COMPANY:
+    case PurchaseType.OTHER:
+      return 'GENERAL_EXPENSE';
+    default:
+      return 'INVENTORY_ASSET';
+  }
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
 @Injectable()
 export class PurchaseOrdersService {
   private readonly logger = new Logger(PurchaseOrdersService.name);
@@ -62,6 +80,8 @@ export class PurchaseOrdersService {
     private readonly taxAutoApply: TaxAutoApplyService,
     private readonly codes: EntityCodeGeneratorService,
     private readonly companyScope: CompanyScopeService,
+    private readonly postingEngine: PostingEngineService,
+    private readonly accountResolver: AccountResolverService,
   ) {}
 
   async findAll(query: QueryPurchaseOrderDto, user: AuthUser) {
@@ -476,6 +496,8 @@ export class PurchaseOrdersService {
     const receivingBranchId = existing.branchId;
 
     const record = await this.prisma.$transaction(async (tx) => {
+      const receivedAt = new Date();
+
       for (const line of existing.lines as any[]) {
         const product = await tx.product.findUnique({
           where: { id: line.productId },
@@ -487,14 +509,18 @@ export class PurchaseOrdersService {
         }
 
         if (product.trackInventory) {
+          const unitCost =
+            Number(line.quantity) > 0
+              ? Number(line.lineTotal) / Number(line.quantity)
+              : Number(line.unitCost);
           await this.inventoryMovements.createMovement({
             companyId: existing.companyId,
             productId: line.productId,
             movementType: 'PURCHASE_RECEIPT',
             quantity: Number(line.quantity),
             unitId: line.unitId,
-            unitCost: Number(line.unitCost),
-            movementDate: new Date(),
+            unitCost,
+            movementDate: receivedAt,
             createdById: userId,
             referenceType: 'PurchaseOrder',
             referenceId: id,
@@ -507,12 +533,58 @@ export class PurchaseOrdersService {
         }
       }
 
+      let payableId = existing.payableId ?? null;
+      if (existing.purchaseType !== PurchaseType.CASH_PURCHASE && !payableId) {
+        const payableNumber = await this.codes.next({
+          entityType: 'Payable',
+          companyId: existing.companyId,
+          tx,
+        });
+        const payable = await tx.payable.create({
+          data: {
+            payableNumber,
+            companyId: existing.companyId,
+            divisionId: existing.divisionId ?? null,
+            branchId: existing.branchId ?? null,
+            supplierId: existing.supplierId ?? null,
+            supplierName: existing.supplierName ?? 'Unknown supplier',
+            amount: existing.totalAmount,
+            paidAmount: 0,
+            outstandingAmount: existing.totalAmount,
+            currency: existing.currency,
+            issueDate: receivedAt,
+            dueDate: existing.expectedDate ?? new Date(Date.now() + 30 * 24 * 3600 * 1000),
+            status: 'OPEN' as any,
+            sourceType: 'PurchaseOrder',
+            sourceId: id,
+            notes: `Purchase Order ${existing.purchaseOrderNumber}`,
+          },
+        });
+        payableId = payable.id;
+      }
+
+      const journalEntry = await this.postPurchaseOrderLedger({
+        order: existing as any,
+        transactionDate: receivedAt,
+        userId,
+        tx,
+      });
+
+      if (payableId) {
+        await tx.payable.update({
+          where: { id: payableId },
+          data: { journalEntryId: journalEntry.id },
+        });
+      }
+
       return tx.purchaseOrder.update({
         where: { id },
         data: {
           status: 'RECEIVED',
           receivedById: userId,
-          receivedAt: new Date(),
+          receivedAt,
+          journalEntryId: journalEntry.id,
+          ...(payableId ? { payableId } : {}),
           ...(existing.purchaseType === PurchaseType.CASH_PURCHASE && {
             paidAmount: existing.totalAmount,
             outstandingAmount: 0,
@@ -534,6 +606,73 @@ export class PurchaseOrdersService {
     });
 
     return record;
+  }
+
+  private async postPurchaseOrderLedger(input: {
+    order: {
+      id: string;
+      purchaseOrderNumber: string;
+      companyId: string;
+      divisionId: string | null;
+      branchId: string | null;
+      purchaseType: PurchaseType;
+      totalAmount: Prisma.Decimal | number | string;
+    };
+    transactionDate: Date;
+    userId: string;
+    tx: Prisma.TransactionClient;
+  }) {
+    const amount = roundMoney(Number(input.order.totalAmount));
+    if (amount <= 0) {
+      throw new BadRequestException('Purchase order total must be greater than zero to post');
+    }
+
+    const debitRole = purchaseDebitRole(input.order.purchaseType);
+    const creditRole: AccountRole =
+      input.order.purchaseType === PurchaseType.CASH_PURCHASE ? 'CASH_ON_HAND' : 'AP_CONTROL';
+    const accounts = await this.accountResolver.resolveMany(
+      input.order.companyId,
+      [debitRole, creditRole],
+      input.tx,
+    );
+    const description = `Purchase order ${input.order.purchaseOrderNumber}`;
+
+    return this.postingEngine.postLines(
+      {
+        companyId: input.order.companyId,
+        divisionId: input.order.divisionId,
+        branchId: input.order.branchId,
+        transactionDate: input.transactionDate,
+        description,
+        referenceType: 'PurchaseOrder',
+        referenceId: input.order.id,
+        moduleName: 'purchase-orders',
+        userId: input.userId,
+        lines: [
+          {
+            accountId: accounts[debitRole].id,
+            description:
+              debitRole === 'INVENTORY_ASSET'
+                ? 'Inventory received'
+                : debitRole === 'FIXED_ASSET'
+                  ? 'Asset purchased'
+                  : 'Purchase expense',
+            debit: amount,
+            credit: 0,
+          },
+          {
+            accountId: accounts[creditRole].id,
+            description:
+              input.order.purchaseType === PurchaseType.CASH_PURCHASE
+                ? 'Cash paid'
+                : 'Accounts payable',
+            debit: 0,
+            credit: amount,
+          },
+        ],
+      },
+      input.tx,
+    );
   }
 
   async cancel(id: string, user: AuthUser) {
