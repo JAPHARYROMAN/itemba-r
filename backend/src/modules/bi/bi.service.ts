@@ -8,21 +8,24 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { pagination } from '../../common/utils/pagination';
+import { CompanyScopeService } from '../../common/services/company-scope.service';
 
 @Injectable()
 export class BiService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   async getExecutiveSummary(user: any) {
+    const companyScope = await this.companyScope.companyWhereFor(user);
     const [recentInsights, openIssues, pendingApprovals] = await Promise.all([
       this.prisma.executiveInsight.findMany({
         where: {
           status: InsightStatus.OPEN,
           deletedAt: null,
-          ...(user.companyId ? { companyId: user.companyId } : {}),
+          ...companyScope,
         },
         orderBy: { createdAt: 'desc' },
         take: 5,
@@ -35,13 +38,13 @@ export class BiService {
           severity: {
             in: [DataQualityIssueSeverity.HIGH, DataQualityIssueSeverity.CRITICAL],
           },
-          ...(user.companyId ? { companyId: user.companyId } : {}),
+          ...companyScope,
         },
       }),
       this.prisma.approvalRequest.count({
         where: {
           status: ApprovalRequestStatus.PENDING,
-          ...(user.companyId ? { companyId: user.companyId } : {}),
+          ...companyScope,
         },
       }),
     ]);
@@ -49,8 +52,9 @@ export class BiService {
   }
 
   async getGroupSummary(user: any) {
+    const companyScope = await this.companyScope.companyWhereFor(user);
     const companies = await this.prisma.company.findMany({
-      where: { deletedAt: null, ...(user.companyId ? { id: user.companyId } : {}) },
+      where: { deletedAt: null, ...this.companyTableWhere(companyScope) },
       select: { id: true, name: true, code: true },
     });
     const latestSnapshots = await this.prisma.kPISnapshot.findMany({
@@ -75,11 +79,11 @@ export class BiService {
   }
 
   async queryDataset(datasetKey: string, body: any, user: any) {
-    const companyId = body.companyId ?? user.companyId;
-    const companyFilter = companyId ? { companyId } : {};
+    const companyFilter = await this.companyScope.companyWhereFor(user, body.companyId);
 
     switch (datasetKey) {
       case 'cash_position': {
+        const paging = pagination({ page: body.page, limit: body.limit, maxLimit: 200 });
         const data = await this.prisma.cashAccount.findMany({
           where: { deletedAt: null, ...companyFilter },
           select: {
@@ -89,13 +93,14 @@ export class BiService {
             currency: true,
             companyId: true,
           },
+          take: paging.limit,
         });
         return { datasetKey, data };
       }
       case 'inventory_summary': {
         const paging = pagination({ page: body.page, limit: body.limit, maxLimit: 200 });
         const data = await this.prisma.inventoryBalance.findMany({
-          where: { ...(companyId ? { companyId } : {}) },
+          where: { ...companyFilter },
           orderBy: { updatedAt: 'desc' },
           skip: paging.skip,
           take: paging.limit,
@@ -169,9 +174,15 @@ export class BiService {
         };
       }
       case 'company_comparison': {
+        const paging = pagination({ page: body.page, limit: body.limit, maxLimit: 200 });
+        // Scope the company roster to the caller's accessible companies (the
+        // Company table is keyed by `id`, so map the scope's companyId/id onto
+        // an `id` filter). This closes the cross-tenant leak where any caller
+        // could read the whole group roster.
         const companies = await this.prisma.company.findMany({
-          where: { deletedAt: null },
+          where: { deletedAt: null, ...this.companyTableWhere(companyFilter) },
           select: { id: true, name: true, code: true },
+          take: paging.limit,
         });
         return { datasetKey, data: companies };
       }
@@ -183,5 +194,15 @@ export class BiService {
           message: 'Query ready — filters supported',
         };
     }
+  }
+
+  private companyTableWhere(scopeWhere: any) {
+    if (scopeWhere.companyId !== undefined) {
+      return { id: scopeWhere.companyId };
+    }
+    if (scopeWhere.id !== undefined) {
+      return { id: scopeWhere.id };
+    }
+    return { id: { in: [] as string[] } };
   }
 }

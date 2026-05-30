@@ -1,15 +1,17 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InsightStatus } from '@prisma/client';
+import { AccessLevel, InsightStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateExecutiveInsightDto } from './dto/create-executive-insight.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
 
 @Injectable()
 export class ExecutiveInsightsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   async findAll(user: any, query: any) {
@@ -27,16 +29,20 @@ export class ExecutiveInsightsService {
     return { data, total, page: Number(page), limit: Number(limit) };
   }
 
-  async findOne(id: string, user: any) {
+  async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const record = await this.prisma.executiveInsight.findFirst({ where: { id, deletedAt: null } });
     if (!record) throw new NotFoundException('Executive Insight not found');
+    await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
     return record;
   }
 
-  async create(dto: CreateExecutiveInsightDto, user: any) {
+  async create(dto: CreateExecutiveInsightDto, user: AuthUser) {
+    const companyId = dto.companyId ?? (this.companyScope.isGroupScoped(user) ? undefined : user.companyId);
+    await this.companyScope.assertCanAccessCompany(user, companyId ?? null, AccessLevel.WRITE);
     const record = await this.prisma.executiveInsight.create({
       data: {
         ...dto,
+        companyId: companyId ?? null,
         insightNumber: `INS-${Date.now()}`,
         createdById: user.id,
         insightDate: new Date(dto.insightDate),
@@ -46,8 +52,11 @@ export class ExecutiveInsightsService {
     return record;
   }
 
-  async update(id: string, dto: Partial<CreateExecutiveInsightDto>, user: any) {
-    await this.findOne(id, user);
+  async update(id: string, dto: Partial<CreateExecutiveInsightDto>, user: AuthUser) {
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (dto.companyId !== undefined && dto.companyId !== existing.companyId) {
+      await this.companyScope.assertCanAccessCompany(user, dto.companyId ?? null, AccessLevel.WRITE);
+    }
     const updateData: any = { ...dto };
     if (dto.insightDate) updateData.insightDate = new Date(dto.insightDate);
     const record = await this.prisma.executiveInsight.update({ where: { id }, data: updateData });
@@ -55,8 +64,8 @@ export class ExecutiveInsightsService {
     return record;
   }
 
-  async acknowledge(id: string, user: any) {
-    await this.findOne(id, user);
+  async acknowledge(id: string, user: AuthUser) {
+    await this.findOne(id, user, AccessLevel.WRITE);
     const record = await this.prisma.executiveInsight.update({
       where: { id },
       data: { acknowledgedById: user.id, acknowledgedAt: new Date(), status: InsightStatus.ACKNOWLEDGED },
@@ -65,8 +74,8 @@ export class ExecutiveInsightsService {
     return record;
   }
 
-  async resolve(id: string, user: any) {
-    await this.findOne(id, user);
+  async resolve(id: string, user: AuthUser) {
+    await this.findOne(id, user, AccessLevel.WRITE);
     const record = await this.prisma.executiveInsight.update({
       where: { id },
       data: { resolvedById: user.id, resolvedAt: new Date(), status: InsightStatus.RESOLVED },
@@ -75,15 +84,15 @@ export class ExecutiveInsightsService {
     return record;
   }
 
-  async dismiss(id: string, user: any) {
-    await this.findOne(id, user);
+  async dismiss(id: string, user: AuthUser) {
+    await this.findOne(id, user, AccessLevel.WRITE);
     const record = await this.prisma.executiveInsight.update({ where: { id }, data: { status: InsightStatus.DISMISSED } });
     await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'ExecutiveInsight', entityId: id, newValue: { status: 'DISMISSED' } as any });
     return record;
   }
 
-  async remove(id: string, user: any) {
-    await this.findOne(id, user);
+  async remove(id: string, user: AuthUser) {
+    await this.findOne(id, user, AccessLevel.WRITE);
     const record = await this.prisma.executiveInsight.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'ExecutiveInsight', entityId: id, newValue: {} as any });
     return record;
