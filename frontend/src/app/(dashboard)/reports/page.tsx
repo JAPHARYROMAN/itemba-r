@@ -1,7 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Card, PageHeader } from '@/components/ui';
+import { backendGet, backendList } from '@/lib/api-client';
 
 type ReportSector =
   | 'FINANCE'
@@ -15,7 +17,18 @@ type ReportSector =
   | 'CONSTRUCTION'
   | 'LOGISTICS'
   | 'BI';
+
 type ReportScope = 'GROUP' | 'COMPANY' | 'DIVISION';
+type ReportType =
+  | 'FINANCIAL_STATEMENT'
+  | 'OPERATIONAL'
+  | 'ANALYTICAL'
+  | 'COMPLIANCE'
+  | 'AUDIT'
+  | 'DASHBOARD'
+  | 'SELF_SERVICE';
+type ReportLifecycleStatus = 'DRAFT' | 'VALIDATED' | 'CERTIFIED' | 'OFFICIAL' | 'ARCHIVED';
+type SecurityClassification = 'INTERNAL' | 'CONFIDENTIAL' | 'RESTRICTED' | 'SENSITIVE';
 
 interface CatalogEntry {
   id: string;
@@ -27,6 +40,16 @@ interface CatalogEntry {
   permission: string;
   apiPath: string;
   frontendPath: string;
+  reportType: ReportType;
+  lifecycleStatus: ReportLifecycleStatus;
+  owner: string;
+  dataFreshness: string;
+  securityClassification: SecurityClassification;
+  outputFormats: string[];
+  tags: string[];
+  businessQuestions: string[];
+  drillPaths: string[];
+  relatedCapabilities: string[];
 }
 
 interface CatalogResponse {
@@ -34,39 +57,390 @@ interface CatalogResponse {
   filtered: number;
   sectors: ReportSector[];
   sectorCounts: Record<string, number>;
+  typeCounts: Record<string, number>;
+  lifecycleCounts: Record<string, number>;
+  securityCounts: Record<string, number>;
+  generatedAt: string;
   entries: CatalogEntry[];
 }
 
-interface Company { id: string; name: string; code: string; }
-interface Division { id: string; name: string; code: string; companyId: string; }
+interface Company {
+  id: string;
+  name: string;
+  code: string;
+}
 
-const SECTOR_META: Record<ReportSector, { label: string; color: string; icon: string }> = {
-  FINANCE: { label: 'Finance', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: '◈' },
-  HR: { label: 'HR & Payroll', color: 'bg-violet-50 text-violet-700 border-violet-200', icon: '◉' },
-  OPERATIONS: { label: 'Operations', color: 'bg-sky-50 text-sky-700 border-sky-200', icon: '◐' },
-  PETROLEUM: { label: 'Petroleum', color: 'bg-amber-50 text-amber-700 border-amber-200', icon: '◆' },
-  WESTSIDES: { label: 'Westsides', color: 'bg-rose-50 text-rose-700 border-rose-200', icon: '◇' },
-  COMPLIANCE: { label: 'Compliance', color: 'bg-zinc-100 text-zinc-700 border-zinc-200', icon: '✓' },
-  ITEMBA: { label: 'Itemba', color: 'bg-indigo-50 text-indigo-700 border-indigo-200', icon: '◢' },
-  AGRICULTURE: { label: 'Agriculture', color: 'bg-lime-50 text-lime-700 border-lime-200', icon: '✿' },
-  CONSTRUCTION: { label: 'Construction', color: 'bg-orange-50 text-orange-700 border-orange-200', icon: '▣' },
-  LOGISTICS: { label: 'Logistics', color: 'bg-teal-50 text-teal-700 border-teal-200', icon: '➤' },
-  BI: { label: 'BI / Advanced', color: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200', icon: '◭' },
+interface Division {
+  id: string;
+  name: string;
+  code: string;
+  companyId: string;
+}
+
+type AreaKey =
+  | 'reports'
+  | 'dashboards'
+  | 'kpis'
+  | 'builder'
+  | 'packs'
+  | 'subscriptions'
+  | 'catalog'
+  | 'governance'
+  | 'admin';
+
+type PersonaKey = 'executive' | 'cfo' | 'operations' | 'procurement' | 'auditor' | 'analyst';
+
+const AREA_NAV: { key: AreaKey; label: string }[] = [
+  { key: 'reports', label: 'Reports' },
+  { key: 'dashboards', label: 'Dashboards' },
+  { key: 'kpis', label: 'KPIs' },
+  { key: 'builder', label: 'Builder' },
+  { key: 'packs', label: 'Report Packs' },
+  { key: 'subscriptions', label: 'Subscriptions' },
+  { key: 'catalog', label: 'Data Catalog' },
+  { key: 'governance', label: 'Governance' },
+  { key: 'admin', label: 'Admin' },
+];
+
+const SECTOR_LABELS: Record<ReportSector, string> = {
+  FINANCE: 'Finance',
+  HR: 'HR and Payroll',
+  OPERATIONS: 'Operations',
+  PETROLEUM: 'Petroleum',
+  WESTSIDES: 'Westsides',
+  COMPLIANCE: 'Compliance',
+  ITEMBA: 'Itemba',
+  AGRICULTURE: 'Agriculture',
+  CONSTRUCTION: 'Construction',
+  LOGISTICS: 'Logistics',
+  BI: 'BI and Advanced',
 };
 
-const SCOPE_META: Record<ReportScope, { label: string; color: string }> = {
-  GROUP: { label: 'Group', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  COMPANY: { label: 'Company', color: 'bg-sky-50 text-sky-700 border-sky-200' },
-  DIVISION: { label: 'Division', color: 'bg-violet-50 text-violet-700 border-violet-200' },
+const REPORT_TYPE_LABELS: Record<ReportType, string> = {
+  FINANCIAL_STATEMENT: 'Financial',
+  OPERATIONAL: 'Operational',
+  ANALYTICAL: 'Analytical',
+  COMPLIANCE: 'Compliance',
+  AUDIT: 'Audit',
+  DASHBOARD: 'Dashboard',
+  SELF_SERVICE: 'Self-service',
 };
+
+const STATUS_LABELS: Record<ReportLifecycleStatus, string> = {
+  DRAFT: 'Draft',
+  VALIDATED: 'Validated',
+  CERTIFIED: 'Certified',
+  OFFICIAL: 'Official',
+  ARCHIVED: 'Archived',
+};
+
+const PERSONAS: {
+  key: PersonaKey;
+  label: string;
+  focus: string;
+  terms: string[];
+}[] = [
+  {
+    key: 'executive',
+    label: 'Executive',
+    focus: 'KPI cockpit, cash, profitability, exceptions, and board-ready summaries.',
+    terms: ['summary', 'cockpit', 'dashboard', 'cash', 'profit', 'group', 'activity'],
+  },
+  {
+    key: 'cfo',
+    label: 'CFO / Controller',
+    focus: 'Statements, close evidence, cash, AR/AP, consolidation, and audit trail.',
+    terms: ['trial', 'profit', 'balance', 'cash', 'aging', 'intercompany', 'financial', 'audit'],
+  },
+  {
+    key: 'operations',
+    label: 'Operations',
+    focus: 'Stock, movements, sales, purchases, branch performance, and exceptions.',
+    terms: ['stock', 'inventory', 'movement', 'sales', 'purchase', 'operations', 'valuation'],
+  },
+  {
+    key: 'procurement',
+    label: 'Procurement',
+    focus: 'Spend, suppliers, purchase orders, price variance, and commitments.',
+    terms: ['purchase', 'vendor', 'supplier', 'payables', 'procurement', 'spend', 'price'],
+  },
+  {
+    key: 'auditor',
+    label: 'Auditor',
+    focus: 'Evidence, lineage, controls, user actions, snapshots, and formal exports.',
+    terms: ['audit', 'compliance', 'tax', 'document', 'obligation', 'evidence', 'trail'],
+  },
+  {
+    key: 'analyst',
+    label: 'Analyst',
+    focus: 'Builder, custom views, report runs, saved filters, and analytical datasets.',
+    terms: ['bi', 'definition', 'builder', 'run', 'analytics', 'summary', 'performance'],
+  },
+];
+
+const CAPABILITY_LINKS: Record<AreaKey, { title: string; desc: string; href: string; badge: string }[]> = {
+  reports: [],
+  dashboards: [
+    { title: 'Executive BI Dashboard', desc: 'Group-level KPIs and executive intelligence.', href: '/bi/executive', badge: 'Live' },
+    { title: 'BI Dashboards', desc: 'Configured dashboard definitions and widgets.', href: '/bi/dashboards', badge: 'Governed' },
+    { title: 'Operations Reports', desc: 'Stock, sales, and purchase operational analytics.', href: '/operations/reports', badge: 'Ops' },
+    { title: 'Finance Reports', desc: 'Financial statements, AR/AP, group and consolidated views.', href: '/finance/reports', badge: 'Finance' },
+  ],
+  kpis: [
+    { title: 'KPI Library', desc: 'Owned KPI definitions, thresholds, targets, and status.', href: '/bi/kpis', badge: 'Metrics' },
+    { title: 'KPI Snapshots', desc: 'Time-series KPI snapshots for trends and evidence.', href: '/bi/kpi-snapshots', badge: 'History' },
+    { title: 'Executive Insights', desc: 'Anomaly and opportunity insights with lifecycle actions.', href: '/bi/insights', badge: 'Insights' },
+  ],
+  builder: [
+    { title: 'Guided Report Builder', desc: 'Run governed custom reports with filters and saved views.', href: '/bi/report-builder', badge: 'Build' },
+    { title: 'Report Definitions', desc: 'Manage user-authored report definitions and lifecycle.', href: '/bi/reports', badge: 'Definitions' },
+    { title: 'Saved Views', desc: 'Private and shared report views with persisted parameters.', href: '/bi/saved-views', badge: 'Views' },
+    { title: 'Report Runs', desc: 'Execution history, outputs, and failed run investigation.', href: '/bi/report-runs', badge: 'Runs' },
+  ],
+  packs: [
+    { title: 'Financial Statements Archive', desc: 'Generated statements for close evidence and historical review.', href: '/accounting-engine/financial-statements', badge: 'Snapshot' },
+    { title: 'Compliance Evidence Packs', desc: 'Audit and statutory evidence bundles with approval status.', href: '/compliance/evidence-packs', badge: 'Evidence' },
+    { title: 'Finance Reports', desc: 'Generate the statement schedules used inside management packs.', href: '/finance/reports', badge: 'Schedules' },
+  ],
+  subscriptions: [
+    { title: 'Scheduled Reports', desc: 'Automated report delivery, manual trigger, and last-run tracking.', href: '/bi/scheduled-reports', badge: 'Schedule' },
+    { title: 'Analytics Runs', desc: 'Snapshot and analytics execution history.', href: '/bi/analytics-runs', badge: 'Runs' },
+    { title: 'Report Runs', desc: 'Ad-hoc execution log and export history.', href: '/bi/report-runs', badge: 'Audit' },
+  ],
+  catalog: [
+    { title: 'Report Definitions', desc: 'Certified and custom report objects in the reporting layer.', href: '/bi/reports', badge: 'Reports' },
+    { title: 'Saved Views', desc: 'Persisted filter sets and default views by user or team.', href: '/bi/saved-views', badge: 'Views' },
+    { title: 'Data Quality', desc: 'Data integrity findings that can affect report trust.', href: '/bi/data-quality', badge: 'Quality' },
+  ],
+  governance: [
+    { title: 'Data Quality', desc: 'Open quality issues, broken mappings, and data readiness warnings.', href: '/bi/data-quality', badge: 'Quality' },
+    { title: 'Audit Trail Report', desc: 'Group activity and reportable user action history.', href: '/reports/run?reportId=group.audit-trail', badge: 'Audit' },
+    { title: 'Compliance Reports', desc: 'Obligations, tax movements, and document status summaries.', href: '/compliance/reports', badge: 'Controls' },
+    { title: 'Evidence Packs', desc: 'Formal compliance and audit evidence bundles.', href: '/compliance/evidence-packs', badge: 'Evidence' },
+  ],
+  admin: [
+    { title: 'BI Definitions', desc: 'Manage governed definitions that feed reporting and analytics.', href: '/bi/reports', badge: 'Models' },
+    { title: 'Scheduled Reports', desc: 'Monitor scheduled report ownership and delivery failures.', href: '/bi/scheduled-reports', badge: 'Jobs' },
+    { title: 'Report Runs', desc: 'Review slow, failed, exported, or high-volume report runs.', href: '/bi/report-runs', badge: 'Usage' },
+    { title: 'Data Quality', desc: 'Track reporting readiness and quality exceptions.', href: '/bi/data-quality', badge: 'DQ' },
+  ],
+};
+
+const METRIC_CATALOG = [
+  {
+    metric: 'Net Sales',
+    definition: 'Confirmed revenue less cancellations and approved deductions.',
+    owner: 'Group Finance',
+    dimensions: 'Customer, product, company, branch, period',
+    href: '/reports/run?reportId=group.sales',
+  },
+  {
+    metric: 'Gross Margin',
+    definition: 'Net sales less cost of goods sold, with drill-down to orders and ledger lines where posted.',
+    owner: 'Group Finance',
+    dimensions: 'Product, customer, division, period',
+    href: '/finance/reports',
+  },
+  {
+    metric: 'Inventory Value',
+    definition: 'Quantity on hand multiplied by average cost for the selected stock location.',
+    owner: 'Operations Control',
+    dimensions: 'Product, branch, location, company',
+    href: '/reports/run?reportId=operations.stock-valuation',
+  },
+  {
+    metric: 'Receivables Aging',
+    definition: 'Open customer balances bucketed by overdue days.',
+    owner: 'Group Finance',
+    dimensions: 'Customer, company, period, currency',
+    href: '/reports/run?reportId=finance.receivables-aging',
+  },
+  {
+    metric: 'Payables Aging',
+    definition: 'Open supplier balances bucketed by overdue days.',
+    owner: 'Group Finance',
+    dimensions: 'Supplier, company, period, currency',
+    href: '/reports/run?reportId=finance.payables-aging',
+  },
+];
+
+const EMPTY_ENTRIES: CatalogEntry[] = [];
+const EMPTY_SECTORS: ReportSector[] = [];
+
+const inputClass =
+  'w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:ring-2 focus:ring-brand-500';
+
+const controlStyle = {
+  background: 'var(--aurora-card)',
+  borderColor: 'var(--aurora-border)',
+  color: 'var(--aurora-text)',
+} as const;
+
+function countBy<T extends string>(entries: CatalogEntry[], pick: (entry: CatalogEntry) => T): Record<T, number> {
+  return entries.reduce(
+    (acc, entry) => {
+      const key = pick(entry);
+      acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    },
+    {} as Record<T, number>,
+  );
+}
+
+function formatDateTime(value?: string) {
+  if (!value) return 'Not loaded yet';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function badgeToneForStatus(status: ReportLifecycleStatus): 'green' | 'amber' | 'blue' | 'neutral' {
+  if (status === 'CERTIFIED' || status === 'OFFICIAL') return 'green';
+  if (status === 'DRAFT') return 'amber';
+  if (status === 'VALIDATED') return 'blue';
+  return 'neutral';
+}
+
+function badgeToneForSecurity(security: SecurityClassification): 'red' | 'amber' | 'blue' | 'neutral' {
+  if (security === 'SENSITIVE' || security === 'RESTRICTED') return 'red';
+  if (security === 'CONFIDENTIAL') return 'amber';
+  if (security === 'INTERNAL') return 'blue';
+  return 'neutral';
+}
+
+function Badge({
+  children,
+  tone = 'neutral',
+}: {
+  children: ReactNode;
+  tone?: 'neutral' | 'blue' | 'green' | 'amber' | 'red';
+}) {
+  const styles = {
+    neutral: { background: 'var(--aurora-bg-subtle)', color: 'var(--aurora-text-secondary)', borderColor: 'var(--aurora-border)' },
+    blue: { background: 'var(--aurora-primary-subtle)', color: 'var(--aurora-primary-text)', borderColor: 'var(--aurora-border)' },
+    green: { background: 'var(--aurora-success-bg)', color: 'var(--aurora-success-text)', borderColor: 'var(--aurora-success)' },
+    amber: { background: 'var(--aurora-warning-bg)', color: 'var(--aurora-warning-text)', borderColor: 'var(--aurora-warning)' },
+    red: { background: 'var(--aurora-danger-bg)', color: 'var(--aurora-danger-text)', borderColor: 'var(--aurora-danger)' },
+  }[tone];
+
+  return (
+    <span className="inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium" style={styles}>
+      {children}
+    </span>
+  );
+}
+
+function SectionHeading({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h2 className="text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
+          {title}
+        </h2>
+        {subtitle && (
+          <p className="mt-1 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+            {subtitle}
+          </p>
+        )}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function CapabilityGrid({ items }: { items: { title: string; desc: string; href: string; badge: string }[] }) {
+  return (
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+      {items.map((item) => (
+        <Link
+          key={item.href + item.title}
+          href={item.href}
+          className="block rounded-lg border p-4 transition-colors hover:border-brand-500"
+          style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
+        >
+          <div className="mb-3">
+            <Badge tone="blue">{item.badge}</Badge>
+          </div>
+          <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+            {item.title}
+          </div>
+          <p className="mt-1 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+            {item.desc}
+          </p>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function ReportCard({ entry, href }: { entry: CatalogEntry; href: string }) {
+  return (
+    <Link
+      href={href}
+      className="block rounded-lg border p-4 transition-colors hover:border-brand-500"
+      style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+            {entry.name}
+          </div>
+          <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+            {SECTOR_LABELS[entry.sector]} / {entry.category}
+          </div>
+        </div>
+        <Badge tone={badgeToneForStatus(entry.lifecycleStatus)}>{STATUS_LABELS[entry.lifecycleStatus]}</Badge>
+      </div>
+
+      <p className="mt-3 min-h-10 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+        {entry.description}
+      </p>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Badge tone="neutral">{REPORT_TYPE_LABELS[entry.reportType]}</Badge>
+        <Badge tone={badgeToneForSecurity(entry.securityClassification)}>{entry.securityClassification}</Badge>
+        {entry.scopes.map((scopeValue) => (
+          <Badge key={scopeValue} tone="blue">
+            {scopeValue}
+          </Badge>
+        ))}
+      </div>
+
+      <div className="mt-4 grid gap-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+        <div>Owner: {entry.owner}</div>
+        <div>Freshness: {entry.dataFreshness}</div>
+        <div>Outputs: {entry.outputFormats.join(', ')}</div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-1">
+        {entry.tags.slice(0, 5).map((tag) => (
+          <span key={tag} className="rounded border px-1.5 py-0.5 text-[10px]" style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}>
+            {tag}
+          </span>
+        ))}
+      </div>
+    </Link>
+  );
+}
 
 export default function MasterReportsPage() {
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [activeArea, setActiveArea] = useState<AreaKey>('reports');
+  const [persona, setPersona] = useState<PersonaKey>('executive');
 
-  const [scope, setScope] = useState<ReportScope>('COMPANY');
+  const [scope, setScope] = useState<ReportScope | 'ALL'>('ALL');
   const [sector, setSector] = useState<ReportSector | 'ALL'>('ALL');
+  const [reportType, setReportType] = useState<ReportType | 'ALL'>('ALL');
+  const [status, setStatus] = useState<ReportLifecycleStatus | 'ALL'>('ALL');
+  const [category, setCategory] = useState('ALL');
   const [search, setSearch] = useState('');
 
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -74,241 +448,590 @@ export default function MasterReportsPage() {
   const [companyId, setCompanyId] = useState('');
   const [divisionId, setDivisionId] = useState('');
 
-  // Load companies once.
-  useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
-      .then((r) => r.json())
-      .then((j) => {
-        const inner = j.data?.data ?? j.data;
-        const rows: Company[] = Array.isArray(inner) ? inner : Array.isArray(inner?.data) ? inner.data : [];
-        setCompanies(rows);
-      })
-      .catch(() => {});
-  }, []);
-
-  // Load divisions when company changes.
-  useEffect(() => {
-    if (!companyId) { setDivisions([]); setDivisionId(''); return; }
-    fetch(`/api/backend/divisions?companyId=${companyId}&limit=50`)
-      .then((r) => r.json())
-      .then((j) => {
-        const inner = j.data?.data ?? j.data;
-        const rows: Division[] = Array.isArray(inner) ? inner : Array.isArray(inner?.data) ? inner.data : [];
-        setDivisions(rows);
-      })
-      .catch(() => {});
-    setDivisionId('');
-  }, [companyId]);
-
-  // Load catalog (re-fetches when scope/sector change).
   const loadCatalog = useCallback(async () => {
-    setLoading(true); setError('');
+    setLoading(true);
+    setError('');
     try {
-      const params = new URLSearchParams();
-      params.set('scope', scope);
-      if (sector !== 'ALL') params.set('sector', sector);
-      const res = await fetch(`/api/backend/reports/catalog?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const data: CatalogResponse = json.data ?? json;
+      const data = await backendGet<CatalogResponse>('/reports/catalog');
       setCatalog(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load catalog');
+      setError(err instanceof Error ? err.message : 'Failed to load report catalog');
     } finally {
       setLoading(false);
     }
-  }, [scope, sector]);
+  }, []);
 
-  useEffect(() => { loadCatalog(); }, [loadCatalog]);
+  useEffect(() => {
+    loadCatalog();
+  }, [loadCatalog]);
+
+  useEffect(() => {
+    let cancelled = false;
+    backendList<Company>('/companies', { query: { limit: 100 } })
+      .then((rows) => {
+        if (!cancelled) setCompanies(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCompanies([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!companyId) {
+      setDivisions([]);
+      setDivisionId('');
+      return;
+    }
+    let cancelled = false;
+    backendList<Division>('/divisions', { query: { companyId, limit: 200 } })
+      .then((rows) => {
+        if (!cancelled) setDivisions(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setDivisions([]);
+      });
+    setDivisionId('');
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+
+  const entries = catalog?.entries ?? EMPTY_ENTRIES;
+  const sectors = catalog?.sectors ?? EMPTY_SECTORS;
+  const selectedPersona = PERSONAS.find((item) => item.key === persona) ?? PERSONAS[0];
+
+  const categoryOptions = useMemo(() => {
+    const values = entries
+      .filter((entry) => sector === 'ALL' || entry.sector === sector)
+      .map((entry) => entry.category);
+    return Array.from(new Set(values)).sort();
+  }, [entries, sector]);
 
   const filteredEntries = useMemo(() => {
-    if (!catalog) return [];
     const q = search.trim().toLowerCase();
-    if (!q) return catalog.entries;
-    return catalog.entries.filter(
-      (e) =>
-        e.name.toLowerCase().includes(q) ||
-        e.description.toLowerCase().includes(q) ||
-        e.category.toLowerCase().includes(q),
-    );
-  }, [catalog, search]);
+    return entries.filter((entry) => {
+      if (scope !== 'ALL' && !entry.scopes.includes(scope)) return false;
+      if (sector !== 'ALL' && entry.sector !== sector) return false;
+      if (reportType !== 'ALL' && entry.reportType !== reportType) return false;
+      if (status !== 'ALL' && entry.lifecycleStatus !== status) return false;
+      if (category !== 'ALL' && entry.category !== category) return false;
+      if (!q) return true;
+      const haystack = [
+        entry.id,
+        entry.sector,
+        entry.category,
+        entry.name,
+        entry.description,
+        entry.permission,
+        entry.reportType,
+        entry.lifecycleStatus,
+        entry.owner,
+        entry.dataFreshness,
+        entry.securityClassification,
+        ...entry.outputFormats,
+        ...entry.tags,
+        ...entry.businessQuestions,
+        ...entry.drillPaths,
+        ...entry.relatedCapabilities,
+      ]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [category, entries, reportType, scope, search, sector, status]);
 
-  // Group filtered entries by sector → category for the grid.
-  const grouped = useMemo(() => {
-    const bySector = new Map<ReportSector, Map<string, CatalogEntry[]>>();
-    for (const e of filteredEntries) {
-      let cat = bySector.get(e.sector);
-      if (!cat) { cat = new Map(); bySector.set(e.sector, cat); }
-      const list = cat.get(e.category) ?? [];
-      list.push(e);
-      cat.set(e.category, list);
+  const entriesByCategory = useMemo(() => {
+    const grouped = new Map<string, CatalogEntry[]>();
+    for (const entry of filteredEntries) {
+      const key = `${SECTOR_LABELS[entry.sector]} / ${entry.category}`;
+      grouped.set(key, [...(grouped.get(key) ?? []), entry]);
     }
-    return bySector;
+    return Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
   }, [filteredEntries]);
 
+  const recommendedEntries = useMemo(() => {
+    const score = (entry: CatalogEntry) => {
+      const haystack = [
+        entry.name,
+        entry.description,
+        entry.category,
+        entry.sector,
+        entry.reportType,
+        ...entry.tags,
+        ...entry.businessQuestions,
+      ]
+        .join(' ')
+        .toLowerCase();
+      const termScore = selectedPersona.terms.reduce((sum, term) => sum + (haystack.includes(term) ? 2 : 0), 0);
+      const statusScore = entry.lifecycleStatus === 'CERTIFIED' || entry.lifecycleStatus === 'OFFICIAL' ? 2 : 0;
+      return termScore + statusScore;
+    };
+    return [...entries]
+      .map((entry) => ({ entry, score: score(entry) }))
+      .filter((row) => row.score > 0)
+      .sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name))
+      .slice(0, 6)
+      .map((row) => row.entry);
+  }, [entries, selectedPersona]);
+
+  const typeCounts = useMemo(() => countBy(entries, (entry) => entry.reportType), [entries]);
+  const lifecycleCounts = useMemo(() => countBy(entries, (entry) => entry.lifecycleStatus), [entries]);
+  const liveCount = entries.filter((entry) => entry.dataFreshness.toLowerCase().includes('live')).length;
+  const certifiedCount = (lifecycleCounts.CERTIFIED ?? 0) + (lifecycleCounts.OFFICIAL ?? 0);
+  const sensitiveCount = entries.filter((entry) => entry.securityClassification === 'SENSITIVE' || entry.securityClassification === 'RESTRICTED').length;
+
   const buildLink = (entry: CatalogEntry) => {
-    // Per-record reports (apiPath has {id}) can't be auto-run — link to the
-    // sector page so the user can pick a record. Everything else opens in
-    // the generic runner with parameters pre-applied.
-    const isPerRecord = entry.apiPath.includes('{id}');
-    if (isPerRecord) {
-      const params = new URLSearchParams();
-      if (companyId) params.set('companyId', companyId);
-      if (divisionId) params.set('divisionId', divisionId);
-      params.set('reportId', entry.id);
-      const qs = params.toString();
-      return qs ? `${entry.frontendPath}?${qs}` : entry.frontendPath;
-    }
     const params = new URLSearchParams();
     params.set('reportId', entry.id);
     if (companyId) params.set('companyId', companyId);
     if (divisionId) params.set('divisionId', divisionId);
+    if (entry.apiPath.includes('{id}')) {
+      const qs = new URLSearchParams();
+      if (companyId) qs.set('companyId', companyId);
+      if (divisionId) qs.set('divisionId', divisionId);
+      qs.set('reportId', entry.id);
+      const suffix = qs.toString();
+      return suffix ? `${entry.frontendPath}?${suffix}` : entry.frontendPath;
+    }
     return `/reports/run?${params.toString()}`;
   };
 
+  const resetFilters = () => {
+    setScope('ALL');
+    setSector('ALL');
+    setReportType('ALL');
+    setStatus('ALL');
+    setCategory('ALL');
+    setSearch('');
+  };
+
   return (
-    <div className="p-6 space-y-5">
+    <div className="space-y-6 p-6">
       <PageHeader
         title="Reports"
-        subtitle="Master catalog — every report across every sector. Pick a scope, pick a sector, drill in."
+        subtitle="Enterprise reporting, analytics, governance, and decision support across ITEMBA-R."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Link className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700" href="/bi/report-builder">
+              Builder
+            </Link>
+            <Link
+              className="rounded-lg border px-3 py-2 text-sm font-medium"
+              href="/bi/scheduled-reports"
+              style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
+            >
+              Subscriptions
+            </Link>
+          </div>
+        }
       />
 
-      {/* Scope strip */}
-      <Card className="p-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-1">Scope</div>
-            <div className="inline-flex rounded-md border border-slate-200 overflow-hidden">
-              {(['GROUP', 'COMPANY', 'DIVISION'] as ReportScope[]).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setScope(s)}
-                  className={`px-3 py-1.5 text-xs font-medium border-r border-slate-200 last:border-r-0 transition ${
-                    scope === s ? 'bg-indigo-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  {SCOPE_META[s].label}
-                </button>
-              ))}
+      <Card padding="none" className="overflow-hidden">
+        <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+          <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
+            <div>
+              <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                Reporting command center
+              </div>
+              <p className="mt-1 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                Search governed reports, launch dashboards, build saved views, generate close evidence, and trace numbers back to operational source records.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+              <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Reports
+                </div>
+                <div className="mt-1 text-xl font-semibold">{catalog?.total ?? 0}</div>
+              </div>
+              <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Certified
+                </div>
+                <div className="mt-1 text-xl font-semibold">{certifiedCount}</div>
+              </div>
+              <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Live
+                </div>
+                <div className="mt-1 text-xl font-semibold">{liveCount}</div>
+              </div>
+              <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Sensitive
+                </div>
+                <div className="mt-1 text-xl font-semibold">{sensitiveCount}</div>
+              </div>
             </div>
           </div>
+        </div>
 
-          {(scope === 'COMPANY' || scope === 'DIVISION') && (
-            <div>
-              <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-1">Company</div>
-              <select
-                value={companyId}
-                onChange={(e) => setCompanyId(e.target.value)}
-                className="text-sm border border-slate-200 rounded-md px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+        <div className="flex gap-1 overflow-x-auto p-2">
+          {AREA_NAV.map((area) => {
+            const active = activeArea === area.key;
+            return (
+              <button
+                key={area.key}
+                type="button"
+                onClick={() => setActiveArea(area.key)}
+                className="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+                style={{
+                  background: active ? 'var(--aurora-primary)' : 'transparent',
+                  color: active ? '#fff' : 'var(--aurora-text-secondary)',
+                }}
               >
-                <option value="">— Select Company —</option>
-                {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-          )}
-
-          {scope === 'DIVISION' && companyId && (
-            <div>
-              <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-1">Division</div>
-              <select
-                value={divisionId}
-                onChange={(e) => setDivisionId(e.target.value)}
-                className="text-sm border border-slate-200 rounded-md px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-              >
-                <option value="">— Select Division —</option>
-                {divisions.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
-            </div>
-          )}
-
-          <div className="flex-1 min-w-[200px]">
-            <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-1">Search</div>
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="trial balance, sales, leave…"
-              className="w-full text-sm border border-slate-200 rounded-md px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-            />
-          </div>
+                {area.label}
+              </button>
+            );
+          })}
         </div>
       </Card>
 
-      {/* Sector tabs */}
-      {catalog && (
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setSector('ALL')}
-            className={`px-3 py-1.5 text-xs font-medium border rounded-full transition ${
-              sector === 'ALL' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-            }`}
-          >
-            All <span className="ml-1 opacity-70">{catalog.total}</span>
-          </button>
-          {catalog.sectors.map((s) => (
-            <button
-              key={s}
-              onClick={() => setSector(s)}
-              className={`px-3 py-1.5 text-xs font-medium border rounded-full transition ${
-                sector === s ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              {SECTOR_META[s].icon} {SECTOR_META[s].label} <span className="ml-1 opacity-70">{catalog.sectorCounts[s] ?? 0}</span>
-            </button>
-          ))}
+      {error && (
+        <div className="rounded-lg border px-4 py-3 text-sm" style={{ background: 'var(--aurora-danger-bg)', borderColor: 'var(--aurora-danger)', color: 'var(--aurora-danger-text)' }}>
+          {error}
         </div>
       )}
 
-      {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
-      {loading && <div className="flex justify-center py-10"><div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" /></div>}
-
-      {!loading && filteredEntries.length === 0 && (
-        <Card className="p-10 text-center text-sm text-slate-500">No reports match the current filters.</Card>
-      )}
-
-      {/* Grid grouped by sector → category */}
-      {!loading && Array.from(grouped.entries()).map(([sec, byCategory]) => (
-        <Card key={sec} className="overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className={`inline-flex items-center px-2 py-0.5 border rounded-full text-[11px] font-semibold ${SECTOR_META[sec].color}`}>
-                {SECTOR_META[sec].icon} {SECTOR_META[sec].label}
-              </span>
-              <span className="text-xs text-slate-500">
-                {Array.from(byCategory.values()).reduce((s, list) => s + list.length, 0)} reports
-              </span>
-            </div>
-          </div>
-          <div className="p-4 space-y-5">
-            {Array.from(byCategory.entries()).map(([category, entries]) => (
-              <div key={category}>
-                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">{category}</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {entries.map((entry) => (
-                    <a
-                      key={entry.id}
-                      href={buildLink(entry)}
-                      className="block border border-slate-200 rounded-lg p-3 hover:border-indigo-300 hover:bg-indigo-50/40 transition group"
-                    >
-                      <div className="flex items-start justify-between gap-2 mb-1">
-                        <div className="font-medium text-sm text-slate-800 group-hover:text-indigo-700">{entry.name}</div>
-                        <div className="flex flex-wrap gap-1 flex-shrink-0">
-                          {entry.scopes.map((sc) => (
-                            <span key={sc} className={`inline-flex items-center px-1.5 py-0.5 border rounded text-[10px] font-medium ${SCOPE_META[sc].color}`}>
-                              {SCOPE_META[sc].label}
-                            </span>
-                          ))}
-                        </div>
+      {loading ? (
+        <div className="flex justify-center py-14">
+          <div className="h-7 w-7 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
+        </div>
+      ) : (
+        <>
+          {activeArea === 'reports' && (
+            <div className="space-y-6">
+              <Card padding="none" className="overflow-hidden">
+                <div className="grid gap-4 p-4 xl:grid-cols-[1.2fr_1fr]">
+                  <div>
+                    <SectionHeading title="Role lens" subtitle={selectedPersona.focus} />
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {PERSONAS.map((item) => {
+                        const active = persona === item.key;
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => setPersona(item.key)}
+                            className="rounded-lg border px-3 py-2 text-sm font-medium transition-colors"
+                            style={{
+                              background: active ? 'var(--aurora-primary-subtle)' : 'var(--aurora-card)',
+                              borderColor: active ? 'var(--aurora-primary)' : 'var(--aurora-border)',
+                              color: active ? 'var(--aurora-primary-text)' : 'var(--aurora-text-secondary)',
+                            }}
+                          >
+                            {item.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <SectionHeading title="Reporting freshness" subtitle={`Catalog refreshed ${formatDateTime(catalog?.generatedAt)}`} />
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                      <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                        <div style={{ color: 'var(--aurora-text-muted)' }}>Self-service assets</div>
+                        <div className="mt-1 font-semibold">{typeCounts.SELF_SERVICE ?? 0}</div>
                       </div>
-                      <div className="text-xs text-slate-500 leading-snug">{entry.description}</div>
-                      <div className="text-[10px] text-slate-400 font-mono mt-2">{entry.id}</div>
-                    </a>
+                      <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                        <div style={{ color: 'var(--aurora-text-muted)' }}>Financial reports</div>
+                        <div className="mt-1 font-semibold">{typeCounts.FINANCIAL_STATEMENT ?? 0}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+
+              <div className="space-y-3">
+                <SectionHeading title="Recommended for this role" subtitle="Certified and high-value reports surfaced from the catalog." />
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {recommendedEntries.map((entry) => (
+                    <ReportCard key={`recommended-${entry.id}`} entry={entry} href={buildLink(entry)} />
                   ))}
                 </div>
               </div>
-            ))}
-          </div>
-        </Card>
-      ))}
+
+              <Card padding="none" className="overflow-hidden">
+                <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                  <SectionHeading
+                    title="Report library"
+                    subtitle="Search by name, metric, business question, tag, owner, scope, or sector."
+                    action={
+                      <button
+                        type="button"
+                        onClick={resetFilters}
+                        className="rounded-lg border px-3 py-2 text-sm font-medium"
+                        style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
+                      >
+                        Reset
+                      </button>
+                    }
+                  />
+                </div>
+                <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-6">
+                  <div className="md:col-span-2 xl:col-span-2">
+                    <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      Search
+                    </label>
+                    <input
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder="revenue by region, aging, cash, inventory, audit..."
+                      className={inputClass}
+                      style={controlStyle}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      Scope
+                    </label>
+                    <select value={scope} onChange={(event) => setScope(event.target.value as ReportScope | 'ALL')} className={inputClass} style={controlStyle}>
+                      <option value="ALL">All scopes</option>
+                      <option value="GROUP">Group</option>
+                      <option value="COMPANY">Company</option>
+                      <option value="DIVISION">Division</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      Sector
+                    </label>
+                    <select
+                      value={sector}
+                      onChange={(event) => {
+                        setSector(event.target.value as ReportSector | 'ALL');
+                        setCategory('ALL');
+                      }}
+                      className={inputClass}
+                      style={controlStyle}
+                    >
+                      <option value="ALL">All sectors</option>
+                      {sectors.map((item) => (
+                        <option key={item} value={item}>
+                          {SECTOR_LABELS[item]} ({catalog?.sectorCounts[item] ?? 0})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      Type
+                    </label>
+                    <select value={reportType} onChange={(event) => setReportType(event.target.value as ReportType | 'ALL')} className={inputClass} style={controlStyle}>
+                      <option value="ALL">All types</option>
+                      {Object.entries(REPORT_TYPE_LABELS).map(([key, label]) => (
+                        <option key={key} value={key}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      Status
+                    </label>
+                    <select value={status} onChange={(event) => setStatus(event.target.value as ReportLifecycleStatus | 'ALL')} className={inputClass} style={controlStyle}>
+                      <option value="ALL">All statuses</option>
+                      {Object.entries(STATUS_LABELS).map(([key, label]) => (
+                        <option key={key} value={key}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="md:col-span-2 xl:col-span-2">
+                    <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      Category
+                    </label>
+                    <select value={category} onChange={(event) => setCategory(event.target.value)} className={inputClass} style={controlStyle}>
+                      <option value="ALL">All categories</option>
+                      {categoryOptions.map((item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      Company context
+                    </label>
+                    <select value={companyId} onChange={(event) => setCompanyId(event.target.value)} className={inputClass} style={controlStyle}>
+                      <option value="">No company selected</option>
+                      {companies.map((company) => (
+                        <option key={company.id} value={company.id}>
+                          {company.code ? `${company.code} - ${company.name}` : company.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      Division context
+                    </label>
+                    <select
+                      value={divisionId}
+                      onChange={(event) => setDivisionId(event.target.value)}
+                      className={inputClass}
+                      style={controlStyle}
+                      disabled={!companyId}
+                    >
+                      <option value="">All divisions</option>
+                      {divisions.map((division) => (
+                        <option key={division.id} value={division.id}>
+                          {division.code ? `${division.code} - ${division.name}` : division.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </Card>
+
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                  Showing {filteredEntries.length} of {catalog?.total ?? 0} registered reports
+                </div>
+              </div>
+
+              {filteredEntries.length === 0 ? (
+                <Card>
+                  <div className="text-center text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                    No reports match the current filters.
+                  </div>
+                </Card>
+              ) : (
+                <div className="space-y-6">
+                  {entriesByCategory.map(([group, groupEntries]) => (
+                    <section key={group} className="space-y-3">
+                      <SectionHeading title={group} subtitle={`${groupEntries.length} report${groupEntries.length === 1 ? '' : 's'}`} />
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {groupEntries.map((entry) => (
+                          <ReportCard key={entry.id} entry={entry} href={buildLink(entry)} />
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeArea !== 'reports' && (
+            <div className="space-y-6">
+              <SectionHeading
+                title={AREA_NAV.find((area) => area.key === activeArea)?.label ?? 'Reports'}
+                subtitle="This area connects existing ITEMBA-R reporting capabilities into the enterprise reporting layer."
+              />
+              <CapabilityGrid items={CAPABILITY_LINKS[activeArea]} />
+
+              {activeArea === 'catalog' && (
+                <Card padding="none" className="overflow-hidden">
+                  <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                    <SectionHeading title="Certified metric catalog" subtitle="Core business definitions that should remain consistent across reports." />
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
+                        <tr>
+                          <th className="px-4 py-3 text-left font-semibold">Metric</th>
+                          <th className="px-4 py-3 text-left font-semibold">Definition</th>
+                          <th className="px-4 py-3 text-left font-semibold">Owner</th>
+                          <th className="px-4 py-3 text-left font-semibold">Valid dimensions</th>
+                          <th className="px-4 py-3 text-left font-semibold">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {METRIC_CATALOG.map((metric) => (
+                          <tr key={metric.metric} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+                            <td className="px-4 py-3 font-medium">{metric.metric}</td>
+                            <td className="px-4 py-3" style={{ color: 'var(--aurora-text-secondary)' }}>
+                              {metric.definition}
+                            </td>
+                            <td className="px-4 py-3" style={{ color: 'var(--aurora-text-secondary)' }}>
+                              {metric.owner}
+                            </td>
+                            <td className="px-4 py-3" style={{ color: 'var(--aurora-text-secondary)' }}>
+                              {metric.dimensions}
+                            </td>
+                            <td className="px-4 py-3">
+                              <Link className="text-brand-500 hover:underline" href={metric.href}>
+                                Open
+                              </Link>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              )}
+
+              {activeArea === 'governance' && (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <Card>
+                    <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                      Certified or official
+                    </div>
+                    <div className="mt-2 text-3xl font-semibold">{certifiedCount}</div>
+                    <p className="mt-2 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      Reports users can treat as governed sources of truth.
+                    </p>
+                  </Card>
+                  <Card>
+                    <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                      Restricted or sensitive
+                    </div>
+                    <div className="mt-2 text-3xl font-semibold">{sensitiveCount}</div>
+                    <p className="mt-2 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      Reports requiring careful role and export control.
+                    </p>
+                  </Card>
+                  <Card>
+                    <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                      Live operational coverage
+                    </div>
+                    <div className="mt-2 text-3xl font-semibold">{liveCount}</div>
+                    <p className="mt-2 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      Reports connected to live transactional modules.
+                    </p>
+                  </Card>
+                </div>
+              )}
+
+              {activeArea === 'admin' && (
+                <Card padding="none" className="overflow-hidden">
+                  <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                    <SectionHeading title="Administration snapshot" subtitle="Current catalog distribution by report type and lifecycle status." />
+                  </div>
+                  <div className="grid gap-4 p-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <div className="text-sm font-semibold">Report types</div>
+                      {Object.entries(REPORT_TYPE_LABELS).map(([key, label]) => (
+                        <div key={key} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
+                          <span style={{ color: 'var(--aurora-text-secondary)' }}>{label}</span>
+                          <span className="font-semibold">{typeCounts[key as ReportType] ?? 0}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-semibold">Lifecycle status</div>
+                      {Object.entries(STATUS_LABELS).map(([key, label]) => (
+                        <div key={key} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
+                          <span style={{ color: 'var(--aurora-text-secondary)' }}>{label}</span>
+                          <span className="font-semibold">{lifecycleCounts[key as ReportLifecycleStatus] ?? 0}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </Card>
+              )}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

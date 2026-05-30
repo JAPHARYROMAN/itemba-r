@@ -27,6 +27,28 @@ export type ReportSector =
 
 export type ReportScope = 'GROUP' | 'COMPANY' | 'DIVISION';
 
+export type ReportType =
+  | 'FINANCIAL_STATEMENT'
+  | 'OPERATIONAL'
+  | 'ANALYTICAL'
+  | 'COMPLIANCE'
+  | 'AUDIT'
+  | 'DASHBOARD'
+  | 'SELF_SERVICE';
+
+export type ReportLifecycleStatus =
+  | 'DRAFT'
+  | 'VALIDATED'
+  | 'CERTIFIED'
+  | 'OFFICIAL'
+  | 'ARCHIVED';
+
+export type SecurityClassification =
+  | 'INTERNAL'
+  | 'CONFIDENTIAL'
+  | 'RESTRICTED'
+  | 'SENSITIVE';
+
 export interface CatalogEntry {
   id: string;
   sector: ReportSector;
@@ -37,6 +59,148 @@ export interface CatalogEntry {
   permission: string;
   apiPath: string;
   frontendPath: string;
+}
+
+export interface EnterpriseCatalogEntry extends CatalogEntry {
+  reportType: ReportType;
+  lifecycleStatus: ReportLifecycleStatus;
+  owner: string;
+  dataFreshness: string;
+  securityClassification: SecurityClassification;
+  outputFormats: string[];
+  tags: string[];
+  businessQuestions: string[];
+  drillPaths: string[];
+  relatedCapabilities: string[];
+}
+
+const SECTOR_OWNERS: Record<ReportSector, string> = {
+  FINANCE: 'Group Finance',
+  HR: 'People Operations',
+  OPERATIONS: 'Operations Control',
+  PETROLEUM: 'Petroleum Operations',
+  WESTSIDES: 'Westsides Commercial',
+  COMPLIANCE: 'Risk and Compliance',
+  ITEMBA: 'Group Executive Office',
+  AGRICULTURE: 'Agriculture Operations',
+  CONSTRUCTION: 'Construction Operations',
+  LOGISTICS: 'Logistics Operations',
+  BI: 'Data and Analytics',
+};
+
+function inferReportType(entry: CatalogEntry): ReportType {
+  const text = `${entry.id} ${entry.category} ${entry.name}`.toLowerCase();
+  if (entry.sector === 'BI') return 'SELF_SERVICE';
+  if (text.includes('dashboard') || text.includes('cockpit')) return 'DASHBOARD';
+  if (text.includes('audit')) return 'AUDIT';
+  if (entry.sector === 'COMPLIANCE' || text.includes('tax') || text.includes('obligation')) return 'COMPLIANCE';
+  if (
+    entry.sector === 'FINANCE' ||
+    text.includes('trial-balance') ||
+    text.includes('profit') ||
+    text.includes('balance sheet') ||
+    text.includes('cash flow') ||
+    text.includes('aging') ||
+    text.includes('intercompany')
+  ) {
+    return 'FINANCIAL_STATEMENT';
+  }
+  if (text.includes('summary') || text.includes('performance') || text.includes('profitability')) return 'ANALYTICAL';
+  return 'OPERATIONAL';
+}
+
+function inferLifecycleStatus(entry: CatalogEntry, reportType: ReportType): ReportLifecycleStatus {
+  if (reportType === 'AUDIT' || reportType === 'COMPLIANCE') return 'OFFICIAL';
+  if (reportType === 'SELF_SERVICE') return 'VALIDATED';
+  if (reportType === 'FINANCIAL_STATEMENT' || reportType === 'DASHBOARD') return 'CERTIFIED';
+  return 'VALIDATED';
+}
+
+function inferSecurity(entry: CatalogEntry, reportType: ReportType): SecurityClassification {
+  if (reportType === 'AUDIT' || reportType === 'COMPLIANCE') return 'RESTRICTED';
+  if (entry.sector === 'HR' || entry.sector === 'FINANCE') return 'SENSITIVE';
+  if (entry.sector === 'BI') return 'CONFIDENTIAL';
+  return 'INTERNAL';
+}
+
+function inferFreshness(entry: CatalogEntry, reportType: ReportType): string {
+  if (reportType === 'SELF_SERVICE') return 'Saved definition and execution history';
+  if (reportType === 'FINANCIAL_STATEMENT') return 'Live ledger, snapshot capable';
+  if (reportType === 'COMPLIANCE' || reportType === 'AUDIT') return 'Live controls with audit history';
+  if (reportType === 'DASHBOARD') return 'Live operational cockpit';
+  return 'Live operational transactions';
+}
+
+function inferOutputs(reportType: ReportType): string[] {
+  if (reportType === 'DASHBOARD') return ['HTML', 'PDF', 'JSON'];
+  if (reportType === 'SELF_SERVICE') return ['HTML', 'CSV', 'XLSX', 'JSON'];
+  if (reportType === 'AUDIT' || reportType === 'COMPLIANCE') return ['HTML', 'PDF', 'CSV', 'Evidence Pack'];
+  return ['HTML', 'PDF', 'CSV', 'XLSX'];
+}
+
+function inferTags(entry: CatalogEntry, reportType: ReportType): string[] {
+  const base = [
+    entry.sector.toLowerCase(),
+    entry.category.toLowerCase(),
+    reportType.toLowerCase().replace(/_/g, '-'),
+    ...entry.scopes.map((scope) => scope.toLowerCase()),
+  ];
+  const words = entry.name
+    .toLowerCase()
+    .replace(/&/g, ' ')
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length > 2);
+  return Array.from(new Set([...base, ...words]));
+}
+
+function inferBusinessQuestions(entry: CatalogEntry, reportType: ReportType): string[] {
+  if (reportType === 'FINANCIAL_STATEMENT') {
+    return ['What happened financially?', 'Which account or entity explains the variance?', 'Can this number be traced to ledger evidence?'];
+  }
+  if (reportType === 'AUDIT' || reportType === 'COMPLIANCE') {
+    return ['What must be reported formally?', 'Which controls or obligations need attention?', 'Who changed or approved the record?'];
+  }
+  if (reportType === 'DASHBOARD') {
+    return ['What is happening now?', 'Which exceptions require action?', 'Which KPI should be investigated first?'];
+  }
+  if (reportType === 'SELF_SERVICE') {
+    return ['Which governed dataset can answer this question?', 'Can users save, schedule, or share this view?', 'Which reports were run or exported?'];
+  }
+  return ['What is happening operationally?', 'Where are bottlenecks or exceptions?', 'Which source transactions explain the result?'];
+}
+
+function inferDrillPaths(entry: CatalogEntry, reportType: ReportType): string[] {
+  if (reportType === 'FINANCIAL_STATEMENT') return ['Statement line', 'Account', 'Journal entry', 'Source document'];
+  if (entry.sector === 'OPERATIONS') return ['Summary', 'Branch or location', 'Product or order', 'Source transaction'];
+  if (entry.sector === 'WESTSIDES') return ['Summary', 'Customer or product', 'Invoice or order', 'Payment or delivery'];
+  if (entry.sector === 'PETROLEUM') return ['Summary', 'Station or shift', 'Tank or sale', 'Reconciliation record'];
+  if (reportType === 'AUDIT' || reportType === 'COMPLIANCE') return ['Finding', 'Entity', 'User action', 'Evidence'];
+  return ['Summary', 'Dimension', 'Record', 'Audit trail'];
+}
+
+function inferRelatedCapabilities(reportType: ReportType): string[] {
+  if (reportType === 'SELF_SERVICE') return ['Builder', 'Saved Views', 'Report Runs', 'Scheduling'];
+  if (reportType === 'FINANCIAL_STATEMENT') return ['Financial Statements Archive', 'Report Packs', 'Lineage', 'Export'];
+  if (reportType === 'AUDIT' || reportType === 'COMPLIANCE') return ['Evidence Packs', 'Audit Trail', 'Approvals', 'Retention'];
+  if (reportType === 'DASHBOARD') return ['KPIs', 'Alerts', 'Executive Insights', 'Subscriptions'];
+  return ['Operational Drill-through', 'Exceptions', 'Export', 'Workflow'];
+}
+
+export function enrichCatalogEntry(entry: CatalogEntry): EnterpriseCatalogEntry {
+  const reportType = inferReportType(entry);
+  return {
+    ...entry,
+    reportType,
+    lifecycleStatus: inferLifecycleStatus(entry, reportType),
+    owner: SECTOR_OWNERS[entry.sector],
+    dataFreshness: inferFreshness(entry, reportType),
+    securityClassification: inferSecurity(entry, reportType),
+    outputFormats: inferOutputs(reportType),
+    tags: inferTags(entry, reportType),
+    businessQuestions: inferBusinessQuestions(entry, reportType),
+    drillPaths: inferDrillPaths(entry, reportType),
+    relatedCapabilities: inferRelatedCapabilities(reportType),
+  };
 }
 
 export const REPORTS_CATALOG: CatalogEntry[] = [
