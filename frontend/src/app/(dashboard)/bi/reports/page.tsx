@@ -1,30 +1,39 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react';
 
 interface ReportDefinition {
-  id: string
-  reportCode: string
-  name: string
-  reportCategory: string
-  datasetKey: string
-  isSystemReport: boolean
-  isActive: boolean
-  isSensitive: boolean
-  requiredPermission: string | null
+  id: string;
+  reportCode: string;
+  name: string;
+  reportCategory: string;
+  datasetKey: string;
+  isSystemReport: boolean;
+  isActive: boolean;
+  isSensitive: boolean;
+  requiredPermission: string | null;
+}
+
+function extractRows<T>(payload: unknown): T[] {
+  const data = (payload as { data?: unknown })?.data;
+  const nested = (data as { data?: unknown })?.data;
+  if (Array.isArray(payload)) return payload as T[];
+  if (Array.isArray(data)) return data as T[];
+  if (Array.isArray(nested)) return nested as T[];
+  return [];
 }
 
 export default function ReportDefinitionsPage() {
-  const [reports, setReports] = useState<ReportDefinition[]>([])
-  const [loading, setLoading] = useState(true)
+  const [reports, setReports] = useState<ReportDefinition[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetch('/api/backend/bi/report-definitions?limit=50')
       .then((r) => r.json())
-      .then((data: ReportDefinition[]) => setReports(Array.isArray(data) ? data : []))
+      .then((data) => setReports(extractRows<ReportDefinition>(data)))
       .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [])
+      .finally(() => setLoading(false));
+  }, []);
 
   return (
     <div className="p-6">
@@ -48,7 +57,11 @@ export default function ReportDefinitionsPage() {
             </thead>
             <tbody>
               {reports.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-6 text-center text-gray-400">No report definitions found</td></tr>
+                <tr>
+                  <td colSpan={7} className="px-4 py-6 text-center text-gray-400">
+                    No report definitions found
+                  </td>
+                </tr>
               ) : (
                 reports.map((r) => (
                   <tr key={r.id} className="border-t border-gray-100 hover:bg-gray-50">
@@ -57,15 +70,25 @@ export default function ReportDefinitionsPage() {
                     <td className="px-4 py-2">{r.reportCategory}</td>
                     <td className="px-4 py-2 text-xs text-gray-500">{r.datasetKey}</td>
                     <td className="px-4 py-2">
-                      {r.isSystemReport && <span className="px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700">System</span>}
+                      {r.isSystemReport && (
+                        <span className="px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700">
+                          System
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2">
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${r.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium ${r.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
+                      >
                         {r.isActive ? 'Active' : 'Inactive'}
                       </span>
                     </td>
                     <td className="px-4 py-2">
-                      {r.isSensitive && <span className="px-2 py-0.5 rounded text-xs bg-orange-100 text-orange-700">Sensitive</span>}
+                      {r.isSensitive && (
+                        <span className="px-2 py-0.5 rounded text-xs bg-orange-100 text-orange-700">
+                          Sensitive
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -75,5 +98,5 @@ export default function ReportDefinitionsPage() {
         </div>
       )}
     </div>
-  )
+  );
 }
