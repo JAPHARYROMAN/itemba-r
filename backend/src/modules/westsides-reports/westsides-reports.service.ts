@@ -42,6 +42,46 @@ export class WestsidesReportsService {
     return this.companyScope.companyWhereFor(user, query.companyId) as any;
   }
 
+  private toNumber(value: unknown): number {
+    return Number(value ?? 0);
+  }
+
+  private async productMap(productIds: Array<string | null | undefined>) {
+    const ids = Array.from(new Set(productIds.filter((id): id is string => Boolean(id))));
+    if (ids.length === 0)
+      return new Map<
+        string,
+        { id: string; productCode: string; name: string; sku: string | null }
+      >();
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, productCode: true, name: true, sku: true },
+    });
+    return new Map(products.map((product) => [product.id, product]));
+  }
+
+  private async employeeMap(employeeIds: Array<string | null | undefined>) {
+    const ids = Array.from(new Set(employeeIds.filter((id): id is string => Boolean(id))));
+    if (ids.length === 0)
+      return new Map<string, { id: string; fullName: string; employeeCode: string }>();
+    const employees = await this.prisma.employee.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, fullName: true, employeeCode: true },
+    });
+    return new Map(employees.map((employee) => [employee.id, employee]));
+  }
+
+  private async customerMap(customerIds: Array<string | null | undefined>) {
+    const ids = Array.from(new Set(customerIds.filter((id): id is string => Boolean(id))));
+    if (ids.length === 0)
+      return new Map<string, { id: string; name: string; customerCode: string }>();
+    const customers = await this.prisma.customer.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, customerCode: true },
+    });
+    return new Map(customers.map((customer) => [customer.id, customer]));
+  }
+
   private async salesWhere(query: QueryReportDto, user: AuthUser): Promise<any> {
     const { companyId, branchId, dateFrom, dateTo } = query;
     const companyWhere = await this.companyWhere({ companyId }, user);
@@ -297,12 +337,19 @@ export class WestsidesReportsService {
   async salesByChannel(query: QueryReportDto, user: AuthUser) {
     // SalesOrder doesn't carry salesChannelId today; group by salesType as the
     // closest equivalent (CASH_SALE, CREDIT_SALE, WHOLESALE, RETAIL, etc.).
-    return this.prisma.salesOrder.groupBy({
+    const rows = await this.prisma.salesOrder.groupBy({
       by: ['salesType'],
       where: await this.salesWhere(query, user),
       _sum: { totalAmount: true },
       _count: { id: true },
     });
+
+    return rows.map((row) => ({
+      salesType: row.salesType,
+      channel: String(row.salesType).replace(/_/g, ' '),
+      orderCount: row._count.id,
+      totalAmount: this.toNumber(row._sum.totalAmount),
+    }));
   }
 
   async salesByProduct(query: QueryReportDto, user: AuthUser) {
@@ -311,40 +358,87 @@ export class WestsidesReportsService {
       select: { id: true },
     });
     const orderIds = orders.map((o) => o.id);
-    return this.prisma.salesOrderLine.groupBy({
+    if (orderIds.length === 0) return [];
+
+    const rows = await this.prisma.salesOrderLine.groupBy({
       by: ['productId'],
       where: { salesOrderId: { in: orderIds } },
       _sum: { quantity: true, lineTotal: true },
       orderBy: { _sum: { lineTotal: 'desc' } },
     });
+    const products = await this.productMap(rows.map((row) => row.productId));
+
+    return rows.map((row) => {
+      const product = products.get(row.productId);
+      return {
+        productId: row.productId,
+        productCode: product?.productCode ?? null,
+        sku: product?.sku ?? null,
+        productName: product?.name ?? 'Unknown product',
+        quantity: this.toNumber(row._sum.quantity),
+        totalAmount: this.toNumber(row._sum.lineTotal),
+      };
+    });
   }
 
   async salesByCashier(query: QueryReportDto, user: AuthUser) {
     // Renamed in spirit: "by salesperson" since POS cashiers no longer exist.
-    return this.prisma.salesOrder.groupBy({
+    const rows = await this.prisma.salesOrder.groupBy({
       by: ['salespersonId'],
       where: await this.salesWhere(query, user),
       _sum: { totalAmount: true },
       _count: { id: true },
+    });
+    const employees = await this.employeeMap(rows.map((row) => row.salespersonId));
+
+    return rows.map((row) => {
+      const employee = row.salespersonId ? employees.get(row.salespersonId) : null;
+      return {
+        salespersonId: row.salespersonId,
+        salesperson: employee?.fullName ?? employee?.employeeCode ?? 'Unassigned',
+        orderCount: row._count.id,
+        totalAmount: this.toNumber(row._sum.totalAmount),
+      };
     });
   }
 
   async batchStatus(query: QueryReportDto, user: AuthUser) {
     const { companyId } = query;
     const companyWhere = await this.companyWhere({ companyId }, user);
-    return this.prisma.productBatch.findMany({
+    const rows = await this.prisma.productBatch.findMany({
       where: { ...companyWhere, deletedAt: null },
       select: {
         id: true,
         batchNumber: true,
-        productId: true,
         status: true,
         expiryDate: true,
+        receivedDate: true,
         remainingQuantity: true,
         initialQuantity: true,
+        unitCost: true,
+        product: { select: { id: true, productCode: true, name: true, sku: true } },
+        unit: { select: { symbol: true, name: true } },
+        branch: { select: { code: true, name: true } },
+        supplier: { select: { supplierCode: true, name: true } },
       },
       orderBy: { expiryDate: 'asc' },
     });
+
+    return rows.map((row) => ({
+      batchNumber: row.batchNumber,
+      productCode: row.product.productCode,
+      sku: row.product.sku,
+      productName: row.product.name,
+      branch: row.branch ? `${row.branch.code} - ${row.branch.name}` : 'All branches',
+      supplier: row.supplier ? `${row.supplier.supplierCode} - ${row.supplier.name}` : null,
+      status: row.status,
+      receivedDate: row.receivedDate,
+      expiryDate: row.expiryDate,
+      initialQuantity: this.toNumber(row.initialQuantity),
+      remainingQuantity: this.toNumber(row.remainingQuantity),
+      unit: row.unit.symbol ?? row.unit.name,
+      unitCost: this.toNumber(row.unitCost),
+    }));
   }
 
   async stockDamageReport(query: QueryReportDto, user: AuthUser) {
@@ -353,21 +447,44 @@ export class WestsidesReportsService {
     const where: any = { ...companyWhere, deletedAt: null };
     if (branchId) where.branchId = branchId;
 
-    return this.prisma.stockDamage.groupBy({
+    const rows = await this.prisma.stockDamage.groupBy({
       by: ['damageType', 'status'],
       where,
       _sum: { quantity: true, estimatedValue: true },
       _count: { id: true },
     });
+
+    return rows.map((row) => ({
+      damageType: row.damageType,
+      status: row.status,
+      reportCount: row._count.id,
+      quantity: this.toNumber(row._sum.quantity),
+      estimatedValue: this.toNumber(row._sum.estimatedValue),
+    }));
   }
 
   async packageBalanceReport(query: QueryReportDto, user: AuthUser) {
     const { companyId } = query;
     const companyWhere = await this.companyWhere({ companyId }, user);
-    return this.prisma.customerPackageBalance.findMany({
+    const rows = await this.prisma.customerPackageBalance.findMany({
       where: companyWhere,
-      include: { customer: { select: { id: true, name: true } }, returnablePackage: true },
+      include: {
+        customer: { select: { id: true, name: true, customerCode: true } },
+        returnablePackage: { select: { packageCode: true, name: true, packageType: true } },
+      },
     });
+
+    return rows.map((row) => ({
+      customerCode: row.customer.customerCode,
+      customerName: row.customer.name,
+      packageCode: row.returnablePackage?.packageCode ?? null,
+      packageName: row.returnablePackage?.name ?? 'Unassigned package',
+      packageType: row.returnablePackage?.packageType ?? null,
+      quantityOwedByCustomer: this.toNumber(row.quantityOwedByCustomer),
+      quantityOwedToCustomer: this.toNumber(row.quantityOwedToCustomer),
+      depositBalance: this.toNumber(row.depositBalance),
+      updatedAt: row.updatedAt,
+    }));
   }
 
   async quotationConversion(query: QueryReportDto, user: AuthUser) {
@@ -380,12 +497,14 @@ export class WestsidesReportsService {
     });
     const total = byStatus.reduce((sum, s) => sum + s._count.id, 0);
     const converted = byStatus.find((s) => s.status === 'CONVERTED')?._count.id ?? 0;
-    return {
-      byStatus,
-      total,
-      converted,
-      conversionRate: total > 0 ? (converted / total) * 100 : 0,
-    };
+    const conversionRate = total > 0 ? (converted / total) * 100 : 0;
+    return byStatus.map((row) => ({
+      status: row.status,
+      quotationCount: row._count.id,
+      totalQuotations: total,
+      convertedQuotations: converted,
+      conversionRate,
+    }));
   }
 
   async deliveryPerformance(query: QueryReportDto, user: AuthUser) {
@@ -394,11 +513,16 @@ export class WestsidesReportsService {
     const where: any = { ...companyWhere, deletedAt: null };
     if (branchId) where.branchId = branchId;
 
-    return this.prisma.deliveryNote.groupBy({
+    const rows = await this.prisma.deliveryNote.groupBy({
       by: ['status'],
       where,
       _count: { id: true },
     });
+
+    return rows.map((row) => ({
+      status: row.status,
+      deliveryCount: row._count.id,
+    }));
   }
 
   async priceListReport(query: QueryReportDto, user: AuthUser) {
@@ -408,9 +532,15 @@ export class WestsidesReportsService {
       where: { ...companyWhere, deletedAt: null },
       include: { _count: { select: { items: true } } },
     });
-    return priceLists.map((pl) => ({
-      ...pl,
-      itemCount: pl._count.items,
+    return priceLists.map((priceList) => ({
+      name: priceList.name,
+      priceListType: priceList.priceListType,
+      currency: priceList.currency,
+      effectiveFrom: priceList.effectiveFrom,
+      effectiveTo: priceList.effectiveTo,
+      status: priceList.status,
+      itemCount: priceList._count.items,
+      approvedAt: priceList.approvedAt,
     }));
   }
 
@@ -420,17 +550,32 @@ export class WestsidesReportsService {
       select: { id: true },
     });
     const orderIds = orders.map((o) => o.id);
-    return this.prisma.salesOrderLine.groupBy({
+    if (orderIds.length === 0) return [];
+
+    const rows = await this.prisma.salesOrderLine.groupBy({
       by: ['productId'],
       where: { salesOrderId: { in: orderIds } },
       _sum: { quantity: true, lineTotal: true },
       orderBy: { _sum: { quantity: 'desc' } },
       take: 20,
     });
+    const products = await this.productMap(rows.map((row) => row.productId));
+
+    return rows.map((row, index) => {
+      const product = products.get(row.productId);
+      return {
+        rank: index + 1,
+        productCode: product?.productCode ?? null,
+        sku: product?.sku ?? null,
+        productName: product?.name ?? 'Unknown product',
+        quantity: this.toNumber(row._sum.quantity),
+        totalAmount: this.toNumber(row._sum.lineTotal),
+      };
+    });
   }
 
   async slowMovingItems(query: QueryReportDto, user: AuthUser) {
-    const { companyId } = query;
+    const { companyId, branchId } = query;
     const companyWhere = await this.companyWhere({ companyId }, user);
     const cutoff = new Date(Date.now() - 30 * 24 * 3600 * 1000);
 
@@ -453,10 +598,32 @@ export class WestsidesReportsService {
       })
     ).map((l) => l.productId);
 
-    return this.prisma.inventoryBalance.findMany({
-      where: { ...companyWhere, productId: { notIn: soldProductIds }, quantityOnHand: { gt: 0 } },
-      include: { product: { select: { id: true, name: true, sku: true } } },
+    const where: any = {
+      ...companyWhere,
+      productId: { notIn: soldProductIds },
+      quantityOnHand: { gt: 0 },
+    };
+    if (branchId) where.branchId = branchId;
+
+    const rows = await this.prisma.inventoryBalance.findMany({
+      where,
+      include: {
+        product: { select: { id: true, productCode: true, name: true, sku: true } },
+        branch: { select: { code: true, name: true } },
+      },
+      orderBy: { quantityOnHand: 'desc' },
     });
+
+    return rows.map((row) => ({
+      productCode: row.product.productCode,
+      sku: row.product.sku,
+      productName: row.product.name,
+      branch: row.branch ? `${row.branch.code} - ${row.branch.name}` : 'All branches',
+      quantityOnHand: this.toNumber(row.quantityOnHand),
+      quantityReserved: this.toNumber(row.quantityReserved),
+      totalValue: this.toNumber(row.totalValue),
+      lastMovementAt: row.lastMovementAt,
+    }));
   }
 
   async productProfitability(query: QueryReportDto, user: AuthUser) {
@@ -467,6 +634,7 @@ export class WestsidesReportsService {
       select: { id: true },
     });
     const orderIds = orders.map((o) => o.id);
+    if (orderIds.length === 0) return [];
 
     const revenue = await this.prisma.salesOrderLine.groupBy({
       by: ['productId'],
@@ -481,13 +649,20 @@ export class WestsidesReportsService {
     });
 
     const costMap = new Map(costByProduct.map((c) => [c.productId, c._avg.unitCost ?? 0]));
+    const products = await this.productMap(revenue.map((row) => row.productId));
 
     return revenue.map((r) => {
       const totalRevenue = Number(r._sum.lineTotal ?? 0);
       const avgCost = Number(costMap.get(r.productId) ?? 0);
       const totalCost = avgCost * Number(r._sum.quantity ?? 0);
+      const product = products.get(r.productId);
       return {
         productId: r.productId,
+        productCode: product?.productCode ?? null,
+        sku: product?.sku ?? null,
+        productName: product?.name ?? 'Unknown product',
+        quantity: this.toNumber(r._sum.quantity),
+        averageUnitCost: avgCost,
         totalRevenue,
         totalCost,
         grossProfit: totalRevenue - totalCost,
@@ -499,12 +674,25 @@ export class WestsidesReportsService {
   async creditCustomersReport(query: QueryReportDto, user: AuthUser) {
     const { companyId } = query;
     const companyWhere = await this.companyWhere({ companyId }, user);
-    return this.prisma.receivable.groupBy({
+    const rows = await this.prisma.receivable.groupBy({
       by: ['customerId'],
       where: { ...companyWhere, status: { in: ['OPEN', 'OVERDUE'] as any } },
-      _sum: { amount: true },
+      _sum: { amount: true, outstandingAmount: true },
       _count: { id: true },
-      orderBy: { _sum: { amount: 'desc' } },
+      orderBy: { _sum: { outstandingAmount: 'desc' } },
+    });
+    const customers = await this.customerMap(rows.map((row) => row.customerId));
+
+    return rows.map((row) => {
+      const customer = row.customerId ? customers.get(row.customerId) : null;
+      return {
+        customerId: row.customerId,
+        customerCode: customer?.customerCode ?? null,
+        customerName: customer?.name ?? 'Walk-in or unassigned',
+        invoiceCount: row._count.id,
+        invoicedAmount: this.toNumber(row._sum.amount),
+        outstandingAmount: this.toNumber(row._sum.outstandingAmount),
+      };
     });
   }
 
