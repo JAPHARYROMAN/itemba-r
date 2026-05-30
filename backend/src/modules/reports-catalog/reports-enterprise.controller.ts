@@ -43,6 +43,15 @@ export class ReportsEnterpriseController {
     return this.service.viewerMetadata(reportId);
   }
 
+  @Post('viewer/:reportId/run-manifest')
+  recordViewerRun(
+    @Param('reportId') reportId: string,
+    @Body() body: Record<string, unknown>,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.recordViewerRun(reportId, body ?? {}, user);
+  }
+
   @Post('report-packs/:packKey/generate')
   generateReportPack(
     @Param('packKey') packKey: string,
@@ -82,6 +91,15 @@ export class ReportsEnterpriseController {
   @Post('export-audit')
   recordExportAudit(@Body() body: Record<string, unknown>, @CurrentUser() user: AuthUser) {
     return this.service.recordExportAudit(body ?? {}, user);
+  }
+
+  @Get('export-audit/:reportId')
+  exportAuditHistory(
+    @Param('reportId') reportId: string,
+    @Query() query: Record<string, unknown>,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.exportAuditHistory(reportId, user, query ?? {});
   }
 
   @Patch('governance/:reportId/lifecycle')

@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   EnterpriseCatalogEntry,
@@ -15,6 +16,7 @@ import {
   DataQualityIssueStatus,
   FinancialStatementType,
   InsightStatus,
+  Prisma,
   ReportRunStatus,
   StatementRunStatus,
 } from '@prisma/client';
@@ -346,8 +348,14 @@ export class ReportsCatalogService {
         name: 'Monthly Management Pack',
         owner: 'Group Finance',
         status: 'TEMPLATE_READY',
+        templateVersion: '1.2.0',
         cadence: 'Monthly',
         href: '/accounting-engine/financial-statements',
+        readinessScore: 92,
+        snapshotMode: 'FROZEN_STATEMENT_RUN',
+        outputFormats: ['PDF', 'XLSX', 'CSV', 'JSON'],
+        retentionPolicy: '7 years, close and audit evidence',
+        approvalFlow: ['Controller review', 'CFO approval', 'Snapshot lock'],
         sections: [
           'Executive summary',
           'Profit and Loss',
@@ -364,36 +372,78 @@ export class ReportsCatalogService {
           'Inventory valuation reviewed',
           'Data-quality issues acknowledged',
         ],
+        snapshotChecklist: [
+          'Statement filters locked',
+          'Section manifest generated',
+          'Data-quality warnings embedded',
+          'Export audit required',
+        ],
       },
       {
         key: 'audit-evidence-pack',
         name: 'Audit Evidence Pack',
         owner: 'Risk and Compliance',
         status: 'TEMPLATE_READY',
+        templateVersion: '1.1.0',
         cadence: 'On demand',
         href: '/compliance/evidence-packs',
+        readinessScore: 91,
+        snapshotMode: 'FROZEN_EVIDENCE_MANIFEST',
+        outputFormats: ['PDF', 'XLSX', 'JSON'],
+        retentionPolicy: 'Audit retention policy with export trail',
+        approvalFlow: ['Evidence owner review', 'Auditor read-only release'],
         sections: ['Audit trail', 'Financial statement snapshots', 'Source documents', 'Approvals', 'Export log'],
         prerequisites: ['Report parameters locked', 'Evidence documents attached', 'Reviewer assigned'],
+        snapshotChecklist: [
+          'Evidence sources linked',
+          'Export history embedded',
+          'Reviewer assignment recorded',
+          'Lineage references generated',
+        ],
       },
       {
         key: 'board-pack',
         name: 'Board Pack',
         owner: 'Executive Office',
         status: 'DESIGN_READY',
+        templateVersion: '1.0.0',
         cadence: 'Monthly / quarterly',
         href: '/bi/executive',
+        readinessScore: 90,
+        snapshotMode: 'FROZEN_BOARD_MANIFEST',
+        outputFormats: ['PDF', 'PPTX', 'XLSX'],
+        retentionPolicy: 'Board archive with approval evidence',
+        approvalFlow: ['Management commentary', 'CFO review', 'Executive publication'],
         sections: ['Executive KPI summary', 'Financial highlights', 'Cash and working capital', 'Risks', 'Opportunities', 'Forecast'],
         prerequisites: ['Management pack reviewed', 'Commentary completed', 'CFO approval'],
+        snapshotChecklist: [
+          'Management pack dependency linked',
+          'Commentary blocks prepared',
+          'Executive KPIs versioned',
+          'Distribution audit required',
+        ],
       },
       {
         key: 'tax-pack',
         name: 'Tax and Statutory Pack',
         owner: 'Tax and Compliance',
         status: 'DESIGN_READY',
+        templateVersion: '1.0.0',
         cadence: 'Monthly / statutory',
         href: '/compliance/reports',
+        readinessScore: 90,
+        snapshotMode: 'FROZEN_STATUTORY_MANIFEST',
+        outputFormats: ['PDF', 'XLSX', 'CSV', 'JSON'],
+        retentionPolicy: 'Statutory evidence retention by filing period',
+        approvalFlow: ['Tax owner review', 'Compliance approval', 'Filing evidence lock'],
         sections: ['VAT / WHT schedules', 'Tax transaction summary', 'Document status', 'Obligation status', 'Filing readiness'],
         prerequisites: ['Tax mappings complete', 'Open obligations reviewed', 'Compliance evidence attached'],
+        snapshotChecklist: [
+          'Tax mappings verified',
+          'Open obligations embedded',
+          'Filing period locked',
+          'Export audit required',
+        ],
       },
     ];
   }
@@ -452,14 +502,58 @@ export class ReportsCatalogService {
       dateTo: period.periodEnd.toISOString(),
     });
     const generatedAt = new Date();
+    const statementRunNumber = this.makeRunNumber('RPACK');
+    const dataQualityWarnings = dataQuality.warnings.map((warning) => JSON.parse(JSON.stringify(warning)));
+    const sectionManifest = pack.sections.map((section, index) => ({
+      sequence: index + 1,
+      name: section,
+      status: dataQualityWarnings.some((warning) =>
+        String(warning.title ?? warning.description ?? '')
+          .toLowerCase()
+          .includes(section.toLowerCase().split(' ')[0] ?? section.toLowerCase()),
+      )
+        ? 'ATTENTION'
+        : 'READY',
+      relatedReports: includedReports
+        .filter((entry) =>
+          [entry.name, entry.category, entry.sector, entry.reportType, entry.tags.join(' ')]
+            .join(' ')
+            .toLowerCase()
+            .includes(section.toLowerCase().split(' ')[0] ?? section.toLowerCase()),
+        )
+        .slice(0, 6)
+        .map((entry) => ({ id: entry.id, name: entry.name, apiPath: entry.apiPath })),
+    }));
+    const prerequisiteChecks = pack.prerequisites.map((prerequisite) => {
+      const normalized = prerequisite.toLowerCase();
+      const warningMatch = dataQualityWarnings.find((warning) =>
+        [warning.title, warning.description, warning.source]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(normalized.split(' ')[0] ?? normalized),
+      );
+      return {
+        name: prerequisite,
+        status: warningMatch ? 'ATTENTION' : 'READY',
+        evidence: warningMatch ? String(warningMatch.title) : 'No blocking issue detected during generation',
+      };
+    });
 
-    const snapshotPayload = {
+    const snapshotPayloadBase = {
+      snapshotVersion: pack.templateVersion,
+      snapshotNumber: statementRunNumber,
       packKey: pack.key,
       packName: pack.name,
       owner: pack.owner,
       cadence: pack.cadence,
+      readinessScore: pack.readinessScore,
+      templateStatus: pack.status,
       sections: pack.sections,
+      sectionManifest,
       prerequisites: pack.prerequisites,
+      prerequisiteChecks,
+      snapshotChecklist: pack.snapshotChecklist,
       includedReports: includedReports.map((entry) => ({
         id: entry.id,
         name: entry.name,
@@ -475,14 +569,32 @@ export class ReportsCatalogService {
         currency: stringValue(dto.currency) ?? 'TZS',
         basis: stringValue(dto.basis) ?? 'ACCRUAL',
       },
-      dataQualityWarnings: dataQuality.warnings.map((warning) => JSON.parse(JSON.stringify(warning))),
+      dataQualityWarnings,
       generatedAt: generatedAt.toISOString(),
-      snapshotMode: 'Frozen snapshot metadata with source report pointers',
+      snapshotMode: pack.snapshotMode,
+      retentionPolicy: pack.retentionPolicy,
+      approvalFlow: pack.approvalFlow,
+      exportManifest: {
+        formats: pack.outputFormats,
+        auditRequired: true,
+        watermark: `${pack.name} / ${statementRunNumber} / ${generatedAt.toISOString()}`,
+        fileStem: `${pack.key}-${period.periodStart.toISOString().slice(0, 10)}-${period.periodEnd.toISOString().slice(0, 10)}`,
+      },
+      lineageManifest: {
+        catalogPath: '/reports/catalog',
+        packTemplatePath: '/reports/report-packs',
+        archivePath: '/accounting-engine/financial-statements',
+        sourceReportCount: includedReports.length,
+      },
+    };
+    const snapshotPayload = {
+      ...snapshotPayloadBase,
+      manifestHash: this.hashJson(snapshotPayloadBase),
     };
 
     const run = await this.prisma.financialStatementRun.create({
       data: {
-        statementRunNumber: this.makeRunNumber('RPACK'),
+        statementRunNumber,
         companyId: companyId ?? undefined,
         statementType: FinancialStatementType.CUSTOM,
         periodStart: period.periodStart,
@@ -508,6 +620,7 @@ export class ReportsCatalogService {
         statementRunNumber: run.statementRunNumber,
         reportCount: includedReports.length,
         warningCount: dataQuality.warnings.length,
+        manifestHash: snapshotPayload.manifestHash,
       },
     });
 
@@ -521,9 +634,21 @@ export class ReportsCatalogService {
         periodStart: run.periodStart,
         periodEnd: run.periodEnd,
         companyId: run.companyId,
+        manifestHash: snapshotPayload.manifestHash,
+        snapshotMode: pack.snapshotMode,
+        sectionCount: sectionManifest.length,
+        prerequisiteStatus: prerequisiteChecks.some((check) => check.status === 'ATTENTION')
+          ? 'ATTENTION'
+          : 'READY',
       },
       includedReports,
       dataQualityWarnings: dataQuality.warnings,
+      manifest: {
+        hash: snapshotPayload.manifestHash,
+        sectionManifest,
+        prerequisiteChecks,
+        exportManifest: snapshotPayload.exportManifest,
+      },
     };
   }
 
@@ -756,6 +881,141 @@ export class ReportsCatalogService {
     };
   }
 
+  async recordViewerRun(reportId: string, dto: Record<string, unknown>, user: AuthUser) {
+    const entry = this.resolveReportEntry(reportId);
+    const companyId = stringValue(dto.companyId);
+    await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.READ);
+    const generatedAt = new Date();
+    const metrics =
+      dto.metrics && typeof dto.metrics === 'object' && !Array.isArray(dto.metrics)
+        ? (dto.metrics as Record<string, unknown>)
+        : {};
+    const parameters =
+      dto.parameters && typeof dto.parameters === 'object' && !Array.isArray(dto.parameters)
+        ? (dto.parameters as Record<string, unknown>)
+        : {};
+    const runId = this.makeRunNumber('RRUN');
+    const manifestBase = {
+      runId,
+      reportId: entry.id,
+      reportName: entry.name,
+      companyId,
+      generatedAt: generatedAt.toISOString(),
+      lifecycleStatus: entry.lifecycleStatus,
+      securityClassification: entry.securityClassification,
+      sourcePath: entry.apiPath,
+      sourceUrl: stringValue(dto.sourceUrl),
+      viewerPath: entry.frontendPath,
+      parameters,
+      metrics: {
+        rowCount: numberValue(metrics.rowCount) ?? 0,
+        columnCount: numberValue(metrics.columnCount) ?? 0,
+        scalarCount: numberValue(metrics.scalarCount) ?? 0,
+        objectSectionCount: numberValue(metrics.objectSectionCount) ?? 0,
+        primarySection: stringValue(metrics.primarySection) ?? 'Rows',
+        clientDataHash: stringValue(metrics.dataHash),
+      },
+      controls: {
+        dataQualityAttached: Boolean(dto.dataQualityAttached),
+        lineageAttached: Boolean(dto.lineageAttached),
+        exportAuditRequired: true,
+        snapshotEligible:
+          entry.reportType === 'FINANCIAL_STATEMENT' ||
+          entry.reportType === 'COMPLIANCE' ||
+          entry.reportType === 'AUDIT',
+      },
+    };
+    const manifest = {
+      ...manifestBase,
+      manifestHash: this.hashJson(manifestBase),
+      status: 'COMPLETED',
+    };
+
+    await this.auditLogs.log({
+      action: 'REPORT_VIEWER_RUN',
+      entityType: 'ReportViewerRun',
+      entityId: reportId,
+      userId: user.id,
+      companyId: companyId ?? undefined,
+      severity:
+        entry.securityClassification === 'SENSITIVE' || entry.securityClassification === 'RESTRICTED'
+          ? AuditSeverity.HIGH
+          : AuditSeverity.MEDIUM,
+      metadata: {
+        runId,
+        reportId: entry.id,
+        reportName: entry.name,
+        sourcePath: entry.apiPath,
+        manifestHash: manifest.manifestHash,
+        metrics: manifest.metrics,
+      },
+    });
+
+    return manifest;
+  }
+
+  async exportAuditHistory(reportId: string, user: AuthUser, query: Record<string, unknown> = {}) {
+    const entry = this.resolveReportEntry(reportId);
+    const companyId = stringValue(query.companyId);
+    await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.READ);
+    const companyWhere = await this.companyScope.companyWhereFor(user, companyId);
+    const limit = Math.min(Math.max(numberValue(query.limit) ?? 10, 1), 50);
+    const where = {
+      ...companyWhere,
+      filters: { path: ['reportId'], equals: reportId },
+    };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.dataExportLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        select: {
+          id: true,
+          exportNumber: true,
+          exportType: true,
+          filters: true,
+          fileName: true,
+          status: true,
+          createdAt: true,
+          completedAt: true,
+          notes: true,
+          exportedBy: { select: { id: true, fullName: true, email: true } },
+        },
+      }),
+      this.prisma.dataExportLog.count({ where }),
+    ]);
+
+    return {
+      reportId,
+      reportName: entry.name,
+      generatedAt: new Date().toISOString(),
+      total,
+      exports: rows.map((row) => {
+        const filters =
+          row.filters && typeof row.filters === 'object' && !Array.isArray(row.filters)
+            ? (row.filters as Record<string, unknown>)
+            : {};
+        return {
+          id: row.id,
+          exportNumber: row.exportNumber,
+          exportType: row.exportType,
+          format: stringValue(filters.format) ?? 'UNKNOWN',
+          status: row.status,
+          fileName: row.fileName,
+          createdAt: row.createdAt,
+          completedAt: row.completedAt,
+          exportedBy: row.exportedBy,
+          auditHash: stringValue(filters.auditHash),
+          runId: stringValue(filters.runId),
+          metrics: filters.metrics ?? {},
+          parameters: filters.parameters ?? {},
+          notes: row.notes,
+        };
+      }),
+    };
+  }
+
   async recordExportAudit(dto: Record<string, unknown>, user: AuthUser) {
     const reportId = stringValue(dto.reportId);
     if (!reportId) throw new BadRequestException('reportId is required');
@@ -764,6 +1024,46 @@ export class ReportsCatalogService {
     await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.READ);
     const format = (stringValue(dto.format) ?? 'CSV').toUpperCase();
     const exportedAt = new Date();
+    const parameters =
+      dto.parameters && typeof dto.parameters === 'object' && !Array.isArray(dto.parameters)
+        ? (dto.parameters as Record<string, unknown>)
+        : {};
+    const metrics = {
+      rowCount: numberValue(dto.rowCount) ?? 0,
+      columnCount: numberValue(dto.columnCount) ?? 0,
+      sectionCount: numberValue(dto.sectionCount) ?? 0,
+      scalarCount: numberValue(dto.scalarCount) ?? 0,
+      objectSectionCount: numberValue(dto.objectSectionCount) ?? 0,
+    };
+    const auditBase = {
+      reportId,
+      reportName: entry.name,
+      companyId,
+      format,
+      parameters,
+      metrics,
+      runId: stringValue(dto.runId),
+      sourcePath: entry.apiPath,
+      sourceUrl: stringValue(dto.sourceUrl),
+      dataHash: stringValue(dto.dataHash),
+      exportedAt: exportedAt.toISOString(),
+    };
+    const auditHash = this.hashJson(auditBase);
+    const exportFilters = JSON.parse(
+      JSON.stringify({
+        reportId,
+        reportName: entry.name,
+        format,
+        parameters,
+        metrics,
+        runId: auditBase.runId,
+        sourcePath: entry.apiPath,
+        sourceUrl: auditBase.sourceUrl,
+        dataHash: auditBase.dataHash,
+        auditHash,
+        exportedAt: exportedAt.toISOString(),
+      }),
+    ) as Prisma.InputJsonValue;
 
     const exportRecord = await this.prisma.dataExportLog.create({
       data: {
@@ -771,13 +1071,7 @@ export class ReportsCatalogService {
         companyId: companyId ?? undefined,
         exportedById: user.id,
         exportType: this.exportTypeFor(entry),
-        filters: {
-          reportId,
-          reportName: entry.name,
-          format,
-          parameters: dto.parameters ?? {},
-          sourcePath: entry.apiPath,
-        },
+        filters: exportFilters,
         fileName: `${reportId}-${exportedAt.toISOString().slice(0, 10)}.${format.toLowerCase()}`,
         status: DataExportStatus.COMPLETED,
         completedAt: exportedAt,
@@ -800,10 +1094,23 @@ export class ReportsCatalogService {
         reportName: entry.name,
         format,
         dataExportLogId: exportRecord.id,
+        runId: auditBase.runId,
+        auditHash,
+        dataHash: auditBase.dataHash,
+        metrics,
       },
     });
 
-    return { exportRecord };
+    return {
+      exportRecord,
+      audit: {
+        auditHash,
+        runId: auditBase.runId,
+        dataHash: auditBase.dataHash,
+        metrics,
+        exportedAt,
+      },
+    };
   }
 
   async updateLifecycle(reportId: string, dto: Record<string, unknown>, user: AuthUser) {
@@ -1345,6 +1652,10 @@ export class ReportsCatalogService {
     return `${prefix}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
   }
 
+  private hashJson(value: unknown) {
+    return createHash('sha256').update(stableStringify(value)).digest('hex');
+  }
+
   private countBy<T extends string>(
     entries: EnterpriseCatalogEntry[],
     pick: (entry: EnterpriseCatalogEntry) => T,
@@ -1491,4 +1802,28 @@ export class ReportsCatalogService {
 
 function stringValue(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function numberValue(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  return undefined;
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || value === undefined) return JSON.stringify(value);
+  if (value instanceof Date) return JSON.stringify(value.toISOString());
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  if (typeof value === 'object') {
+    const maybeJson = value as { toJSON?: () => unknown };
+    if (typeof maybeJson.toJSON === 'function') {
+      const jsonValue = maybeJson.toJSON();
+      if (jsonValue !== value) return stableStringify(jsonValue);
+    }
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
 }

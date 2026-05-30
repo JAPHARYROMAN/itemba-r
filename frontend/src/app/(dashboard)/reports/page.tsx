@@ -116,10 +116,17 @@ interface ReportPack {
   name: string;
   owner: string;
   status: string;
+  templateVersion?: string;
   cadence: string;
   href: string;
+  readinessScore?: number;
+  snapshotMode?: string;
+  outputFormats?: string[];
+  retentionPolicy?: string;
+  approvalFlow?: string[];
   sections: string[];
   prerequisites: string[];
+  snapshotChecklist?: string[];
 }
 
 interface PackGenerationResult {
@@ -128,6 +135,16 @@ interface PackGenerationResult {
     statementRunNumber: string;
     status: string;
     generatedAt?: string;
+    manifestHash?: string;
+    snapshotMode?: string;
+    sectionCount?: number;
+    prerequisiteStatus?: string;
+  };
+  manifest?: {
+    hash: string;
+    prerequisiteChecks?: { name: string; status: string; evidence?: string }[];
+    sectionManifest?: { name: string; status: string; relatedReports?: unknown[] }[];
+    exportManifest?: { formats?: string[]; auditRequired?: boolean; watermark?: string };
   };
   dataQualityWarnings?: unknown[];
 }
@@ -914,7 +931,7 @@ export default function MasterReportsPage() {
       setPackResult(
         `${pack.name} generated as ${result.snapshot?.statementRunNumber ?? 'a report-pack snapshot'} with ${
           result.dataQualityWarnings?.length ?? 0
-        } warning(s).`,
+        } warning(s). Manifest ${result.manifest?.hash ?? result.snapshot?.manifestHash ?? 'pending'}.`,
       );
       void loadCatalog();
     } catch (err) {
@@ -1663,10 +1680,36 @@ export default function MasterReportsPage() {
                           <div>
                             <div className="text-base font-semibold">{pack.name}</div>
                             <div className="mt-1 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
-                              {pack.owner} / {pack.cadence}
+                              {pack.owner} / {pack.cadence} / v{pack.templateVersion ?? '1.0.0'}
                             </div>
                           </div>
                           <Badge tone={toneForOperationalStatus(pack.status)}>{pack.status}</Badge>
+                        </div>
+                        <div className="mt-4 grid gap-2 md:grid-cols-4">
+                          <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              Readiness
+                            </div>
+                            <div className="mt-1 text-lg font-semibold">{pack.readinessScore ?? 90}%</div>
+                          </div>
+                          <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              Snapshot
+                            </div>
+                            <div className="mt-1 break-words text-xs font-semibold">{pack.snapshotMode ?? 'FROZEN_MANIFEST'}</div>
+                          </div>
+                          <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              Outputs
+                            </div>
+                            <div className="mt-1 text-xs font-semibold">{(pack.outputFormats ?? ['PDF', 'XLSX', 'JSON']).join(', ')}</div>
+                          </div>
+                          <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              Retention
+                            </div>
+                            <div className="mt-1 text-xs font-semibold">{pack.retentionPolicy ?? 'Audit archive'}</div>
+                          </div>
                         </div>
                         <div className="mt-4 grid gap-4 md:grid-cols-2">
                           <div>
@@ -1684,6 +1727,32 @@ export default function MasterReportsPage() {
                             <p className="mt-2 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
                               {pack.prerequisites.join(', ')}
                             </p>
+                          </div>
+                        </div>
+                        <div className="mt-4 grid gap-3 md:grid-cols-2">
+                          <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
+                            <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                              Approval flow
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {(pack.approvalFlow ?? ['Owner review', 'Approval', 'Lock']).map((step) => (
+                                <Badge key={step} tone="blue">
+                                  {step}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
+                            <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                              Snapshot controls
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {(pack.snapshotChecklist ?? ['Filters locked', 'Manifest hash', 'Export audit']).map((item) => (
+                                <Badge key={item} tone="green">
+                                  {item}
+                                </Badge>
+                              ))}
+                            </div>
                           </div>
                         </div>
                         <div className="mt-4 flex flex-wrap gap-2">

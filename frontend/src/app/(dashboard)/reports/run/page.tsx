@@ -59,6 +59,65 @@ interface ExplainResponse {
   caveats: string[];
 }
 
+interface ReportResultMetrics {
+  rowCount: number;
+  columnCount: number;
+  scalarCount: number;
+  objectSectionCount: number;
+  primarySection: string;
+  dataHash: string;
+}
+
+interface ViewerRunManifest {
+  runId: string;
+  reportId: string;
+  reportName: string;
+  generatedAt: string;
+  sourcePath: string;
+  sourceUrl?: string;
+  lifecycleStatus: string;
+  securityClassification: string;
+  metrics: ReportResultMetrics & { clientDataHash?: string };
+  controls: {
+    dataQualityAttached: boolean;
+    lineageAttached: boolean;
+    exportAuditRequired: boolean;
+    snapshotEligible: boolean;
+  };
+  manifestHash: string;
+  status: string;
+}
+
+interface ExportHistoryItem {
+  id: string;
+  exportNumber: string;
+  format: string;
+  status: string;
+  fileName?: string | null;
+  createdAt: string;
+  completedAt?: string | null;
+  auditHash?: string | null;
+  runId?: string | null;
+  metrics?: Partial<ReportResultMetrics>;
+  exportedBy?: { fullName?: string | null; email?: string | null } | null;
+}
+
+interface ExportAuditHistory {
+  total: number;
+  exports: ExportHistoryItem[];
+}
+
+interface ExportAuditResponse {
+  exportRecord?: { exportNumber: string; completedAt?: string; fileName?: string | null };
+  audit?: {
+    auditHash: string;
+    runId?: string | null;
+    dataHash?: string | null;
+    exportedAt?: string;
+    metrics?: Partial<ReportResultMetrics>;
+  };
+}
+
 const fmtNumber = (v: unknown): string => {
   if (v === null || v === undefined) return '—';
   if (typeof v === 'number') {
@@ -158,6 +217,79 @@ function toCsv(columns: string[], rows: string[][]): string {
   return [columns, ...rows].map((row) => row.map(escape).join(',')).join('\n');
 }
 
+function formatDateTime(value?: string | null) {
+  if (!value) return 'Not recorded';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function stableClientHash(value: unknown): string {
+  const json = JSON.stringify(value, (_, v) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      return Object.keys(v as Record<string, unknown>)
+        .sort()
+        .reduce(
+          (acc, key) => {
+            acc[key] = (v as Record<string, unknown>)[key];
+            return acc;
+          },
+          {} as Record<string, unknown>,
+        );
+    }
+    return v;
+  });
+  let hash = 2166136261;
+  for (let i = 0; i < json.length; i += 1) {
+    hash ^= json.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function summarizeResult(data: unknown): ReportResultMetrics {
+  const primary = pickPrimaryTable(data);
+  const columns = primary.rows.length ? flattenForCsv(primary.rows).columns : [];
+  const scalars =
+    data && typeof data === 'object' && !Array.isArray(data)
+      ? Object.entries(data as Record<string, unknown>).filter(([, v]) => isPrimitiveOrDate(v))
+      : [];
+  const objectSections =
+    data && typeof data === 'object' && !Array.isArray(data)
+      ? Object.entries(data as Record<string, unknown>).filter(
+          ([k, v]) =>
+            !isPrimitiveOrDate(v) &&
+            v !== null &&
+            typeof v === 'object' &&
+            !Array.isArray(v) &&
+            k !== primary.key,
+        )
+      : [];
+  return {
+    rowCount: primary.rows.length,
+    columnCount: columns.length,
+    scalarCount: scalars.length,
+    objectSectionCount: objectSections.length,
+    primarySection: primary.key ?? 'Rows',
+    dataHash: stableClientHash({
+      primarySection: primary.key ?? 'Rows',
+      rowCount: primary.rows.length,
+      columnCount: columns.length,
+      scalarCount: scalars.length,
+      objectSectionCount: objectSections.length,
+      firstRow: primary.rows[0] ?? null,
+      lastRow: primary.rows[primary.rows.length - 1] ?? null,
+      scalars,
+    }),
+  };
+}
+
 function metaBadge(label: string, tone: 'neutral' | 'green' | 'amber' | 'red' | 'blue' = 'neutral') {
   const styles = {
     neutral: { background: 'var(--aurora-bg-subtle)', color: 'var(--aurora-text-secondary)', borderColor: 'var(--aurora-border)' },
@@ -208,6 +340,9 @@ function ReportRunContent() {
   const [qualityWarnings, setQualityWarnings] = useState<QualityWarning[]>([]);
   const [explanation, setExplanation] = useState<ExplainResponse | null>(null);
   const [exporting, setExporting] = useState('');
+  const [runManifest, setRunManifest] = useState<ViewerRunManifest | null>(null);
+  const [exportHistory, setExportHistory] = useState<ExportHistoryItem[]>([]);
+  const [lastExportAudit, setLastExportAudit] = useState<ExportAuditResponse['audit'] | null>(null);
 
   // Load catalog and find the entry.
   useEffect(() => {
@@ -311,22 +446,72 @@ function ReportRunContent() {
     };
   }, [asOf, companyId, dateFrom, dateTo, divisionId, entry, reportId]);
 
+  const loadExportHistory = useCallback(async () => {
+    if (!entry || !reportId) return;
+    const qs = new URLSearchParams();
+    if (companyId) qs.set('companyId', companyId);
+    qs.set('limit', '8');
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    try {
+      const response = await fetch(`/api/backend/reports/export-audit/${encodeURIComponent(reportId)}${suffix}`);
+      if (!response.ok) return;
+      const payload = await response.json();
+      const history = (payload.data ?? payload) as ExportAuditHistory;
+      setExportHistory(Array.isArray(history.exports) ? history.exports : []);
+    } catch {
+      setExportHistory([]);
+    }
+  }, [companyId, entry, reportId]);
+
+  useEffect(() => {
+    void loadExportHistory();
+  }, [loadExportHistory]);
+
   const run = useCallback(async () => {
     if (!builtUrl) return;
     setLoading(true);
     setError('');
     setData(null);
+    setRunManifest(null);
+    setLastExportAudit(null);
     try {
       const res = await fetch(builtUrl);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      setData(json.data ?? json);
+      const result = json.data ?? json;
+      const metrics = summarizeResult(result);
+      setData(result);
+      try {
+        const manifestRes = await fetch(`/api/backend/reports/viewer/${encodeURIComponent(reportId)}/run-manifest`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            companyId: companyId || undefined,
+            sourceUrl: builtUrl,
+            parameters: {
+              divisionId: divisionId || undefined,
+              dateFrom: dateFrom || undefined,
+              dateTo: dateTo || undefined,
+              asOf: asOf || undefined,
+            },
+            metrics,
+            dataQualityAttached: true,
+            lineageAttached: true,
+          }),
+        });
+        if (manifestRes.ok) {
+          const manifestPayload = await manifestRes.json();
+          setRunManifest((manifestPayload.data ?? manifestPayload) as ViewerRunManifest);
+        }
+      } catch {
+        // Report rendering remains available if manifest logging is temporarily unavailable.
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run report');
     } finally {
       setLoading(false);
     }
-  }, [builtUrl]);
+  }, [asOf, builtUrl, companyId, dateFrom, dateTo, divisionId, reportId]);
 
   // Auto-run when the URL is fully resolved.
   useEffect(() => {
@@ -354,13 +539,22 @@ function ReportRunContent() {
     if (!entry) return;
     setExporting(format);
     try {
-      await fetch('/api/backend/reports/export-audit', {
+      const metrics = data ? summarizeResult(data) : summarizeResult(primary.rows);
+      const response = await fetch('/api/backend/reports/export-audit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           reportId: entry.id,
           companyId: companyId || undefined,
           format,
+          runId: runManifest?.runId,
+          sourceUrl: builtUrl,
+          dataHash: runManifest?.manifestHash ?? metrics.dataHash,
+          rowCount: metrics.rowCount,
+          columnCount: metrics.columnCount,
+          scalarCount: metrics.scalarCount,
+          objectSectionCount: metrics.objectSectionCount,
+          sectionCount: metrics.objectSectionCount + (metrics.rowCount > 0 ? 1 : 0) + (metrics.scalarCount > 0 ? 1 : 0),
           parameters: {
             divisionId: divisionId || undefined,
             dateFrom: dateFrom || undefined,
@@ -369,6 +563,12 @@ function ReportRunContent() {
           },
         }),
       });
+      if (response.ok) {
+        const payload = await response.json();
+        const audit = (payload.data ?? payload) as ExportAuditResponse;
+        setLastExportAudit(audit.audit ?? null);
+        void loadExportHistory();
+      }
     } catch {
       // Keep client-side export usable if the audit write is temporarily unavailable.
     } finally {
@@ -622,6 +822,65 @@ function ReportRunContent() {
         </div>
       </Card>
 
+      {data !== null && (
+        <Card className="p-4 print:hidden">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+              <div className="text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                Run status
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                {metaBadge(runManifest?.status ?? 'MANIFEST PENDING', runManifest ? 'green' : 'amber')}
+              </div>
+              <div className="mt-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                {runManifest?.runId ?? 'Awaiting server manifest'}
+              </div>
+            </div>
+            <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+              <div className="text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                Result shape
+              </div>
+              <div className="mt-2 text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                {runManifest?.metrics?.rowCount ?? primary.rows.length} rows / {runManifest?.metrics?.columnCount ?? flattenForCsv(primary.rows).columns.length} cols
+              </div>
+              <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                {runManifest?.metrics?.primarySection ?? primary.key ?? 'Rows'}
+              </div>
+            </div>
+            <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+              <div className="text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                Manifest hash
+              </div>
+              <div className="mt-2 break-all font-mono text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
+                {runManifest?.manifestHash ?? summarizeResult(data).dataHash}
+              </div>
+            </div>
+            <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+              <div className="text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                Export audit
+              </div>
+              <div className="mt-2 text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                {exportHistory.length} recent record{exportHistory.length === 1 ? '' : 's'}
+              </div>
+              <div className="mt-1 break-all font-mono text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                {lastExportAudit?.auditHash ?? exportHistory[0]?.auditHash ?? 'No export in this view'}
+              </div>
+            </div>
+            <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+              <div className="text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                Snapshot eligible
+              </div>
+              <div className="mt-2">
+                {metaBadge(runManifest?.controls?.snapshotEligible ? 'YES' : 'LIVE VIEW', runManifest?.controls?.snapshotEligible ? 'green' : 'blue')}
+              </div>
+              <div className="mt-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                {formatDateTime(runManifest?.generatedAt)}
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {qualityWarnings.length > 0 && (
         <Card className="p-4 print:hidden">
           <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
@@ -820,6 +1079,55 @@ function ReportRunContent() {
                 {!lineage?.lineage?.length && (
                   <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
                     Lineage loads after the report metadata is available.
+                  </div>
+                )}
+              </div>
+            </Card>
+            <Card>
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                  Export audit trail
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void loadExportHistory()}
+                  className="rounded-md border px-2 py-1 text-[11px]"
+                  style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-secondary)' }}
+                >
+                  Refresh
+                </button>
+              </div>
+              {lastExportAudit && (
+                <div className="mt-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--aurora-success)', background: 'var(--aurora-success-bg)', color: 'var(--aurora-success-text)' }}>
+                  Last export hash: <span className="font-mono">{lastExportAudit.auditHash}</span>
+                </div>
+              )}
+              <div className="mt-3 space-y-2">
+                {exportHistory.slice(0, 5).map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-lg border px-3 py-2 text-sm"
+                    style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                        {item.exportNumber}
+                      </span>
+                      {metaBadge(item.format, 'blue')}
+                    </div>
+                    <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                      {formatDateTime(item.completedAt ?? item.createdAt)} / {item.status}
+                    </div>
+                    {item.auditHash && (
+                      <div className="mt-1 break-all font-mono text-[10px]" style={{ color: 'var(--aurora-text-muted)' }}>
+                        {item.auditHash}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {exportHistory.length === 0 && (
+                  <div className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}>
+                    No export audit records found for this report and scope.
                   </div>
                 )}
               </div>
