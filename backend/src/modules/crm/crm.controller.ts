@@ -12,4 +12,10 @@ export class CrmController {
   getSummary(@Query() query: any, @CurrentUser() user: AuthUser) {
     return this.service.getSummary(query, user);
   }
+
+  @Get('readiness')
+  @RequirePermissions('crm.dashboard')
+  getReadiness(@Query() query: any, @CurrentUser() user: AuthUser) {
+    return this.service.getReadiness(query, user);
+  }
 }

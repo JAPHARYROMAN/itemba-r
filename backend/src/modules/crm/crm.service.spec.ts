@@ -8,7 +8,8 @@ function makePrisma() {
         .mockResolvedValueOnce(100)
         .mockResolvedValueOnce(80)
         .mockResolvedValueOnce(5)
-        .mockResolvedValueOnce(15),
+        .mockResolvedValueOnce(15)
+        .mockResolvedValueOnce(4),
       aggregate: jest.fn().mockResolvedValue({
         _sum: { currentBalance: 125000, creditLimit: 250000 },
       }),
@@ -27,7 +28,8 @@ function makePrisma() {
         .mockResolvedValueOnce(40)
         .mockResolvedValueOnce(35)
         .mockResolvedValueOnce(2)
-        .mockResolvedValueOnce(3),
+        .mockResolvedValueOnce(3)
+        .mockResolvedValueOnce(1),
       aggregate: jest.fn().mockResolvedValue({
         _sum: { currentBalance: 62000, creditLimit: 100000 },
       }),
@@ -51,6 +53,8 @@ function makePrisma() {
     contactPerson: { count: jest.fn().mockResolvedValue(55) },
     customerCreditProfile: { count: jest.fn().mockResolvedValue(3) },
     supplierPerformanceProfile: { count: jest.fn().mockResolvedValue(2) },
+    customerStatementRun: { count: jest.fn().mockResolvedValue(5) },
+    supplierStatementRun: { count: jest.fn().mockResolvedValue(4) },
   } as any;
 }
 
@@ -103,5 +107,24 @@ describe('CrmService feature breadth summary', () => {
     expect(result.customerStatusBreakdown).toEqual({ ACTIVE: 80, BLOCKED: 5 });
     expect(result.communicationTypeBreakdown).toEqual({ EMAIL: 6 });
     expect(companyScope.companyWhereFor).toHaveBeenCalledWith({ id: 'user-1' }, 'company-1');
+  });
+
+  it('returns CRM/SRM readiness above the 90% threshold when controls are wired', async () => {
+    const prisma = makePrisma();
+    const companyScope = {
+      companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-1' }),
+    };
+    const service = new CrmService(prisma, { log: jest.fn() } as any, companyScope as any);
+
+    const readiness = await service.getReadiness({ companyId: 'company-1' }, {
+      id: 'user-1',
+    } as any);
+
+    expect(readiness.score).toBeGreaterThanOrEqual(90);
+    expect(readiness.status).toBe('READY');
+    expect(readiness.target).toBe(90);
+    expect(readiness.checks).toHaveLength(6);
+    expect(readiness.indicators.totalCustomers).toBe(100);
+    expect(readiness.indicators.totalSuppliers).toBe(40);
   });
 });

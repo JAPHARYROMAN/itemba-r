@@ -13,6 +13,18 @@ export class ProductionReadinessController {
     return this.service.findAll(query);
   }
 
+  @Get('summary')
+  @RequirePermissions('production_readiness.view')
+  getSummary() {
+    return this.service.getSummary();
+  }
+
+  @Get('readiness')
+  @RequirePermissions('production_readiness.view')
+  getReadiness() {
+    return this.service.getReadiness();
+  }
+
   @Get(':id')
   @RequirePermissions('production_readiness.view')
   findOne(@Param('id') id: string) {

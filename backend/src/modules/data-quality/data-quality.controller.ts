@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -32,6 +42,12 @@ export class DataQualityController {
     return this.service.getSummary(user);
   }
 
+  @Get('readiness')
+  @RequirePermissions('data_quality.view')
+  getReadiness(@CurrentUser() user: AuthUser) {
+    return this.service.getReadiness(user);
+  }
+
   @Post('run-checks')
   @RequirePermissions('data_quality.run_checks')
   runChecks(@CurrentUser() user: AuthUser) {
@@ -46,7 +62,11 @@ export class DataQualityController {
 
   @Patch(':id')
   @RequirePermissions('data_quality.manage')
-  update(@Param('id') id: string, @Body() dto: Partial<CreateDataQualityIssueDto>, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: Partial<CreateDataQualityIssueDto>,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 

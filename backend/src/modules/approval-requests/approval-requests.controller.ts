@@ -17,6 +17,12 @@ export class ApprovalRequestsController {
 
   // IMPORTANT: Static routes BEFORE :id routes to prevent route conflicts
 
+  @Get('readiness')
+  @RequirePermissions('approval_requests.view')
+  getReadiness(@CurrentUser() user: AuthUser, @Query() query: any) {
+    return this.service.getReadiness(user, query);
+  }
+
   @Get('pending/me')
   @RequirePermissions('approval_requests.view')
   pendingForMe(@CurrentUser() user: AuthUser, @Query() query: any) {
@@ -73,7 +79,11 @@ export class ApprovalRequestsController {
 
   @Post(':id/comment')
   @RequirePermissions('approval_requests.view')
-  addComment(@Param('id') id: string, @Body() dto: ApprovalActionDto, @CurrentUser() user: AuthUser) {
+  addComment(
+    @Param('id') id: string,
+    @Body() dto: ApprovalActionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.addComment(id, dto, user);
   }
 }
