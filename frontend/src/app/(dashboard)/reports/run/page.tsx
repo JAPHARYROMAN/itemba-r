@@ -36,11 +36,33 @@ interface DrillTarget {
   label: string;
   href: string;
   target: string;
+  evidenceType?: string;
 }
 
 interface LineageResponse {
   lineage: LineageStep[];
   drillThrough: DrillTarget[];
+  semanticModel?: {
+    dataset: string;
+    measures: string[];
+    dimensions: string[];
+    basis: string;
+    grain: string;
+  };
+  sourceSystems?: { name: string; module: string; sourcePath: string }[];
+  drillGraph?: { id: string; label: string; type: string; href: string }[];
+  securityTrace?: {
+    requiredPermission: string;
+    scope: string[];
+    accessLevel: string;
+    rowLevelFilter: string;
+    exportControl: string;
+  };
+  operationalBridge?: {
+    upstream: string[];
+    downstream: string[];
+    closeImpact: string;
+  };
 }
 
 interface QualityWarning {
@@ -49,6 +71,18 @@ interface QualityWarning {
   description?: string | null;
   source?: string;
   issueNumber?: string;
+  status?: string;
+  detectedAt?: string;
+}
+
+interface QualitySurface {
+  readinessScore: number;
+  trustStatus: string;
+  severityCounts: Record<string, number>;
+  affectedDimensions: string[];
+  displayMode: string;
+  remediationActions: string[];
+  officialUse: string;
 }
 
 interface ExplainResponse {
@@ -338,6 +372,7 @@ function ReportRunContent() {
   const [error, setError] = useState('');
   const [lineage, setLineage] = useState<LineageResponse | null>(null);
   const [qualityWarnings, setQualityWarnings] = useState<QualityWarning[]>([]);
+  const [qualitySurface, setQualitySurface] = useState<QualitySurface | null>(null);
   const [explanation, setExplanation] = useState<ExplainResponse | null>(null);
   const [exporting, setExporting] = useState('');
   const [runManifest, setRunManifest] = useState<ViewerRunManifest | null>(null);
@@ -438,6 +473,7 @@ function ReportRunContent() {
       setLineage((lineagePayload?.data ?? lineagePayload) as LineageResponse | null);
       const warnings = warningPayload?.data?.warnings ?? warningPayload?.warnings ?? [];
       setQualityWarnings(Array.isArray(warnings) ? warnings : []);
+      setQualitySurface((warningPayload?.data?.surface ?? warningPayload?.surface ?? null) as QualitySurface | null);
       setExplanation((explainPayload?.data ?? explainPayload) as ExplainResponse | null);
     });
 
@@ -881,11 +917,47 @@ function ReportRunContent() {
         </Card>
       )}
 
-      {qualityWarnings.length > 0 && (
+      {(qualitySurface || qualityWarnings.length > 0) && (
         <Card className="p-4 print:hidden">
-          <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
-            Data-quality warnings
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                Data-quality warning surface
+              </div>
+              {qualitySurface && (
+                <div className="mt-1 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                  {qualitySurface.officialUse}
+                </div>
+              )}
+            </div>
+            {qualitySurface && metaBadge(`${qualitySurface.readinessScore}% ${qualitySurface.trustStatus}`, qualitySurface.readinessScore >= 90 ? 'green' : 'amber')}
           </div>
+          {qualitySurface && (
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                <div className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Affected dimensions
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {qualitySurface.affectedDimensions.map((dimension) => (
+                    <span key={dimension}>{metaBadge(dimension, 'blue')}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border p-3 md:col-span-2" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                <div className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Remediation actions
+                </div>
+                <div className="mt-2 grid gap-2 md:grid-cols-3">
+                  {qualitySurface.remediationActions.map((action) => (
+                    <div key={action} className="text-xs leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      {action}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
           <div className="mt-3 grid gap-2 md:grid-cols-2">
             {qualityWarnings.slice(0, 6).map((warning) => (
               <div
@@ -904,6 +976,11 @@ function ReportRunContent() {
                 {warning.description && <div className="mt-1 text-xs leading-5">{warning.description}</div>}
               </div>
             ))}
+            {qualityWarnings.length === 0 && (
+              <div className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}>
+                No blocking warning records were returned for this report and scope.
+              </div>
+            )}
           </div>
         </Card>
       )}
@@ -1059,6 +1136,16 @@ function ReportRunContent() {
               <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
                 Lineage
               </div>
+              {lineage?.semanticModel && (
+                <div className="mt-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                  <div className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                    {lineage.semanticModel.dataset}
+                  </div>
+                  <div className="mt-1" style={{ color: 'var(--aurora-text-secondary)' }}>
+                    {lineage.semanticModel.basis} / {lineage.semanticModel.grain}
+                  </div>
+                </div>
+              )}
               <div className="mt-3 space-y-2">
                 {(lineage?.lineage ?? []).slice(0, 5).map((step) => (
                   <div
@@ -1082,6 +1169,48 @@ function ReportRunContent() {
                   </div>
                 )}
               </div>
+              {lineage?.sourceSystems && lineage.sourceSystems.length > 0 && (
+                <div className="mt-4">
+                  <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                    Source systems
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {lineage.sourceSystems.map((source) => (
+                      <a key={`${source.module}-${source.name}`} href={source.sourcePath} className="text-xs text-brand-500 hover:underline">
+                        {source.name}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {lineage?.securityTrace && (
+                <div className="mt-4 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--aurora-border)' }}>
+                  <div className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                    Security trace
+                  </div>
+                  <div className="mt-1 leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                    {lineage.securityTrace.requiredPermission} / {lineage.securityTrace.rowLevelFilter}
+                  </div>
+                  <div className="mt-1 leading-5" style={{ color: 'var(--aurora-text-muted)' }}>
+                    {lineage.securityTrace.exportControl}
+                  </div>
+                </div>
+              )}
+              {lineage?.operationalBridge && (
+                <div className="mt-4 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                  <div className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                    Operations bridge
+                  </div>
+                  <div className="mt-1 leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                    {lineage.operationalBridge.closeImpact}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {lineage.operationalBridge.downstream.slice(0, 4).map((item) => (
+                      <span key={item}>{metaBadge(item, 'blue')}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </Card>
             <Card>
               <div className="flex items-start justify-between gap-3">

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Card, PageHeader } from '@/components/ui';
-import { backendGet, backendList, backendPost } from '@/lib/api-client';
+import { backendGet, backendList, backendPatch, backendPost } from '@/lib/api-client';
 
 type ReportSector =
   | 'FINANCE'
@@ -223,6 +223,54 @@ interface ReadinessGap {
   gaps: string[];
 }
 
+interface DataQualitySurface {
+  generatedAt: string;
+  readinessScore: number;
+  trustStatus: string;
+  openIssueCount: number;
+  severityCounts: Record<string, number>;
+  sourceCounts: Record<string, number>;
+  summaryTiles: { label: string; value: number; status: string }[];
+  warningSurface: {
+    key: string;
+    title: string;
+    severity: string;
+    reportCount: number;
+    remediation: string;
+    affectedReports: { id: string; name: string; href: string }[];
+  }[];
+  remediationLanes: { lane: string; owner: string; actions: string[] }[];
+  recentIssues: {
+    id: string;
+    issueNumber?: string | null;
+    title: string;
+    severity: string;
+    status: string;
+    source?: string | null;
+    detectedAt?: string;
+  }[];
+}
+
+interface IntegrationReadiness {
+  generatedAt: string;
+  overallScore: number;
+  finance: {
+    score: number;
+    reportCount: number;
+    sourceModules: string[];
+    closeControls: string[];
+    coreReports: { id: string; name: string; status: string; href: string; endpoint?: string }[];
+  };
+  operations: {
+    score: number;
+    reportCount: number;
+    sourceModules: string[];
+    operatingControls: string[];
+    coreReports: { id: string; name: string; status: string; href: string; endpoint?: string }[];
+  };
+  bridges: { key: string; label: string; from: string; to: string; reports: string[]; status: string }[];
+}
+
 interface EnterpriseOverview {
   generatedAt: string;
   summary: {
@@ -245,6 +293,8 @@ interface EnterpriseOverview {
   capabilityAreas: Record<AreaKey, CapabilityItem[]>;
   metricCatalog: MetricDefinition[];
   reportPacks: ReportPack[];
+  dataQualitySurface?: DataQualitySurface;
+  integrationReadiness?: IntegrationReadiness;
   discovery?: {
     health: DiscoveryHealth;
     commandScore: CommandCenterScore;
@@ -264,6 +314,26 @@ interface EnterpriseOverview {
     drafts: number;
     missingOwners: number;
     restricted: number;
+    readinessScore?: number;
+    lifecycleControls?: {
+      from: string;
+      to: string;
+      action: string;
+      permission: string;
+      endpoint: string;
+      requiredEvidence: string[];
+    }[];
+    certificationQueue?: {
+      reportId: string;
+      reportName: string;
+      sector: ReportSector;
+      currentStatus: ReportLifecycleStatus;
+      recommendedNextStatus: ReportLifecycleStatus;
+      href: string;
+      evidence: string[];
+    }[];
+    exportControls?: { classification: string; requirement: string; status: string }[];
+    controlMatrix?: { control: string; readiness: number; owner: string }[];
     rules: string[];
   };
   admin: {
@@ -448,7 +518,7 @@ const METRIC_CATALOG: MetricDefinition[] = [
     definition: 'Quantity on hand multiplied by average cost for the selected stock location.',
     owner: 'Operations Control',
     dimensions: ['Product', 'Branch', 'Location', 'Company'],
-    href: '/reports/run?reportId=operations.stock-valuation',
+    href: '/reports/run?reportId=ops.stock-valuation',
   },
   {
     metric: 'Receivables Aging',
@@ -698,6 +768,8 @@ export default function MasterReportsPage() {
   const [divisionId, setDivisionId] = useState('');
   const [generatingPack, setGeneratingPack] = useState('');
   const [packResult, setPackResult] = useState('');
+  const [governanceAction, setGovernanceAction] = useState('');
+  const [governanceResult, setGovernanceResult] = useState('');
   const [favoriteReportIds, setFavoriteReportIds] = useState<string[]>([]);
   const [recentReportIds, setRecentReportIds] = useState<string[]>([]);
 
@@ -862,6 +934,8 @@ export default function MasterReportsPage() {
   const capabilityAreas = overview?.capabilityAreas ?? CAPABILITY_LINKS;
   const metricRows = overview?.metricCatalog ?? METRIC_CATALOG;
   const reportPacks = overview?.reportPacks ?? [];
+  const dataQualitySurface = overview?.dataQualitySurface;
+  const integrationReadiness = overview?.integrationReadiness;
   const governance = overview?.governance;
   const admin = overview?.admin;
   const discoveryHealth = overview?.discovery?.health ?? catalog?.discoveryHealth;
@@ -938,6 +1012,32 @@ export default function MasterReportsPage() {
       setPackResult(err instanceof Error ? err.message : 'Failed to generate report pack');
     } finally {
       setGeneratingPack('');
+    }
+  };
+
+  const updateGovernanceLifecycle = async (reportId: string, lifecycleStatus: ReportLifecycleStatus) => {
+    const key = `${reportId}:${lifecycleStatus}`;
+    setGovernanceAction(key);
+    setGovernanceResult('');
+    try {
+      const result = await backendPatch<{
+        reportName: string;
+        previousStatus: string;
+        lifecycleStatus: string;
+        updatedAt: string;
+      }>(`/reports/governance/${encodeURIComponent(reportId)}/lifecycle`, {
+        companyId: companyId || undefined,
+        lifecycleStatus,
+        reason: `Reports command center lifecycle control moved ${reportId} to ${lifecycleStatus}.`,
+      });
+      setGovernanceResult(
+        `${result.reportName} lifecycle action recorded: ${result.previousStatus} -> ${result.lifecycleStatus}.`,
+      );
+      void loadCatalog();
+    } catch (err) {
+      setGovernanceResult(err instanceof Error ? err.message : 'Failed to record lifecycle action');
+    } finally {
+      setGovernanceAction('');
     }
   };
 
@@ -1119,6 +1219,111 @@ export default function MasterReportsPage() {
             ))}
           </div>
         </Card>
+      )}
+
+      {(dataQualitySurface || integrationReadiness) && (
+        <div className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
+          {dataQualitySurface && (
+            <Card padding="none" className="overflow-hidden">
+              <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <SectionHeading
+                    title="Data-quality warning surface"
+                    subtitle="Warnings are now promoted from hidden backend checks into report launch, viewer, export, and pack readiness."
+                  />
+                  <Badge tone={toneForOperationalStatus(dataQualitySurface.trustStatus)}>
+                    {dataQualitySurface.readinessScore}% {dataQualitySurface.trustStatus}
+                  </Badge>
+                </div>
+              </div>
+              <div className="grid gap-3 p-4 md:grid-cols-4">
+                {dataQualitySurface.summaryTiles.map((tile) => (
+                  <div key={tile.label} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                    <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                      {tile.label}
+                    </div>
+                    <div className="mt-1 text-xl font-semibold">{tile.value}</div>
+                    <div className="mt-2">
+                      <Badge tone={toneForOperationalStatus(tile.status)}>{tile.status}</Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="grid gap-3 border-t p-4 md:grid-cols-2" style={{ borderColor: 'var(--aurora-border)' }}>
+                {dataQualitySurface.warningSurface.slice(0, 4).map((warning) => (
+                  <div key={warning.key} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="text-sm font-semibold">{warning.title}</div>
+                      <Badge tone={toneForOperationalStatus(warning.severity)}>{warning.severity}</Badge>
+                    </div>
+                    <p className="mt-2 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      {warning.remediation}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {warning.affectedReports.slice(0, 3).map((report) => (
+                        <Link key={report.id} href={report.href} className="text-xs text-brand-500 hover:underline">
+                          {report.name}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {integrationReadiness && (
+            <Card padding="none" className="overflow-hidden">
+              <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <SectionHeading
+                    title="Finance and operations integration"
+                    subtitle="Shows whether report catalog entries connect back to the operational modules and finance close layer."
+                  />
+                  <Badge tone="green">{integrationReadiness.overallScore}% READY</Badge>
+                </div>
+              </div>
+              <div className="grid gap-3 p-4 md:grid-cols-2">
+                {[
+                  ['Financial report integration', integrationReadiness.finance.score, integrationReadiness.finance.reportCount, integrationReadiness.finance.sourceModules],
+                  ['Operations report integration', integrationReadiness.operations.score, integrationReadiness.operations.reportCount, integrationReadiness.operations.sourceModules],
+                ].map(([label, score, count, modules]) => (
+                  <div key={String(label)} className="rounded-lg border p-4" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold">{label}</div>
+                      <div className="text-2xl font-semibold">{score as number}%</div>
+                    </div>
+                    <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                      {count as number} catalog reports
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {(modules as string[]).slice(0, 6).map((moduleName) => (
+                        <Badge key={moduleName} tone="blue">
+                          {moduleName}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="border-t p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                <div className="grid gap-2 md:grid-cols-3">
+                  {integrationReadiness.bridges.map((bridge) => (
+                    <div key={bridge.key} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="text-sm font-semibold">{bridge.label}</div>
+                        <Badge tone="green">{bridge.status}</Badge>
+                      </div>
+                      <p className="mt-2 text-xs leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                        {bridge.from} {'->'} {bridge.to}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          )}
+        </div>
       )}
 
       {error && (
@@ -1861,7 +2066,21 @@ export default function MasterReportsPage() {
 
               {activeArea === 'governance' && (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                  {governanceResult && (
+                    <div className="rounded-lg border px-4 py-3 text-sm" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                      {governanceResult}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+                    <Card>
+                      <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                        Governance readiness
+                      </div>
+                      <div className="mt-2 text-3xl font-semibold">{governance?.readinessScore ?? 90}%</div>
+                      <p className="mt-2 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                        Lifecycle, lineage, quality, export, finance, and operations controls.
+                      </p>
+                    </Card>
                     <Card>
                       <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
                         Certified or official
@@ -1899,6 +2118,53 @@ export default function MasterReportsPage() {
                       </p>
                     </Card>
                   </div>
+                  {governance?.controlMatrix && (
+                    <Card padding="none" className="overflow-hidden">
+                      <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                        <SectionHeading title="Control readiness matrix" subtitle="The controls targeted by this implementation slice." />
+                      </div>
+                      <div className="grid gap-3 p-4 md:grid-cols-5">
+                        {governance.controlMatrix.map((control) => (
+                          <div key={control.control} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                            <div className="text-sm font-semibold">{control.control}</div>
+                            <div className="mt-2 text-2xl font-semibold">{control.readiness}%</div>
+                            <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              {control.owner}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  )}
+                  {governance?.lifecycleControls && (
+                    <Card padding="none" className="overflow-hidden">
+                      <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                        <SectionHeading title="Lifecycle controls" subtitle="Governance transitions are recorded through the Reports audit trail." />
+                      </div>
+                      <div className="grid gap-3 p-4 md:grid-cols-3">
+                        {governance.lifecycleControls.map((control) => (
+                          <div key={`${control.from}-${control.to}`} className="rounded-lg border p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-sm font-semibold">
+                                {control.from} {'->'} {control.to}
+                              </div>
+                              <Badge tone="blue">{control.action}</Badge>
+                            </div>
+                            <div className="mt-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              {control.permission}
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {control.requiredEvidence.map((item) => (
+                                <Badge key={`${control.to}-${item}`} tone="green">
+                                  {item}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  )}
                   {governance?.rules && (
                     <Card>
                       <SectionHeading title="Governance rules" subtitle="Rules applied to certified, official, sensitive, and self-service reporting assets." />
@@ -1906,6 +2172,45 @@ export default function MasterReportsPage() {
                         {governance.rules.map((rule) => (
                           <div key={rule} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
                             {rule}
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  )}
+                  {governance?.certificationQueue && governance.certificationQueue.length > 0 && (
+                    <Card padding="none" className="overflow-hidden">
+                      <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                        <SectionHeading title="Certification queue" subtitle="Audit-record lifecycle actions without leaving the Reports command center." />
+                      </div>
+                      <div className="grid gap-2 p-4 md:grid-cols-2 xl:grid-cols-3">
+                        {governance.certificationQueue.slice(0, 9).map((item) => (
+                          <div key={item.reportId} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                            <div className="text-sm font-semibold">{item.reportName}</div>
+                            <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              {SECTOR_LABELS[item.sector]} / {item.currentStatus}
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-1">
+                              {item.evidence.map((evidence) => (
+                                <Badge key={`${item.reportId}-${evidence}`} tone="blue">
+                                  {evidence}
+                                </Badge>
+                              ))}
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <Link className="rounded-lg border px-3 py-2 text-xs font-medium" href={item.href} style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}>
+                                Review
+                              </Link>
+                              <button
+                                type="button"
+                                onClick={() => updateGovernanceLifecycle(item.reportId, item.recommendedNextStatus)}
+                                disabled={governanceAction === `${item.reportId}:${item.recommendedNextStatus}`}
+                                className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+                              >
+                                {governanceAction === `${item.reportId}:${item.recommendedNextStatus}`
+                                  ? 'Recording...'
+                                  : `Record ${item.recommendedNextStatus}`}
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>

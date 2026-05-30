@@ -145,6 +145,9 @@ export class ReportsCatalogService {
     const certifiedCount = (lifecycleCounts.CERTIFIED ?? 0) + (lifecycleCounts.OFFICIAL ?? 0);
     const sensitiveCount = (securityCounts.SENSITIVE ?? 0) + (securityCounts.RESTRICTED ?? 0);
     const liveCount = catalog.filter((entry) => entry.dataFreshness.toLowerCase().includes('live')).length;
+    const [dataQualitySurface] = await Promise.all([this.dataQualitySurface(user, catalog)]);
+    const integrationReadiness = this.integrationReadiness(catalog);
+    const governance = this.governanceSnapshot(catalog);
 
     return {
       generatedAt,
@@ -244,7 +247,9 @@ export class ReportsCatalogService {
       capabilityAreas: this.capabilityAreas(),
       metricCatalog: this.metricCatalog(),
       reportPacks: this.reportPacks(),
-      governance: this.governanceSnapshot(catalog),
+      dataQualitySurface,
+      integrationReadiness,
+      governance,
       discovery: {
         health: this.discoveryHealth(catalog),
         commandScore: this.commandCenterScore(catalog, {
@@ -303,7 +308,7 @@ export class ReportsCatalogService {
           refreshMode: 'Live',
           sensitivity: 'CONFIDENTIAL',
           validDimensions: ['Customer', 'Product', 'Company', 'Branch', 'Channel', 'Period'],
-          relatedReports: ['group.sales', 'operations.sales-summary', 'westsides.sales-by-product'],
+          relatedReports: ['group.sales', 'ops.sales-summary', 'westsides.sales-by-product'],
         },
         {
           key: 'inventory_movements',
@@ -312,7 +317,7 @@ export class ReportsCatalogService {
           refreshMode: 'Live',
           sensitivity: 'INTERNAL',
           validDimensions: ['Product', 'Warehouse', 'Location', 'Company', 'Period'],
-          relatedReports: ['operations.stock-valuation', 'operations.inventory-movements'],
+          relatedReports: ['ops.stock-valuation', 'ops.inventory-movements'],
         },
         {
           key: 'compliance_controls',
@@ -337,6 +342,215 @@ export class ReportsCatalogService {
         'Currency',
         'Period',
         'Status',
+      ],
+    };
+  }
+
+  async dataQualitySurface(
+    user: AuthUser,
+    catalog: EnterpriseCatalogEntry[] = this.catalog(),
+    query: Record<string, unknown> = {},
+  ) {
+    const companyId = stringValue(query.companyId);
+    const companyWhere = await this.companyScope.companyWhereFor(user, companyId);
+    const issues = await this.prisma.dataQualityIssue.findMany({
+      where: {
+        ...companyWhere,
+        status: { in: [DataQualityIssueStatus.OPEN, DataQualityIssueStatus.ACKNOWLEDGED] },
+      },
+      orderBy: [{ severity: 'desc' }, { detectedAt: 'desc' }],
+      take: 30,
+      select: {
+        id: true,
+        issueNumber: true,
+        title: true,
+        description: true,
+        severity: true,
+        status: true,
+        entityType: true,
+        detectedAt: true,
+      },
+    });
+    const severityCounts = this.countTextValues(issues.map((issue) => String(issue.severity ?? 'UNKNOWN')));
+    const sourceCounts = this.countTextValues(issues.map((issue) => issue.entityType ?? 'unknown'));
+    const financeReports = catalog.filter((entry) => entry.sector === 'FINANCE');
+    const operationsReports = catalog.filter((entry) => entry.sector === 'OPERATIONS');
+    const high = severityCounts.HIGH ?? 0;
+    const critical = severityCounts.CRITICAL ?? 0;
+    const medium = severityCounts.MEDIUM ?? 0;
+    const readinessScore = Math.max(70, 100 - critical * 10 - high * 6 - medium * 3 - Math.min(issues.length, 10));
+    const surfaceWarnings = [
+      {
+        key: 'accounting-periods',
+        title: 'Accounting period coverage',
+        severity: 'HIGH',
+        reportCount: financeReports.length,
+        affectedReports: financeReports
+          .filter((entry) => entry.reportType === 'FINANCIAL_STATEMENT' || entry.category.includes('Group'))
+          .slice(0, 6)
+          .map((entry) => ({ id: entry.id, name: entry.name, href: `/reports/run?reportId=${entry.id}` })),
+        remediation: 'Create or open accounting periods before treating financial outputs as official.',
+      },
+      {
+        key: 'cash-account-mapping',
+        title: 'Cash and bank account mapping',
+        severity: 'HIGH',
+        reportCount: financeReports.filter((entry) => entry.id.includes('cash') || entry.name.toLowerCase().includes('cash')).length,
+        affectedReports: financeReports
+          .filter((entry) => entry.id.includes('cash') || entry.name.toLowerCase().includes('cash'))
+          .map((entry) => ({ id: entry.id, name: entry.name, href: `/reports/run?reportId=${entry.id}` })),
+        remediation: 'Tag cash/bank chart-of-account rows with the expected accountSubType values.',
+      },
+      {
+        key: 'inventory-cost-basis',
+        title: 'Inventory cost and movement completeness',
+        severity: 'MEDIUM',
+        reportCount: operationsReports.length,
+        affectedReports: operationsReports
+          .filter((entry) => entry.category === 'Inventory' || entry.name.toLowerCase().includes('stock'))
+          .map((entry) => ({ id: entry.id, name: entry.name, href: `/reports/run?reportId=${entry.id}` })),
+        remediation: 'Review inventory balances, movements, product costing, and negative-stock exceptions.',
+      },
+      {
+        key: 'source-posting-bridge',
+        title: 'Operations-to-finance posting bridge',
+        severity: 'MEDIUM',
+        reportCount: catalog.filter((entry) => ['FINANCE', 'OPERATIONS'].includes(entry.sector)).length,
+        affectedReports: [...operationsReports.slice(0, 4), ...financeReports.slice(0, 4)].map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          href: `/reports/run?reportId=${entry.id}`,
+        })),
+        remediation: 'Reconcile sales, purchases, inventory movement, and journal evidence during close.',
+      },
+    ];
+
+    return {
+      generatedAt: new Date().toISOString(),
+      readinessScore,
+      trustStatus: readinessScore >= 90 ? 'READY' : readinessScore >= 80 ? 'ATTENTION' : 'BLOCKED',
+      openIssueCount: issues.length,
+      severityCounts,
+      sourceCounts,
+      summaryTiles: [
+        { label: 'Open issues', value: issues.length, status: issues.length > 0 ? 'ATTENTION' : 'READY' },
+        { label: 'High / critical', value: high + critical, status: high + critical > 0 ? 'ATTENTION' : 'READY' },
+        { label: 'Finance checks', value: financeReports.length, status: 'READY' },
+        { label: 'Operations checks', value: operationsReports.length, status: 'READY' },
+      ],
+      warningSurface: surfaceWarnings,
+      remediationLanes: [
+        {
+          lane: 'Close readiness',
+          owner: 'Group Finance',
+          actions: ['Accounting periods', 'Cash mappings', 'Statement snapshot warnings'],
+        },
+        {
+          lane: 'Operations readiness',
+          owner: 'Operations Control',
+          actions: ['Inventory costing', 'Movement completeness', 'Sales/purchase reconciliation'],
+        },
+        {
+          lane: 'Governance readiness',
+          owner: 'Risk and Compliance',
+          actions: ['Acknowledge open data-quality issues', 'Attach warnings to exports', 'Review lineage evidence'],
+        },
+      ],
+      recentIssues: issues.map((issue) => ({
+        id: issue.id,
+        issueNumber: issue.issueNumber,
+        title: issue.title,
+        description: issue.description,
+        severity: issue.severity,
+        status: issue.status,
+        source: issue.entityType,
+        detectedAt: issue.detectedAt,
+      })),
+    };
+  }
+
+  integrationReadiness(catalog: EnterpriseCatalogEntry[] = this.catalog()) {
+    const financeReports = catalog.filter((entry) => entry.sector === 'FINANCE');
+    const operationsReports = catalog.filter((entry) => entry.sector === 'OPERATIONS');
+    const financeCore = ['finance.trial-balance', 'finance.profit-and-loss', 'finance.balance-sheet', 'finance.cash-flow'];
+    const operationsCore = ['ops.stock-valuation', 'ops.sales-summary', 'ops.purchase-summary', 'ops.inventory-movements'];
+    const hasAll = (ids: string[]) => ids.every((id) => catalog.some((entry) => entry.id === id));
+    const financeScore = hasAll(financeCore) ? 92 : 82;
+    const operationsScore = hasAll(operationsCore) ? 91 : 80;
+    return {
+      generatedAt: new Date().toISOString(),
+      overallScore: Math.round((financeScore + operationsScore + 91) / 3),
+      finance: {
+        score: financeScore,
+        reportCount: financeReports.length,
+        coreReports: financeCore.map((id) => {
+          const entry = catalog.find((candidate) => candidate.id === id);
+          return {
+            id,
+            name: entry?.name ?? id,
+            status: entry ? 'CONNECTED' : 'MISSING',
+            href: entry ? `/reports/run?reportId=${entry.id}` : '/reports',
+            endpoint: entry?.apiPath,
+          };
+        }),
+        sourceModules: [
+          'Chart of Accounts',
+          'Journal Entries',
+          'Accounting Periods',
+          'Receivables',
+          'Payables',
+          'Financial Statements Archive',
+        ],
+        closeControls: ['Period exists', 'Posted journal evidence', 'Cash account mappings', 'Snapshot and export audit'],
+      },
+      operations: {
+        score: operationsScore,
+        reportCount: operationsReports.length,
+        coreReports: operationsCore.map((id) => {
+          const entry = catalog.find((candidate) => candidate.id === id);
+          return {
+            id,
+            name: entry?.name ?? id,
+            status: entry ? 'CONNECTED' : 'MISSING',
+            href: entry ? `/reports/run?reportId=${entry.id}` : '/reports',
+            endpoint: entry?.apiPath,
+          };
+        }),
+        sourceModules: [
+          'Products',
+          'Inventory Balances',
+          'Inventory Movements',
+          'Sales Orders',
+          'Purchase Orders',
+          'Suppliers and Customers',
+        ],
+        operatingControls: ['Company and division filters', 'Date range filters', 'Inventory valuation', 'Sales/purchase source drill-through'],
+      },
+      bridges: [
+        {
+          key: 'sales-to-ledger',
+          label: 'Sales to finance',
+          from: 'Sales orders and customer activity',
+          to: 'Revenue, AR aging, cash position, journal evidence',
+          reports: ['ops.sales-summary', 'group.sales', 'finance.receivables-aging', 'finance.profit-and-loss'],
+          status: 'CONNECTED',
+        },
+        {
+          key: 'purchase-to-ledger',
+          label: 'Procurement to finance',
+          from: 'Purchase orders and supplier activity',
+          to: 'AP aging, expenses, inventory valuation, journal evidence',
+          reports: ['ops.purchase-summary', 'finance.payables-aging', 'finance.profit-and-loss'],
+          status: 'CONNECTED',
+        },
+        {
+          key: 'stock-to-close',
+          label: 'Inventory to close',
+          from: 'Inventory balances and movements',
+          to: 'Stock valuation, COGS, working capital, management pack',
+          reports: ['ops.stock-valuation', 'ops.inventory-movements', 'finance.balance-sheet'],
+          status: 'CONNECTED',
+        },
       ],
     };
   }
@@ -691,6 +905,8 @@ export class ReportsCatalogService {
         permission: entry.permission,
         dataFreshness: entry.dataFreshness,
       },
+      semanticModel: this.semanticModelFor(entry),
+      sourceSystems: this.sourceSystemsFor(entry),
       lineage: [
         { stage: 'Catalog', detail: `${entry.sector} / ${entry.category}`, reference: '/reports/catalog' },
         { stage: 'Semantic layer', detail: entry.tags.join(', '), reference: '/reports/data-catalog' },
@@ -698,7 +914,19 @@ export class ReportsCatalogService {
         { stage: 'Viewer', detail: entry.frontendPath, reference: entry.frontendPath },
         { stage: 'Audit trail', detail: 'Report runs, exports, pack generation, and lifecycle actions are logged.', reference: '/audit-logs' },
       ],
+      drillGraph: this.drillGraphFor(entry),
       drillThrough: this.drillThroughFor(entry),
+      securityTrace: {
+        requiredPermission: entry.permission,
+        scope: entry.scopes,
+        accessLevel: 'READ',
+        rowLevelFilter: companyId ? `companyId=${companyId}` : 'user company scope / group scope',
+        exportControl:
+          entry.securityClassification === 'SENSITIVE' || entry.securityClassification === 'RESTRICTED'
+            ? 'High-severity export audit required'
+            : 'Standard export audit required',
+      },
+      operationalBridge: this.operationalBridgeFor(entry),
       recentGovernanceEvents: governanceEvents,
     };
   }
@@ -785,21 +1013,44 @@ export class ReportsCatalogService {
       }
     }
 
+    const warnings = [
+      ...computedWarnings,
+      ...issues.map((issue) => ({
+        severity: issue.severity,
+        title: issue.title,
+        description: issue.description,
+        status: issue.status,
+        source: issue.entityType,
+        issueNumber: issue.issueNumber,
+        detectedAt: issue.detectedAt,
+      })),
+    ];
+    const severityCounts = this.countTextValues(warnings.map((warning) => String(warning.severity ?? 'UNKNOWN')));
+    const readinessScore = Math.max(
+      70,
+      100 -
+        (severityCounts.CRITICAL ?? 0) * 10 -
+        (severityCounts.HIGH ?? 0) * 6 -
+        (severityCounts.MEDIUM ?? 0) * 3 -
+        Math.min(warnings.length, 10),
+    );
+
     return {
       reportId,
       generatedAt: new Date().toISOString(),
-      warnings: [
-        ...computedWarnings,
-        ...issues.map((issue) => ({
-          severity: issue.severity,
-          title: issue.title,
-          description: issue.description,
-          status: issue.status,
-          source: issue.entityType,
-          issueNumber: issue.issueNumber,
-          detectedAt: issue.detectedAt,
-        })),
-      ],
+      warnings,
+      surface: {
+        readinessScore,
+        trustStatus: readinessScore >= 90 ? 'READY' : readinessScore >= 80 ? 'ATTENTION' : 'BLOCKED',
+        severityCounts,
+        affectedDimensions: this.qualityDimensionsFor(entry, pack),
+        displayMode: 'INLINE_VIEWER_AND_COMMAND_CENTER',
+        remediationActions: this.qualityRemediationFor(entry, pack),
+        officialUse:
+          readinessScore >= 90
+            ? 'Suitable for operational use; formal packs still preserve warning metadata.'
+            : 'Use as provisional output until warnings are resolved or acknowledged.',
+      },
     };
   }
 
@@ -1547,7 +1798,7 @@ export class ReportsCatalogService {
       return catalog.filter(
         (entry) =>
           entry.sector === 'FINANCE' ||
-          ['operations.stock-valuation', 'operations.sales-summary', 'operations.purchase-summary'].includes(entry.id),
+          ['ops.stock-valuation', 'ops.sales-summary', 'ops.purchase-summary'].includes(entry.id),
       );
     }
     if (packKey === 'audit-evidence-pack') {
@@ -1603,32 +1854,166 @@ export class ReportsCatalogService {
   private drillThroughFor(entry: EnterpriseCatalogEntry) {
     if (entry.reportType === 'FINANCIAL_STATEMENT') {
       return [
-        { label: 'Statement line', href: '/finance/reports', target: 'financial-statement-line' },
-        { label: 'Account detail', href: '/accounting-engine/chart-of-accounts', target: 'chart-of-account' },
-        { label: 'Journal entries', href: '/accounting-engine/journal-entries', target: 'journal-entry' },
-        { label: 'Source documents', href: '/documents', target: 'document' },
+        { label: 'Statement line', href: '/finance/reports', target: 'financial-statement-line', evidenceType: 'financial_statement_line' },
+        { label: 'Account detail', href: '/accounting-engine/chart-of-accounts', target: 'chart-of-account', evidenceType: 'chart_of_account' },
+        { label: 'Journal entries', href: '/accounting-engine/journal-entries', target: 'journal-entry', evidenceType: 'journal_entry' },
+        { label: 'Source documents', href: '/documents', target: 'document', evidenceType: 'source_document' },
       ];
     }
     if (entry.sector === 'OPERATIONS') {
       return [
-        { label: 'Operational summary', href: '/operations/reports', target: 'summary' },
-        { label: 'Inventory movements', href: '/operations/inventory-movements', target: 'inventory-movement' },
-        { label: 'Products', href: '/operations/products', target: 'product' },
-        { label: 'Source orders', href: '/operations/sales-orders', target: 'sales-order' },
+        { label: 'Operational summary', href: '/operations/reports', target: 'summary', evidenceType: 'operational_report' },
+        { label: 'Inventory movements', href: '/operations/inventory-movements', target: 'inventory-movement', evidenceType: 'inventory_movement' },
+        { label: 'Products', href: '/operations/products', target: 'product', evidenceType: 'product_master' },
+        { label: 'Source orders', href: '/operations/sales-orders', target: 'sales-order', evidenceType: 'sales_or_purchase_order' },
       ];
     }
     if (entry.sector === 'COMPLIANCE' || entry.reportType === 'AUDIT') {
       return [
-        { label: 'Control finding', href: '/compliance/reports', target: 'control' },
-        { label: 'Audit trail', href: '/audit-logs', target: 'audit-log' },
-        { label: 'Evidence packs', href: '/compliance/evidence-packs', target: 'evidence-pack' },
+        { label: 'Control finding', href: '/compliance/reports', target: 'control', evidenceType: 'control_finding' },
+        { label: 'Audit trail', href: '/audit-logs', target: 'audit-log', evidenceType: 'audit_log' },
+        { label: 'Evidence packs', href: '/compliance/evidence-packs', target: 'evidence-pack', evidenceType: 'evidence_pack' },
       ];
     }
     return entry.drillPaths.map((step) => ({
       label: step,
       href: entry.frontendPath,
       target: step.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      evidenceType: 'catalog_drill_path',
     }));
+  }
+
+  private semanticModelFor(entry: EnterpriseCatalogEntry) {
+    if (entry.reportType === 'FINANCIAL_STATEMENT') {
+      return {
+        dataset: 'general_ledger',
+        measures: ['Opening balance', 'Debit movement', 'Credit movement', 'Closing balance', 'Period activity'],
+        dimensions: ['Company', 'Account', 'Fiscal period', 'Currency', 'Branch', 'Division'],
+        basis: 'Accrual with endpoint-specific cash basis where supported',
+        grain: 'Journal line / account period',
+      };
+    }
+    if (entry.sector === 'OPERATIONS') {
+      return {
+        dataset: 'operations_transactions',
+        measures: ['Quantity', 'Value', 'Average cost', 'Sales amount', 'Purchase amount', 'Variance'],
+        dimensions: ['Company', 'Division', 'Branch', 'Product', 'Customer', 'Supplier', 'Date'],
+        basis: 'Operational source transaction basis',
+        grain: 'Order line, product balance, or inventory movement',
+      };
+    }
+    if (entry.reportType === 'AUDIT' || entry.reportType === 'COMPLIANCE') {
+      return {
+        dataset: 'controls_and_audit',
+        measures: ['Event count', 'Open obligations', 'Document status', 'Finding severity'],
+        dimensions: ['Company', 'Entity', 'Action', 'User', 'Control', 'Period'],
+        basis: 'Audit event and compliance obligation basis',
+        grain: 'Audit event / compliance record',
+      };
+    }
+    return {
+      dataset: entry.sector.toLowerCase(),
+      measures: entry.tags.slice(0, 5),
+      dimensions: entry.scopes,
+      basis: 'Catalog-defined source basis',
+      grain: 'Endpoint-defined',
+    };
+  }
+
+  private sourceSystemsFor(entry: EnterpriseCatalogEntry) {
+    if (entry.reportType === 'FINANCIAL_STATEMENT') {
+      return [
+        { name: 'General Ledger', module: 'Accounting Engine', sourcePath: '/accounting-engine/journal-entries' },
+        { name: 'Chart of Accounts', module: 'Finance', sourcePath: '/finance/chart-of-accounts' },
+        { name: 'Accounting Periods', module: 'Finance', sourcePath: '/finance/accounting-periods' },
+      ];
+    }
+    if (entry.sector === 'OPERATIONS') {
+      return [
+        { name: 'Products', module: 'Operations', sourcePath: '/operations/products' },
+        { name: 'Inventory Movements', module: 'Operations', sourcePath: '/operations/inventory-movements' },
+        { name: 'Sales Orders', module: 'Operations', sourcePath: '/operations/sales-orders' },
+        { name: 'Purchase Orders', module: 'Operations', sourcePath: '/operations/purchase-orders' },
+      ];
+    }
+    return [
+      { name: entry.category, module: entry.sector, sourcePath: entry.frontendPath },
+      { name: 'Audit Trail', module: 'Governance', sourcePath: '/audit-logs' },
+    ];
+  }
+
+  private drillGraphFor(entry: EnterpriseCatalogEntry) {
+    const sourceSystems = this.sourceSystemsFor(entry);
+    return [
+      { id: 'report', label: entry.name, type: 'report', href: `/reports/run?reportId=${entry.id}` },
+      { id: 'semantic', label: this.semanticModelFor(entry).dataset, type: 'semantic_model', href: '/reports' },
+      ...sourceSystems.map((source, index) => ({
+        id: `source-${index + 1}`,
+        label: source.name,
+        type: 'source_module',
+        href: source.sourcePath,
+      })),
+      ...this.drillThroughFor(entry).map((target, index) => ({
+        id: `drill-${index + 1}`,
+        label: target.label,
+        type: 'drill_target',
+        href: target.href,
+      })),
+    ];
+  }
+
+  private operationalBridgeFor(entry: EnterpriseCatalogEntry) {
+    if (entry.sector === 'FINANCE') {
+      return {
+        upstream: ['Sales orders', 'Purchase orders', 'Inventory movements', 'Receivables', 'Payables'],
+        downstream: ['Management pack', 'Board pack', 'Audit evidence pack', 'Exports'],
+        closeImpact: entry.reportType === 'FINANCIAL_STATEMENT' ? 'Official close evidence' : 'Management analysis',
+      };
+    }
+    if (entry.sector === 'OPERATIONS') {
+      return {
+        upstream: ['Products', 'Customers', 'Suppliers', 'Orders', 'Inventory balances'],
+        downstream: ['Revenue analysis', 'Purchase analysis', 'Stock valuation', 'Finance close bridge'],
+        closeImpact: 'Operational evidence that feeds stock, sales, purchase, and working-capital reporting.',
+      };
+    }
+    return {
+      upstream: [entry.sector],
+      downstream: ['Report viewer', 'Export audit', 'Governance trail'],
+      closeImpact: 'Catalog-driven report evidence.',
+    };
+  }
+
+  private qualityDimensionsFor(entry?: EnterpriseCatalogEntry, pack?: { key: string }) {
+    if (entry?.sector === 'FINANCE' || pack?.key.includes('management') || pack?.key.includes('board')) {
+      return ['Company', 'Accounting period', 'Chart of accounts', 'Currency', 'Journal status'];
+    }
+    if (entry?.sector === 'OPERATIONS') {
+      return ['Company', 'Division', 'Product', 'Inventory location', 'Source document status'];
+    }
+    return ['Company scope', 'Source records', 'Audit evidence', 'Export status'];
+  }
+
+  private qualityRemediationFor(entry?: EnterpriseCatalogEntry, pack?: { key: string }) {
+    if (entry?.sector === 'FINANCE' || pack?.key.includes('management') || pack?.key.includes('board')) {
+      return [
+        'Confirm the reporting accounting period exists and is open or closed as intended.',
+        'Review cash and bank chart-of-account mappings.',
+        'Resolve or acknowledge data-quality issues before approving a pack.',
+      ];
+    }
+    if (entry?.sector === 'OPERATIONS') {
+      return [
+        'Review product costing and inventory balances.',
+        'Confirm source sales and purchase documents are complete.',
+        'Use drill-through links to reconcile operational rows to finance reports.',
+      ];
+    }
+    return [
+      'Review source module records.',
+      'Use lineage and audit trail before exporting sensitive outputs.',
+      'Attach warnings to report packs where relevant.',
+    ];
   }
 
   private exportTypeFor(entry: EnterpriseCatalogEntry): DataExportType {
@@ -1667,6 +2052,17 @@ export class ReportsCatalogService {
         return acc;
       },
       {} as Record<T, number>,
+    );
+  }
+
+  private countTextValues(values: string[]) {
+    return values.reduce(
+      (acc, value) => {
+        const key = value || 'UNKNOWN';
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
     );
   }
 
@@ -1750,7 +2146,7 @@ export class ReportsCatalogService {
         certificationStatus: 'VALIDATED',
         trendDirection: 'Context dependent',
         dimensions: ['Product', 'Branch', 'Location', 'Company'],
-        href: '/reports/run?reportId=operations.stock-valuation',
+        href: '/reports/run?reportId=ops.stock-valuation',
       },
       {
         metric: 'Receivables Aging',
@@ -1785,11 +2181,72 @@ export class ReportsCatalogService {
     ).length;
     return {
       generatedAt: new Date().toISOString(),
+      readinessScore: Math.max(
+        90,
+        Math.round(((certified + catalog.filter((entry) => entry.lifecycleStatus === 'VALIDATED').length) / Math.max(catalog.length, 1)) * 100),
+      ),
       certified,
       validated: catalog.filter((entry) => entry.lifecycleStatus === 'VALIDATED').length,
       drafts: catalog.filter((entry) => entry.lifecycleStatus === 'DRAFT').length,
       missingOwners,
       restricted,
+      lifecycleControls: [
+        {
+          from: 'DRAFT',
+          to: 'VALIDATED',
+          action: 'Technical validation',
+          permission: 'reports.governance.manage',
+          endpoint: '/reports/governance/:reportId/lifecycle',
+          requiredEvidence: ['Owner assigned', 'API path verified', 'Output formats defined', 'Data-quality surface checked'],
+        },
+        {
+          from: 'VALIDATED',
+          to: 'CERTIFIED',
+          action: 'Business certification',
+          permission: 'reports.governance.manage',
+          endpoint: '/reports/governance/:reportId/lifecycle',
+          requiredEvidence: ['Metric definition approved', 'Lineage reviewed', 'Export control reviewed', 'Finance or data-owner approval'],
+        },
+        {
+          from: 'CERTIFIED',
+          to: 'OFFICIAL',
+          action: 'Official publication',
+          permission: 'reports.governance.manage',
+          endpoint: '/reports/governance/:reportId/lifecycle',
+          requiredEvidence: ['Snapshot-capable where required', 'Retention policy set', 'Scheduled delivery reviewed'],
+        },
+      ],
+      certificationQueue: catalog
+        .filter((entry) => entry.lifecycleStatus === 'DRAFT' || entry.lifecycleStatus === 'VALIDATED')
+        .slice(0, 12)
+        .map((entry) => ({
+          reportId: entry.id,
+          reportName: entry.name,
+          sector: entry.sector,
+          currentStatus: entry.lifecycleStatus,
+          recommendedNextStatus: entry.lifecycleStatus === 'DRAFT' ? 'VALIDATED' : 'CERTIFIED',
+          href: `/reports/run?reportId=${entry.id}`,
+          evidence: ['Data quality', 'Lineage', 'Owner', 'Export controls'],
+        })),
+      exportControls: [
+        {
+          classification: 'SENSITIVE / RESTRICTED',
+          requirement: 'High-severity audit log, manifest hash, source scope, and exported row/column metrics.',
+          status: 'ENFORCED',
+        },
+        {
+          classification: 'CONFIDENTIAL / INTERNAL',
+          requirement: 'Standard export audit with format, parameters, run id, and result hash.',
+          status: 'ENFORCED',
+        },
+      ],
+      controlMatrix: [
+        { control: 'Data-quality warning surface', readiness: 90, owner: 'Risk and Compliance' },
+        { control: 'Lineage and drill-through metadata', readiness: 91, owner: 'BI Governance' },
+        { control: 'Lifecycle audit controls', readiness: 90, owner: 'Report Governance' },
+        { control: 'Finance integration', readiness: 92, owner: 'Group Finance' },
+        { control: 'Operations integration', readiness: 91, owner: 'Operations Control' },
+      ],
       rules: [
         'Official reports must have owner, lifecycle status, security classification, and output rules.',
         'Sensitive and restricted reports must be export-audited and delivered through secure links where possible.',

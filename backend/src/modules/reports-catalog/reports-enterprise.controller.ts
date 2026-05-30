@@ -23,6 +23,16 @@ export class ReportsEnterpriseController {
     return this.service.dataCatalog();
   }
 
+  @Get('data-quality-surface')
+  dataQualitySurface(@Query() query: Record<string, unknown>, @CurrentUser() user: AuthUser) {
+    return this.service.dataQualitySurface(user, undefined, query ?? {});
+  }
+
+  @Get('integration-readiness')
+  integrationReadiness() {
+    return this.service.integrationReadiness();
+  }
+
   @Get('report-packs')
   reportPacks() {
     return this.service.reportPacks();
