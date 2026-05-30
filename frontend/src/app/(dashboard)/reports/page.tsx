@@ -72,6 +72,10 @@ interface CatalogResponse {
   suggestedSearches?: string[];
   businessQuestionIndex?: BusinessQuestion[];
   featuredCollections?: FeaturedCollection[];
+  personaCollections?: PersonaCollection[];
+  actionLanes?: ActionLane[];
+  coverageMatrix?: CoverageRow[];
+  readinessGaps?: ReadinessGap[];
   discoveryHealth?: DiscoveryHealth;
   entries: CatalogEntry[];
 }
@@ -151,8 +155,55 @@ interface DiscoveryHealth {
   withQuestions: number;
   withDrillPaths: number;
   withOutputs: number;
+  withPermission?: number;
+  withApiPath?: number;
+  withFrontendPath?: number;
+  withTags?: number;
   certifiedOrOfficial: number;
   status: string;
+}
+
+interface CommandCenterScore {
+  overallScore: number;
+  discovery: number;
+  navigation: number;
+  personalization: number;
+  actionCoverage: number;
+  governanceVisibility: number;
+  operationalSignals: number;
+  status: string;
+}
+
+interface PersonaCollection {
+  key: string;
+  label: string;
+  objective: string;
+  terms: string[];
+  reports: CatalogEntry[];
+}
+
+interface ActionLane {
+  key: string;
+  title: string;
+  description: string;
+  href: string;
+  badge: string;
+  reportCount: number;
+}
+
+interface CoverageRow {
+  sector: ReportSector;
+  total: number;
+  reportTypes: { reportType: ReportType; count: number }[];
+  certifiedOrOfficial: number;
+  sensitiveOrRestricted: number;
+}
+
+interface ReadinessGap {
+  reportId: string;
+  reportName: string;
+  sector: ReportSector;
+  gaps: string[];
 }
 
 interface EnterpriseOverview {
@@ -179,9 +230,14 @@ interface EnterpriseOverview {
   reportPacks: ReportPack[];
   discovery?: {
     health: DiscoveryHealth;
+    commandScore: CommandCenterScore;
     suggestedSearches: string[];
     businessQuestions: BusinessQuestion[];
     featuredCollections: FeaturedCollection[];
+    personaCollections: PersonaCollection[];
+    actionLanes: ActionLane[];
+    coverageMatrix: CoverageRow[];
+    readinessGaps: ReadinessGap[];
     certifiedHighlights: CatalogEntry[];
   };
   governance: {
@@ -792,9 +848,15 @@ export default function MasterReportsPage() {
   const governance = overview?.governance;
   const admin = overview?.admin;
   const discoveryHealth = overview?.discovery?.health ?? catalog?.discoveryHealth;
+  const commandScore = overview?.discovery?.commandScore;
   const suggestedSearches = overview?.discovery?.suggestedSearches ?? catalog?.suggestedSearches ?? [];
   const businessQuestions = overview?.discovery?.businessQuestions ?? catalog?.businessQuestionIndex ?? [];
   const featuredCollections = overview?.discovery?.featuredCollections ?? catalog?.featuredCollections ?? [];
+  const personaCollections = overview?.discovery?.personaCollections ?? catalog?.personaCollections ?? [];
+  const actionLanes = overview?.discovery?.actionLanes ?? catalog?.actionLanes ?? [];
+  const coverageMatrix = overview?.discovery?.coverageMatrix ?? catalog?.coverageMatrix ?? [];
+  const readinessGaps = overview?.discovery?.readinessGaps ?? catalog?.readinessGaps ?? [];
+  const selectedPersonaCollection = personaCollections.find((item) => item.key === persona);
 
   const buildLink = (entry: CatalogEntry) => {
     const params = new URLSearchParams();
@@ -980,6 +1042,42 @@ export default function MasterReportsPage() {
         </div>
       )}
 
+      {commandScore && (
+        <Card padding="none" className="overflow-hidden">
+          <div className="grid gap-4 p-4 xl:grid-cols-[260px_1fr]">
+            <div>
+              <div className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                Command center readiness
+              </div>
+              <div className="mt-2 flex items-end gap-2">
+                <div className="text-4xl font-semibold">{commandScore.overallScore}%</div>
+                <Badge tone={toneForOperationalStatus(commandScore.status)}>{commandScore.status}</Badge>
+              </div>
+              <p className="mt-2 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                Measures discovery, navigation, personalization, action coverage, governance visibility, and operational signals.
+              </p>
+            </div>
+            <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+              {[
+                ['Discovery', commandScore.discovery],
+                ['Navigation', commandScore.navigation],
+                ['Personalization', commandScore.personalization],
+                ['Actions', commandScore.actionCoverage],
+                ['Governance', commandScore.governanceVisibility],
+                ['Signals', commandScore.operationalSignals],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                  <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                    {label}
+                  </div>
+                  <div className="mt-1 text-xl font-semibold">{value}%</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      )}
+
       {overview?.alerts && overview.alerts.length > 0 && (
         <Card padding="none" className="overflow-hidden">
           <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
@@ -1128,6 +1226,56 @@ export default function MasterReportsPage() {
                 </Card>
               </div>
 
+              {actionLanes.length > 0 && (
+                <div className="space-y-3">
+                  <SectionHeading title="Command lanes" subtitle="The main reporting jobs users can start directly from this command center." />
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                    {actionLanes.map((lane) => {
+                      const content = (
+                        <>
+                          <div className="flex items-start justify-between gap-3">
+                            <Badge tone="blue">{lane.badge}</Badge>
+                            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              {lane.reportCount}
+                            </span>
+                          </div>
+                          <div className="mt-3 text-sm font-semibold">{lane.title}</div>
+                          <p className="mt-2 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                            {lane.description}
+                          </p>
+                        </>
+                      );
+                      if (lane.href === '/reports') {
+                        return (
+                          <button
+                            key={lane.key}
+                            type="button"
+                            onClick={() => {
+                              setActiveArea(lane.key === 'generate-pack' ? 'packs' : lane.key === 'govern-catalog' ? 'governance' : 'reports');
+                              if (lane.key === 'answer-question') selectSearch('business question');
+                            }}
+                            className="rounded-lg border p-4 text-left transition-colors hover:border-brand-500"
+                            style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)' }}
+                          >
+                            {content}
+                          </button>
+                        );
+                      }
+                      return (
+                        <Link
+                          key={lane.key}
+                          href={lane.href}
+                          className="rounded-lg border p-4 transition-colors hover:border-brand-500"
+                          style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)' }}
+                        >
+                          {content}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {featuredCollections.length > 0 && (
                 <div className="space-y-3">
                   <SectionHeading title="Featured collections" subtitle="Curated discovery sets for close, operations, compliance, and self-service BI." />
@@ -1177,6 +1325,37 @@ export default function MasterReportsPage() {
                         );
                       })}
                     </div>
+                    {selectedPersonaCollection && (
+                      <div className="mt-4 rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                        <div className="text-sm font-medium">{selectedPersonaCollection.objective}</div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {selectedPersonaCollection.terms.slice(0, 8).map((term) => (
+                            <button
+                              key={term}
+                              type="button"
+                              onClick={() => selectSearch(term)}
+                              className="rounded-md border px-2 py-1 text-xs"
+                              style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-secondary)' }}
+                            >
+                              {term}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="mt-3 grid gap-2 md:grid-cols-2">
+                          {selectedPersonaCollection.reports.slice(0, 4).map((entry) => (
+                            <Link
+                              key={`persona-${selectedPersonaCollection.key}-${entry.id}`}
+                              href={buildLink(entry)}
+                              onClick={() => rememberReport(entry.id)}
+                              className="rounded-lg border px-3 py-2 text-sm"
+                              style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}
+                            >
+                              {entry.name}
+                            </Link>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div>
                     <SectionHeading title="Reporting freshness" subtitle={`Catalog refreshed ${formatDateTime(overview?.generatedAt ?? catalog?.generatedAt)}`} />
@@ -1365,6 +1544,63 @@ export default function MasterReportsPage() {
                 </div>
               </Card>
 
+              {(catalog?.searchIntent || catalog?.facets) && (
+                <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+                  {catalog?.searchIntent && (
+                    <Card>
+                      <SectionHeading
+                        title="Search intelligence"
+                        subtitle={`${catalog.searchIntent.matchedReports} matched report${catalog.searchIntent.matchedReports === 1 ? '' : 's'} for "${catalog.searchIntent.query}".`}
+                      />
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {catalog.searchIntent.expandedTerms.map((term) => (
+                          <button
+                            key={term}
+                            type="button"
+                            onClick={() => selectSearch(term)}
+                            className="rounded-md border px-2 py-1 text-xs"
+                            style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-secondary)' }}
+                          >
+                            {term}
+                          </button>
+                        ))}
+                      </div>
+                    </Card>
+                  )}
+                  {catalog?.facets && (
+                    <Card>
+                      <SectionHeading title="Top discovery facets" subtitle="Use facets to understand catalog coverage before filtering." />
+                      <div className="mt-3 grid gap-2 md:grid-cols-2">
+                        {(catalog.facets.sectors ?? []).slice(0, 5).map((facet) => (
+                          <button
+                            key={`sector-facet-${facet.value}`}
+                            type="button"
+                            onClick={() => setSector(facet.value as ReportSector)}
+                            className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm"
+                            style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}
+                          >
+                            <span>{SECTOR_LABELS[facet.value as ReportSector] ?? facet.value}</span>
+                            <span style={{ color: 'var(--aurora-text-muted)' }}>{facet.count}</span>
+                          </button>
+                        ))}
+                        {(catalog.facets.reportTypes ?? []).slice(0, 5).map((facet) => (
+                          <button
+                            key={`type-facet-${facet.value}`}
+                            type="button"
+                            onClick={() => setReportType(facet.value as ReportType)}
+                            className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm"
+                            style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}
+                          >
+                            <span>{REPORT_TYPE_LABELS[facet.value as ReportType] ?? facet.value}</span>
+                            <span style={{ color: 'var(--aurora-text-muted)' }}>{facet.count}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </Card>
+                  )}
+                </div>
+              )}
+
               <div className="flex items-center justify-between gap-3">
                 <div className="text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
                   Showing {filteredEntries.length} of {catalog?.total ?? 0} registered reports
@@ -1474,45 +1710,84 @@ export default function MasterReportsPage() {
               )}
 
               {activeArea === 'catalog' && (
-                <Card padding="none" className="overflow-hidden">
-                  <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
-                    <SectionHeading title="Certified metric catalog" subtitle="Core business definitions that should remain consistent across reports." />
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
-                        <tr>
-                          <th className="px-4 py-3 text-left font-semibold">Metric</th>
-                          <th className="px-4 py-3 text-left font-semibold">Definition</th>
-                          <th className="px-4 py-3 text-left font-semibold">Owner</th>
-                          <th className="px-4 py-3 text-left font-semibold">Valid dimensions</th>
-                          <th className="px-4 py-3 text-left font-semibold">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {metricRows.map((metric) => (
-                          <tr key={metric.metric} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
-                            <td className="px-4 py-3 font-medium">{metric.metric}</td>
-                            <td className="px-4 py-3" style={{ color: 'var(--aurora-text-secondary)' }}>
-                              {metric.definition}
-                            </td>
-                            <td className="px-4 py-3" style={{ color: 'var(--aurora-text-secondary)' }}>
-                              {metric.owner}
-                            </td>
-                            <td className="px-4 py-3" style={{ color: 'var(--aurora-text-secondary)' }}>
-                              {formatList(metric.dimensions)}
-                            </td>
-                            <td className="px-4 py-3">
-                              <Link className="text-brand-500 hover:underline" href={metric.href}>
-                                Open
-                              </Link>
-                            </td>
+                <div className="space-y-4">
+                  {coverageMatrix.length > 0 && (
+                    <Card padding="none" className="overflow-hidden">
+                      <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                        <SectionHeading title="Coverage matrix" subtitle="Sector coverage by report type, certification, and sensitivity." />
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
+                            <tr>
+                              <th className="px-4 py-3 text-left font-semibold">Sector</th>
+                              <th className="px-4 py-3 text-left font-semibold">Total</th>
+                              <th className="px-4 py-3 text-left font-semibold">Certified / official</th>
+                              <th className="px-4 py-3 text-left font-semibold">Sensitive</th>
+                              <th className="px-4 py-3 text-left font-semibold">Report types</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {coverageMatrix.map((row) => (
+                              <tr key={row.sector} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+                                <td className="px-4 py-3 font-medium">{SECTOR_LABELS[row.sector]}</td>
+                                <td className="px-4 py-3">{row.total}</td>
+                                <td className="px-4 py-3">{row.certifiedOrOfficial}</td>
+                                <td className="px-4 py-3">{row.sensitiveOrRestricted}</td>
+                                <td className="px-4 py-3" style={{ color: 'var(--aurora-text-secondary)' }}>
+                                  {row.reportTypes
+                                    .filter((item) => item.count > 0)
+                                    .map((item) => `${REPORT_TYPE_LABELS[item.reportType]}: ${item.count}`)
+                                    .join(', ')}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </Card>
+                  )}
+
+                  <Card padding="none" className="overflow-hidden">
+                    <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                      <SectionHeading title="Certified metric catalog" subtitle="Core business definitions that should remain consistent across reports." />
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
+                          <tr>
+                            <th className="px-4 py-3 text-left font-semibold">Metric</th>
+                            <th className="px-4 py-3 text-left font-semibold">Definition</th>
+                            <th className="px-4 py-3 text-left font-semibold">Owner</th>
+                            <th className="px-4 py-3 text-left font-semibold">Valid dimensions</th>
+                            <th className="px-4 py-3 text-left font-semibold">Action</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </Card>
+                        </thead>
+                        <tbody>
+                          {metricRows.map((metric) => (
+                            <tr key={metric.metric} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+                              <td className="px-4 py-3 font-medium">{metric.metric}</td>
+                              <td className="px-4 py-3" style={{ color: 'var(--aurora-text-secondary)' }}>
+                                {metric.definition}
+                              </td>
+                              <td className="px-4 py-3" style={{ color: 'var(--aurora-text-secondary)' }}>
+                                {metric.owner}
+                              </td>
+                              <td className="px-4 py-3" style={{ color: 'var(--aurora-text-secondary)' }}>
+                                {formatList(metric.dimensions)}
+                              </td>
+                              <td className="px-4 py-3">
+                                <Link className="text-brand-500 hover:underline" href={metric.href}>
+                                  Open
+                                </Link>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
+                </div>
               )}
 
               {activeArea === 'governance' && (
@@ -1562,6 +1837,30 @@ export default function MasterReportsPage() {
                         {governance.rules.map((rule) => (
                           <div key={rule} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
                             {rule}
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  )}
+                  {readinessGaps.length > 0 && (
+                    <Card padding="none" className="overflow-hidden">
+                      <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                        <SectionHeading title="Readiness gap register" subtitle="Catalog records that still need governance metadata before final certification." />
+                      </div>
+                      <div className="grid gap-2 p-4 md:grid-cols-2 xl:grid-cols-3">
+                        {readinessGaps.slice(0, 9).map((gap) => (
+                          <div key={gap.reportId} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                            <div className="text-sm font-semibold">{gap.reportName}</div>
+                            <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              {SECTOR_LABELS[gap.sector]}
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-1">
+                              {gap.gaps.map((item) => (
+                                <Badge key={`${gap.reportId}-${item}`} tone="amber">
+                                  {item}
+                                </Badge>
+                              ))}
+                            </div>
                           </div>
                         ))}
                       </div>

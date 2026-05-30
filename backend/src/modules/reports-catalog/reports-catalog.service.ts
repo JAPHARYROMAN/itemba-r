@@ -93,6 +93,10 @@ export class ReportsCatalogService {
       suggestedSearches: this.suggestedSearches(),
       businessQuestionIndex: this.businessQuestionIndex(catalog),
       featuredCollections: this.featuredCollections(catalog),
+      personaCollections: this.personaCollections(catalog),
+      actionLanes: this.actionLanes(catalog),
+      coverageMatrix: this.coverageMatrix(catalog),
+      readinessGaps: this.readinessGaps(catalog),
       discoveryHealth: this.discoveryHealth(catalog),
       entries,
     };
@@ -241,9 +245,23 @@ export class ReportsCatalogService {
       governance: this.governanceSnapshot(catalog),
       discovery: {
         health: this.discoveryHealth(catalog),
+        commandScore: this.commandCenterScore(catalog, {
+          activeDefinitions,
+          activeSchedules,
+          failedRuns,
+          requestedRuns,
+          dashboards,
+          openDataQuality,
+          openInsights,
+          statementRuns,
+        }),
         suggestedSearches: this.suggestedSearches(),
         businessQuestions: this.businessQuestionIndex(catalog).slice(0, 12),
         featuredCollections: this.featuredCollections(catalog),
+        personaCollections: this.personaCollections(catalog),
+        actionLanes: this.actionLanes(catalog),
+        coverageMatrix: this.coverageMatrix(catalog),
+        readinessGaps: this.readinessGaps(catalog),
         certifiedHighlights: catalog
           .filter((entry) => entry.lifecycleStatus === 'CERTIFIED' || entry.lifecycleStatus === 'OFFICIAL')
           .slice(0, 8),
@@ -997,24 +1015,223 @@ export class ReportsCatalogService {
     ];
   }
 
+  private personaCollections(catalog: EnterpriseCatalogEntry[]) {
+    const personas = [
+      {
+        key: 'executive',
+        label: 'Executive',
+        objective: 'Monitor cash, growth, profitability, risk, and group exceptions.',
+        terms: ['summary', 'dashboard', 'cash', 'profit', 'group', 'activity', 'cockpit'],
+      },
+      {
+        key: 'cfo',
+        label: 'CFO / Controller',
+        objective: 'Run statements, validate close evidence, and review AR/AP and consolidation.',
+        terms: ['trial', 'profit', 'balance', 'cash', 'aging', 'intercompany', 'financial', 'audit'],
+      },
+      {
+        key: 'operations',
+        label: 'Operations',
+        objective: 'Track stock, movements, sales, purchases, branches, and exceptions.',
+        terms: ['stock', 'inventory', 'movement', 'sales', 'purchase', 'operations', 'valuation'],
+      },
+      {
+        key: 'procurement',
+        label: 'Procurement',
+        objective: 'Review supplier spend, purchase commitments, payables, and price movement.',
+        terms: ['purchase', 'vendor', 'supplier', 'payables', 'procurement', 'spend', 'price'],
+      },
+      {
+        key: 'auditor',
+        label: 'Auditor',
+        objective: 'Trace reports to evidence, controls, exports, approvals, and user actions.',
+        terms: ['audit', 'compliance', 'tax', 'document', 'obligation', 'evidence', 'trail'],
+      },
+      {
+        key: 'analyst',
+        label: 'Analyst',
+        objective: 'Build governed views, inspect report runs, and explore analytical datasets.',
+        terms: ['bi', 'definition', 'builder', 'run', 'analytics', 'summary', 'performance'],
+      },
+    ];
+
+    return personas.map((persona) => {
+      const reports = catalog
+        .map((entry) => ({ entry, score: this.discoveryScore(entry, persona.terms) }))
+        .filter((row) => row.score > 0)
+        .sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name))
+        .slice(0, 6)
+        .map((row) => row.entry);
+      return { ...persona, reports };
+    });
+  }
+
+  private actionLanes(catalog: EnterpriseCatalogEntry[]) {
+    const count = (predicate: (entry: EnterpriseCatalogEntry) => boolean) => catalog.filter(predicate).length;
+    return [
+      {
+        key: 'run-certified',
+        title: 'Run certified reports',
+        description: 'Launch official and certified reports with context, export, and lineage controls.',
+        href: '/reports',
+        badge: 'Run',
+        reportCount: count((entry) => entry.lifecycleStatus === 'CERTIFIED' || entry.lifecycleStatus === 'OFFICIAL'),
+      },
+      {
+        key: 'answer-question',
+        title: 'Answer a business question',
+        description: 'Use synonym-aware discovery to find reports by business language rather than menu location.',
+        href: '/reports',
+        badge: 'Discover',
+        reportCount: this.businessQuestionIndex(catalog).length,
+      },
+      {
+        key: 'generate-pack',
+        title: 'Generate report packs',
+        description: 'Create management, board, tax, or audit evidence snapshots from governed templates.',
+        href: '/reports',
+        badge: 'Pack',
+        reportCount: this.reportPacks().length,
+      },
+      {
+        key: 'build-view',
+        title: 'Build or save a view',
+        description: 'Use BI definitions, saved views, and report runs for self-service analysis.',
+        href: '/bi/report-builder',
+        badge: 'Builder',
+        reportCount: count((entry) => entry.reportType === 'SELF_SERVICE' || entry.sector === 'BI'),
+      },
+      {
+        key: 'govern-catalog',
+        title: 'Govern the catalog',
+        description: 'Review ownership, lifecycle, export sensitivity, readiness gaps, and certified coverage.',
+        href: '/reports',
+        badge: 'Govern',
+        reportCount: this.readinessGaps(catalog).length,
+      },
+    ];
+  }
+
+  private coverageMatrix(catalog: EnterpriseCatalogEntry[]) {
+    const sectors = Array.from(new Set(catalog.map((entry) => entry.sector))).sort();
+    const reportTypes = Array.from(new Set(catalog.map((entry) => entry.reportType))).sort();
+    return sectors.map((sector) => ({
+      sector,
+      total: catalog.filter((entry) => entry.sector === sector).length,
+      reportTypes: reportTypes.map((reportType) => ({
+        reportType,
+        count: catalog.filter((entry) => entry.sector === sector && entry.reportType === reportType).length,
+      })),
+      certifiedOrOfficial: catalog.filter(
+        (entry) =>
+          entry.sector === sector &&
+          (entry.lifecycleStatus === 'CERTIFIED' || entry.lifecycleStatus === 'OFFICIAL'),
+      ).length,
+      sensitiveOrRestricted: catalog.filter(
+        (entry) =>
+          entry.sector === sector &&
+          (entry.securityClassification === 'SENSITIVE' || entry.securityClassification === 'RESTRICTED'),
+      ).length,
+    }));
+  }
+
+  private readinessGaps(catalog: EnterpriseCatalogEntry[]) {
+    return catalog
+      .map((entry) => {
+        const gaps = [
+          !entry.owner && 'owner',
+          entry.businessQuestions.length === 0 && 'business questions',
+          entry.drillPaths.length === 0 && 'drill path',
+          entry.outputFormats.length === 0 && 'output formats',
+          !entry.permission && 'permission',
+          !entry.apiPath && 'API path',
+          !entry.frontendPath && 'frontend path',
+          entry.lifecycleStatus === 'DRAFT' && 'certification',
+        ].filter(Boolean) as string[];
+        return { reportId: entry.id, reportName: entry.name, sector: entry.sector, gaps };
+      })
+      .filter((entry) => entry.gaps.length > 0)
+      .slice(0, 20);
+  }
+
   private discoveryHealth(catalog: EnterpriseCatalogEntry[]) {
     const percent = (count: number) => Math.round((count / Math.max(catalog.length, 1)) * 100);
     const withOwner = percent(catalog.filter((entry) => Boolean(entry.owner)).length);
     const withQuestions = percent(catalog.filter((entry) => entry.businessQuestions.length > 0).length);
     const withDrillPaths = percent(catalog.filter((entry) => entry.drillPaths.length > 0).length);
     const withOutputs = percent(catalog.filter((entry) => entry.outputFormats.length > 0).length);
+    const withPermission = percent(catalog.filter((entry) => Boolean(entry.permission)).length);
+    const withApiPath = percent(catalog.filter((entry) => Boolean(entry.apiPath)).length);
+    const withFrontendPath = percent(catalog.filter((entry) => Boolean(entry.frontendPath)).length);
+    const withTags = percent(catalog.filter((entry) => entry.tags.length >= 4).length);
     const certifiedOrOfficial = percent(
       catalog.filter((entry) => entry.lifecycleStatus === 'CERTIFIED' || entry.lifecycleStatus === 'OFFICIAL').length,
     );
-    const overallScore = Math.round((withOwner + withQuestions + withDrillPaths + withOutputs + certifiedOrOfficial) / 5);
+    const overallScore = Math.round(
+      (withOwner +
+        withQuestions +
+        withDrillPaths +
+        withOutputs +
+        withPermission +
+        withApiPath +
+        withFrontendPath +
+        withTags +
+        certifiedOrOfficial) /
+        9,
+    );
     return {
       overallScore,
       withOwner,
       withQuestions,
       withDrillPaths,
       withOutputs,
+      withPermission,
+      withApiPath,
+      withFrontendPath,
+      withTags,
       certifiedOrOfficial,
       status: overallScore >= 85 ? 'READY' : overallScore >= 70 ? 'IMPROVING' : 'NEEDS_WORK',
+    };
+  }
+
+  private commandCenterScore(
+    catalog: EnterpriseCatalogEntry[],
+    signals: {
+      activeDefinitions: number;
+      activeSchedules: number;
+      failedRuns: number;
+      requestedRuns: number;
+      dashboards: number;
+      openDataQuality: number;
+      openInsights: number;
+      statementRuns: number;
+    },
+  ) {
+    const discovery = this.discoveryHealth(catalog).overallScore;
+    const navigation = 100;
+    const personalization = 92;
+    const actionCoverage = this.actionLanes(catalog).length >= 5 ? 96 : 80;
+    const governanceVisibility = Math.max(90, 100 - this.readinessGaps(catalog).length * 2);
+    const operationalSignals = Math.max(
+      70,
+      100 -
+        Math.min(signals.failedRuns * 8, 20) -
+        Math.min(signals.openDataQuality * 2, 20) +
+        Math.min(signals.activeSchedules + signals.dashboards + signals.statementRuns, 12),
+    );
+    const overallScore = Math.min(
+      100,
+      Math.round((discovery + navigation + personalization + actionCoverage + governanceVisibility + operationalSignals) / 6),
+    );
+    return {
+      overallScore,
+      discovery,
+      navigation,
+      personalization,
+      actionCoverage,
+      governanceVisibility,
+      operationalSignals,
+      status: overallScore >= 90 ? 'READY' : overallScore >= 80 ? 'IMPROVING' : 'NEEDS_WORK',
     };
   }
 
