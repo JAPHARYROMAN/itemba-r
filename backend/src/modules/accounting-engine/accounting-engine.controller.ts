@@ -13,4 +13,10 @@ export class AccountingEngineController {
   getSummary(@Query() query: AccountingEngineSummaryQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.getSummary(query, user);
   }
+
+  @Get('readiness')
+  @RequirePermissions('accounting_engine.dashboard')
+  getReadiness(@Query() query: AccountingEngineSummaryQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getReadiness(query, user);
+  }
 }

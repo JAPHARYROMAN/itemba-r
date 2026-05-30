@@ -58,8 +58,7 @@ export class AccountResolverService {
         },
       });
       account =
-        codes.map((code) => accounts.find((row) => row.accountCode === code)).find(Boolean) ??
-        null;
+        codes.map((code) => accounts.find((row) => row.accountCode === code)).find(Boolean) ?? null;
       if (account) return account;
     }
 
@@ -147,7 +146,7 @@ export type AccountRole =
  * Conventional Tanzanian SME chart codes — used when accountSubType isn't set.
  * Each role can list multiple codes; the first match wins.
  */
-const CONVENTIONAL_CODES: Record<AccountRole, string[]> = {
+export const CONVENTIONAL_CODES: Record<AccountRole, string[]> = {
   CASH_ON_HAND: ['1000', '1010'],
   BANK: ['1010', '1020', '1021', '1100'], // 1100 also used for AR in some legacy charts
   AR_CONTROL: ['1100', '1110', '1200'],
