@@ -16,7 +16,7 @@ export class RoomBookingsController {
   @Post()
   @RequirePermissions('room_bookings.create')
   create(@Body() dto: CreateRoomBookingDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Get()
@@ -28,38 +28,48 @@ export class RoomBookingsController {
     @Query('roomId') roomId?: string,
     @Query('status') status?: RoomBookingStatus,
     @Query('page') page?: string,
-    @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
+    @Query('limit') limit?: string,
+    @CurrentUser() user?: AuthUser,
   ) {
-    return this.service.findAll(companyId, hospitalityFacilityId, guestId, roomId, status, page ? +page : 1, limit ? +limit : 20, user);
+    return this.service.findAll(
+      companyId,
+      hospitalityFacilityId,
+      guestId,
+      roomId,
+      status,
+      page ? +page : 1,
+      limit ? +limit : 20,
+      user!,
+    );
   }
 
   @Get(':id')
   @RequirePermissions('room_bookings.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Patch(':id')
   @RequirePermissions('room_bookings.create')
   update(@Param('id') id: string, @Body() dto: UpdateRoomBookingDto, @CurrentUser() user: AuthUser) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 
   @Post(':id/check-in')
   @RequirePermissions('room_bookings.check_in')
   checkIn(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.checkIn(id, user.id);
+    return this.service.checkIn(id, user);
   }
 
   @Post(':id/check-out')
   @RequirePermissions('room_bookings.check_out')
   checkOut(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.checkOut(id, user.id);
+    return this.service.checkOut(id, user);
   }
 
   @Post(':id/cancel')
   @RequirePermissions('room_bookings.cancel')
   cancel(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.cancel(id, user.id);
+    return this.service.cancel(id, user);
   }
 }

@@ -5,7 +5,7 @@ import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { CreateHarvestRecordDto } from './dto/create-harvest-record.dto';
 import { UpdateHarvestRecordDto } from './dto/update-harvest-record.dto';
-import { HarvestRecordStatus, InventoryMovementType } from '@prisma/client';
+import { HarvestRecordStatus, InventoryMovementType, Prisma } from '@prisma/client';
 import { applyCompanyScopeWhere } from '../../common/services';
 
 function round2(n: number): number {
@@ -14,6 +14,15 @@ function round2(n: number): number {
 
 function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
+}
+
+// Shape of the row returned by the FOR UPDATE balance lock (see ITMB-080).
+interface BalanceLockRow {
+  id: string;
+  quantityOnHand: Prisma.Decimal;
+  quantityReserved: Prisma.Decimal;
+  averageCost: Prisma.Decimal;
+  totalValue: Prisma.Decimal;
 }
 
 @Injectable()
@@ -143,6 +152,8 @@ export class HarvestRecordsService {
       throw new BadRequestException('Only APPROVED harvests can be posted');
     if (!h.productId || !h.branchId)
       throw new BadRequestException('Product and branch/location are required to post harvest');
+    const productId = h.productId;
+    const branchId = h.branchId;
 
     const quantity = Number(h.quantity);
     const unitValue = Number(h.estimatedUnitValue ?? 0);
@@ -165,8 +176,8 @@ export class HarvestRecordsService {
           movementNumber,
           companyId: h.companyId,
           divisionId: h.divisionId,
-          branchId: h.branchId,
-          productId: h.productId!,
+          branchId,
+          productId,
           movementType: InventoryMovementType.PRODUCTION_IN,
           quantity,
           unitId: h.unitId,
@@ -182,40 +193,61 @@ export class HarvestRecordsService {
 
       // Inventory balance: increment qty AND value, then recompute
       // weighted-average cost so sales draw the right COGS.
-      const existing = await tx.inventoryBalance.findFirst({
+      //
+      // ITMB-080: ensure the balance row exists, then take a FOR UPDATE row
+      // lock before the read-modify-write — mirroring the locking inventory
+      // mutator. The prior plain findFirst/create raced on the unique
+      // (companyId, productId, branchId) constraint under concurrency and
+      // could lose a WAC update. The upsert seeds an empty row atomically
+      // (create-only) so the subsequent locked read always finds a row to
+      // update.
+      await tx.inventoryBalance.upsert({
         where: {
+          companyId_productId_branchId: {
+            companyId: h.companyId,
+            productId,
+            branchId,
+          },
+        },
+        create: {
           companyId: h.companyId,
-          productId: h.productId!,
-          branchId: h.branchId,
+          divisionId: h.divisionId,
+          productId,
+          branchId,
+          quantityOnHand: 0,
+          quantityReserved: 0,
+          averageCost: 0,
+          totalValue: 0,
+          lastMovementAt: null,
+        },
+        update: {},
+      });
+
+      const lockedRows = await tx.$queryRaw<BalanceLockRow[]>(Prisma.sql`
+        SELECT id, "quantityOnHand", "quantityReserved", "averageCost", "totalValue"
+        FROM "inventory_balances"
+        WHERE "companyId" = ${h.companyId}
+          AND "productId" = ${productId}
+          AND "branchId" = ${branchId}
+        FOR UPDATE
+      `);
+      const existing = lockedRows[0];
+      if (!existing) {
+        throw new BadRequestException('Inventory balance row could not be locked');
+      }
+      const newQty = round4(Number(existing.quantityOnHand) + quantity);
+      const newTotalValue = round2(Number(existing.totalValue) + (hasCostBasis ? totalValue : 0));
+      const newAverage =
+        newQty > 0 ? round4(newTotalValue / newQty) : Number(existing.averageCost);
+      await tx.inventoryBalance.update({
+        where: { id: existing.id },
+        data: {
+          quantityOnHand: newQty,
+          totalValue: newTotalValue,
+          averageCost: newAverage,
+          lastMovementAt: new Date(),
         },
       });
-      if (existing) {
-        const newQty = round4(Number(existing.quantityOnHand) + quantity);
-        const newTotalValue = round2(Number(existing.totalValue) + (hasCostBasis ? totalValue : 0));
-        const newAverage =
-          newQty > 0 ? round4(newTotalValue / newQty) : Number(existing.averageCost);
-        await tx.inventoryBalance.update({
-          where: { id: existing.id },
-          data: {
-            quantityOnHand: newQty,
-            totalValue: newTotalValue,
-            averageCost: newAverage,
-            lastMovementAt: new Date(),
-          },
-        });
-      } else {
-        await tx.inventoryBalance.create({
-          data: {
-            companyId: h.companyId,
-            productId: h.productId!,
-            branchId: h.branchId,
-            quantityOnHand: quantity,
-            totalValue: hasCostBasis ? totalValue : 0,
-            averageCost: hasCostBasis ? unitValue : 0,
-            lastMovementAt: new Date(),
-          },
-        });
-      }
 
       // Crop season actual yield bookkeeping.
       await tx.cropSeason.update({

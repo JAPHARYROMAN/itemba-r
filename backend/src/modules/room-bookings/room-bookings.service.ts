@@ -1,153 +1,239 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { RoomBookingStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { applyCompanyScopeWhere } from '../../common/services';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { FoliosService } from '../folios/folios.service';
 import { CreateRoomBookingDto } from './dto/create-room-booking.dto';
 import { UpdateRoomBookingDto } from './dto/update-room-booking.dto';
-import { RoomBookingStatus, RoomStatus } from '@prisma/client';
-import { applyCompanyScopeWhere } from '../../common/services';
 
 @Injectable()
 export class RoomBookingsService {
-  private readonly logger = new Logger(RoomBookingsService.name);
   constructor(
-    private prisma: PrismaService,
-    private audit: AuditLogsService,
-    private folios: FoliosService,
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditLogsService,
+    private readonly folios: FoliosService,
   ) {}
 
-  async create(dto: CreateRoomBookingDto, userId: string) {
-    const existing = await this.prisma.roomBooking.findFirst({
-      where: { companyId: dto.companyId, bookingNumber: dto.bookingNumber, deletedAt: null },
+  private async assertNoConflict(
+    companyId: string,
+    roomId: string,
+    expectedCheckIn: Date,
+    expectedCheckOut: Date,
+    excludeId?: string,
+  ) {
+    const conflict = await this.prisma.roomBooking.findFirst({
+      where: {
+        companyId,
+        roomId,
+        deletedAt: null,
+        status: { notIn: [RoomBookingStatus.CANCELLED, RoomBookingStatus.CHECKED_OUT] },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+        // Overlap: existing.expectedCheckIn < newEnd AND existing.expectedCheckOut > newStart.
+        expectedCheckIn: { lt: expectedCheckOut },
+        expectedCheckOut: { gt: expectedCheckIn },
+      },
     });
-    if (existing) throw new BadRequestException('Booking number already exists for this company');
+    if (conflict) {
+      throw new ConflictException('Room is already booked for the selected time window');
+    }
+  }
+
+  async create(dto: CreateRoomBookingDto, user: AuthUser) {
+    const expectedCheckIn = new Date(dto.expectedCheckIn);
+    const expectedCheckOut = new Date(dto.expectedCheckOut);
+    if (expectedCheckOut <= expectedCheckIn) {
+      throw new BadRequestException('Expected check-out must be after check-in');
+    }
+    await this.assertNoConflict(
+      dto.companyId,
+      dto.roomId,
+      expectedCheckIn,
+      expectedCheckOut,
+    );
+    const nights = dto.nights ?? Math.max(1, Math.ceil((expectedCheckOut.getTime() - expectedCheckIn.getTime()) / (24 * 3600 * 1000)));
+    const subtotal = dto.subtotal ?? nights * Number(dto.ratePerNight);
+    const discountAmount = dto.discountAmount ?? 0;
+    const taxAmount = dto.taxAmount ?? 0;
+    const totalAmount = dto.totalAmount ?? Math.max(0, subtotal - discountAmount + taxAmount);
+    const paidAmount = dto.paidAmount ?? 0;
     const booking = await this.prisma.roomBooking.create({
       data: {
         ...dto,
-        bookingDate: dto.bookingDate ? new Date(dto.bookingDate) : undefined,
-        expectedCheckIn: new Date(dto.expectedCheckIn),
-        expectedCheckOut: new Date(dto.expectedCheckOut),
+        bookingDate: dto.bookingDate ? new Date(dto.bookingDate) : new Date(),
+        expectedCheckIn,
+        expectedCheckOut,
+        nights,
+        subtotal,
+        discountAmount,
+        taxAmount,
+        totalAmount,
+        paidAmount,
+        outstandingAmount: dto.outstandingAmount ?? Math.max(0, totalAmount - paidAmount),
+        createdById: user.id,
       },
     });
-    await this.audit.log({ userId, action: 'CREATE', entityType: 'RoomBooking', entityId: booking.id, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId: user.id,
+      action: 'CREATE',
+      entityType: 'RoomBooking',
+      entityId: booking.id,
+      companyId: booking.companyId,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
     return booking;
   }
 
-  async findAll(companyId?: string, hospitalityFacilityId?: string, guestId?: string, roomId?: string, status?: RoomBookingStatus, page = 1, limit = 20, user?: any) {
+  async findAll(
+    companyId: string | undefined,
+    hospitalityFacilityId: string | undefined,
+    guestId: string | undefined,
+    roomId: string | undefined,
+    status: RoomBookingStatus | undefined,
+    page = 1,
+    limit = 20,
+    user: AuthUser,
+  ) {
     const where: any = { deletedAt: null };
     applyCompanyScopeWhere(where, user, companyId);
     if (hospitalityFacilityId) where.hospitalityFacilityId = hospitalityFacilityId;
     if (guestId) where.guestId = guestId;
     if (roomId) where.roomId = roomId;
     if (status) where.status = status;
-    const [data, total] = await this.prisma.$transaction([
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+    const [data, total] = await Promise.all([
       this.prisma.roomBooking.findMany({
-        where, skip: (page - 1) * limit, take: limit, orderBy: { createdAt: 'desc' },
+        where,
         include: {
-          guest: { select: { fullName: true, guestCode: true } },
+          facility: { select: { facilityName: true, facilityCode: true } },
           room: { select: { roomNumber: true, roomType: true } },
-          facility: { select: { facilityName: true } },
+          guest: { select: { fullName: true, guestCode: true } },
         },
+        orderBy: { expectedCheckIn: 'desc' },
+        skip: (safePage - 1) * safeLimit,
+        take: safeLimit,
       }),
       this.prisma.roomBooking.count({ where }),
     ]);
-    return { data, total, page, limit };
+    return { data, total, page: safePage, limit: safeLimit };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser) {
+    const where: any = { id, deletedAt: null };
+    applyCompanyScopeWhere(where, user);
     const booking = await this.prisma.roomBooking.findFirst({
-      where: { id, deletedAt: null },
+      where,
       include: {
-        guest: { select: { fullName: true, guestCode: true, phone: true } },
-        room: { select: { roomNumber: true, roomType: true, defaultRate: true } },
-        facility: { select: { facilityName: true, facilityCode: true } },
+        facility: true,
+        room: true,
+        guest: true,
+        payments: true,
+        folio: { include: { charges: true } },
       },
     });
     if (!booking) throw new NotFoundException('Room booking not found');
     return booking;
   }
 
-  async update(id: string, dto: UpdateRoomBookingDto, userId: string) {
-    await this.findOne(id);
-    const booking = await this.prisma.roomBooking.update({
+  async update(id: string, dto: UpdateRoomBookingDto, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    const roomId = dto.roomId ?? existing.roomId;
+    const expectedCheckIn = dto.expectedCheckIn ? new Date(dto.expectedCheckIn) : existing.expectedCheckIn;
+    const expectedCheckOut = dto.expectedCheckOut ? new Date(dto.expectedCheckOut) : existing.expectedCheckOut;
+    if (expectedCheckOut <= expectedCheckIn) {
+      throw new BadRequestException('Expected check-out must be after check-in');
+    }
+    await this.assertNoConflict(existing.companyId, roomId, expectedCheckIn, expectedCheckOut, id);
+    const updated = await this.prisma.roomBooking.update({
       where: { id },
       data: {
         ...dto,
         bookingDate: dto.bookingDate ? new Date(dto.bookingDate) : undefined,
-        expectedCheckIn: dto.expectedCheckIn ? new Date(dto.expectedCheckIn) : undefined,
-        expectedCheckOut: dto.expectedCheckOut ? new Date(dto.expectedCheckOut) : undefined,
+        expectedCheckIn,
+        expectedCheckOut,
       },
     });
-    await this.audit.log({ userId, action: 'UPDATE', entityType: 'RoomBooking', entityId: id, newValue: dto as unknown as Record<string, unknown> });
-    return booking;
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'RoomBooking',
+      entityId: id,
+      companyId: updated.companyId,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
+    return updated;
   }
 
-  async checkIn(id: string, userId: string) {
-    const booking = await this.findOne(id);
+  async checkIn(id: string, user: AuthUser) {
+    const booking = await this.findOne(id, user);
     if (booking.status !== RoomBookingStatus.RESERVED) {
-      throw new BadRequestException('Booking must be in RESERVED status to check in');
+      throw new BadRequestException('Only RESERVED bookings can be checked in');
     }
     const updated = await this.prisma.roomBooking.update({
       where: { id },
-      data: { actualCheckIn: new Date(), status: RoomBookingStatus.CHECKED_IN, checkedInById: userId },
+      data: { status: RoomBookingStatus.CHECKED_IN, actualCheckIn: new Date(), checkedInById: user.id },
     });
-    await this.prisma.room.update({ where: { id: booking.roomId }, data: { status: RoomStatus.OCCUPIED } });
-    await this.audit.log({ userId, action: 'CHECK_IN', entityType: 'RoomBooking', entityId: id, newValue: { status: 'CHECKED_IN' } });
-
-    // Open the running-tab folio for this stay so restaurant/bar/extras can
-    // be charged through it. Soft-fails — a configuration miss should not
-    // block the check-in itself.
-    try {
-      await this.folios.openForBooking(id, userId);
-    } catch (err) {
-      this.logger.warn(
-        `Folio open failed for booking ${id}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    return updated;
+    await this.folios.openForBooking(id, user.id);
+    await this.audit.log({
+      userId: user.id,
+      action: 'CHECK_IN',
+      entityType: 'RoomBooking',
+      entityId: id,
+      companyId: updated.companyId,
+      newValue: { status: updated.status } as unknown as Record<string, unknown>,
+    });
+    return this.findOne(id, user);
   }
 
-  async checkOut(id: string, userId: string) {
-    const booking = await this.findOne(id);
+  async checkOut(id: string, user: AuthUser) {
+    const booking = await this.findOne(id, user);
     if (booking.status !== RoomBookingStatus.CHECKED_IN) {
-      throw new BadRequestException('Booking must be in CHECKED_IN status to check out');
+      throw new BadRequestException('Only CHECKED_IN bookings can be checked out');
     }
     const updated = await this.prisma.roomBooking.update({
       where: { id },
-      data: { actualCheckOut: new Date(), status: RoomBookingStatus.CHECKED_OUT, checkedOutById: userId },
+      data: { status: RoomBookingStatus.CHECKED_OUT, actualCheckOut: new Date(), checkedOutById: user.id },
     });
-    await this.prisma.room.update({ where: { id: booking.roomId }, data: { status: RoomStatus.DIRTY } });
-    await this.audit.log({ userId, action: 'CHECK_OUT', entityType: 'RoomBooking', entityId: id, newValue: { status: 'CHECKED_OUT' } });
-
-    // Post the final room-nights charge to the folio. We deliberately leave
-    // the folio OPEN so the front desk can settle it with the chosen payment
-    // method (CASH / MOBILE_MONEY / CARD / CREDIT). The /settle endpoint
-    // closes the folio and creates the settlement SalesOrder. The room-
-    // nights charge is idempotent so a double check-out doesn't duplicate.
-    try {
-      const folio = await this.folios.findByBooking(id);
-      if (folio && folio.status === 'OPEN') {
-        await this.folios.postRoomNightsCharge(folio.id, userId);
-      }
-    } catch (err) {
-      this.logger.warn(
-        `Folio room-nights post failed for booking ${id}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    return updated;
+    const folio = await this.folios.openForBooking(id, user.id);
+    await this.folios.postRoomNightsCharge(folio.id, user.id);
+    await this.audit.log({
+      userId: user.id,
+      action: 'CHECK_OUT',
+      entityType: 'RoomBooking',
+      entityId: id,
+      companyId: updated.companyId,
+      newValue: { status: updated.status } as unknown as Record<string, unknown>,
+    });
+    return this.findOne(id, user);
   }
 
-  async cancel(id: string, userId: string) {
-    const booking = await this.findOne(id);
-    if (booking.status === RoomBookingStatus.CHECKED_OUT || booking.status === RoomBookingStatus.CANCELLED) {
-      throw new BadRequestException('Booking cannot be cancelled in its current status');
+  async cancel(id: string, user: AuthUser) {
+    const booking = await this.findOne(id, user);
+    if (booking.status === RoomBookingStatus.CHECKED_OUT) {
+      throw new BadRequestException('Checked-out bookings cannot be cancelled');
     }
     const updated = await this.prisma.roomBooking.update({
       where: { id },
       data: { status: RoomBookingStatus.CANCELLED },
     });
-    await this.prisma.room.update({ where: { id: booking.roomId }, data: { status: RoomStatus.AVAILABLE } });
-    await this.audit.log({ userId, action: 'CANCEL', entityType: 'RoomBooking', entityId: id, newValue: { status: 'CANCELLED' } });
+    await this.audit.log({
+      userId: user.id,
+      action: 'CANCEL',
+      entityType: 'RoomBooking',
+      entityId: id,
+      companyId: updated.companyId,
+      newValue: { status: updated.status } as unknown as Record<string, unknown>,
+    });
     return updated;
+  }
+
+  async remove(id: string, user: AuthUser) {
+    await this.findOne(id, user);
+    return this.prisma.roomBooking.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
   }
 }

@@ -1,19 +1,27 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   EnterpriseCatalogEntry,
+  ReportLifecycleStatus,
   REPORTS_CATALOG,
   ReportScope,
   ReportSector,
   enrichCatalogEntry,
 } from './catalog';
 import {
+  AccessLevel,
+  AuditSeverity,
+  DataExportStatus,
+  DataExportType,
   DataQualityIssueStatus,
+  FinancialStatementType,
   InsightStatus,
   ReportRunStatus,
+  StatementRunStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services/company-scope.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 interface CatalogQuery {
   sector?: string;
@@ -26,6 +34,7 @@ export class ReportsCatalogService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companyScope: CompanyScopeService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   list(query: CatalogQuery = {}) {
@@ -399,8 +408,532 @@ export class ReportsCatalogService {
     };
   }
 
+  async generateReportPack(packKey: string, dto: Record<string, unknown>, user: AuthUser) {
+    const pack = this.reportPacks().find((candidate) => candidate.key === packKey);
+    if (!pack) throw new NotFoundException('Report pack template not found');
+
+    const companyId = stringValue(dto.companyId);
+    await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.WRITE);
+    const period = this.resolvePackPeriod(dto);
+    const catalog = this.catalog();
+    const includedReports = this.reportsForPack(packKey, catalog);
+    const dataQuality = await this.dataQualityWarnings(packKey, user, {
+      companyId: companyId ?? undefined,
+      dateFrom: period.periodStart.toISOString(),
+      dateTo: period.periodEnd.toISOString(),
+    });
+    const generatedAt = new Date();
+
+    const snapshotPayload = {
+      packKey: pack.key,
+      packName: pack.name,
+      owner: pack.owner,
+      cadence: pack.cadence,
+      sections: pack.sections,
+      prerequisites: pack.prerequisites,
+      includedReports: includedReports.map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        sector: entry.sector,
+        reportType: entry.reportType,
+        lifecycleStatus: entry.lifecycleStatus,
+        apiPath: entry.apiPath,
+      })),
+      filters: {
+        companyId,
+        periodStart: period.periodStart.toISOString(),
+        periodEnd: period.periodEnd.toISOString(),
+        currency: stringValue(dto.currency) ?? 'TZS',
+        basis: stringValue(dto.basis) ?? 'ACCRUAL',
+      },
+      dataQualityWarnings: dataQuality.warnings.map((warning) => JSON.parse(JSON.stringify(warning))),
+      generatedAt: generatedAt.toISOString(),
+      snapshotMode: 'Frozen snapshot metadata with source report pointers',
+    };
+
+    const run = await this.prisma.financialStatementRun.create({
+      data: {
+        statementRunNumber: this.makeRunNumber('RPACK'),
+        companyId: companyId ?? undefined,
+        statementType: FinancialStatementType.CUSTOM,
+        periodStart: period.periodStart,
+        periodEnd: period.periodEnd,
+        currency: stringValue(dto.currency) ?? 'TZS',
+        filters: snapshotPayload.filters,
+        status: StatementRunStatus.GENERATED,
+        generatedById: user.id,
+        generatedAt,
+        resultSummary: JSON.parse(JSON.stringify(snapshotPayload)),
+      },
+    });
+
+    await this.auditLogs.log({
+      action: 'REPORT_PACK_GENERATE',
+      entityType: 'ReportPack',
+      entityId: run.id,
+      userId: user.id,
+      companyId: companyId ?? undefined,
+      severity: AuditSeverity.HIGH,
+      metadata: {
+        packKey,
+        statementRunNumber: run.statementRunNumber,
+        reportCount: includedReports.length,
+        warningCount: dataQuality.warnings.length,
+      },
+    });
+
+    return {
+      pack,
+      snapshot: {
+        id: run.id,
+        statementRunNumber: run.statementRunNumber,
+        status: run.status,
+        generatedAt: run.generatedAt,
+        periodStart: run.periodStart,
+        periodEnd: run.periodEnd,
+        companyId: run.companyId,
+      },
+      includedReports,
+      dataQualityWarnings: dataQuality.warnings,
+    };
+  }
+
+  async lineage(reportId: string, user: AuthUser, query: Record<string, unknown> = {}) {
+    const entry = this.resolveReportEntry(reportId);
+    const companyId = stringValue(query.companyId);
+    await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.READ);
+    const companyWhere = await this.companyScope.companyWhereFor(user, companyId);
+
+    const governanceEvents = await this.prisma.auditLog.findMany({
+      where: {
+        ...companyWhere,
+        entityType: { in: ['ReportGovernance', 'ReportExport', 'ReportPack'] },
+        OR: [
+          { entityId: reportId },
+          { metadata: { path: ['reportId'], equals: reportId } },
+          { metadata: { path: ['packKey'], equals: reportId } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 8,
+      select: {
+        id: true,
+        action: true,
+        entityType: true,
+        createdAt: true,
+        user: { select: { id: true, fullName: true, email: true } },
+      },
+    });
+
+    return {
+      reportId,
+      generatedAt: new Date().toISOString(),
+      entry,
+      semanticDefinition: {
+        businessName: entry.name,
+        owner: entry.owner,
+        lifecycleStatus: entry.lifecycleStatus,
+        securityClassification: entry.securityClassification,
+        permission: entry.permission,
+        dataFreshness: entry.dataFreshness,
+      },
+      lineage: [
+        { stage: 'Catalog', detail: `${entry.sector} / ${entry.category}`, reference: '/reports/catalog' },
+        { stage: 'Semantic layer', detail: entry.tags.join(', '), reference: '/reports/data-catalog' },
+        { stage: 'Source endpoint', detail: entry.apiPath, reference: entry.apiPath },
+        { stage: 'Viewer', detail: entry.frontendPath, reference: entry.frontendPath },
+        { stage: 'Audit trail', detail: 'Report runs, exports, pack generation, and lifecycle actions are logged.', reference: '/audit-logs' },
+      ],
+      drillThrough: this.drillThroughFor(entry),
+      recentGovernanceEvents: governanceEvents,
+    };
+  }
+
+  async dataQualityWarnings(
+    reportId: string,
+    user: AuthUser,
+    query: Record<string, unknown> = {},
+  ) {
+    const entry = this.catalog().find((candidate) => candidate.id === reportId);
+    const pack = this.reportPacks().find((candidate) => candidate.key === reportId);
+    if (!entry && !pack) throw new NotFoundException('Report or report pack not found');
+
+    const companyId = stringValue(query.companyId);
+    await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.READ);
+    const companyWhere = await this.companyScope.companyWhereFor(user, companyId);
+    const period = this.resolveOptionalPeriod(query);
+
+    const issues = await this.prisma.dataQualityIssue.findMany({
+      where: {
+        ...companyWhere,
+        status: { in: [DataQualityIssueStatus.OPEN, DataQualityIssueStatus.ACKNOWLEDGED] },
+      },
+      orderBy: [{ severity: 'desc' }, { detectedAt: 'desc' }],
+      take: 12,
+      select: {
+        id: true,
+        issueNumber: true,
+        title: true,
+        description: true,
+        severity: true,
+        status: true,
+        entityType: true,
+        detectedAt: true,
+      },
+    });
+
+    const computedWarnings: Array<Record<string, unknown>> = [];
+    if (entry?.reportType === 'FINANCIAL_STATEMENT' || pack?.key.includes('management') || pack?.key.includes('board')) {
+      if (!companyId) {
+        computedWarnings.push({
+          severity: 'MEDIUM',
+          title: 'Group-level financial pack',
+          description: 'No company was selected, so the output is treated as group-level and requires a group-scoped user.',
+          source: 'scope',
+        });
+      } else if (period) {
+        const periodCount = await this.prisma.accountingPeriod.count({
+          where: {
+            companyId,
+            startDate: { lte: period.periodEnd },
+            endDate: { gte: period.periodStart },
+          },
+        });
+        if (periodCount === 0) {
+          computedWarnings.push({
+            severity: 'HIGH',
+            title: 'No accounting period exists for this transaction date range',
+            description: 'Create or open the relevant accounting period before using this output as an official report.',
+            source: 'accounting_periods',
+          });
+        }
+      }
+    }
+
+    if (companyId && (entry?.id.includes('cash') || pack?.key.includes('management') || pack?.key.includes('board'))) {
+      const cashAccounts = await this.prisma.chartOfAccount.count({
+        where: {
+          companyId,
+          OR: [
+            { accountSubType: { equals: 'cash_on_hand', mode: 'insensitive' } },
+            { accountSubType: { equals: 'bank', mode: 'insensitive' } },
+            { accountCode: { in: ['1000', '1010', '1020'] } },
+          ],
+        },
+      });
+      if (cashAccounts === 0) {
+        computedWarnings.push({
+          severity: 'HIGH',
+          title: 'Cash account mapping is incomplete',
+          description: 'Set accountSubType="cash_on_hand" or "bank" on cash/bank accounts, or create a conventional account code such as 1000, 1010, or 1020.',
+          source: 'chart_of_accounts',
+        });
+      }
+    }
+
+    return {
+      reportId,
+      generatedAt: new Date().toISOString(),
+      warnings: [
+        ...computedWarnings,
+        ...issues.map((issue) => ({
+          severity: issue.severity,
+          title: issue.title,
+          description: issue.description,
+          status: issue.status,
+          source: issue.entityType,
+          issueNumber: issue.issueNumber,
+          detectedAt: issue.detectedAt,
+        })),
+      ],
+    };
+  }
+
+  async explain(reportId: string, user: AuthUser, query: Record<string, unknown> = {}) {
+    const entry = this.resolveReportEntry(reportId);
+    const companyId = stringValue(query.companyId);
+    await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.READ);
+    const companyWhere = await this.companyScope.companyWhereFor(user, companyId);
+    const period = this.resolveOptionalPeriod(query);
+    const dateWhere = period
+      ? { transactionDate: { gte: period.periodStart, lte: period.periodEnd } }
+      : {};
+
+    const [postedJournals, draftJournals, reportRuns, openQuality] = await Promise.all([
+      this.prisma.journalEntry.count({
+        where: { ...companyWhere, ...dateWhere, status: 'POSTED', deletedAt: null },
+      }),
+      this.prisma.journalEntry.count({
+        where: { ...companyWhere, ...dateWhere, status: 'DRAFT', deletedAt: null },
+      }),
+      this.prisma.reportRun.count({
+        where: { ...companyWhere, status: { in: [ReportRunStatus.COMPLETED, ReportRunStatus.FAILED] } },
+      }),
+      this.prisma.dataQualityIssue.count({
+        where: {
+          ...companyWhere,
+          status: { in: [DataQualityIssueStatus.OPEN, DataQualityIssueStatus.ACKNOWLEDGED] },
+        },
+      }),
+    ]);
+
+    const drivers = [
+      {
+        label: 'Source evidence volume',
+        value: `${postedJournals} posted journal(s) in scope`,
+        interpretation:
+          postedJournals > 0
+            ? 'Financial figures can drill through to posted ledger evidence.'
+            : 'No posted journals were found for the selected scope and period.',
+      },
+      {
+        label: 'Unposted activity',
+        value: `${draftJournals} draft journal(s) in scope`,
+        interpretation:
+          draftJournals > 0
+            ? 'Draft journals may explain differences between operational activity and official financial reports.'
+            : 'No draft journals were found for the selected scope and period.',
+      },
+      {
+        label: 'Data quality',
+        value: `${openQuality} open or acknowledged issue(s)`,
+        interpretation:
+          openQuality > 0
+            ? 'Treat affected numbers as provisional until data-quality findings are resolved or acknowledged.'
+            : 'No open data-quality issue was found in the selected scope.',
+      },
+      {
+        label: 'Usage and execution history',
+        value: `${reportRuns} completed or failed BI run(s) in scope`,
+        interpretation: 'Execution history is available for run, failure, export, and schedule investigation.',
+      },
+    ];
+
+    return {
+      reportId,
+      generatedAt: new Date().toISOString(),
+      summary: `${entry.name} is a ${entry.reportType.toLowerCase().replace(/_/g, ' ')} report owned by ${entry.owner}. It uses ${entry.dataFreshness.toLowerCase()} and is governed as ${entry.lifecycleStatus.toLowerCase()}.`,
+      basis:
+        entry.reportType === 'FINANCIAL_STATEMENT'
+          ? 'Accrual financial basis unless the source endpoint supports a cash-basis filter.'
+          : 'Operational basis from source transactions.',
+      drivers,
+      recommendedDrillDowns: this.drillThroughFor(entry),
+      questions: entry.businessQuestions,
+      caveats: [
+        'This explanation is deterministic metadata and source-count analysis, not a substitute for accounting approval.',
+        'Official report packs should use generated snapshots and remain tied to the audit trail.',
+      ],
+    };
+  }
+
+  async recordExportAudit(dto: Record<string, unknown>, user: AuthUser) {
+    const reportId = stringValue(dto.reportId);
+    if (!reportId) throw new BadRequestException('reportId is required');
+    const entry = this.resolveReportEntry(reportId);
+    const companyId = stringValue(dto.companyId);
+    await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.READ);
+    const format = (stringValue(dto.format) ?? 'CSV').toUpperCase();
+    const exportedAt = new Date();
+
+    const exportRecord = await this.prisma.dataExportLog.create({
+      data: {
+        exportNumber: this.makeRunNumber('REXP'),
+        companyId: companyId ?? undefined,
+        exportedById: user.id,
+        exportType: this.exportTypeFor(entry),
+        filters: {
+          reportId,
+          reportName: entry.name,
+          format,
+          parameters: dto.parameters ?? {},
+          sourcePath: entry.apiPath,
+        },
+        fileName: `${reportId}-${exportedAt.toISOString().slice(0, 10)}.${format.toLowerCase()}`,
+        status: DataExportStatus.COMPLETED,
+        completedAt: exportedAt,
+        notes: 'Client-side report export/print action recorded by the Reports module.',
+      },
+    });
+
+    await this.auditLogs.log({
+      action: 'REPORT_EXPORT',
+      entityType: 'ReportExport',
+      entityId: reportId,
+      userId: user.id,
+      companyId: companyId ?? undefined,
+      severity:
+        entry.securityClassification === 'SENSITIVE' || entry.securityClassification === 'RESTRICTED'
+          ? AuditSeverity.HIGH
+          : AuditSeverity.MEDIUM,
+      metadata: {
+        reportId,
+        reportName: entry.name,
+        format,
+        dataExportLogId: exportRecord.id,
+      },
+    });
+
+    return { exportRecord };
+  }
+
+  async updateLifecycle(reportId: string, dto: Record<string, unknown>, user: AuthUser) {
+    const entry = this.resolveReportEntry(reportId);
+    const nextStatus = stringValue(dto.lifecycleStatus) as ReportLifecycleStatus | undefined;
+    const allowed: ReportLifecycleStatus[] = ['DRAFT', 'VALIDATED', 'CERTIFIED', 'OFFICIAL', 'ARCHIVED'];
+    if (!nextStatus || !allowed.includes(nextStatus)) {
+      throw new BadRequestException('Valid lifecycleStatus is required');
+    }
+
+    const companyId = stringValue(dto.companyId);
+    await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.MANAGE);
+    await this.auditLogs.log({
+      action: 'REPORT_LIFECYCLE_UPDATE',
+      entityType: 'ReportGovernance',
+      entityId: reportId,
+      userId: user.id,
+      companyId: companyId ?? undefined,
+      severity: AuditSeverity.HIGH,
+      oldValue: { lifecycleStatus: entry.lifecycleStatus },
+      newValue: {
+        lifecycleStatus: nextStatus,
+        reason: stringValue(dto.reason) ?? 'Lifecycle updated from Reports governance screen',
+      },
+      metadata: {
+        reportId,
+        reportName: entry.name,
+        owner: entry.owner,
+      },
+    });
+
+    return {
+      reportId,
+      reportName: entry.name,
+      previousStatus: entry.lifecycleStatus,
+      lifecycleStatus: nextStatus,
+      persistedAs: 'AuditLog',
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
   private catalog(): EnterpriseCatalogEntry[] {
     return REPORTS_CATALOG.map(enrichCatalogEntry);
+  }
+
+  private resolveReportEntry(reportId: string) {
+    const entry = this.catalog().find((candidate) => candidate.id === reportId);
+    if (!entry) throw new NotFoundException('Report not found in catalog');
+    return entry;
+  }
+
+  private reportsForPack(packKey: string, catalog: EnterpriseCatalogEntry[]) {
+    if (packKey === 'monthly-management-pack') {
+      return catalog.filter(
+        (entry) =>
+          entry.sector === 'FINANCE' ||
+          ['operations.stock-valuation', 'operations.sales-summary', 'operations.purchase-summary'].includes(entry.id),
+      );
+    }
+    if (packKey === 'audit-evidence-pack') {
+      return catalog.filter((entry) => entry.reportType === 'AUDIT' || entry.sector === 'COMPLIANCE');
+    }
+    if (packKey === 'board-pack') {
+      return catalog.filter(
+        (entry) =>
+          entry.scopes.includes('GROUP') &&
+          (entry.reportType === 'DASHBOARD' ||
+            entry.reportType === 'FINANCIAL_STATEMENT' ||
+            entry.reportType === 'ANALYTICAL'),
+      );
+    }
+    if (packKey === 'tax-pack') {
+      return catalog.filter((entry) => entry.sector === 'COMPLIANCE' || entry.name.toLowerCase().includes('tax'));
+    }
+    return catalog.slice(0, 20);
+  }
+
+  private resolvePackPeriod(dto: Record<string, unknown>) {
+    const explicitStart = stringValue(dto.periodStart) ?? stringValue(dto.dateFrom);
+    const explicitEnd = stringValue(dto.periodEnd) ?? stringValue(dto.dateTo);
+    const now = new Date();
+    const periodStart = explicitStart ? new Date(explicitStart) : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const periodEnd = explicitEnd
+      ? new Date(explicitEnd)
+      : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+    if (Number.isNaN(periodStart.getTime()) || Number.isNaN(periodEnd.getTime())) {
+      throw new BadRequestException('Invalid periodStart or periodEnd');
+    }
+    if (periodStart > periodEnd) {
+      throw new BadRequestException('periodStart must be before periodEnd');
+    }
+    return { periodStart, periodEnd };
+  }
+
+  private resolveOptionalPeriod(query: Record<string, unknown>) {
+    const from = stringValue(query.periodStart) ?? stringValue(query.dateFrom);
+    const to = stringValue(query.periodEnd) ?? stringValue(query.dateTo) ?? stringValue(query.asOf);
+    if (!from && !to) return null;
+    const periodStart = from ? new Date(from) : new Date(to as string);
+    const periodEnd = to ? new Date(to) : new Date(from as string);
+    if (Number.isNaN(periodStart.getTime()) || Number.isNaN(periodEnd.getTime())) {
+      throw new BadRequestException('Invalid date range');
+    }
+    if (periodStart > periodEnd) {
+      throw new BadRequestException('dateFrom must be before dateTo');
+    }
+    return { periodStart, periodEnd };
+  }
+
+  private drillThroughFor(entry: EnterpriseCatalogEntry) {
+    if (entry.reportType === 'FINANCIAL_STATEMENT') {
+      return [
+        { label: 'Statement line', href: '/finance/reports', target: 'financial-statement-line' },
+        { label: 'Account detail', href: '/accounting-engine/chart-of-accounts', target: 'chart-of-account' },
+        { label: 'Journal entries', href: '/accounting-engine/journal-entries', target: 'journal-entry' },
+        { label: 'Source documents', href: '/documents', target: 'document' },
+      ];
+    }
+    if (entry.sector === 'OPERATIONS') {
+      return [
+        { label: 'Operational summary', href: '/operations/reports', target: 'summary' },
+        { label: 'Inventory movements', href: '/operations/inventory-movements', target: 'inventory-movement' },
+        { label: 'Products', href: '/operations/products', target: 'product' },
+        { label: 'Source orders', href: '/operations/sales-orders', target: 'sales-order' },
+      ];
+    }
+    if (entry.sector === 'COMPLIANCE' || entry.reportType === 'AUDIT') {
+      return [
+        { label: 'Control finding', href: '/compliance/reports', target: 'control' },
+        { label: 'Audit trail', href: '/audit-logs', target: 'audit-log' },
+        { label: 'Evidence packs', href: '/compliance/evidence-packs', target: 'evidence-pack' },
+      ];
+    }
+    return entry.drillPaths.map((step) => ({
+      label: step,
+      href: entry.frontendPath,
+      target: step.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+    }));
+  }
+
+  private exportTypeFor(entry: EnterpriseCatalogEntry): DataExportType {
+    if (entry.reportType === 'AUDIT') return DataExportType.AUDIT_EVIDENCE_PACK;
+    if (entry.sector === 'COMPLIANCE') return DataExportType.COMPLIANCE_REPORT;
+    if (entry.sector === 'FINANCE') return DataExportType.FINANCIAL_REPORT;
+    if (entry.sector === 'HR') return DataExportType.HR_REPORT;
+    if (entry.sector === 'OPERATIONS' && entry.category.toLowerCase().includes('purchase')) {
+      return DataExportType.PURCHASE_REPORT;
+    }
+    if (entry.sector === 'OPERATIONS' && entry.category.toLowerCase().includes('inventory')) {
+      return DataExportType.INVENTORY_REPORT;
+    }
+    if (entry.id.includes('sales') || entry.category.toLowerCase().includes('sales')) {
+      return DataExportType.SALES_REPORT;
+    }
+    return DataExportType.OTHER;
+  }
+
+  private makeRunNumber(prefix: string) {
+    return `${prefix}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
   }
 
   private countBy<T extends string>(
@@ -545,4 +1078,8 @@ export class ReportsCatalogService {
       ],
     };
   }
+}
+
+function stringValue(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }

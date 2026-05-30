@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Card, PageHeader } from '@/components/ui';
-import { backendGet, backendList } from '@/lib/api-client';
+import { backendGet, backendList, backendPost } from '@/lib/api-client';
 
 type ReportSector =
   | 'FINANCE'
@@ -104,6 +104,16 @@ interface ReportPack {
   href: string;
   sections: string[];
   prerequisites: string[];
+}
+
+interface PackGenerationResult {
+  snapshot?: {
+    id: string;
+    statementRunNumber: string;
+    status: string;
+    generatedAt?: string;
+  };
+  dataQualityWarnings?: unknown[];
 }
 
 interface EnterpriseOverview {
@@ -533,6 +543,8 @@ export default function MasterReportsPage() {
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [companyId, setCompanyId] = useState('');
   const [divisionId, setDivisionId] = useState('');
+  const [generatingPack, setGeneratingPack] = useState('');
+  const [packResult, setPackResult] = useState('');
 
   const loadCatalog = useCallback(async () => {
     setLoading(true);
@@ -693,6 +705,33 @@ export default function MasterReportsPage() {
       return suffix ? `${entry.frontendPath}?${suffix}` : entry.frontendPath;
     }
     return `/reports/run?${params.toString()}`;
+  };
+
+  const generatePack = async (pack: ReportPack) => {
+    setGeneratingPack(pack.key);
+    setPackResult('');
+    try {
+      const now = new Date();
+      const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+      const periodEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999)).toISOString();
+      const result = await backendPost<PackGenerationResult>(`/reports/report-packs/${pack.key}/generate`, {
+        companyId: companyId || undefined,
+        periodStart,
+        periodEnd,
+        currency: 'TZS',
+        basis: 'ACCRUAL',
+      });
+      setPackResult(
+        `${pack.name} generated as ${result.snapshot?.statementRunNumber ?? 'a report-pack snapshot'} with ${
+          result.dataQualityWarnings?.length ?? 0
+        } warning(s).`,
+      );
+      void loadCatalog();
+    } catch (err) {
+      setPackResult(err instanceof Error ? err.message : 'Failed to generate report pack');
+    } finally {
+      setGeneratingPack('');
+    }
   };
 
   const resetFilters = () => {
@@ -1090,43 +1129,66 @@ export default function MasterReportsPage() {
               <CapabilityGrid items={capabilityAreas[activeArea] ?? []} />
 
               {activeArea === 'packs' && reportPacks.length > 0 && (
-                <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-                  {reportPacks.map((pack) => (
-                    <Link
-                      key={pack.key}
-                      href={pack.href}
-                      className="block rounded-lg border p-5 transition-colors hover:border-brand-500"
-                      style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)' }}
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="text-base font-semibold">{pack.name}</div>
-                          <div className="mt-1 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
-                            {pack.owner} / {pack.cadence}
+                <div className="space-y-3">
+                  {packResult && (
+                    <div className="rounded-lg border px-4 py-3 text-sm" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                      {packResult}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                    {reportPacks.map((pack) => (
+                      <div
+                        key={pack.key}
+                        className="rounded-lg border p-5"
+                        style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)' }}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="text-base font-semibold">{pack.name}</div>
+                            <div className="mt-1 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                              {pack.owner} / {pack.cadence}
+                            </div>
+                          </div>
+                          <Badge tone={toneForOperationalStatus(pack.status)}>{pack.status}</Badge>
+                        </div>
+                        <div className="mt-4 grid gap-4 md:grid-cols-2">
+                          <div>
+                            <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                              Sections
+                            </div>
+                            <p className="mt-2 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                              {pack.sections.join(', ')}
+                            </p>
+                          </div>
+                          <div>
+                            <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                              Prerequisites
+                            </div>
+                            <p className="mt-2 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                              {pack.prerequisites.join(', ')}
+                            </p>
                           </div>
                         </div>
-                        <Badge tone={toneForOperationalStatus(pack.status)}>{pack.status}</Badge>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => generatePack(pack)}
+                            disabled={generatingPack === pack.key}
+                            className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+                          >
+                            {generatingPack === pack.key ? 'Generating...' : 'Generate Snapshot'}
+                          </button>
+                          <Link
+                            href={pack.href}
+                            className="rounded-lg border px-3 py-2 text-sm font-medium"
+                            style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
+                          >
+                            Open Source
+                          </Link>
+                        </div>
                       </div>
-                      <div className="mt-4 grid gap-4 md:grid-cols-2">
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
-                            Sections
-                          </div>
-                          <p className="mt-2 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
-                            {pack.sections.join(', ')}
-                          </p>
-                        </div>
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
-                            Prerequisites
-                          </div>
-                          <p className="mt-2 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
-                            {pack.prerequisites.join(', ')}
-                          </p>
-                        </div>
-                      </div>
-                    </Link>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               )}
 

@@ -26,6 +26,39 @@ interface CatalogEntry {
   relatedCapabilities?: string[];
 }
 
+interface LineageStep {
+  stage: string;
+  detail: string;
+  reference: string;
+}
+
+interface DrillTarget {
+  label: string;
+  href: string;
+  target: string;
+}
+
+interface LineageResponse {
+  lineage: LineageStep[];
+  drillThrough: DrillTarget[];
+}
+
+interface QualityWarning {
+  severity?: string;
+  title: string;
+  description?: string | null;
+  source?: string;
+  issueNumber?: string;
+}
+
+interface ExplainResponse {
+  summary: string;
+  basis: string;
+  drivers: { label: string; value: string; interpretation: string }[];
+  recommendedDrillDowns: DrillTarget[];
+  caveats: string[];
+}
+
 const fmtNumber = (v: unknown): string => {
   if (v === null || v === undefined) return '—';
   if (typeof v === 'number') {
@@ -171,6 +204,10 @@ function ReportRunContent() {
   const [data, setData] = useState<unknown>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [lineage, setLineage] = useState<LineageResponse | null>(null);
+  const [qualityWarnings, setQualityWarnings] = useState<QualityWarning[]>([]);
+  const [explanation, setExplanation] = useState<ExplainResponse | null>(null);
+  const [exporting, setExporting] = useState('');
 
   // Load catalog and find the entry.
   useEffect(() => {
@@ -240,6 +277,40 @@ function ReportRunContent() {
     return s ? `/api/backend${path}?${s}` : `/api/backend${path}`;
   }, [entry, companyId, divisionId, dateFrom, dateTo, asOf]);
 
+  useEffect(() => {
+    if (!entry || !reportId) return;
+    const qs = new URLSearchParams();
+    if (companyId) qs.set('companyId', companyId);
+    if (divisionId) qs.set('divisionId', divisionId);
+    if (dateFrom) qs.set('dateFrom', dateFrom);
+    if (dateTo) qs.set('dateTo', dateTo);
+    if (asOf) qs.set('asOf', asOf);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    let cancelled = false;
+
+    Promise.all([
+      fetch(`/api/backend/reports/lineage/${encodeURIComponent(reportId)}${suffix}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      fetch(`/api/backend/reports/data-quality-warnings/${encodeURIComponent(reportId)}${suffix}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      fetch(`/api/backend/reports/explain/${encodeURIComponent(reportId)}${suffix}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ]).then(([lineagePayload, warningPayload, explainPayload]) => {
+      if (cancelled) return;
+      setLineage((lineagePayload?.data ?? lineagePayload) as LineageResponse | null);
+      const warnings = warningPayload?.data?.warnings ?? warningPayload?.warnings ?? [];
+      setQualityWarnings(Array.isArray(warnings) ? warnings : []);
+      setExplanation((explainPayload?.data ?? explainPayload) as ExplainResponse | null);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [asOf, companyId, dateFrom, dateTo, divisionId, entry, reportId]);
+
   const run = useCallback(async () => {
     if (!builtUrl) return;
     setLoading(true);
@@ -279,8 +350,35 @@ function ReportRunContent() {
     );
   }, [data, primary.key]);
 
-  const downloadCsv = () => {
+  const recordExport = async (format: string) => {
+    if (!entry) return;
+    setExporting(format);
+    try {
+      await fetch('/api/backend/reports/export-audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reportId: entry.id,
+          companyId: companyId || undefined,
+          format,
+          parameters: {
+            divisionId: divisionId || undefined,
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
+            asOf: asOf || undefined,
+          },
+        }),
+      });
+    } catch {
+      // Keep client-side export usable if the audit write is temporarily unavailable.
+    } finally {
+      setExporting('');
+    }
+  };
+
+  const downloadCsv = async () => {
     if (!primary.rows.length) return;
+    await recordExport('CSV');
     const { columns, data: rows } = flattenForCsv(primary.rows);
     const csv = toCsv(columns, rows);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -292,10 +390,14 @@ function ReportRunContent() {
     URL.revokeObjectURL(url);
   };
 
-  const printPage = () => window.print();
+  const printPage = async () => {
+    await recordExport('PDF');
+    window.print();
+  };
 
-  const copyJson = () => {
+  const copyJson = async () => {
     if (!data) return;
+    await recordExport('JSON');
     navigator.clipboard?.writeText(JSON.stringify(data, null, 2));
   };
 
@@ -371,24 +473,24 @@ function ReportRunContent() {
             </button>
             <button
               onClick={downloadCsv}
-              disabled={!primary.rows.length}
+              disabled={!primary.rows.length || exporting === 'CSV'}
               className="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-md bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
-              Export CSV
+              {exporting === 'CSV' ? 'Auditing...' : 'Export CSV'}
             </button>
             <button
               onClick={printPage}
-              disabled={!data}
+              disabled={!data || exporting === 'PDF'}
               className="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-md bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
-              Print / PDF
+              {exporting === 'PDF' ? 'Auditing...' : 'Print / PDF'}
             </button>
             <button
               onClick={copyJson}
-              disabled={!data}
+              disabled={!data || exporting === 'JSON'}
               className="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-md bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
-              Copy JSON
+              {exporting === 'JSON' ? 'Auditing...' : 'Copy JSON'}
             </button>
           </div>
         }
@@ -426,7 +528,7 @@ function ReportRunContent() {
               Drill and lineage path
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
-              {(entry.drillPaths ?? ['Summary', 'Record', 'Source']).map((step) => metaBadge(step, 'blue'))}
+              {(lineage?.drillThrough?.map((target) => target.label) ?? entry.drillPaths ?? ['Summary', 'Record', 'Source']).map((step) => metaBadge(step, 'blue'))}
             </div>
           </div>
         </div>
@@ -519,6 +621,33 @@ function ReportRunContent() {
           </div>
         </div>
       </Card>
+
+      {qualityWarnings.length > 0 && (
+        <Card className="p-4 print:hidden">
+          <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+            Data-quality warnings
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            {qualityWarnings.slice(0, 6).map((warning) => (
+              <div
+                key={`${warning.issueNumber ?? warning.title}-${warning.source ?? 'computed'}`}
+                className="rounded-lg border px-3 py-2 text-sm"
+                style={{
+                  borderColor: 'var(--aurora-warning)',
+                  background: 'var(--aurora-warning-bg)',
+                  color: 'var(--aurora-warning-text)',
+                }}
+              >
+                <div className="font-semibold">
+                  {warning.severity ? `${warning.severity}: ` : ''}
+                  {warning.title}
+                </div>
+                {warning.description && <div className="mt-1 text-xs leading-5">{warning.description}</div>}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
@@ -625,14 +754,56 @@ function ReportRunContent() {
               <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
                 Explain this report
               </div>
+              {explanation ? (
+                <div className="mt-3 space-y-3">
+                  <p className="text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                    {explanation.summary}
+                  </p>
+                  <div className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                    Basis: {explanation.basis}
+                  </div>
+                  {explanation.drivers.slice(0, 4).map((driver) => (
+                    <div key={driver.label} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
+                      <div className="font-semibold">{driver.label}</div>
+                      <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                        {driver.value}
+                      </div>
+                      <div className="mt-1 text-xs leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                        {driver.interpretation}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {(entry.businessQuestions ?? [
+                    'What changed?',
+                    'Why did it happen?',
+                    'Which source records explain this number?',
+                  ]).map((question) => (
+                    <div
+                      key={question}
+                      className="rounded-lg border px-3 py-2 text-sm"
+                      style={{
+                        borderColor: 'var(--aurora-border)',
+                        background: 'var(--aurora-bg-subtle)',
+                        color: 'var(--aurora-text-secondary)',
+                      }}
+                    >
+                      {question}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+            <Card>
+              <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                Lineage
+              </div>
               <div className="mt-3 space-y-2">
-                {(entry.businessQuestions ?? [
-                  'What changed?',
-                  'Why did it happen?',
-                  'Which source records explain this number?',
-                ]).map((question) => (
+                {(lineage?.lineage ?? []).slice(0, 5).map((step) => (
                   <div
-                    key={question}
+                    key={`${step.stage}-${step.reference}`}
                     className="rounded-lg border px-3 py-2 text-sm"
                     style={{
                       borderColor: 'var(--aurora-border)',
@@ -640,9 +811,17 @@ function ReportRunContent() {
                       color: 'var(--aurora-text-secondary)',
                     }}
                   >
-                    {question}
+                    <div className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                      {step.stage}
+                    </div>
+                    <div className="mt-1 text-xs leading-5">{step.detail}</div>
                   </div>
                 ))}
+                {!lineage?.lineage?.length && (
+                  <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                    Lineage loads after the report metadata is available.
+                  </div>
+                )}
               </div>
             </Card>
             <Card>

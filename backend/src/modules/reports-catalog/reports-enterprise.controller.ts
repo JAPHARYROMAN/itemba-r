@@ -1,4 +1,4 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ReportsCatalogService } from './reports-catalog.service';
@@ -41,5 +41,55 @@ export class ReportsEnterpriseController {
   @Get('viewer/:reportId')
   viewerMetadata(@Param('reportId') reportId: string) {
     return this.service.viewerMetadata(reportId);
+  }
+
+  @Post('report-packs/:packKey/generate')
+  generateReportPack(
+    @Param('packKey') packKey: string,
+    @Body() body: Record<string, unknown>,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.generateReportPack(packKey, body ?? {}, user);
+  }
+
+  @Get('lineage/:reportId')
+  lineage(
+    @Param('reportId') reportId: string,
+    @Query() query: Record<string, unknown>,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.lineage(reportId, user, query ?? {});
+  }
+
+  @Get('data-quality-warnings/:reportId')
+  dataQualityWarnings(
+    @Param('reportId') reportId: string,
+    @Query() query: Record<string, unknown>,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.dataQualityWarnings(reportId, user, query ?? {});
+  }
+
+  @Get('explain/:reportId')
+  explain(
+    @Param('reportId') reportId: string,
+    @Query() query: Record<string, unknown>,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.explain(reportId, user, query ?? {});
+  }
+
+  @Post('export-audit')
+  recordExportAudit(@Body() body: Record<string, unknown>, @CurrentUser() user: AuthUser) {
+    return this.service.recordExportAudit(body ?? {}, user);
+  }
+
+  @Patch('governance/:reportId/lifecycle')
+  updateLifecycle(
+    @Param('reportId') reportId: string,
+    @Body() body: Record<string, unknown>,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.updateLifecycle(reportId, body ?? {}, user);
   }
 }
