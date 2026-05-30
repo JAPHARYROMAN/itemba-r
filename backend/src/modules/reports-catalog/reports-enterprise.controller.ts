@@ -96,6 +96,15 @@ export class ReportsEnterpriseController {
     return this.service.generateReportPack(packKey, body ?? {}, user);
   }
 
+  @Post('report-packs/:packKey/render')
+  renderReportPack(
+    @Param('packKey') packKey: string,
+    @Body() body: Record<string, unknown>,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.renderReportPack(packKey, body ?? {}, user);
+  }
+
   @Post('report-packs/:packKey/approval-requests')
   submitReportPackApproval(
     @Param('packKey') packKey: string,

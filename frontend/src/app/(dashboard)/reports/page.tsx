@@ -407,6 +407,36 @@ interface PackApprovalQueue {
   requests: PackApprovalRequest[];
 }
 
+interface PackRenderResult {
+  snapshot?: {
+    id: string;
+    statementRunNumber: string;
+    status: string;
+    sourceManifestHash?: string;
+  };
+  exportRecord?: {
+    exportNumber: string;
+    status: string;
+    fileName?: string | null;
+    filePath?: string | null;
+  };
+  artifact?: {
+    format: string;
+    fileName: string;
+    filePath: string;
+    mimeType: string;
+    byteLength: number;
+    artifactHash: string;
+    auditHash: string;
+  };
+  controls?: {
+    watermark: string;
+    exportAuditLogged: boolean;
+    retentionPolicy: string;
+    sourceSnapshotLocked: boolean;
+  };
+}
+
 interface EnterpriseOverview {
   generatedAt: string;
   summary: {
@@ -933,6 +963,8 @@ export default function MasterReportsPage() {
   const [packApprovalResult, setPackApprovalResult] = useState('');
   const [packApprovals, setPackApprovals] = useState<PackApprovalQueue | null>(null);
   const [approvalDecisionAction, setApprovalDecisionAction] = useState('');
+  const [renderingPack, setRenderingPack] = useState('');
+  const [packRenderResult, setPackRenderResult] = useState('');
   const [governanceAction, setGovernanceAction] = useState('');
   const [governanceResult, setGovernanceResult] = useState('');
   const [builderDataset, setBuilderDataset] = useState('');
@@ -1254,6 +1286,35 @@ export default function MasterReportsPage() {
       setPackApprovalResult(err instanceof Error ? err.message : 'Failed to submit report-pack approval');
     } finally {
       setPackApprovalAction('');
+    }
+  };
+
+  const renderPack = async (pack: ReportPack, format: 'PDF' | 'XLSX' | 'CSV' | 'JSON') => {
+    const snapshot = lastPackSnapshot?.packKey === pack.key ? lastPackSnapshot : null;
+    if (!snapshot?.snapshotId && !snapshot?.statementRunNumber) {
+      setPackRenderResult(`Generate a ${pack.name} snapshot before rendering ${format}.`);
+      return;
+    }
+    const key = `${pack.key}:${format}`;
+    setRenderingPack(key);
+    setPackRenderResult('');
+    try {
+      const result = await backendPost<PackRenderResult>(`/reports/report-packs/${pack.key}/render`, {
+        companyId: companyId || undefined,
+        snapshotId: snapshot.snapshotId,
+        statementRunNumber: snapshot.statementRunNumber,
+        format,
+      });
+      setPackRenderResult(
+        `${pack.name} rendered as ${result.artifact?.format ?? format}: ${
+          result.artifact?.fileName ?? result.exportRecord?.fileName ?? 'artifact created'
+        } (${result.artifact?.byteLength ?? 0} bytes). Audit ${result.artifact?.auditHash ?? 'logged'}.`,
+      );
+      void loadCatalog();
+    } catch (err) {
+      setPackRenderResult(err instanceof Error ? err.message : `Failed to render ${pack.name}`);
+    } finally {
+      setRenderingPack('');
     }
   };
 
@@ -2520,6 +2581,11 @@ export default function MasterReportsPage() {
                       {packApprovalResult}
                     </div>
                   )}
+                  {packRenderResult && (
+                    <div className="rounded-lg border px-4 py-3 text-sm" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                      {packRenderResult}
+                    </div>
+                  )}
                   {advancedReadiness?.packApprovalWorkflow && (
                     <Card padding="none" className="overflow-hidden">
                       <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
@@ -2728,6 +2794,18 @@ export default function MasterReportsPage() {
                           >
                             {packApprovalAction === pack.key ? 'Submitting...' : 'Submit Approval'}
                           </button>
+                          {(['PDF', 'XLSX'] as const).map((format) => (
+                            <button
+                              key={`${pack.key}-${format}`}
+                              type="button"
+                              onClick={() => renderPack(pack, format)}
+                              disabled={renderingPack === `${pack.key}:${format}`}
+                              className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-60"
+                              style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
+                            >
+                              {renderingPack === `${pack.key}:${format}` ? `Rendering ${format}...` : `Render ${format}`}
+                            </button>
+                          ))}
                         </div>
                       </div>
                     ))}
