@@ -43,6 +43,11 @@ export class ReportsEnterpriseController {
     return this.service.reportPacks();
   }
 
+  @Get('report-packs/approval-requests')
+  reportPackApprovalRequests(@Query() query: Record<string, unknown>, @CurrentUser() user: AuthUser) {
+    return this.service.reportPackApprovalRequests(user, query ?? {});
+  }
+
   @Get('governance')
   governance() {
     return this.service.governance();
@@ -65,6 +70,21 @@ export class ReportsEnterpriseController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.recordViewerRun(reportId, body ?? {}, user);
+  }
+
+  @Post('semantic/query')
+  semanticQuery(@Body() body: Record<string, unknown>, @CurrentUser() user: AuthUser) {
+    return this.service.semanticQuery(body ?? {}, user);
+  }
+
+  @Post('builder/preview')
+  builderPreview(@Body() body: Record<string, unknown>, @CurrentUser() user: AuthUser) {
+    return this.service.builderPreview(body ?? {}, user);
+  }
+
+  @Post('builder/save')
+  saveBuilderReport(@Body() body: Record<string, unknown>, @CurrentUser() user: AuthUser) {
+    return this.service.saveBuilderReport(body ?? {}, user);
   }
 
   @Post('report-packs/:packKey/generate')

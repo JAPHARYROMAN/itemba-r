@@ -308,6 +308,105 @@ interface AdvancedReadiness {
   };
 }
 
+interface ProductionReadiness {
+  generatedAt: string;
+  overallScore: number;
+  status: string;
+  executableCoverage: number;
+  controlScores: { key: string; label: string; score: number }[];
+  productionGates: { gate: string; status: string; evidence: string }[];
+  remainingHardening: string[];
+  catalogReportCount: number;
+}
+
+interface SemanticQueryResponse {
+  queryId: string;
+  generatedAt: string;
+  executionMode: string;
+  dataset: {
+    key: string;
+    name: string;
+    owner: string;
+    sensitivity: string;
+    refreshMode: string;
+    grain: string;
+  };
+  dimensions: string[];
+  measures: string[];
+  filters: Record<string, unknown>;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  totals: Record<string, unknown>;
+  metrics: {
+    rowCount: number;
+    columnCount: number;
+    executionTimeMs: number;
+    dataHash: string;
+  };
+  visualization: string;
+  lineage: {
+    sourceSystems: string[];
+    relatedReports: { id: string; name: string; href: string }[];
+    drillThrough: { label: string; href: string }[];
+  };
+  security: {
+    rowLevelScope: string;
+    classification: string;
+    exportAuditRequired: boolean;
+  };
+  dataQuality: string[];
+  manifestHash: string;
+}
+
+interface BuilderSaveResult {
+  definition?: { id: string; reportCode: string; name: string };
+  savedView?: { id: string; name: string };
+  run?: { id: string; reportRunNumber: string; status: string };
+  preview?: SemanticQueryResponse;
+  nextActions?: { label: string; href: string }[];
+}
+
+interface PackApprovalRequest {
+  id: string;
+  approvalRequestNumber: string;
+  entityId: string;
+  status: string;
+  requestTitle: string;
+  requestSummary?: string | null;
+  submittedAt?: string | null;
+  approvedAt?: string | null;
+  rejectedAt?: string | null;
+  cancelledAt?: string | null;
+  dueAt?: string | null;
+  notes?: string | null;
+  packKey?: string;
+  packName?: string;
+  statementRunNumber?: string;
+  manifestHash?: string;
+  approvalFlow: string[];
+  requestedBy?: { fullName?: string | null; email?: string | null } | null;
+  actions: {
+    id: string;
+    action: string;
+    actionAt: string;
+    comment?: string | null;
+    reason?: string | null;
+    actionBy?: { fullName?: string | null; email?: string | null } | null;
+  }[];
+}
+
+interface PackApprovalQueue {
+  generatedAt: string;
+  total: number;
+  summary: {
+    pending: number;
+    approved: number;
+    actionable: number;
+    readinessScore: number;
+  };
+  requests: PackApprovalRequest[];
+}
+
 interface EnterpriseOverview {
   generatedAt: string;
   summary: {
@@ -333,6 +432,7 @@ interface EnterpriseOverview {
   dataQualitySurface?: DataQualitySurface;
   integrationReadiness?: IntegrationReadiness;
   advancedReadiness?: AdvancedReadiness;
+  productionReadiness?: ProductionReadiness;
   discovery?: {
     health: DiscoveryHealth;
     commandScore: CommandCenterScore;
@@ -622,8 +722,18 @@ function formatList(value: string[] | string) {
 }
 
 function toneForOperationalStatus(status: string): 'green' | 'amber' | 'red' | 'blue' | 'neutral' {
-  if (status === 'ok' || status === 'READY' || status === 'TEMPLATE_READY' || status === 'CERTIFIED') return 'green';
-  if (status === 'watch' || status === 'ATTENTION' || status === 'DESIGN_READY' || status === 'VALIDATED') return 'amber';
+  if (
+    status === 'ok' ||
+    status === 'READY' ||
+    status === 'TEMPLATE_READY' ||
+    status === 'CERTIFIED' ||
+    status === 'PASS' ||
+    status === 'APPROVED' ||
+    status === 'PRODUCTION_READY_WITH_MONITORING'
+  )
+    return 'green';
+  if (status === 'watch' || status === 'ATTENTION' || status === 'DESIGN_READY' || status === 'VALIDATED' || status === 'PENDING')
+    return 'amber';
   if (status === 'critical' || status === 'HIGH' || status === 'CRITICAL' || status === 'NEEDS_SETUP') return 'red';
   if (status === 'LOW' || status === 'MEDIUM') return 'blue';
   return 'neutral';
@@ -821,8 +931,19 @@ export default function MasterReportsPage() {
   } | null>(null);
   const [packApprovalAction, setPackApprovalAction] = useState('');
   const [packApprovalResult, setPackApprovalResult] = useState('');
+  const [packApprovals, setPackApprovals] = useState<PackApprovalQueue | null>(null);
+  const [approvalDecisionAction, setApprovalDecisionAction] = useState('');
   const [governanceAction, setGovernanceAction] = useState('');
   const [governanceResult, setGovernanceResult] = useState('');
+  const [builderDataset, setBuilderDataset] = useState('');
+  const [builderName, setBuilderName] = useState('');
+  const [builderDimensions, setBuilderDimensions] = useState<string[]>([]);
+  const [builderMeasures, setBuilderMeasures] = useState<string[]>([]);
+  const [builderRunning, setBuilderRunning] = useState(false);
+  const [builderSaving, setBuilderSaving] = useState(false);
+  const [builderMessage, setBuilderMessage] = useState('');
+  const [builderResult, setBuilderResult] = useState<SemanticQueryResponse | null>(null);
+  const [builderSaveResult, setBuilderSaveResult] = useState<BuilderSaveResult | null>(null);
   const [favoriteReportIds, setFavoriteReportIds] = useState<string[]>([]);
   const [recentReportIds, setRecentReportIds] = useState<string[]>([]);
 
@@ -990,6 +1111,7 @@ export default function MasterReportsPage() {
   const dataQualitySurface = overview?.dataQualitySurface;
   const integrationReadiness = overview?.integrationReadiness;
   const advancedReadiness = overview?.advancedReadiness;
+  const productionReadiness = overview?.productionReadiness;
   const governance = overview?.governance;
   const admin = overview?.admin;
   const discoveryHealth = overview?.discovery?.health ?? catalog?.discoveryHealth;
@@ -1002,6 +1124,23 @@ export default function MasterReportsPage() {
   const coverageMatrix = overview?.discovery?.coverageMatrix ?? catalog?.coverageMatrix ?? [];
   const readinessGaps = overview?.discovery?.readinessGaps ?? catalog?.readinessGaps ?? [];
   const selectedPersonaCollection = personaCollections.find((item) => item.key === persona);
+  const semanticObjects = useMemo(() => advancedReadiness?.semanticLayer.objects ?? [], [advancedReadiness]);
+  const selectedSemanticObject = semanticObjects.find((object) => object.key === builderDataset) ?? semanticObjects[0];
+
+  useEffect(() => {
+    if (!semanticObjects.length) return;
+    if (!builderDataset) {
+      setBuilderDataset(semanticObjects[0].key);
+      return;
+    }
+    const active = semanticObjects.find((object) => object.key === builderDataset);
+    if (!active) return;
+    setBuilderDimensions(active.dimensions.slice(0, 2));
+    setBuilderMeasures(active.measures.slice(0, 3));
+    setBuilderName((current) => current || `${active.name} analysis`);
+    setBuilderResult(null);
+    setBuilderSaveResult(null);
+  }, [builderDataset, semanticObjects]);
 
   const buildLink = (entry: CatalogEntry) => {
     const params = new URLSearchParams();
@@ -1041,6 +1180,22 @@ export default function MasterReportsPage() {
     setSearch(value);
     setActiveArea('reports');
   };
+
+  const loadPackApprovals = useCallback(async () => {
+    try {
+      const data = await backendGet<PackApprovalQueue>('/reports/report-packs/approval-requests', {
+        query: { companyId: companyId || undefined, limit: 12 },
+      });
+      setPackApprovals(data);
+    } catch {
+      setPackApprovals(null);
+    }
+  }, [companyId]);
+
+  useEffect(() => {
+    if (activeArea !== 'packs') return;
+    void loadPackApprovals();
+  }, [activeArea, loadPackApprovals]);
 
   const generatePack = async (pack: ReportPack) => {
     setGeneratingPack(pack.key);
@@ -1094,10 +1249,92 @@ export default function MasterReportsPage() {
         `${pack.name} approval submitted as ${result.request?.approvalRequestNumber ?? 'an approval request'} (${result.request?.status ?? 'PENDING'}).`,
       );
       void loadCatalog();
+      void loadPackApprovals();
     } catch (err) {
       setPackApprovalResult(err instanceof Error ? err.message : 'Failed to submit report-pack approval');
     } finally {
       setPackApprovalAction('');
+    }
+  };
+
+  const runBuilderPreview = async () => {
+    if (!selectedSemanticObject) return;
+    setBuilderRunning(true);
+    setBuilderMessage('');
+    setBuilderSaveResult(null);
+    try {
+      const result = await backendPost<SemanticQueryResponse>('/reports/builder/preview', {
+        datasetKey: selectedSemanticObject.key,
+        dimensions: builderDimensions,
+        measures: builderMeasures,
+        filters: {
+          companyId: companyId || undefined,
+          divisionId: divisionId || undefined,
+        },
+        limit: 50,
+      });
+      setBuilderResult(result);
+      setBuilderMessage(
+        `${result.dataset.name} preview returned ${result.metrics.rowCount} row(s) in ${result.metrics.executionTimeMs}ms. Manifest ${result.manifestHash}.`,
+      );
+    } catch (err) {
+      setBuilderMessage(err instanceof Error ? err.message : 'Failed to preview semantic report');
+    } finally {
+      setBuilderRunning(false);
+    }
+  };
+
+  const saveBuilderReport = async () => {
+    if (!selectedSemanticObject) return;
+    setBuilderSaving(true);
+    setBuilderMessage('');
+    try {
+      const result = await backendPost<BuilderSaveResult>('/reports/builder/save', {
+        name: builderName || `${selectedSemanticObject.name} analysis`,
+        datasetKey: selectedSemanticObject.key,
+        dimensions: builderDimensions,
+        measures: builderMeasures,
+        filters: {
+          companyId: companyId || undefined,
+          divisionId: divisionId || undefined,
+        },
+        isShared: false,
+        limit: 50,
+      });
+      setBuilderSaveResult(result);
+      setBuilderResult(result.preview ?? builderResult);
+      setBuilderMessage(
+        `${result.definition?.name ?? 'Report'} saved as ${result.definition?.reportCode ?? 'a report definition'} with run ${result.run?.reportRunNumber ?? 'created'}.`,
+      );
+      void loadCatalog();
+    } catch (err) {
+      setBuilderMessage(err instanceof Error ? err.message : 'Failed to save builder report');
+    } finally {
+      setBuilderSaving(false);
+    }
+  };
+
+  const actOnPackApproval = async (request: PackApprovalRequest, action: 'APPROVE' | 'REJECT' | 'COMMENT') => {
+    const key = `${request.id}:${action}`;
+    setApprovalDecisionAction(key);
+    setPackApprovalResult('');
+    try {
+      const result = await backendPatch<{ request?: { approvalRequestNumber: string; status: string } }>(
+        `/reports/report-packs/approval-requests/${request.id}`,
+        {
+          action,
+          comment: `${action} from Reports command center.`,
+        },
+      );
+      setPackApprovalResult(
+        `${request.approvalRequestNumber} updated to ${result.request?.status ?? action}.`,
+      );
+      void loadCatalog();
+      void loadPackApprovals();
+    } catch (err) {
+      setPackApprovalResult(err instanceof Error ? err.message : 'Failed to update approval request');
+    } finally {
+      setApprovalDecisionAction('');
     }
   };
 
@@ -1276,6 +1513,50 @@ export default function MasterReportsPage() {
                   <div className="mt-1 text-xl font-semibold">{value}%</div>
                 </div>
               ))}
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {productionReadiness && (
+        <Card padding="none" className="overflow-hidden">
+          <div className="grid gap-4 p-4 xl:grid-cols-[280px_1fr]">
+            <div>
+              <div className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                Reports production readiness
+              </div>
+              <div className="mt-2 flex items-end gap-2">
+                <div className="text-4xl font-semibold">{productionReadiness.overallScore}%</div>
+                <Badge tone={toneForOperationalStatus(productionReadiness.status)}>{productionReadiness.status}</Badge>
+              </div>
+              <p className="mt-2 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                Whole-module score across discovery, command center, semantic execution, data quality, integrations, advanced workflows, and governance.
+              </p>
+            </div>
+            <div className="grid gap-3">
+              <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-7">
+                {productionReadiness.controlScores.map((control) => (
+                  <div key={control.key} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                    <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                      {control.label}
+                    </div>
+                    <div className="mt-1 text-xl font-semibold">{control.score}%</div>
+                  </div>
+                ))}
+              </div>
+              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+                {productionReadiness.productionGates.map((gate) => (
+                  <div key={gate.gate} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="text-sm font-semibold">{gate.gate}</div>
+                      <Badge tone={toneForOperationalStatus(gate.status)}>{gate.status}</Badge>
+                    </div>
+                    <p className="mt-2 text-xs leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      {gate.evidence}
+                    </p>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </Card>
@@ -2023,6 +2304,210 @@ export default function MasterReportsPage() {
                 </div>
               )}
 
+              {activeArea === 'builder' && selectedSemanticObject && (
+                <Card padding="none" className="overflow-hidden">
+                  <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <SectionHeading
+                        title="Governed semantic builder"
+                        subtitle="Preview live semantic datasets, preserve company scope, then save the output as a report definition, saved view, and completed run."
+                      />
+                      <Badge tone="green">Executable</Badge>
+                    </div>
+                  </div>
+                  <div className="grid gap-4 p-4 xl:grid-cols-[360px_1fr]">
+                    <div className="space-y-4">
+                      <label className="block">
+                        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                          Dataset
+                        </span>
+                        <select
+                          className={`${inputClass} mt-2`}
+                          style={controlStyle}
+                          value={builderDataset}
+                          onChange={(event) => setBuilderDataset(event.target.value)}
+                        >
+                          {semanticObjects.map((object) => (
+                            <option key={object.key} value={object.key}>
+                              {object.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                          Report name
+                        </span>
+                        <input
+                          className={`${inputClass} mt-2`}
+                          style={controlStyle}
+                          value={builderName}
+                          onChange={(event) => setBuilderName(event.target.value)}
+                          placeholder={`${selectedSemanticObject.name} analysis`}
+                        />
+                      </label>
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                          Dimensions
+                        </div>
+                        <div className="mt-2 grid gap-2">
+                          {selectedSemanticObject.dimensions.slice(0, 8).map((dimension) => (
+                            <label key={dimension} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
+                              <input
+                                type="checkbox"
+                                checked={builderDimensions.includes(dimension)}
+                                onChange={(event) =>
+                                  setBuilderDimensions((current) =>
+                                    event.target.checked
+                                      ? Array.from(new Set([...current, dimension])).slice(0, 4)
+                                      : current.filter((item) => item !== dimension),
+                                  )
+                                }
+                              />
+                              <span>{dimension}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                          Measures
+                        </div>
+                        <div className="mt-2 grid gap-2">
+                          {selectedSemanticObject.measures.slice(0, 8).map((measure) => (
+                            <label key={measure} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
+                              <input
+                                type="checkbox"
+                                checked={builderMeasures.includes(measure)}
+                                onChange={(event) =>
+                                  setBuilderMeasures((current) =>
+                                    event.target.checked
+                                      ? Array.from(new Set([...current, measure])).slice(0, 5)
+                                      : current.filter((item) => item !== measure),
+                                  )
+                                }
+                              />
+                              <span>{measure}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={runBuilderPreview}
+                          disabled={builderRunning || builderMeasures.length === 0}
+                          className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+                        >
+                          {builderRunning ? 'Previewing...' : 'Preview'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={saveBuilderReport}
+                          disabled={builderSaving || builderMeasures.length === 0}
+                          className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-60"
+                          style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
+                        >
+                          {builderSaving ? 'Saving...' : 'Save governed report'}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="grid gap-3 md:grid-cols-4">
+                        {[
+                          ['Owner', selectedSemanticObject.owner],
+                          ['Sensitivity', selectedSemanticObject.sensitivity],
+                          ['Refresh', selectedSemanticObject.refreshMode],
+                          ['Grain', selectedSemanticObject.grain],
+                        ].map(([label, value]) => (
+                          <div key={label} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              {label}
+                            </div>
+                            <div className="mt-1 break-words text-sm font-semibold">{value}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {builderMessage && (
+                        <div className="rounded-lg border px-4 py-3 text-sm" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                          {builderMessage}
+                        </div>
+                      )}
+                      {builderResult && (
+                        <Card padding="none" className="overflow-hidden">
+                          <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <SectionHeading
+                                title="Live preview"
+                                subtitle={`${builderResult.metrics.rowCount} row(s), ${builderResult.metrics.columnCount} column(s), ${builderResult.metrics.executionTimeMs}ms, ${builderResult.visualization}.`}
+                              />
+                              <Badge tone={badgeToneForSecurity(builderResult.security.classification as SecurityClassification)}>
+                                {builderResult.security.classification}
+                              </Badge>
+                            </div>
+                          </div>
+                          <div className="grid gap-3 border-b p-4 md:grid-cols-3" style={{ borderColor: 'var(--aurora-border)' }}>
+                            <div>
+                              <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                                Query id
+                              </div>
+                              <div className="mt-1 text-sm font-semibold">{builderResult.queryId}</div>
+                            </div>
+                            <div>
+                              <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                                Manifest hash
+                              </div>
+                              <div className="mt-1 break-all text-xs font-semibold">{builderResult.manifestHash}</div>
+                            </div>
+                            <div>
+                              <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                                Data-quality notes
+                              </div>
+                              <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
+                                {builderResult.dataQuality.slice(0, 2).join(' ')}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
+                                <tr>
+                                  {(builderResult.columns.length ? builderResult.columns : Object.keys(builderResult.rows[0] ?? {})).map((column) => (
+                                    <th key={column} className="px-4 py-3 text-left font-semibold">
+                                      {column}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {builderResult.rows.slice(0, 8).map((row, index) => (
+                                  <tr key={`${builderResult.queryId}-${index}`} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+                                    {(builderResult.columns.length ? builderResult.columns : Object.keys(row)).map((column) => (
+                                      <td key={`${builderResult.queryId}-${index}-${column}`} className="px-4 py-3" style={{ color: 'var(--aurora-text-secondary)' }}>
+                                        {String(row[column] ?? '-')}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </Card>
+                      )}
+                      {builderSaveResult?.nextActions && (
+                        <div className="flex flex-wrap gap-2">
+                          {builderSaveResult.nextActions.map((action) => (
+                            <Link key={action.href} href={action.href} className="rounded-lg border px-3 py-2 text-sm font-medium" style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}>
+                              {action.label}
+                            </Link>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              )}
+
               {activeArea === 'packs' && reportPacks.length > 0 && (
                 <div className="space-y-3">
                   {packResult && (
@@ -2059,6 +2544,76 @@ export default function MasterReportsPage() {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    </Card>
+                  )}
+                  {packApprovals && (
+                    <Card padding="none" className="overflow-hidden">
+                      <div className="border-b p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <SectionHeading
+                            title="Approval queue"
+                            subtitle={`${packApprovals.total} report-pack approval request(s), ${packApprovals.summary.pending} pending action(s).`}
+                          />
+                          <Badge tone="green">{packApprovals.summary.readinessScore}% READY</Badge>
+                        </div>
+                      </div>
+                      <div className="grid gap-3 p-4 lg:grid-cols-2 xl:grid-cols-3">
+                        {packApprovals.requests.length === 0 ? (
+                          <div className="rounded-lg border p-4 text-sm" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)', color: 'var(--aurora-text-secondary)' }}>
+                            No report-pack approval requests in the current scope.
+                          </div>
+                        ) : (
+                          packApprovals.requests.map((request) => (
+                            <div key={request.id} className="rounded-lg border p-4" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold">{request.packName ?? request.requestTitle}</div>
+                                  <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                                    {request.approvalRequestNumber} / {formatDateTime(request.submittedAt ?? undefined)}
+                                  </div>
+                                </div>
+                                <Badge tone={toneForOperationalStatus(request.status)}>{request.status}</Badge>
+                              </div>
+                              <p className="mt-3 text-sm leading-5" style={{ color: 'var(--aurora-text-secondary)' }}>
+                                {request.requestSummary ?? 'Report-pack approval request.'}
+                              </p>
+                              <div className="mt-3 grid gap-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                                <div>Snapshot: {request.statementRunNumber ?? request.entityId}</div>
+                                <div className="break-all">Manifest: {request.manifestHash ?? '-'}</div>
+                                <div>Requester: {request.requestedBy?.fullName ?? request.requestedBy?.email ?? '-'}</div>
+                              </div>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {request.approvalFlow.slice(0, 3).map((step) => (
+                                  <Badge key={`${request.id}-${step}`} tone="blue">
+                                    {step}
+                                  </Badge>
+                                ))}
+                              </div>
+                              {request.status === 'PENDING' && (
+                                <div className="mt-4 flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => actOnPackApproval(request, 'APPROVE')}
+                                    disabled={approvalDecisionAction === `${request.id}:APPROVE`}
+                                    className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+                                  >
+                                    {approvalDecisionAction === `${request.id}:APPROVE` ? 'Approving...' : 'Approve'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => actOnPackApproval(request, 'REJECT')}
+                                    disabled={approvalDecisionAction === `${request.id}:REJECT`}
+                                    className="rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-60"
+                                    style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
+                                  >
+                                    {approvalDecisionAction === `${request.id}:REJECT` ? 'Rejecting...' : 'Reject'}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ))
+                        )}
                       </div>
                     </Card>
                   )}
