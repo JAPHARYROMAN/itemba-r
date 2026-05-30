@@ -4215,17 +4215,17 @@ interface AccountSeed {
 
 const DEFAULT_COA: AccountSeed[] = [
   // Assets
-  { code: '1000', name: 'Cash on Hand', type: AccountType.ASSET, subType: 'Current Asset' },
-  { code: '1010', name: 'Bank', type: AccountType.ASSET, subType: 'Current Asset' },
-  { code: '1100', name: 'Accounts Receivable', type: AccountType.ASSET, subType: 'Current Asset' },
+  { code: '1000', name: 'Cash on Hand', type: AccountType.ASSET, subType: 'cash_on_hand' },
+  { code: '1010', name: 'Bank', type: AccountType.ASSET, subType: 'bank' },
+  { code: '1100', name: 'Accounts Receivable', type: AccountType.ASSET, subType: 'ar_control' },
   {
     code: '1110',
     name: 'Employee Receivable (Salary Advances)',
     type: AccountType.ASSET,
     subType: 'Current Asset',
   },
-  { code: '1200', name: 'Inventory', type: AccountType.ASSET, subType: 'Current Asset' },
-  { code: '1500', name: 'Fixed Assets', type: AccountType.ASSET, subType: 'Non-Current Asset' },
+  { code: '1200', name: 'Inventory', type: AccountType.ASSET, subType: 'inventory_asset' },
+  { code: '1500', name: 'Fixed Assets', type: AccountType.ASSET, subType: 'fixed_asset' },
   {
     code: '1599',
     name: 'Accumulated Depreciation',
@@ -4237,7 +4237,7 @@ const DEFAULT_COA: AccountSeed[] = [
     code: '2000',
     name: 'Accounts Payable',
     type: AccountType.LIABILITY,
-    subType: 'Current Liability',
+    subType: 'ap_control',
   },
   {
     code: '2100',
@@ -4249,7 +4249,7 @@ const DEFAULT_COA: AccountSeed[] = [
     code: '2200',
     name: 'Taxes Payable',
     type: AccountType.LIABILITY,
-    subType: 'Current Liability',
+    subType: 'tax_vat_payable',
   },
   // ── Tanzania payroll statutory payables ──────────────────────────────────
   // Each cleared monthly to TRA / NSSF / PSSSF / WCF / NHIF / HESLB.
@@ -4291,7 +4291,7 @@ const DEFAULT_COA: AccountSeed[] = [
   { code: '3100', name: 'Retained Earnings', type: AccountType.EQUITY },
   { code: '3900', name: 'Income Summary', type: AccountType.EQUITY, subType: 'income_summary' },
   // Income
-  { code: '4000', name: 'Sales Revenue', type: AccountType.INCOME },
+  { code: '4000', name: 'Sales Revenue', type: AccountType.INCOME, subType: 'sales_revenue' },
   { code: '4100', name: 'Service Revenue', type: AccountType.INCOME },
   { code: '4200', name: 'Crop Production Income', type: AccountType.INCOME },
   { code: '4900', name: 'Other Income', type: AccountType.INCOME },
@@ -4314,9 +4314,14 @@ const DEFAULT_COA: AccountSeed[] = [
   { code: '6300', name: 'Rent Expense', type: AccountType.EXPENSE },
   { code: '6400', name: 'Maintenance Expense', type: AccountType.EXPENSE },
   { code: '6500', name: 'Utilities Expense', type: AccountType.EXPENSE },
-  { code: '6900', name: 'General Expense', type: AccountType.EXPENSE },
+  { code: '6900', name: 'General Expense', type: AccountType.EXPENSE, subType: 'general_expense' },
   // COGS
-  { code: '5000', name: 'Cost of Goods Sold', type: AccountType.COST_OF_GOODS_SOLD },
+  {
+    code: '5000',
+    name: 'Cost of Goods Sold',
+    type: AccountType.COST_OF_GOODS_SOLD,
+    subType: 'cost_of_goods_sold',
+  },
   {
     code: '5100',
     name: 'Direct Project Labour Cost',

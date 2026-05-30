@@ -49,16 +49,17 @@ export class AccountResolverService {
     // 2. Fallback: try each conventional code in priority order.
     const codes = CONVENTIONAL_CODES[role];
     if (codes && codes.length) {
-      account = await db.chartOfAccount.findFirst({
+      const accounts = await db.chartOfAccount.findMany({
         where: {
           companyId,
           deletedAt: null,
           isActive: true,
           accountCode: { in: codes },
         },
-        // Prefer the first listed code if multiple match.
-        orderBy: { accountCode: 'asc' },
       });
+      account =
+        codes.map((code) => accounts.find((row) => row.accountCode === code)).find(Boolean) ??
+        null;
       if (account) return account;
     }
 
@@ -147,7 +148,7 @@ export type AccountRole =
  * Each role can list multiple codes; the first match wins.
  */
 const CONVENTIONAL_CODES: Record<AccountRole, string[]> = {
-  CASH_ON_HAND: ['1010', '1000'],
+  CASH_ON_HAND: ['1000', '1010'],
   BANK: ['1010', '1020', '1021', '1100'], // 1100 also used for AR in some legacy charts
   AR_CONTROL: ['1100', '1110', '1200'],
   AP_CONTROL: ['2000', '2010', '2100'],

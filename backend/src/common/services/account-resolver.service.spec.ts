@@ -8,6 +8,7 @@ describe('AccountResolverService', () => {
         findMany: async ({ where }: any) => {
           const subtypeFilter = where.OR?.find((item: any) => item.accountSubType)?.accountSubType;
           const codeFilter = where.OR?.find((item: any) => item.accountCode)?.accountCode;
+          const directCodeFilter = where.accountCode;
           return rows.filter((r) => {
             if (r.companyId !== where.companyId) return false;
             if (r.deletedAt) return false;
@@ -17,7 +18,8 @@ describe('AccountResolverService', () => {
                 (want: string) => r.accountSubType?.toLowerCase() === want.toLowerCase(),
               ) ?? false;
             const codeMatch = codeFilter?.in?.includes(r.accountCode) ?? false;
-            return subtypeMatch || codeMatch;
+            const directCodeMatch = directCodeFilter?.in?.includes(r.accountCode) ?? false;
+            return subtypeMatch || codeMatch || directCodeMatch;
           });
         },
         findFirst: async ({ where }: any) => {
@@ -73,6 +75,15 @@ describe('AccountResolverService', () => {
     expect(got.accountCode).toBe('1010');
   });
 
+  it('uses conventional code priority instead of lexical ordering', async () => {
+    const svc = makeService([
+      { id: 'bank', companyId: 'co-1', accountCode: '1010', accountSubType: null },
+      { id: 'cash', companyId: 'co-1', accountCode: '1000', accountSubType: null },
+    ]);
+    const got = await svc.resolve('co-1', 'CASH_ON_HAND');
+    expect(got.id).toBe('cash');
+  });
+
   it('prefers a subtype match over a conventional-code match', async () => {
     const svc = makeService([
       { id: 'sub', companyId: 'co-1', accountCode: '9999', accountSubType: 'cash_on_hand' },
@@ -97,11 +108,13 @@ describe('AccountResolverService', () => {
 
   it('resolveMany returns a record keyed by role', async () => {
     const svc = makeService([
-      { id: 'cash', companyId: 'co-1', accountCode: '1010', accountSubType: null },
+      { id: 'cash', companyId: 'co-1', accountCode: '1000', accountSubType: null },
+      { id: 'bank', companyId: 'co-1', accountCode: '1010', accountSubType: null },
       { id: 'ar', companyId: 'co-1', accountCode: '1100', accountSubType: null },
     ]);
-    const got = await svc.resolveMany('co-1', ['CASH_ON_HAND', 'AR_CONTROL']);
+    const got = await svc.resolveMany('co-1', ['CASH_ON_HAND', 'BANK', 'AR_CONTROL']);
     expect(got.CASH_ON_HAND.id).toBe('cash');
+    expect(got.BANK.id).toBe('bank');
     expect(got.AR_CONTROL.id).toBe('ar');
   });
 
