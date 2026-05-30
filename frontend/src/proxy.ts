@@ -18,9 +18,9 @@ export function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // `itemba_auth` is a non-httpOnly flag cookie set alongside the real tokens.
-  // It lets the Edge middleware know the user has an active session.
-  const isAuthenticated = req.cookies.has('itemba_auth');
+  // Require an actual httpOnly token cookie, not the browser-visible marker.
+  // A stale `itemba_auth` marker must never be enough to open protected UI.
+  const isAuthenticated = req.cookies.has('itemba_access') || req.cookies.has('itemba_refresh');
 
   if (!isAuthenticated) {
     const loginUrl = req.nextUrl.clone();

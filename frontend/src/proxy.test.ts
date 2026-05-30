@@ -28,8 +28,21 @@ describe('middleware route protection', () => {
     expect(res.headers.get('x-middleware-next')).toBe('1');
   });
 
-  it('allows protected routes when the session flag cookie is present', () => {
+  it('does not allow protected routes with only the stale session flag cookie', () => {
     const res = proxy(request('/dashboard', 'itemba_auth=1'));
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('http://localhost/login?from=%2Fdashboard');
+  });
+
+  it('allows protected routes when the access token cookie is present', () => {
+    const res = proxy(request('/dashboard', 'itemba_access=token'));
+
+    expect(res.headers.get('x-middleware-next')).toBe('1');
+  });
+
+  it('allows protected routes when only the refresh token cookie is present', () => {
+    const res = proxy(request('/dashboard', 'itemba_refresh=token'));
 
     expect(res.headers.get('x-middleware-next')).toBe('1');
   });
