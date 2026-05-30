@@ -10,6 +10,7 @@ describe('LoanRepaymentSchedulesService — amortization math', () => {
     {} as any,
     {} as any,
     {} as any,
+    {} as any,
   );
 
   // Reach into the private method for direct testing.
@@ -26,7 +27,7 @@ describe('LoanRepaymentSchedulesService — amortization math', () => {
 
   it('every installment principal+interest sums to the EMI within rounding', () => {
     const rows = amortize(12000, 0.01, 12);
-    const emi = 12000 * 0.01 * Math.pow(1.01, 12) / (Math.pow(1.01, 12) - 1);
+    const emi = (12000 * 0.01 * Math.pow(1.01, 12)) / (Math.pow(1.01, 12) - 1);
     for (const r of rows) {
       expect(Math.abs(r.principal + r.interest - emi)).toBeLessThan(0.5);
     }

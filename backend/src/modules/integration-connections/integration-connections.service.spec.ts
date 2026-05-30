@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { IntegrationConnectionStatus } from '@prisma/client';
+import * as dns from 'dns';
 import { IntegrationConnectionsService } from './integration-connections.service';
 
 describe('IntegrationConnectionsService', () => {
@@ -41,6 +42,9 @@ describe('IntegrationConnectionsService', () => {
       status: 204,
       text: jest.fn(),
     } as any);
+    jest
+      .spyOn(dns.promises, 'lookup')
+      .mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
 
     await expect(service.testConnection('connection-1', 'user-1')).resolves.toMatchObject({
       status: IntegrationConnectionStatus.ACTIVE,
