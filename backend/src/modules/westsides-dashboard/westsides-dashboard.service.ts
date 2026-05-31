@@ -60,10 +60,20 @@ const OPEN_DELIVERY_STATUSES: DeliveryNoteStatus[] = [
 
 const LOW_STOCK_THRESHOLD = 10;
 const MS_PER_DAY = 24 * 3600 * 1000;
+const READINESS_TARGET = 90;
 
 type CloseStatus = 'READY' | 'WARN' | 'BLOCKED';
 type ActionSeverity = 'CRITICAL' | 'WARNING' | 'INFO';
-type ActionCategory = 'SALES' | 'CASH' | 'CREDIT' | 'STOCK' | 'PRICING' | 'FULFILLMENT' | 'CLOSE';
+type ActionCategory =
+  | 'SALES'
+  | 'CASH'
+  | 'CREDIT'
+  | 'STOCK'
+  | 'PRICING'
+  | 'FULFILLMENT'
+  | 'CLOSE'
+  | 'DATA'
+  | 'CONTROL';
 
 interface DashboardAction {
   id: string;
@@ -74,6 +84,7 @@ interface DashboardAction {
   count?: number;
   amount?: number;
   suggestedAction: string;
+  drillThrough?: DrillThroughLink;
 }
 
 interface ReadinessCheck {
@@ -83,6 +94,37 @@ interface ReadinessCheck {
   score: number;
   message: string;
   details: Record<string, number | string | boolean>;
+}
+
+interface DrillThroughLink {
+  label: string;
+  frontendPath: string;
+  apiPath: string;
+  filters: Record<string, number | string | boolean | null | undefined>;
+}
+
+interface ReadinessIssue {
+  key: string;
+  category: ActionCategory;
+  severity: ActionSeverity;
+  title: string;
+  message: string;
+  count?: number;
+  amount?: number;
+  owner: string;
+  suggestedAction: string;
+  drillThrough: DrillThroughLink;
+}
+
+interface FreshnessSignal {
+  key: string;
+  title: string;
+  status: CloseStatus;
+  lastSeenAt: string | null;
+  ageHours: number | null;
+  warnAfterHours: number;
+  message: string;
+  drillThrough: DrillThroughLink;
 }
 
 type CountByStatusRow<TStatus extends string> = {
@@ -123,6 +165,11 @@ export class WestsidesDashboardService {
       customerCreditRisk: commandCenter.customerCreditRisk,
       pipeline: commandCenter.pipeline,
       actions: commandCenter.actions,
+      readiness: commandCenter.readiness,
+      staleData: commandCenter.staleData,
+      dataQuality: commandCenter.dataQuality,
+      controlSignals: commandCenter.controlSignals,
+      drillThrough: commandCenter.drillThrough,
     };
   }
 
@@ -279,6 +326,20 @@ export class WestsidesDashboardService {
       blockedCustomers,
       customerOutstandingRaw,
       overdueCustomerRaw,
+      latestSalesData,
+      latestInventoryMovement,
+      latestInventoryBalance,
+      latestDeliveryData,
+      latestPriceData,
+      latestPostingData,
+      productsMissingSearchKey,
+      productsMissingReorderPolicy,
+      activeTrackedProducts,
+      balanceProductCoverage,
+      activeCustomers,
+      creditProfileCoverage,
+      deliveriesMissingLogistics,
+      activePriceListsUnapproved,
     ] = await Promise.all([
       this.prisma.salesOrder.aggregate({
         where: salesWhereToday,
@@ -814,6 +875,92 @@ export class WestsidesDashboardService {
         _sum: { outstandingAmount: true },
         _count: { id: true },
       }),
+      this.prisma.salesOrder.aggregate({
+        where: { companyId, ...branchFilter, deletedAt: null },
+        _max: { orderDate: true, updatedAt: true },
+        _count: { id: true },
+      }),
+      this.prisma.inventoryMovement.aggregate({
+        where: { companyId, ...branchFilter },
+        _max: { movementDate: true, updatedAt: true },
+        _count: { id: true },
+      }),
+      this.prisma.inventoryBalance.aggregate({
+        where: { companyId, ...branchFilter },
+        _max: { lastMovementAt: true, updatedAt: true },
+        _count: { id: true },
+      }),
+      this.prisma.deliveryNote.aggregate({
+        where: { companyId, ...branchFilter, deletedAt: null },
+        _max: { deliveryDate: true, updatedAt: true },
+        _count: { id: true },
+      }),
+      this.prisma.priceList.aggregate({
+        where: activePriceWindow,
+        _max: { updatedAt: true, effectiveFrom: true, effectiveTo: true },
+        _count: { id: true },
+      }),
+      this.prisma.postingRun.aggregate({
+        where: { companyId, deletedAt: null },
+        _max: { createdAt: true, postedAt: true, updatedAt: true },
+        _count: { id: true },
+      }),
+      this.prisma.product.count({
+        where: {
+          companyId,
+          status: ProductStatus.ACTIVE,
+          deletedAt: null,
+          productCode: '',
+          sku: null,
+          barcode: null,
+        },
+      }),
+      this.prisma.product.count({
+        where: {
+          companyId,
+          status: ProductStatus.ACTIVE,
+          trackInventory: true,
+          deletedAt: null,
+          reorderLevel: null,
+          minimumStockLevel: null,
+        },
+      }),
+      this.prisma.product.count({
+        where: {
+          companyId,
+          status: ProductStatus.ACTIVE,
+          trackInventory: true,
+          deletedAt: null,
+        },
+      }),
+      this.prisma.inventoryBalance.findMany({
+        where: { companyId, ...branchFilter },
+        distinct: ['productId'],
+        select: { productId: true },
+      }),
+      this.prisma.customer.count({
+        where: { companyId, ...branchFilter, status: CustomerStatus.ACTIVE, deletedAt: null },
+      }),
+      this.prisma.customerCreditProfile.count({
+        where: { companyId, deletedAt: null },
+      }),
+      this.prisma.deliveryNote.count({
+        where: {
+          companyId,
+          ...branchFilter,
+          status: { in: OPEN_DELIVERY_STATUSES },
+          deletedAt: null,
+          OR: [
+            { driverName: null },
+            { driverName: '' },
+            { vehicleNumber: null },
+            { vehicleNumber: '' },
+          ],
+        },
+      }),
+      this.prisma.priceList.count({
+        where: { ...activePriceWindow, approvedById: null },
+      }),
     ]);
 
     const [divisionById, salespersonById, productById, creditCustomerById] = await Promise.all([
@@ -1140,6 +1287,81 @@ export class WestsidesDashboardService {
       checks: dailyCloseChecks,
     };
 
+    const drillThrough = this.buildDrillThrough({ companyId, branchId, date: todayStart });
+    const productsWithoutBalance = Math.max(
+      0,
+      activeTrackedProducts - balanceProductCoverage.length,
+    );
+    const customersMissingCreditProfile = Math.max(0, activeCustomers - creditProfileCoverage);
+    const staleData = this.buildStaleDataSignals(now, drillThrough, {
+      latestSalesAt: this.latestDate(
+        latestSalesData._max.orderDate,
+        latestSalesData._max.updatedAt,
+      ),
+      salesRows: latestSalesData._count.id,
+      latestInventoryMovementAt: this.latestDate(
+        latestInventoryMovement._max.movementDate,
+        latestInventoryMovement._max.updatedAt,
+      ),
+      inventoryMovementRows: latestInventoryMovement._count.id,
+      latestInventoryBalanceAt: this.latestDate(
+        latestInventoryBalance._max.lastMovementAt,
+        latestInventoryBalance._max.updatedAt,
+      ),
+      inventoryBalanceRows: latestInventoryBalance._count.id,
+      latestDeliveryAt: this.latestDate(
+        latestDeliveryData._max.deliveryDate,
+        latestDeliveryData._max.updatedAt,
+      ),
+      deliveryRows: latestDeliveryData._count.id,
+      latestPriceDataAt: this.latestDate(
+        latestPriceData._max.updatedAt,
+        latestPriceData._max.effectiveFrom,
+        latestPriceData._max.effectiveTo,
+      ),
+      activePriceLists: latestPriceData._count.id,
+      latestPostingAt: this.latestDate(
+        latestPostingData._max.postedAt,
+        latestPostingData._max.updatedAt,
+        latestPostingData._max.createdAt,
+      ),
+      postingRows: latestPostingData._count.id,
+    });
+    const dataQuality = this.buildDataQualitySignals(drillThrough, {
+      activeProducts,
+      productsMissingSearchKey,
+      productsMissingReorderPolicy,
+      productsWithoutBalance,
+      productsMissingPrice,
+      activeCustomers,
+      customersMissingCreditProfile,
+      deliveriesMissingLogistics,
+      activePriceListsUnapproved,
+      unapprovedAgreements,
+    });
+    const controlSignals = this.buildControlSignals(drillThrough, {
+      dailyCloseChecks,
+      activeCashAccounts,
+      activeAccountingLocks,
+      currentOpenPeriods,
+      failedPostingRuns,
+      confirmedOrdersMissingJournal,
+      nonCreditMissingCashAccount,
+      activePriceListsUnapproved,
+      unapprovedAgreements,
+    });
+    const readiness = this.buildCommandReadiness({
+      dailyClose,
+      stockRisk,
+      pricing,
+      fulfillment,
+      customerCreditRisk,
+      staleData,
+      dataQuality,
+      controlSignals,
+      drillThrough,
+    });
+
     const actions = this.buildActions({
       outOfStockCount,
       lowStockCount,
@@ -1185,6 +1407,10 @@ export class WestsidesDashboardService {
         grossMarginToday: todayMargin,
         grossMarginPctToday: this.percentage(todayMargin, todaySales),
         dailyCloseScore: closeScore,
+        readinessScore: readiness.score,
+        readinessBlockers: readiness.blockerCount,
+        readinessWarnings: readiness.warningCount,
+        staleDataSignals: readiness.staleDataCount,
         actionsCritical: actions.filter((action) => action.severity === 'CRITICAL').length,
       },
       yesterday: {
@@ -1279,6 +1505,11 @@ export class WestsidesDashboardService {
         activeProformas,
       },
       actions,
+      readiness,
+      staleData,
+      dataQuality,
+      controlSignals,
+      drillThrough,
     };
 
     return {
@@ -1297,6 +1528,12 @@ export class WestsidesDashboardService {
       expiringBatches: commandCenter.stockRisk.expiry.expiringSoonCount,
       pendingStockDamage: commandCenter.stockRisk.damage.pendingCount,
       creditReceivables: commandCenter.customerCreditRisk.outstandingAmount,
+      readinessScore: commandCenter.readiness?.score ?? commandCenter.kpis?.readinessScore ?? null,
+      readinessStatus: commandCenter.readiness?.status ?? null,
+      readinessBlockers:
+        commandCenter.readiness?.blockerCount ?? commandCenter.kpis?.readinessBlockers ?? 0,
+      readinessWarnings:
+        commandCenter.readiness?.warningCount ?? commandCenter.kpis?.readinessWarnings ?? 0,
     };
   }
 
@@ -1310,6 +1547,12 @@ export class WestsidesDashboardService {
 
   private daysBefore(date: Date, days: number) {
     return new Date(date.getTime() - days * MS_PER_DAY);
+  }
+
+  private latestDate(...dates: Array<Date | null | undefined>): Date | null {
+    const validDates = dates.filter((date): date is Date => Boolean(date));
+    if (validDates.length === 0) return null;
+    return new Date(Math.max(...validDates.map((date) => date.getTime())));
   }
 
   private toNumber(value: unknown): number {
@@ -1495,6 +1738,759 @@ export class WestsidesDashboardService {
         },
       },
     ];
+  }
+
+  private buildDrillThrough(input: {
+    companyId: string;
+    branchId?: string;
+    date: Date;
+  }): Record<string, DrillThroughLink> {
+    const date = input.date.toISOString().slice(0, 10);
+    const scope = { companyId: input.companyId, branchId: input.branchId ?? null };
+    return {
+      dailyClose: this.drillThrough('Daily close workbench', '/westsides/daily-close', {
+        ...scope,
+        date,
+      }),
+      salesOrders: this.drillThrough('Sales orders', '/sales-orders', {
+        ...scope,
+        date,
+      }),
+      salesDrafts: this.drillThrough('Draft sales orders', '/sales-orders', {
+        ...scope,
+        status: SalesOrderStatus.DRAFT,
+        date,
+      }),
+      liveInventory: this.drillThrough('Live inventory risk', '/westsides/inventory/live', {
+        ...scope,
+        risk: 'low-or-out-of-stock',
+      }),
+      batchExpiry: this.drillThrough('Batch expiry risk', '/westsides/reports/batch-status', {
+        ...scope,
+        horizonDays: 30,
+      }),
+      stockDamage: this.drillThrough('Stock damage queue', '/westsides/reports/damage', {
+        ...scope,
+        status: 'submitted-or-approved',
+      }),
+      pricing: this.drillThrough('Price-list coverage', '/westsides/reports/price-lists', {
+        ...scope,
+        status: PriceListStatus.ACTIVE,
+      }),
+      delivery: this.drillThrough('Delivery queue', '/westsides/reports/deliveries', {
+        ...scope,
+        status: 'open-or-overdue',
+      }),
+      receivables: this.drillThrough(
+        'Customer credit risk',
+        '/westsides/reports/credit-customers',
+        {
+          ...scope,
+          status: ReceivableStatus.OVERDUE,
+        },
+      ),
+      accounting: this.drillThrough('Accounting evidence', '/accounting-engine', {
+        ...scope,
+        date,
+      }),
+      dataQuality: this.drillThrough('Westsides data-quality issues', '/data-quality', {
+        ...scope,
+        domain: 'WESTSIDES',
+      }),
+    };
+  }
+
+  private drillThrough(
+    label: string,
+    frontendPath: string,
+    filters: Record<string, number | string | boolean | null | undefined>,
+  ): DrillThroughLink {
+    return {
+      label,
+      frontendPath,
+      apiPath: `/api/v1${frontendPath}`,
+      filters,
+    };
+  }
+
+  private buildStaleDataSignals(
+    now: Date,
+    drillThrough: Record<string, DrillThroughLink>,
+    input: {
+      latestSalesAt: Date | null;
+      salesRows: number;
+      latestInventoryMovementAt: Date | null;
+      inventoryMovementRows: number;
+      latestInventoryBalanceAt: Date | null;
+      inventoryBalanceRows: number;
+      latestDeliveryAt: Date | null;
+      deliveryRows: number;
+      latestPriceDataAt: Date | null;
+      activePriceLists: number;
+      latestPostingAt: Date | null;
+      postingRows: number;
+    },
+  ) {
+    const signals = [
+      this.freshnessSignal(now, {
+        key: 'sales-activity-freshness',
+        title: 'Sales activity freshness',
+        lastSeenAt: input.latestSalesAt,
+        rowCount: input.salesRows,
+        warnAfterHours: 12,
+        emptyMessage: 'No sales activity has been recorded for this scope.',
+        staleMessage: 'Sales activity is older than the same-day operating window.',
+        freshMessage: 'Sales activity is current.',
+        drillThrough: drillThrough.salesOrders,
+      }),
+      this.freshnessSignal(now, {
+        key: 'inventory-movement-freshness',
+        title: 'Inventory movement freshness',
+        lastSeenAt: input.latestInventoryMovementAt ?? input.latestInventoryBalanceAt,
+        rowCount: input.inventoryMovementRows || input.inventoryBalanceRows,
+        warnAfterHours: 48,
+        emptyMessage: 'No inventory movement or balance data exists for this scope.',
+        staleMessage: 'Inventory movement data has not changed recently.',
+        freshMessage: 'Inventory movement data is current.',
+        drillThrough: drillThrough.liveInventory,
+      }),
+      this.freshnessSignal(now, {
+        key: 'delivery-freshness',
+        title: 'Delivery queue freshness',
+        lastSeenAt: input.latestDeliveryAt,
+        rowCount: input.deliveryRows,
+        warnAfterHours: 24,
+        emptyMessage: 'No delivery notes have been recorded for this scope.',
+        staleMessage: 'Delivery queue data is older than the daily dispatch window.',
+        freshMessage: 'Delivery queue data is current.',
+        drillThrough: drillThrough.delivery,
+      }),
+      this.freshnessSignal(now, {
+        key: 'pricing-freshness',
+        title: 'Pricing data freshness',
+        lastSeenAt: input.latestPriceDataAt,
+        rowCount: input.activePriceLists,
+        warnAfterHours: 168,
+        emptyMessage: 'No active price list is available for this scope.',
+        staleMessage: 'Active pricing has not been reviewed in the last week.',
+        freshMessage: 'Pricing data is current.',
+        drillThrough: drillThrough.pricing,
+      }),
+      this.freshnessSignal(now, {
+        key: 'posting-freshness',
+        title: 'Posting evidence freshness',
+        lastSeenAt: input.latestPostingAt,
+        rowCount: input.postingRows,
+        warnAfterHours: 24,
+        emptyMessage: 'No accounting posting run has been recorded for this company.',
+        staleMessage: 'Posting evidence is older than the daily close window.',
+        freshMessage: 'Posting evidence is current.',
+        drillThrough: drillThrough.accounting,
+      }),
+    ];
+
+    const staleSignals = signals.filter((signal) => signal.status !== 'READY');
+    return {
+      status: staleSignals.length > 0 ? 'WARN' : ('READY' as CloseStatus),
+      staleCount: staleSignals.length,
+      score: this.clampScore(100 - staleSignals.length * 6),
+      signals,
+    };
+  }
+
+  private freshnessSignal(
+    now: Date,
+    input: {
+      key: string;
+      title: string;
+      lastSeenAt: Date | null;
+      rowCount: number;
+      warnAfterHours: number;
+      emptyMessage: string;
+      staleMessage: string;
+      freshMessage: string;
+      drillThrough: DrillThroughLink;
+    },
+  ): FreshnessSignal {
+    const lastSeenAt = input.lastSeenAt;
+    const ageHours = lastSeenAt ? (now.getTime() - lastSeenAt.getTime()) / 3600000 : null;
+    const status: CloseStatus =
+      input.rowCount === 0 || ageHours === null || ageHours > input.warnAfterHours
+        ? 'WARN'
+        : 'READY';
+    const message =
+      input.rowCount === 0
+        ? input.emptyMessage
+        : status === 'WARN'
+          ? input.staleMessage
+          : input.freshMessage;
+
+    return {
+      key: input.key,
+      title: input.title,
+      status,
+      lastSeenAt: lastSeenAt?.toISOString() ?? null,
+      ageHours: ageHours === null ? null : Math.round(ageHours * 10) / 10,
+      warnAfterHours: input.warnAfterHours,
+      message,
+      drillThrough: input.drillThrough,
+    };
+  }
+
+  private buildDataQualitySignals(
+    drillThrough: Record<string, DrillThroughLink>,
+    input: {
+      activeProducts: number;
+      productsMissingSearchKey: number;
+      productsMissingReorderPolicy: number;
+      productsWithoutBalance: number;
+      productsMissingPrice: number;
+      activeCustomers: number;
+      customersMissingCreditProfile: number;
+      deliveriesMissingLogistics: number;
+      activePriceListsUnapproved: number;
+      unapprovedAgreements: number;
+    },
+  ) {
+    const checks: ReadinessCheck[] = [
+      {
+        key: 'product-searchability',
+        title: 'Product searchability',
+        status: this.statusForScore(this.clampScore(100 - input.productsMissingSearchKey * 8)),
+        score: this.clampScore(100 - input.productsMissingSearchKey * 8),
+        message:
+          input.productsMissingSearchKey === 0
+            ? 'Active products have searchable identifiers.'
+            : 'Some products are missing code, SKU, and barcode identifiers.',
+        details: {
+          activeProducts: input.activeProducts,
+          productsMissingSearchKey: input.productsMissingSearchKey,
+        },
+      },
+      {
+        key: 'inventory-master-policy',
+        title: 'Inventory master policy',
+        status: this.statusForScore(
+          this.clampScore(
+            100 - input.productsMissingReorderPolicy * 5 - input.productsWithoutBalance * 4,
+          ),
+        ),
+        score: this.clampScore(
+          100 - input.productsMissingReorderPolicy * 5 - input.productsWithoutBalance * 4,
+        ),
+        message:
+          input.productsMissingReorderPolicy === 0 && input.productsWithoutBalance === 0
+            ? 'Tracked products have reorder policies and inventory balance records.'
+            : 'Some tracked products lack reorder policy or inventory balance coverage.',
+        details: {
+          productsMissingReorderPolicy: input.productsMissingReorderPolicy,
+          productsWithoutBalance: input.productsWithoutBalance,
+        },
+      },
+      {
+        key: 'pricing-approval-quality',
+        title: 'Pricing approval quality',
+        status: this.statusForScore(
+          this.clampScore(
+            100 -
+              input.productsMissingPrice * 4 -
+              input.activePriceListsUnapproved * 10 -
+              input.unapprovedAgreements * 8,
+          ),
+        ),
+        score: this.clampScore(
+          100 -
+            input.productsMissingPrice * 4 -
+            input.activePriceListsUnapproved * 10 -
+            input.unapprovedAgreements * 8,
+        ),
+        message:
+          input.productsMissingPrice === 0 &&
+          input.activePriceListsUnapproved === 0 &&
+          input.unapprovedAgreements === 0
+            ? 'Active pricing is covered and approved.'
+            : 'Pricing coverage or approval gaps exist.',
+        details: {
+          productsMissingPrice: input.productsMissingPrice,
+          activePriceListsUnapproved: input.activePriceListsUnapproved,
+          unapprovedAgreements: input.unapprovedAgreements,
+        },
+      },
+      {
+        key: 'customer-credit-master-data',
+        title: 'Customer credit master data',
+        status: this.statusForScore(this.clampScore(100 - input.customersMissingCreditProfile * 4)),
+        score: this.clampScore(100 - input.customersMissingCreditProfile * 4),
+        message:
+          input.customersMissingCreditProfile === 0
+            ? 'Active customers have credit profile coverage.'
+            : 'Some active customers do not have a credit profile.',
+        details: {
+          activeCustomers: input.activeCustomers,
+          customersMissingCreditProfile: input.customersMissingCreditProfile,
+        },
+      },
+      {
+        key: 'delivery-logistics-quality',
+        title: 'Delivery logistics quality',
+        status: this.statusForScore(this.clampScore(100 - input.deliveriesMissingLogistics * 6)),
+        score: this.clampScore(100 - input.deliveriesMissingLogistics * 6),
+        message:
+          input.deliveriesMissingLogistics === 0
+            ? 'Open delivery notes include driver and vehicle metadata.'
+            : 'Some open delivery notes are missing driver or vehicle metadata.',
+        details: {
+          deliveriesMissingLogistics: input.deliveriesMissingLogistics,
+        },
+      },
+    ];
+
+    const issueChecks = checks.filter((check) => check.status !== 'READY');
+    return {
+      status: issueChecks.some((check) => check.status === 'BLOCKED')
+        ? 'BLOCKED'
+        : issueChecks.length > 0
+          ? 'WARN'
+          : ('READY' as CloseStatus),
+      score: this.clampScore(checks.reduce((sum, check) => sum + check.score, 0) / checks.length),
+      issueCount: issueChecks.length,
+      checks,
+      issues: [
+        ...(input.productsMissingSearchKey > 0
+          ? [
+              this.readinessIssue({
+                key: 'products-missing-search-key',
+                category: 'DATA',
+                severity: 'WARNING',
+                title: 'Products missing searchable identifiers',
+                message: `${input.productsMissingSearchKey} active products are missing code, SKU, and barcode search keys.`,
+                count: input.productsMissingSearchKey,
+                owner: 'Stock controller',
+                suggestedAction:
+                  'Update product codes, SKUs, or barcodes so sales and inventory search works reliably.',
+                drillThrough: drillThrough.dataQuality,
+              }),
+            ]
+          : []),
+        ...(input.productsWithoutBalance > 0
+          ? [
+              this.readinessIssue({
+                key: 'products-without-inventory-balance',
+                category: 'DATA',
+                severity: 'WARNING',
+                title: 'Tracked products missing stock balance',
+                message: `${input.productsWithoutBalance} active tracked products have no inventory balance row in this scope.`,
+                count: input.productsWithoutBalance,
+                owner: 'Warehouse manager',
+                suggestedAction:
+                  'Initialize balances or perform a stock adjustment for the missing SKUs.',
+                drillThrough: drillThrough.liveInventory,
+              }),
+            ]
+          : []),
+        ...(input.deliveriesMissingLogistics > 0
+          ? [
+              this.readinessIssue({
+                key: 'deliveries-missing-logistics',
+                category: 'FULFILLMENT',
+                severity: 'WARNING',
+                title: 'Delivery notes missing logistics metadata',
+                message: `${input.deliveriesMissingLogistics} open delivery notes do not have driver or vehicle data.`,
+                count: input.deliveriesMissingLogistics,
+                owner: 'Dispatch lead',
+                suggestedAction:
+                  'Assign vehicle and driver before dispatching or closing delivery notes.',
+                drillThrough: drillThrough.delivery,
+              }),
+            ]
+          : []),
+      ],
+    };
+  }
+
+  private buildControlSignals(
+    drillThrough: Record<string, DrillThroughLink>,
+    input: {
+      dailyCloseChecks: ReadinessCheck[];
+      activeCashAccounts: number;
+      activeAccountingLocks: number;
+      currentOpenPeriods: number;
+      failedPostingRuns: number;
+      confirmedOrdersMissingJournal: number;
+      nonCreditMissingCashAccount: number;
+      activePriceListsUnapproved: number;
+      unapprovedAgreements: number;
+    },
+  ) {
+    const checks: Array<ReadinessCheck & { drillThrough: DrillThroughLink }> =
+      input.dailyCloseChecks.map((check) => ({
+        ...check,
+        drillThrough:
+          check.key === 'payment-evidence'
+            ? drillThrough.salesOrders
+            : check.key === 'posting-integrity' || check.key === 'finance-controls'
+              ? drillThrough.accounting
+              : drillThrough.dailyClose,
+      }));
+
+    const issueChecks = checks.filter((check) => check.status !== 'READY');
+    const issues: ReadinessIssue[] = [
+      ...(input.activeCashAccounts === 0
+        ? [
+            this.readinessIssue({
+              key: 'no-active-cash-account',
+              category: 'CONTROL',
+              severity: 'CRITICAL',
+              title: 'No active cash account',
+              message: 'Westsides cannot evidence cash receipts without an active cash account.',
+              count: 1,
+              owner: 'Finance controller',
+              suggestedAction:
+                'Create or reactivate a cash-on-hand, bank, or mobile-money account.',
+              drillThrough: drillThrough.accounting,
+            }),
+          ]
+        : []),
+      ...(input.activeAccountingLocks > 0
+        ? [
+            this.readinessIssue({
+              key: 'active-accounting-locks',
+              category: 'CONTROL',
+              severity: 'CRITICAL',
+              title: 'Active accounting locks',
+              message: `${input.activeAccountingLocks} active accounting locks can block today's processing.`,
+              count: input.activeAccountingLocks,
+              owner: 'Finance controller',
+              suggestedAction: 'Release or document locks before running daily close.',
+              drillThrough: drillThrough.accounting,
+            }),
+          ]
+        : []),
+      ...(input.currentOpenPeriods === 0
+        ? [
+            this.readinessIssue({
+              key: 'no-open-current-period',
+              category: 'CONTROL',
+              severity: 'CRITICAL',
+              title: 'No open accounting period',
+              message: 'No open accounting period covers today.',
+              count: 1,
+              owner: 'Finance controller',
+              suggestedAction:
+                'Open the current accounting period before posting sales and stock evidence.',
+              drillThrough: drillThrough.accounting,
+            }),
+          ]
+        : []),
+      ...(input.failedPostingRuns > 0 || input.confirmedOrdersMissingJournal > 0
+        ? [
+            this.readinessIssue({
+              key: 'posting-evidence-gap',
+              category: 'CONTROL',
+              severity: 'CRITICAL',
+              title: 'Posting evidence gap',
+              message: `${input.failedPostingRuns} failed/draft posting runs and ${input.confirmedOrdersMissingJournal} confirmed sales without journals need review.`,
+              count: input.failedPostingRuns + input.confirmedOrdersMissingJournal,
+              owner: 'Accountant',
+              suggestedAction: 'Rerun failed postings and attach journals to confirmed sales.',
+              drillThrough: drillThrough.accounting,
+            }),
+          ]
+        : []),
+      ...(input.nonCreditMissingCashAccount > 0
+        ? [
+            this.readinessIssue({
+              key: 'cash-sale-missing-account',
+              category: 'CONTROL',
+              severity: 'CRITICAL',
+              title: 'Cash sales missing account',
+              message: `${input.nonCreditMissingCashAccount} non-credit sales are missing a cash account.`,
+              count: input.nonCreditMissingCashAccount,
+              owner: 'Cashier supervisor',
+              suggestedAction: 'Assign the correct cash, bank, card, or mobile-money account.',
+              drillThrough: drillThrough.salesOrders,
+            }),
+          ]
+        : []),
+      ...(input.activePriceListsUnapproved > 0 || input.unapprovedAgreements > 0
+        ? [
+            this.readinessIssue({
+              key: 'unapproved-pricing-controls',
+              category: 'CONTROL',
+              severity: 'WARNING',
+              title: 'Unapproved pricing controls',
+              message: `${input.activePriceListsUnapproved} active price lists and ${input.unapprovedAgreements} active agreements are unapproved.`,
+              count: input.activePriceListsUnapproved + input.unapprovedAgreements,
+              owner: 'Commercial manager',
+              suggestedAction:
+                'Approve active pricing before using it as the official trading basis.',
+              drillThrough: drillThrough.pricing,
+            }),
+          ]
+        : []),
+    ];
+
+    return {
+      status: issues.some((issue) => issue.severity === 'CRITICAL')
+        ? 'BLOCKED'
+        : issueChecks.length > 0 || issues.length > 0
+          ? 'WARN'
+          : ('READY' as CloseStatus),
+      score: this.clampScore(checks.reduce((sum, check) => sum + check.score, 0) / checks.length),
+      issueCount: issues.length,
+      checks,
+      issues,
+    };
+  }
+
+  private buildCommandReadiness(input: {
+    dailyClose: { status: CloseStatus; score: number; blockers: number; warnings: number };
+    stockRisk: {
+      lowStockCount: number;
+      outOfStockCount: number;
+      negativeStockCount: number;
+      reorder: { exposureCount: number; exposureValue: number };
+      expiry: { expiringSoonCount: number; expiredActiveCount: number };
+      damage: { pendingCount: number; pendingEstimatedValue: number };
+    };
+    pricing: {
+      priceLists: {
+        productsMissingPrice: number;
+        activeButPastEffectiveTo: number;
+        expiringSoon: number;
+      };
+      customerAgreements: { unapprovedActive: number };
+    };
+    fulfillment: { ordersAwaitingDelivery: number; deliveries: { overdue: number } };
+    customerCreditRisk: {
+      overdueAmount: number;
+      overdueCount: number;
+      customersOverLimit: number;
+      overLimitAmount: number;
+      highRiskProfiles: number;
+    };
+    staleData: { score: number; staleCount: number; signals: FreshnessSignal[] };
+    dataQuality: { score: number; issueCount: number; issues: ReadinessIssue[] };
+    controlSignals: { score: number; issueCount: number; issues: ReadinessIssue[] };
+    drillThrough: Record<string, DrillThroughLink>;
+  }) {
+    const operationalIssues: ReadinessIssue[] = [
+      ...(input.stockRisk.outOfStockCount > 0 || input.stockRisk.negativeStockCount > 0
+        ? [
+            this.readinessIssue({
+              key: 'stock-availability-blocker',
+              category: 'STOCK',
+              severity: 'CRITICAL',
+              title: 'Stock availability blocker',
+              message: `${input.stockRisk.outOfStockCount} balances are out of stock and ${input.stockRisk.negativeStockCount} are negative.`,
+              count: input.stockRisk.outOfStockCount + input.stockRisk.negativeStockCount,
+              owner: 'Warehouse manager',
+              suggestedAction: 'Replenish, transfer, or correct affected SKUs before trading.',
+              drillThrough: input.drillThrough.liveInventory,
+            }),
+          ]
+        : []),
+      ...(input.stockRisk.expiry.expiredActiveCount > 0
+        ? [
+            this.readinessIssue({
+              key: 'expired-active-stock',
+              category: 'STOCK',
+              severity: 'CRITICAL',
+              title: 'Expired active stock',
+              message: `${input.stockRisk.expiry.expiredActiveCount} active batches are already expired.`,
+              count: input.stockRisk.expiry.expiredActiveCount,
+              owner: 'Warehouse manager',
+              suggestedAction:
+                'Quarantine expired batches and post the appropriate stock damage or adjustment.',
+              drillThrough: input.drillThrough.batchExpiry,
+            }),
+          ]
+        : []),
+      ...(input.fulfillment.deliveries.overdue > 0
+        ? [
+            this.readinessIssue({
+              key: 'overdue-deliveries',
+              category: 'FULFILLMENT',
+              severity: 'CRITICAL',
+              title: 'Overdue deliveries',
+              message: `${input.fulfillment.deliveries.overdue} open deliveries are overdue.`,
+              count: input.fulfillment.deliveries.overdue,
+              owner: 'Dispatch lead',
+              suggestedAction: 'Dispatch, reschedule, or close overdue delivery notes.',
+              drillThrough: input.drillThrough.delivery,
+            }),
+          ]
+        : []),
+      ...(input.stockRisk.reorder.exposureCount > 0 || input.stockRisk.lowStockCount > 0
+        ? [
+            this.readinessIssue({
+              key: 'reorder-exposure',
+              category: 'STOCK',
+              severity: 'WARNING',
+              title: 'Reorder exposure',
+              message: `${input.stockRisk.reorder.exposureCount} SKUs are below reorder policy.`,
+              count: input.stockRisk.reorder.exposureCount || input.stockRisk.lowStockCount,
+              amount: input.stockRisk.reorder.exposureValue,
+              owner: 'Procurement lead',
+              suggestedAction: 'Create replenishment actions for highest-value shortages.',
+              drillThrough: input.drillThrough.liveInventory,
+            }),
+          ]
+        : []),
+      ...(input.stockRisk.expiry.expiringSoonCount > 0
+        ? [
+            this.readinessIssue({
+              key: 'batch-expiry-watch',
+              category: 'STOCK',
+              severity: 'WARNING',
+              title: 'Batch expiry watch',
+              message: `${input.stockRisk.expiry.expiringSoonCount} active batches expire within 30 days.`,
+              count: input.stockRisk.expiry.expiringSoonCount,
+              owner: 'Warehouse manager',
+              suggestedAction:
+                'Prioritize sales, transfers, or supplier return of near-expiry stock.',
+              drillThrough: input.drillThrough.batchExpiry,
+            }),
+          ]
+        : []),
+      ...(input.stockRisk.damage.pendingCount > 0
+        ? [
+            this.readinessIssue({
+              key: 'pending-stock-damage',
+              category: 'STOCK',
+              severity: 'WARNING',
+              title: 'Pending stock damage',
+              message: `${input.stockRisk.damage.pendingCount} stock damage records are not fully posted.`,
+              count: input.stockRisk.damage.pendingCount,
+              amount: input.stockRisk.damage.pendingEstimatedValue,
+              owner: 'Warehouse manager',
+              suggestedAction: 'Approve or post pending stock damage so valuation is correct.',
+              drillThrough: input.drillThrough.stockDamage,
+            }),
+          ]
+        : []),
+      ...(input.pricing.priceLists.productsMissingPrice > 0 ||
+      input.pricing.priceLists.activeButPastEffectiveTo > 0
+        ? [
+            this.readinessIssue({
+              key: 'pricing-coverage-risk',
+              category: 'PRICING',
+              severity: 'WARNING',
+              title: 'Pricing coverage risk',
+              message: `${input.pricing.priceLists.productsMissingPrice} active products are missing active price-list coverage.`,
+              count:
+                input.pricing.priceLists.productsMissingPrice +
+                input.pricing.priceLists.activeButPastEffectiveTo,
+              owner: 'Commercial manager',
+              suggestedAction: 'Publish active price-list coverage before trading.',
+              drillThrough: input.drillThrough.pricing,
+            }),
+          ]
+        : []),
+      ...(input.customerCreditRisk.customersOverLimit > 0 ||
+      input.customerCreditRisk.overdueAmount > 0
+        ? [
+            this.readinessIssue({
+              key: 'customer-credit-risk',
+              category: 'CREDIT',
+              severity: input.customerCreditRisk.customersOverLimit > 0 ? 'CRITICAL' : 'WARNING',
+              title: 'Customer credit risk',
+              message: `${input.customerCreditRisk.overdueCount} receivables are overdue and ${input.customerCreditRisk.customersOverLimit} customers are over limit.`,
+              count:
+                input.customerCreditRisk.overdueCount + input.customerCreditRisk.customersOverLimit,
+              amount:
+                input.customerCreditRisk.overdueAmount + input.customerCreditRisk.overLimitAmount,
+              owner: 'Credit controller',
+              suggestedAction:
+                'Follow up overdue balances and block or approve over-limit customers.',
+              drillThrough: input.drillThrough.receivables,
+            }),
+          ]
+        : []),
+    ];
+
+    const staleIssues = input.staleData.signals
+      .filter((signal) => signal.status !== 'READY')
+      .map((signal) =>
+        this.readinessIssue({
+          key: signal.key,
+          category: 'DATA',
+          severity: 'WARNING',
+          title: signal.title,
+          message: signal.message,
+          count: 1,
+          owner: 'Operations manager',
+          suggestedAction:
+            'Review the source workflow and refresh or process pending transactions.',
+          drillThrough: signal.drillThrough,
+        }),
+      );
+
+    const issues = [
+      ...input.controlSignals.issues,
+      ...operationalIssues,
+      ...input.dataQuality.issues,
+      ...staleIssues,
+    ];
+    const blockers = issues.filter((issue) => issue.severity === 'CRITICAL');
+    const warnings = issues.filter((issue) => issue.severity === 'WARNING');
+    const baseScore = this.clampScore(
+      (input.dailyClose.score +
+        input.staleData.score +
+        input.dataQuality.score +
+        input.controlSignals.score +
+        this.clampScore(
+          100 -
+            input.stockRisk.outOfStockCount * 10 -
+            input.stockRisk.negativeStockCount * 12 -
+            input.stockRisk.reorder.exposureCount * 3 -
+            input.fulfillment.deliveries.overdue * 8 -
+            input.pricing.priceLists.productsMissingPrice * 3 -
+            input.customerCreditRisk.customersOverLimit * 10,
+        )) /
+        5,
+    );
+    const score = this.clampScore(baseScore - blockers.length * 8 - warnings.length * 2);
+    const status: CloseStatus =
+      blockers.length > 0 || score < 70
+        ? 'BLOCKED'
+        : warnings.length > 0 || score < READINESS_TARGET
+          ? 'WARN'
+          : 'READY';
+
+    return {
+      score,
+      target: READINESS_TARGET,
+      status,
+      maturity:
+        score >= 95 && blockers.length === 0
+          ? 'enterprise-ready'
+          : score >= READINESS_TARGET && blockers.length === 0
+            ? 'production-ready'
+            : 'needs-attention',
+      blockerCount: blockers.length,
+      warningCount: warnings.length,
+      staleDataCount: input.staleData.staleCount,
+      dataQualityIssueCount: input.dataQuality.issueCount,
+      controlIssueCount: input.controlSignals.issueCount,
+      generatedAt: new Date().toISOString(),
+      indicators: {
+        dailyCloseScore: input.dailyClose.score,
+        stockOutOrNegative: input.stockRisk.outOfStockCount + input.stockRisk.negativeStockCount,
+        reorderExposureCount: input.stockRisk.reorder.exposureCount,
+        overdueDeliveries: input.fulfillment.deliveries.overdue,
+        pricingCoverageGaps: input.pricing.priceLists.productsMissingPrice,
+        customersOverLimit: input.customerCreditRisk.customersOverLimit,
+        staleSignals: input.staleData.staleCount,
+      },
+      blockers,
+      warnings,
+      issues,
+    };
+  }
+
+  private readinessIssue(input: ReadinessIssue): ReadinessIssue {
+    return input;
   }
 
   private buildActions(input: {
