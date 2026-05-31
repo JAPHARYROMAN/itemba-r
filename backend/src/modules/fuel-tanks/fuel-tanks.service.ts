@@ -12,6 +12,11 @@ export class FuelTanksService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
+  private readonly listInclude = {
+    branch: { select: { id: true, code: true, name: true } },
+    product: { select: { id: true, productCode: true, name: true } },
+  } as const;
+
   async findAll(query: Record<string, unknown>) {
     const page = parseInt(query.page as string) || 1;
     const limit = parseInt(query.limit as string) || 20;
@@ -26,6 +31,7 @@ export class FuelTanksService {
     const [data, total] = await Promise.all([
       this.prisma.fuelTank.findMany({
         where,
+        include: this.listInclude,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
@@ -37,7 +43,10 @@ export class FuelTanksService {
   }
 
   async findOne(id: string) {
-    const record = await this.prisma.fuelTank.findFirst({ where: { id, deletedAt: null } });
+    const record = await this.prisma.fuelTank.findFirst({
+      where: { id, deletedAt: null },
+      include: this.listInclude,
+    });
     if (!record) throw new NotFoundException('Fuel tank not found');
     return record;
   }
@@ -45,6 +54,7 @@ export class FuelTanksService {
   async findByBranch(branchId: string) {
     return this.prisma.fuelTank.findMany({
       where: { branchId, deletedAt: null },
+      include: this.listInclude,
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -68,6 +78,7 @@ export class FuelTanksService {
         installationDate: dto.installationDate ? new Date(dto.installationDate) : undefined,
         notes: dto.notes,
       },
+      include: this.listInclude,
     });
 
     await this.auditLogs.log({
@@ -109,6 +120,7 @@ export class FuelTanksService {
         }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
       },
+      include: this.listInclude,
     });
 
     await this.auditLogs.log({

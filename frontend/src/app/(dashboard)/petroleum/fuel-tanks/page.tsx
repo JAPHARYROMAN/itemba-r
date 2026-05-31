@@ -13,7 +13,8 @@ interface Company {
 interface Branch {
   id: string;
   name: string;
-  branchCode: string;
+  code?: string;
+  branchCode?: string;
 }
 interface Product {
   id: string;
@@ -23,13 +24,16 @@ interface Product {
 
 interface FuelTank {
   id: string;
+  companyId: string;
+  branchId: string;
+  productId: string;
   tankCode: string;
   tankName: string;
   product?: { name: string } | null;
   branch?: { name: string } | null;
   capacityLitres: number;
   currentBookBalance: number;
-  lastDipBalance: number;
+  lastDipBalance: number | null;
   status: string;
 }
 
@@ -57,8 +61,27 @@ function Badge({ status }: { status: string }) {
   );
 }
 
-function fmtNum(n: number) {
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(n);
+function fmtNum(n: number | string | null | undefined) {
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number(n) || 0);
+}
+
+function branchLabel(branch: Branch) {
+  return `${branch.branchCode ?? branch.code ?? 'BR'} - ${branch.name}`;
+}
+
+function unwrapList<T>(json: unknown): T[] {
+  const payload = json as { data?: { data?: unknown } | unknown };
+  if (Array.isArray(payload.data && (payload.data as { data?: unknown }).data)) {
+    return (payload.data as { data: T[] }).data;
+  }
+  if (Array.isArray(payload.data)) return payload.data as T[];
+  if (Array.isArray(json)) return json as T[];
+  return [];
+}
+
+function unwrapRecord<T>(json: unknown): T {
+  const payload = json as { data?: unknown };
+  return (payload.data ?? json) as T;
 }
 
 function Spinner() {
@@ -83,13 +106,13 @@ interface ModalProps {
   tank: FuelTank | null;
   companies: Company[];
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (tank: FuelTank) => void;
 }
 
 function TankModal({ tank, companies, onClose, onSaved }: ModalProps) {
-  const [companyId, setCompanyId] = useState(tank ? '' : '');
-  const [branchId, setBranchId] = useState('');
-  const [productId, setProductId] = useState('');
+  const [companyId, setCompanyId] = useState(tank?.companyId ?? '');
+  const [branchId, setBranchId] = useState(tank?.branchId ?? '');
+  const [productId, setProductId] = useState(tank?.productId ?? '');
   const [tankCode, setTankCode] = useState(tank?.tankCode ?? '');
   const [tankName, setTankName] = useState(tank?.tankName ?? '');
   const [capacityLitres, setCapacityLitres] = useState<number | ''>(tank?.capacityLitres ?? '');
@@ -102,24 +125,29 @@ function TankModal({ tank, companies, onClose, onSaved }: ModalProps) {
     if (companyId) {
       fetch(`/api/backend/branches?companyId=${companyId}&limit=200`)
         .then((r) => r.json())
-        .then((j) =>
-          setBranches(
-            Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
-          ),
-        );
+        .then((j) => setBranches(unwrapList<Branch>(j)));
       fetch(`/api/backend/products?companyId=${companyId}&limit=200`)
         .then((r) => r.json())
-        .then((j) =>
-          setProducts(
-            Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
-          ),
-        );
+        .then((j) => setProducts(unwrapList<Product>(j)));
+    } else {
+      setBranches([]);
+      setProducts([]);
+      setBranchId('');
+      setProductId('');
     }
   }, [companyId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!companyId || !branchId || !productId || !tankCode || !tankName) {
+    if (
+      !companyId ||
+      !branchId ||
+      !productId ||
+      !tankCode ||
+      !tankName ||
+      !capacityLitres ||
+      Number(capacityLitres) <= 0
+    ) {
       setError('All required fields must be filled');
       return;
     }
@@ -147,7 +175,8 @@ function TankModal({ tank, companies, onClose, onSaved }: ModalProps) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.message ?? 'Save failed');
       }
-      onSaved();
+      const saved = unwrapRecord<FuelTank>(await res.json());
+      onSaved(saved);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error saving');
     } finally {
@@ -178,7 +207,11 @@ function TankModal({ tank, companies, onClose, onSaved }: ModalProps) {
               <select
                 required
                 value={companyId}
-                onChange={(e) => setCompanyId(e.target.value)}
+                onChange={(e) => {
+                  setCompanyId(e.target.value);
+                  setBranchId('');
+                  setProductId('');
+                }}
                 className={fieldCls}
               >
                 <option value="">Select…</option>
@@ -201,7 +234,7 @@ function TankModal({ tank, companies, onClose, onSaved }: ModalProps) {
                 <option value="">Select…</option>
                 {branches.map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.branchCode} – {b.name}
+                    {branchLabel(b)}
                   </option>
                 ))}
               </select>
@@ -244,10 +277,12 @@ function TankModal({ tank, companies, onClose, onSaved }: ModalProps) {
               </select>
             </div>
             <div>
-              <label className={labelCls}>Capacity (Litres)</label>
+              <label className={labelCls}>Capacity (Litres) *</label>
               <input
+                required
                 type="number"
                 step="0.01"
+                min="1"
                 value={capacityLitres}
                 onChange={(e) =>
                   setCapacityLitres(e.target.value === '' ? '' : Number(e.target.value))
@@ -295,22 +330,14 @@ export default function FuelTanksPage() {
   useEffect(() => {
     fetch('/api/backend/companies?limit=100')
       .then((r) => r.json())
-      .then((j) =>
-        setCompanies(
-          Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
-        ),
-      );
+      .then((j) => setCompanies(unwrapList<Company>(j)));
   }, []);
 
   useEffect(() => {
     if (companyId) {
       fetch(`/api/backend/branches?companyId=${companyId}&limit=200`)
         .then((r) => r.json())
-        .then((j) =>
-          setBranches(
-            Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
-          ),
-        );
+        .then((j) => setBranches(unwrapList<Branch>(j)));
     } else {
       setBranches([]);
       setBranchId('');
@@ -318,14 +345,18 @@ export default function FuelTanksPage() {
   }, [companyId]);
 
   const load = useCallback(async () => {
-    if (!branchId) return;
+    const targetBranchId = branchId;
+    if (!targetBranchId) {
+      setTanks([]);
+      return;
+    }
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`/api/backend/petroleum/fuel-tanks/branch/${branchId}`);
+      const res = await fetch(`/api/backend/petroleum/fuel-tanks/branch/${targetBranchId}`);
       if (!res.ok) throw new Error('Failed to load tanks');
       const json = await res.json();
-      Array.isArray(json.data?.data) ? json.data.data : Array.isArray(json.data) ? json.data : [];
+      setTanks(unwrapList<FuelTank>(json));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error loading tanks');
     } finally {
@@ -392,7 +423,7 @@ export default function FuelTanksPage() {
               <option value="">— Select Branch —</option>
               {branches.map((b) => (
                 <option key={b.id} value={b.id}>
-                  {b.branchCode} – {b.name}
+                  {branchLabel(b)}
                 </option>
               ))}
             </select>
@@ -483,10 +514,15 @@ export default function FuelTanksPage() {
             setModalOpen(false);
             setEditing(null);
           }}
-          onSaved={() => {
+          onSaved={(savedTank) => {
             setModalOpen(false);
             setEditing(null);
-            load();
+            setCompanyId(savedTank.companyId);
+            setBranchId(savedTank.branchId);
+            setTanks((current) => {
+              const next = current.filter((tank) => tank.id !== savedTank.id);
+              return [savedTank, ...next];
+            });
           }}
         />
       )}
