@@ -262,6 +262,93 @@ export class WestsidesReportsService {
         : [];
     const salespersonById = new Map(salespersons.map((e) => [e.id, e]));
 
+    const methodRows = byMethod.map((m) => ({
+      paymentMethod: m.paymentMethod,
+      cashAccountId: m.cashAccountId,
+      cashAccountName: m.cashAccountId
+        ? (cashAccountById.get(m.cashAccountId)?.accountName ?? null)
+        : null,
+      cashAccountType: m.cashAccountId
+        ? (cashAccountById.get(m.cashAccountId)?.accountType ?? null)
+        : null,
+      count: m._count.id,
+      expected: Number(m._sum.totalAmount ?? 0),
+      paid: Number(m._sum.paidAmount ?? 0),
+    }));
+
+    const mobileMoneyReferences = mobileMoneyOrders.map((o) => ({
+      id: o.id,
+      salesOrderNumber: o.salesOrderNumber,
+      reference: o.paymentReference,
+      amount: Number(o.totalAmount),
+      cashAccountId: o.cashAccountId,
+      cashAccountName: o.cashAccountId
+        ? (cashAccountById.get(o.cashAccountId)?.accountName ?? null)
+        : null,
+    }));
+
+    const unassignedPaymentAccountCount = methodRows.filter(
+      (m) => m.paymentMethod !== 'CREDIT' && !m.cashAccountId,
+    ).length;
+    const missingMobileMoneyReferenceCount = mobileMoneyReferences.filter(
+      (m) => !m.reference,
+    ).length;
+    const unattributedSalespersonCount = bySalesperson
+      .filter((s) => !s.salespersonId)
+      .reduce((sum, s) => sum + s._count.id, 0);
+    const exceptionList = [
+      ...(totals._count.id === 0
+        ? [
+            {
+              code: 'NO_SALES',
+              severity: 'info',
+              title: 'No sales recorded',
+              detail: 'There are no confirmed sales for the selected close date.',
+            },
+          ]
+        : []),
+      ...(Number(totals._sum.outstandingAmount ?? 0) > 0
+        ? [
+            {
+              code: 'CREDIT_OUTSTANDING',
+              severity: 'warning',
+              title: 'Credit exposure remains',
+              detail: `TZS ${Number(totals._sum.outstandingAmount ?? 0).toLocaleString('en-TZ')} is outstanding on confirmed sales.`,
+            },
+          ]
+        : []),
+      ...(unassignedPaymentAccountCount > 0
+        ? [
+            {
+              code: 'UNASSIGNED_CASH_ACCOUNT',
+              severity: 'critical',
+              title: 'Payment method missing cash account',
+              detail: `${unassignedPaymentAccountCount} payment method group has no cash or bank account assigned.`,
+            },
+          ]
+        : []),
+      ...(missingMobileMoneyReferenceCount > 0
+        ? [
+            {
+              code: 'MISSING_MOBILE_REFERENCE',
+              severity: 'warning',
+              title: 'Mobile-money references missing',
+              detail: `${missingMobileMoneyReferenceCount} mobile-money sale needs a payment reference before approval.`,
+            },
+          ]
+        : []),
+      ...(unattributedSalespersonCount > 0
+        ? [
+            {
+              code: 'UNATTRIBUTED_SALESPERSON',
+              severity: 'warning',
+              title: 'Sales without salesperson attribution',
+              detail: `${unattributedSalespersonCount} sale${unattributedSalespersonCount === 1 ? '' : 's'} should be attributed before performance reporting.`,
+            },
+          ]
+        : []),
+    ];
+
     return {
       date: dayStart.toISOString(),
       companyId: query.companyId,
@@ -282,19 +369,7 @@ export class WestsidesReportsService {
       },
       // Expected receipts per (paymentMethod, cashAccount) — operator
       // compares against actual count to compute variance.
-      byMethod: byMethod.map((m) => ({
-        paymentMethod: m.paymentMethod,
-        cashAccountId: m.cashAccountId,
-        cashAccountName: m.cashAccountId
-          ? (cashAccountById.get(m.cashAccountId)?.accountName ?? null)
-          : null,
-        cashAccountType: m.cashAccountId
-          ? (cashAccountById.get(m.cashAccountId)?.accountType ?? null)
-          : null,
-        count: m._count.id,
-        expected: Number(m._sum.totalAmount ?? 0),
-        paid: Number(m._sum.paidAmount ?? 0),
-      })),
+      byMethod: methodRows,
       bySalesType: bySalesType.map((s) => ({
         salesType: s.salesType,
         count: s._count.id,
@@ -321,16 +396,23 @@ export class WestsidesReportsService {
         paymentMethod: o.paymentMethod,
         paymentReference: o.paymentReference,
       })),
-      mobileMoneyReferences: mobileMoneyOrders.map((o) => ({
-        id: o.id,
-        salesOrderNumber: o.salesOrderNumber,
-        reference: o.paymentReference,
-        amount: Number(o.totalAmount),
-        cashAccountId: o.cashAccountId,
-        cashAccountName: o.cashAccountId
-          ? (cashAccountById.get(o.cashAccountId)?.accountName ?? null)
-          : null,
-      })),
+      mobileMoneyReferences,
+      readiness: {
+        status: exceptionList.some((item) => item.severity === 'critical')
+          ? 'BLOCKED'
+          : exceptionList.some((item) => item.severity === 'warning')
+            ? 'NEEDS_REVIEW'
+            : 'READY',
+        closeReady:
+          exceptionList.length === 0 || !exceptionList.some((item) => item.severity === 'critical'),
+        exceptionCount: exceptionList.length,
+        cashAccountsAssigned: unassignedPaymentAccountCount === 0,
+        mobileMoneyReferencesComplete: missingMobileMoneyReferenceCount === 0,
+        unassignedPaymentAccountCount,
+        missingMobileMoneyReferenceCount,
+        unattributedSalespersonCount,
+      },
+      exceptions: exceptionList,
     };
   }
 

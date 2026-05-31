@@ -19,7 +19,11 @@ export class InventoryBalancesService {
     applyCompanyScopeWhere(where, user, companyId);
     if (productId) where.productId = productId;
     if (locationId) where.branchId = locationId;
-    if (lowStock) where.quantityOnHand = { lte: 0 };
+    // Low-stock = positive-but-low band (consistent with liveStock()'s default
+    // lowThreshold of 10). A row is "low" only when it still has stock on hand
+    // (> 0) but is at or below the reorder threshold, so reorder alerts fire
+    // before a SKU is fully depleted.
+    if (lowStock) where.quantityOnHand = { gt: 0, lte: 10 };
 
     const [data, total] = await Promise.all([
       this.prisma.inventoryBalance.findMany({
@@ -76,7 +80,9 @@ export class InventoryBalancesService {
       where.product = {
         OR: [
           { name: { contains: query.search, mode: 'insensitive' } },
+          { productCode: { contains: query.search, mode: 'insensitive' } },
           { sku: { contains: query.search, mode: 'insensitive' } },
+          { barcode: { contains: query.search, mode: 'insensitive' } },
         ],
       };
     }
@@ -84,18 +90,42 @@ export class InventoryBalancesService {
     const balances = await this.prisma.inventoryBalance.findMany({
       where,
       include: {
-        product: { select: { id: true, name: true, sku: true } },
+        product: {
+          select: {
+            id: true,
+            productCode: true,
+            name: true,
+            sku: true,
+            barcode: true,
+            minimumStockLevel: true,
+            reorderLevel: true,
+          },
+        },
         branch: { select: { id: true, name: true, code: true } },
       },
       orderBy: [{ quantityOnHand: 'asc' }, { product: { name: 'asc' } }],
     });
 
+    const now = Date.now();
     const annotated = balances.map((b) => {
       const onHand = Number(b.quantityOnHand);
       const reserved = Number(b.quantityReserved);
       const available = onHand - reserved;
+      const skuThreshold = Number(b.product.reorderLevel ?? b.product.minimumStockLevel ?? 0);
+      const effectiveLowThreshold = skuThreshold > 0 ? skuThreshold : lowThreshold;
       const status: 'OUT' | 'LOW' | 'OK' =
-        onHand <= 0 ? 'OUT' : onHand <= lowThreshold ? 'LOW' : 'OK';
+        onHand <= 0 ? 'OUT' : available <= effectiveLowThreshold ? 'LOW' : 'OK';
+      const daysSinceMovement = b.lastMovementAt
+        ? Math.floor((now - b.lastMovementAt.getTime()) / (24 * 3600 * 1000))
+        : null;
+      const riskScore =
+        status === 'OUT'
+          ? 100
+          : status === 'LOW'
+            ? Math.max(50, Math.round((1 - available / Math.max(effectiveLowThreshold, 1)) * 100))
+            : reserved > 0 && available <= effectiveLowThreshold * 1.5
+              ? 35
+              : 0;
       return {
         id: b.id,
         productId: b.productId,
@@ -107,6 +137,10 @@ export class InventoryBalancesService {
         averageCost: Number(b.averageCost),
         totalValue: Number(b.totalValue),
         lastMovementAt: b.lastMovementAt,
+        daysSinceMovement,
+        lowThreshold: effectiveLowThreshold,
+        riskScore,
+        riskValue: status === 'OK' ? 0 : Number(b.totalValue),
         status,
       };
     });
@@ -123,6 +157,9 @@ export class InventoryBalancesService {
         out: number;
         low: number;
         ok: number;
+        reserved: number;
+        available: number;
+        riskValue: number;
         totalValue: number;
         items: typeof annotated;
       }
@@ -138,11 +175,17 @@ export class InventoryBalancesService {
         out: 0,
         low: 0,
         ok: 0,
+        reserved: 0,
+        available: 0,
+        riskValue: 0,
         totalValue: 0,
         items: [],
       };
       entry.itemCount++;
       entry.totalValue += item.totalValue;
+      entry.reserved += item.quantityReserved;
+      entry.available += item.quantityAvailable;
+      entry.riskValue += item.riskValue;
       if (item.status === 'OUT') entry.out++;
       else if (item.status === 'LOW') entry.low++;
       else entry.ok++;
@@ -157,14 +200,46 @@ export class InventoryBalancesService {
         out: acc.out + (it.status === 'OUT' ? 1 : 0),
         low: acc.low + (it.status === 'LOW' ? 1 : 0),
         ok: acc.ok + (it.status === 'OK' ? 1 : 0),
+        negative: acc.negative + (it.quantityAvailable < 0 ? 1 : 0),
+        reservedSkus: acc.reservedSkus + (it.quantityReserved > 0 ? 1 : 0),
+        totalOnHand: acc.totalOnHand + it.quantityOnHand,
+        totalReserved: acc.totalReserved + it.quantityReserved,
+        totalAvailable: acc.totalAvailable + it.quantityAvailable,
+        riskValue: acc.riskValue + it.riskValue,
         totalValue: acc.totalValue + it.totalValue,
       }),
-      { totalSkus: 0, out: 0, low: 0, ok: 0, totalValue: 0 },
+      {
+        totalSkus: 0,
+        out: 0,
+        low: 0,
+        ok: 0,
+        negative: 0,
+        reservedSkus: 0,
+        totalOnHand: 0,
+        totalReserved: 0,
+        totalAvailable: 0,
+        riskValue: 0,
+        totalValue: 0,
+      },
     );
 
     return {
       lowThreshold,
       totals,
+      risk: {
+        criticalCount: totals.out + totals.low + totals.negative,
+        criticalValue: totals.riskValue,
+        reservationPressure:
+          totals.totalOnHand > 0 ? (totals.totalReserved / totals.totalOnHand) * 100 : 0,
+        criticalItems: annotated
+          .filter((item) => item.status !== 'OK' || item.quantityAvailable < 0)
+          .sort((a, b) => b.riskScore - a.riskScore || b.riskValue - a.riskValue)
+          .slice(0, 12),
+        staleItems: annotated
+          .filter((item) => (item.daysSinceMovement ?? 0) >= 30 && item.quantityOnHand > 0)
+          .sort((a, b) => (b.daysSinceMovement ?? 0) - (a.daysSinceMovement ?? 0))
+          .slice(0, 12),
+      },
       locations: Array.from(locationMap.values()).sort(
         (a, b) => b.out + b.low - (a.out + a.low) || a.locationName.localeCompare(b.locationName),
       ),

@@ -12,14 +12,14 @@ export class WestsidesDashboardController {
 
   @Get('summary')
   @RequirePermissions('westsides.dashboard.view')
-  @ApiOperation({ summary: 'Westsides dashboard summary' })
+  @ApiOperation({ summary: 'Westsides dashboard command-center summary' })
   getSummary(@Query() query: QueryDashboardDto, @CurrentUser() user: AuthUser) {
     return this.service.getSummary(query, user);
   }
 
   @Get('cockpit')
   @RequirePermissions('westsides.dashboard.view')
-  @ApiOperation({ summary: 'Westsides Commercial Cockpit — single-shot KPI aggregate' })
+  @ApiOperation({ summary: 'Westsides command center cockpit' })
   cockpit(
     @Query('companyId') companyId: string,
     @CurrentUser() user: AuthUser,

@@ -1,173 +1,408 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import Link from 'next/link';
 import { Btn, Card, FormSelect, PageHeader, PageSpinner } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
 import { useAuth } from '@/hooks/use-auth';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+type NumericValue = number | string | null | undefined;
+type Tone = 'neutral' | 'good' | 'warn' | 'danger' | 'info' | 'brand';
 
 interface Cockpit {
-  asOf: string;
-  kpis: {
-    todaySales: number;
-    todayCount: number;
-    avgTicket: number;
-    cashCollected: number;
-    outstandingAR: number;
-    openFoliosCount: number;
-    openFoliosTotal: number;
+  asOf?: string;
+  kpis?: {
+    todaySales?: NumericValue;
+    todayCount?: NumericValue;
+    avgTicket?: NumericValue;
+    cashCollected?: NumericValue;
+    outstandingAR?: NumericValue;
+    openFoliosCount?: NumericValue;
+    openFoliosTotal?: NumericValue;
   };
-  yesterday: { sales: number; count: number; deltaPct: number };
-  byDivision: Array<{
-    divisionId: string | null;
-    name: string | null;
-    code: string | null;
-    count: number;
-    revenue: number;
+  yesterday?: { sales?: NumericValue; count?: NumericValue; deltaPct?: NumericValue };
+  byDivision?: Array<{
+    divisionId?: string | null;
+    name?: string | null;
+    code?: string | null;
+    count?: NumericValue;
+    revenue?: NumericValue;
   }>;
-  stock: {
-    outOfStock: number;
-    lowStock: number;
-    criticalSkus: Array<{
-      productId: string;
-      productName: string;
-      sku: string | null;
-      locationName: string;
-      quantityOnHand: number;
-    }>;
+  stock?: {
+    outOfStock?: NumericValue;
+    lowStock?: NumericValue;
+    criticalSkus?: CriticalSku[];
   };
-  rooms: {
-    total: number;
-    occupied: number;
-    available: number;
-    dirty: number;
-    outOfOrder: number;
-    occupancyRate: number;
-    inHouseGuests: number;
+  rooms?: {
+    total?: NumericValue;
+    occupied?: NumericValue;
+    available?: NumericValue;
+    dirty?: NumericValue;
+    outOfOrder?: NumericValue;
+    occupancyRate?: NumericValue;
+    inHouseGuests?: NumericValue;
   };
-  arAging: {
-    current: number;
-    days1to30: number;
-    days31to60: number;
-    days61to90: number;
-    days90plus: number;
-    overdueCount: number;
-    overdueAmount: number;
+  arAging?: {
+    current?: NumericValue;
+    days1to30?: NumericValue;
+    days31to60?: NumericValue;
+    days61to90?: NumericValue;
+    days90plus?: NumericValue;
+    overdueCount?: NumericValue;
+    overdueAmount?: NumericValue;
   };
-  topSalespersons: Array<{
-    id: string | null;
-    name: string | null;
-    count: number;
-    revenue: number;
+  topSalespersons?: Array<{
+    id?: string | null;
+    name?: string | null;
+    count?: NumericValue;
+    revenue?: NumericValue;
   }>;
-  topProducts: Array<{
-    productId: string;
-    name: string;
-    sku: string | null;
-    quantity: number;
-    revenue: number;
+  topProducts?: Array<{
+    productId?: string;
+    name?: string;
+    sku?: string | null;
+    quantity?: NumericValue;
+    revenue?: NumericValue;
   }>;
-  activity: {
-    recentSales: Array<ActivityItem>;
-    recentCharges: Array<ActivityItem>;
+  activity?: {
+    recentSales?: ActivityItem[];
+    recentCharges?: ActivityItem[];
   };
+
+  // Deeper command-center sections returned by the Westsides cockpit API.
+  management?: {
+    exceptions?: ManagementException[];
+    actions?: ManagementAction[];
+  };
+  exceptions?: ManagementException[];
+  actions?: ManagementAction[];
+  salesHealth?: OptionalHealth & {
+    today?: {
+      orders?: NumericValue;
+      netSales?: NumericValue;
+      paidAmount?: NumericValue;
+      outstandingAmount?: NumericValue;
+      grossMargin?: NumericValue;
+      grossMarginPct?: NumericValue;
+    };
+    monthToDate?: {
+      orders?: NumericValue;
+      netSales?: NumericValue;
+      paidAmount?: NumericValue;
+      outstandingAmount?: NumericValue;
+      grossMargin?: NumericValue;
+      grossMarginPct?: NumericValue;
+    };
+    cash?: {
+      collectedToday?: NumericValue;
+      activeCashAccounts?: NumericValue;
+      totalCashAccountBalance?: NumericValue;
+    };
+    credit?: {
+      creditSalesToday?: NumericValue;
+      creditOrdersToday?: NumericValue;
+      creditOutstandingToday?: NumericValue;
+      overdueAR?: NumericValue;
+      overdueCount?: NumericValue;
+      overduePct?: NumericValue;
+    };
+  };
+  cashHealth?: OptionalHealth;
+  creditHealth?: OptionalHealth;
+  stockRisk?: OptionalHealth & {
+    outOfStock?: NumericValue;
+    outOfStockCount?: NumericValue;
+    lowStock?: NumericValue;
+    lowStockCount?: NumericValue;
+    negativeStockCount?: NumericValue;
+    expiringBatches?: NumericValue;
+    pendingDamage?: NumericValue;
+    valueAtRisk?: NumericValue;
+    reorderRequired?: NumericValue;
+    variances?: NumericValue;
+    inventoryValue?: NumericValue;
+    expiry?: {
+      expiringSoonCount?: NumericValue;
+      expiredActiveCount?: NumericValue;
+    };
+    damage?: {
+      pendingCount?: NumericValue;
+      pendingEstimatedValue?: NumericValue;
+    };
+    reorder?: {
+      exposureCount?: NumericValue;
+      exposureValue?: NumericValue;
+    };
+  };
+  deliveryHealth?: OptionalHealth & {
+    pending?: NumericValue;
+    overdue?: NumericValue;
+    dispatched?: NumericValue;
+    onTimeRate?: NumericValue;
+  };
+  fulfillment?: {
+    ordersAwaitingDelivery?: NumericValue;
+    status?: string;
+    deliveries?: {
+      draft?: NumericValue;
+      dispatched?: NumericValue;
+      delivered?: NumericValue;
+      partiallyDelivered?: NumericValue;
+      overdue?: NumericValue;
+      dueToday?: NumericValue;
+      deliveredToday?: NumericValue;
+    };
+  };
+  pricingHealth?: OptionalHealth & {
+    activePriceLists?: NumericValue;
+    activeAgreements?: NumericValue;
+    expiringAgreements?: NumericValue;
+    exceptions?: NumericValue;
+    marginAlerts?: NumericValue;
+  };
+  pricing?: {
+    status?: string;
+    priceLists?: {
+      active?: NumericValue;
+      activeButPastEffectiveTo?: NumericValue;
+      expiringSoon?: NumericValue;
+      productsMissingPrice?: NumericValue;
+      productCoveragePct?: NumericValue;
+    };
+    customerAgreements?: {
+      active?: NumericValue;
+      expiringSoon?: NumericValue;
+      unapprovedActive?: NumericValue;
+    };
+    discounts?: {
+      discountedOrdersToday?: NumericValue;
+      discountAmountToday?: NumericValue;
+      discountRateToday?: NumericValue;
+    };
+  };
+  dailyClose?: OptionalHealth & {
+    status?: string;
+    score?: NumericValue;
+    blockers?: NumericValue;
+    warnings?: NumericValue;
+    lastClosedAt?: string;
+    openItems?: NumericValue;
+    variance?: NumericValue;
+  };
+  customerRisk?: OptionalHealth & {
+    overdueCustomers?: NumericValue;
+    customersOnHold?: NumericValue;
+    inactiveCustomers?: NumericValue;
+    highExposure?: NumericValue;
+  };
+  customerCreditRisk?: {
+    status?: string;
+    outstandingAmount?: NumericValue;
+    openReceivables?: NumericValue;
+    overdueAmount?: NumericValue;
+    overdueCount?: NumericValue;
+    overduePct?: NumericValue;
+    blockedCustomers?: NumericValue;
+    highRiskProfiles?: NumericValue;
+    reviewProfiles?: NumericValue;
+    customersOverLimit?: NumericValue;
+    overLimitAmount?: NumericValue;
+  };
+  pipeline?: {
+    activeQuotations?: NumericValue;
+    activeQuotationValue?: NumericValue;
+    expiringQuotationsNext7Days?: NumericValue;
+    activeProformas?: NumericValue;
+  };
+  pendingDeliveries?: NumericValue;
+  activeQuotations?: NumericValue;
+  expiringBatches?: NumericValue;
+  pendingStockDamage?: NumericValue;
+  creditReceivables?: NumericValue;
+}
+
+interface OptionalHealth {
+  status?: string;
+  statusLabel?: string;
+  label?: string;
+  note?: string;
+  href?: string;
+  count?: NumericValue;
+  amount?: NumericValue;
+  value?: NumericValue;
+  target?: NumericValue;
+  variance?: NumericValue;
+  exceptions?: NumericValue;
+  openItems?: NumericValue;
+  overdue?: NumericValue;
+  trendPct?: NumericValue;
+  cashSales?: NumericValue;
+  creditSales?: NumericValue;
+  openOrders?: NumericValue;
+  expected?: NumericValue;
+  collected?: NumericValue;
+  bankingPending?: NumericValue;
+  drawersOpen?: NumericValue;
+  creditLimitBreaches?: NumericValue;
+  customersOnHold?: NumericValue;
+}
+
+interface CriticalSku {
+  productId?: string;
+  productName?: string;
+  sku?: string | null;
+  locationName?: string;
+  quantityOnHand?: NumericValue;
 }
 
 interface ActivityItem {
   id: string;
-  kind: 'SALE' | 'FOLIO_CHARGE';
+  kind: 'SALE' | 'FOLIO_CHARGE' | string;
   when: string;
   headline: string;
   subline: string;
-  amount: number;
+  amount: NumericValue;
+}
+
+interface ManagementException {
+  id?: string;
+  title?: string;
+  label?: string;
+  description?: string;
+  message?: string;
+  severity?: string;
+  tone?: Tone;
+  href?: string;
+  owner?: string;
+  dueAt?: string;
+  value?: NumericValue;
+}
+
+interface ManagementAction {
+  id?: string;
+  label?: string;
+  title?: string;
+  message?: string;
+  description?: string;
+  suggestedAction?: string;
+  href?: string;
+  tone?: Tone;
+  priority?: string;
+  severity?: string;
+  category?: string;
+  count?: NumericValue;
+}
+
+interface MiniMetric {
+  label: string;
+  value: string;
+  tone?: Tone;
+}
+
+interface HealthBlockData {
+  title: string;
+  status: string;
+  tone: Tone;
+  value: string;
+  summary: string;
+  href?: string;
+  metrics: MiniMetric[];
+}
+
+interface RiskLaneData {
+  title: string;
+  status: string;
+  tone: Tone;
+  href: string;
+  value: string;
+  label: string;
+  note: string;
+  metrics: MiniMetric[];
 }
 
 const QUICK_LINKS = [
-  {
-    label: 'Quick Sale',
-    href: '/westsides/quick-sale',
-    color: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
-  },
-  {
-    label: 'Customers',
-    href: '/westsides/customers',
-    color: 'bg-fuchsia-50 text-fuchsia-700 hover:bg-fuchsia-100',
-  },
-  {
-    label: 'Live Inventory',
-    href: '/westsides/inventory/live',
-    color: 'bg-cyan-50 text-cyan-700 hover:bg-cyan-100',
-  },
-  {
-    label: 'Daily Close',
-    href: '/westsides/daily-close',
-    color: 'bg-rose-50 text-rose-700 hover:bg-rose-100',
-  },
-  {
-    label: 'Bookings',
-    href: '/hospitality/bookings',
-    color: 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100',
-  },
-  {
-    label: 'Sales Orders',
-    href: '/operations/sales-orders',
-    color: 'bg-teal-50 text-teal-700 hover:bg-teal-100',
-  },
-  {
-    label: 'Quotations',
-    href: '/westsides/quotations',
-    color: 'bg-violet-50 text-violet-700 hover:bg-violet-100',
-  },
-  {
-    label: 'Price Lists',
-    href: '/westsides/price-lists',
-    color: 'bg-amber-50 text-amber-700 hover:bg-amber-100',
-  },
+  { label: 'Quick Sale', href: '/westsides/quick-sale', tone: 'good', group: 'Commercial' },
+  { label: 'Customers', href: '/westsides/customers', tone: 'brand', group: 'Commercial' },
+  { label: 'Live Inventory', href: '/westsides/inventory/live', tone: 'info', group: 'Stock' },
+  { label: 'Daily Close', href: '/westsides/daily-close', tone: 'warn', group: 'Control' },
+  { label: 'Bookings', href: '/hospitality/bookings', tone: 'brand', group: 'Hospitality' },
+  { label: 'Sales Orders', href: '/operations/sales-orders', tone: 'neutral', group: 'Commercial' },
+  { label: 'Quotations', href: '/westsides/quotations', tone: 'neutral', group: 'Pipeline' },
+  { label: 'Price Lists', href: '/westsides/price-lists', tone: 'info', group: 'Pricing' },
   {
     label: 'Delivery Notes',
     href: '/westsides/delivery-notes',
-    color: 'bg-sky-50 text-sky-700 hover:bg-sky-100',
+    tone: 'neutral',
+    group: 'Fulfilment',
   },
-  {
-    label: 'Product Batches',
-    href: '/westsides/product-batches',
-    color: 'bg-orange-50 text-orange-700 hover:bg-orange-100',
-  },
-  {
-    label: 'Stock Damage',
-    href: '/westsides/stock-damage',
-    color: 'bg-red-50 text-red-700 hover:bg-red-100',
-  },
-  {
-    label: 'Reports',
-    href: '/westsides/reports',
-    color: 'bg-slate-50 text-slate-700 hover:bg-slate-100',
-  },
-];
+  { label: 'Product Batches', href: '/westsides/product-batches', tone: 'warn', group: 'Stock' },
+  { label: 'Stock Damage', href: '/westsides/stock-damage', tone: 'danger', group: 'Control' },
+  { label: 'Reports', href: '/westsides/reports', tone: 'brand', group: 'Insight' },
+] as const;
 
 const SETTINGS_KEY = 'itemba.cockpit.settings.v1';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const fmt = (n: number | string | undefined | null) =>
-  new Intl.NumberFormat('en-TZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
-    Number(n ?? 0),
-  );
-const fmtInt = (n: number | string | undefined | null) =>
-  new Intl.NumberFormat('en-TZ').format(Number.isFinite(Number(n ?? 0)) ? Number(n ?? 0) : 0);
-const timeAgo = (iso: string) => {
-  const ms = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(ms / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+const TEXT: CSSProperties = { color: 'var(--aurora-text)' };
+const TEXT_SECONDARY: CSSProperties = { color: 'var(--aurora-text-secondary)' };
+const TEXT_MUTED: CSSProperties = { color: 'var(--aurora-text-muted)' };
+const BORDER: CSSProperties = { borderColor: 'var(--aurora-border)' };
+const SURFACE: CSSProperties = {
+  background: 'var(--aurora-bg-subtle)',
+  borderColor: 'var(--aurora-border)',
+};
+const ELEVATED_SURFACE: CSSProperties = {
+  background: 'var(--aurora-card-elevated)',
+  borderColor: 'var(--aurora-border)',
 };
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+const TONE_STYLES: Record<
+  Tone,
+  { color: string; background: string; border: string; solid: string }
+> = {
+  neutral: {
+    color: 'var(--aurora-text-secondary)',
+    background: 'var(--aurora-bg-subtle)',
+    border: 'var(--aurora-border)',
+    solid: 'var(--aurora-text-muted)',
+  },
+  good: {
+    color: 'var(--aurora-success-text)',
+    background: 'var(--aurora-success-bg)',
+    border: 'var(--aurora-success)',
+    solid: 'var(--aurora-success)',
+  },
+  warn: {
+    color: 'var(--aurora-warning-text)',
+    background: 'var(--aurora-warning-bg)',
+    border: 'var(--aurora-warning)',
+    solid: 'var(--aurora-warning)',
+  },
+  danger: {
+    color: 'var(--aurora-danger-text)',
+    background: 'var(--aurora-danger-bg)',
+    border: 'var(--aurora-danger)',
+    solid: 'var(--aurora-danger)',
+  },
+  info: {
+    color: 'var(--aurora-info-text)',
+    background: 'var(--aurora-info-bg)',
+    border: 'var(--aurora-info)',
+    solid: 'var(--aurora-info)',
+  },
+  brand: {
+    color: 'var(--aurora-primary-text)',
+    background: 'var(--aurora-primary-subtle)',
+    border: 'var(--aurora-primary)',
+    solid: 'var(--aurora-primary)',
+  },
+};
 
 export default function WestsidesCockpitPage() {
   const { user, loading: authLoading } = useAuth();
@@ -184,18 +419,17 @@ export default function WestsidesCockpitPage() {
     skipEmployees: true,
   });
 
-  // Persist company/branch selection on the device.
   useEffect(() => {
     if (authLoading) return;
     try {
       const raw = user?.id ? localStorage.getItem(`${SETTINGS_KEY}.${user.id}`) : null;
       if (raw) {
-        const s = JSON.parse(raw) as { companyId?: string; branchId?: string };
-        if (s.companyId) setCompanyId(s.companyId);
-        if (s.branchId) setBranchId(s.branchId);
+        const settings = JSON.parse(raw) as { companyId?: string; branchId?: string };
+        if (settings.companyId) setCompanyId(settings.companyId);
+        if (settings.branchId) setBranchId(settings.branchId);
       }
     } catch {
-      /* ignore */
+      // Local settings are convenience-only.
     }
     setHydrated(true);
   }, [authLoading, user?.id]);
@@ -205,7 +439,7 @@ export default function WestsidesCockpitPage() {
     try {
       localStorage.setItem(`${SETTINGS_KEY}.${user.id}`, JSON.stringify({ companyId, branchId }));
     } catch {
-      /* ignore */
+      // Local settings are convenience-only.
     }
   }, [companyId, branchId, hydrated, user?.id]);
 
@@ -221,11 +455,11 @@ export default function WestsidesCockpitPage() {
       if (branchId) params.set('branchId', branchId);
       const res = await fetch(`/api/backend/westsides/dashboard/cockpit?${params}`);
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j?.message ?? `HTTP ${res.status}`);
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.message ?? `HTTP ${res.status}`);
       }
-      const j = await res.json();
-      setData(j.data ?? j);
+      const body = await res.json();
+      setData((body.data ?? body) || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Load failed');
     } finally {
@@ -237,28 +471,25 @@ export default function WestsidesCockpitPage() {
     void load();
   }, [load]);
 
-  // Opt-in 30s auto-refresh.
   useEffect(() => {
     if (!hydrated || !autoRefresh || !companyId) return;
     const id = setInterval(load, 30_000);
     return () => clearInterval(id);
   }, [autoRefresh, companyId, hydrated, load]);
 
-  const activityFeed = useMemo<ActivityItem[]>(() => {
-    if (!data) return [];
-    return [...data.activity.recentSales, ...data.activity.recentCharges]
-      .sort((a, b) => new Date(b.when).getTime() - new Date(a.when).getTime())
-      .slice(0, 12);
-  }, [data]);
+  const model = useMemo(() => (data ? buildCockpitModel(data) : null), [data]);
 
   if (!hydrated) return <PageSpinner />;
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-4 sm:p-6 space-y-4 min-w-0">
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        <PageHeader title="Westsides Cockpit" subtitle="Today's commercial command center." />
+        <PageHeader
+          title="Westsides Command Center"
+          subtitle="Commercial, stock, credit, and fulfilment control."
+        />
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="w-48">
+          <div className="w-full sm:w-52">
             <FormSelect
               value={companyId}
               onChange={(e) => {
@@ -269,7 +500,7 @@ export default function WestsidesCockpitPage() {
               placeholder="Pick company"
             />
           </div>
-          <div className="w-40">
+          <div className="w-full sm:w-44">
             <FormSelect
               value={branchId}
               onChange={(e) => setBranchId(e.target.value)}
@@ -277,7 +508,10 @@ export default function WestsidesCockpitPage() {
               placeholder={companyId ? 'All branches' : 'Pick company'}
             />
           </div>
-          <label className="text-xs text-slate-500 flex items-center gap-1.5 cursor-pointer">
+          <label
+            className="text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+            style={TEXT_SECONDARY}
+          >
             <input
               type="checkbox"
               checked={autoRefresh}
@@ -285,436 +519,1090 @@ export default function WestsidesCockpitPage() {
             />
             Auto 30s
           </label>
-          <Btn variant="secondary" size="sm" onClick={load} disabled={!companyId} loading={loading}>
+          <Btn variant="primary" size="sm" onClick={load} disabled={!companyId} loading={loading}>
             Refresh
           </Btn>
         </div>
       </div>
 
-      {error && <Card className="p-3 bg-red-50 border-red-200 text-red-700 text-sm">{error}</Card>}
+      {error && (
+        <StatusPanel tone="danger">
+          <span className="font-semibold">Cockpit load failed.</span> {error}
+        </StatusPanel>
+      )}
+
       {!companyId && !loading && (
-        <Card className="p-8 text-center text-sm text-slate-400">
-          Pick a company to light up the cockpit.
+        <Card padding="none" className="p-8 text-center">
+          <div className="text-sm" style={TEXT_SECONDARY}>
+            Pick a company to load the Westsides operating picture.
+          </div>
         </Card>
       )}
 
-      {data && (
+      {model && (
         <>
-          {/* ── Top KPI strip ─────────────────────────────────────────── */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            <Tile
+          <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8 gap-3">
+            <KpiTile
               label="Revenue today"
-              value={`TZS ${fmt(data.kpis.todaySales)}`}
-              highlight
-              hint={`${data.kpis.todayCount} sale${data.kpis.todayCount === 1 ? '' : 's'}`}
+              value={formatMoney(model.todaySales, true)}
+              hint={`${formatCount(model.todayCount)} sale${model.todayCount === 1 ? '' : 's'} | ${formatMoney(model.todaySales)} exact`}
+              tone="brand"
             />
-            <Tile
-              label="vs yesterday"
-              value={
-                data.yesterday.deltaPct === 0
-                  ? '—'
-                  : `${data.yesterday.deltaPct >= 0 ? '+' : ''}${data.yesterday.deltaPct.toFixed(1)}%`
-              }
-              tone={
-                data.yesterday.deltaPct > 0
-                  ? 'good'
-                  : data.yesterday.deltaPct < 0
-                    ? 'warn'
-                    : undefined
-              }
-              hint={`yest. TZS ${fmt(data.yesterday.sales)}`}
+            <KpiTile
+              label="Day movement"
+              value={formatDelta(model.deltaPct)}
+              hint={`Yesterday ${formatMoney(model.yesterdaySales, true)}`}
+              tone={model.deltaTone}
             />
-            <Tile label="Avg ticket" value={`TZS ${fmt(data.kpis.avgTicket)}`} />
-            <Tile
+            <KpiTile
+              label="Average ticket"
+              value={formatMoney(model.avgTicket, true)}
+              hint={`${formatCount(model.yesterdayCount)} sale${model.yesterdayCount === 1 ? '' : 's'} yesterday`}
+              tone="neutral"
+            />
+            <KpiTile
               label="Cash collected"
-              value={`TZS ${fmt(data.kpis.cashCollected)}`}
-              tone="good"
+              value={formatMoney(model.cashCollected, true)}
+              hint={`${formatPercent(model.cashCollectionRate)} of today's revenue`}
+              tone={model.cashCollectionRate >= 75 || model.todaySales === 0 ? 'good' : 'warn'}
             />
-            <Tile
-              label="Outstanding AR"
-              value={`TZS ${fmt(data.kpis.outstandingAR)}`}
-              tone={data.arAging.overdueAmount > 0 ? 'warn' : undefined}
-              hint={
-                data.arAging.overdueCount > 0 ? `${data.arAging.overdueCount} overdue` : undefined
-              }
+            <KpiTile
+              label="Credit exposure"
+              value={formatMoney(model.outstandingAR, true)}
+              hint={`${formatMoney(model.overdueAmount, true)} overdue`}
+              tone={model.overdueAmount > 0 ? 'warn' : 'good'}
             />
-            <Tile
+            <KpiTile
+              label="Stock alerts"
+              value={formatCount(model.stockAlertCount)}
+              hint={`${formatCount(model.outOfStock)} out | ${formatCount(model.lowStock)} low`}
+              tone={model.outOfStock > 0 ? 'danger' : model.lowStock > 0 ? 'warn' : 'good'}
+            />
+            <KpiTile
               label="Open folios"
-              value={String(data.kpis.openFoliosCount)}
-              hint={`TZS ${fmt(data.kpis.openFoliosTotal)} unsettled`}
+              value={formatCount(model.openFoliosCount)}
+              hint={`${formatMoney(model.openFoliosTotal, true)} unsettled`}
+              tone={model.openFoliosTotal > 0 ? 'warn' : 'neutral'}
             />
-          </div>
+            <KpiTile
+              label="Occupancy"
+              value={model.rooms.total > 0 ? formatPercent(model.rooms.occupancyRate) : 'No rooms'}
+              hint={`${formatCount(model.rooms.inHouseGuests)} in-house guests`}
+              tone={model.rooms.total > 0 && model.rooms.occupancyRate >= 70 ? 'good' : 'neutral'}
+            />
+          </section>
 
-          {/* ── Per-division revenue ──────────────────────────────────── */}
-          {data.byDivision.length > 0 && (
-            <Card className="p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold">Revenue by division — today</h3>
-                <span className="text-xs text-slate-500">
-                  total TZS {fmt(data.kpis.todaySales)}
-                </span>
-              </div>
-              <div className="space-y-2">
-                {data.byDivision.map((d) => {
-                  const pct =
-                    data.kpis.todaySales > 0 ? (d.revenue / data.kpis.todaySales) * 100 : 0;
-                  return (
-                    <div key={d.divisionId ?? 'unassigned'} className="flex items-center gap-3">
-                      <div className="w-32 text-sm font-medium truncate">
-                        {d.name ?? 'Unassigned'}
-                      </div>
-                      <div className="flex-1 bg-slate-100 rounded-full h-3 overflow-hidden">
-                        <div
-                          className="h-full bg-indigo-500"
-                          style={{ width: `${Math.min(100, pct)}%` }}
-                        />
-                      </div>
-                      <div className="w-32 text-right text-sm tabular-nums">
-                        TZS {fmt(d.revenue)}
-                      </div>
-                      <div className="w-20 text-right text-xs text-slate-500 tabular-nums">
-                        {pct.toFixed(1)}%
-                      </div>
-                      <div className="w-16 text-right text-xs text-slate-500">{d.count} sales</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
-          )}
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* ── Stock health ────────────────────────────────────────── */}
-            <Card className="overflow-hidden">
-              <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="text-sm font-semibold">Stock health</h3>
-                <Link
-                  href="/westsides/inventory/live"
-                  className="text-[11px] text-brand-600 hover:underline"
+          <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <Card padding="none" className="xl:col-span-2 overflow-hidden">
+              <SectionHeader
+                eyebrow="Management"
+                title="Exceptions and action queue"
+                subtitle={`${formatCount(model.exceptions.length)} exception${model.exceptions.length === 1 ? '' : 's'} surfaced for today's operating review`}
+              />
+              <div className="grid grid-cols-1 lg:grid-cols-2">
+                <div
+                  className="p-4 space-y-3"
+                  style={{ borderRight: '1px solid var(--aurora-border)' }}
                 >
-                  View live →
-                </Link>
-              </div>
-              <div className="grid grid-cols-3 divide-x divide-slate-100">
-                <div className="p-4 text-center">
-                  <div className="text-2xl font-bold text-red-600">
-                    {fmtInt(data.stock.outOfStock)}
-                  </div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500 mt-1">
-                    Out of stock
-                  </div>
+                  <Subheading title="Exceptions" />
+                  {model.exceptions.length === 0 ? (
+                    <EmptyLine text="No active cockpit exceptions." tone="good" />
+                  ) : (
+                    <div className="space-y-2">
+                      {model.exceptions.map((item) => (
+                        <ExceptionRow key={item.id} item={item} />
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className="p-4 text-center">
-                  <div className="text-2xl font-bold text-amber-600">
-                    {fmtInt(data.stock.lowStock)}
-                  </div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500 mt-1">
-                    Low stock
-                  </div>
-                </div>
-                <div className="p-4 text-center">
-                  <div className="text-2xl font-bold text-emerald-600">
-                    {fmtInt(data.stock.outOfStock + data.stock.lowStock)}
-                  </div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500 mt-1">
-                    Total alerts
-                  </div>
-                </div>
-              </div>
-              {data.stock.criticalSkus.length > 0 && (
-                <div className="border-t border-slate-100">
-                  <div className="px-4 py-2 text-[11px] uppercase tracking-wide text-slate-500">
-                    Most critical
-                  </div>
-                  <ul className="divide-y divide-slate-100">
-                    {data.stock.criticalSkus.map((s, i) => (
-                      <li key={i} className="px-4 py-2 flex items-center gap-3 text-sm">
-                        <span
-                          className={`w-2 h-2 rounded-full ${s.quantityOnHand <= 0 ? 'bg-red-500' : 'bg-amber-500'}`}
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="truncate font-medium">{s.productName}</div>
-                          <div className="text-[11px] text-slate-500 font-mono">
-                            {s.sku ?? '—'} · {s.locationName}
-                          </div>
-                        </div>
-                        <div
-                          className={`text-sm font-bold tabular-nums ${s.quantityOnHand <= 0 ? 'text-red-600' : 'text-amber-600'}`}
-                        >
-                          {fmt(s.quantityOnHand)}
-                        </div>
-                      </li>
+                <div className="p-4 space-y-3">
+                  <Subheading title="Management actions" />
+                  <div className="space-y-2">
+                    {model.actions.map((action) => (
+                      <ActionLink key={action.id} action={action} />
                     ))}
-                  </ul>
+                  </div>
                 </div>
-              )}
+              </div>
             </Card>
 
-            {/* ── Room occupancy ──────────────────────────────────────── */}
-            <Card className="overflow-hidden">
-              <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="text-sm font-semibold">Hospitality</h3>
-                <Link
-                  href="/hospitality/bookings"
-                  className="text-[11px] text-brand-600 hover:underline"
-                >
-                  Bookings →
-                </Link>
+            <Card padding="none" className="overflow-hidden">
+              <SectionHeader
+                eyebrow="Close control"
+                title="Cash, credit, and close posture"
+                subtitle={model.closeNarrative}
+              />
+              <div className="p-4 space-y-3">
+                <ControlLine
+                  label="Cash collection rate"
+                  value={formatPercent(model.cashCollectionRate)}
+                  tone={model.cashCollectionRate >= 75 || model.todaySales === 0 ? 'good' : 'warn'}
+                />
+                <ControlLine
+                  label="Overdue AR"
+                  value={formatMoney(model.overdueAmount, true)}
+                  tone={model.overdueAmount > 0 ? 'warn' : 'good'}
+                />
+                <ControlLine
+                  label="90+ day exposure"
+                  value={formatMoney(model.ar.days90plus, true)}
+                  tone={model.ar.days90plus > 0 ? 'danger' : 'good'}
+                />
+                <ControlLine
+                  label="Daily close open items"
+                  value={formatCount(model.dailyCloseOpenItems)}
+                  tone={model.dailyCloseOpenItems > 0 ? 'warn' : 'neutral'}
+                />
               </div>
-              {data.rooms.total === 0 ? (
-                <div className="p-8 text-center text-sm text-slate-400 italic">
-                  No rooms configured.
-                </div>
-              ) : (
-                <>
-                  <div className="p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="text-xs uppercase tracking-wide text-slate-500">
-                        Occupancy
-                      </div>
-                      <div className="text-sm font-bold">
-                        {data.rooms.occupancyRate.toFixed(0)}%
-                      </div>
+            </Card>
+          </section>
+
+          <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <Card padding="none" className="xl:col-span-2 overflow-hidden">
+              <SectionHeader
+                eyebrow="Commercial health"
+                title="Sales, cash, and credit"
+                subtitle="Real-time trading posture using confirmed orders, collections, and receivables."
+              />
+              <div className="grid grid-cols-1 lg:grid-cols-3">
+                {model.healthBlocks.map((block) => (
+                  <HealthBlock key={block.title} block={block} />
+                ))}
+              </div>
+            </Card>
+
+            <Card padding="none" className="overflow-hidden">
+              <SectionHeader
+                eyebrow="AR aging"
+                title="Credit aging"
+                subtitle={`${formatCount(model.overdueCount)} overdue invoice${model.overdueCount === 1 ? '' : 's'}`}
+              />
+              <div className="p-4 space-y-3">
+                {model.arBuckets.map((bucket) => (
+                  <AgingBucket
+                    key={bucket.label}
+                    label={bucket.label}
+                    amount={bucket.amount}
+                    total={model.outstandingAR}
+                    tone={bucket.tone}
+                  />
+                ))}
+              </div>
+            </Card>
+          </section>
+
+          <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <Card padding="none" className="overflow-hidden">
+              <SectionHeader
+                eyebrow="Stock risk"
+                title="Availability and shrinkage"
+                subtitle={`${formatCount(model.criticalSkus.length)} critical SKU${model.criticalSkus.length === 1 ? '' : 's'} in the watchlist`}
+                action={<TextLink href="/westsides/inventory/live">Live inventory</TextLink>}
+              />
+              <div className="grid grid-cols-2 sm:grid-cols-4" style={BORDER}>
+                <InlineStat label="Out" value={formatCount(model.outOfStock)} tone="danger" />
+                <InlineStat label="Low" value={formatCount(model.lowStock)} tone="warn" />
+                <InlineStat
+                  label="Expiring"
+                  value={formatCount(model.expiringBatches)}
+                  tone={model.expiringBatches > 0 ? 'warn' : 'neutral'}
+                />
+                <InlineStat
+                  label="Damage"
+                  value={formatCount(model.pendingStockDamage)}
+                  tone={model.pendingStockDamage > 0 ? 'danger' : 'neutral'}
+                />
+              </div>
+              <div className="p-4">
+                {model.criticalSkus.length === 0 ? (
+                  <EmptyLine text="No critical SKUs returned by the cockpit." tone="good" />
+                ) : (
+                  <div className="space-y-2">
+                    {model.criticalSkus.slice(0, 6).map((sku, index) => (
+                      <CriticalSkuRow
+                        key={`${sku.productId ?? sku.sku ?? index}-${index}`}
+                        sku={sku}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            <Card padding="none" className="xl:col-span-2 overflow-hidden">
+              <SectionHeader
+                eyebrow="Risk board"
+                title="Delivery, pricing, daily close, and customer risk"
+                subtitle="Operational lanes stay visible even when the backend has not yet added deeper detail."
+              />
+              <div className="grid grid-cols-1 md:grid-cols-2">
+                {model.riskLanes.map((lane) => (
+                  <RiskLane key={lane.title} lane={lane} />
+                ))}
+              </div>
+            </Card>
+          </section>
+
+          <section className="grid grid-cols-1 xl:grid-cols-5 gap-4">
+            <Card padding="none" className="xl:col-span-2 overflow-hidden">
+              <SectionHeader
+                eyebrow="Revenue mix"
+                title="Division performance"
+                subtitle={`${formatCount(model.byDivision.length)} division${model.byDivision.length === 1 ? '' : 's'} contributing today`}
+              />
+              <div className="p-4 space-y-3">
+                {model.byDivision.length === 0 ? (
+                  <EmptyLine text="No division revenue yet today." tone="neutral" />
+                ) : (
+                  model.byDivision.map((division) => (
+                    <DivisionRow
+                      key={division.divisionId ?? division.name ?? 'unassigned'}
+                      division={division}
+                      total={model.todaySales}
+                    />
+                  ))
+                )}
+              </div>
+            </Card>
+
+            <Card padding="none" className="overflow-hidden">
+              <SectionHeader
+                eyebrow="People"
+                title="Top salespersons"
+                subtitle="Ranked by today's revenue."
+              />
+              <RankingList
+                emptyText="No salespersons ranked yet."
+                items={model.topSalespersons.map((person) => ({
+                  id: person.id ?? person.name ?? 'unassigned',
+                  title: person.name ?? 'Unattributed',
+                  meta: `${formatCount(person.count)} sale${toNumber(person.count) === 1 ? '' : 's'}`,
+                  value: formatMoney(person.revenue, true),
+                }))}
+              />
+            </Card>
+
+            <Card padding="none" className="overflow-hidden">
+              <SectionHeader
+                eyebrow="Products"
+                title="Top products"
+                subtitle="Fastest revenue movement today."
+              />
+              <RankingList
+                emptyText="No products sold yet."
+                items={model.topProducts.map((product) => ({
+                  id: product.productId ?? product.name ?? 'unknown',
+                  title: product.name ?? 'Unknown product',
+                  meta: `${product.sku ?? 'No SKU'} | ${formatCount(product.quantity)} units`,
+                  value: formatMoney(product.revenue, true),
+                }))}
+              />
+            </Card>
+
+            <Card padding="none" className="overflow-hidden">
+              <SectionHeader
+                eyebrow="Hospitality"
+                title="Rooms posture"
+                subtitle="Occupancy and readiness."
+              />
+              <div className="p-4 space-y-4">
+                {model.rooms.total === 0 ? (
+                  <EmptyLine text="No rooms configured." tone="neutral" />
+                ) : (
+                  <>
+                    <ProgressSummary
+                      label="Occupancy"
+                      value={formatPercent(model.rooms.occupancyRate)}
+                      pct={model.rooms.occupancyRate}
+                      tone={model.rooms.occupancyRate >= 70 ? 'good' : 'brand'}
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <InlineStat
+                        label="Occupied"
+                        value={formatCount(model.rooms.occupied)}
+                        tone="brand"
+                        compact
+                      />
+                      <InlineStat
+                        label="Dirty"
+                        value={formatCount(model.rooms.dirty)}
+                        tone="warn"
+                        compact
+                      />
+                      <InlineStat
+                        label="Available"
+                        value={formatCount(model.rooms.available)}
+                        tone="good"
+                        compact
+                      />
+                      <InlineStat
+                        label="OOO"
+                        value={formatCount(model.rooms.outOfOrder)}
+                        tone="neutral"
+                        compact
+                      />
                     </div>
-                    <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden flex">
-                      <div
-                        className="bg-indigo-500"
-                        style={{ width: `${(data.rooms.occupied / data.rooms.total) * 100}%` }}
-                        title={`${data.rooms.occupied} occupied`}
-                      />
-                      <div
-                        className="bg-amber-300"
-                        style={{ width: `${(data.rooms.dirty / data.rooms.total) * 100}%` }}
-                        title={`${data.rooms.dirty} dirty`}
-                      />
-                      <div
-                        className="bg-emerald-300"
-                        style={{ width: `${(data.rooms.available / data.rooms.total) * 100}%` }}
-                        title={`${data.rooms.available} available`}
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-4 divide-x divide-slate-100 border-t border-slate-100">
-                    <RoomStat label="Occupied" value={data.rooms.occupied} tone="indigo" />
-                    <RoomStat label="Dirty" value={data.rooms.dirty} tone="amber" />
-                    <RoomStat label="Available" value={data.rooms.available} tone="emerald" />
-                    <RoomStat label="OOO" value={data.rooms.outOfOrder} tone="slate" />
-                  </div>
-                  <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-sm">
-                    <span className="text-slate-600">In-house guests</span>
-                    <span className="font-semibold tabular-nums">{data.rooms.inHouseGuests}</span>
-                  </div>
-                </>
-              )}
+                  </>
+                )}
+              </div>
             </Card>
-          </div>
+          </section>
 
-          {/* ── AR aging ──────────────────────────────────────────────── */}
-          <Card className="p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold">AR aging</h3>
-              <span className="text-xs text-slate-500">
-                total TZS {fmt(data.kpis.outstandingAR)}
-              </span>
-            </div>
-            <div className="grid grid-cols-5 gap-2">
-              <ArBucket
-                label="Current"
-                amount={data.arAging.current}
-                total={data.kpis.outstandingAR}
-                tone="emerald"
+          <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <Card padding="none" className="xl:col-span-2 overflow-hidden">
+              <SectionHeader
+                eyebrow="Activity"
+                title="Live commercial activity"
+                subtitle={`${formatCount(model.activityFeed.length)} recent event${model.activityFeed.length === 1 ? '' : 's'} from sales and folio charges`}
               />
-              <ArBucket
-                label="1–30 days"
-                amount={data.arAging.days1to30}
-                total={data.kpis.outstandingAR}
-                tone="lime"
-              />
-              <ArBucket
-                label="31–60 days"
-                amount={data.arAging.days31to60}
-                total={data.kpis.outstandingAR}
-                tone="amber"
-              />
-              <ArBucket
-                label="61–90 days"
-                amount={data.arAging.days61to90}
-                total={data.kpis.outstandingAR}
-                tone="orange"
-              />
-              <ArBucket
-                label="90+ days"
-                amount={data.arAging.days90plus}
-                total={data.kpis.outstandingAR}
-                tone="red"
-              />
-            </div>
-            {data.arAging.overdueAmount > 0 && (
-              <div className="mt-3 text-xs text-amber-700">
-                ⚠ TZS {fmt(data.arAging.overdueAmount)} across {data.arAging.overdueCount} overdue
-                invoice{data.arAging.overdueCount === 1 ? '' : 's'}.
-              </div>
-            )}
-          </Card>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* ── Top salespersons ─────────────────────────────────────── */}
-            <Card className="overflow-hidden">
-              <div className="px-4 py-2 border-b border-slate-100">
-                <h3 className="text-sm font-semibold">Top salespersons today</h3>
-              </div>
-              {data.topSalespersons.length === 0 ? (
-                <div className="p-6 text-sm text-slate-400 italic text-center">
-                  No sales yet today.
-                </div>
-              ) : (
-                <ul className="divide-y divide-slate-100">
-                  {data.topSalespersons.map((s, i) => (
-                    <li key={i} className="px-4 py-2 flex items-center gap-3 text-sm">
-                      <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center text-xs font-bold">
-                        {i + 1}
-                      </span>
-                      <div className="flex-1 min-w-0 truncate">
-                        {s.name ?? <em className="text-slate-400">unattributed</em>}
-                      </div>
-                      <div className="text-xs text-slate-500">{s.count}</div>
-                      <div className="font-semibold tabular-nums">TZS {fmt(s.revenue)}</div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <ActivityFeed items={model.activityFeed} />
             </Card>
 
-            {/* ── Top SKUs ──────────────────────────────────────────────── */}
-            <Card className="overflow-hidden">
-              <div className="px-4 py-2 border-b border-slate-100">
-                <h3 className="text-sm font-semibold">Top SKUs today</h3>
+            <Card padding="none" className="overflow-hidden">
+              <SectionHeader
+                eyebrow="Actions"
+                title="Quick actions"
+                subtitle="Primary Westsides workflows."
+              />
+              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-2">
+                {QUICK_LINKS.map((link) => (
+                  <QuickAction key={link.href} link={link} />
+                ))}
               </div>
-              {data.topProducts.length === 0 ? (
-                <div className="p-6 text-sm text-slate-400 italic text-center">
-                  No items sold yet.
-                </div>
-              ) : (
-                <ul className="divide-y divide-slate-100">
-                  {data.topProducts.map((p, i) => (
-                    <li key={p.productId} className="px-4 py-2 flex items-start gap-3 text-sm">
-                      <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center text-xs font-bold flex-shrink-0">
-                        {i + 1}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <div className="truncate font-medium">{p.name}</div>
-                        <div className="text-[11px] font-mono text-slate-400">{p.sku ?? '—'}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-semibold tabular-nums">TZS {fmt(p.revenue)}</div>
-                        <div className="text-[11px] text-slate-500">
-                          {p.quantity.toFixed(0)} units
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
             </Card>
+          </section>
 
-            {/* ── Activity feed ─────────────────────────────────────────── */}
-            <Card className="overflow-hidden">
-              <div className="px-4 py-2 border-b border-slate-100">
-                <h3 className="text-sm font-semibold">Live activity</h3>
-              </div>
-              {activityFeed.length === 0 ? (
-                <div className="p-6 text-sm text-slate-400 italic text-center">Nothing yet.</div>
-              ) : (
-                <ul className="divide-y divide-slate-100">
-                  {activityFeed.map((a) => (
-                    <li key={`${a.kind}-${a.id}`} className="px-4 py-2.5 text-sm">
-                      <div className="flex items-baseline justify-between gap-2">
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${a.kind === 'SALE' ? 'bg-emerald-500' : 'bg-indigo-500'}`}
-                          />
-                          <div className="truncate font-medium">{a.headline}</div>
-                        </div>
-                        <div className="text-xs tabular-nums text-slate-500 flex-shrink-0">
-                          {timeAgo(a.when)}
-                        </div>
-                      </div>
-                      <div className="flex items-baseline justify-between gap-2 mt-0.5">
-                        <div className="text-[11px] text-slate-500 truncate">{a.subline}</div>
-                        <div className="text-xs font-semibold tabular-nums flex-shrink-0">
-                          TZS {fmt(a.amount)}
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Card>
-          </div>
-
-          <p className="text-[11px] text-slate-500 text-right">
-            As of {new Date(data.asOf).toLocaleTimeString('en-GB')}
-            {autoRefresh ? ' · refreshing every 30s' : ''}.
+          <p className="text-[11px] text-right" style={TEXT_MUTED}>
+            As of {model.asOfLabel}
+            {autoRefresh ? ' | refreshing every 30s' : ''}.
           </p>
         </>
       )}
-
-      {/* ── Quick links (always visible at the bottom) ─────────────── */}
-      <Card className="p-4">
-        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
-          Quick access
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-          {QUICK_LINKS.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={`rounded-lg px-3 py-2 text-sm font-medium text-center transition-colors ${link.color}`}
-            >
-              {link.label}
-            </Link>
-          ))}
-        </div>
-      </Card>
     </div>
   );
 }
 
-// ─── Subcomponents ────────────────────────────────────────────────────────────
+function buildCockpitModel(data: Cockpit) {
+  const todaySales = toNumber(data.kpis?.todaySales);
+  const todayCount = toNumber(data.kpis?.todayCount);
+  const avgTicket = toNumber(data.kpis?.avgTicket);
+  const cashCollected = toNumber(data.kpis?.cashCollected);
+  const outstandingAR = firstNumber(data.kpis?.outstandingAR, data.creditReceivables);
+  const openFoliosCount = toNumber(data.kpis?.openFoliosCount);
+  const openFoliosTotal = toNumber(data.kpis?.openFoliosTotal);
+  const yesterdaySales = toNumber(data.yesterday?.sales);
+  const yesterdayCount = toNumber(data.yesterday?.count);
+  const deltaPct = toNumber(data.yesterday?.deltaPct);
+  const deltaTone: Tone =
+    deltaPct >= 5 ? 'good' : deltaPct < -10 ? 'danger' : deltaPct < 0 ? 'warn' : 'neutral';
 
-function Tile({
+  const outOfStock = firstNumber(
+    data.stock?.outOfStock,
+    data.stockRisk?.outOfStock,
+    data.stockRisk?.outOfStockCount,
+  );
+  const lowStock = firstNumber(
+    data.stock?.lowStock,
+    data.stockRisk?.lowStock,
+    data.stockRisk?.lowStockCount,
+  );
+  const stockAlertCount = outOfStock + lowStock;
+  const criticalSkus = asArray<CriticalSku>(data.stock?.criticalSkus);
+  const expiringBatches = firstNumber(
+    data.stockRisk?.expiringBatches,
+    data.stockRisk?.expiry?.expiringSoonCount,
+    data.expiringBatches,
+  );
+  const pendingStockDamage = firstNumber(
+    data.stockRisk?.pendingDamage,
+    data.stockRisk?.damage?.pendingCount,
+    data.pendingStockDamage,
+  );
+
+  const rooms = {
+    total: toNumber(data.rooms?.total),
+    occupied: toNumber(data.rooms?.occupied),
+    available: toNumber(data.rooms?.available),
+    dirty: toNumber(data.rooms?.dirty),
+    outOfOrder: toNumber(data.rooms?.outOfOrder),
+    occupancyRate: toNumber(data.rooms?.occupancyRate),
+    inHouseGuests: toNumber(data.rooms?.inHouseGuests),
+  };
+
+  const ar = {
+    current: toNumber(data.arAging?.current),
+    days1to30: toNumber(data.arAging?.days1to30),
+    days31to60: toNumber(data.arAging?.days31to60),
+    days61to90: toNumber(data.arAging?.days61to90),
+    days90plus: toNumber(data.arAging?.days90plus),
+  };
+  const overdueCount = toNumber(data.arAging?.overdueCount);
+  const overdueAmount = toNumber(data.arAging?.overdueAmount);
+  const cashCollectionRate = percentage(cashCollected, todaySales);
+  const closeItems =
+    data.dailyClose !== undefined
+      ? toNumber(data.dailyClose.blockers) + toNumber(data.dailyClose.warnings)
+      : undefined;
+  const dailyCloseOpenItems = firstNumber(data.dailyClose?.openItems, closeItems, openFoliosCount);
+  const closeNarrative = data.dailyClose?.status
+    ? `Daily close status: ${data.dailyClose.status}`
+    : openFoliosTotal > 0
+      ? `${formatMoney(openFoliosTotal, true)} remains unsettled in open folios.`
+      : 'No close blockers returned by the cockpit.';
+
+  const byDivision = asArray<NonNullable<Cockpit['byDivision']>[number]>(data.byDivision)
+    .map((division) => ({
+      ...division,
+      count: toNumber(division.count),
+      revenue: toNumber(division.revenue),
+    }))
+    .sort((a, b) => b.revenue - a.revenue);
+
+  const topSalespersons = asArray<NonNullable<Cockpit['topSalespersons']>[number]>(
+    data.topSalespersons,
+  ).map((person) => ({
+    ...person,
+    count: toNumber(person.count),
+    revenue: toNumber(person.revenue),
+  }));
+
+  const topProducts = asArray<NonNullable<Cockpit['topProducts']>[number]>(data.topProducts).map(
+    (product) => ({
+      ...product,
+      quantity: toNumber(product.quantity),
+      revenue: toNumber(product.revenue),
+    }),
+  );
+
+  const activityFeed = [
+    ...asArray<ActivityItem>(data.activity?.recentSales),
+    ...asArray<ActivityItem>(data.activity?.recentCharges),
+  ]
+    .sort((a, b) => safeDateMs(b.when) - safeDateMs(a.when))
+    .slice(0, 14);
+
+  const healthBlocks: HealthBlockData[] = [
+    {
+      title: 'Sales health',
+      status: deltaPct >= 0 ? 'Trading stable' : deltaPct < -10 ? 'Revenue pressure' : 'Softening',
+      tone: deltaTone,
+      value: formatMoney(todaySales, true),
+      summary: `${formatDelta(deltaPct)} vs yesterday across ${formatCount(todayCount)} sale${todayCount === 1 ? '' : 's'}.`,
+      href: '/westsides/reports',
+      metrics: compact([
+        metric('Avg ticket', formatMoney(avgTicket, true)),
+        metric('Yesterday', formatMoney(yesterdaySales, true)),
+        optionalMetric('MTD sales', data.salesHealth?.monthToDate?.netSales, 'money'),
+        optionalMetric('Margin', data.salesHealth?.today?.grossMarginPct, 'percent'),
+        optionalMetric('Credit sales', data.salesHealth?.credit?.creditSalesToday, 'money'),
+      ]),
+    },
+    {
+      title: 'Cash health',
+      status:
+        cashCollectionRate >= 75 || todaySales === 0 ? 'Collection on track' : 'Collection gap',
+      tone: cashCollectionRate >= 75 || todaySales === 0 ? 'good' : 'warn',
+      value: formatMoney(cashCollected, true),
+      summary: `${formatPercent(cashCollectionRate)} collected against today's revenue.`,
+      href: '/westsides/daily-close',
+      metrics: compact([
+        optionalMetric('Expected', data.cashHealth?.expected, 'money'),
+        optionalMetric(
+          'Variance',
+          data.cashHealth?.variance,
+          'money',
+          valueTone(data.cashHealth?.variance),
+        ),
+        optionalMetric('Banking pending', data.cashHealth?.bankingPending, 'money'),
+        optionalMetric('Drawers open', data.cashHealth?.drawersOpen, 'count'),
+        optionalMetric('Active accounts', data.salesHealth?.cash?.activeCashAccounts, 'count'),
+        metric(
+          'Open folios',
+          formatMoney(openFoliosTotal, true),
+          openFoliosTotal > 0 ? 'warn' : 'neutral',
+        ),
+      ]),
+    },
+    {
+      title: 'Credit health',
+      status: overdueAmount > 0 ? 'Collections required' : 'No overdue exposure',
+      tone: overdueAmount > 0 ? 'warn' : 'good',
+      value: formatMoney(outstandingAR, true),
+      summary: `${formatMoney(overdueAmount, true)} overdue across ${formatCount(overdueCount)} invoice${overdueCount === 1 ? '' : 's'}.`,
+      href: '/westsides/reports',
+      metrics: compact([
+        metric('Current', formatMoney(ar.current, true), 'good'),
+        metric(
+          '90+ days',
+          formatMoney(ar.days90plus, true),
+          ar.days90plus > 0 ? 'danger' : 'neutral',
+        ),
+        optionalMetric('Limit breaches', data.creditHealth?.creditLimitBreaches, 'count', 'danger'),
+        optionalMetric(
+          'Over limit',
+          data.customerCreditRisk?.customersOverLimit,
+          'count',
+          'danger',
+        ),
+        optionalMetric('High exposure', data.customerCreditRisk?.overLimitAmount, 'money', 'warn'),
+      ]),
+    },
+  ];
+
+  const exceptions = buildExceptions(data, {
+    outOfStock,
+    lowStock,
+    overdueAmount,
+    overdueCount,
+    deltaPct,
+    openFoliosTotal,
+    roomsDirty: rooms.dirty,
+    roomsOutOfOrder: rooms.outOfOrder,
+    pendingStockDamage,
+    expiringBatches,
+  });
+
+  const actions = buildActions(data, {
+    outOfStock,
+    lowStock,
+    overdueAmount,
+    openFoliosTotal,
+    pendingStockDamage,
+    expiringBatches,
+  });
+
+  const riskLanes: RiskLaneData[] = [
+    buildDeliveryLane(data),
+    buildPricingLane(data),
+    buildDailyCloseLane(data, { openFoliosCount, openFoliosTotal, dailyCloseOpenItems }),
+    buildCustomerRiskLane(data, { overdueCount, overdueAmount, outstandingAR }),
+  ];
+
+  const arBuckets = [
+    { label: 'Current', amount: ar.current, tone: 'good' as Tone },
+    { label: '1-30 days', amount: ar.days1to30, tone: 'info' as Tone },
+    { label: '31-60 days', amount: ar.days31to60, tone: 'warn' as Tone },
+    { label: '61-90 days', amount: ar.days61to90, tone: 'warn' as Tone },
+    { label: '90+ days', amount: ar.days90plus, tone: 'danger' as Tone },
+  ];
+
+  return {
+    asOfLabel: formatAsOf(data.asOf),
+    todaySales,
+    todayCount,
+    avgTicket,
+    cashCollected,
+    outstandingAR,
+    openFoliosCount,
+    openFoliosTotal,
+    yesterdaySales,
+    yesterdayCount,
+    deltaPct,
+    deltaTone,
+    cashCollectionRate,
+    overdueCount,
+    overdueAmount,
+    ar,
+    arBuckets,
+    outOfStock,
+    lowStock,
+    stockAlertCount,
+    criticalSkus,
+    expiringBatches,
+    pendingStockDamage,
+    rooms,
+    dailyCloseOpenItems,
+    closeNarrative,
+    byDivision,
+    topSalespersons,
+    topProducts,
+    activityFeed,
+    healthBlocks,
+    exceptions,
+    actions,
+    riskLanes,
+  };
+}
+
+function buildExceptions(
+  data: Cockpit,
+  derived: {
+    outOfStock: number;
+    lowStock: number;
+    overdueAmount: number;
+    overdueCount: number;
+    deltaPct: number;
+    openFoliosTotal: number;
+    roomsDirty: number;
+    roomsOutOfOrder: number;
+    pendingStockDamage: number;
+    expiringBatches: number;
+  },
+) {
+  const backend = [
+    ...asArray<ManagementException>(data.management?.exceptions),
+    ...asArray<ManagementException>(data.exceptions),
+  ].map((item, index) => ({
+    id: item.id ?? `backend-exception-${index}`,
+    title: item.title ?? item.label ?? 'Management exception',
+    description: item.description ?? item.message ?? '',
+    href: item.href,
+    owner: item.owner,
+    dueAt: item.dueAt,
+    value: item.value,
+    tone: item.tone ?? toneFromSeverity(item.severity),
+  }));
+
+  const generated = compact<ReturnType<typeof normalizeException>>([
+    derived.outOfStock > 0
+      ? normalizeException({
+          id: 'stock-out',
+          title: 'Stockouts require allocation',
+          description: `${formatCount(derived.outOfStock)} SKU${derived.outOfStock === 1 ? '' : 's'} out of stock.`,
+          href: '/westsides/inventory/live',
+          tone: 'danger',
+        })
+      : null,
+    derived.lowStock > 0
+      ? normalizeException({
+          id: 'low-stock',
+          title: 'Low-stock replenishment queue',
+          description: `${formatCount(derived.lowStock)} SKU${derived.lowStock === 1 ? '' : 's'} below threshold.`,
+          href: '/westsides/product-batches',
+          tone: derived.outOfStock > 0 ? 'danger' : 'warn',
+        })
+      : null,
+    derived.overdueAmount > 0
+      ? normalizeException({
+          id: 'overdue-credit',
+          title: 'Overdue credit exposure',
+          description: `${formatMoney(derived.overdueAmount, true)} overdue across ${formatCount(derived.overdueCount)} invoice${derived.overdueCount === 1 ? '' : 's'}.`,
+          href: '/westsides/reports',
+          tone: 'warn',
+        })
+      : null,
+    derived.deltaPct < -10
+      ? normalizeException({
+          id: 'sales-drop',
+          title: 'Revenue dropped sharply',
+          description: `${formatDelta(derived.deltaPct)} versus yesterday. Review division mix and salesperson activity.`,
+          href: '/westsides/reports',
+          tone: 'danger',
+        })
+      : null,
+    derived.openFoliosTotal > 0
+      ? normalizeException({
+          id: 'open-folios',
+          title: 'Open folio balances',
+          description: `${formatMoney(derived.openFoliosTotal, true)} remains unsettled before close.`,
+          href: '/westsides/daily-close',
+          tone: 'warn',
+        })
+      : null,
+    derived.roomsDirty + derived.roomsOutOfOrder > 0
+      ? normalizeException({
+          id: 'room-readiness',
+          title: 'Room readiness drag',
+          description: `${formatCount(derived.roomsDirty)} dirty and ${formatCount(derived.roomsOutOfOrder)} out-of-order rooms.`,
+          href: '/hospitality/bookings',
+          tone: 'warn',
+        })
+      : null,
+    derived.pendingStockDamage > 0
+      ? normalizeException({
+          id: 'stock-damage',
+          title: 'Stock damage approvals pending',
+          description: `${formatCount(derived.pendingStockDamage)} damage item${derived.pendingStockDamage === 1 ? '' : 's'} need control review.`,
+          href: '/westsides/stock-damage',
+          tone: 'danger',
+        })
+      : null,
+    derived.expiringBatches > 0
+      ? normalizeException({
+          id: 'expiring-batches',
+          title: 'Expiring batches need sell-through',
+          description: `${formatCount(derived.expiringBatches)} batch${derived.expiringBatches === 1 ? '' : 'es'} approaching expiry.`,
+          href: '/westsides/product-batches',
+          tone: 'warn',
+        })
+      : null,
+  ]);
+
+  return [...backend, ...generated].slice(0, 8);
+}
+
+function normalizeException(item: {
+  id: string;
+  title: string;
+  description: string;
+  href?: string;
+  owner?: string;
+  dueAt?: string;
+  value?: NumericValue;
+  tone: Tone;
+}) {
+  return item;
+}
+
+function buildActions(
+  data: Cockpit,
+  derived: {
+    outOfStock: number;
+    lowStock: number;
+    overdueAmount: number;
+    openFoliosTotal: number;
+    pendingStockDamage: number;
+    expiringBatches: number;
+  },
+) {
+  const backend = [
+    ...asArray<ManagementAction>(data.management?.actions),
+    ...asArray<ManagementAction>(data.actions),
+  ].map((action, index) => ({
+    id: action.id ?? `backend-action-${index}`,
+    label: action.label ?? action.title ?? 'Open action',
+    description: action.description ?? action.message ?? action.suggestedAction ?? '',
+    href: action.href ?? hrefForActionCategory(action.category),
+    tone: action.tone ?? toneFromSeverity(action.severity ?? action.priority),
+    count: action.count,
+  }));
+
+  const generated = compact([
+    derived.outOfStock + derived.lowStock > 0
+      ? {
+          id: 'action-stock',
+          label: 'Resolve stock alerts',
+          description: `${formatCount(derived.outOfStock + derived.lowStock)} availability alert${derived.outOfStock + derived.lowStock === 1 ? '' : 's'} in the queue.`,
+          href: '/westsides/inventory/live',
+          tone: derived.outOfStock > 0 ? ('danger' as Tone) : ('warn' as Tone),
+        }
+      : null,
+    derived.overdueAmount > 0
+      ? {
+          id: 'action-credit',
+          label: 'Review credit exposure',
+          description: `${formatMoney(derived.overdueAmount, true)} overdue needs collection follow-up.`,
+          href: '/westsides/reports',
+          tone: 'warn' as Tone,
+        }
+      : null,
+    derived.openFoliosTotal > 0
+      ? {
+          id: 'action-close',
+          label: 'Prepare daily close',
+          description: `${formatMoney(derived.openFoliosTotal, true)} in open folios before close.`,
+          href: '/westsides/daily-close',
+          tone: 'warn' as Tone,
+        }
+      : null,
+    derived.pendingStockDamage > 0
+      ? {
+          id: 'action-damage',
+          label: 'Approve stock damage',
+          description: `${formatCount(derived.pendingStockDamage)} pending damage record${derived.pendingStockDamage === 1 ? '' : 's'}.`,
+          href: '/westsides/stock-damage',
+          tone: 'danger' as Tone,
+        }
+      : null,
+    derived.expiringBatches > 0
+      ? {
+          id: 'action-expiry',
+          label: 'Move expiring batches',
+          description: `${formatCount(derived.expiringBatches)} expiring batch${derived.expiringBatches === 1 ? '' : 'es'} to review.`,
+          href: '/westsides/product-batches',
+          tone: 'warn' as Tone,
+        }
+      : null,
+    {
+      id: 'action-sale',
+      label: 'Start quick sale',
+      description: 'Open the point-of-sale workflow.',
+      href: '/westsides/quick-sale',
+      tone: 'good' as Tone,
+    },
+    {
+      id: 'action-report',
+      label: 'Open Westsides reports',
+      description: 'Review daily sales, delivery, stock, and credit reports.',
+      href: '/westsides/reports',
+      tone: 'brand' as Tone,
+    },
+  ]);
+
+  return [...backend, ...generated].slice(0, 8);
+}
+
+function buildDeliveryLane(data: Cockpit): RiskLaneData {
+  const pending = firstNumber(
+    data.deliveryHealth?.pending,
+    data.fulfillment?.ordersAwaitingDelivery,
+    data.pendingDeliveries,
+  );
+  const overdue = firstNumber(data.deliveryHealth?.overdue, data.fulfillment?.deliveries?.overdue);
+  const onTimeRate = toNumber(data.deliveryHealth?.onTimeRate);
+  const dispatched = firstNumber(
+    data.deliveryHealth?.dispatched,
+    data.fulfillment?.deliveries?.dispatched,
+  );
+  const tone: Tone = overdue > 0 ? 'danger' : pending > 0 ? 'warn' : 'good';
+  return {
+    title: 'Delivery',
+    status:
+      data.deliveryHealth?.statusLabel ??
+      data.deliveryHealth?.status ??
+      data.fulfillment?.status ??
+      (pending > 0 ? 'Dispatch watch' : 'No blockers'),
+    tone,
+    href: data.deliveryHealth?.href ?? '/westsides/delivery-notes',
+    value: formatCount(pending),
+    label: 'pending',
+    note:
+      data.deliveryHealth?.note ??
+      (overdue > 0
+        ? `${formatCount(overdue)} overdue delivery note${overdue === 1 ? '' : 's'}.`
+        : 'Pending deliveries and overdue dispatches.'),
+    metrics: compact([
+      metric('Overdue', formatCount(overdue), overdue > 0 ? 'danger' : 'neutral'),
+      metric('Dispatched', formatCount(dispatched), dispatched > 0 ? 'brand' : 'neutral'),
+      optionalMetric('Due today', data.fulfillment?.deliveries?.dueToday, 'count', 'warn'),
+      onTimeRate > 0
+        ? metric('On time', formatPercent(onTimeRate), onTimeRate >= 90 ? 'good' : 'warn')
+        : null,
+    ]),
+  };
+}
+
+function buildPricingLane(data: Cockpit): RiskLaneData {
+  const priceListGaps =
+    toNumber(data.pricing?.priceLists?.productsMissingPrice) +
+    toNumber(data.pricing?.priceLists?.activeButPastEffectiveTo) +
+    toNumber(data.pricing?.customerAgreements?.unapprovedActive);
+  const exceptions = firstNumber(
+    data.pricingHealth?.exceptions,
+    data.pricingHealth?.marginAlerts,
+    priceListGaps,
+  );
+  const activeQuotations = firstNumber(data.pipeline?.activeQuotations, data.activeQuotations);
+  const expiringAgreements = firstNumber(
+    data.pricingHealth?.expiringAgreements,
+    data.pricing?.customerAgreements?.expiringSoon,
+  );
+  const expiringPriceLists = toNumber(data.pricing?.priceLists?.expiringSoon);
+  const tone: Tone = exceptions > 0 ? 'danger' : expiringAgreements > 0 ? 'warn' : 'neutral';
+  return {
+    title: 'Pricing',
+    status:
+      data.pricingHealth?.statusLabel ??
+      data.pricingHealth?.status ??
+      data.pricing?.status ??
+      (exceptions > 0 ? 'Price exceptions' : 'Controlled'),
+    tone,
+    href: data.pricingHealth?.href ?? '/westsides/price-lists',
+    value: formatCount(exceptions),
+    label: 'exceptions',
+    note:
+      data.pricingHealth?.note ??
+      'Price lists, customer agreements, quotes, and margin exceptions.',
+    metrics: compact([
+      optionalMetric(
+        'Price lists',
+        firstDefined(data.pricingHealth?.activePriceLists, data.pricing?.priceLists?.active),
+        'count',
+      ),
+      optionalMetric(
+        'Agreements',
+        firstDefined(
+          data.pricingHealth?.activeAgreements,
+          data.pricing?.customerAgreements?.active,
+        ),
+        'count',
+      ),
+      metric(
+        'Active quotes',
+        formatCount(activeQuotations),
+        activeQuotations > 0 ? 'brand' : 'neutral',
+      ),
+      metric(
+        'Expiring',
+        formatCount(expiringAgreements + expiringPriceLists),
+        expiringAgreements + expiringPriceLists > 0 ? 'warn' : 'neutral',
+      ),
+      optionalMetric('Coverage', data.pricing?.priceLists?.productCoveragePct, 'percent'),
+    ]),
+  };
+}
+
+function buildDailyCloseLane(
+  data: Cockpit,
+  derived: { openFoliosCount: number; openFoliosTotal: number; dailyCloseOpenItems: number },
+): RiskLaneData {
+  const variance = toNumber(data.dailyClose?.variance);
+  const blockers = toNumber(data.dailyClose?.blockers);
+  const warnings = toNumber(data.dailyClose?.warnings);
+  const tone: Tone =
+    blockers > 0
+      ? 'danger'
+      : variance !== 0
+        ? valueTone(variance)
+        : derived.dailyCloseOpenItems > 0
+          ? 'warn'
+          : 'neutral';
+  return {
+    title: 'Daily close',
+    status:
+      data.dailyClose?.statusLabel ??
+      data.dailyClose?.status ??
+      (derived.dailyCloseOpenItems > 0 ? 'Open items' : 'Awaiting close'),
+    tone,
+    href: data.dailyClose?.href ?? '/westsides/daily-close',
+    value: formatCount(derived.dailyCloseOpenItems),
+    label: 'open items',
+    note:
+      data.dailyClose?.note ??
+      `${formatMoney(derived.openFoliosTotal, true)} unsettled folio balance.`,
+    metrics: compact([
+      optionalMetric('Score', data.dailyClose?.score, 'percent'),
+      metric('Blockers', formatCount(blockers), blockers > 0 ? 'danger' : 'neutral'),
+      metric('Warnings', formatCount(warnings), warnings > 0 ? 'warn' : 'neutral'),
+      metric(
+        'Open folios',
+        formatCount(derived.openFoliosCount),
+        derived.openFoliosCount > 0 ? 'warn' : 'neutral',
+      ),
+      metric(
+        'Folio total',
+        formatMoney(derived.openFoliosTotal, true),
+        derived.openFoliosTotal > 0 ? 'warn' : 'neutral',
+      ),
+      optionalMetric(
+        'Variance',
+        data.dailyClose?.variance,
+        'money',
+        valueTone(data.dailyClose?.variance),
+      ),
+      data.dailyClose?.lastClosedAt
+        ? metric('Last closed', formatShortDate(data.dailyClose.lastClosedAt), 'neutral')
+        : null,
+    ]),
+  };
+}
+
+function buildCustomerRiskLane(
+  data: Cockpit,
+  derived: { overdueCount: number; overdueAmount: number; outstandingAR: number },
+): RiskLaneData {
+  const overdueCustomers = firstNumber(
+    data.customerRisk?.overdueCustomers,
+    data.customerCreditRisk?.overdueCount,
+    derived.overdueCount,
+  );
+  const customersOnHold = firstNumber(
+    data.customerRisk?.customersOnHold,
+    data.creditHealth?.customersOnHold,
+    data.customerCreditRisk?.blockedCustomers,
+  );
+  const highExposure = firstNumber(
+    data.customerRisk?.highExposure,
+    data.customerCreditRisk?.overLimitAmount,
+    data.customerCreditRisk?.overdueAmount,
+    derived.overdueAmount,
+  );
+  const tone: Tone = highExposure > 0 ? 'warn' : customersOnHold > 0 ? 'warn' : 'good';
+  return {
+    title: 'Customer risk',
+    status:
+      data.customerRisk?.statusLabel ??
+      data.customerRisk?.status ??
+      data.customerCreditRisk?.status ??
+      (highExposure > 0 ? 'Credit watch' : 'Stable'),
+    tone,
+    href: data.customerRisk?.href ?? '/westsides/customers',
+    value: formatCount(overdueCustomers),
+    label: 'overdue',
+    note:
+      data.customerRisk?.note ??
+      `${formatMoney(derived.outstandingAR, true)} total receivables exposure.`,
+    metrics: compact([
+      metric('On hold', formatCount(customersOnHold), customersOnHold > 0 ? 'warn' : 'neutral'),
+      metric(
+        'High exposure',
+        formatMoney(highExposure, true),
+        highExposure > 0 ? 'warn' : 'neutral',
+      ),
+      optionalMetric('Over limit', data.customerCreditRisk?.customersOverLimit, 'count', 'danger'),
+      optionalMetric('Inactive', data.customerRisk?.inactiveCustomers, 'count'),
+    ]),
+  };
+}
+
+function SectionHeader({
+  eyebrow,
+  title,
+  subtitle,
+  action,
+}: {
+  eyebrow: string;
+  title: string;
+  subtitle?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div
+      className="px-4 py-3 flex items-start justify-between gap-3"
+      style={{ borderBottom: '1px solid var(--aurora-border)' }}
+    >
+      <div className="min-w-0">
+        <div className="text-[11px] uppercase font-semibold tracking-wide" style={TEXT_MUTED}>
+          {eyebrow}
+        </div>
+        <h2 className="text-sm font-semibold truncate" style={TEXT}>
+          {title}
+        </h2>
+        {subtitle && (
+          <p className="text-xs mt-0.5 leading-5" style={TEXT_SECONDARY}>
+            {subtitle}
+          </p>
+        )}
+      </div>
+      {action && <div className="flex-shrink-0">{action}</div>}
+    </div>
+  );
+}
+
+function KpiTile({
   label,
   value,
   hint,
   tone,
-  highlight,
 }: {
   label: string;
   value: string;
   hint?: string;
-  tone?: 'good' | 'warn' | 'danger';
-  highlight?: boolean;
+  tone: Tone;
 }) {
-  const cls =
-    tone === 'danger'
-      ? 'bg-red-50 border-red-200'
-      : tone === 'warn'
-        ? 'bg-amber-50 border-amber-200'
-        : tone === 'good'
-          ? 'bg-emerald-50 border-emerald-200'
-          : highlight
-            ? 'bg-slate-900 text-white'
-            : '';
+  const toneStyle = TONE_STYLES[tone];
   return (
-    <Card className={`p-3 ${cls}`}>
-      <div
-        className={`text-[11px] uppercase tracking-wide ${highlight ? 'text-slate-300' : 'text-slate-500'}`}
-      >
-        {label}
+    <Card padding="none" className="p-4 min-w-0 overflow-hidden">
+      <div className="flex items-start justify-between gap-2">
+        <div
+          className="text-[11px] uppercase font-semibold tracking-wide truncate"
+          style={TEXT_MUTED}
+        >
+          {label}
+        </div>
+        <span
+          className="w-2 h-2 rounded-full mt-1 flex-shrink-0"
+          style={{ background: toneStyle.solid }}
+        />
       </div>
-      <div className={`text-xl font-bold mt-1 ${highlight ? 'text-white' : ''}`}>{value}</div>
+      <div
+        className="text-xl font-bold mt-2 tabular-nums truncate"
+        style={{ color: toneStyle.color }}
+      >
+        {value}
+      </div>
       {hint && (
-        <div className={`text-[11px] mt-0.5 ${highlight ? 'text-slate-300' : 'text-slate-500'}`}>
+        <div className="text-[11px] mt-1 leading-4 line-clamp-2" style={TEXT_SECONDARY}>
           {hint}
         </div>
       )}
@@ -722,32 +1610,171 @@ function Tile({
   );
 }
 
-function RoomStat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone: 'indigo' | 'amber' | 'emerald' | 'slate';
-}) {
-  const text =
-    tone === 'indigo'
-      ? 'text-indigo-700'
-      : tone === 'amber'
-        ? 'text-amber-700'
-        : tone === 'emerald'
-          ? 'text-emerald-700'
-          : 'text-slate-500';
+function StatusPanel({ tone, children }: { tone: Tone; children: ReactNode }) {
+  const colors = TONE_STYLES[tone];
   return (
-    <div className="p-3 text-center">
-      <div className={`text-lg font-bold ${text}`}>{value}</div>
-      <div className="text-[11px] uppercase tracking-wide text-slate-500 mt-0.5">{label}</div>
+    <div
+      className="rounded-lg border px-3 py-2 text-sm"
+      style={{ background: colors.background, borderColor: colors.border, color: colors.color }}
+    >
+      {children}
     </div>
   );
 }
 
-function ArBucket({
+function Subheading({ title }: { title: string }) {
+  return (
+    <div className="text-xs uppercase font-semibold tracking-wide" style={TEXT_MUTED}>
+      {title}
+    </div>
+  );
+}
+
+function EmptyLine({ text, tone = 'neutral' }: { text: string; tone?: Tone }) {
+  const colors = TONE_STYLES[tone];
+  return (
+    <div
+      className="rounded-lg border px-3 py-3 text-sm"
+      style={{ background: colors.background, borderColor: colors.border, color: colors.color }}
+    >
+      {text}
+    </div>
+  );
+}
+
+function ExceptionRow({ item }: { item: ReturnType<typeof normalizeException> }) {
+  const colors = TONE_STYLES[item.tone];
+  return (
+    <LinkOrDiv href={item.href}>
+      <div
+        className="rounded-lg border p-3"
+        style={{ ...SURFACE, borderLeft: `3px solid ${colors.solid}` }}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold leading-5" style={TEXT}>
+              {item.title}
+            </div>
+            {item.description && (
+              <div className="text-xs leading-5 mt-0.5" style={TEXT_SECONDARY}>
+                {item.description}
+              </div>
+            )}
+          </div>
+          <span
+            className="rounded-md border px-2 py-0.5 text-[11px] uppercase font-semibold whitespace-nowrap"
+            style={{
+              background: colors.background,
+              borderColor: colors.border,
+              color: colors.color,
+            }}
+          >
+            {item.tone}
+          </span>
+        </div>
+        {(item.owner || item.dueAt || item.value !== undefined) && (
+          <div className="flex items-center gap-2 flex-wrap mt-2 text-[11px]" style={TEXT_MUTED}>
+            {item.owner && <span>{item.owner}</span>}
+            {item.dueAt && <span>{formatShortDate(item.dueAt)}</span>}
+            {item.value !== undefined && <span>{formatMaybeNumber(item.value)}</span>}
+          </div>
+        )}
+      </div>
+    </LinkOrDiv>
+  );
+}
+
+function ActionLink({
+  action,
+}: {
+  action: ManagementAction & { id: string; href: string; tone: Tone };
+}) {
+  const colors = TONE_STYLES[action.tone];
+  return (
+    <Link
+      href={action.href}
+      className="block rounded-lg border p-3 transition-colors"
+      style={{ ...SURFACE, borderLeft: `3px solid ${colors.solid}` }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold leading-5" style={TEXT}>
+            {action.label ?? action.title}
+          </div>
+          {action.description && (
+            <div className="text-xs leading-5 mt-0.5" style={TEXT_SECONDARY}>
+              {action.description}
+            </div>
+          )}
+        </div>
+        {action.count !== undefined && (
+          <span className="text-xs font-semibold tabular-nums" style={{ color: colors.color }}>
+            {formatCount(action.count)}
+          </span>
+        )}
+      </div>
+    </Link>
+  );
+}
+
+function HealthBlock({ block }: { block: HealthBlockData }) {
+  const colors = TONE_STYLES[block.tone];
+  return (
+    <div
+      className="p-4 min-w-0"
+      style={{ borderRight: '1px solid var(--aurora-border)', minHeight: '100%' }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold uppercase tracking-wide" style={TEXT_MUTED}>
+            {block.title}
+          </div>
+          <div
+            className="text-xl font-bold mt-1 tabular-nums truncate"
+            style={{ color: colors.color }}
+          >
+            {block.value}
+          </div>
+        </div>
+        <StatusPill tone={block.tone}>{block.status}</StatusPill>
+      </div>
+      <p className="text-xs leading-5 mt-2" style={TEXT_SECONDARY}>
+        {block.summary}
+      </p>
+      <div className="grid grid-cols-2 gap-2 mt-3">
+        {block.metrics.map((metricItem) => (
+          <MiniMetricView key={metricItem.label} item={metricItem} />
+        ))}
+      </div>
+      {block.href && (
+        <div className="mt-3">
+          <TextLink href={block.href}>Open detail</TextLink>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ControlLine({ label, value, tone }: { label: string; value: string; tone: Tone }) {
+  const colors = TONE_STYLES[tone];
+  return (
+    <div className="rounded-lg border px-3 py-2" style={SURFACE}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm truncate" style={TEXT_SECONDARY}>
+          {label}
+        </span>
+        <span
+          className="text-sm font-semibold tabular-nums whitespace-nowrap"
+          style={{ color: colors.color }}
+        >
+          {value}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function AgingBucket({
   label,
   amount,
   total,
@@ -756,37 +1783,523 @@ function ArBucket({
   label: string;
   amount: number;
   total: number;
-  tone: 'emerald' | 'lime' | 'amber' | 'orange' | 'red';
+  tone: Tone;
 }) {
-  const pct = total > 0 ? (amount / total) * 100 : 0;
-  const bg =
-    tone === 'emerald'
-      ? 'bg-emerald-500'
-      : tone === 'lime'
-        ? 'bg-lime-500'
-        : tone === 'amber'
-          ? 'bg-amber-500'
-          : tone === 'orange'
-            ? 'bg-orange-500'
-            : 'bg-red-500';
-  const accent =
-    tone === 'emerald'
-      ? 'text-emerald-700'
-      : tone === 'lime'
-        ? 'text-lime-700'
-        : tone === 'amber'
-          ? 'text-amber-700'
-          : tone === 'orange'
-            ? 'text-orange-700'
-            : 'text-red-700';
+  const pct = percentage(amount, total);
   return (
-    <div className="border border-slate-100 rounded-lg p-3">
-      <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
-      <div className={`text-base font-bold mt-1 tabular-nums ${accent}`}>TZS {fmt(amount)}</div>
-      <div className="mt-1.5 w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-        <div className={`h-full ${bg}`} style={{ width: `${Math.min(100, pct)}%` }} />
+    <div>
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <span style={TEXT_SECONDARY}>{label}</span>
+        <span className="font-semibold tabular-nums" style={{ color: TONE_STYLES[tone].color }}>
+          {formatMoney(amount, true)}
+        </span>
       </div>
-      <div className="text-[10px] text-slate-500 mt-0.5 tabular-nums">{pct.toFixed(1)}%</div>
+      <div
+        className="h-2 rounded-full mt-1 overflow-hidden"
+        style={{ background: 'var(--aurora-bg-muted)' }}
+      >
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${Math.min(100, pct)}%`, background: TONE_STYLES[tone].solid }}
+        />
+      </div>
+      <div className="text-[11px] mt-1 tabular-nums" style={TEXT_MUTED}>
+        {formatPercent(pct)}
+      </div>
     </div>
   );
+}
+
+function InlineStat({
+  label,
+  value,
+  tone,
+  compact = false,
+}: {
+  label: string;
+  value: string;
+  tone: Tone;
+  compact?: boolean;
+}) {
+  const colors = TONE_STYLES[tone];
+  return (
+    <div
+      className={`${compact ? 'rounded-lg border p-3' : 'p-3 text-center min-w-0'}`}
+      style={compact ? SURFACE : { borderRight: '1px solid var(--aurora-border)' }}
+    >
+      <div
+        className={`${compact ? 'text-lg' : 'text-xl'} font-bold tabular-nums truncate`}
+        style={{ color: colors.color }}
+      >
+        {value}
+      </div>
+      <div className="text-[11px] uppercase tracking-wide mt-1 truncate" style={TEXT_MUTED}>
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function CriticalSkuRow({ sku }: { sku: CriticalSku }) {
+  const quantity = toNumber(sku.quantityOnHand);
+  const tone: Tone = quantity <= 0 ? 'danger' : 'warn';
+  return (
+    <Link
+      href="/westsides/inventory/live"
+      className="block rounded-lg border p-3"
+      style={{ ...SURFACE, borderLeft: `3px solid ${TONE_STYLES[tone].solid}` }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold truncate" style={TEXT}>
+            {sku.productName ?? 'Unknown product'}
+          </div>
+          <div className="text-[11px] mt-0.5 truncate" style={TEXT_MUTED}>
+            {sku.sku ?? 'No SKU'} | {sku.locationName ?? 'Unassigned branch/location'}
+          </div>
+        </div>
+        <div className="text-right flex-shrink-0">
+          <div
+            className="text-sm font-bold tabular-nums"
+            style={{ color: TONE_STYLES[tone].color }}
+          >
+            {formatAmount(quantity)}
+          </div>
+          <div className="text-[11px]" style={TEXT_MUTED}>
+            on hand
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+function RiskLane({ lane }: { lane: RiskLaneData }) {
+  const colors = TONE_STYLES[lane.tone];
+  return (
+    <Link
+      href={lane.href}
+      className="block p-4 min-w-0"
+      style={{
+        borderRight: '1px solid var(--aurora-border)',
+        borderBottom: '1px solid var(--aurora-border)',
+      }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold" style={TEXT}>
+            {lane.title}
+          </div>
+          <div className="text-xs mt-0.5" style={TEXT_SECONDARY}>
+            {lane.status}
+          </div>
+        </div>
+        <span
+          className="rounded-md border px-2 py-0.5 text-[11px] uppercase font-semibold"
+          style={{ background: colors.background, borderColor: colors.border, color: colors.color }}
+        >
+          {lane.label}
+        </span>
+      </div>
+      <div className="text-2xl font-bold mt-3 tabular-nums" style={{ color: colors.color }}>
+        {lane.value}
+      </div>
+      <p className="text-xs leading-5 mt-1" style={TEXT_SECONDARY}>
+        {lane.note}
+      </p>
+      {lane.metrics.length > 0 && (
+        <div className="grid grid-cols-2 gap-2 mt-3">
+          {lane.metrics.map((item) => (
+            <MiniMetricView key={item.label} item={item} />
+          ))}
+        </div>
+      )}
+    </Link>
+  );
+}
+
+function DivisionRow({
+  division,
+  total,
+}: {
+  division: NonNullable<Cockpit['byDivision']>[number] & { revenue: number; count: number };
+  total: number;
+}) {
+  const pct = percentage(division.revenue, total);
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <div className="min-w-0">
+          <div className="font-semibold truncate" style={TEXT}>
+            {division.name ?? 'Unassigned'}
+          </div>
+          <div className="text-[11px] truncate" style={TEXT_MUTED}>
+            {division.code ?? 'No code'} | {formatCount(division.count)} sale
+            {division.count === 1 ? '' : 's'}
+          </div>
+        </div>
+        <div className="text-right flex-shrink-0">
+          <div className="font-semibold tabular-nums" style={TEXT}>
+            {formatMoney(division.revenue, true)}
+          </div>
+          <div className="text-[11px] tabular-nums" style={TEXT_MUTED}>
+            {formatPercent(pct)}
+          </div>
+        </div>
+      </div>
+      <div
+        className="h-2 rounded-full mt-2 overflow-hidden"
+        style={{ background: 'var(--aurora-bg-muted)' }}
+      >
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${Math.min(100, pct)}%`, background: 'var(--aurora-primary)' }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function RankingList({
+  items,
+  emptyText,
+}: {
+  items: Array<{ id: string; title: string; meta: string; value: string }>;
+  emptyText: string;
+}) {
+  if (items.length === 0) {
+    return (
+      <div className="p-4">
+        <EmptyLine text={emptyText} tone="neutral" />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {items.slice(0, 7).map((item, index) => (
+        <div
+          key={`${item.id}-${index}`}
+          className="px-4 py-3 flex items-start gap-3"
+          style={{ borderBottom: '1px solid var(--aurora-border)' }}
+        >
+          <span
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0"
+            style={ELEVATED_SURFACE}
+          >
+            {index + 1}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold truncate" style={TEXT}>
+              {item.title}
+            </div>
+            <div className="text-[11px] truncate mt-0.5" style={TEXT_MUTED}>
+              {item.meta}
+            </div>
+          </div>
+          <div className="text-sm font-semibold tabular-nums flex-shrink-0" style={TEXT}>
+            {item.value}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ProgressSummary({
+  label,
+  value,
+  pct,
+  tone,
+}: {
+  label: string;
+  value: string;
+  pct: number;
+  tone: Tone;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span style={TEXT_SECONDARY}>{label}</span>
+        <span className="font-semibold tabular-nums" style={{ color: TONE_STYLES[tone].color }}>
+          {value}
+        </span>
+      </div>
+      <div
+        className="h-2 rounded-full mt-2 overflow-hidden"
+        style={{ background: 'var(--aurora-bg-muted)' }}
+      >
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${Math.min(100, pct)}%`, background: TONE_STYLES[tone].solid }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ActivityFeed({ items }: { items: ActivityItem[] }) {
+  if (items.length === 0) {
+    return (
+      <div className="p-4">
+        <EmptyLine text="No sales or folio activity returned yet." tone="neutral" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2">
+      {items.map((item) => {
+        const tone: Tone = item.kind === 'SALE' ? 'good' : 'brand';
+        return (
+          <div
+            key={`${item.kind}-${item.id}`}
+            className="p-4 min-w-0"
+            style={{
+              borderRight: '1px solid var(--aurora-border)',
+              borderBottom: '1px solid var(--aurora-border)',
+            }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2 min-w-0">
+                <span
+                  className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0"
+                  style={{ background: TONE_STYLES[tone].solid }}
+                />
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold truncate" style={TEXT}>
+                    {item.headline}
+                  </div>
+                  <div className="text-xs truncate mt-0.5" style={TEXT_SECONDARY}>
+                    {item.subline}
+                  </div>
+                </div>
+              </div>
+              <div className="text-[11px] tabular-nums flex-shrink-0" style={TEXT_MUTED}>
+                {timeAgo(item.when)}
+              </div>
+            </div>
+            <div
+              className="text-sm font-semibold tabular-nums mt-2"
+              style={{ color: TONE_STYLES[tone].color }}
+            >
+              {formatMoney(item.amount, true)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function QuickAction({ link }: { link: (typeof QUICK_LINKS)[number] }) {
+  const colors = TONE_STYLES[link.tone];
+  return (
+    <Link
+      href={link.href}
+      className="rounded-lg border px-3 py-2 min-w-0"
+      style={{ background: colors.background, borderColor: colors.border, color: colors.color }}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-semibold truncate">{link.label}</span>
+        <span className="text-[11px] uppercase tracking-wide flex-shrink-0">{link.group}</span>
+      </div>
+    </Link>
+  );
+}
+
+function MiniMetricView({ item }: { item: MiniMetric }) {
+  const tone = item.tone ?? 'neutral';
+  return (
+    <div className="rounded-lg border px-2.5 py-2 min-w-0" style={SURFACE}>
+      <div className="text-[11px] uppercase tracking-wide truncate" style={TEXT_MUTED}>
+        {item.label}
+      </div>
+      <div
+        className="text-xs font-semibold tabular-nums mt-0.5 truncate"
+        style={{ color: TONE_STYLES[tone].color }}
+      >
+        {item.value}
+      </div>
+    </div>
+  );
+}
+
+function StatusPill({ tone, children }: { tone: Tone; children: ReactNode }) {
+  const colors = TONE_STYLES[tone];
+  return (
+    <span
+      className="rounded-md border px-2 py-0.5 text-[11px] uppercase font-semibold whitespace-nowrap"
+      style={{ background: colors.background, borderColor: colors.border, color: colors.color }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function TextLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="text-xs font-semibold"
+      style={{ color: 'var(--aurora-primary-text)' }}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function LinkOrDiv({ href, children }: { href?: string; children: ReactNode }) {
+  return href ? <Link href={href}>{children}</Link> : <>{children}</>;
+}
+
+function metric(label: string, value: string, tone?: Tone): MiniMetric {
+  return { label, value, tone };
+}
+
+function optionalMetric(
+  label: string,
+  raw: NumericValue,
+  kind: 'money' | 'count' | 'percent',
+  tone?: Tone,
+): MiniMetric | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const value =
+    kind === 'money'
+      ? formatMoney(raw, true)
+      : kind === 'percent'
+        ? formatPercent(toNumber(raw))
+        : formatCount(raw);
+  return metric(label, value, tone);
+}
+
+function toneFromSeverity(severity?: string | null): Tone {
+  const value = String(severity ?? '').toLowerCase();
+  if (value.includes('critical') || value.includes('danger') || value.includes('high'))
+    return 'danger';
+  if (value.includes('warn') || value.includes('medium') || value.includes('due')) return 'warn';
+  if (value.includes('success') || value.includes('good') || value.includes('low')) return 'good';
+  if (value.includes('info')) return 'info';
+  if (value.includes('brand') || value.includes('primary')) return 'brand';
+  return 'neutral';
+}
+
+function hrefForActionCategory(category?: string | null) {
+  switch (String(category ?? '').toUpperCase()) {
+    case 'STOCK':
+      return '/westsides/inventory/live';
+    case 'PRICING':
+      return '/westsides/price-lists';
+    case 'FULFILLMENT':
+      return '/westsides/delivery-notes';
+    case 'CLOSE':
+    case 'CASH':
+      return '/westsides/daily-close';
+    case 'CREDIT':
+      return '/westsides/customers';
+    case 'SALES':
+      return '/westsides/reports';
+    default:
+      return '/westsides';
+  }
+}
+
+function valueTone(value: NumericValue): Tone {
+  const n = toNumber(value);
+  if (n > 0) return 'danger';
+  if (n < 0) return 'good';
+  return 'neutral';
+}
+
+function asArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function compact<T>(items: Array<T | null | undefined | false>): T[] {
+  return items.filter(Boolean) as T[];
+}
+
+function toNumber(value: NumericValue): number {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function firstNumber(...values: NumericValue[]): number {
+  for (const value of values) {
+    if (value !== null && value !== undefined && value !== '') return toNumber(value);
+  }
+  return 0;
+}
+
+function firstDefined(...values: NumericValue[]): NumericValue {
+  return values.find((value) => value !== null && value !== undefined && value !== '');
+}
+
+function percentage(value: NumericValue, total: NumericValue): number {
+  const denominator = toNumber(total);
+  if (denominator <= 0) return 0;
+  return (toNumber(value) / denominator) * 100;
+}
+
+function formatAmount(value: NumericValue) {
+  return new Intl.NumberFormat('en-TZ', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(toNumber(value));
+}
+
+function formatCount(value: NumericValue) {
+  return new Intl.NumberFormat('en-TZ', { maximumFractionDigits: 0 }).format(toNumber(value));
+}
+
+function formatMoney(value: NumericValue, compactValue = false) {
+  return `TZS ${new Intl.NumberFormat('en-TZ', {
+    notation: compactValue ? 'compact' : 'standard',
+    minimumFractionDigits: compactValue ? 0 : 2,
+    maximumFractionDigits: compactValue ? 1 : 2,
+  }).format(toNumber(value))}`;
+}
+
+function formatMaybeNumber(value: NumericValue) {
+  const n = toNumber(value);
+  return Number.isInteger(n) ? formatCount(n) : formatAmount(n);
+}
+
+function formatPercent(value: NumericValue) {
+  return `${toNumber(value).toFixed(1)}%`;
+}
+
+function formatDelta(value: NumericValue) {
+  const n = toNumber(value);
+  if (n === 0) return '0.0%';
+  return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`;
+}
+
+function safeDateMs(value?: string) {
+  const ms = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function timeAgo(iso: string) {
+  const eventMs = safeDateMs(iso);
+  if (!eventMs) return 'unknown';
+  const ms = Date.now() - eventMs;
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return new Date(eventMs).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+}
+
+function formatAsOf(iso?: string) {
+  const ms = safeDateMs(iso);
+  if (!ms) return 'unknown time';
+  return new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatShortDate(iso: string) {
+  const ms = safeDateMs(iso);
+  if (!ms) return 'unknown';
+  return new Date(ms).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
 }
