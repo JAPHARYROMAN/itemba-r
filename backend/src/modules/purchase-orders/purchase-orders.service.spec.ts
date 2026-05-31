@@ -31,6 +31,14 @@ function makeService() {
       findMany: jest.fn().mockResolvedValue([{ id: 'product-1', companyId: 'company-1' }]),
       findUnique: jest.fn().mockResolvedValue({ id: 'product-1', trackInventory: false }),
     },
+    fuelTank: {
+      findMany: jest.fn().mockResolvedValue([]),
+      update: jest.fn(async ({ data }: any) => ({ id: 'tank-1', ...data })),
+    },
+    fuelDelivery: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn(async ({ data }: any) => ({ id: 'fuel-delivery-1', ...data })),
+    },
     unitOfMeasure: {
       findMany: jest.fn().mockResolvedValue([{ id: 'unit-1', companyId: 'company-1' }]),
     },
@@ -62,7 +70,7 @@ function makeService() {
     accountResolver,
   );
 
-  return { service, prisma, postingEngine, accountResolver };
+  return { service, prisma, postingEngine, accountResolver, inventoryMovements, codes };
 }
 
 const user = { id: 'user-1', permissions: ['purchases.create'] } as any;
@@ -174,6 +182,71 @@ describe('PurchaseOrdersService payment state', () => {
         referenceId: 'po-1',
       }),
       prisma,
+    );
+  });
+
+  it('posts received fuel purchase lines into the matching petroleum tank', async () => {
+    const { service, prisma, inventoryMovements, codes } = makeService();
+    prisma.product.findUnique.mockResolvedValue({ id: 'product-1', trackInventory: true });
+    prisma.fuelTank.findMany.mockResolvedValue([
+      { id: 'tank-1', tankCode: 'DIESEL-1', tankName: 'Diesel Tank 1' },
+    ]);
+    prisma.purchaseOrder.findFirst.mockResolvedValue({
+      id: 'po-1',
+      purchaseOrderNumber: 'PO-2026-000001',
+      companyId: 'company-1',
+      branchId: 'branch-1',
+      divisionId: 'division-1',
+      supplierId: 'supplier-1',
+      supplierName: 'Fuel Supplier Ltd',
+      purchaseType: 'CASH_PURCHASE',
+      totalAmount: 2000000,
+      expectedDate: null,
+      currency: 'TZS',
+      status: 'CONFIRMED',
+      payableId: null,
+      lines: [
+        {
+          productId: 'product-1',
+          quantity: 1000,
+          unitId: 'unit-1',
+          unitCost: 2000,
+          lineTotal: 2000000,
+          batchNumber: null,
+          expiryDate: null,
+        },
+      ],
+    });
+
+    await service.receive('po-1', user);
+
+    expect(inventoryMovements.createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        movementType: 'PURCHASE_RECEIPT',
+        quantity: 1000,
+        referenceType: 'PurchaseOrder',
+        referenceId: 'po-1',
+        branchId: 'branch-1',
+      }),
+    );
+    expect(prisma.fuelDelivery.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          purchaseOrderId: 'po-1',
+          tankId: 'tank-1',
+          productId: 'product-1',
+          acceptedLitres: 1000,
+          status: 'POSTED',
+          postedById: 'user-1',
+        }),
+      }),
+    );
+    expect(prisma.fuelTank.update).toHaveBeenCalledWith({
+      where: { id: 'tank-1' },
+      data: { currentBookBalance: { increment: 1000 } },
+    });
+    expect(codes.next).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: 'FuelDelivery', companyId: 'company-1' }),
     );
   });
 });

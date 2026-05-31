@@ -21,6 +21,13 @@ type PurchaseOrderReferenceIds = {
   lines?: PurchaseOrderLineDto[];
 };
 
+type FuelPurchaseReceipt = {
+  tankId: string;
+  productId: string;
+  quantity: number;
+  totalCost: number;
+};
+
 function calcLineTotals(line: {
   quantity: number;
   unitCost: number;
@@ -517,6 +524,7 @@ export class PurchaseOrdersService {
 
     const record = await this.prisma.$transaction(async (tx) => {
       const receivedAt = new Date();
+      const fuelReceipts = new Map<string, FuelPurchaseReceipt>();
 
       for (const line of existing.lines as any[]) {
         const product = await tx.product.findUnique({
@@ -550,8 +558,35 @@ export class PurchaseOrdersService {
             branchId: receivingBranchId,
             tx,
           });
+
+          const tank = await this.resolveSingleFuelTankForReceipt({
+            companyId: existing.companyId,
+            branchId: receivingBranchId,
+            productId: line.productId,
+            tx,
+          });
+          if (tank) {
+            const key = `${tank.id}:${line.productId}`;
+            const current = fuelReceipts.get(key) ?? {
+              tankId: tank.id,
+              productId: line.productId,
+              quantity: 0,
+              totalCost: 0,
+            };
+            current.quantity += Number(line.quantity);
+            current.totalCost += Number(line.lineTotal);
+            fuelReceipts.set(key, current);
+          }
         }
       }
+
+      await this.postOperationsFuelReceipts({
+        order: existing as any,
+        receipts: Array.from(fuelReceipts.values()),
+        receivedAt,
+        userId,
+        tx,
+      });
 
       let payableId = existing.payableId ?? null;
       if (existing.purchaseType !== PurchaseType.CASH_PURCHASE && !payableId) {
@@ -626,6 +661,113 @@ export class PurchaseOrdersService {
     });
 
     return record;
+  }
+
+  private async resolveSingleFuelTankForReceipt(input: {
+    companyId: string;
+    branchId: string;
+    productId: string;
+    tx: Prisma.TransactionClient;
+  }) {
+    const tanks = await input.tx.fuelTank.findMany({
+      where: {
+        companyId: input.companyId,
+        branchId: input.branchId,
+        productId: input.productId,
+        deletedAt: null,
+        status: 'ACTIVE',
+      },
+      select: { id: true, tankCode: true, tankName: true },
+      orderBy: { tankCode: 'asc' },
+    });
+
+    if (tanks.length === 0) return null;
+    if (tanks.length > 1) {
+      throw new BadRequestException(
+        'This fuel product has multiple active tanks at the receiving branch. Receive it through Petroleum > Fuel Deliveries so the tank is selected explicitly.',
+      );
+    }
+    return tanks[0];
+  }
+
+  private async postOperationsFuelReceipts(input: {
+    order: {
+      id: string;
+      purchaseOrderNumber: string;
+      companyId: string;
+      divisionId: string | null;
+      branchId: string | null;
+      supplierId: string | null;
+      supplierName: string | null;
+      expectedDate: Date | null;
+      currency: string;
+    };
+    receipts: FuelPurchaseReceipt[];
+    receivedAt: Date;
+    userId: string;
+    tx: Prisma.TransactionClient;
+  }) {
+    if (input.receipts.length === 0) return;
+
+    for (const receipt of input.receipts) {
+      const existingPostedDelivery = await input.tx.fuelDelivery.findFirst({
+        where: {
+          purchaseOrderId: input.order.id,
+          tankId: receipt.tankId,
+          productId: receipt.productId,
+          status: 'POSTED',
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      if (existingPostedDelivery) {
+        throw new BadRequestException(
+          'A posted petroleum delivery already exists for this purchase order and tank. Avoid receiving the same fuel purchase twice.',
+        );
+      }
+
+      if (input.order.supplierId) {
+        const deliveryNumber = await this.codes.next({
+          entityType: 'FuelDelivery',
+          companyId: input.order.companyId,
+          tx: input.tx,
+        });
+        const unitCost =
+          receipt.quantity > 0 ? roundMoney(receipt.totalCost / receipt.quantity) : undefined;
+
+        await input.tx.fuelDelivery.create({
+          data: {
+            deliveryNumber,
+            companyId: input.order.companyId,
+            branchId: input.order.branchId!,
+            supplierId: input.order.supplierId,
+            productId: receipt.productId,
+            tankId: receipt.tankId,
+            purchaseOrderId: input.order.id,
+            deliveryDate: input.receivedAt,
+            deliveryNoteNumber: input.order.purchaseOrderNumber,
+            orderedLitres: receipt.quantity,
+            deliveredLitres: receipt.quantity,
+            acceptedLitres: receipt.quantity,
+            rejectedLitres: 0,
+            unitCost,
+            totalCost: roundMoney(receipt.totalCost),
+            notes: `Auto-posted from Operations purchase order ${input.order.purchaseOrderNumber}`,
+            status: 'POSTED',
+            receivedById: input.userId,
+            approvedById: input.userId,
+            approvedAt: input.receivedAt,
+            postedById: input.userId,
+            postedAt: input.receivedAt,
+          },
+        });
+      }
+
+      await input.tx.fuelTank.update({
+        where: { id: receipt.tankId },
+        data: { currentBookBalance: { increment: receipt.quantity } },
+      });
+    }
   }
 
   private async postPurchaseOrderLedger(input: {
