@@ -22,6 +22,16 @@ interface LockedFuelShiftRow {
   status: string;
 }
 
+export interface ProductSalesSummaryItem {
+  productId: string;
+  productCode: string | null;
+  productName: string;
+  litresSold: number;
+  expectedAmount: number;
+  averagePricePerLitre: number;
+  nozzleCount: number;
+}
+
 @Injectable()
 export class FuelShiftsService {
   constructor(
@@ -109,6 +119,7 @@ export class FuelShiftsService {
     const record = await this.prisma.fuelShift.findFirst({
       where: { id, deletedAt: null },
       include: {
+        branch: { select: { id: true, code: true, name: true } },
         openedBy: { select: { id: true, fullName: true } },
         submittedBy: { select: { id: true, fullName: true } },
         supervisorApproved: { select: { id: true, fullName: true } },
@@ -122,18 +133,23 @@ export class FuelShiftsService {
         },
         nozzleReadings: {
           include: {
-            nozzle: { select: { id: true, nozzleName: true } },
+            nozzle: { select: { id: true, nozzleCode: true, nozzleName: true } },
             pump: { select: { id: true, pumpCode: true, pumpName: true } },
-            product: { select: { id: true, name: true } },
+            tank: { select: { id: true, tankCode: true, tankName: true } },
+            product: { select: { id: true, productCode: true, name: true } },
             attendant: { select: { id: true, fullName: true } },
           },
+          orderBy: [{ pump: { pumpCode: 'asc' } }, { nozzle: { nozzleCode: 'asc' } }],
         },
         collections: true,
       },
     });
     if (!record) throw new NotFoundException('Fuel shift not found');
     if (user) await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
-    return record;
+    return {
+      ...record,
+      salesSummary: this.buildShiftSalesSummary(record.nozzleReadings, record.collections),
+    };
   }
 
   async openShift(dto: OpenFuelShiftDto, user: AuthUser) {
@@ -156,6 +172,7 @@ export class FuelShiftsService {
     });
 
     // Build nozzle reading creates
+    const pricingAt = new Date(dto.startTime);
     const nozzleReadingCreates = await Promise.all(
       nozzles.map(async (nozzle) => {
         // Try branch-specific price first, then company-wide
@@ -165,7 +182,10 @@ export class FuelShiftsService {
             branchId: dto.branchId,
             productId: nozzle.productId,
             status: 'ACTIVE',
+            effectiveFrom: { lte: pricingAt },
+            OR: [{ effectiveTo: null }, { effectiveTo: { gte: pricingAt } }],
           },
+          orderBy: { effectiveFrom: 'desc' },
         });
         if (!price) {
           price = await this.prisma.fuelPrice.findFirst({
@@ -174,7 +194,10 @@ export class FuelShiftsService {
               branchId: null,
               productId: nozzle.productId,
               status: 'ACTIVE',
+              effectiveFrom: { lte: pricingAt },
+              OR: [{ effectiveTo: null }, { effectiveTo: { gte: pricingAt } }],
             },
+            orderBy: { effectiveFrom: 'desc' },
           });
         }
 
@@ -414,8 +437,12 @@ export class FuelShiftsService {
       if (lockedShift.status === 'CLOSED') {
         return this.buildClosedShiftSummary(id, tx, true);
       }
-      if (lockedShift.status !== 'MANAGER_APPROVED') {
-        throw new BadRequestException('Only MANAGER_APPROVED shifts can be closed');
+      const previousStatus = lockedShift.status;
+      const closableStatuses = ['OPEN', 'SUBMITTED', 'SUPERVISOR_APPROVED', 'MANAGER_APPROVED'];
+      if (!closableStatuses.includes(lockedShift.status)) {
+        throw new BadRequestException(
+          'Only OPEN, SUBMITTED, SUPERVISOR_APPROVED, or MANAGER_APPROVED shifts can be closed',
+        );
       }
 
       const readings = await tx.fuelNozzleReading.findMany({
@@ -444,7 +471,7 @@ export class FuelShiftsService {
         }),
         tx.product.findMany({
           where: { id: { in: productIds }, deletedAt: null },
-          select: { id: true, name: true, companyId: true, baseUnitId: true },
+          select: { id: true, productCode: true, name: true, companyId: true, baseUnitId: true },
         }),
       ]);
       const tankById = new Map(tanks.map((tank) => [tank.id, tank]));
@@ -533,6 +560,15 @@ export class FuelShiftsService {
         totalLitresSold += litresSold;
         totalExpectedSales += expectedAmount;
       }
+      const productSales = this.buildProductSalesSummary(
+        validatedReadings.map(({ reading, litresSold, expectedAmount }) => ({
+          productId: reading.productId,
+          pricePerLitre: reading.pricePerLitre,
+          litresSold,
+          expectedAmount,
+          product: productById.get(reading.productId) ?? null,
+        })),
+      );
 
       const collectionsAgg = await tx.fuelShiftCollection.aggregate({
         where: { fuelShiftId: id },
@@ -606,6 +642,8 @@ export class FuelShiftsService {
         totalExpectedSales,
         totalCollections,
         shortageOrExcess: totalCollections - totalExpectedSales,
+        productSales,
+        previousStatus,
         alreadyClosed: false,
       };
     });
@@ -616,11 +654,11 @@ export class FuelShiftsService {
       entityId: id,
       userId,
       companyId: result.companyId,
-      oldValue: { status: result.alreadyClosed ? 'CLOSED' : 'MANAGER_APPROVED' } as any,
+      oldValue: { status: result.previousStatus } as any,
       newValue: { status: 'CLOSED', alreadyClosed: result.alreadyClosed } as any,
     });
 
-    const { companyId, ...response } = result;
+    const { companyId, previousStatus, ...response } = result;
     return response;
   }
 
@@ -889,11 +927,17 @@ export class FuelShiftsService {
     const [shift, readings, collectionsAgg] = await Promise.all([
       tx.fuelShift.findUniqueOrThrow({
         where: { id },
-        select: { companyId: true },
+        select: { companyId: true, status: true },
       }),
       tx.fuelNozzleReading.findMany({
         where: { fuelShiftId: id },
-        select: { litresSold: true, expectedAmount: true },
+        select: {
+          productId: true,
+          litresSold: true,
+          pricePerLitre: true,
+          expectedAmount: true,
+          product: { select: { id: true, productCode: true, name: true } },
+        },
       }),
       tx.fuelShiftCollection.aggregate({
         where: { fuelShiftId: id },
@@ -915,7 +959,85 @@ export class FuelShiftsService {
       totalExpectedSales,
       totalCollections,
       shortageOrExcess: totalCollections - totalExpectedSales,
+      productSales: this.buildProductSalesSummary(readings),
+      previousStatus: shift.status,
       alreadyClosed,
     };
+  }
+
+  private buildShiftSalesSummary(
+    readings: Array<{
+      productId: string;
+      pricePerLitre: unknown;
+      litresSold: unknown;
+      expectedAmount: unknown;
+      product?: { productCode?: string | null; name?: string | null } | null;
+    }>,
+    collections: Array<{ amount: unknown }>,
+  ) {
+    const totalLitresSold = readings.reduce(
+      (sum, reading) => sum + Number(reading.litresSold ?? 0),
+      0,
+    );
+    const totalExpectedSales = readings.reduce(
+      (sum, reading) => sum + Number(reading.expectedAmount ?? 0),
+      0,
+    );
+    const totalCollections = collections.reduce(
+      (sum, collection) => sum + Number(collection.amount ?? 0),
+      0,
+    );
+
+    return {
+      totalLitresSold,
+      totalExpectedSales,
+      totalCollections,
+      shortageOrExcess: totalCollections - totalExpectedSales,
+      productSales: this.buildProductSalesSummary(readings),
+    };
+  }
+
+  private buildProductSalesSummary(
+    rows: Array<{
+      productId: string;
+      pricePerLitre: unknown;
+      litresSold: unknown;
+      expectedAmount: unknown;
+      product?: { productCode?: string | null; name?: string | null } | null;
+    }>,
+  ): ProductSalesSummaryItem[] {
+    const byProduct = new Map<string, ProductSalesSummaryItem>();
+
+    for (const row of rows) {
+      const litresSold = Number(row.litresSold ?? 0);
+      const expectedAmount = Number(row.expectedAmount ?? 0);
+      const existing = byProduct.get(row.productId);
+
+      if (existing) {
+        existing.litresSold += litresSold;
+        existing.expectedAmount += expectedAmount;
+        existing.nozzleCount += 1;
+        existing.averagePricePerLitre =
+          existing.litresSold > 0
+            ? existing.expectedAmount / existing.litresSold
+            : Number(row.pricePerLitre ?? 0);
+        continue;
+      }
+
+      byProduct.set(row.productId, {
+        productId: row.productId,
+        productCode: row.product?.productCode ?? null,
+        productName: row.product?.name ?? 'Unknown product',
+        litresSold,
+        expectedAmount,
+        averagePricePerLitre:
+          litresSold > 0 ? expectedAmount / litresSold : Number(row.pricePerLitre ?? 0),
+        nozzleCount: 1,
+      });
+    }
+
+    return Array.from(byProduct.values()).sort((a, b) =>
+      a.productName.localeCompare(b.productName),
+    );
   }
 }
