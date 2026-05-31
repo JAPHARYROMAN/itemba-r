@@ -26,6 +26,8 @@ interface Cockpit {
     outstandingAR?: NumericValue;
     openFoliosCount?: NumericValue;
     openFoliosTotal?: NumericValue;
+    dailyCloseScore?: NumericValue;
+    actionsCritical?: NumericValue;
   };
   yesterday?: { sales?: NumericValue; count?: NumericValue; deltaPct?: NumericValue };
   byDivision?: Array<{
@@ -188,6 +190,7 @@ interface Cockpit {
     };
   };
   dailyClose?: OptionalHealth & {
+    date?: string;
     status?: string;
     score?: NumericValue;
     blockers?: NumericValue;
@@ -195,6 +198,29 @@ interface Cockpit {
     lastClosedAt?: string;
     openItems?: NumericValue;
     variance?: NumericValue;
+    expected?: {
+      salesCount?: NumericValue;
+      totalSales?: NumericValue;
+      paidAmount?: NumericValue;
+      outstandingAmount?: NumericValue;
+    };
+    exceptions?: Record<string, NumericValue | string | boolean | null | undefined>;
+    checks?: ReadinessCheck[];
+    actions?: ManagementAction[];
+    sourceLinks?: ReadinessSourceLink[];
+    sources?: ReadinessSourceLink[];
+  };
+  readiness?: {
+    status?: string;
+    score?: NumericValue;
+    blockers?: NumericValue;
+    warnings?: NumericValue;
+    summary?: string;
+    checks?: ReadinessCheck[];
+    checklist?: ReadinessCheck[];
+    actions?: ManagementAction[];
+    sourceLinks?: ReadinessSourceLink[];
+    sources?: ReadinessSourceLink[];
   };
   customerRisk?: OptionalHealth & {
     overdueCustomers?: NumericValue;
@@ -298,6 +324,31 @@ interface ManagementAction {
   severity?: string;
   category?: string;
   count?: NumericValue;
+  amount?: NumericValue;
+}
+
+interface ReadinessCheck {
+  key?: string;
+  id?: string;
+  title?: string;
+  label?: string;
+  status?: string;
+  score?: NumericValue;
+  message?: string;
+  description?: string;
+  details?: Record<string, NumericValue | string | boolean | null | undefined>;
+  href?: string;
+  sourceHref?: string;
+  sourceLabel?: string;
+}
+
+interface ReadinessSourceLink {
+  label?: string;
+  title?: string;
+  href?: string;
+  description?: string;
+  count?: NumericValue;
+  tone?: Tone;
 }
 
 interface MiniMetric {
@@ -324,6 +375,48 @@ interface RiskLaneData {
   value: string;
   label: string;
   note: string;
+  metrics: MiniMetric[];
+}
+
+interface ReadinessChecklistItem {
+  id: string;
+  title: string;
+  status: string;
+  score: number;
+  tone: Tone;
+  message: string;
+  href: string;
+  details: MiniMetric[];
+}
+
+interface ReadinessActionItem {
+  id: string;
+  title: string;
+  description: string;
+  href: string;
+  tone: Tone;
+  count?: NumericValue;
+}
+
+interface ReadinessModel {
+  status: string;
+  score: number;
+  tone: Tone;
+  blockers: number;
+  warnings: number;
+  summary: string;
+  lastClosedLabel: string;
+  sourceCoverage: string;
+  checklist: ReadinessChecklistItem[];
+  actions: ReadinessActionItem[];
+  sources: Array<
+    Required<Pick<ReadinessSourceLink, 'href'>> & {
+      label: string;
+      description: string;
+      tone: Tone;
+      count?: NumericValue;
+    }
+  >;
   metrics: MiniMetric[];
 }
 
@@ -591,6 +684,8 @@ export default function WestsidesCockpitPage() {
               tone={model.rooms.total > 0 && model.rooms.occupancyRate >= 70 ? 'good' : 'neutral'}
             />
           </section>
+
+          <ReadinessCommandPanel readiness={model.readiness} />
 
           <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
             <Card padding="none" className="xl:col-span-2 overflow-hidden">
@@ -1071,6 +1166,23 @@ function buildCockpitModel(data: Cockpit) {
     expiringBatches,
   });
 
+  const readiness = buildReadinessModel(data, {
+    todaySales,
+    cashCollected,
+    cashCollectionRate,
+    outstandingAR,
+    overdueAmount,
+    overdueCount,
+    outOfStock,
+    lowStock,
+    pendingStockDamage,
+    expiringBatches,
+    dailyCloseOpenItems,
+    openFoliosTotal,
+    actions,
+    exceptions,
+  });
+
   const riskLanes: RiskLaneData[] = [
     buildDeliveryLane(data),
     buildPricingLane(data),
@@ -1120,7 +1232,315 @@ function buildCockpitModel(data: Cockpit) {
     healthBlocks,
     exceptions,
     actions,
+    readiness,
     riskLanes,
+  };
+}
+
+function buildReadinessModel(
+  data: Cockpit,
+  derived: {
+    todaySales: number;
+    cashCollected: number;
+    cashCollectionRate: number;
+    outstandingAR: number;
+    overdueAmount: number;
+    overdueCount: number;
+    outOfStock: number;
+    lowStock: number;
+    pendingStockDamage: number;
+    expiringBatches: number;
+    dailyCloseOpenItems: number;
+    openFoliosTotal: number;
+    actions: Array<{
+      id: string;
+      label?: string;
+      title?: string;
+      description?: string;
+      href: string;
+      tone: Tone;
+      count?: NumericValue;
+    }>;
+    exceptions: Array<{ tone: Tone }>;
+  },
+): ReadinessModel {
+  const fallbackBlockers =
+    (derived.outOfStock > 0 ? 1 : 0) +
+    (derived.pendingStockDamage > 0 ? 1 : 0) +
+    (derived.exceptions.some((item) => item.tone === 'danger') ? 1 : 0);
+  const fallbackWarnings =
+    (derived.lowStock > 0 ? 1 : 0) +
+    (derived.expiringBatches > 0 ? 1 : 0) +
+    (derived.overdueAmount > 0 ? 1 : 0) +
+    (derived.openFoliosTotal > 0 ? 1 : 0);
+  const blockers = firstNumber(
+    data.readiness?.blockers,
+    data.dailyClose?.blockers,
+    fallbackBlockers,
+  );
+  const warnings = firstNumber(
+    data.readiness?.warnings,
+    data.dailyClose?.warnings,
+    fallbackWarnings,
+  );
+  const fallbackScore = 100 - blockers * 18 - warnings * 4;
+  const score = clampPercent(
+    firstNumber(
+      data.readiness?.score,
+      data.dailyClose?.score,
+      data.kpis?.dailyCloseScore,
+      fallbackScore,
+    ),
+  );
+  const status = formatReadinessStatus(
+    data.readiness?.status ??
+      data.dailyClose?.status ??
+      (blockers > 0 ? 'BLOCKED' : warnings > 0 ? 'WARN' : score >= 90 ? 'READY' : 'WATCH'),
+  );
+  const tone = toneForReadiness(status, score, blockers, warnings);
+  const backendChecks = [
+    ...asArray<ReadinessCheck>(data.readiness?.checks),
+    ...asArray<ReadinessCheck>(data.readiness?.checklist),
+    ...asArray<ReadinessCheck>(data.dailyClose?.checks),
+  ];
+  const checklist =
+    backendChecks.length > 0
+      ? dedupeBy(
+          backendChecks.map((check, index) => normalizeReadinessCheck(check, index)),
+          (check) => check.id,
+        ).slice(0, 6)
+      : buildFallbackReadinessChecklist(derived);
+
+  const backendActions = [
+    ...asArray<ManagementAction>(data.readiness?.actions),
+    ...asArray<ManagementAction>(data.dailyClose?.actions),
+  ].map((action, index) => normalizeReadinessAction(action, index));
+  const generatedActions = derived.actions.map((action) => ({
+    id: action.id,
+    title: action.label ?? action.title ?? 'Open action',
+    description: action.description ?? '',
+    href: action.href,
+    tone: action.tone,
+    count: action.count,
+  }));
+  const actions = dedupeBy([...backendActions, ...generatedActions], (action) => action.id).slice(
+    0,
+    5,
+  );
+
+  const backendSources = [
+    ...asArray<ReadinessSourceLink>(data.readiness?.sourceLinks),
+    ...asArray<ReadinessSourceLink>(data.readiness?.sources),
+    ...asArray<ReadinessSourceLink>(data.dailyClose?.sourceLinks),
+    ...asArray<ReadinessSourceLink>(data.dailyClose?.sources),
+  ].map((source, index) => normalizeReadinessSource(source, index));
+  const generatedSources: ReadinessModel['sources'] = [
+    {
+      label: 'Daily close',
+      href: '/westsides/daily-close',
+      description: 'Payment evidence, posting checks, and cash reconciliation.',
+      tone,
+      count: blockers + warnings,
+    },
+    {
+      label: 'Live inventory',
+      href: '/westsides/inventory/live',
+      description: 'Stockouts, low stock, reservation pressure, and value at risk.',
+      tone: derived.outOfStock > 0 ? 'danger' : derived.lowStock > 0 ? 'warn' : 'good',
+      count: derived.outOfStock + derived.lowStock,
+    },
+    {
+      label: 'Credit reports',
+      href: '/westsides/reports',
+      description: 'Receivables, overdue balances, customer risk, and sales evidence.',
+      tone: derived.overdueAmount > 0 ? 'warn' : 'good',
+      count: derived.overdueCount,
+    },
+    {
+      label: 'Delivery notes',
+      href: '/westsides/delivery-notes',
+      description: 'Dispatch status and fulfilment follow-through.',
+      tone: 'neutral',
+    },
+  ];
+  const sources = dedupeBy([...backendSources, ...generatedSources], (source) => source.href).slice(
+    0,
+    6,
+  );
+
+  return {
+    status,
+    score,
+    tone,
+    blockers,
+    warnings,
+    summary:
+      data.readiness?.summary ??
+      (blockers > 0
+        ? 'Production readiness is blocked until high-severity controls are cleared.'
+        : warnings > 0
+          ? 'Production readiness is above operating threshold, with warnings to clear before close.'
+          : 'Production readiness is clear based on the current cockpit evidence.'),
+    lastClosedLabel: data.dailyClose?.lastClosedAt
+      ? formatShortDate(data.dailyClose.lastClosedAt)
+      : 'Not closed today',
+    sourceCoverage: `${formatCount(sources.length)} source link${sources.length === 1 ? '' : 's'} connected`,
+    checklist,
+    actions,
+    sources,
+    metrics: compact([
+      metric('Blockers', formatCount(blockers), blockers > 0 ? 'danger' : 'good'),
+      metric('Warnings', formatCount(warnings), warnings > 0 ? 'warn' : 'good'),
+      metric(
+        'Cash collected',
+        formatMoney(derived.cashCollected, true),
+        derived.cashCollectionRate >= 75 || derived.todaySales === 0 ? 'good' : 'warn',
+      ),
+      metric(
+        'Credit exposure',
+        formatMoney(derived.outstandingAR, true),
+        derived.overdueAmount > 0 ? 'warn' : 'good',
+      ),
+      optionalMetric('Expected sales', data.dailyClose?.expected?.totalSales, 'money'),
+      optionalMetric('Paid today', data.dailyClose?.expected?.paidAmount, 'money'),
+    ]),
+  };
+}
+
+function normalizeReadinessCheck(check: ReadinessCheck, index: number): ReadinessChecklistItem {
+  const title =
+    check.title ?? check.label ?? humanizeKey(check.key ?? check.id ?? `Check ${index + 1}`);
+  const status = formatReadinessStatus(
+    check.status ?? (toNumber(check.score) >= 90 ? 'READY' : 'WARN'),
+  );
+  const score = clampPercent(firstNumber(check.score, status === 'READY' ? 100 : 70));
+  return {
+    id: check.key ?? check.id ?? title.toLowerCase().replace(/\s+/g, '-'),
+    title,
+    status,
+    score,
+    tone: toneForReadiness(status, score, status === 'BLOCKED' ? 1 : 0, status === 'WARN' ? 1 : 0),
+    message: check.message ?? check.description ?? 'Readiness check returned without detail.',
+    href: check.href ?? check.sourceHref ?? hrefForReadinessCheck(check.key ?? check.id ?? title),
+    details: detailsToMetrics(check.details),
+  };
+}
+
+function buildFallbackReadinessChecklist(derived: {
+  todaySales: number;
+  cashCollectionRate: number;
+  overdueAmount: number;
+  overdueCount: number;
+  outOfStock: number;
+  lowStock: number;
+  pendingStockDamage: number;
+  expiringBatches: number;
+  dailyCloseOpenItems: number;
+  openFoliosTotal: number;
+}): ReadinessChecklistItem[] {
+  const stockScore = clampPercent(100 - derived.outOfStock * 25 - derived.lowStock * 5);
+  const cashScore = derived.todaySales === 0 ? 100 : clampPercent(derived.cashCollectionRate);
+  const creditScore = clampPercent(100 - derived.overdueCount * 8);
+  const closeScore = clampPercent(
+    100 -
+      derived.dailyCloseOpenItems * 8 -
+      (derived.openFoliosTotal > 0 ? 12 : 0) -
+      derived.pendingStockDamage * 5,
+  );
+
+  return [
+    {
+      id: 'cash-evidence',
+      title: 'Cash evidence',
+      status: cashScore >= 90 || derived.todaySales === 0 ? 'READY' : 'WARN',
+      score: cashScore,
+      tone: cashScore >= 90 || derived.todaySales === 0 ? 'good' : 'warn',
+      message:
+        derived.todaySales === 0
+          ? 'No trading volume yet, so cash evidence is clear by fallback.'
+          : `${formatPercent(cashScore)} of today's revenue has been collected.`,
+      href: '/westsides/daily-close',
+      details: [metric('Collection', formatPercent(cashScore), cashScore >= 90 ? 'good' : 'warn')],
+    },
+    {
+      id: 'stock-control',
+      title: 'Stock control',
+      status: stockScore >= 90 ? 'READY' : derived.outOfStock > 0 ? 'BLOCKED' : 'WARN',
+      score: stockScore,
+      tone: stockScore >= 90 ? 'good' : derived.outOfStock > 0 ? 'danger' : 'warn',
+      message: `${formatCount(derived.outOfStock)} out-of-stock and ${formatCount(derived.lowStock)} low-stock items.`,
+      href: '/westsides/inventory/live',
+      details: [
+        metric('Out', formatCount(derived.outOfStock), derived.outOfStock > 0 ? 'danger' : 'good'),
+        metric('Low', formatCount(derived.lowStock), derived.lowStock > 0 ? 'warn' : 'good'),
+      ],
+    },
+    {
+      id: 'credit-control',
+      title: 'Credit control',
+      status: creditScore >= 90 ? 'READY' : 'WARN',
+      score: creditScore,
+      tone: creditScore >= 90 ? 'good' : 'warn',
+      message: `${formatMoney(derived.overdueAmount, true)} overdue across ${formatCount(derived.overdueCount)} invoice${derived.overdueCount === 1 ? '' : 's'}.`,
+      href: '/westsides/reports',
+      details: [
+        metric(
+          'Overdue',
+          formatMoney(derived.overdueAmount, true),
+          derived.overdueAmount > 0 ? 'warn' : 'good',
+        ),
+      ],
+    },
+    {
+      id: 'close-control',
+      title: 'Close control',
+      status: closeScore >= 90 ? 'READY' : 'WARN',
+      score: closeScore,
+      tone: closeScore >= 90 ? 'good' : 'warn',
+      message: `${formatCount(derived.dailyCloseOpenItems)} close item${derived.dailyCloseOpenItems === 1 ? '' : 's'} and ${formatMoney(derived.openFoliosTotal, true)} folio exposure.`,
+      href: '/westsides/daily-close',
+      details: [
+        metric(
+          'Open items',
+          formatCount(derived.dailyCloseOpenItems),
+          derived.dailyCloseOpenItems > 0 ? 'warn' : 'good',
+        ),
+        metric(
+          'Damage',
+          formatCount(derived.pendingStockDamage),
+          derived.pendingStockDamage > 0 ? 'danger' : 'good',
+        ),
+        metric(
+          'Expiry',
+          formatCount(derived.expiringBatches),
+          derived.expiringBatches > 0 ? 'warn' : 'good',
+        ),
+      ],
+    },
+  ];
+}
+
+function normalizeReadinessAction(action: ManagementAction, index: number): ReadinessActionItem {
+  return {
+    id: action.id ?? `readiness-action-${index}`,
+    title: action.label ?? action.title ?? 'Open action',
+    description: action.description ?? action.message ?? action.suggestedAction ?? '',
+    href: action.href ?? hrefForActionCategory(action.category),
+    tone: action.tone ?? toneFromSeverity(action.severity ?? action.priority),
+    count: action.count ?? action.amount,
+  };
+}
+
+function normalizeReadinessSource(
+  source: ReadinessSourceLink,
+  index: number,
+): ReadinessModel['sources'][number] {
+  return {
+    label: source.label ?? source.title ?? `Source ${index + 1}`,
+    href: source.href ?? '/westsides',
+    description: source.description ?? 'Open source evidence.',
+    tone: source.tone ?? 'neutral',
+    count: source.count,
   };
 }
 
@@ -1533,6 +1953,225 @@ function buildCustomerRiskLane(
       optionalMetric('Inactive', data.customerRisk?.inactiveCustomers, 'count'),
     ]),
   };
+}
+
+function ReadinessCommandPanel({ readiness }: { readiness: ReadinessModel }) {
+  const colors = TONE_STYLES[readiness.tone];
+  return (
+    <section className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+      <Card padding="none" className="xl:col-span-4 overflow-hidden">
+        <div className="p-5" style={ELEVATED_SURFACE}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase font-semibold tracking-wide" style={TEXT_MUTED}>
+                Production readiness
+              </div>
+              <h2 className="text-lg font-bold mt-1" style={TEXT}>
+                Westsides operating clearance
+              </h2>
+              <p className="text-xs leading-5 mt-1" style={TEXT_SECONDARY}>
+                {readiness.summary}
+              </p>
+            </div>
+            <StatusPill tone={readiness.tone}>{readiness.status}</StatusPill>
+          </div>
+
+          <div className="flex items-end justify-between gap-4 mt-5">
+            <div>
+              <div className="text-5xl font-bold tabular-nums" style={{ color: colors.color }}>
+                {formatCount(readiness.score)}
+              </div>
+              <div className="text-xs uppercase tracking-wide mt-1" style={TEXT_MUTED}>
+                readiness score
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-sm font-semibold" style={TEXT}>
+                {readiness.sourceCoverage}
+              </div>
+              <div className="text-xs mt-1" style={TEXT_MUTED}>
+                Last close: {readiness.lastClosedLabel}
+              </div>
+            </div>
+          </div>
+
+          <div
+            className="h-3 rounded-full mt-4 overflow-hidden"
+            style={{ background: 'var(--aurora-bg-muted)' }}
+          >
+            <div
+              className="h-full rounded-full"
+              style={{ width: `${readiness.score}%`, background: colors.solid }}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-4">
+            {readiness.metrics.slice(0, 6).map((item) => (
+              <MiniMetricView key={item.label} item={item} />
+            ))}
+          </div>
+        </div>
+      </Card>
+
+      <Card padding="none" className="xl:col-span-4 overflow-hidden">
+        <SectionHeader
+          eyebrow="Checklist"
+          title="Close and control readiness"
+          subtitle={`${formatCount(readiness.blockers)} blocker${readiness.blockers === 1 ? '' : 's'} and ${formatCount(readiness.warnings)} warning${readiness.warnings === 1 ? '' : 's'} before production close.`}
+        />
+        <div className="divide-y" style={BORDER}>
+          {readiness.checklist.map((check) => (
+            <ReadinessCheckRow key={check.id} check={check} />
+          ))}
+        </div>
+      </Card>
+
+      <Card padding="none" className="xl:col-span-4 overflow-hidden">
+        <SectionHeader
+          eyebrow="Execution"
+          title="Recommended next actions"
+          subtitle="Actionable links keep the cockpit tied to source workflows."
+        />
+        <div className="p-4 space-y-3">
+          {readiness.actions.length === 0 ? (
+            <EmptyLine text="No readiness actions returned." tone="good" />
+          ) : (
+            readiness.actions.map((action) => (
+              <ReadinessActionRow key={action.id} action={action} />
+            ))
+          )}
+        </div>
+        <div className="px-4 pb-4">
+          <Subheading title="Source and drill-through" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+            {readiness.sources.map((source) => (
+              <ReadinessSourceLink key={source.href} source={source} />
+            ))}
+          </div>
+        </div>
+      </Card>
+    </section>
+  );
+}
+
+function ReadinessCheckRow({ check }: { check: ReadinessChecklistItem }) {
+  const colors = TONE_STYLES[check.tone];
+  return (
+    <Link href={check.href} className="block p-4 transition-colors">
+      <div className="flex items-start gap-3">
+        <StatusGlyph tone={check.tone} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold" style={TEXT}>
+                {check.title}
+              </div>
+              <p className="text-xs leading-5 mt-0.5" style={TEXT_SECONDARY}>
+                {check.message}
+              </p>
+            </div>
+            <div className="text-right flex-shrink-0">
+              <div className="text-sm font-bold tabular-nums" style={{ color: colors.color }}>
+                {formatCount(check.score)}
+              </div>
+              <div className="text-[11px] uppercase" style={TEXT_MUTED}>
+                score
+              </div>
+            </div>
+          </div>
+          <div
+            className="h-2 rounded-full mt-3 overflow-hidden"
+            style={{ background: 'var(--aurora-bg-muted)' }}
+          >
+            <div
+              className="h-full rounded-full"
+              style={{ width: `${check.score}%`, background: colors.solid }}
+            />
+          </div>
+          {check.details.length > 0 && (
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              {check.details.map((item) => (
+                <MiniMetricView key={item.label} item={item} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+function ReadinessActionRow({ action }: { action: ReadinessActionItem }) {
+  const colors = TONE_STYLES[action.tone];
+  return (
+    <Link
+      href={action.href}
+      className="block rounded-lg border p-3"
+      style={{ ...SURFACE, borderLeft: `3px solid ${colors.solid}` }}
+    >
+      <div className="flex items-start gap-3">
+        <StatusGlyph tone={action.tone} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="text-sm font-semibold leading-5" style={TEXT}>
+              {action.title}
+            </div>
+            {action.count !== undefined && (
+              <span
+                className="text-xs font-bold tabular-nums flex-shrink-0"
+                style={{ color: colors.color }}
+              >
+                {formatMaybeNumber(action.count)}
+              </span>
+            )}
+          </div>
+          {action.description && (
+            <p className="text-xs leading-5 mt-0.5" style={TEXT_SECONDARY}>
+              {action.description}
+            </p>
+          )}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+function ReadinessSourceLink({ source }: { source: ReadinessModel['sources'][number] }) {
+  const colors = TONE_STYLES[source.tone];
+  return (
+    <Link href={source.href} className="rounded-lg border p-3 block min-w-0" style={SURFACE}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold truncate" style={TEXT}>
+            {source.label}
+          </div>
+          <div className="text-[11px] leading-4 mt-0.5 line-clamp-2" style={TEXT_SECONDARY}>
+            {source.description}
+          </div>
+        </div>
+        <span
+          className="rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase flex-shrink-0"
+          style={{ background: colors.background, borderColor: colors.border, color: colors.color }}
+        >
+          {source.count !== undefined ? formatCount(source.count) : 'Open'}
+        </span>
+      </div>
+    </Link>
+  );
+}
+
+function StatusGlyph({ tone }: { tone: Tone }) {
+  const colors = TONE_STYLES[tone];
+  const label = tone === 'danger' ? '!' : tone === 'warn' ? '?' : tone === 'good' ? 'OK' : 'i';
+  return (
+    <span
+      className="w-8 h-8 rounded-lg border flex items-center justify-center text-[11px] font-bold flex-shrink-0"
+      style={{ background: colors.background, borderColor: colors.border, color: colors.color }}
+      aria-hidden="true"
+    >
+      {label}
+    </span>
+  );
 }
 
 function SectionHeader({
@@ -2173,6 +2812,88 @@ function optionalMetric(
   return metric(label, value, tone);
 }
 
+function detailsToMetrics(
+  details?: Record<string, NumericValue | string | boolean | null | undefined>,
+): MiniMetric[] {
+  if (!details) return [];
+  return Object.entries(details)
+    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .slice(0, 4)
+    .map(([key, value]) =>
+      metric(humanizeKey(key), formatReadinessDetail(value), detailTone(value)),
+    );
+}
+
+function formatReadinessDetail(value: NumericValue | string | boolean) {
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'number')
+    return Number.isInteger(value) ? formatCount(value) : formatAmount(value);
+  if (typeof value === 'string') {
+    const n = Number(value);
+    if (value.trim() !== '' && Number.isFinite(n)) {
+      return Number.isInteger(n) ? formatCount(n) : formatAmount(n);
+    }
+    return value;
+  }
+  return '0';
+}
+
+function detailTone(value: NumericValue | string | boolean): Tone {
+  if (typeof value === 'boolean') return value ? 'good' : 'warn';
+  const n = Number(value ?? 0);
+  if (Number.isFinite(n) && n > 0) return 'warn';
+  return 'neutral';
+}
+
+function formatReadinessStatus(status?: string | null) {
+  const value = String(status ?? 'WATCH')
+    .replace(/_/g, ' ')
+    .trim();
+  return value ? value.toUpperCase() : 'WATCH';
+}
+
+function toneForReadiness(status: string, score: number, blockers: number, warnings: number): Tone {
+  const value = status.toLowerCase();
+  if (blockers > 0 || value.includes('block') || value.includes('critical')) return 'danger';
+  if (warnings > 0 || score < 90 || value.includes('warn') || value.includes('watch'))
+    return 'warn';
+  if (value.includes('ready') || value.includes('clear') || score >= 90) return 'good';
+  return 'neutral';
+}
+
+function hrefForReadinessCheck(key: string) {
+  const value = key.toLowerCase();
+  if (value.includes('payment') || value.includes('cash') || value.includes('close'))
+    return '/westsides/daily-close';
+  if (value.includes('posting') || value.includes('finance') || value.includes('account'))
+    return '/reports/financial';
+  if (value.includes('stock') || value.includes('inventory') || value.includes('operation'))
+    return '/westsides/inventory/live';
+  if (value.includes('delivery') || value.includes('fulfillment'))
+    return '/westsides/delivery-notes';
+  if (value.includes('credit') || value.includes('customer')) return '/westsides/customers';
+  return '/westsides/reports';
+}
+
+function humanizeKey(key: string) {
+  return key
+    .replace(/[-_]/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^./, (char) => char.toUpperCase());
+}
+
+function dedupeBy<T>(items: T[], keyFn: (item: T) => string) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = keyFn(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function toneFromSeverity(severity?: string | null): Tone {
   const value = String(severity ?? '').toLowerCase();
   if (value.includes('critical') || value.includes('danger') || value.includes('high'))
@@ -2222,6 +2943,10 @@ function compact<T>(items: Array<T | null | undefined | false>): T[] {
 function toNumber(value: NumericValue): number {
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? n : 0;
+}
+
+function clampPercent(value: NumericValue): number {
+  return Math.max(0, Math.min(100, Math.round(toNumber(value))));
 }
 
 function firstNumber(...values: NumericValue[]): number {
