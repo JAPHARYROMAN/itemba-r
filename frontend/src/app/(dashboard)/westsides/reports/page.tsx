@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, PageHeader, StatCard } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
 
+type MetaStatus = 'READY' | 'INFO' | 'WARNING' | 'CRITICAL' | 'BLOCKED' | 'NEEDS_REVIEW';
+
 interface ReportCard {
   key: string;
   title: string;
@@ -11,6 +13,53 @@ interface ReportCard {
   endpoint: string;
   icon: string;
   category: string;
+  outputFormats: string[];
+  primaryAction: string;
+  queryMode?: 'range' | 'daily-close';
+}
+
+interface ReportReadinessCheck {
+  key?: string;
+  status?: MetaStatus | string;
+  label?: string;
+  detail?: string;
+}
+
+interface ReportMeta {
+  readiness?: {
+    status?: MetaStatus | string;
+    score?: number;
+    target?: number;
+    message?: string;
+    checks?: ReportReadinessCheck[];
+  };
+  lineage?: {
+    source?: string;
+    sourceTables?: string[];
+    measures?: string[];
+    scope?: string;
+  };
+  drillThrough?: Array<{
+    label: string;
+    href: string;
+    entityType?: string;
+    entityId?: string | null;
+  }>;
+  actions?: Array<{
+    label: string;
+    href: string;
+    kind?: string;
+  }>;
+}
+
+interface NormalizedReport {
+  rows: Record<string, unknown>[];
+  raw: unknown;
+  meta?: ReportMeta & {
+    generatedAt?: string;
+    exportOptions?: string[];
+    scope?: Record<string, unknown>;
+  };
 }
 
 interface ReportTableProps {
@@ -19,20 +68,35 @@ interface ReportTableProps {
 
 const REPORTS: ReportCard[] = [
   {
+    key: 'daily-close',
+    title: 'Daily Close / Z-Report',
+    description: 'Close readiness, payment reconciliation, and sales-order evidence for a day.',
+    endpoint: '/api/backend/westsides/reports/daily-close',
+    icon: 'Z',
+    category: 'Controls',
+    outputFormats: ['PRINT', 'CSV', 'JSON'],
+    primaryAction: 'Open close screen',
+    queryMode: 'daily-close',
+  },
+  {
     key: 'daily-sales-summary',
     title: 'Daily Sales Summary',
-    description: 'Day-by-day sales totals and transaction counts.',
+    description: 'Day-by-day sales totals, transaction counts, and source-order drill-through.',
     endpoint: '/api/backend/westsides/reports/daily-sales-summary',
     icon: 'DS',
     category: 'Sales',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Review day orders',
   },
   {
     key: 'monthly-sales-summary',
     title: 'Monthly Sales Summary',
-    description: 'Month-over-month sales performance.',
+    description: 'Month-over-month sales performance with order-level drill-through hints.',
     endpoint: '/api/backend/westsides/reports/monthly-sales-summary',
     icon: 'MS',
     category: 'Sales',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Review month orders',
   },
   {
     key: 'sales-by-channel',
@@ -41,22 +105,28 @@ const REPORTS: ReportCard[] = [
     endpoint: '/api/backend/westsides/reports/sales-by-channel',
     icon: 'SC',
     category: 'Sales',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Open sales orders',
   },
   {
     key: 'sales-by-product',
     title: 'Sales by Product',
-    description: 'Sales volume and revenue by product.',
+    description: 'Sales volume, average selling price, and revenue by product.',
     endpoint: '/api/backend/westsides/reports/sales-by-product',
     icon: 'SP',
     category: 'Sales',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Review product',
   },
   {
     key: 'sales-by-cashier',
     title: 'Sales by Salesperson',
-    description: 'Sales totals grouped by salesperson.',
+    description: 'Sales totals grouped by salesperson, including attribution warnings.',
     endpoint: '/api/backend/westsides/reports/sales-by-cashier',
     icon: 'SS',
     category: 'People',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Review salesperson orders',
   },
   {
     key: 'product-profitability',
@@ -65,14 +135,18 @@ const REPORTS: ReportCard[] = [
     endpoint: '/api/backend/westsides/reports/product-profitability',
     icon: 'GP',
     category: 'Margin',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Review margin drivers',
   },
   {
     key: 'fast-moving-items',
     title: 'Fast Moving Items',
-    description: 'Top selling products by quantity.',
+    description: 'Top selling products by quantity, with replenishment drill-through.',
     endpoint: '/api/backend/westsides/reports/fast-moving-items',
     icon: 'FM',
     category: 'Inventory',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Review stock',
   },
   {
     key: 'slow-moving-items',
@@ -81,14 +155,18 @@ const REPORTS: ReportCard[] = [
     endpoint: '/api/backend/westsides/reports/slow-moving-items',
     icon: 'SM',
     category: 'Inventory',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Review stock risk',
   },
   {
     key: 'batch-status',
     title: 'Batch Status Report',
-    description: 'Product batch status, expiry dates, and remaining quantities.',
+    description: 'Batch expiry, depletion, remaining quantity, and stock action risk.',
     endpoint: '/api/backend/westsides/reports/batch-status',
     icon: 'BS',
     category: 'Inventory',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Open batches',
   },
   {
     key: 'stock-damage-report',
@@ -97,46 +175,58 @@ const REPORTS: ReportCard[] = [
     endpoint: '/api/backend/westsides/reports/stock-damage-report',
     icon: 'SD',
     category: 'Controls',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Review damage',
   },
   {
     key: 'package-balance-report',
     title: 'Package Balance Report',
-    description: 'Customer returnable package balances.',
+    description: 'Customer returnable package exposure and reconciliation routes.',
     endpoint: '/api/backend/westsides/reports/package-balance-report',
     icon: 'PB',
     category: 'Controls',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Open customer',
   },
   {
     key: 'quotation-conversion',
     title: 'Quotation Conversion',
-    description: 'Quotation status mix and conversion rate.',
+    description: 'Quotation status mix, conversion rate, and leakage warning signals.',
     endpoint: '/api/backend/westsides/reports/quotation-conversion',
     icon: 'QC',
     category: 'Sales',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Review quotations',
   },
   {
     key: 'delivery-performance',
     title: 'Delivery Performance',
-    description: 'Delivery note performance by status.',
+    description: 'Delivery note performance by status and open fulfillment risk.',
     endpoint: '/api/backend/westsides/reports/delivery-performance',
     icon: 'DP',
     category: 'Fulfillment',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Review deliveries',
   },
   {
     key: 'price-list-report',
     title: 'Price List Report',
-    description: 'Price lists with item counts and current status.',
+    description: 'Price lists with item counts, effective dates, approval, and activity status.',
     endpoint: '/api/backend/westsides/reports/price-list-report',
     icon: 'PL',
     category: 'Pricing',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Review price lists',
   },
   {
     key: 'credit-customers',
     title: 'Credit Customers',
-    description: 'Customers with receivable balances.',
+    description: 'Customers with receivable exposure and collection drill-through.',
     endpoint: '/api/backend/westsides/reports/credit-customers-report',
     icon: 'AR',
     category: 'Receivables',
+    outputFormats: ['CSV', 'JSON', 'PRINT'],
+    primaryAction: 'Review receivables',
   },
 ];
 
@@ -144,11 +234,13 @@ const controlStyle = {
   background: 'var(--aurora-bg-subtle)',
   borderColor: 'var(--aurora-border)',
   color: 'var(--aurora-text)',
-};
+  colorScheme: 'dark',
+} as const;
 
 const inputClass =
   'h-10 rounded-lg border px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500/40';
 const SETTINGS_KEY = 'itemba.westsides.reports.scope.v1';
+const META_KEY = '_reportMeta';
 
 function formatHeading(value: string) {
   return value
@@ -184,24 +276,73 @@ function fmtValue(value: unknown): string {
   return String(value);
 }
 
-function normalizePayload(payload: unknown): Record<string, unknown>[] {
+function unwrapPayload(payload: unknown): unknown {
   const data = (payload as { data?: unknown })?.data;
   const nested = (data as { data?: unknown })?.data;
-  const raw = Array.isArray(nested)
-    ? nested
-    : Array.isArray(data)
-      ? data
-      : Array.isArray(payload)
-        ? payload
-        : (data ?? payload);
-  if (Array.isArray(raw)) return raw as Record<string, unknown>[];
+  return nested ?? data ?? payload;
+}
+
+function getRowMeta(row: Record<string, unknown>): ReportMeta | null {
+  const meta = row[META_KEY];
+  return meta && typeof meta === 'object' ? (meta as ReportMeta) : null;
+}
+
+function visibleColumns(data: Record<string, unknown>[]) {
+  return Array.from(
+    new Set(data.flatMap((row) => Object.keys(row).filter((key) => !key.startsWith('_')))),
+  );
+}
+
+function normalizePayload(payload: unknown, report: ReportCard): NormalizedReport {
+  const raw = unwrapPayload(payload);
+
+  if (report.key === 'daily-close' && raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const close = raw as Record<string, unknown>;
+    const readiness = close.readiness as ReportMeta['readiness'];
+    const lineage = close.lineage as ReportMeta['lineage'];
+    const actions = close.actions as ReportMeta['actions'];
+    const meta = {
+      readiness,
+      lineage,
+      actions,
+      exportOptions: close.exportOptions as string[] | undefined,
+      generatedAt: close.generatedAt as string | undefined,
+      scope: close.scope as Record<string, unknown> | undefined,
+    };
+    const byMethod = Array.isArray(close.byMethod) ? close.byMethod : [];
+    const mobile = Array.isArray(close.mobileMoneyReferences) ? close.mobileMoneyReferences : [];
+    const orders = Array.isArray(close.orders) ? close.orders : [];
+    const rows = [
+      ...byMethod.map((row) => ({
+        section: 'Payment Method',
+        ...(row as Record<string, unknown>),
+      })),
+      ...mobile.map((row) => ({ section: 'Mobile Money', ...(row as Record<string, unknown>) })),
+      ...orders.map((row) => ({ section: 'Sales Order', ...(row as Record<string, unknown>) })),
+    ];
+    return { rows, raw, meta };
+  }
+
+  if (Array.isArray(raw)) return { rows: raw as Record<string, unknown>[], raw };
+
   if (raw && typeof raw === 'object') {
     const object = raw as Record<string, unknown>;
     const arrayEntry = Object.entries(object).find(([, value]) => Array.isArray(value));
-    if (arrayEntry) return arrayEntry[1] as Record<string, unknown>[];
-    return [object];
+    if (arrayEntry) {
+      return { rows: arrayEntry[1] as Record<string, unknown>[], raw };
+    }
+    return {
+      rows: [object],
+      raw,
+      meta: {
+        readiness: object.readiness as ReportMeta['readiness'],
+        lineage: object.lineage as ReportMeta['lineage'],
+        actions: object.actions as ReportMeta['actions'],
+      },
+    };
   }
-  return [];
+
+  return { rows: [], raw };
 }
 
 function errorMessage(payload: unknown, fallback: string) {
@@ -212,6 +353,47 @@ function errorMessage(payload: unknown, fallback: string) {
   return fallback;
 }
 
+function statusStyle(status?: string) {
+  const normalized = String(status ?? 'INFO').toUpperCase();
+  if (normalized === 'READY') {
+    return {
+      background: 'rgba(16, 185, 129, 0.14)',
+      borderColor: 'rgba(16, 185, 129, 0.45)',
+      color: '#bbf7d0',
+    };
+  }
+  if (normalized === 'WARNING' || normalized === 'NEEDS_REVIEW') {
+    return {
+      background: 'rgba(245, 158, 11, 0.16)',
+      borderColor: 'rgba(245, 158, 11, 0.5)',
+      color: '#fde68a',
+    };
+  }
+  if (normalized === 'CRITICAL' || normalized === 'BLOCKED') {
+    return {
+      background: 'rgba(239, 68, 68, 0.16)',
+      borderColor: 'rgba(239, 68, 68, 0.55)',
+      color: '#fecaca',
+    };
+  }
+  return {
+    background: 'rgba(59, 130, 246, 0.14)',
+    borderColor: 'rgba(59, 130, 246, 0.45)',
+    color: '#bfdbfe',
+  };
+}
+
+function StatusBadge({ status }: { status?: string }) {
+  return (
+    <span
+      className="inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-semibold uppercase"
+      style={statusStyle(status)}
+    >
+      {String(status ?? 'Info').replace(/_/g, ' ')}
+    </span>
+  );
+}
+
 function Spinner() {
   return (
     <div className="flex justify-center py-10">
@@ -220,19 +402,183 @@ function Spinner() {
   );
 }
 
-function ReportTable({ data }: ReportTableProps) {
-  if (data.length === 0) {
-    return (
-      <p className="py-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
-        No rows returned for the selected filters.
-      </p>
-    );
-  }
+function downloadText(filename: string, mimeType: string, content: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
 
-  const columns = Array.from(new Set(data.flatMap((row) => Object.keys(row))));
+function csvEscape(value: unknown) {
+  const text = fmtValue(value);
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function EmptyState({ report, onReload }: { report: ReportCard; onReload: () => void }) {
+  return (
+    <div className="px-5 py-12 text-center">
+      <div
+        className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg border text-sm font-bold"
+        style={{
+          borderColor: 'var(--aurora-border)',
+          background: 'var(--aurora-bg-subtle)',
+          color: 'var(--aurora-text)',
+        }}
+      >
+        {report.icon}
+      </div>
+      <h3 className="mt-4 text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
+        No rows returned
+      </h3>
+      <p
+        className="mx-auto mt-2 max-w-xl text-sm"
+        style={{ color: 'var(--aurora-text-secondary)' }}
+      >
+        The report loaded successfully, but the selected company, branch, or date filters did not
+        produce reportable rows. Try a wider date range or all branches.
+      </p>
+      <button
+        type="button"
+        onClick={onReload}
+        className="mt-5 rounded-lg border px-4 py-2 text-sm font-semibold transition hover:border-blue-500/70"
+        style={{
+          borderColor: 'var(--aurora-border)',
+          background: 'var(--aurora-bg-subtle)',
+          color: 'var(--aurora-text)',
+        }}
+      >
+        Reload report
+      </button>
+    </div>
+  );
+}
+
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="mx-5 my-4 rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-4">
+      <div className="text-sm font-semibold text-red-100">Report could not be loaded</div>
+      <div className="mt-1 text-sm text-red-200">{message}</div>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-3 rounded-lg border border-red-300/50 px-3 py-2 text-xs font-semibold text-red-100 transition hover:bg-red-500/20"
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
+
+function ReadinessPanel({
+  rows,
+  meta,
+}: {
+  rows: Record<string, unknown>[];
+  meta?: NormalizedReport['meta'];
+}) {
+  const rowMetas = rows.map(getRowMeta).filter((item): item is ReportMeta => Boolean(item));
+  const rowStatuses = rows
+    .map((row) =>
+      String(row.readinessStatus ?? getRowMeta(row)?.readiness?.status ?? '').toUpperCase(),
+    )
+    .filter(Boolean);
+  const problemRows = rowStatuses.filter(
+    (status) => status === 'WARNING' || status === 'CRITICAL' || status === 'BLOCKED',
+  ).length;
+  const sourceTables = Array.from(
+    new Set([
+      ...(meta?.lineage?.sourceTables ?? []),
+      ...rowMetas.flatMap((item) => item.lineage?.sourceTables ?? []),
+    ]),
+  );
+  const measures = Array.from(
+    new Set([
+      ...(meta?.lineage?.measures ?? []),
+      ...rowMetas.flatMap((item) => item.lineage?.measures ?? []),
+    ]),
+  );
+  const checks =
+    meta?.readiness?.checks ?? rowMetas.flatMap((item) => item.readiness?.checks ?? []);
+  const reportStatus = String(
+    meta?.readiness?.status ?? (problemRows > 0 ? 'NEEDS_REVIEW' : 'READY'),
+  );
+
+  return (
+    <div
+      className="grid gap-3 border-b px-5 py-4 md:grid-cols-3"
+      style={{ borderColor: 'var(--aurora-border)' }}
+    >
+      <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
+        <div
+          className="text-xs font-semibold uppercase"
+          style={{ color: 'var(--aurora-text-muted)' }}
+        >
+          Readiness
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <StatusBadge status={reportStatus} />
+          {typeof meta?.readiness?.score === 'number' && (
+            <span className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+              {meta.readiness.score}/{meta.readiness.target ?? 100}
+            </span>
+          )}
+        </div>
+        <div className="mt-2 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
+          {meta?.readiness?.message ??
+            (problemRows > 0
+              ? `${problemRows} row${problemRows === 1 ? '' : 's'} require review.`
+              : 'Rows are reportable with current metadata.')}
+        </div>
+      </div>
+
+      <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
+        <div
+          className="text-xs font-semibold uppercase"
+          style={{ color: 'var(--aurora-text-muted)' }}
+        >
+          Lineage
+        </div>
+        <div className="mt-2 text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+          {meta?.lineage?.source ?? 'Row-level lineage'}
+        </div>
+        <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
+          {sourceTables.length > 0 ? sourceTables.join(', ') : 'Source tables supplied per row'}
+        </div>
+      </div>
+
+      <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
+        <div
+          className="text-xs font-semibold uppercase"
+          style={{ color: 'var(--aurora-text-muted)' }}
+        >
+          Evidence
+        </div>
+        <div className="mt-2 text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+          {rows.length} rows, {measures.length || 'source'} measures
+        </div>
+        <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
+          {checks.length > 0
+            ? `${checks.length} readiness check${checks.length === 1 ? '' : 's'} available`
+            : 'Export includes current filters and visible columns'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReportTable({ data }: ReportTableProps) {
+  const columns = visibleColumns(data);
+  const hasActions = data.some((row) => {
+    const meta = getRowMeta(row);
+    return Boolean((meta?.drillThrough?.length ?? 0) > 0 || (meta?.actions?.length ?? 0) > 0);
+  });
+
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-sm">
+      <table className="w-full min-w-[860px] text-sm">
         <thead>
           <tr style={{ background: 'var(--aurora-bg-subtle)' }}>
             {columns.map((column) => (
@@ -244,23 +590,71 @@ function ReportTable({ data }: ReportTableProps) {
                 {formatHeading(column)}
               </th>
             ))}
+            {hasActions && (
+              <th
+                className="border-b px-4 py-3 text-left text-xs font-semibold uppercase"
+                style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}
+              >
+                Actions
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
-          {data.map((row, rowIndex) => (
-            <tr key={rowIndex} className="transition hover:bg-white/5">
-              {columns.map((column) => (
-                <td
-                  key={column}
-                  className="max-w-[320px] border-b px-4 py-3 align-top"
-                  style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
-                  title={fmtValue(row[column])}
-                >
-                  <span className="line-clamp-2 break-words">{fmtValue(row[column])}</span>
-                </td>
-              ))}
-            </tr>
-          ))}
+          {data.map((row, rowIndex) => {
+            const meta = getRowMeta(row);
+            const actionLinks = [...(meta?.drillThrough ?? []), ...(meta?.actions ?? [])];
+            return (
+              <tr key={rowIndex} className="transition hover:bg-white/5">
+                {columns.map((column) => {
+                  const value = row[column];
+                  return (
+                    <td
+                      key={column}
+                      className="max-w-[340px] border-b px-4 py-3 align-top"
+                      style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
+                      title={fmtValue(value)}
+                    >
+                      {column.toLowerCase().includes('status') ? (
+                        <StatusBadge status={fmtValue(value)} />
+                      ) : (
+                        <span className="line-clamp-2 break-words">{fmtValue(value)}</span>
+                      )}
+                    </td>
+                  );
+                })}
+                {hasActions && (
+                  <td
+                    className="border-b px-4 py-3 align-top"
+                    style={{ borderColor: 'var(--aurora-border)' }}
+                  >
+                    {actionLinks.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {actionLinks.slice(0, 3).map((action, index) => (
+                          <a
+                            key={`${action.href}-${index}`}
+                            href={action.href}
+                            className="rounded-md border px-2 py-1 text-xs font-semibold transition hover:border-blue-500/70"
+                            style={{
+                              borderColor: 'var(--aurora-border)',
+                              background: 'var(--aurora-bg-subtle)',
+                              color: 'var(--aurora-text)',
+                            }}
+                          >
+                            {action.label}
+                          </a>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                        No route
+                      </span>
+                    )}
+                  </td>
+                )}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -275,7 +669,10 @@ export default function WestsideReportsPage() {
   const [hydrated, setHydrated] = useState(false);
   const [autoLoadedCompanyId, setAutoLoadedCompanyId] = useState('');
   const [activeReport, setActiveReport] = useState<ReportCard | null>(null);
-  const [reportData, setReportData] = useState<Record<string, unknown>[]>([]);
+  const [reportResult, setReportResult] = useState<NormalizedReport>({
+    rows: [],
+    raw: null,
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -342,11 +739,13 @@ export default function WestsideReportsPage() {
 
   const categories = useMemo(() => new Set(REPORTS.map((report) => report.category)).size, []);
   const currentCompanyLabel = companyOptions.find((option) => option.value === companyId)?.label;
+  const currentBranchLabel = branchOptions.find((option) => option.value === branchId)?.label;
+  const visibleColumnList = useMemo(() => visibleColumns(reportResult.rows), [reportResult.rows]);
 
   const loadReport = useCallback(
     async (report: ReportCard) => {
       setActiveReport(report);
-      setReportData([]);
+      setReportResult({ rows: [], raw: null });
       if (!companyId) {
         setError('Select a company before loading a Westsides report.');
         return;
@@ -357,15 +756,19 @@ export default function WestsideReportsPage() {
       try {
         const params = new URLSearchParams({ companyId });
         if (branchId) params.set('branchId', branchId);
-        if (dateFrom) params.set('dateFrom', dateFrom);
-        if (dateTo) params.set('dateTo', dateTo);
+        if (report.queryMode === 'daily-close') {
+          params.set('date', dateTo || dateFrom || new Date().toISOString().slice(0, 10));
+        } else {
+          if (dateFrom) params.set('dateFrom', dateFrom);
+          if (dateTo) params.set('dateTo', dateTo);
+        }
 
         const response = await fetch(`${report.endpoint}?${params.toString()}`);
         const json = await response.json().catch(() => ({}));
         if (!response.ok) {
           throw new Error(errorMessage(json, `HTTP ${response.status}`));
         }
-        setReportData(normalizePayload(json));
+        setReportResult(normalizePayload(json, report));
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Error loading report');
       } finally {
@@ -381,11 +784,33 @@ export default function WestsideReportsPage() {
     void loadReport(REPORTS[0]);
   }, [activeReport, autoLoadedCompanyId, companyId, loadReport, loading]);
 
+  const exportCsv = useCallback(() => {
+    if (!activeReport || reportResult.rows.length === 0) return;
+    const headers = visibleColumnList;
+    const rows = reportResult.rows.map((row) =>
+      headers.map((header) => csvEscape(row[header])).join(','),
+    );
+    downloadText(
+      `westsides-${activeReport.key}-${new Date().toISOString().slice(0, 10)}.csv`,
+      'text/csv;charset=utf-8',
+      [headers.map(csvEscape).join(','), ...rows].join('\n'),
+    );
+  }, [activeReport, reportResult.rows, visibleColumnList]);
+
+  const exportJson = useCallback(() => {
+    if (!activeReport) return;
+    downloadText(
+      `westsides-${activeReport.key}-${new Date().toISOString().slice(0, 10)}.json`,
+      'application/json;charset=utf-8',
+      JSON.stringify(reportResult.raw ?? reportResult.rows, null, 2),
+    );
+  }, [activeReport, reportResult.raw, reportResult.rows]);
+
   return (
     <div className="space-y-6 p-6">
       <PageHeader
         title="Westsides Reports"
-        subtitle="Sales, inventory, pricing, customer, fulfillment, and profitability reports."
+        subtitle="Production-ready sales, inventory, pricing, customer, fulfillment, and control reports."
       />
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -401,7 +826,7 @@ export default function WestsideReportsPage() {
           value={currentCompanyLabel ? currentCompanyLabel.split('(')[0].trim() : 'Not selected'}
           hint={
             activeReport
-              ? `${reportData.length} rows loaded`
+              ? `${reportResult.rows.length} rows loaded`
               : 'Auto-selects Westsides when available'
           }
           variant={companyId ? 'green' : 'amber'}
@@ -499,21 +924,35 @@ export default function WestsideReportsPage() {
           </div>
         )}
 
-        {activeReport && (
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void loadReport(activeReport)}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={loading || !companyId}
-            >
-              Reload Current Report
-            </button>
-            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-              Current report: {activeReport.title}
-            </span>
-          </div>
-        )}
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+          <span
+            className="rounded-full border px-2 py-1"
+            style={{
+              borderColor: 'var(--aurora-border)',
+              color: 'var(--aurora-text-secondary)',
+            }}
+          >
+            Company: {currentCompanyLabel ?? 'Not selected'}
+          </span>
+          <span
+            className="rounded-full border px-2 py-1"
+            style={{
+              borderColor: 'var(--aurora-border)',
+              color: 'var(--aurora-text-secondary)',
+            }}
+          >
+            Branch: {currentBranchLabel ?? 'All branches'}
+          </span>
+          <span
+            className="rounded-full border px-2 py-1"
+            style={{
+              borderColor: 'var(--aurora-border)',
+              color: 'var(--aurora-text-secondary)',
+            }}
+          >
+            Period: {dateFrom || 'Open'} to {dateTo || 'Open'}
+          </span>
+        </div>
       </Card>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
@@ -562,6 +1001,9 @@ export default function WestsideReportsPage() {
             >
               {report.description}
             </div>
+            <div className="mt-3 text-[11px] font-semibold" style={{ color: '#bfdbfe' }}>
+              {report.outputFormats.join(' / ')}
+            </div>
           </button>
         ))}
       </div>
@@ -590,30 +1032,76 @@ export default function WestsideReportsPage() {
                 <div className="mt-0.5 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
                   {activeReport.description}
                 </div>
+                {reportResult.meta?.generatedAt && (
+                  <div className="mt-1 text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+                    Generated {fmtValue(reportResult.meta.generatedAt)}
+                  </div>
+                )}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => void loadReport(activeReport)}
-              className="rounded-lg border px-3 py-2 text-xs font-semibold transition hover:border-blue-500/60"
-              style={{
-                borderColor: 'var(--aurora-border)',
-                color: 'var(--aurora-text)',
-                background: 'var(--aurora-bg-subtle)',
-              }}
-              disabled={loading}
-            >
-              Refresh
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void loadReport(activeReport)}
+                className="rounded-lg border px-3 py-2 text-xs font-semibold transition hover:border-blue-500/60"
+                style={{
+                  borderColor: 'var(--aurora-border)',
+                  color: 'var(--aurora-text)',
+                  background: 'var(--aurora-bg-subtle)',
+                }}
+                disabled={loading}
+              >
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={exportCsv}
+                className="rounded-lg border px-3 py-2 text-xs font-semibold transition hover:border-blue-500/60 disabled:opacity-50"
+                style={{
+                  borderColor: 'var(--aurora-border)',
+                  color: 'var(--aurora-text)',
+                  background: 'var(--aurora-bg-subtle)',
+                }}
+                disabled={reportResult.rows.length === 0}
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                onClick={exportJson}
+                className="rounded-lg border px-3 py-2 text-xs font-semibold transition hover:border-blue-500/60 disabled:opacity-50"
+                style={{
+                  borderColor: 'var(--aurora-border)',
+                  color: 'var(--aurora-text)',
+                  background: 'var(--aurora-bg-subtle)',
+                }}
+                disabled={!reportResult.raw}
+              >
+                Export JSON
+              </button>
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-700"
+              >
+                Print / PDF
+              </button>
+            </div>
           </div>
 
-          {error && (
-            <div className="mx-5 my-3 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-              {error}
-            </div>
+          {!loading && !error && reportResult.rows.length > 0 && (
+            <ReadinessPanel rows={reportResult.rows} meta={reportResult.meta} />
           )}
 
-          {loading ? <Spinner /> : <ReportTable data={reportData} />}
+          {error && <ErrorState message={error} onRetry={() => void loadReport(activeReport)} />}
+
+          {loading ? (
+            <Spinner />
+          ) : !error && reportResult.rows.length === 0 ? (
+            <EmptyState report={activeReport} onReload={() => void loadReport(activeReport)} />
+          ) : !error ? (
+            <ReportTable data={reportResult.rows} />
+          ) : null}
         </Card>
       ) : (
         <div className="py-10 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>

@@ -20,6 +20,41 @@ const CONFIRMED_SALES_STATUSES = [
   SalesOrderStatus.PAID,
 ] as const;
 
+export type ReportReadinessStatus = 'READY' | 'INFO' | 'WARNING' | 'CRITICAL';
+
+export interface ReportReadinessCheck {
+  key: string;
+  status: ReportReadinessStatus;
+  label: string;
+  detail: string;
+}
+
+export interface ReportRowMeta {
+  readiness?: {
+    status: ReportReadinessStatus;
+    score?: number;
+    message: string;
+    checks?: ReportReadinessCheck[];
+  };
+  lineage?: {
+    source: string;
+    sourceTables: string[];
+    measures: string[];
+    scope: string;
+  };
+  drillThrough?: Array<{
+    label: string;
+    href: string;
+    entityType?: string;
+    entityId?: string | null;
+  }>;
+  actions?: Array<{
+    label: string;
+    href: string;
+    kind: 'view' | 'review' | 'print' | 'export';
+  }>;
+}
+
 @Injectable()
 export class WestsidesReportsService {
   constructor(
@@ -44,6 +79,59 @@ export class WestsidesReportsService {
 
   private toNumber(value: unknown): number {
     return Number(value ?? 0);
+  }
+
+  private route(path: string, params: Record<string, unknown> = {}) {
+    const query = Object.entries(params)
+      .filter(([, value]) => value !== null && value !== undefined && value !== '')
+      .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+      .join('&');
+    return query ? `${path}?${query}` : path;
+  }
+
+  private reportMeta(meta: ReportRowMeta) {
+    return { _reportMeta: meta };
+  }
+
+  private lineage(source: string, sourceTables: string[], measures: string[], scope = 'Westsides') {
+    return { source, sourceTables, measures, scope };
+  }
+
+  private readiness(
+    status: ReportReadinessStatus,
+    message: string,
+    checks: ReportReadinessCheck[] = [],
+    score?: number,
+  ) {
+    return { status, score, message, checks };
+  }
+
+  private statusFromAmount(amount: number, warningAt = 1): ReportReadinessStatus {
+    if (amount <= 0) return 'READY';
+    return amount >= warningAt ? 'WARNING' : 'INFO';
+  }
+
+  private daysUntil(date: Date | null | undefined, from = new Date()) {
+    if (!date) return null;
+    const ms = date.getTime() - from.getTime();
+    return Math.ceil(ms / (24 * 3600 * 1000));
+  }
+
+  private dailyCloseReadiness(checks: ReportReadinessCheck[]) {
+    const critical = checks.filter((check) => check.status === 'CRITICAL').length;
+    const warnings = checks.filter((check) => check.status === 'WARNING').length;
+    const infos = checks.filter((check) => check.status === 'INFO').length;
+    const score = Math.max(0, 100 - critical * 25 - warnings * 10 - infos * 2);
+    return {
+      status: critical > 0 ? 'BLOCKED' : warnings > 0 ? 'NEEDS_REVIEW' : 'READY',
+      closeReady: critical === 0,
+      score,
+      target: 90,
+      criticalCount: critical,
+      warningCount: warnings,
+      infoCount: infos,
+      checks,
+    };
   }
 
   private async productMap(productIds: Array<string | null | undefined>) {
@@ -262,19 +350,72 @@ export class WestsidesReportsService {
         : [];
     const salespersonById = new Map(salespersons.map((e) => [e.id, e]));
 
-    const methodRows = byMethod.map((m) => ({
-      paymentMethod: m.paymentMethod,
-      cashAccountId: m.cashAccountId,
-      cashAccountName: m.cashAccountId
-        ? (cashAccountById.get(m.cashAccountId)?.accountName ?? null)
-        : null,
-      cashAccountType: m.cashAccountId
-        ? (cashAccountById.get(m.cashAccountId)?.accountType ?? null)
-        : null,
-      count: m._count.id,
-      expected: Number(m._sum.totalAmount ?? 0),
-      paid: Number(m._sum.paidAmount ?? 0),
-    }));
+    const methodRows = byMethod.map((m) => {
+      const expected = Number(m._sum.totalAmount ?? 0);
+      const paid = Number(m._sum.paidAmount ?? 0);
+      const requiresCashAccount = m.paymentMethod !== 'CREDIT';
+      const missingCashAccount = requiresCashAccount && !m.cashAccountId;
+      const varianceAtSource = Math.abs(expected - paid);
+      return {
+        paymentMethod: m.paymentMethod,
+        cashAccountId: m.cashAccountId,
+        cashAccountName: m.cashAccountId
+          ? (cashAccountById.get(m.cashAccountId)?.accountName ?? null)
+          : null,
+        cashAccountType: m.cashAccountId
+          ? (cashAccountById.get(m.cashAccountId)?.accountType ?? null)
+          : null,
+        count: m._count.id,
+        expected,
+        paid,
+        varianceAtSource,
+        requiresCount: m.paymentMethod !== 'CREDIT',
+        readinessStatus: missingCashAccount
+          ? 'CRITICAL'
+          : varianceAtSource > 0
+            ? 'WARNING'
+            : 'READY',
+        ...this.reportMeta({
+          readiness: this.readiness(
+            missingCashAccount ? 'CRITICAL' : varianceAtSource > 0 ? 'WARNING' : 'READY',
+            missingCashAccount
+              ? 'Payment method needs a mapped cash or bank account before close sign-off.'
+              : varianceAtSource > 0
+                ? 'Paid amount differs from expected sales amount; reconcile before approval.'
+                : 'Payment method is ready for counted cash entry.',
+          ),
+          lineage: this.lineage(
+            'Daily close payment-method aggregation',
+            ['sales_orders', 'cash_accounts'],
+            ['totalAmount', 'paidAmount', 'paymentMethod', 'cashAccountId'],
+          ),
+          drillThrough: [
+            {
+              label: 'Review sales orders',
+              href: this.route('/operations/sales-orders', {
+                companyId: query.companyId,
+                branchId: query.branchId,
+                paymentMethod: m.paymentMethod,
+                dateFrom: dayStart.toISOString().slice(0, 10),
+                dateTo: dayStart.toISOString().slice(0, 10),
+              }),
+              entityType: 'salesOrder',
+            },
+          ],
+          actions: [
+            {
+              label: 'Open daily close',
+              href: this.route('/westsides/daily-close', {
+                companyId: query.companyId,
+                branchId: query.branchId,
+                date: dayStart.toISOString().slice(0, 10),
+              }),
+              kind: 'review',
+            },
+          ],
+        }),
+      };
+    });
 
     const mobileMoneyReferences = mobileMoneyOrders.map((o) => ({
       id: o.id,
@@ -285,6 +426,28 @@ export class WestsidesReportsService {
       cashAccountName: o.cashAccountId
         ? (cashAccountById.get(o.cashAccountId)?.accountName ?? null)
         : null,
+      readinessStatus: o.paymentReference ? 'READY' : 'WARNING',
+      ...this.reportMeta({
+        readiness: this.readiness(
+          o.paymentReference ? 'READY' : 'WARNING',
+          o.paymentReference
+            ? 'Mobile-money reference is captured.'
+            : 'Payment reference is missing; reconcile against the mobile-money statement.',
+        ),
+        lineage: this.lineage(
+          'Mobile-money reference listing',
+          ['sales_orders', 'cash_accounts'],
+          ['paymentReference', 'totalAmount', 'cashAccountId'],
+        ),
+        drillThrough: [
+          {
+            label: 'Open sales order',
+            href: this.route('/operations/sales-orders', { search: o.salesOrderNumber }),
+            entityType: 'salesOrder',
+            entityId: o.id,
+          },
+        ],
+      }),
     }));
 
     const unassignedPaymentAccountCount = methodRows.filter(
@@ -349,10 +512,92 @@ export class WestsidesReportsService {
         : []),
     ];
 
+    const readinessChecks: ReportReadinessCheck[] = [
+      {
+        key: 'sales-present',
+        status: totals._count.id === 0 ? 'INFO' : 'READY',
+        label: 'Sales activity',
+        detail:
+          totals._count.id === 0
+            ? 'No confirmed sales were recorded for this close date.'
+            : `${totals._count.id} confirmed sale${totals._count.id === 1 ? '' : 's'} included.`,
+      },
+      {
+        key: 'cash-account-mapping',
+        status: unassignedPaymentAccountCount > 0 ? 'CRITICAL' : 'READY',
+        label: 'Cash account mapping',
+        detail:
+          unassignedPaymentAccountCount > 0
+            ? `${unassignedPaymentAccountCount} payment group${unassignedPaymentAccountCount === 1 ? '' : 's'} missing cash/bank account mapping.`
+            : 'Every non-credit payment method is mapped to a cash or bank account.',
+      },
+      {
+        key: 'mobile-money-reference',
+        status: missingMobileMoneyReferenceCount > 0 ? 'WARNING' : 'READY',
+        label: 'Mobile-money references',
+        detail:
+          missingMobileMoneyReferenceCount > 0
+            ? `${missingMobileMoneyReferenceCount} mobile-money sale${missingMobileMoneyReferenceCount === 1 ? '' : 's'} missing payment reference.`
+            : 'All mobile-money sales include payment references.',
+      },
+      {
+        key: 'salesperson-attribution',
+        status: unattributedSalespersonCount > 0 ? 'WARNING' : 'READY',
+        label: 'Salesperson attribution',
+        detail:
+          unattributedSalespersonCount > 0
+            ? `${unattributedSalespersonCount} sale${unattributedSalespersonCount === 1 ? '' : 's'} missing salesperson attribution.`
+            : 'All grouped sales have salesperson attribution.',
+      },
+      {
+        key: 'credit-exposure',
+        status: Number(totals._sum.outstandingAmount ?? 0) > 0 ? 'WARNING' : 'READY',
+        label: 'Credit exposure',
+        detail:
+          Number(totals._sum.outstandingAmount ?? 0) > 0
+            ? `TZS ${Number(totals._sum.outstandingAmount ?? 0).toLocaleString('en-TZ')} remains outstanding.`
+            : 'No outstanding amount remains on confirmed sales.',
+      },
+    ];
+    const closeReadiness = this.dailyCloseReadiness(readinessChecks);
+
     return {
       date: dayStart.toISOString(),
       companyId: query.companyId,
       branchId: query.branchId ?? null,
+      generatedAt: new Date().toISOString(),
+      scope: {
+        companyId: query.companyId,
+        branchId: query.branchId ?? null,
+        date: dayStart.toISOString().slice(0, 10),
+      },
+      lineage: this.lineage(
+        'Daily Close / Z-Report',
+        ['sales_orders', 'sales_order_lines', 'products', 'cash_accounts', 'employees'],
+        ['totalAmount', 'paidAmount', 'outstandingAmount', 'taxAmount', 'discountAmount'],
+      ),
+      exportOptions: ['PRINT', 'CSV', 'JSON'],
+      actions: [
+        {
+          label: 'Open close screen',
+          href: this.route('/westsides/daily-close', {
+            companyId: query.companyId,
+            branchId: query.branchId,
+            date: dayStart.toISOString().slice(0, 10),
+          }),
+          kind: 'review',
+        },
+        {
+          label: 'Review sales orders',
+          href: this.route('/operations/sales-orders', {
+            companyId: query.companyId,
+            branchId: query.branchId,
+            dateFrom: dayStart.toISOString().slice(0, 10),
+            dateTo: dayStart.toISOString().slice(0, 10),
+          }),
+          kind: 'view',
+        },
+      ],
       totals: {
         salesCount: totals._count.id,
         totalSales: Number(totals._sum.totalAmount ?? 0),
@@ -395,22 +640,46 @@ export class WestsidesReportsService {
         totalAmount: Number(o.totalAmount),
         paymentMethod: o.paymentMethod,
         paymentReference: o.paymentReference,
+        readinessStatus:
+          o.paymentMethod === 'MOBILE_MONEY' && !o.paymentReference ? 'WARNING' : 'READY',
+        ...this.reportMeta({
+          readiness: this.readiness(
+            o.paymentMethod === 'MOBILE_MONEY' && !o.paymentReference ? 'WARNING' : 'READY',
+            o.paymentMethod === 'MOBILE_MONEY' && !o.paymentReference
+              ? 'Mobile-money order needs a payment reference.'
+              : 'Order is included in the close evidence set.',
+          ),
+          lineage: this.lineage(
+            'Daily close sales-order evidence',
+            ['sales_orders'],
+            ['totalAmount', 'paymentMethod', 'paymentReference'],
+          ),
+          drillThrough: [
+            {
+              label: 'Open sales order',
+              href: this.route('/operations/sales-orders', { search: o.salesOrderNumber }),
+              entityType: 'salesOrder',
+              entityId: o.id,
+            },
+          ],
+        }),
       })),
       mobileMoneyReferences,
       readiness: {
-        status: exceptionList.some((item) => item.severity === 'critical')
-          ? 'BLOCKED'
-          : exceptionList.some((item) => item.severity === 'warning')
-            ? 'NEEDS_REVIEW'
-            : 'READY',
-        closeReady:
-          exceptionList.length === 0 || !exceptionList.some((item) => item.severity === 'critical'),
+        status: closeReadiness.status,
+        closeReady: closeReadiness.closeReady,
+        score: closeReadiness.score,
+        target: closeReadiness.target,
         exceptionCount: exceptionList.length,
+        criticalCount: closeReadiness.criticalCount,
+        warningCount: closeReadiness.warningCount,
+        infoCount: closeReadiness.infoCount,
         cashAccountsAssigned: unassignedPaymentAccountCount === 0,
         mobileMoneyReferencesComplete: missingMobileMoneyReferenceCount === 0,
         unassignedPaymentAccountCount,
         missingMobileMoneyReferenceCount,
         unattributedSalespersonCount,
+        checks: closeReadiness.checks,
       },
       exceptions: exceptionList,
     };
@@ -431,6 +700,31 @@ export class WestsidesReportsService {
       channel: String(row.salesType).replace(/_/g, ' '),
       orderCount: row._count.id,
       totalAmount: this.toNumber(row._sum.totalAmount),
+      readinessStatus: row._count.id > 0 ? 'READY' : 'INFO',
+      ...this.reportMeta({
+        readiness: this.readiness(
+          row._count.id > 0 ? 'READY' : 'INFO',
+          row._count.id > 0
+            ? 'Channel has confirmed sales in the selected scope.'
+            : 'No confirmed sales were found for this channel in the selected scope.',
+          [],
+          row._count.id > 0 ? 95 : 80,
+        ),
+        lineage: this.lineage('Sales by channel', ['sales_orders'], ['totalAmount', 'salesType']),
+        drillThrough: [
+          {
+            label: 'Open sales orders',
+            href: this.route('/operations/sales-orders', {
+              companyId: query.companyId,
+              branchId: query.branchId,
+              salesType: row.salesType,
+              dateFrom: query.dateFrom,
+              dateTo: query.dateTo,
+            }),
+            entityType: 'salesOrder',
+          },
+        ],
+      }),
     }));
   }
 
@@ -452,13 +746,49 @@ export class WestsidesReportsService {
 
     return rows.map((row) => {
       const product = products.get(row.productId);
+      const quantity = this.toNumber(row._sum.quantity);
+      const totalAmount = this.toNumber(row._sum.lineTotal);
       return {
         productId: row.productId,
         productCode: product?.productCode ?? null,
         sku: product?.sku ?? null,
         productName: product?.name ?? 'Unknown product',
-        quantity: this.toNumber(row._sum.quantity),
-        totalAmount: this.toNumber(row._sum.lineTotal),
+        quantity,
+        totalAmount,
+        averageSellingPrice: quantity > 0 ? totalAmount / quantity : 0,
+        readinessStatus: product ? 'READY' : 'WARNING',
+        ...this.reportMeta({
+          readiness: this.readiness(
+            product ? 'READY' : 'WARNING',
+            product
+              ? 'Product sales can be traced back to master data and source orders.'
+              : 'Sales reference a product that could not be resolved in product master data.',
+          ),
+          lineage: this.lineage(
+            'Sales by product',
+            ['sales_orders', 'sales_order_lines', 'products'],
+            ['quantity', 'lineTotal'],
+          ),
+          drillThrough: [
+            {
+              label: 'Open product',
+              href: this.route('/operations/products', {
+                search: product?.productCode ?? product?.sku ?? product?.name ?? row.productId,
+              }),
+              entityType: 'product',
+              entityId: row.productId,
+            },
+            {
+              label: 'Review live stock',
+              href: this.route('/westsides/inventory/live', {
+                companyId: query.companyId,
+                branchId: query.branchId,
+                productId: row.productId,
+              }),
+              entityType: 'inventoryBalance',
+            },
+          ],
+        }),
       };
     });
   }
@@ -480,6 +810,33 @@ export class WestsidesReportsService {
         salesperson: employee?.fullName ?? employee?.employeeCode ?? 'Unassigned',
         orderCount: row._count.id,
         totalAmount: this.toNumber(row._sum.totalAmount),
+        readinessStatus: row.salespersonId ? 'READY' : 'WARNING',
+        ...this.reportMeta({
+          readiness: this.readiness(
+            row.salespersonId ? 'READY' : 'WARNING',
+            row.salespersonId
+              ? 'Salesperson attribution is available for commission and performance review.'
+              : 'Orders in this group are missing salesperson attribution.',
+          ),
+          lineage: this.lineage(
+            'Sales by salesperson',
+            ['sales_orders', 'employees'],
+            ['totalAmount', 'salespersonId'],
+          ),
+          drillThrough: [
+            {
+              label: 'Open sales orders',
+              href: this.route('/operations/sales-orders', {
+                companyId: query.companyId,
+                branchId: query.branchId,
+                salespersonId: row.salespersonId,
+                dateFrom: query.dateFrom,
+                dateTo: query.dateTo,
+              }),
+              entityType: 'salesOrder',
+            },
+          ],
+        }),
       };
     });
   }
@@ -506,21 +863,68 @@ export class WestsidesReportsService {
       orderBy: { expiryDate: 'asc' },
     });
 
-    return rows.map((row) => ({
-      batchNumber: row.batchNumber,
-      productCode: row.product.productCode,
-      sku: row.product.sku,
-      productName: row.product.name,
-      branch: row.branch ? `${row.branch.code} - ${row.branch.name}` : 'All branches',
-      supplier: row.supplier ? `${row.supplier.supplierCode} - ${row.supplier.name}` : null,
-      status: row.status,
-      receivedDate: row.receivedDate,
-      expiryDate: row.expiryDate,
-      initialQuantity: this.toNumber(row.initialQuantity),
-      remainingQuantity: this.toNumber(row.remainingQuantity),
-      unit: row.unit.symbol ?? row.unit.name,
-      unitCost: this.toNumber(row.unitCost),
-    }));
+    return rows.map((row) => {
+      const initialQuantity = this.toNumber(row.initialQuantity);
+      const remainingQuantity = this.toNumber(row.remainingQuantity);
+      const daysToExpiry = this.daysUntil(row.expiryDate);
+      const depletionPercent =
+        initialQuantity > 0 ? ((initialQuantity - remainingQuantity) / initialQuantity) * 100 : 0;
+      const readinessStatus: ReportReadinessStatus =
+        daysToExpiry !== null && daysToExpiry < 0
+          ? 'CRITICAL'
+          : daysToExpiry !== null && daysToExpiry <= 14
+            ? 'WARNING'
+            : remainingQuantity <= 0
+              ? 'INFO'
+              : 'READY';
+      return {
+        batchNumber: row.batchNumber,
+        productCode: row.product.productCode,
+        sku: row.product.sku,
+        productName: row.product.name,
+        branch: row.branch ? `${row.branch.code} - ${row.branch.name}` : 'All branches',
+        supplier: row.supplier ? `${row.supplier.supplierCode} - ${row.supplier.name}` : null,
+        status: row.status,
+        receivedDate: row.receivedDate,
+        expiryDate: row.expiryDate,
+        daysToExpiry,
+        initialQuantity,
+        remainingQuantity,
+        depletionPercent,
+        unit: row.unit.symbol ?? row.unit.name,
+        unitCost: this.toNumber(row.unitCost),
+        readinessStatus,
+        ...this.reportMeta({
+          readiness: this.readiness(
+            readinessStatus,
+            readinessStatus === 'CRITICAL'
+              ? 'Batch is expired and should be reviewed before sale.'
+              : readinessStatus === 'WARNING'
+                ? 'Batch is close to expiry and should be prioritized or quarantined.'
+                : readinessStatus === 'INFO'
+                  ? 'Batch has no remaining quantity.'
+                  : 'Batch is active and usable.',
+          ),
+          lineage: this.lineage(
+            'Batch status',
+            ['product_batches', 'products', 'branches', 'suppliers'],
+            ['initialQuantity', 'remainingQuantity', 'unitCost', 'expiryDate'],
+          ),
+          drillThrough: [
+            {
+              label: 'Open product batches',
+              href: this.route('/westsides/product-batches', {
+                companyId: query.companyId,
+                branchId: query.branchId,
+                search: row.batchNumber,
+              }),
+              entityType: 'productBatch',
+              entityId: row.id,
+            },
+          ],
+        }),
+      };
+    });
   }
 
   async stockDamageReport(query: QueryReportDto, user: AuthUser) {
@@ -536,13 +940,44 @@ export class WestsidesReportsService {
       _count: { id: true },
     });
 
-    return rows.map((row) => ({
-      damageType: row.damageType,
-      status: row.status,
-      reportCount: row._count.id,
-      quantity: this.toNumber(row._sum.quantity),
-      estimatedValue: this.toNumber(row._sum.estimatedValue),
-    }));
+    return rows.map((row) => {
+      const estimatedValue = this.toNumber(row._sum.estimatedValue);
+      const readinessStatus: ReportReadinessStatus =
+        row.status === 'DRAFT' || row.status === 'SUBMITTED' ? 'WARNING' : 'READY';
+      return {
+        damageType: row.damageType,
+        status: row.status,
+        reportCount: row._count.id,
+        quantity: this.toNumber(row._sum.quantity),
+        estimatedValue,
+        readinessStatus,
+        ...this.reportMeta({
+          readiness: this.readiness(
+            readinessStatus,
+            readinessStatus === 'WARNING'
+              ? 'Damage entries still need review or approval.'
+              : 'Damage entries are in a controlled status.',
+          ),
+          lineage: this.lineage(
+            'Stock damage report',
+            ['stock_damages'],
+            ['quantity', 'estimatedValue', 'damageType', 'status'],
+          ),
+          drillThrough: [
+            {
+              label: 'Review stock damage',
+              href: this.route('/westsides/stock-damage', {
+                companyId: query.companyId,
+                branchId: query.branchId,
+                status: row.status,
+                damageType: row.damageType,
+              }),
+              entityType: 'stockDamage',
+            },
+          ],
+        }),
+      };
+    });
   }
 
   async packageBalanceReport(query: QueryReportDto, user: AuthUser) {
@@ -556,17 +991,55 @@ export class WestsidesReportsService {
       },
     });
 
-    return rows.map((row) => ({
-      customerCode: row.customer.customerCode,
-      customerName: row.customer.name,
-      packageCode: row.returnablePackage?.packageCode ?? null,
-      packageName: row.returnablePackage?.name ?? 'Unassigned package',
-      packageType: row.returnablePackage?.packageType ?? null,
-      quantityOwedByCustomer: this.toNumber(row.quantityOwedByCustomer),
-      quantityOwedToCustomer: this.toNumber(row.quantityOwedToCustomer),
-      depositBalance: this.toNumber(row.depositBalance),
-      updatedAt: row.updatedAt,
-    }));
+    return rows.map((row) => {
+      const owedByCustomer = this.toNumber(row.quantityOwedByCustomer);
+      const owedToCustomer = this.toNumber(row.quantityOwedToCustomer);
+      const depositBalance = this.toNumber(row.depositBalance);
+      const exposure = Math.abs(depositBalance) + owedByCustomer + owedToCustomer;
+      const readinessStatus = this.statusFromAmount(exposure, 10);
+      return {
+        customerCode: row.customer.customerCode,
+        customerName: row.customer.name,
+        packageCode: row.returnablePackage?.packageCode ?? null,
+        packageName: row.returnablePackage?.name ?? 'Unassigned package',
+        packageType: row.returnablePackage?.packageType ?? null,
+        quantityOwedByCustomer: owedByCustomer,
+        quantityOwedToCustomer: owedToCustomer,
+        depositBalance,
+        netPackageExposure: exposure,
+        updatedAt: row.updatedAt,
+        readinessStatus,
+        ...this.reportMeta({
+          readiness: this.readiness(
+            readinessStatus,
+            exposure > 0
+              ? 'Customer package balance needs follow-up or reconciliation.'
+              : 'No package exposure is outstanding for this customer/package.',
+          ),
+          lineage: this.lineage(
+            'Customer package balance',
+            ['customer_package_balances', 'customers', 'returnable_packages'],
+            ['quantityOwedByCustomer', 'quantityOwedToCustomer', 'depositBalance'],
+          ),
+          drillThrough: [
+            {
+              label: 'Open customer',
+              href: `/westsides/customers/${row.customer.id}`,
+              entityType: 'customer',
+              entityId: row.customer.id,
+            },
+            {
+              label: 'Review package movements',
+              href: this.route('/westsides/package-movements', {
+                companyId: query.companyId,
+                customerId: row.customer.id,
+              }),
+              entityType: 'packageMovement',
+            },
+          ],
+        }),
+      };
+    });
   }
 
   async quotationConversion(query: QueryReportDto, user: AuthUser) {
@@ -580,13 +1053,41 @@ export class WestsidesReportsService {
     const total = byStatus.reduce((sum, s) => sum + s._count.id, 0);
     const converted = byStatus.find((s) => s.status === 'CONVERTED')?._count.id ?? 0;
     const conversionRate = total > 0 ? (converted / total) * 100 : 0;
-    return byStatus.map((row) => ({
-      status: row.status,
-      quotationCount: row._count.id,
-      totalQuotations: total,
-      convertedQuotations: converted,
-      conversionRate,
-    }));
+    return byStatus.map((row) => {
+      const readinessStatus: ReportReadinessStatus =
+        row.status === 'EXPIRED' || row.status === 'REJECTED' ? 'WARNING' : 'READY';
+      return {
+        status: row.status,
+        quotationCount: row._count.id,
+        totalQuotations: total,
+        convertedQuotations: converted,
+        conversionRate,
+        readinessStatus,
+        ...this.reportMeta({
+          readiness: this.readiness(
+            readinessStatus,
+            readinessStatus === 'WARNING'
+              ? 'Quotation status indicates sales leakage or follow-up risk.'
+              : 'Quotation status is active or successfully controlled.',
+          ),
+          lineage: this.lineage(
+            'Quotation conversion',
+            ['quotations'],
+            ['status', 'convertedSalesOrderId'],
+          ),
+          drillThrough: [
+            {
+              label: 'Open quotations',
+              href: this.route('/westsides/quotations', {
+                companyId: query.companyId,
+                status: row.status,
+              }),
+              entityType: 'quotation',
+            },
+          ],
+        }),
+      };
+    });
   }
 
   async deliveryPerformance(query: QueryReportDto, user: AuthUser) {
@@ -601,10 +1102,43 @@ export class WestsidesReportsService {
       _count: { id: true },
     });
 
-    return rows.map((row) => ({
-      status: row.status,
-      deliveryCount: row._count.id,
-    }));
+    return rows.map((row) => {
+      const readinessStatus: ReportReadinessStatus =
+        row.status === 'DRAFT' ||
+        row.status === 'DISPATCHED' ||
+        row.status === 'PARTIALLY_DELIVERED'
+          ? 'WARNING'
+          : 'READY';
+      return {
+        status: row.status,
+        deliveryCount: row._count.id,
+        readinessStatus,
+        ...this.reportMeta({
+          readiness: this.readiness(
+            readinessStatus,
+            readinessStatus === 'WARNING'
+              ? 'Deliveries in this status need operational follow-up.'
+              : 'Delivery status is finalized or closed.',
+          ),
+          lineage: this.lineage(
+            'Delivery performance',
+            ['delivery_notes'],
+            ['status', 'deliveryDate'],
+          ),
+          drillThrough: [
+            {
+              label: 'Open delivery notes',
+              href: this.route('/westsides/delivery-notes', {
+                companyId: query.companyId,
+                branchId: query.branchId,
+                status: row.status,
+              }),
+              entityType: 'deliveryNote',
+            },
+          ],
+        }),
+      };
+    });
   }
 
   async priceListReport(query: QueryReportDto, user: AuthUser) {
@@ -612,18 +1146,66 @@ export class WestsidesReportsService {
     const companyWhere = await this.companyWhere({ companyId }, user);
     const priceLists = await this.prisma.priceList.findMany({
       where: { ...companyWhere, deletedAt: null },
-      include: { _count: { select: { items: true } } },
+      select: {
+        id: true,
+        name: true,
+        priceListType: true,
+        currency: true,
+        effectiveFrom: true,
+        effectiveTo: true,
+        status: true,
+        approvedAt: true,
+        _count: { select: { items: true } },
+      },
     });
-    return priceLists.map((priceList) => ({
-      name: priceList.name,
-      priceListType: priceList.priceListType,
-      currency: priceList.currency,
-      effectiveFrom: priceList.effectiveFrom,
-      effectiveTo: priceList.effectiveTo,
-      status: priceList.status,
-      itemCount: priceList._count.items,
-      approvedAt: priceList.approvedAt,
-    }));
+    return priceLists.map((priceList) => {
+      const expired =
+        priceList.effectiveTo !== null && priceList.effectiveTo.getTime() < Date.now();
+      const readinessStatus: ReportReadinessStatus =
+        priceList.status !== 'ACTIVE' || expired || priceList._count.items === 0
+          ? 'WARNING'
+          : 'READY';
+      return {
+        name: priceList.name,
+        priceListType: priceList.priceListType,
+        currency: priceList.currency,
+        effectiveFrom: priceList.effectiveFrom,
+        effectiveTo: priceList.effectiveTo,
+        status: priceList.status,
+        itemCount: priceList._count.items,
+        approvedAt: priceList.approvedAt,
+        isExpired: expired,
+        readinessStatus,
+        ...this.reportMeta({
+          readiness: this.readiness(
+            readinessStatus,
+            expired
+              ? 'Price list is past its effective end date.'
+              : priceList._count.items === 0
+                ? 'Price list has no items and cannot drive pricing.'
+                : priceList.status !== 'ACTIVE'
+                  ? 'Price list is not active.'
+                  : 'Price list is active, effective, and populated.',
+          ),
+          lineage: this.lineage(
+            'Price list report',
+            ['price_lists', 'price_list_items'],
+            ['status', 'effectiveFrom', 'effectiveTo', 'itemCount'],
+          ),
+          drillThrough: [
+            {
+              label: 'Open price lists',
+              href: this.route('/westsides/price-lists', {
+                companyId: query.companyId,
+                search: priceList.name,
+              }),
+              entityType: 'priceList',
+              entityId: priceList.id,
+            },
+          ],
+        }),
+      };
+    });
   }
 
   async fastMovingItems(query: QueryReportDto, user: AuthUser) {
@@ -645,13 +1227,41 @@ export class WestsidesReportsService {
 
     return rows.map((row, index) => {
       const product = products.get(row.productId);
+      const quantity = this.toNumber(row._sum.quantity);
+      const totalAmount = this.toNumber(row._sum.lineTotal);
       return {
         rank: index + 1,
         productCode: product?.productCode ?? null,
         sku: product?.sku ?? null,
         productName: product?.name ?? 'Unknown product',
-        quantity: this.toNumber(row._sum.quantity),
-        totalAmount: this.toNumber(row._sum.lineTotal),
+        quantity,
+        totalAmount,
+        velocitySignal: index < 5 ? 'TOP_SELLER' : 'FAST_MOVING',
+        readinessStatus: product ? 'READY' : 'WARNING',
+        ...this.reportMeta({
+          readiness: this.readiness(
+            product ? 'READY' : 'WARNING',
+            product
+              ? 'Fast-moving product can be replenished against live stock and sales history.'
+              : 'Fast-moving row is missing product master metadata.',
+          ),
+          lineage: this.lineage(
+            'Fast-moving items',
+            ['sales_orders', 'sales_order_lines', 'products'],
+            ['quantity', 'lineTotal'],
+          ),
+          drillThrough: [
+            {
+              label: 'Review live stock',
+              href: this.route('/westsides/inventory/live', {
+                companyId: query.companyId,
+                branchId: query.branchId,
+                productId: row.productId,
+              }),
+              entityType: 'inventoryBalance',
+            },
+          ],
+        }),
       };
     });
   }
@@ -696,16 +1306,51 @@ export class WestsidesReportsService {
       orderBy: { quantityOnHand: 'desc' },
     });
 
-    return rows.map((row) => ({
-      productCode: row.product.productCode,
-      sku: row.product.sku,
-      productName: row.product.name,
-      branch: row.branch ? `${row.branch.code} - ${row.branch.name}` : 'All branches',
-      quantityOnHand: this.toNumber(row.quantityOnHand),
-      quantityReserved: this.toNumber(row.quantityReserved),
-      totalValue: this.toNumber(row.totalValue),
-      lastMovementAt: row.lastMovementAt,
-    }));
+    return rows.map((row) => {
+      const quantityOnHand = this.toNumber(row.quantityOnHand);
+      const totalValue = this.toNumber(row.totalValue);
+      const daysSinceMovement = row.lastMovementAt
+        ? Math.floor((Date.now() - row.lastMovementAt.getTime()) / (24 * 3600 * 1000))
+        : null;
+      const readinessStatus: ReportReadinessStatus = totalValue > 0 ? 'WARNING' : 'INFO';
+      return {
+        productCode: row.product.productCode,
+        sku: row.product.sku,
+        productName: row.product.name,
+        branch: row.branch ? `${row.branch.code} - ${row.branch.name}` : 'All branches',
+        quantityOnHand,
+        quantityReserved: this.toNumber(row.quantityReserved),
+        totalValue,
+        daysSinceMovement,
+        lastMovementAt: row.lastMovementAt,
+        readinessStatus,
+        ...this.reportMeta({
+          readiness: this.readiness(
+            readinessStatus,
+            totalValue > 0
+              ? 'Stock has value but no sales movement in the last 30 days.'
+              : 'Slow-moving stock has no current value exposure.',
+          ),
+          lineage: this.lineage(
+            'Slow-moving items',
+            ['inventory_balances', 'sales_orders', 'sales_order_lines', 'products'],
+            ['quantityOnHand', 'quantityReserved', 'totalValue', 'lastMovementAt'],
+          ),
+          drillThrough: [
+            {
+              label: 'Review live stock',
+              href: this.route('/westsides/inventory/live', {
+                companyId: query.companyId,
+                branchId: query.branchId,
+                productId: row.productId,
+              }),
+              entityType: 'inventoryBalance',
+              entityId: row.id,
+            },
+          ],
+        }),
+      };
+    });
   }
 
   async productProfitability(query: QueryReportDto, user: AuthUser) {
@@ -738,6 +1383,10 @@ export class WestsidesReportsService {
       const avgCost = Number(costMap.get(r.productId) ?? 0);
       const totalCost = avgCost * Number(r._sum.quantity ?? 0);
       const product = products.get(r.productId);
+      const grossProfit = totalRevenue - totalCost;
+      const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+      const readinessStatus: ReportReadinessStatus =
+        grossMargin < 0 ? 'CRITICAL' : grossMargin < 15 ? 'WARNING' : 'READY';
       return {
         productId: r.productId,
         productCode: product?.productCode ?? null,
@@ -747,8 +1396,45 @@ export class WestsidesReportsService {
         averageUnitCost: avgCost,
         totalRevenue,
         totalCost,
-        grossProfit: totalRevenue - totalCost,
-        grossMargin: totalRevenue > 0 ? ((totalRevenue - totalCost) / totalRevenue) * 100 : 0,
+        grossProfit,
+        grossMargin,
+        readinessStatus,
+        ...this.reportMeta({
+          readiness: this.readiness(
+            readinessStatus,
+            readinessStatus === 'CRITICAL'
+              ? 'Product is selling below estimated cost.'
+              : readinessStatus === 'WARNING'
+                ? 'Product margin is below the operating review threshold.'
+                : 'Product margin is healthy against estimated batch cost.',
+          ),
+          lineage: this.lineage(
+            'Product profitability',
+            ['sales_orders', 'sales_order_lines', 'product_batches', 'products'],
+            ['lineTotal', 'quantity', 'unitCost'],
+          ),
+          drillThrough: [
+            {
+              label: 'Review product sales',
+              href: this.route('/operations/sales-orders', {
+                companyId: query.companyId,
+                branchId: query.branchId,
+                productId: r.productId,
+                dateFrom: query.dateFrom,
+                dateTo: query.dateTo,
+              }),
+              entityType: 'salesOrder',
+            },
+            {
+              label: 'Review pricing',
+              href: this.route('/westsides/price-lists', {
+                companyId: query.companyId,
+                search: product?.productCode ?? product?.name ?? r.productId,
+              }),
+              entityType: 'priceList',
+            },
+          ],
+        }),
       };
     });
   }
@@ -774,6 +1460,40 @@ export class WestsidesReportsService {
         invoiceCount: row._count.id,
         invoicedAmount: this.toNumber(row._sum.amount),
         outstandingAmount: this.toNumber(row._sum.outstandingAmount),
+        readinessStatus: this.toNumber(row._sum.outstandingAmount) > 0 ? 'WARNING' : 'READY',
+        ...this.reportMeta({
+          readiness: this.readiness(
+            this.toNumber(row._sum.outstandingAmount) > 0 ? 'WARNING' : 'READY',
+            this.toNumber(row._sum.outstandingAmount) > 0
+              ? 'Customer has open receivable exposure requiring collection follow-up.'
+              : 'Customer receivable exposure is settled.',
+          ),
+          lineage: this.lineage(
+            'Credit customers',
+            ['receivables', 'customers'],
+            ['amount', 'outstandingAmount', 'status'],
+          ),
+          drillThrough: [
+            ...(row.customerId
+              ? [
+                  {
+                    label: 'Open customer',
+                    href: `/westsides/customers/${row.customerId}`,
+                    entityType: 'customer',
+                    entityId: row.customerId,
+                  },
+                ]
+              : []),
+            {
+              label: 'Review receivables',
+              href: this.route('/finance/receivables', {
+                companyId: query.companyId,
+                customerId: row.customerId,
+              }),
+              entityType: 'receivable',
+            },
+          ],
+        }),
       };
     });
   }
@@ -793,7 +1513,45 @@ export class WestsidesReportsService {
       entry.count += 1;
       daily.set(key, entry);
     }
-    return Array.from(daily.values());
+    return Array.from(daily.values()).map((row) => ({
+      ...row,
+      averageOrderValue: row.count > 0 ? row.total / row.count : 0,
+      readinessStatus: row.count > 0 ? 'READY' : 'INFO',
+      ...this.reportMeta({
+        readiness: this.readiness(
+          row.count > 0 ? 'READY' : 'INFO',
+          row.count > 0
+            ? 'Daily sales are traceable to confirmed sales orders.'
+            : 'No confirmed sales orders exist for this day.',
+        ),
+        lineage: this.lineage(
+          'Daily sales summary',
+          ['sales_orders'],
+          ['totalAmount', 'orderDate'],
+        ),
+        drillThrough: [
+          {
+            label: 'Open day orders',
+            href: this.route('/operations/sales-orders', {
+              companyId: query.companyId,
+              branchId: query.branchId,
+              dateFrom: row.date,
+              dateTo: row.date,
+            }),
+            entityType: 'salesOrder',
+          },
+          {
+            label: 'Open Z-report',
+            href: this.route('/westsides/daily-close', {
+              companyId: query.companyId,
+              branchId: query.branchId,
+              date: row.date,
+            }),
+            entityType: 'dailyClose',
+          },
+        ],
+      }),
+    }));
   }
 
   async monthlySalesSummary(query: QueryReportDto, user: AuthUser) {
@@ -812,6 +1570,34 @@ export class WestsidesReportsService {
       entry.count += 1;
       monthly.set(key, entry);
     }
-    return Array.from(monthly.values());
+    return Array.from(monthly.values()).map((row) => ({
+      ...row,
+      averageOrderValue: row.count > 0 ? row.total / row.count : 0,
+      readinessStatus: row.count > 0 ? 'READY' : 'INFO',
+      ...this.reportMeta({
+        readiness: this.readiness(
+          row.count > 0 ? 'READY' : 'INFO',
+          row.count > 0
+            ? 'Monthly sales are traceable to confirmed sales orders.'
+            : 'No confirmed sales orders exist for this month.',
+        ),
+        lineage: this.lineage(
+          'Monthly sales summary',
+          ['sales_orders'],
+          ['totalAmount', 'orderDate'],
+        ),
+        drillThrough: [
+          {
+            label: 'Open month orders',
+            href: this.route('/operations/sales-orders', {
+              companyId: query.companyId,
+              branchId: query.branchId,
+              month: row.month,
+            }),
+            entityType: 'salesOrder',
+          },
+        ],
+      }),
+    }));
   }
 }
