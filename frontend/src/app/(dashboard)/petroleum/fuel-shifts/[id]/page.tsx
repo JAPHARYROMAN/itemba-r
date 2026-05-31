@@ -182,10 +182,12 @@ function CloseShiftModal({
   shift,
   onClose,
   onSaved,
+  onSynced,
 }: {
   shift: ShiftDetail;
   onClose: () => void;
   onSaved: () => void;
+  onSynced: () => Promise<void> | void;
 }) {
   const readings = shift.nozzleReadings ?? [];
   const [closingMeters, setClosingMeters] = useState<Record<string, string>>(() =>
@@ -198,7 +200,21 @@ function CloseShiftModal({
   );
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncAttempted, setSyncAttempted] = useState(false);
   const [error, setError] = useState('');
+  const readingKey = readings.map((reading) => reading.id).join('|');
+
+  useEffect(() => {
+    setClosingMeters(
+      Object.fromEntries(
+        readings.map((reading) => [
+          reading.id,
+          reading.closingMeter == null ? '' : String(reading.closingMeter),
+        ]),
+      ),
+    );
+  }, [readingKey]);
 
   const rows = readings.map((reading) => {
     const openingMeter = Number(reading.openingMeter ?? 0);
@@ -240,6 +256,38 @@ function CloseShiftModal({
 
   const labelFor = (reading: NozzleReading) =>
     `${reading.nozzle?.nozzleCode ?? 'Nozzle'}${reading.nozzle?.nozzleName ? ` - ${reading.nozzle.nozzleName}` : ''}`;
+
+  const syncReadings = async () => {
+    setSyncing(true);
+    setError('');
+    try {
+      const res = await fetch(
+        `/api/backend/petroleum/fuel-shifts/${shift.id}/nozzle-readings/sync`,
+        {
+          method: 'POST',
+        },
+      );
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        const msg = Array.isArray(j?.message)
+          ? j.message.join(', ')
+          : (j?.message ?? 'Could not load active nozzles for this shift');
+        throw new Error(msg);
+      }
+      await onSynced();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not load active nozzles for this shift');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (readings.length === 0 && !syncAttempted) {
+      setSyncAttempted(true);
+      void syncReadings();
+    }
+  }, [readings.length, syncAttempted]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -336,52 +384,77 @@ function CloseShiftModal({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
-                  <tr key={row.reading.id} className="border-t border-slate-100">
-                    <td className={`${tdCls} font-medium`}>
-                      <div>{labelFor(row.reading)}</div>
-                      <div className="text-[11px] text-slate-500">
-                        {row.reading.pump?.pumpCode ?? 'Pump'}
-                        {row.reading.tank?.tankCode ? ` / ${row.reading.tank.tankCode}` : ''}
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center">
+                      <div className="text-sm text-slate-500">
+                        {syncing
+                          ? 'Loading active branch nozzles into this shift...'
+                          : 'No nozzle readings are linked to this shift yet.'}
                       </div>
-                    </td>
-                    <td className={tdCls}>
-                      <div>{row.reading.product?.name ?? 'Unknown product'}</div>
-                      {row.reading.product?.productCode && (
-                        <div className="text-[11px] text-slate-500 font-mono">
-                          {row.reading.product.productCode}
-                        </div>
+                      {!syncing && (
+                        <button
+                          type="button"
+                          onClick={syncReadings}
+                          className="mt-3 text-sm bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md font-medium"
+                        >
+                          Load Active Nozzles
+                        </button>
                       )}
                     </td>
-                    <td className={`${tdCls} text-right font-mono`}>{fmtNum(row.openingMeter)}</td>
-                    <td className={`${tdCls} text-right`}>
-                      <input
-                        required
-                        type="number"
-                        min={row.openingMeter}
-                        step="0.001"
-                        value={closingMeters[row.reading.id] ?? ''}
-                        onChange={(event) =>
-                          setClosingMeters((current) => ({
-                            ...current,
-                            [row.reading.id]: event.target.value,
-                          }))
-                        }
-                        className="w-36 text-right text-sm border border-slate-200 rounded-md px-3 py-2 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                        placeholder="0.000"
-                      />
-                    </td>
-                    <td
-                      className={`${tdCls} text-right font-mono ${row.litresSold != null && row.litresSold < 0 ? 'text-red-600' : ''}`}
-                    >
-                      {row.litresSold == null ? '-' : fmtNum(row.litresSold)}
-                    </td>
-                    <td className={`${tdCls} text-right font-mono`}>{fmtNum(row.pricePerLitre)}</td>
-                    <td className={`${tdCls} text-right font-mono`}>
-                      {row.expectedAmount == null ? '-' : fmtNum(row.expectedAmount)}
-                    </td>
                   </tr>
-                ))}
+                ) : (
+                  rows.map((row) => (
+                    <tr key={row.reading.id} className="border-t border-slate-100">
+                      <td className={`${tdCls} font-medium`}>
+                        <div>{labelFor(row.reading)}</div>
+                        <div className="text-[11px] text-slate-500">
+                          {row.reading.pump?.pumpCode ?? 'Pump'}
+                          {row.reading.tank?.tankCode ? ` / ${row.reading.tank.tankCode}` : ''}
+                        </div>
+                      </td>
+                      <td className={tdCls}>
+                        <div>{row.reading.product?.name ?? 'Unknown product'}</div>
+                        {row.reading.product?.productCode && (
+                          <div className="text-[11px] text-slate-500 font-mono">
+                            {row.reading.product.productCode}
+                          </div>
+                        )}
+                      </td>
+                      <td className={`${tdCls} text-right font-mono`}>
+                        {fmtNum(row.openingMeter)}
+                      </td>
+                      <td className={`${tdCls} text-right`}>
+                        <input
+                          required
+                          type="number"
+                          min={row.openingMeter}
+                          step="0.001"
+                          value={closingMeters[row.reading.id] ?? ''}
+                          onChange={(event) =>
+                            setClosingMeters((current) => ({
+                              ...current,
+                              [row.reading.id]: event.target.value,
+                            }))
+                          }
+                          className="w-36 text-right text-sm border border-slate-200 rounded-md px-3 py-2 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                          placeholder="0.000"
+                        />
+                      </td>
+                      <td
+                        className={`${tdCls} text-right font-mono ${row.litresSold != null && row.litresSold < 0 ? 'text-red-600' : ''}`}
+                      >
+                        {row.litresSold == null ? '-' : fmtNum(row.litresSold)}
+                      </td>
+                      <td className={`${tdCls} text-right font-mono`}>
+                        {fmtNum(row.pricePerLitre)}
+                      </td>
+                      <td className={`${tdCls} text-right font-mono`}>
+                        {row.expectedAmount == null ? '-' : fmtNum(row.expectedAmount)}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -455,7 +528,7 @@ function CloseShiftModal({
           </button>
           <button
             onClick={(e) => handleSubmit(e as unknown as React.FormEvent)}
-            disabled={saving || readings.length === 0}
+            disabled={saving || syncing || readings.length === 0}
             className="text-sm bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-5 py-2 rounded-md font-medium"
           >
             {saving ? 'Closing...' : 'Close Shift'}
@@ -1325,6 +1398,7 @@ export default function ShiftDetailPage() {
         <CloseShiftModal
           shift={shift}
           onClose={() => setShowCloseModal(false)}
+          onSynced={load}
           onSaved={() => {
             setShowCloseModal(false);
             load();

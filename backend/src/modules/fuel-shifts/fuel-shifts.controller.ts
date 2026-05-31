@@ -1,13 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Body,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { FuelShiftsService } from './fuel-shifts.service';
 import { OpenFuelShiftDto } from './dto/open-fuel-shift.dto';
 import { UpdateFuelShiftDto, RejectFuelShiftDto } from './dto/update-fuel-shift.dto';
@@ -62,11 +53,7 @@ export class FuelShiftsController {
 
   @Patch(':id')
   @RequirePermissions('fuel_shifts.update')
-  update(
-    @Param('id') id: string,
-    @Body() dto: UpdateFuelShiftDto,
-    @CurrentUser() user: AuthUser,
-  ) {
+  update(@Param('id') id: string, @Body() dto: UpdateFuelShiftDto, @CurrentUser() user: AuthUser) {
     return this.service.update(id, dto, user);
   }
 
@@ -90,22 +77,20 @@ export class FuelShiftsController {
 
   @Patch(':id/reject')
   @RequirePermissions('fuel_shifts.reject')
-  reject(
-    @Param('id') id: string,
-    @Body() dto: RejectFuelShiftDto,
-    @CurrentUser() user: AuthUser,
-  ) {
+  reject(@Param('id') id: string, @Body() dto: RejectFuelShiftDto, @CurrentUser() user: AuthUser) {
     return this.service.rejectShift(id, dto.reason, user);
   }
 
   @Patch(':id/close')
   @RequirePermissions('fuel_shifts.close')
-  close(
-    @Param('id') id: string,
-    @Body() dto: CloseFuelShiftDto,
-    @CurrentUser() user: AuthUser,
-  ) {
+  close(@Param('id') id: string, @Body() dto: CloseFuelShiftDto, @CurrentUser() user: AuthUser) {
     return this.service.closeShift(id, dto, user);
+  }
+
+  @Post(':id/nozzle-readings/sync')
+  @RequirePermissions('fuel_shifts.update')
+  syncNozzleReadings(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.syncNozzleReadings(id, user);
   }
 
   @Delete(':id')

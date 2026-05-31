@@ -161,59 +161,16 @@ export class FuelShiftsService {
       companyId: dto.companyId,
     });
 
-    // Find active nozzles for branch
-    const nozzles = await this.prisma.fuelNozzle.findMany({
-      where: {
-        companyId: dto.companyId,
-        branchId: dto.branchId,
-        status: 'ACTIVE',
-        deletedAt: null,
-      },
+    const nozzleReadingCreates = await this.buildNozzleReadingCreates(this.prisma, {
+      companyId: dto.companyId,
+      branchId: dto.branchId,
+      pricingAt: new Date(dto.startTime),
     });
-
-    // Build nozzle reading creates
-    const pricingAt = new Date(dto.startTime);
-    const nozzleReadingCreates = await Promise.all(
-      nozzles.map(async (nozzle) => {
-        // Try branch-specific price first, then company-wide
-        let price = await this.prisma.fuelPrice.findFirst({
-          where: {
-            companyId: dto.companyId,
-            branchId: dto.branchId,
-            productId: nozzle.productId,
-            status: 'ACTIVE',
-            effectiveFrom: { lte: pricingAt },
-            OR: [{ effectiveTo: null }, { effectiveTo: { gte: pricingAt } }],
-          },
-          orderBy: { effectiveFrom: 'desc' },
-        });
-        if (!price) {
-          price = await this.prisma.fuelPrice.findFirst({
-            where: {
-              companyId: dto.companyId,
-              branchId: null,
-              productId: nozzle.productId,
-              status: 'ACTIVE',
-              effectiveFrom: { lte: pricingAt },
-              OR: [{ effectiveTo: null }, { effectiveTo: { gte: pricingAt } }],
-            },
-            orderBy: { effectiveFrom: 'desc' },
-          });
-        }
-
-        return {
-          companyId: dto.companyId,
-          branchId: dto.branchId,
-          nozzleId: nozzle.id,
-          pumpId: nozzle.pumpId,
-          tankId: nozzle.tankId,
-          productId: nozzle.productId,
-          openingMeter: nozzle.currentMeterReading,
-          pricePerLitre: price ? Number(price.pricePerLitre) : 0,
-          status: 'OPEN' as const,
-        };
-      }),
-    );
+    if (nozzleReadingCreates.length === 0) {
+      throw new BadRequestException(
+        'Cannot open a fuel shift before active nozzles are configured for this branch',
+      );
+    }
 
     const shift = await this.prisma.fuelShift.create({
       data: {
@@ -265,6 +222,65 @@ export class FuelShiftsService {
     });
 
     return shift;
+  }
+
+  async syncNozzleReadings(id: string, user: AuthUser) {
+    const shift = await this.prisma.fuelShift.findFirst({
+      where: { id, deletedAt: null },
+      select: {
+        id: true,
+        companyId: true,
+        branchId: true,
+        startTime: true,
+        status: true,
+      },
+    });
+    if (!shift) throw new NotFoundException('Fuel shift not found');
+    await this.companyScope.assertCanAccessCompany(user, shift.companyId, AccessLevel.WRITE);
+
+    if (!['OPEN', 'SUBMITTED', 'SUPERVISOR_APPROVED', 'MANAGER_APPROVED'].includes(shift.status)) {
+      throw new BadRequestException(
+        'Nozzle readings can only be synced before the shift is closed',
+      );
+    }
+
+    const existingReadings = await this.prisma.fuelNozzleReading.findMany({
+      where: { fuelShiftId: id },
+      select: { nozzleId: true },
+    });
+    const existingNozzleIds = new Set(existingReadings.map((reading) => reading.nozzleId));
+    const nozzleReadingCreates = await this.buildNozzleReadingCreates(this.prisma, {
+      companyId: shift.companyId,
+      branchId: shift.branchId,
+      pricingAt: shift.startTime,
+      excludeNozzleIds: existingNozzleIds,
+    });
+
+    if (existingReadings.length === 0 && nozzleReadingCreates.length === 0) {
+      throw new BadRequestException(
+        'No active nozzles are configured for this branch. Create active nozzles before closing the shift.',
+      );
+    }
+
+    if (nozzleReadingCreates.length > 0) {
+      await this.prisma.fuelNozzleReading.createMany({
+        data: nozzleReadingCreates.map((reading) => ({
+          ...reading,
+          fuelShiftId: id,
+        })),
+      });
+
+      await this.auditLogs.log({
+        action: 'FUEL_SHIFT_NOZZLE_READINGS_SYNC',
+        entityType: 'FuelShift',
+        entityId: id,
+        userId: user.id,
+        companyId: shift.companyId,
+        newValue: { addedReadings: nozzleReadingCreates.length } as any,
+      });
+    }
+
+    return this.findOne(id, user, AccessLevel.READ);
   }
 
   async update(id: string, dto: UpdateFuelShiftDto, user: AuthUser) {
@@ -963,6 +979,70 @@ export class FuelShiftsService {
       previousStatus: shift.status,
       alreadyClosed,
     };
+  }
+
+  private async buildNozzleReadingCreates(
+    client: Prisma.TransactionClient | PrismaService,
+    params: {
+      companyId: string;
+      branchId: string;
+      pricingAt: Date;
+      excludeNozzleIds?: Set<string>;
+    },
+  ) {
+    const nozzles = await client.fuelNozzle.findMany({
+      where: {
+        companyId: params.companyId,
+        branchId: params.branchId,
+        status: 'ACTIVE',
+        deletedAt: null,
+        ...(params.excludeNozzleIds?.size
+          ? { id: { notIn: Array.from(params.excludeNozzleIds) } }
+          : {}),
+      },
+      orderBy: [{ pump: { pumpCode: 'asc' } }, { nozzleCode: 'asc' }],
+    });
+
+    return Promise.all(
+      nozzles.map(async (nozzle) => {
+        let price = await client.fuelPrice.findFirst({
+          where: {
+            companyId: params.companyId,
+            branchId: params.branchId,
+            productId: nozzle.productId,
+            status: 'ACTIVE',
+            effectiveFrom: { lte: params.pricingAt },
+            OR: [{ effectiveTo: null }, { effectiveTo: { gte: params.pricingAt } }],
+          },
+          orderBy: { effectiveFrom: 'desc' },
+        });
+        if (!price) {
+          price = await client.fuelPrice.findFirst({
+            where: {
+              companyId: params.companyId,
+              branchId: null,
+              productId: nozzle.productId,
+              status: 'ACTIVE',
+              effectiveFrom: { lte: params.pricingAt },
+              OR: [{ effectiveTo: null }, { effectiveTo: { gte: params.pricingAt } }],
+            },
+            orderBy: { effectiveFrom: 'desc' },
+          });
+        }
+
+        return {
+          companyId: params.companyId,
+          branchId: params.branchId,
+          nozzleId: nozzle.id,
+          pumpId: nozzle.pumpId,
+          tankId: nozzle.tankId,
+          productId: nozzle.productId,
+          openingMeter: nozzle.currentMeterReading,
+          pricePerLitre: price ? Number(price.pricePerLitre) : 0,
+          status: 'OPEN' as const,
+        };
+      }),
+    );
   }
 
   private buildShiftSalesSummary(

@@ -39,6 +39,7 @@ interface FuelDelivery {
   product?: { name: string } | null;
   tank?: { tankName: string } | null;
   orderedLitres: number;
+  deliveredLitres: number;
   acceptedLitres: number;
   unitCost: number;
   status: string;
@@ -111,6 +112,7 @@ function CreateDeliveryModal({
   const [tankId, setTankId] = useState('');
   const [deliveryDate, setDeliveryDate] = useState(new Date().toISOString().split('T')[0]);
   const [orderedLitres, setOrderedLitres] = useState<number | ''>('');
+  const [deliveredLitres, setDeliveredLitres] = useState<number | ''>('');
   const [acceptedLitres, setAcceptedLitres] = useState<number | ''>('');
   const [unitCost, setUnitCost] = useState<number | ''>('');
   const [notes, setNotes] = useState('');
@@ -163,6 +165,17 @@ function CreateDeliveryModal({
     setSaving(true);
     setError('');
     try {
+      const delivered = Number(deliveredLitres || acceptedLitres || orderedLitres);
+      const accepted = Number(acceptedLitres || delivered);
+      if (!delivered || delivered <= 0) {
+        throw new Error('Delivered litres must be greater than zero');
+      }
+      if (!accepted || accepted <= 0) {
+        throw new Error('Accepted litres must be greater than zero');
+      }
+      if (accepted > delivered) {
+        throw new Error('Accepted litres cannot be greater than delivered litres');
+      }
       const body = {
         companyId,
         branchId,
@@ -171,7 +184,9 @@ function CreateDeliveryModal({
         tankId,
         deliveryDate,
         orderedLitres: Number(orderedLitres) || 0,
-        acceptedLitres: Number(acceptedLitres) || 0,
+        deliveredLitres: delivered,
+        acceptedLitres: accepted,
+        rejectedLitres: Math.max(0, delivered - accepted),
         unitCost: Number(unitCost) || 0,
         notes: notes.trim() || undefined,
       };
@@ -326,18 +341,40 @@ function CreateDeliveryModal({
                 type="number"
                 step="0.01"
                 value={orderedLitres}
-                onChange={(e) =>
-                  setOrderedLitres(e.target.value === '' ? '' : Number(e.target.value))
-                }
+                onChange={(e) => {
+                  const value = e.target.value === '' ? '' : Number(e.target.value);
+                  setOrderedLitres(value);
+                  if (deliveredLitres === '') setDeliveredLitres(value);
+                  if (acceptedLitres === '') setAcceptedLitres(value);
+                }}
                 className={fieldCls}
                 placeholder="0.00"
               />
             </div>
             <div>
-              <label className={labelCls}>Accepted Litres</label>
+              <label className={labelCls}>Delivered Litres *</label>
               <input
+                required
                 type="number"
                 step="0.01"
+                min="0.001"
+                value={deliveredLitres}
+                onChange={(e) => {
+                  const value = e.target.value === '' ? '' : Number(e.target.value);
+                  setDeliveredLitres(value);
+                  if (acceptedLitres === '') setAcceptedLitres(value);
+                }}
+                className={fieldCls}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Accepted Litres *</label>
+              <input
+                required
+                type="number"
+                step="0.01"
+                min="0.001"
                 value={acceptedLitres}
                 onChange={(e) =>
                   setAcceptedLitres(e.target.value === '' ? '' : Number(e.target.value))
@@ -513,6 +550,7 @@ export default function FuelDeliveriesPage() {
                     <th className={thCls}>Product</th>
                     <th className={thCls}>Tank</th>
                     <th className={`${thCls} text-right`}>Ordered (L)</th>
+                    <th className={`${thCls} text-right`}>Delivered (L)</th>
                     <th className={`${thCls} text-right`}>Accepted (L)</th>
                     <th className={thCls}>Status</th>
                     <th className={thCls}></th>
@@ -527,6 +565,9 @@ export default function FuelDeliveriesPage() {
                       <td className={tdCls}>{d.product?.name ?? '—'}</td>
                       <td className={tdCls}>{d.tank?.tankName ?? '—'}</td>
                       <td className={`${tdCls} text-right font-mono`}>{fmtNum(d.orderedLitres)}</td>
+                      <td className={`${tdCls} text-right font-mono`}>
+                        {fmtNum(d.deliveredLitres)}
+                      </td>
                       <td className={`${tdCls} text-right font-mono`}>
                         {fmtNum(d.acceptedLitres)}
                       </td>
