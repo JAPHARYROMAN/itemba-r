@@ -106,6 +106,5 @@ export class CreateEmployeeDto {
   @IsOptional() @IsString() notes?: string;
   @IsOptional() @IsString() userId?: string;
 
-  // ── Audit ──────────────────────────────────────────────────────────────
-  @IsString() createdById!: string;
+  // Audit is derived from the authenticated user, not accepted from clients.
 }

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
@@ -15,6 +15,61 @@ const SENSITIVE_FIELDS = [
   'nssfNumber',
   'nhifNumber',
 ];
+
+const EMPLOYEE_WRITABLE_FIELDS = new Set([
+  'employeeCode',
+  'companyId',
+  'divisionId',
+  'branchId',
+  'licensedBusinessUnitId',
+  'departmentId',
+  'positionId',
+  'userId',
+  'firstName',
+  'middleName',
+  'lastName',
+  'fullName',
+  'gender',
+  'dateOfBirth',
+  'nationality',
+  'phone',
+  'email',
+  'address',
+  'identificationType',
+  'identificationNumber',
+  'nidaNumber',
+  'passportNumber',
+  'passportCountry',
+  'votersIdNumber',
+  'tin',
+  'nssfNumber',
+  'nhifNumber',
+  'pssfNumber',
+  'wcfRegistrationNumber',
+  'heslbNumber',
+  'heslbBorrower',
+  'taxResidencyStatus',
+  'disabilityStatus',
+  'disabilityCertificateNo',
+  'dependents',
+  'payrollRegion',
+  'bankName',
+  'bankAccountName',
+  'bankAccountNumber',
+  'mobileMoneyNumber',
+  'emergencyContactName',
+  'emergencyContactPhone',
+  'employmentType',
+  'employmentStatus',
+  'hireDate',
+  'terminationDate',
+  'baseSalary',
+  'salaryCurrency',
+  'paymentFrequency',
+  'notes',
+]);
+
+const EMPLOYEE_DATE_FIELDS = new Set(['dateOfBirth', 'hireDate', 'terminationDate']);
 
 function hasSensitivePermission(user: any): boolean {
   const perms: string[] = user.permissions ?? [];
@@ -104,18 +159,52 @@ export class EmployeesService {
 
   async create(dto: CreateEmployeeDto, user: any) {
     const placement = await this.normalizeEmployeeHierarchy(dto, user);
-    const employeeCode = dto.employeeCode?.trim()
-      ? dto.employeeCode.trim()
-      : await this.nextEmployeeCode(dto.companyId);
-    const record = await this.prisma.employee.create({ data: { ...dto, ...placement, employeeCode } });
+    const explicitCode = dto.employeeCode?.trim();
+    const record = explicitCode
+      ? await this.prisma.employee.create({
+          data: this.employeeCreateData(dto, placement, explicitCode),
+        })
+      : await this.createWithGeneratedCode(dto, placement);
     await this.audit.log({
       userId: user.id,
       action: 'CREATE',
       entityType: 'Employee',
       entityId: record.id,
-      newValue: { ...dto, employeeCode } as unknown as Record<string, unknown>,
+      newValue: { employeeCode: record.employeeCode, fullName: record.fullName },
     });
     return stripSensitive(record, user);
+  }
+
+  /**
+   * Generate the per-company `{prefix}-EMP-{NNNN}` code and create the employee
+   * inside a transaction. On the unique-constraint race (two concurrent creates
+   * computing the same count+1), retry once with a freshly recomputed count.
+   */
+  private async createWithGeneratedCode(
+    dto: CreateEmployeeDto,
+    placement: Record<string, unknown>,
+  ) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await this.prisma.$transaction(async (tx) => {
+          const employeeCode = await this.nextEmployeeCode(dto.companyId, tx);
+          return tx.employee.create({
+            data: this.employeeCreateData(dto, placement, employeeCode),
+          });
+        });
+      } catch (error) {
+        if (
+          attempt === 0 &&
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    // Unreachable: the loop either returns the created record or rethrows.
+    throw new BadRequestException('Could not generate a unique employee code');
   }
 
   /**
@@ -124,19 +213,21 @@ export class EmployeesService {
    * first 4 chars of `Company.code` (uppercased) when unset.
    *
    * Counts existing employees (including soft-deleted) so a deleted-then-
-   * recreated employee doesn't reuse a code. There's a small race window if
-   * two creates fire simultaneously — matches the codebase's existing
-   * pattern (`nextJournalNumber`, `nextActionNumber`). Bumps with retry
-   * could be added if collisions become a real problem.
+   * recreated employee doesn't reuse a code. To avoid a count+create race the
+   * caller runs this inside a $transaction and retries once on the unique
+   * constraint (see createWithGeneratedCode).
    */
-  async nextEmployeeCode(companyId: string): Promise<string> {
-    const company = await this.prisma.company.findUnique({
+  async nextEmployeeCode(
+    companyId: string,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<string> {
+    const company = await client.company.findUnique({
       where: { id: companyId },
       select: { code: true, employeeCodePrefix: true },
     });
     if (!company) throw new NotFoundException('Company not found');
     const prefix = (company.employeeCodePrefix ?? company.code.slice(0, 4)).toUpperCase();
-    const count = await this.prisma.employee.count({ where: { companyId } });
+    const count = await client.employee.count({ where: { companyId } });
     return `${prefix}-EMP-${String(count + 1).padStart(4, '0')}`;
   }
 
@@ -155,7 +246,10 @@ export class EmployeesService {
       } as CreateEmployeeDto,
       user,
     );
-    const record = await this.prisma.employee.update({ where: { id }, data: { ...dto, ...placement } });
+    const record = await this.prisma.employee.update({
+      where: { id },
+      data: this.employeeUpdateData(dto, placement),
+    });
     await this.audit.log({
       userId: user.id,
       action: 'UPDATE',
@@ -164,6 +258,71 @@ export class EmployeesService {
       newValue: dto as unknown as Record<string, unknown>,
     });
     return stripSensitive(record, user);
+  }
+
+  private employeeCreateData(
+    dto: CreateEmployeeDto,
+    placement: Record<string, unknown>,
+    employeeCode: string,
+  ): Prisma.EmployeeUncheckedCreateInput {
+    const firstName = dto.firstName?.trim();
+    const middleName = dto.middleName?.trim();
+    const lastName = dto.lastName?.trim();
+    const fullName =
+      dto.fullName?.trim() || [firstName, middleName, lastName].filter(Boolean).join(' ');
+
+    return this.employeeWriteData({
+      ...dto,
+      ...placement,
+      employeeCode,
+      firstName,
+      middleName,
+      lastName,
+      fullName,
+    }) as Prisma.EmployeeUncheckedCreateInput;
+  }
+
+  private employeeUpdateData(
+    dto: UpdateEmployeeDto,
+    placement: Record<string, unknown>,
+  ): Prisma.EmployeeUncheckedUpdateInput {
+    return this.employeeWriteData({ ...dto, ...placement }) as Prisma.EmployeeUncheckedUpdateInput;
+  }
+
+  private employeeWriteData(input: Record<string, unknown>): Record<string, unknown> {
+    const data: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(input)) {
+      if (!EMPLOYEE_WRITABLE_FIELDS.has(key)) continue;
+      if (value === undefined || value === '') continue;
+      if (value === null) {
+        data[key] = null;
+        continue;
+      }
+
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) continue;
+        if (EMPLOYEE_DATE_FIELDS.has(key)) {
+          data[key] = this.parseEmployeeDate(key, trimmed);
+        } else {
+          data[key] = trimmed;
+        }
+        continue;
+      }
+
+      data[key] = value;
+    }
+
+    return data;
+  }
+
+  private parseEmployeeDate(field: string, value: string): Date {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException(`${field} must be a valid date`);
+    }
+    return parsed;
   }
 
   async requestTermination(
@@ -347,13 +506,17 @@ export class EmployeesService {
       });
       if (!branch) throw new NotFoundException('Branch/location not found');
       if (branch.division.companyId !== dto.companyId) {
-        throw new BadRequestException('Employee branch/location must belong to the selected company');
+        throw new BadRequestException(
+          'Employee branch/location must belong to the selected company',
+        );
       }
       if (!branch.isActive || !branch.division.isActive || branch.division.deletedAt) {
         throw new BadRequestException('Employee branch/location must be active');
       }
       if (placement.divisionId && placement.divisionId !== branch.divisionId) {
-        throw new BadRequestException('Employee branch/location must belong to the selected division');
+        throw new BadRequestException(
+          'Employee branch/location must belong to the selected division',
+        );
       }
       placement.divisionId = branch.divisionId;
     }
@@ -385,12 +548,21 @@ export class EmployeesService {
       }
       if (department.branchId) {
         if (placement.branchId && placement.branchId !== department.branchId) {
-          throw new BadRequestException('Employee department must belong to the selected branch/location');
+          throw new BadRequestException(
+            'Employee department must belong to the selected branch/location',
+          );
         }
         placement.branchId = department.branchId;
       }
-      if (department.division && (department.division.companyId !== dto.companyId || !department.division.isActive || department.division.deletedAt)) {
-        throw new BadRequestException('Employee department division is not active for the selected company');
+      if (
+        department.division &&
+        (department.division.companyId !== dto.companyId ||
+          !department.division.isActive ||
+          department.division.deletedAt)
+      ) {
+        throw new BadRequestException(
+          'Employee department division is not active for the selected company',
+        );
       }
       if (department.branch && (!department.branch.isActive || department.branch.deletedAt)) {
         throw new BadRequestException('Employee department branch/location must be active');

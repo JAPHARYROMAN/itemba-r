@@ -13,7 +13,6 @@ import {
   PageToolbar,
   StatusBadge,
 } from '@/components/ui';
-import { useAuth } from '@/hooks/use-auth';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm';
@@ -155,7 +154,6 @@ const blank: FormState = {
 
 export default function EmployeesPage() {
   const router = useRouter();
-  const { user } = useAuth();
   const [rows, setRows] = useState<EmployeeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -243,9 +241,7 @@ export default function EmployeesPage() {
 
   const filteredPositions = useMemo(
     () =>
-      form.departmentId
-        ? positions.filter((p) => p.departmentId === form.departmentId)
-        : positions,
+      form.departmentId ? positions.filter((p) => p.departmentId === form.departmentId) : positions,
     [positions, form.departmentId],
   );
 
@@ -280,7 +276,6 @@ export default function EmployeesPage() {
         paymentFrequency: form.paymentFrequency,
         heslbBorrower: form.heslbBorrower,
         dependents: Number(form.dependents) || 0,
-        createdById: user?.id ?? '',
       };
       const optional: Array<keyof FormState> = [
         'branchId',
