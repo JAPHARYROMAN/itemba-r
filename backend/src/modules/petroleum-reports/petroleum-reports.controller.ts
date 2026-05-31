@@ -22,6 +22,18 @@ export class PetroleumReportsController {
     return this.service.getShiftSummary(query, user);
   }
 
+  @Get('nozzle-readings')
+  @RequirePermissions('petroleum.reports.view')
+  getNozzleReadingsReport(@Query() query: Record<string, string>, @CurrentUser() user: AuthUser) {
+    return this.service.getNozzleReadingsReport(query, user);
+  }
+
+  @Get('collections')
+  @RequirePermissions('petroleum.reports.view')
+  getCollectionsReport(@Query() query: Record<string, string>, @CurrentUser() user: AuthUser) {
+    return this.service.getCollectionsReport(query, user);
+  }
+
   @Get('deliveries-summary')
   @RequirePermissions('petroleum.reports.view')
   getDeliveriesSummary(@Query() query: Record<string, string>, @CurrentUser() user: AuthUser) {
@@ -44,5 +56,11 @@ export class PetroleumReportsController {
   @RequirePermissions('petroleum.reports.view')
   getReconciliationHistory(@Query() query: Record<string, string>, @CurrentUser() user: AuthUser) {
     return this.service.getReconciliationHistory(query, user);
+  }
+
+  @Get('fuel-prices')
+  @RequirePermissions('petroleum.reports.view')
+  getFuelPricesReport(@Query() query: Record<string, string>, @CurrentUser() user: AuthUser) {
+    return this.service.getFuelPricesReport(query, user);
   }
 }
