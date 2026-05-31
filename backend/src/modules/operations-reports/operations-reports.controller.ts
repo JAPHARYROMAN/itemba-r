@@ -8,31 +8,65 @@ class StockValuationQueryDto {
   @IsOptional() @IsString() companyId?: string;
   @IsOptional() @IsString() divisionId?: string;
   @IsOptional() @IsString() locationId?: string;
+  @IsOptional() @IsString() branchId?: string;
+  @IsOptional() @IsString() productId?: string;
 }
 
 class SalesSummaryQueryDto {
   @IsOptional() @IsString() companyId?: string;
   @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
+  @IsOptional() @IsString() locationId?: string;
+  @IsOptional() @IsString() customerId?: string;
+  @IsOptional() @IsString() productId?: string;
+  @IsOptional() @IsString() status?: string;
+  @IsOptional() @IsString() paymentStatus?: string;
   @IsOptional() @IsString() dateFrom?: string;
   @IsOptional() @IsString() dateTo?: string;
+  @IsOptional() @IsNumberString() pageSize?: string;
 }
 
 class PurchaseSummaryQueryDto {
   @IsOptional() @IsString() companyId?: string;
   @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
+  @IsOptional() @IsString() locationId?: string;
+  @IsOptional() @IsString() supplierId?: string;
+  @IsOptional() @IsString() productId?: string;
+  @IsOptional() @IsString() status?: string;
+  @IsOptional() @IsString() paymentStatus?: string;
   @IsOptional() @IsString() dateFrom?: string;
   @IsOptional() @IsString() dateTo?: string;
+  @IsOptional() @IsNumberString() pageSize?: string;
 }
 
 class InventoryMovementsQueryDto {
   @IsOptional() @IsString() companyId?: string;
   @IsOptional() @IsString() divisionId?: string;
   @IsOptional() @IsString() productId?: string;
+  @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsString() locationId?: string;
+  @IsOptional() @IsString() status?: string;
   @IsOptional() @IsString() dateFrom?: string;
   @IsOptional() @IsString() dateTo?: string;
   @IsOptional() @IsNumberString() page?: string;
   @IsOptional() @IsNumberString() pageSize?: string;
+}
+
+class OperationsReportQueryDto {
+  @IsOptional() @IsString() companyId?: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
+  @IsOptional() @IsString() locationId?: string;
+  @IsOptional() @IsString() productId?: string;
+  @IsOptional() @IsString() customerId?: string;
+  @IsOptional() @IsString() supplierId?: string;
+  @IsOptional() @IsString() status?: string;
+  @IsOptional() @IsString() paymentStatus?: string;
+  @IsOptional() @IsString() dateFrom?: string;
+  @IsOptional() @IsString() dateTo?: string;
+  @IsOptional() @IsNumberString() pageSize?: string;
+  @IsOptional() @IsNumberString() limit?: string;
 }
 
 @Controller('operations-reports')
@@ -42,7 +76,13 @@ export class OperationsReportsController {
   @Get('stock-valuation')
   @RequirePermissions('operations.reports.view')
   getStockValuation(@Query() q: StockValuationQueryDto, @CurrentUser() user: AuthUser) {
-    return this.service.getStockValuation(q.companyId, q.locationId, q.divisionId, user);
+    return this.service.getStockValuation(
+      q.companyId,
+      q.branchId ?? q.locationId,
+      q.divisionId,
+      user,
+      q.productId,
+    );
   }
 
   @Get('sales-summary')
@@ -63,7 +103,7 @@ export class OperationsReportsController {
     return this.service.getInventoryMovements(
       q.companyId,
       q.productId,
-      q.locationId,
+      q.branchId ?? q.locationId,
       q.dateFrom,
       q.dateTo,
       q.page ? parseInt(q.page, 10) : 1,
@@ -71,5 +111,53 @@ export class OperationsReportsController {
       q.divisionId,
       user,
     );
+  }
+
+  @Get('sales-report')
+  @RequirePermissions('operations.reports.view')
+  getSalesReport(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getSalesReport(q as Record<string, string | undefined>, user);
+  }
+
+  @Get('sales-by-customer')
+  @RequirePermissions('operations.reports.view')
+  getSalesByCustomer(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getSalesByCustomer(q as Record<string, string | undefined>, user);
+  }
+
+  @Get('sales-by-product')
+  @RequirePermissions('operations.reports.view')
+  getSalesByProduct(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getSalesByProduct(q as Record<string, string | undefined>, user);
+  }
+
+  @Get('purchase-report')
+  @RequirePermissions('operations.reports.view')
+  getPurchaseReport(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getPurchaseReport(q as Record<string, string | undefined>, user);
+  }
+
+  @Get('purchases-by-supplier')
+  @RequirePermissions('operations.reports.view')
+  getPurchasesBySupplier(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getPurchasesBySupplier(q as Record<string, string | undefined>, user);
+  }
+
+  @Get('purchases-by-product')
+  @RequirePermissions('operations.reports.view')
+  getPurchasesByProduct(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getPurchasesByProduct(q as Record<string, string | undefined>, user);
+  }
+
+  @Get('low-stock')
+  @RequirePermissions('operations.reports.view')
+  getLowStock(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getLowStock(q as Record<string, string | undefined>, user);
+  }
+
+  @Get('stock-adjustments')
+  @RequirePermissions('operations.reports.view')
+  getStockAdjustments(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getStockAdjustments(q as Record<string, string | undefined>, user);
   }
 }
