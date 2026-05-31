@@ -174,7 +174,23 @@ function Spinner() {
   );
 }
 
-const COLLECTION_TYPES = ['CASH', 'MOBILE_MONEY', 'CARD', 'BANK_TRANSFER', 'CREDIT', 'CHEQUE'];
+const COLLECTION_TYPES = [
+  'CASH',
+  'MOBILE_MONEY',
+  'BANK_CARD',
+  'BANK_DEPOSIT',
+  'CREDIT_SALE',
+  'VOUCHER',
+  'OTHER',
+] as const;
+
+type CollectionType = (typeof COLLECTION_TYPES)[number];
+
+interface CollectionLine {
+  collectionType: CollectionType;
+  amount: number | '';
+  reference: string;
+}
 
 // ─── Close Shift Modal ───────────────────────────────────────────────────────
 
@@ -199,6 +215,9 @@ function CloseShiftModal({
     ),
   );
   const [notes, setNotes] = useState('');
+  const [collectionLines, setCollectionLines] = useState<CollectionLine[]>([
+    { collectionType: 'CASH', amount: '', reference: '' },
+  ]);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncAttempted, setSyncAttempted] = useState(false);
@@ -253,9 +272,44 @@ function CloseShiftModal({
   }, []);
   const totalLitresSold = productSummary.reduce((sum, item) => sum + item.litresSold, 0);
   const totalExpectedAmount = productSummary.reduce((sum, item) => sum + item.expectedAmount, 0);
+  const existingCollectionsTotal = (shift.collections ?? []).reduce(
+    (sum, collection) => sum + (Number(collection.amount ?? 0) || 0),
+    0,
+  );
+  const newCollectionsTotal = collectionLines.reduce(
+    (sum, collection) => sum + (Number(collection.amount || 0) || 0),
+    0,
+  );
+  const totalCollectionsAfterClose = existingCollectionsTotal + newCollectionsTotal;
+  const closeVariance = totalCollectionsAfterClose - totalExpectedAmount;
 
   const labelFor = (reading: NozzleReading) =>
     `${reading.nozzle?.nozzleCode ?? 'Nozzle'}${reading.nozzle?.nozzleName ? ` - ${reading.nozzle.nozzleName}` : ''}`;
+
+  const updateCollectionLine = <K extends keyof CollectionLine>(
+    index: number,
+    field: K,
+    value: CollectionLine[K],
+  ) => {
+    setCollectionLines((current) =>
+      current.map((line, i) => (i === index ? { ...line, [field]: value } : line)),
+    );
+  };
+
+  const addCollectionLine = () => {
+    setCollectionLines((current) => [
+      ...current,
+      { collectionType: 'MOBILE_MONEY', amount: '', reference: '' },
+    ]);
+  };
+
+  const removeCollectionLine = (index: number) => {
+    setCollectionLines((current) =>
+      current.length === 1
+        ? [{ collectionType: 'CASH', amount: '', reference: '' }]
+        : current.filter((_, i) => i !== index),
+    );
+  };
 
   const syncReadings = async () => {
     setSyncing(true);
@@ -309,6 +363,31 @@ function CloseShiftModal({
       }
     }
 
+    for (const collection of collectionLines) {
+      if (collection.amount !== '' && Number(collection.amount) <= 0) {
+        setError('Collection amounts must be greater than zero, or leave the row blank');
+        return;
+      }
+    }
+
+    const collectionPayload = collectionLines
+      .filter((collection) => Number(collection.amount || 0) > 0)
+      .map((collection) => ({
+        collectionType: collection.collectionType,
+        amount: Number(collection.amount),
+        reference: collection.reference.trim() || undefined,
+      }));
+
+    if (
+      totalExpectedAmount > 0 &&
+      existingCollectionsTotal +
+        collectionPayload.reduce((sum, collection) => sum + collection.amount, 0) <=
+        0
+    ) {
+      setError('Enter the actual collections before closing this shift');
+      return;
+    }
+
     setSaving(true);
     setError('');
     try {
@@ -317,6 +396,7 @@ function CloseShiftModal({
           nozzleReadingId: row.reading.id,
           closingMeter: row.closingMeter!,
         })),
+        collections: collectionPayload,
         notes: notes.trim() || undefined,
       };
       const res = await fetch(`/api/backend/petroleum/fuel-shifts/${shift.id}/close`, {
@@ -505,6 +585,127 @@ function CloseShiftModal({
                   TZS {fmtNum(totalExpectedAmount)}
                 </div>
               </div>
+              <div>
+                <div className="text-xs text-slate-500">Actual Collections</div>
+                <div className="text-xl font-bold text-slate-900">
+                  TZS {fmtNum(totalCollectionsAfterClose)}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-slate-500">Variance</div>
+                <div
+                  className={`text-xl font-bold ${closeVariance < 0 ? 'text-red-600' : 'text-emerald-600'}`}
+                >
+                  TZS {fmtNum(closeVariance)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="border border-slate-200 rounded-lg overflow-hidden">
+            <div className="flex items-center justify-between gap-3 px-4 py-3 bg-slate-50 border-b border-slate-200">
+              <div>
+                <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                  Collections Captured
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  Enter actual cash, mobile, card, bank, and credit collections for this shift.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={addCollectionLine}
+                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded hover:bg-indigo-50"
+              >
+                + Add Method
+              </button>
+            </div>
+            {existingCollectionsTotal > 0 && (
+              <div className="px-4 py-2 text-xs text-slate-600 border-b border-slate-100">
+                Already recorded on this shift: TZS {fmtNum(existingCollectionsTotal)}
+              </div>
+            )}
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className={thCls}>Method</th>
+                    <th className={`${thCls} text-right`}>Amount</th>
+                    <th className={thCls}>Reference</th>
+                    <th className={`${thCls} text-right`}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {collectionLines.map((line, index) => (
+                    <tr key={index} className="border-t border-slate-100">
+                      <td className={tdCls}>
+                        <select
+                          value={line.collectionType}
+                          onChange={(event) =>
+                            updateCollectionLine(
+                              index,
+                              'collectionType',
+                              event.target.value as CollectionType,
+                            )
+                          }
+                          className={fieldCls}
+                        >
+                          {COLLECTION_TYPES.map((type) => (
+                            <option key={type} value={type}>
+                              {type.replace(/_/g, ' ')}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className={`${tdCls} text-right`}>
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={line.amount}
+                          onChange={(event) =>
+                            updateCollectionLine(
+                              index,
+                              'amount',
+                              event.target.value === '' ? '' : Number(event.target.value),
+                            )
+                          }
+                          className="w-40 text-right text-sm border border-slate-200 rounded-md px-3 py-2 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                          placeholder="0.00"
+                        />
+                      </td>
+                      <td className={tdCls}>
+                        <input
+                          value={line.reference}
+                          onChange={(event) =>
+                            updateCollectionLine(index, 'reference', event.target.value)
+                          }
+                          className={fieldCls}
+                          placeholder="Receipt, mobile ref, bank slip..."
+                        />
+                      </td>
+                      <td className={`${tdCls} text-right`}>
+                        <button
+                          type="button"
+                          onClick={() => removeCollectionLine(index)}
+                          className="text-xs text-red-600 hover:text-red-800 font-medium px-2"
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-slate-200 bg-slate-50">
+                    <td className={`${tdCls} font-semibold`}>New Collections</td>
+                    <td className={`${tdCls} text-right font-mono font-semibold`}>
+                      {fmtNum(newCollectionsTotal)}
+                    </td>
+                    <td colSpan={2} />
+                  </tr>
+                </tfoot>
+              </table>
             </div>
           </div>
 
@@ -542,15 +743,15 @@ function CloseShiftModal({
 // ─── Add Collection Modal ─────────────────────────────────────────────────────
 
 function AddCollectionModal({
-  shiftId,
+  shift,
   onClose,
   onSaved,
 }: {
-  shiftId: string;
+  shift: ShiftDetail;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [collectionType, setCollectionType] = useState('CASH');
+  const [collectionType, setCollectionType] = useState<CollectionType>('CASH');
   const [amount, setAmount] = useState<number | ''>('');
   const [reference, setReference] = useState('');
   const [saving, setSaving] = useState(false);
@@ -566,12 +767,14 @@ function AddCollectionModal({
     setError('');
     try {
       const body = {
-        fuelShiftId: shiftId,
+        fuelShiftId: shift.id,
+        companyId: shift.companyId,
+        branchId: shift.branchId,
         collectionType,
         amount: Number(amount),
         reference: reference.trim() || undefined,
       };
-      const res = await fetch('/api/backend/petroleum/shift-collections', {
+      const res = await fetch('/api/backend/petroleum/fuel-shift-collections', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -615,7 +818,7 @@ function AddCollectionModal({
             <select
               required
               value={collectionType}
-              onChange={(e) => setCollectionType(e.target.value)}
+              onChange={(e) => setCollectionType(e.target.value as CollectionType)}
               className={fieldCls}
             >
               {COLLECTION_TYPES.map((t) => (
@@ -1359,7 +1562,7 @@ export default function ShiftDetailPage() {
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
             Collections
           </div>
-          {shift.status === 'OPEN' && (
+          {!['REJECTED', 'VOIDED'].includes(shift.status) && (
             <button
               onClick={() => setShowCollectionModal(true)}
               className="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded hover:bg-indigo-50"
@@ -1408,7 +1611,7 @@ export default function ShiftDetailPage() {
 
       {showCollectionModal && (
         <AddCollectionModal
-          shiftId={id}
+          shift={shift}
           onClose={() => setShowCollectionModal(false)}
           onSaved={() => {
             setShowCollectionModal(false);

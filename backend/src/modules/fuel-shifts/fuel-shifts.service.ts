@@ -586,6 +586,45 @@ export class FuelShiftsService {
         })),
       );
 
+      const closeCollections = (dto.collections ?? []).filter(
+        (collection) => Number(collection.amount) > 0,
+      );
+      if (closeCollections.length > 0) {
+        const cashAccountIds = closeCollections
+          .map((collection) => collection.cashAccountId)
+          .filter((cashAccountId): cashAccountId is string => Boolean(cashAccountId));
+        if (cashAccountIds.length > 0) {
+          const validCashAccounts = await tx.cashAccount.count({
+            where: {
+              id: { in: cashAccountIds },
+              companyId: lockedShift.companyId,
+              OR: [{ branchId: null }, { branchId: lockedShift.branchId }],
+              isActive: true,
+              deletedAt: null,
+            },
+          });
+          if (validCashAccounts !== new Set(cashAccountIds).size) {
+            throw new BadRequestException(
+              'One or more collection cash/bank accounts do not belong to this shift branch',
+            );
+          }
+        }
+
+        await tx.fuelShiftCollection.createMany({
+          data: closeCollections.map((collection) => ({
+            fuelShiftId: id,
+            companyId: lockedShift.companyId,
+            branchId: lockedShift.branchId,
+            collectionType: collection.collectionType,
+            amount: Number(collection.amount),
+            reference: collection.reference?.trim() || null,
+            cashAccountId: collection.cashAccountId || null,
+            collectedById: userId,
+            notes: collection.notes?.trim() || null,
+          })),
+        });
+      }
+
       const collectionsAgg = await tx.fuelShiftCollection.aggregate({
         where: { fuelShiftId: id },
         _sum: { amount: true },
