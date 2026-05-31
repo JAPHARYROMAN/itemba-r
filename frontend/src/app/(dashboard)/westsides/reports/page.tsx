@@ -4,231 +4,332 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, PageHeader, StatCard } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
 
-type MetaStatus = 'READY' | 'INFO' | 'WARNING' | 'CRITICAL' | 'BLOCKED' | 'NEEDS_REVIEW';
+type QueryMode = 'range' | 'daily-close';
 
-interface ReportCard {
+interface ReportDef {
   key: string;
   title: string;
   description: string;
   endpoint: string;
-  icon: string;
   category: string;
-  outputFormats: string[];
-  primaryAction: string;
-  queryMode?: 'range' | 'daily-close';
-}
-
-interface ReportReadinessCheck {
-  key?: string;
-  status?: MetaStatus | string;
-  label?: string;
-  detail?: string;
-}
-
-interface ReportMeta {
-  readiness?: {
-    status?: MetaStatus | string;
-    score?: number;
-    target?: number;
-    message?: string;
-    checks?: ReportReadinessCheck[];
-  };
-  lineage?: {
-    source?: string;
-    sourceTables?: string[];
-    measures?: string[];
-    scope?: string;
-  };
-  drillThrough?: Array<{
-    label: string;
-    href: string;
-    entityType?: string;
-    entityId?: string | null;
-  }>;
-  actions?: Array<{
-    label: string;
-    href: string;
-    kind?: string;
-  }>;
+  queryMode?: QueryMode;
+  columns?: string[];
 }
 
 interface NormalizedReport {
   rows: Record<string, unknown>[];
   raw: unknown;
-  meta?: ReportMeta & {
-    generatedAt?: string;
-    exportOptions?: string[];
-    scope?: Record<string, unknown>;
-  };
+  summary?: Record<string, unknown>;
+  generatedAt?: string;
 }
 
-interface ReportTableProps {
-  data: Record<string, unknown>[];
-}
-
-const REPORTS: ReportCard[] = [
+const REPORTS: ReportDef[] = [
   {
-    key: 'daily-close',
-    title: 'Daily Close / Z-Report',
-    description: 'Close readiness, payment reconciliation, and sales-order evidence for a day.',
-    endpoint: '/api/backend/westsides/reports/daily-close',
-    icon: 'Z',
-    category: 'Controls',
-    outputFormats: ['PRINT', 'CSV', 'JSON'],
-    primaryAction: 'Open close screen',
-    queryMode: 'daily-close',
+    key: 'sales-report',
+    title: 'Sales Report',
+    description: 'Every sale line with customer, product, unit, quantity, and amount.',
+    endpoint: '/api/backend/westsides/reports/sales-report',
+    category: 'Sales',
+    columns: [
+      'date',
+      'salesOrderNumber',
+      'customer',
+      'productCode',
+      'product',
+      'quantity',
+      'unit',
+      'unitPrice',
+      'discountAmount',
+      'taxAmount',
+      'amount',
+      'paymentMethod',
+      'paymentStatus',
+      'salesperson',
+    ],
   },
   {
-    key: 'daily-sales-summary',
-    title: 'Daily Sales Summary',
-    description: 'Day-by-day sales totals, transaction counts, and source-order drill-through.',
-    endpoint: '/api/backend/westsides/reports/daily-sales-summary',
-    icon: 'DS',
+    key: 'sales-by-customer',
+    title: 'Sales by Customer',
+    description: 'Customer totals, paid amount, and outstanding balance.',
+    endpoint: '/api/backend/westsides/reports/sales-by-customer',
     category: 'Sales',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Review day orders',
-  },
-  {
-    key: 'monthly-sales-summary',
-    title: 'Monthly Sales Summary',
-    description: 'Month-over-month sales performance with order-level drill-through hints.',
-    endpoint: '/api/backend/westsides/reports/monthly-sales-summary',
-    icon: 'MS',
-    category: 'Sales',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Review month orders',
-  },
-  {
-    key: 'sales-by-channel',
-    title: 'Sales by Channel',
-    description: 'Sales breakdown by cash, credit, wholesale, retail, and other channels.',
-    endpoint: '/api/backend/westsides/reports/sales-by-channel',
-    icon: 'SC',
-    category: 'Sales',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Open sales orders',
+    columns: [
+      'customerCode',
+      'customer',
+      'orders',
+      'totalAmount',
+      'paidAmount',
+      'outstandingAmount',
+    ],
   },
   {
     key: 'sales-by-product',
     title: 'Sales by Product',
-    description: 'Sales volume, average selling price, and revenue by product.',
+    description: 'Product quantities, revenue, and average selling price.',
     endpoint: '/api/backend/westsides/reports/sales-by-product',
-    icon: 'SP',
     category: 'Sales',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Review product',
+    columns: [
+      'productCode',
+      'sku',
+      'productName',
+      'quantity',
+      'totalAmount',
+      'averageSellingPrice',
+    ],
+  },
+  {
+    key: 'daily-sales-summary',
+    title: 'Daily Sales Summary',
+    description: 'Sales totals by day.',
+    endpoint: '/api/backend/westsides/reports/daily-sales-summary',
+    category: 'Sales',
+    columns: ['date', 'count', 'total', 'averageOrderValue'],
+  },
+  {
+    key: 'sales-by-channel',
+    title: 'Sales by Channel',
+    description: 'Cash, credit, wholesale, retail, and other sales channels.',
+    endpoint: '/api/backend/westsides/reports/sales-by-channel',
+    category: 'Sales',
+    columns: ['channel', 'orderCount', 'totalAmount'],
   },
   {
     key: 'sales-by-cashier',
     title: 'Sales by Salesperson',
-    description: 'Sales totals grouped by salesperson, including attribution warnings.',
+    description: 'Sales totals by assigned salesperson.',
     endpoint: '/api/backend/westsides/reports/sales-by-cashier',
-    icon: 'SS',
-    category: 'People',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Review salesperson orders',
-  },
-  {
-    key: 'product-profitability',
-    title: 'Product Profitability',
-    description: 'Revenue, estimated cost, gross profit, and margin by product.',
-    endpoint: '/api/backend/westsides/reports/product-profitability',
-    icon: 'GP',
-    category: 'Margin',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Review margin drivers',
-  },
-  {
-    key: 'fast-moving-items',
-    title: 'Fast Moving Items',
-    description: 'Top selling products by quantity, with replenishment drill-through.',
-    endpoint: '/api/backend/westsides/reports/fast-moving-items',
-    icon: 'FM',
-    category: 'Inventory',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Review stock',
-  },
-  {
-    key: 'slow-moving-items',
-    title: 'Slow Moving Items',
-    description: 'Products with stock on hand but no recent sales movement.',
-    endpoint: '/api/backend/westsides/reports/slow-moving-items',
-    icon: 'SM',
-    category: 'Inventory',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Review stock risk',
-  },
-  {
-    key: 'batch-status',
-    title: 'Batch Status Report',
-    description: 'Batch expiry, depletion, remaining quantity, and stock action risk.',
-    endpoint: '/api/backend/westsides/reports/batch-status',
-    icon: 'BS',
-    category: 'Inventory',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Open batches',
-  },
-  {
-    key: 'stock-damage-report',
-    title: 'Stock Damage Report',
-    description: 'Damage and breakage summary by type and approval status.',
-    endpoint: '/api/backend/westsides/reports/stock-damage-report',
-    icon: 'SD',
-    category: 'Controls',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Review damage',
-  },
-  {
-    key: 'package-balance-report',
-    title: 'Package Balance Report',
-    description: 'Customer returnable package exposure and reconciliation routes.',
-    endpoint: '/api/backend/westsides/reports/package-balance-report',
-    icon: 'PB',
-    category: 'Controls',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Open customer',
-  },
-  {
-    key: 'quotation-conversion',
-    title: 'Quotation Conversion',
-    description: 'Quotation status mix, conversion rate, and leakage warning signals.',
-    endpoint: '/api/backend/westsides/reports/quotation-conversion',
-    icon: 'QC',
     category: 'Sales',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Review quotations',
+    columns: ['salesperson', 'orderCount', 'totalAmount'],
   },
   {
-    key: 'delivery-performance',
-    title: 'Delivery Performance',
-    description: 'Delivery note performance by status and open fulfillment risk.',
-    endpoint: '/api/backend/westsides/reports/delivery-performance',
-    icon: 'DP',
-    category: 'Fulfillment',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Review deliveries',
+    key: 'purchase-report',
+    title: 'Purchase Report',
+    description: 'Every purchase line with supplier, product, unit, quantity, and amount.',
+    endpoint: '/api/backend/westsides/reports/purchase-report',
+    category: 'Purchases',
+    columns: [
+      'date',
+      'purchaseOrderNumber',
+      'supplier',
+      'productCode',
+      'product',
+      'quantity',
+      'unit',
+      'unitCost',
+      'discountAmount',
+      'taxAmount',
+      'amount',
+      'purchaseType',
+      'status',
+      'paymentStatus',
+    ],
   },
   {
-    key: 'price-list-report',
-    title: 'Price List Report',
-    description: 'Price lists with item counts, effective dates, approval, and activity status.',
-    endpoint: '/api/backend/westsides/reports/price-list-report',
-    icon: 'PL',
-    category: 'Pricing',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Review price lists',
+    key: 'purchases-by-supplier',
+    title: 'Purchases by Supplier',
+    description: 'Supplier purchase totals, paid amount, and outstanding balance.',
+    endpoint: '/api/backend/westsides/reports/purchases-by-supplier',
+    category: 'Purchases',
+    columns: [
+      'supplierCode',
+      'supplier',
+      'purchaseOrders',
+      'totalAmount',
+      'paidAmount',
+      'outstandingAmount',
+    ],
+  },
+  {
+    key: 'customers-report',
+    title: 'Customers Report',
+    description: 'Customer contacts, balances, and sales totals.',
+    endpoint: '/api/backend/westsides/reports/customers-report',
+    category: 'Customers',
+    columns: [
+      'customerCode',
+      'customer',
+      'phone',
+      'email',
+      'status',
+      'creditLimit',
+      'currentBalance',
+      'orders',
+      'totalSales',
+      'outstandingSales',
+    ],
   },
   {
     key: 'credit-customers',
     title: 'Credit Customers',
-    description: 'Customers with receivable exposure and collection drill-through.',
+    description: 'Customers with receivable exposure.',
     endpoint: '/api/backend/westsides/reports/credit-customers-report',
-    icon: 'AR',
-    category: 'Receivables',
-    outputFormats: ['CSV', 'JSON', 'PRINT'],
-    primaryAction: 'Review receivables',
+    category: 'Customers',
+    columns: [
+      'customerCode',
+      'customerName',
+      'invoiceCount',
+      'invoicedAmount',
+      'outstandingAmount',
+    ],
+  },
+  {
+    key: 'suppliers-report',
+    title: 'Suppliers Report',
+    description: 'Supplier contacts, balances, and purchase totals.',
+    endpoint: '/api/backend/westsides/reports/suppliers-report',
+    category: 'Suppliers',
+    columns: [
+      'supplierCode',
+      'supplier',
+      'phone',
+      'email',
+      'status',
+      'creditLimit',
+      'currentBalance',
+      'purchaseOrders',
+      'totalPurchases',
+      'outstandingPurchases',
+    ],
+  },
+  {
+    key: 'daily-close',
+    title: 'Daily Close / Z-Report',
+    description: 'Payment method reconciliation and compact sales-order evidence.',
+    endpoint: '/api/backend/westsides/reports/daily-close',
+    category: 'Controls',
+    queryMode: 'daily-close',
+    columns: [
+      'section',
+      'paymentMethod',
+      'salesOrderNumber',
+      'customerName',
+      'salesperson',
+      'count',
+      'expected',
+      'paid',
+      'totalAmount',
+      'amount',
+    ],
+  },
+  {
+    key: 'batch-status',
+    title: 'Batch Status',
+    description: 'Batch stock, expiry, and remaining quantity.',
+    endpoint: '/api/backend/westsides/reports/batch-status',
+    category: 'Inventory',
+    columns: [
+      'batchNumber',
+      'productName',
+      'sku',
+      'remainingQuantity',
+      'unitCost',
+      'expiryDate',
+      'status',
+    ],
+  },
+  {
+    key: 'fast-moving-items',
+    title: 'Fast Moving Items',
+    description: 'Top selling products by quantity.',
+    endpoint: '/api/backend/westsides/reports/fast-moving-items',
+    category: 'Inventory',
+    columns: [
+      'rank',
+      'productCode',
+      'sku',
+      'productName',
+      'quantity',
+      'totalAmount',
+      'velocitySignal',
+    ],
+  },
+  {
+    key: 'slow-moving-items',
+    title: 'Slow Moving Items',
+    description: 'Stock on hand with no recent sales movement.',
+    endpoint: '/api/backend/westsides/reports/slow-moving-items',
+    category: 'Inventory',
+    columns: [
+      'productCode',
+      'sku',
+      'productName',
+      'branch',
+      'quantityOnHand',
+      'totalValue',
+      'daysSinceMovement',
+    ],
+  },
+  {
+    key: 'stock-damage-report',
+    title: 'Stock Damage',
+    description: 'Damage and breakage by type and status.',
+    endpoint: '/api/backend/westsides/reports/stock-damage-report',
+    category: 'Inventory',
+    columns: ['damageType', 'status', 'reportCount', 'quantity', 'estimatedValue'],
+  },
+  {
+    key: 'delivery-performance',
+    title: 'Delivery Performance',
+    description: 'Delivery notes by status and fulfillment value.',
+    endpoint: '/api/backend/westsides/reports/delivery-performance',
+    category: 'Fulfillment',
+    columns: ['status', 'deliveryCount'],
+  },
+  {
+    key: 'price-list-report',
+    title: 'Price Lists',
+    description: 'Active price lists, item counts, and effective dates.',
+    endpoint: '/api/backend/westsides/reports/price-list-report',
+    category: 'Pricing',
+    columns: [
+      'name',
+      'priceListType',
+      'currency',
+      'itemCount',
+      'effectiveFrom',
+      'effectiveTo',
+      'status',
+    ],
+  },
+  {
+    key: 'quotation-conversion',
+    title: 'Quotation Conversion',
+    description: 'Quotation status and conversion totals.',
+    endpoint: '/api/backend/westsides/reports/quotation-conversion',
+    category: 'Sales',
+    columns: [
+      'status',
+      'quotationCount',
+      'totalQuotations',
+      'convertedQuotations',
+      'conversionRate',
+    ],
+  },
+  {
+    key: 'package-balance-report',
+    title: 'Package Balances',
+    description: 'Customer returnable package exposure.',
+    endpoint: '/api/backend/westsides/reports/package-balance-report',
+    category: 'Controls',
+    columns: [
+      'customerCode',
+      'customerName',
+      'packageCode',
+      'packageName',
+      'packageType',
+      'quantityOwedByCustomer',
+      'quantityOwedToCustomer',
+      'depositBalance',
+      'netPackageExposure',
+    ],
   },
 ];
+
+const SETTINGS_KEY = 'itemba.westsides.readable-reports.v1';
+const META_KEY = '_reportMeta';
+const MONEY_RE =
+  /(amount|total|paid|outstanding|balance|value|cost|price|revenue|profit|subtotal|tax|discount|limit)$/i;
+const DATE_RE = /(date|createdAt|updatedAt|expiryDate|effectiveFrom|effectiveTo)$/i;
 
 const controlStyle = {
   background: 'var(--aurora-bg-subtle)',
@@ -239,42 +340,6 @@ const controlStyle = {
 
 const inputClass =
   'h-10 rounded-lg border px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500/40';
-const SETTINGS_KEY = 'itemba.westsides.reports.scope.v1';
-const META_KEY = '_reportMeta';
-
-function formatHeading(value: string) {
-  return value
-    .replace(/([A-Z])/g, ' $1')
-    .replace(/_/g, ' ')
-    .trim();
-}
-
-function fmtValue(value: unknown): string {
-  if (value === null || value === undefined || value === '') return '-';
-  if (typeof value === 'number') {
-    return new Intl.NumberFormat('en-TZ', { maximumFractionDigits: 2 }).format(value);
-  }
-  if (typeof value === 'bigint') return value.toString();
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (typeof value === 'string') {
-    if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
-      return new Date(value).toLocaleDateString('en-GB', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-      });
-    }
-    return value;
-  }
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
-  return String(value);
-}
 
 function unwrapPayload(payload: unknown): unknown {
   const data = (payload as { data?: unknown })?.data;
@@ -282,33 +347,11 @@ function unwrapPayload(payload: unknown): unknown {
   return nested ?? data ?? payload;
 }
 
-function getRowMeta(row: Record<string, unknown>): ReportMeta | null {
-  const meta = row[META_KEY];
-  return meta && typeof meta === 'object' ? (meta as ReportMeta) : null;
-}
-
-function visibleColumns(data: Record<string, unknown>[]) {
-  return Array.from(
-    new Set(data.flatMap((row) => Object.keys(row).filter((key) => !key.startsWith('_')))),
-  );
-}
-
-function normalizePayload(payload: unknown, report: ReportCard): NormalizedReport {
+function normalizePayload(payload: unknown, report: ReportDef): NormalizedReport {
   const raw = unwrapPayload(payload);
 
   if (report.key === 'daily-close' && raw && typeof raw === 'object' && !Array.isArray(raw)) {
     const close = raw as Record<string, unknown>;
-    const readiness = close.readiness as ReportMeta['readiness'];
-    const lineage = close.lineage as ReportMeta['lineage'];
-    const actions = close.actions as ReportMeta['actions'];
-    const meta = {
-      readiness,
-      lineage,
-      actions,
-      exportOptions: close.exportOptions as string[] | undefined,
-      generatedAt: close.generatedAt as string | undefined,
-      scope: close.scope as Record<string, unknown> | undefined,
-    };
     const byMethod = Array.isArray(close.byMethod) ? close.byMethod : [];
     const mobile = Array.isArray(close.mobileMoneyReferences) ? close.mobileMoneyReferences : [];
     const orders = Array.isArray(close.orders) ? close.orders : [];
@@ -320,86 +363,116 @@ function normalizePayload(payload: unknown, report: ReportCard): NormalizedRepor
       ...mobile.map((row) => ({ section: 'Mobile Money', ...(row as Record<string, unknown>) })),
       ...orders.map((row) => ({ section: 'Sales Order', ...(row as Record<string, unknown>) })),
     ];
-    return { rows, raw, meta };
+    return {
+      rows,
+      raw,
+      summary: close.totals as Record<string, unknown> | undefined,
+      generatedAt: close.generatedAt as string | undefined,
+    };
   }
 
   if (Array.isArray(raw)) return { rows: raw as Record<string, unknown>[], raw };
 
   if (raw && typeof raw === 'object') {
     const object = raw as Record<string, unknown>;
+    if (Array.isArray(object.rows)) {
+      return {
+        rows: object.rows as Record<string, unknown>[],
+        raw,
+        summary: object.summary as Record<string, unknown> | undefined,
+        generatedAt: object.generatedAt as string | undefined,
+      };
+    }
     const arrayEntry = Object.entries(object).find(([, value]) => Array.isArray(value));
     if (arrayEntry) {
-      return { rows: arrayEntry[1] as Record<string, unknown>[], raw };
+      return {
+        rows: arrayEntry[1] as Record<string, unknown>[],
+        raw,
+        summary: object.summary as Record<string, unknown> | undefined,
+        generatedAt: object.generatedAt as string | undefined,
+      };
     }
-    return {
-      rows: [object],
-      raw,
-      meta: {
-        readiness: object.readiness as ReportMeta['readiness'],
-        lineage: object.lineage as ReportMeta['lineage'],
-        actions: object.actions as ReportMeta['actions'],
-      },
-    };
+    return { rows: [object], raw };
   }
 
   return { rows: [], raw };
 }
 
-function errorMessage(payload: unknown, fallback: string) {
-  const body = payload as { message?: unknown; error?: unknown };
-  const message = body?.message ?? body?.error;
-  if (Array.isArray(message)) return message.join(', ');
-  if (typeof message === 'string' && message.trim()) return message;
-  return fallback;
-}
-
-function statusStyle(status?: string) {
-  const normalized = String(status ?? 'INFO').toUpperCase();
-  if (normalized === 'READY') {
-    return {
-      background: 'rgba(16, 185, 129, 0.14)',
-      borderColor: 'rgba(16, 185, 129, 0.45)',
-      color: '#bbf7d0',
-    };
-  }
-  if (normalized === 'WARNING' || normalized === 'NEEDS_REVIEW') {
-    return {
-      background: 'rgba(245, 158, 11, 0.16)',
-      borderColor: 'rgba(245, 158, 11, 0.5)',
-      color: '#fde68a',
-    };
-  }
-  if (normalized === 'CRITICAL' || normalized === 'BLOCKED') {
-    return {
-      background: 'rgba(239, 68, 68, 0.16)',
-      borderColor: 'rgba(239, 68, 68, 0.55)',
-      color: '#fecaca',
-    };
-  }
-  return {
-    background: 'rgba(59, 130, 246, 0.14)',
-    borderColor: 'rgba(59, 130, 246, 0.45)',
-    color: '#bfdbfe',
-  };
-}
-
-function StatusBadge({ status }: { status?: string }) {
-  return (
-    <span
-      className="inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-semibold uppercase"
-      style={statusStyle(status)}
-    >
-      {String(status ?? 'Info').replace(/_/g, ' ')}
-    </span>
+function visibleColumns(rows: Record<string, unknown>[], report?: ReportDef) {
+  const available = new Set(
+    rows.flatMap((row) =>
+      Object.keys(row).filter(
+        (key) =>
+          !key.startsWith('_') &&
+          key !== META_KEY &&
+          key !== 'readinessStatus' &&
+          !key.endsWith('Id'),
+      ),
+    ),
   );
+  const preferred = report?.columns?.filter((column) => available.has(column)) ?? [];
+  const rest = Array.from(available).filter((column) => !preferred.includes(column));
+  return [...preferred, ...rest];
 }
 
-function Spinner() {
-  return (
-    <div className="flex justify-center py-10">
-      <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-    </div>
-  );
+function formatHeading(value: string) {
+  return value
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/_/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function toNumber(value: unknown) {
+  const number = Number(value ?? 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function formatMoney(value: unknown) {
+  return `TZS ${new Intl.NumberFormat('en-TZ', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(toNumber(value))}`;
+}
+
+function formatNumber(value: unknown) {
+  return new Intl.NumberFormat('en-TZ', { maximumFractionDigits: 4 }).format(toNumber(value));
+}
+
+function formatDate(value: unknown) {
+  if (!value) return '-';
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium' }).format(date);
+}
+
+function formatValue(column: string, value: unknown) {
+  if (value === null || value === undefined || value === '') return '-';
+  if (DATE_RE.test(column)) return formatDate(value);
+  if (MONEY_RE.test(column)) return formatMoney(value);
+  if (typeof value === 'number' || typeof value === 'bigint') return formatNumber(value);
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'object') return '';
+  return String(value).replace(/_/g, ' ');
+}
+
+function rawExportValue(value: unknown) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function csvEscape(value: unknown) {
+  const text = rawExportValue(value);
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function escapeHtml(value: unknown) {
+  return rawExportValue(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function downloadText(filename: string, mimeType: string, content: string) {
@@ -412,252 +485,156 @@ function downloadText(filename: string, mimeType: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
-function csvEscape(value: unknown) {
-  const text = fmtValue(value);
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+function errorMessage(payload: unknown, fallback: string) {
+  const body = payload as { message?: unknown; error?: unknown };
+  const message = body?.message ?? body?.error;
+  if (Array.isArray(message)) return message.join(', ');
+  if (typeof message === 'string' && message.trim()) return message;
+  return fallback;
 }
 
-function EmptyState({ report, onReload }: { report: ReportCard; onReload: () => void }) {
-  return (
-    <div className="px-5 py-12 text-center">
-      <div
-        className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg border text-sm font-bold"
-        style={{
-          borderColor: 'var(--aurora-border)',
-          background: 'var(--aurora-bg-subtle)',
-          color: 'var(--aurora-text)',
-        }}
-      >
-        {report.icon}
-      </div>
-      <h3 className="mt-4 text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
-        No rows returned
-      </h3>
-      <p
-        className="mx-auto mt-2 max-w-xl text-sm"
-        style={{ color: 'var(--aurora-text-secondary)' }}
-      >
-        The report loaded successfully, but the selected company, branch, or date filters did not
-        produce reportable rows. Try a wider date range or all branches.
-      </p>
-      <button
-        type="button"
-        onClick={onReload}
-        className="mt-5 rounded-lg border px-4 py-2 text-sm font-semibold transition hover:border-blue-500/70"
-        style={{
-          borderColor: 'var(--aurora-border)',
-          background: 'var(--aurora-bg-subtle)',
-          color: 'var(--aurora-text)',
-        }}
-      >
-        Reload report
-      </button>
-    </div>
+function buildAutoSummary(rows: Record<string, unknown>[]) {
+  const amountKey = ['amount', 'totalAmount', 'total', 'totalValue'].find((key) =>
+    rows.some((row) => row[key] !== undefined),
   );
+  const quantityKey = ['quantity', 'quantityOnHand', 'remainingQuantity'].find((key) =>
+    rows.some((row) => row[key] !== undefined),
+  );
+  return {
+    rows: rows.length,
+    ...(quantityKey && {
+      quantity: rows.reduce((sum, row) => sum + toNumber(row[quantityKey]), 0),
+    }),
+    ...(amountKey && {
+      totalAmount: rows.reduce((sum, row) => sum + toNumber(row[amountKey]), 0),
+    }),
+  };
 }
 
-function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <div className="mx-5 my-4 rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-4">
-      <div className="text-sm font-semibold text-red-100">Report could not be loaded</div>
-      <div className="mt-1 text-sm text-red-200">{message}</div>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="mt-3 rounded-lg border border-red-300/50 px-3 py-2 text-xs font-semibold text-red-100 transition hover:bg-red-500/20"
-      >
-        Retry
-      </button>
-    </div>
-  );
+function summaryEntries(
+  summary: Record<string, unknown> | undefined,
+  rows: Record<string, unknown>[],
+) {
+  const source = summary && Object.keys(summary).length > 0 ? summary : buildAutoSummary(rows);
+  return Object.entries(source)
+    .filter(([, value]) => typeof value !== 'object' || value === null)
+    .slice(0, 6);
 }
 
-function ReadinessPanel({
-  rows,
-  meta,
-}: {
-  rows: Record<string, unknown>[];
-  meta?: NormalizedReport['meta'];
-}) {
-  const rowMetas = rows.map(getRowMeta).filter((item): item is ReportMeta => Boolean(item));
-  const rowStatuses = rows
-    .map((row) =>
-      String(row.readinessStatus ?? getRowMeta(row)?.readiness?.status ?? '').toUpperCase(),
-    )
-    .filter(Boolean);
-  const problemRows = rowStatuses.filter(
-    (status) => status === 'WARNING' || status === 'CRITICAL' || status === 'BLOCKED',
-  ).length;
-  const sourceTables = Array.from(
-    new Set([
-      ...(meta?.lineage?.sourceTables ?? []),
-      ...rowMetas.flatMap((item) => item.lineage?.sourceTables ?? []),
-    ]),
-  );
-  const measures = Array.from(
-    new Set([
-      ...(meta?.lineage?.measures ?? []),
-      ...rowMetas.flatMap((item) => item.lineage?.measures ?? []),
-    ]),
-  );
-  const checks =
-    meta?.readiness?.checks ?? rowMetas.flatMap((item) => item.readiness?.checks ?? []);
-  const reportStatus = String(
-    meta?.readiness?.status ?? (problemRows > 0 ? 'NEEDS_REVIEW' : 'READY'),
-  );
-
-  return (
-    <div
-      className="grid gap-3 border-b px-5 py-4 md:grid-cols-3"
-      style={{ borderColor: 'var(--aurora-border)' }}
-    >
-      <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
-        <div
-          className="text-xs font-semibold uppercase"
-          style={{ color: 'var(--aurora-text-muted)' }}
-        >
-          Readiness
-        </div>
-        <div className="mt-2 flex items-center gap-2">
-          <StatusBadge status={reportStatus} />
-          {typeof meta?.readiness?.score === 'number' && (
-            <span className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
-              {meta.readiness.score}/{meta.readiness.target ?? 100}
-            </span>
-          )}
-        </div>
-        <div className="mt-2 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
-          {meta?.readiness?.message ??
-            (problemRows > 0
-              ? `${problemRows} row${problemRows === 1 ? '' : 's'} require review.`
-              : 'Rows are reportable with current metadata.')}
-        </div>
-      </div>
-
-      <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
-        <div
-          className="text-xs font-semibold uppercase"
-          style={{ color: 'var(--aurora-text-muted)' }}
-        >
-          Lineage
-        </div>
-        <div className="mt-2 text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
-          {meta?.lineage?.source ?? 'Row-level lineage'}
-        </div>
-        <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
-          {sourceTables.length > 0 ? sourceTables.join(', ') : 'Source tables supplied per row'}
-        </div>
-      </div>
-
-      <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
-        <div
-          className="text-xs font-semibold uppercase"
-          style={{ color: 'var(--aurora-text-muted)' }}
-        >
-          Evidence
-        </div>
-        <div className="mt-2 text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
-          {rows.length} rows, {measures.length || 'source'} measures
-        </div>
-        <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
-          {checks.length > 0
-            ? `${checks.length} readiness check${checks.length === 1 ? '' : 's'} available`
-            : 'Export includes current filters and visible columns'}
-        </div>
-      </div>
-    </div>
-  );
+function reportFilename(report: ReportDef) {
+  return `westsides-${report.key}-${new Date().toISOString().slice(0, 10)}`;
 }
 
-function ReportTable({ data }: ReportTableProps) {
-  const columns = visibleColumns(data);
-  const hasActions = data.some((row) => {
-    const meta = getRowMeta(row);
-    return Boolean((meta?.drillThrough?.length ?? 0) > 0 || (meta?.actions?.length ?? 0) > 0);
-  });
-
+function ReportTable({ rows, report }: { rows: Record<string, unknown>[]; report: ReportDef }) {
+  const columns = visibleColumns(rows, report);
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[860px] text-sm">
+      <table className="w-full min-w-[980px] text-sm print-table">
         <thead>
-          <tr style={{ background: 'var(--aurora-bg-subtle)' }}>
+          <tr>
             {columns.map((column) => (
-              <th
-                key={column}
-                className="border-b px-4 py-3 text-left text-xs font-semibold uppercase"
-                style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}
-              >
+              <th key={column} className="px-3 py-2 text-left text-xs font-semibold uppercase">
                 {formatHeading(column)}
               </th>
             ))}
-            {hasActions && (
-              <th
-                className="border-b px-4 py-3 text-left text-xs font-semibold uppercase"
-                style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}
-              >
-                Actions
-              </th>
-            )}
           </tr>
         </thead>
         <tbody>
-          {data.map((row, rowIndex) => {
-            const meta = getRowMeta(row);
-            const actionLinks = [...(meta?.drillThrough ?? []), ...(meta?.actions ?? [])];
-            return (
-              <tr key={rowIndex} className="transition hover:bg-white/5">
-                {columns.map((column) => {
-                  const value = row[column];
-                  return (
-                    <td
-                      key={column}
-                      className="max-w-[340px] border-b px-4 py-3 align-top"
-                      style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
-                      title={fmtValue(value)}
-                    >
-                      {column.toLowerCase().includes('status') ? (
-                        <StatusBadge status={fmtValue(value)} />
-                      ) : (
-                        <span className="line-clamp-2 break-words">{fmtValue(value)}</span>
-                      )}
-                    </td>
-                  );
-                })}
-                {hasActions && (
-                  <td
-                    className="border-b px-4 py-3 align-top"
-                    style={{ borderColor: 'var(--aurora-border)' }}
-                  >
-                    {actionLinks.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {actionLinks.slice(0, 3).map((action, index) => (
-                          <a
-                            key={`${action.href}-${index}`}
-                            href={action.href}
-                            className="rounded-md border px-2 py-1 text-xs font-semibold transition hover:border-blue-500/70"
-                            style={{
-                              borderColor: 'var(--aurora-border)',
-                              background: 'var(--aurora-bg-subtle)',
-                              color: 'var(--aurora-text)',
-                            }}
-                          >
-                            {action.label}
-                          </a>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                        No route
-                      </span>
-                    )}
-                  </td>
-                )}
-              </tr>
-            );
-          })}
+          {rows.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {columns.map((column) => (
+                <td key={column} className="px-3 py-2 align-top">
+                  {formatValue(column, row[column])}
+                </td>
+              ))}
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function PrintStyles() {
+  return (
+    <style jsx global>{`
+      .print-letterhead {
+        display: none;
+      }
+      .print-summary {
+        display: none;
+      }
+      @media print {
+        @page {
+          margin: 14mm;
+        }
+        body {
+          background: #ffffff !important;
+          color: #111827 !important;
+        }
+        body * {
+          color: #111827 !important;
+        }
+        .no-print {
+          display: none !important;
+        }
+        .print-area {
+          background: #ffffff !important;
+          border: 0 !important;
+          box-shadow: none !important;
+        }
+        .print-area,
+        .print-area * {
+          background-color: #ffffff !important;
+        }
+        .print-letterhead {
+          display: flex !important;
+          align-items: center;
+          gap: 16px;
+          border-bottom: 2px solid #111827;
+          padding-bottom: 12px;
+          margin-bottom: 14px;
+        }
+        .print-letterhead img {
+          width: 78px;
+          height: 78px;
+          object-fit: contain;
+        }
+        .print-summary {
+          display: grid !important;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 8px;
+          margin-bottom: 12px;
+          padding: 0 20px;
+        }
+        .print-summary div {
+          border: 1px solid #d1d5db;
+          padding: 6px 8px;
+        }
+        .print-summary span {
+          display: block;
+          font-size: 8px;
+          text-transform: uppercase;
+        }
+        .print-summary strong {
+          display: block;
+          margin-top: 2px;
+          font-size: 11px;
+        }
+        .print-table {
+          border-collapse: collapse !important;
+          width: 100% !important;
+          font-size: 10px !important;
+        }
+        .print-table th,
+        .print-table td {
+          border: 1px solid #d1d5db !important;
+        }
+        .print-table th {
+          background: #f3f4f6 !important;
+        }
+      }
+    `}</style>
   );
 }
 
@@ -666,13 +643,9 @@ export default function WestsideReportsPage() {
   const [branchId, setBranchId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [activeKey, setActiveKey] = useState(REPORTS[0].key);
   const [hydrated, setHydrated] = useState(false);
-  const [autoLoadedCompanyId, setAutoLoadedCompanyId] = useState('');
-  const [activeReport, setActiveReport] = useState<ReportCard | null>(null);
-  const [reportResult, setReportResult] = useState<NormalizedReport>({
-    rows: [],
-    raw: null,
-  });
+  const [reportResult, setReportResult] = useState<NormalizedReport>({ rows: [], raw: null });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -685,6 +658,22 @@ export default function WestsideReportsPage() {
     skipEmployees: true,
   });
 
+  const activeReport = REPORTS.find((report) => report.key === activeKey) ?? REPORTS[0];
+  const categories = useMemo(
+    () => Array.from(new Set(REPORTS.map((report) => report.category))),
+    [],
+  );
+  const currentCompanyLabel = companyOptions.find((option) => option.value === companyId)?.label;
+  const currentBranchLabel = branchOptions.find((option) => option.value === branchId)?.label;
+  const columns = useMemo(
+    () => visibleColumns(reportResult.rows, activeReport),
+    [activeReport, reportResult.rows],
+  );
+  const summary = useMemo(
+    () => summaryEntries(reportResult.summary, reportResult.rows),
+    [reportResult.rows, reportResult.summary],
+  );
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
@@ -694,14 +683,18 @@ export default function WestsideReportsPage() {
           branchId?: string;
           dateFrom?: string;
           dateTo?: string;
+          activeKey?: string;
         };
         if (settings.companyId) setCompanyId(settings.companyId);
         if (settings.branchId) setBranchId(settings.branchId);
         if (settings.dateFrom) setDateFrom(settings.dateFrom);
         if (settings.dateTo) setDateTo(settings.dateTo);
+        if (settings.activeKey && REPORTS.some((report) => report.key === settings.activeKey)) {
+          setActiveKey(settings.activeKey);
+        }
       }
     } catch {
-      /* ignore corrupt local settings */
+      /* ignore corrupt settings */
     } finally {
       setHydrated(true);
     }
@@ -725,116 +718,126 @@ export default function WestsideReportsPage() {
     try {
       localStorage.setItem(
         SETTINGS_KEY,
-        JSON.stringify({
-          companyId,
-          branchId,
-          dateFrom,
-          dateTo,
-        }),
+        JSON.stringify({ companyId, branchId, dateFrom, dateTo, activeKey }),
       );
     } catch {
       /* ignore storage failures */
     }
-  }, [branchId, companyId, dateFrom, dateTo, hydrated]);
+  }, [activeKey, branchId, companyId, dateFrom, dateTo, hydrated]);
 
-  const categories = useMemo(() => new Set(REPORTS.map((report) => report.category)).size, []);
-  const currentCompanyLabel = companyOptions.find((option) => option.value === companyId)?.label;
-  const currentBranchLabel = branchOptions.find((option) => option.value === branchId)?.label;
-  const visibleColumnList = useMemo(() => visibleColumns(reportResult.rows), [reportResult.rows]);
-
-  const loadReport = useCallback(
-    async (report: ReportCard) => {
-      setActiveReport(report);
-      setReportResult({ rows: [], raw: null });
-      if (!companyId) {
-        setError('Select a company before loading a Westsides report.');
-        return;
+  const loadReport = useCallback(async () => {
+    setReportResult({ rows: [], raw: null });
+    if (!companyId) {
+      setError('Select a company before loading a report.');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const params = new URLSearchParams({ companyId });
+      if (branchId) params.set('branchId', branchId);
+      if (activeReport.queryMode === 'daily-close') {
+        params.set('date', dateTo || dateFrom || new Date().toISOString().slice(0, 10));
+      } else {
+        if (dateFrom) params.set('dateFrom', dateFrom);
+        if (dateTo) params.set('dateTo', dateTo);
       }
-
-      setLoading(true);
-      setError('');
-      try {
-        const params = new URLSearchParams({ companyId });
-        if (branchId) params.set('branchId', branchId);
-        if (report.queryMode === 'daily-close') {
-          params.set('date', dateTo || dateFrom || new Date().toISOString().slice(0, 10));
-        } else {
-          if (dateFrom) params.set('dateFrom', dateFrom);
-          if (dateTo) params.set('dateTo', dateTo);
-        }
-
-        const response = await fetch(`${report.endpoint}?${params.toString()}`);
-        const json = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(errorMessage(json, `HTTP ${response.status}`));
-        }
-        setReportResult(normalizePayload(json, report));
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : 'Error loading report');
-      } finally {
-        setLoading(false);
-      }
-    },
-    [branchId, companyId, dateFrom, dateTo],
-  );
+      const response = await fetch(`${activeReport.endpoint}?${params.toString()}`);
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(errorMessage(json, `HTTP ${response.status}`));
+      setReportResult(normalizePayload(json, activeReport));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error loading report');
+    } finally {
+      setLoading(false);
+    }
+  }, [activeReport, branchId, companyId, dateFrom, dateTo]);
 
   useEffect(() => {
-    if (!companyId || activeReport || loading || autoLoadedCompanyId === companyId) return;
-    setAutoLoadedCompanyId(companyId);
-    void loadReport(REPORTS[0]);
-  }, [activeReport, autoLoadedCompanyId, companyId, loadReport, loading]);
+    if (!companyId || !hydrated) return;
+    void loadReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, hydrated]);
 
-  const exportCsv = useCallback(() => {
-    if (!activeReport || reportResult.rows.length === 0) return;
-    const headers = visibleColumnList;
-    const rows = reportResult.rows.map((row) =>
-      headers.map((header) => csvEscape(row[header])).join(','),
-    );
-    downloadText(
-      `westsides-${activeReport.key}-${new Date().toISOString().slice(0, 10)}.csv`,
-      'text/csv;charset=utf-8',
-      [headers.map(csvEscape).join(','), ...rows].join('\n'),
-    );
-  }, [activeReport, reportResult.rows, visibleColumnList]);
+  function exportCsv() {
+    if (reportResult.rows.length === 0) return;
+    const lines = [
+      columns.map(csvEscape).join(','),
+      ...reportResult.rows.map((row) => columns.map((column) => csvEscape(row[column])).join(',')),
+    ];
+    downloadText(`${reportFilename(activeReport)}.csv`, 'text/csv;charset=utf-8', lines.join('\n'));
+  }
 
-  const exportJson = useCallback(() => {
-    if (!activeReport) return;
+  function exportJson() {
     downloadText(
-      `westsides-${activeReport.key}-${new Date().toISOString().slice(0, 10)}.json`,
+      `${reportFilename(activeReport)}.json`,
       'application/json;charset=utf-8',
       JSON.stringify(reportResult.raw ?? reportResult.rows, null, 2),
     );
-  }, [activeReport, reportResult.raw, reportResult.rows]);
+  }
+
+  function exportExcel() {
+    if (reportResult.rows.length === 0) return;
+    const header = columns
+      .map((column) => `<th>${escapeHtml(formatHeading(column))}</th>`)
+      .join('');
+    const body = reportResult.rows
+      .map(
+        (row) =>
+          `<tr>${columns
+            .map((column) => `<td>${escapeHtml(formatValue(column, row[column]))}</td>`)
+            .join('')}</tr>`,
+      )
+      .join('');
+    const html = `<!doctype html><html><head><meta charset="utf-8" /></head><body>
+      <h2>${escapeHtml(currentCompanyLabel ?? 'ITEMBA Group')}</h2>
+      <h3>${escapeHtml(activeReport.title)}</h3>
+      <p>${escapeHtml(currentBranchLabel ?? 'All branches')} | ${escapeHtml(dateFrom || 'Open')} to ${escapeHtml(dateTo || 'Open')}</p>
+      <table border="1"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>
+    </body></html>`;
+    downloadText(`${reportFilename(activeReport)}.xls`, 'application/vnd.ms-excel', html);
+  }
 
   return (
     <div className="space-y-6 p-6">
-      <PageHeader
-        title="Westsides Reports"
-        subtitle="Production-ready sales, inventory, pricing, customer, fulfillment, and control reports."
-      />
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <StatCard label="Reports" value={REPORTS.length} hint="Westsides coverage" variant="blue" />
-        <StatCard
-          label="Categories"
-          value={categories}
-          hint="Sales, stock, pricing, controls"
-          variant="green"
-        />
-        <StatCard
-          label="Scope"
-          value={currentCompanyLabel ? currentCompanyLabel.split('(')[0].trim() : 'Not selected'}
-          hint={
-            activeReport
-              ? `${reportResult.rows.length} rows loaded`
-              : 'Auto-selects Westsides when available'
-          }
-          variant={companyId ? 'green' : 'amber'}
+      <PrintStyles />
+      <div className="no-print">
+        <PageHeader
+          title="Westsides Reports"
+          subtitle="Readable operational reports for sales, purchases, customers, suppliers, inventory, pricing, delivery, and controls."
         />
       </div>
 
-      <Card>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <Card className="no-print">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <label className="block xl:col-span-2">
+            <span
+              className="text-xs font-semibold uppercase"
+              style={{ color: 'var(--aurora-text-muted)' }}
+            >
+              Report
+            </span>
+            <select
+              value={activeKey}
+              onChange={(event) => {
+                setActiveKey(event.target.value);
+                setReportResult({ rows: [], raw: null });
+              }}
+              className={`${inputClass} mt-2 w-full`}
+              style={controlStyle}
+            >
+              {categories.map((category) => (
+                <optgroup key={category} label={category}>
+                  {REPORTS.filter((report) => report.category === category).map((report) => (
+                    <option key={report.key} value={report.key}>
+                      {report.title}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+
           <label className="block">
             <span
               className="text-xs font-semibold uppercase"
@@ -884,6 +887,19 @@ export default function WestsideReportsPage() {
             </select>
           </label>
 
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={() => void loadReport()}
+              disabled={loading || !companyId}
+              className="h-10 w-full rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+            >
+              {loading ? 'Loading...' : 'Load Report'}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
           <label className="block">
             <span
               className="text-xs font-semibold uppercase"
@@ -899,7 +915,6 @@ export default function WestsideReportsPage() {
               style={controlStyle}
             />
           </label>
-
           <label className="block">
             <span
               className="text-xs font-semibold uppercase"
@@ -916,198 +931,123 @@ export default function WestsideReportsPage() {
             />
           </label>
         </div>
-
-        {!orgLoading && companyOptions.length === 0 && (
-          <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-            No company scope is available for this user. The reports need company access before data
-            can be loaded.
-          </div>
-        )}
-
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
-          <span
-            className="rounded-full border px-2 py-1"
-            style={{
-              borderColor: 'var(--aurora-border)',
-              color: 'var(--aurora-text-secondary)',
-            }}
-          >
-            Company: {currentCompanyLabel ?? 'Not selected'}
-          </span>
-          <span
-            className="rounded-full border px-2 py-1"
-            style={{
-              borderColor: 'var(--aurora-border)',
-              color: 'var(--aurora-text-secondary)',
-            }}
-          >
-            Branch: {currentBranchLabel ?? 'All branches'}
-          </span>
-          <span
-            className="rounded-full border px-2 py-1"
-            style={{
-              borderColor: 'var(--aurora-border)',
-              color: 'var(--aurora-text-secondary)',
-            }}
-          >
-            Period: {dateFrom || 'Open'} to {dateTo || 'Open'}
-          </span>
-        </div>
       </Card>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        {REPORTS.map((report) => (
-          <button
-            key={report.key}
-            type="button"
-            onClick={() => void loadReport(report)}
-            className="group rounded-lg border p-4 text-left transition hover:-translate-y-0.5 hover:border-blue-500/60 disabled:cursor-not-allowed disabled:opacity-60"
-            style={{
-              background: 'var(--aurora-card)',
-              borderColor:
-                activeReport?.key === report.key ? 'rgb(59 130 246)' : 'var(--aurora-border)',
-              color: 'var(--aurora-text)',
-            }}
-            disabled={!companyId && !orgLoading}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border text-xs font-bold"
-                style={{
-                  borderColor: 'var(--aurora-border)',
-                  background: 'var(--aurora-bg-subtle)',
-                  color: 'var(--aurora-text)',
-                }}
-                aria-hidden="true"
-              >
-                {report.icon}
-              </div>
-              <span
-                className="rounded-full border px-2 py-1 text-[11px] font-medium"
-                style={{
-                  borderColor: 'var(--aurora-border)',
-                  color: 'var(--aurora-text-secondary)',
-                }}
-              >
-                {report.category}
-              </span>
-            </div>
-            <div className="mt-3 text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
-              {report.title}
-            </div>
-            <div
-              className="mt-1 text-xs leading-snug"
-              style={{ color: 'var(--aurora-text-secondary)' }}
-            >
-              {report.description}
-            </div>
-            <div className="mt-3 text-[11px] font-semibold" style={{ color: '#bfdbfe' }}>
-              {report.outputFormats.join(' / ')}
-            </div>
-          </button>
-        ))}
-      </div>
-
-      {activeReport ? (
-        <Card className="overflow-hidden" padding="none">
-          <div
-            className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4"
-            style={{ borderColor: 'var(--aurora-border)' }}
-          >
-            <div className="flex items-start gap-3">
-              <div
-                className="flex h-10 w-10 items-center justify-center rounded-lg border text-xs font-bold"
-                style={{
-                  borderColor: 'var(--aurora-border)',
-                  background: 'var(--aurora-bg-subtle)',
-                  color: 'var(--aurora-text)',
-                }}
-              >
-                {activeReport.icon}
-              </div>
-              <div>
-                <div className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
-                  {activeReport.title}
-                </div>
-                <div className="mt-0.5 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
-                  {activeReport.description}
-                </div>
-                {reportResult.meta?.generatedAt && (
-                  <div className="mt-1 text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
-                    Generated {fmtValue(reportResult.meta.generatedAt)}
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void loadReport(activeReport)}
-                className="rounded-lg border px-3 py-2 text-xs font-semibold transition hover:border-blue-500/60"
-                style={{
-                  borderColor: 'var(--aurora-border)',
-                  color: 'var(--aurora-text)',
-                  background: 'var(--aurora-bg-subtle)',
-                }}
-                disabled={loading}
-              >
-                Refresh
-              </button>
-              <button
-                type="button"
-                onClick={exportCsv}
-                className="rounded-lg border px-3 py-2 text-xs font-semibold transition hover:border-blue-500/60 disabled:opacity-50"
-                style={{
-                  borderColor: 'var(--aurora-border)',
-                  color: 'var(--aurora-text)',
-                  background: 'var(--aurora-bg-subtle)',
-                }}
-                disabled={reportResult.rows.length === 0}
-              >
-                Export CSV
-              </button>
-              <button
-                type="button"
-                onClick={exportJson}
-                className="rounded-lg border px-3 py-2 text-xs font-semibold transition hover:border-blue-500/60 disabled:opacity-50"
-                style={{
-                  borderColor: 'var(--aurora-border)',
-                  color: 'var(--aurora-text)',
-                  background: 'var(--aurora-bg-subtle)',
-                }}
-                disabled={!reportResult.raw}
-              >
-                Export JSON
-              </button>
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-700"
-              >
-                Print / PDF
-              </button>
-            </div>
-          </div>
-
-          {!loading && !error && reportResult.rows.length > 0 && (
-            <ReadinessPanel rows={reportResult.rows} meta={reportResult.meta} />
-          )}
-
-          {error && <ErrorState message={error} onRetry={() => void loadReport(activeReport)} />}
-
-          {loading ? (
-            <Spinner />
-          ) : !error && reportResult.rows.length === 0 ? (
-            <EmptyState report={activeReport} onReload={() => void loadReport(activeReport)} />
-          ) : !error ? (
-            <ReportTable data={reportResult.rows} />
-          ) : null}
-        </Card>
-      ) : (
-        <div className="py-10 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
-          Select a company, then choose a report card above to load Westsides data.
+      {error && (
+        <div className="no-print rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+          {error}
         </div>
       )}
+
+      <Card className="print-area overflow-hidden" padding="none">
+        <div className="print-letterhead px-5 pt-5">
+          <img src="/brand/itemba-group-logo.png" alt="ITEMBA Group logo" />
+          <div>
+            <div className="text-xl font-bold">{currentCompanyLabel ?? 'ITEMBA Group'}</div>
+            <div className="text-sm">{activeReport.title}</div>
+            <div className="text-xs">
+              {currentBranchLabel ?? 'All branches'} | {dateFrom || 'Open'} to {dateTo || 'Open'}
+            </div>
+            <div className="text-xs">Generated {new Date().toLocaleString('en-GB')}</div>
+          </div>
+        </div>
+
+        <div
+          className="flex flex-wrap items-start justify-between gap-3 border-b px-5 py-4"
+          style={{ borderColor: 'var(--aurora-border)' }}
+        >
+          <div>
+            <h2 className="text-lg font-semibold" style={{ color: 'var(--aurora-text)' }}>
+              {activeReport.title}
+            </h2>
+            <p className="mt-1 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+              {activeReport.description}
+            </p>
+            <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              {currentCompanyLabel ?? 'No company selected'} |{' '}
+              {currentBranchLabel ?? 'All branches'}
+            </p>
+          </div>
+          <div className="no-print flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white"
+              disabled={reportResult.rows.length === 0}
+            >
+              Print / PDF
+            </button>
+            <button
+              type="button"
+              onClick={exportExcel}
+              className="rounded-lg border px-3 py-2 text-xs font-semibold"
+              style={controlStyle}
+              disabled={reportResult.rows.length === 0}
+            >
+              Excel
+            </button>
+            <button
+              type="button"
+              onClick={exportCsv}
+              className="rounded-lg border px-3 py-2 text-xs font-semibold"
+              style={controlStyle}
+              disabled={reportResult.rows.length === 0}
+            >
+              CSV
+            </button>
+            <button
+              type="button"
+              onClick={exportJson}
+              className="rounded-lg border px-3 py-2 text-xs font-semibold"
+              style={controlStyle}
+              disabled={!reportResult.raw}
+            >
+              JSON
+            </button>
+          </div>
+        </div>
+
+        {loading ? (
+          <div
+            className="px-5 py-12 text-center text-sm"
+            style={{ color: 'var(--aurora-text-secondary)' }}
+          >
+            Loading report...
+          </div>
+        ) : reportResult.rows.length === 0 ? (
+          <div
+            className="px-5 py-12 text-center text-sm"
+            style={{ color: 'var(--aurora-text-secondary)' }}
+          >
+            Select filters and load a report. If no rows appear, widen the date range or choose all
+            branches.
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4 no-print">
+              {summary.map(([key, value]) => (
+                <StatCard
+                  key={key}
+                  label={formatHeading(key)}
+                  value={MONEY_RE.test(key) ? formatMoney(value) : formatValue(key, value)}
+                  variant={MONEY_RE.test(key) ? 'green' : 'blue'}
+                />
+              ))}
+            </div>
+            <div className="print-summary">
+              {summary.map(([key, value]) => (
+                <div key={key}>
+                  <span>{formatHeading(key)}</span>
+                  <strong>
+                    {MONEY_RE.test(key) ? formatMoney(value) : formatValue(key, value)}
+                  </strong>
+                </div>
+              ))}
+            </div>
+            <ReportTable rows={reportResult.rows} report={activeReport} />
+          </>
+        )}
+      </Card>
     </div>
   );
 }

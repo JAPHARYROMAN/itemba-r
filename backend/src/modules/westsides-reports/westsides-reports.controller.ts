@@ -10,6 +10,50 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 export class WestsidesReportsController {
   constructor(private readonly service: WestsidesReportsService) {}
 
+  @Get('sales-report')
+  @RequirePermissions('westsides.reports.view')
+  @ApiOperation({ summary: 'Readable sales report with products, customers, units, and amounts' })
+  salesReport(@Query() query: QueryReportDto, @CurrentUser() user: AuthUser) {
+    return this.service.salesReport(query, user);
+  }
+
+  @Get('sales-by-customer')
+  @RequirePermissions('westsides.reports.view')
+  @ApiOperation({ summary: 'Sales grouped by customer' })
+  salesByCustomer(@Query() query: QueryReportDto, @CurrentUser() user: AuthUser) {
+    return this.service.salesByCustomer(query, user);
+  }
+
+  @Get('purchase-report')
+  @RequirePermissions('westsides.reports.view')
+  @ApiOperation({
+    summary: 'Readable purchase report with suppliers, products, units, and amounts',
+  })
+  purchaseReport(@Query() query: QueryReportDto, @CurrentUser() user: AuthUser) {
+    return this.service.purchaseReport(query, user);
+  }
+
+  @Get('purchases-by-supplier')
+  @RequirePermissions('westsides.reports.view')
+  @ApiOperation({ summary: 'Purchases grouped by supplier' })
+  purchasesBySupplier(@Query() query: QueryReportDto, @CurrentUser() user: AuthUser) {
+    return this.service.purchasesBySupplier(query, user);
+  }
+
+  @Get('customers-report')
+  @RequirePermissions('westsides.reports.view')
+  @ApiOperation({ summary: 'Readable customer report with balances and sales totals' })
+  customersReport(@Query() query: QueryReportDto, @CurrentUser() user: AuthUser) {
+    return this.service.customersReport(query, user);
+  }
+
+  @Get('suppliers-report')
+  @RequirePermissions('westsides.reports.view')
+  @ApiOperation({ summary: 'Readable supplier report with balances and purchase totals' })
+  suppliersReport(@Query() query: QueryReportDto, @CurrentUser() user: AuthUser) {
+    return this.service.suppliersReport(query, user);
+  }
+
   @Get('sales-by-channel')
   @RequirePermissions('westsides.reports.view')
   @ApiOperation({ summary: 'Sales grouped by channel' })

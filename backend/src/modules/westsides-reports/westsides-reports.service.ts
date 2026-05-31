@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { SalesOrderStatus } from '@prisma/client';
+import { PurchaseOrderStatus, SalesOrderStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services/company-scope.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -18,6 +18,12 @@ const CONFIRMED_SALES_STATUSES = [
   SalesOrderStatus.CONFIRMED,
   SalesOrderStatus.PARTIALLY_PAID,
   SalesOrderStatus.PAID,
+] as const;
+
+const REPORTABLE_PURCHASE_STATUSES = [
+  PurchaseOrderStatus.CONFIRMED,
+  PurchaseOrderStatus.RECEIVED,
+  PurchaseOrderStatus.PARTIALLY_RECEIVED,
 ] as const;
 
 export type ReportReadinessStatus = 'READY' | 'INFO' | 'WARNING' | 'CRITICAL';
@@ -170,6 +176,17 @@ export class WestsidesReportsService {
     return new Map(customers.map((customer) => [customer.id, customer]));
   }
 
+  private async supplierMap(supplierIds: Array<string | null | undefined>) {
+    const ids = Array.from(new Set(supplierIds.filter((id): id is string => Boolean(id))));
+    if (ids.length === 0)
+      return new Map<string, { id: string; name: string; supplierCode: string }>();
+    const suppliers = await this.prisma.supplier.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, supplierCode: true },
+    });
+    return new Map(suppliers.map((supplier) => [supplier.id, supplier]));
+  }
+
   private async salesWhere(query: QueryReportDto, user: AuthUser): Promise<any> {
     const { companyId, branchId, dateFrom, dateTo } = query;
     const companyWhere = await this.companyWhere({ companyId }, user);
@@ -182,6 +199,310 @@ export class WestsidesReportsService {
     const df = this.dateFilter(dateFrom, dateTo);
     if (df) where.orderDate = df;
     return where;
+  }
+
+  private async purchaseWhere(query: QueryReportDto, user: AuthUser): Promise<any> {
+    const { companyId, branchId, dateFrom, dateTo } = query;
+    const companyWhere = await this.companyWhere({ companyId }, user);
+    const where: any = {
+      ...companyWhere,
+      status: { in: REPORTABLE_PURCHASE_STATUSES as unknown as any },
+      deletedAt: null,
+    };
+    if (branchId) where.branchId = branchId;
+    const df = this.dateFilter(dateFrom, dateTo);
+    if (df) where.orderDate = df;
+    return where;
+  }
+
+  async salesReport(query: QueryReportDto, user: AuthUser) {
+    const where = await this.salesWhere(query, user);
+    const [ordersAgg, lines] = await Promise.all([
+      this.prisma.salesOrder.aggregate({
+        where,
+        _count: { id: true },
+        _sum: {
+          subtotal: true,
+          discountAmount: true,
+          taxAmount: true,
+          totalAmount: true,
+          paidAmount: true,
+          outstandingAmount: true,
+        },
+      }),
+      this.prisma.salesOrderLine.findMany({
+        where: { salesOrder: where },
+        orderBy: [{ salesOrder: { orderDate: 'desc' } }, { createdAt: 'asc' }],
+        include: {
+          product: { select: { productCode: true, name: true, sku: true } },
+          unit: { select: { symbol: true, name: true } },
+          salesOrder: {
+            select: {
+              salesOrderNumber: true,
+              orderDate: true,
+              customerName: true,
+              customer: { select: { name: true, customerCode: true } },
+              salesType: true,
+              paymentMethod: true,
+              paymentStatus: true,
+              salesperson: { select: { fullName: true, employeeCode: true } },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const rows = lines.map((line) => ({
+      date: line.salesOrder.orderDate.toISOString(),
+      salesOrderNumber: line.salesOrder.salesOrderNumber,
+      customer:
+        line.salesOrder.customer?.name ??
+        line.salesOrder.customerName ??
+        'Walk-in / unassigned customer',
+      customerCode: line.salesOrder.customer?.customerCode ?? null,
+      productCode: line.product.productCode,
+      sku: line.product.sku,
+      product: line.product.name,
+      description: line.description,
+      quantity: this.toNumber(line.quantity),
+      unit: line.unit.symbol || line.unit.name,
+      unitPrice: this.toNumber(line.unitPrice),
+      discountAmount: this.toNumber(line.discountAmount),
+      taxAmount: this.toNumber(line.taxAmount),
+      amount: this.toNumber(line.lineTotal),
+      paymentMethod: line.salesOrder.paymentMethod,
+      paymentStatus: line.salesOrder.paymentStatus,
+      salesperson:
+        line.salesOrder.salesperson?.fullName ?? line.salesOrder.salesperson?.employeeCode ?? null,
+    }));
+
+    return {
+      summary: {
+        orders: ordersAgg._count.id,
+        lines: rows.length,
+        quantity: rows.reduce((sum, row) => sum + row.quantity, 0),
+        subtotal: this.toNumber(ordersAgg._sum.subtotal),
+        discountAmount: this.toNumber(ordersAgg._sum.discountAmount),
+        taxAmount: this.toNumber(ordersAgg._sum.taxAmount),
+        totalAmount: this.toNumber(ordersAgg._sum.totalAmount),
+        paidAmount: this.toNumber(ordersAgg._sum.paidAmount),
+        outstandingAmount: this.toNumber(ordersAgg._sum.outstandingAmount),
+      },
+      rows,
+    };
+  }
+
+  async salesByCustomer(query: QueryReportDto, user: AuthUser) {
+    const rows = await this.prisma.salesOrder.groupBy({
+      by: ['customerId', 'customerName'],
+      where: await this.salesWhere(query, user),
+      _sum: { totalAmount: true, paidAmount: true, outstandingAmount: true },
+      _count: { id: true },
+      orderBy: { _sum: { totalAmount: 'desc' } },
+    });
+    const customers = await this.customerMap(rows.map((row) => row.customerId));
+    return rows.map((row) => {
+      const customer = row.customerId ? customers.get(row.customerId) : null;
+      return {
+        customerCode: customer?.customerCode ?? null,
+        customer: customer?.name ?? row.customerName ?? 'Walk-in / unassigned customer',
+        orders: row._count.id,
+        totalAmount: this.toNumber(row._sum.totalAmount),
+        paidAmount: this.toNumber(row._sum.paidAmount),
+        outstandingAmount: this.toNumber(row._sum.outstandingAmount),
+      };
+    });
+  }
+
+  async purchaseReport(query: QueryReportDto, user: AuthUser) {
+    const where = await this.purchaseWhere(query, user);
+    const [ordersAgg, lines] = await Promise.all([
+      this.prisma.purchaseOrder.aggregate({
+        where,
+        _count: { id: true },
+        _sum: {
+          subtotal: true,
+          discountAmount: true,
+          taxAmount: true,
+          totalAmount: true,
+          paidAmount: true,
+          outstandingAmount: true,
+        },
+      }),
+      this.prisma.purchaseOrderLine.findMany({
+        where: { purchaseOrder: where },
+        orderBy: [{ purchaseOrder: { orderDate: 'desc' } }, { createdAt: 'asc' }],
+        include: {
+          product: { select: { productCode: true, name: true, sku: true } },
+          unit: { select: { symbol: true, name: true } },
+          purchaseOrder: {
+            select: {
+              purchaseOrderNumber: true,
+              orderDate: true,
+              supplierName: true,
+              supplier: { select: { name: true, supplierCode: true } },
+              purchaseType: true,
+              paymentStatus: true,
+              status: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const rows = lines.map((line) => ({
+      date: line.purchaseOrder.orderDate.toISOString(),
+      purchaseOrderNumber: line.purchaseOrder.purchaseOrderNumber,
+      supplier:
+        line.purchaseOrder.supplier?.name ??
+        line.purchaseOrder.supplierName ??
+        'Unassigned supplier',
+      supplierCode: line.purchaseOrder.supplier?.supplierCode ?? null,
+      productCode: line.product.productCode,
+      sku: line.product.sku,
+      product: line.product.name,
+      description: line.description,
+      quantity: this.toNumber(line.quantity),
+      unit: line.unit.symbol || line.unit.name,
+      unitCost: this.toNumber(line.unitCost),
+      discountAmount: this.toNumber(line.discountAmount),
+      taxAmount: this.toNumber(line.taxAmount),
+      amount: this.toNumber(line.lineTotal),
+      purchaseType: line.purchaseOrder.purchaseType,
+      status: line.purchaseOrder.status,
+      paymentStatus: line.purchaseOrder.paymentStatus,
+    }));
+
+    return {
+      summary: {
+        purchaseOrders: ordersAgg._count.id,
+        lines: rows.length,
+        quantity: rows.reduce((sum, row) => sum + row.quantity, 0),
+        subtotal: this.toNumber(ordersAgg._sum.subtotal),
+        discountAmount: this.toNumber(ordersAgg._sum.discountAmount),
+        taxAmount: this.toNumber(ordersAgg._sum.taxAmount),
+        totalAmount: this.toNumber(ordersAgg._sum.totalAmount),
+        paidAmount: this.toNumber(ordersAgg._sum.paidAmount),
+        outstandingAmount: this.toNumber(ordersAgg._sum.outstandingAmount),
+      },
+      rows,
+    };
+  }
+
+  async purchasesBySupplier(query: QueryReportDto, user: AuthUser) {
+    const rows = await this.prisma.purchaseOrder.groupBy({
+      by: ['supplierId', 'supplierName'],
+      where: await this.purchaseWhere(query, user),
+      _sum: { totalAmount: true, paidAmount: true, outstandingAmount: true },
+      _count: { id: true },
+      orderBy: { _sum: { totalAmount: 'desc' } },
+    });
+    const suppliers = await this.supplierMap(rows.map((row) => row.supplierId));
+    return rows.map((row) => {
+      const supplier = row.supplierId ? suppliers.get(row.supplierId) : null;
+      return {
+        supplierCode: supplier?.supplierCode ?? null,
+        supplier: supplier?.name ?? row.supplierName ?? 'Unassigned supplier',
+        purchaseOrders: row._count.id,
+        totalAmount: this.toNumber(row._sum.totalAmount),
+        paidAmount: this.toNumber(row._sum.paidAmount),
+        outstandingAmount: this.toNumber(row._sum.outstandingAmount),
+      };
+    });
+  }
+
+  async customersReport(query: QueryReportDto, user: AuthUser) {
+    const { companyId, branchId } = query;
+    const companyWhere = await this.companyWhere({ companyId }, user);
+    const where: any = { ...companyWhere, deletedAt: null };
+    if (branchId) where.branchId = branchId;
+    const [customers, salesRows] = await Promise.all([
+      this.prisma.customer.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          customerCode: true,
+          name: true,
+          phone: true,
+          email: true,
+          creditLimit: true,
+          currentBalance: true,
+          paymentTerms: true,
+          status: true,
+        },
+      }),
+      this.prisma.salesOrder.groupBy({
+        by: ['customerId'],
+        where: await this.salesWhere(query, user),
+        _sum: { totalAmount: true, outstandingAmount: true },
+        _count: { id: true },
+      }),
+    ]);
+    const salesByCustomer = new Map(salesRows.map((row) => [row.customerId, row]));
+    return customers.map((customer) => {
+      const sales = salesByCustomer.get(customer.id);
+      return {
+        customerCode: customer.customerCode,
+        customer: customer.name,
+        phone: customer.phone,
+        email: customer.email,
+        status: customer.status,
+        paymentTerms: customer.paymentTerms,
+        creditLimit: this.toNumber(customer.creditLimit),
+        currentBalance: this.toNumber(customer.currentBalance),
+        orders: sales?._count.id ?? 0,
+        totalSales: this.toNumber(sales?._sum.totalAmount),
+        outstandingSales: this.toNumber(sales?._sum.outstandingAmount),
+      };
+    });
+  }
+
+  async suppliersReport(query: QueryReportDto, user: AuthUser) {
+    const { companyId, branchId } = query;
+    const companyWhere = await this.companyWhere({ companyId }, user);
+    const where: any = { ...companyWhere, deletedAt: null };
+    if (branchId) where.branchId = branchId;
+    const [suppliers, purchaseRows] = await Promise.all([
+      this.prisma.supplier.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          supplierCode: true,
+          name: true,
+          phone: true,
+          email: true,
+          creditLimit: true,
+          currentBalance: true,
+          paymentTerms: true,
+          status: true,
+        },
+      }),
+      this.prisma.purchaseOrder.groupBy({
+        by: ['supplierId'],
+        where: await this.purchaseWhere(query, user),
+        _sum: { totalAmount: true, outstandingAmount: true },
+        _count: { id: true },
+      }),
+    ]);
+    const purchasesBySupplier = new Map(purchaseRows.map((row) => [row.supplierId, row]));
+    return suppliers.map((supplier) => {
+      const purchases = purchasesBySupplier.get(supplier.id);
+      return {
+        supplierCode: supplier.supplierCode,
+        supplier: supplier.name,
+        phone: supplier.phone,
+        email: supplier.email,
+        status: supplier.status,
+        paymentTerms: supplier.paymentTerms,
+        creditLimit: this.toNumber(supplier.creditLimit),
+        currentBalance: this.toNumber(supplier.currentBalance),
+        purchaseOrders: purchases?._count.id ?? 0,
+        totalPurchases: this.toNumber(purchases?._sum.totalAmount),
+        outstandingPurchases: this.toNumber(purchases?._sum.outstandingAmount),
+      };
+    });
   }
 
   /**
