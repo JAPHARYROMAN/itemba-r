@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Btn, Card, FormInput, FormSelect, Modal, PageHeader, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { backendList } from '@/lib/api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,9 +27,11 @@ interface CashAccount {
   id: string;
   accountName: string;
   accountType: string;
+  currency?: string | null;
   divisionId?: string | null;
   branchId?: string | null;
   isActive?: boolean;
+  linkedBank?: { bankName?: string | null } | null;
 }
 interface Unit {
   id: string;
@@ -105,6 +108,54 @@ function accountTypesForPaymentMethod(method: string) {
   }
 }
 
+const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+  CASH_ON_HAND: 'Cash on hand',
+  PETTY_CASH: 'Petty cash',
+  BANK: 'Bank',
+  MOBILE_MONEY: 'Mobile money',
+  OTHER: 'Other',
+};
+
+function accountSelectLabel(method: string) {
+  switch (method) {
+    case 'CASH':
+      return 'Cash account';
+    case 'BANK_CARD':
+    case 'BANK_TRANSFER':
+      return 'Bank account';
+    case 'MOBILE_MONEY':
+      return 'Mobile money account';
+    default:
+      return 'Receipt account';
+  }
+}
+
+function emptyAccountHint(method: string) {
+  switch (method) {
+    case 'CASH':
+      return 'No active cash-on-hand or petty-cash account is available for this branch.';
+    case 'BANK_CARD':
+    case 'BANK_TRANSFER':
+      return 'No active bank receipt account is available for this company, division, or branch.';
+    case 'MOBILE_MONEY':
+      return 'No active mobile-money account is available for this branch.';
+    default:
+      return 'No active receipt account is available for this branch.';
+  }
+}
+
+function accountOptionLabel(account: CashAccount) {
+  const typeLabel = ACCOUNT_TYPE_LABELS[account.accountType] ?? account.accountType;
+  const bankName =
+    account.accountType === 'BANK' &&
+    account.linkedBank?.bankName &&
+    !account.accountName.toLowerCase().includes(account.linkedBank.bankName.toLowerCase())
+      ? ` - ${account.linkedBank.bankName}`
+      : '';
+  const currency = account.currency ? ` - ${account.currency}` : '';
+  return `${account.accountName}${bankName} (${typeLabel}${currency})`;
+}
+
 const SETTINGS_KEY = 'itemba.quickSale.settings.v1';
 
 interface Settings {
@@ -168,6 +219,8 @@ export default function QuickSalePage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
+  const [cashAccountsLoading, setCashAccountsLoading] = useState(false);
+  const [cashAccountsError, setCashAccountsError] = useState('');
   const [units, setUnits] = useState<Unit[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
 
@@ -230,6 +283,7 @@ export default function QuickSalePage() {
       setBranches([]);
       setDivisions([]);
       setCashAccounts([]);
+      setCashAccountsError('');
       setCustomers([]);
       return;
     }
@@ -250,14 +304,6 @@ export default function QuickSalePage() {
         ),
       )
       .catch(() => setDivisions([]));
-    fetch(`/api/backend/cash-accounts?companyId=${cid}&isActive=true&limit=500`)
-      .then((r) => r.json())
-      .then((j) =>
-        setCashAccounts(
-          Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
-        ),
-      )
-      .catch(() => setCashAccounts([]));
     fetch(`/api/backend/customers?companyId=${cid}&limit=500`)
       .then((r) => r.json())
       .then((j) =>
@@ -267,6 +313,50 @@ export default function QuickSalePage() {
       )
       .catch(() => setCustomers([]));
   }, [settings.companyId]);
+
+  // Receipt account lookup is intentionally scoped to sales.create, not the
+  // finance cash-account permission, so counter users can select a valid
+  // receipt account without full Finance > Cash Accounts access.
+  useEffect(() => {
+    if (!settings.companyId || !settings.divisionId || !settings.branchId) {
+      setCashAccounts([]);
+      setCashAccountsError('');
+      setCashAccountsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCashAccountsLoading(true);
+    setCashAccountsError('');
+    setCashAccounts([]);
+    backendList<CashAccount>('/sales-orders/receipt-accounts', {
+      query: {
+        companyId: settings.companyId,
+        divisionId: settings.divisionId,
+        branchId: settings.branchId,
+        paymentMethod: settings.paymentMethod,
+        limit: 500,
+      },
+    })
+      .then((rows) => {
+        if (!cancelled) setCashAccounts(rows);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setCashAccounts([]);
+          setCashAccountsError(
+            err instanceof Error ? err.message : 'Could not load receipt accounts',
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCashAccountsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.branchId, settings.companyId, settings.divisionId, settings.paymentMethod]);
 
   // Debounced product search — scoped to the selected division (if any).
   // Backend returns SKUs tagged to the division PLUS company-wide SKUs.
@@ -368,14 +458,9 @@ export default function QuickSalePage() {
     () =>
       cashAccounts.filter(
         (account) =>
-          account.isActive !== false &&
-          allowedAccountTypes.includes(account.accountType) &&
-          (account.accountType === 'BANK'
-            ? (!account.divisionId || account.divisionId === settings.divisionId) &&
-              (!account.branchId || account.branchId === settings.branchId)
-            : account.divisionId === settings.divisionId && account.branchId === settings.branchId),
+          account.isActive !== false && allowedAccountTypes.includes(account.accountType),
       ),
-    [allowedAccountTypes, cashAccounts, settings.branchId, settings.divisionId],
+    [allowedAccountTypes, cashAccounts],
   );
 
   useEffect(() => {
@@ -772,25 +857,6 @@ export default function QuickSalePage() {
             disabled={!settings.divisionId}
           />
           <FormSelect
-            label="Cash / bank account"
-            required
-            value={settings.cashAccountId}
-            onChange={(e) => setSettings((s) => ({ ...s, cashAccountId: e.target.value }))}
-            options={selectableCashAccounts.map((a) => ({
-              value: a.id,
-              label: `${a.accountName} (${a.accountType})`,
-            }))}
-            placeholder={
-              settings.branchId ? 'Select account' : 'Pick company, division, and branch first'
-            }
-            disabled={!settings.branchId || selectableCashAccounts.length === 0}
-            hint={
-              settings.branchId && selectableCashAccounts.length === 0
-                ? 'Create an active cash account for this branch under Finance > Cash Accounts.'
-                : undefined
-            }
-          />
-          <FormSelect
             label="Default payment method"
             value={settings.paymentMethod}
             onChange={(e) =>
@@ -801,6 +867,43 @@ export default function QuickSalePage() {
               }))
             }
             options={PAYMENT_METHODS}
+          />
+          <FormSelect
+            label={accountSelectLabel(settings.paymentMethod)}
+            required
+            value={settings.cashAccountId}
+            onChange={(e) => setSettings((s) => ({ ...s, cashAccountId: e.target.value }))}
+            options={selectableCashAccounts.map((a) => ({
+              value: a.id,
+              label: accountOptionLabel(a),
+            }))}
+            placeholder={
+              !settings.companyId
+                ? 'Pick company first'
+                : !settings.divisionId
+                  ? 'Pick division first'
+                  : !settings.branchId
+                    ? 'Pick branch first'
+                    : cashAccountsLoading
+                      ? 'Loading accounts...'
+                      : `Select ${accountSelectLabel(settings.paymentMethod).toLowerCase()}`
+            }
+            disabled={
+              !settings.branchId || cashAccountsLoading || selectableCashAccounts.length === 0
+            }
+            hint={
+              cashAccountsError
+                ? cashAccountsError
+                : cashAccountsLoading
+                  ? 'Loading receipt accounts for the selected branch and payment method.'
+                  : settings.branchId && selectableCashAccounts.length === 0
+                    ? `${emptyAccountHint(settings.paymentMethod)} ${
+                        ['BANK_CARD', 'BANK_TRANSFER'].includes(settings.paymentMethod)
+                          ? 'Create or activate a bank receipt account, or choose Cash/Mobile Money.'
+                          : 'Create or activate it under Finance > Cash Accounts, or change the payment method if this sale should go to bank/mobile money.'
+                      }`
+                    : undefined
+            }
           />
           <p className="text-xs text-slate-500">
             These settings are saved on this device. Change them anytime.
