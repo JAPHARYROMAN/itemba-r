@@ -1,10 +1,4 @@
-import {
-  IsDateString,
-  IsEnum,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { IsDateString, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { FuelPumpStatus } from '@prisma/client';
 
 export class CreateFuelPumpDto {
@@ -23,6 +17,10 @@ export class CreateFuelPumpDto {
   @IsNotEmpty()
   @IsString()
   branchId!: string;
+
+  @IsNotEmpty()
+  @IsString()
+  tankId!: string;
 
   @IsNotEmpty()
   @IsString()

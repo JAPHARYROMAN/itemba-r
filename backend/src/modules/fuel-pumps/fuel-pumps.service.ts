@@ -12,6 +12,31 @@ export class FuelPumpsService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
+  private readonly listInclude = {
+    branch: { select: { id: true, code: true, name: true } },
+    tank: { select: { id: true, tankCode: true, tankName: true } },
+  } as const;
+
+  private async assertTankBelongsToPumpScope(input: {
+    tankId: string;
+    companyId: string;
+    branchId: string;
+  }) {
+    const tank = await this.prisma.fuelTank.findFirst({
+      where: {
+        id: input.tankId,
+        companyId: input.companyId,
+        branchId: input.branchId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+
+    if (!tank) {
+      throw new BadRequestException('Selected tank does not belong to this company and branch');
+    }
+  }
+
   async findAll(query: Record<string, unknown>) {
     const page = parseInt(query.page as string) || 1;
     const limit = parseInt(query.limit as string) || 20;
@@ -20,11 +45,13 @@ export class FuelPumpsService {
     const where: Record<string, unknown> = { deletedAt: null };
     if (query.companyId) where.companyId = query.companyId;
     if (query.branchId) where.branchId = query.branchId;
+    if (query.tankId) where.tankId = query.tankId;
     if (query.status) where.status = query.status;
 
     const [data, total] = await Promise.all([
       this.prisma.fuelPump.findMany({
         where,
+        include: this.listInclude,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
@@ -36,7 +63,10 @@ export class FuelPumpsService {
   }
 
   async findOne(id: string) {
-    const record = await this.prisma.fuelPump.findFirst({ where: { id, deletedAt: null } });
+    const record = await this.prisma.fuelPump.findFirst({
+      where: { id, deletedAt: null },
+      include: this.listInclude,
+    });
     if (!record) throw new NotFoundException('Fuel pump not found');
     return record;
   }
@@ -44,6 +74,7 @@ export class FuelPumpsService {
   async findByBranch(branchId: string) {
     return this.prisma.fuelPump.findMany({
       where: { branchId, deletedAt: null },
+      include: this.listInclude,
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -54,17 +85,25 @@ export class FuelPumpsService {
     });
     if (duplicate) throw new BadRequestException('Pump code already exists for this branch');
 
+    await this.assertTankBelongsToPumpScope({
+      tankId: dto.tankId,
+      companyId: dto.companyId,
+      branchId: dto.branchId,
+    });
+
     const record = await this.prisma.fuelPump.create({
       data: {
         pumpCode: dto.pumpCode,
         companyId: dto.companyId,
         divisionId: dto.divisionId,
         branchId: dto.branchId,
+        tankId: dto.tankId,
         pumpName: dto.pumpName,
         status: dto.status ?? FuelPumpStatus.ACTIVE,
         installationDate: dto.installationDate ? new Date(dto.installationDate) : undefined,
         notes: dto.notes,
       },
+      include: this.listInclude,
     });
 
     await this.auditLogs.log({
@@ -90,6 +129,17 @@ export class FuelPumpsService {
       if (duplicate) throw new BadRequestException('Pump code already exists for this branch');
     }
 
+    const targetCompanyId = dto.companyId ?? existing.companyId;
+    const targetBranchId = dto.branchId ?? existing.branchId;
+    const targetTankId = dto.tankId ?? existing.tankId;
+    if (targetTankId) {
+      await this.assertTankBelongsToPumpScope({
+        tankId: targetTankId,
+        companyId: targetCompanyId,
+        branchId: targetBranchId,
+      });
+    }
+
     const record = await this.prisma.fuelPump.update({
       where: { id },
       data: {
@@ -98,12 +148,14 @@ export class FuelPumpsService {
         ...(dto.companyId !== undefined && { companyId: dto.companyId }),
         ...(dto.divisionId !== undefined && { divisionId: dto.divisionId }),
         ...(dto.branchId !== undefined && { branchId: dto.branchId }),
+        ...(dto.tankId !== undefined && { tankId: dto.tankId }),
         ...(dto.status !== undefined && { status: dto.status }),
         ...(dto.installationDate !== undefined && {
           installationDate: dto.installationDate ? new Date(dto.installationDate) : null,
         }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
       },
+      include: this.listInclude,
     });
 
     await this.auditLogs.log({
