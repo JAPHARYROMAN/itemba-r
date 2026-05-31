@@ -3,17 +3,26 @@ import {
   AuditSeverity,
   BackupJobStatus,
   BackupRunStatus,
+  CustomerPriceAgreementStatus,
   DisasterRecoveryPlanStatus,
+  DeliveryNoteStatus,
   EnvironmentConfigStatus,
   ErrorLogSeverity,
   ErrorLogStatus,
   HealthCheckStatus,
+  PriceListStatus,
+  ProductBatchStatus,
+  ProductStatus,
+  PostingRunStatus,
   ProductionReadinessPriority,
   ProductionReadinessStatus,
   RestoreTestStatus,
+  SalesOrderStatus,
+  SalesPaymentMethod,
   RetentionPolicyStatus,
   SecurityEventSeverity,
   SecurityEventStatus,
+  StockDamageStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -29,6 +38,12 @@ export interface ProductionReadinessCheckResult {
   message: string;
   details: Record<string, DetailValue>;
 }
+
+const WESTSIDES_CONFIRMED_SALES_STATUSES = [
+  SalesOrderStatus.CONFIRMED,
+  SalesOrderStatus.PARTIALLY_PAID,
+  SalesOrderStatus.PAID,
+];
 
 @Injectable()
 export class ProductionReadinessService {
@@ -93,6 +108,8 @@ export class ProductionReadinessService {
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     const thirtyDaysAgo = new Date(now);
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const nextThirtyDays = new Date(now);
+    nextThirtyDays.setDate(nextThirtyDays.getDate() + 30);
     const openReadinessStatuses = [
       ProductionReadinessStatus.NOT_STARTED,
       ProductionReadinessStatus.IN_PROGRESS,
@@ -124,6 +141,19 @@ export class ProductionReadinessService {
       openCriticalErrors,
       openHighErrors,
       activeRetentionPolicies,
+      westsidesActiveProducts,
+      westsidesProductsMissingActivePrice,
+      westsidesLowStockBalances,
+      westsidesOutOfStockBalances,
+      westsidesExpiredActiveBatches,
+      westsidesExpiringBatches,
+      westsidesPendingDamage,
+      westsidesMissingCashAccounts,
+      westsidesMissingMobileReferences,
+      westsidesOverdueDeliveries,
+      westsidesActivePriceLists,
+      westsidesActiveAgreements,
+      westsidesFailedPostingRuns,
       readinessByStatus,
       readinessByCategory,
     ] = await Promise.all([
@@ -224,6 +254,97 @@ export class ProductionReadinessService {
       this.prisma.retentionPolicy.count({
         where: { status: RetentionPolicyStatus.ACTIVE },
       }),
+      this.prisma.product.count({
+        where: { deletedAt: null, status: ProductStatus.ACTIVE },
+      }),
+      this.prisma.product.count({
+        where: {
+          deletedAt: null,
+          status: ProductStatus.ACTIVE,
+          priceListItems: {
+            none: {
+              priceList: {
+                deletedAt: null,
+                status: PriceListStatus.ACTIVE,
+                effectiveFrom: { lte: now },
+                OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.inventoryBalance.count({
+        where: { quantityOnHand: { gt: 0, lte: 10 } },
+      }),
+      this.prisma.inventoryBalance.count({
+        where: { quantityOnHand: { lte: 0 } },
+      }),
+      this.prisma.productBatch.count({
+        where: {
+          deletedAt: null,
+          status: ProductBatchStatus.ACTIVE,
+          remainingQuantity: { gt: 0 },
+          expiryDate: { lt: now },
+        },
+      }),
+      this.prisma.productBatch.count({
+        where: {
+          deletedAt: null,
+          status: ProductBatchStatus.ACTIVE,
+          remainingQuantity: { gt: 0 },
+          expiryDate: { gte: now, lte: nextThirtyDays },
+        },
+      }),
+      this.prisma.stockDamage.count({
+        where: {
+          deletedAt: null,
+          status: { in: [StockDamageStatus.SUBMITTED, StockDamageStatus.APPROVED] },
+        },
+      }),
+      this.prisma.salesOrder.count({
+        where: {
+          deletedAt: null,
+          status: { in: WESTSIDES_CONFIRMED_SALES_STATUSES },
+          paymentMethod: { not: SalesPaymentMethod.CREDIT },
+          cashAccountId: null,
+          orderDate: { gte: sevenDaysAgo },
+        },
+      }),
+      this.prisma.salesOrder.count({
+        where: {
+          deletedAt: null,
+          status: { in: WESTSIDES_CONFIRMED_SALES_STATUSES },
+          paymentMethod: SalesPaymentMethod.MOBILE_MONEY,
+          orderDate: { gte: sevenDaysAgo },
+          OR: [{ paymentReference: null }, { paymentReference: '' }],
+        },
+      }),
+      this.prisma.deliveryNote.count({
+        where: {
+          deletedAt: null,
+          status: { in: [DeliveryNoteStatus.DISPATCHED, DeliveryNoteStatus.PARTIALLY_DELIVERED] },
+          deliveryDate: { lt: now },
+        },
+      }),
+      this.prisma.priceList.count({
+        where: {
+          deletedAt: null,
+          status: PriceListStatus.ACTIVE,
+          effectiveFrom: { lte: now },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
+        },
+      }),
+      this.prisma.customerPriceAgreement.count({
+        where: {
+          deletedAt: null,
+          status: CustomerPriceAgreementStatus.ACTIVE,
+          startDate: { lte: now },
+          OR: [{ endDate: null }, { endDate: { gte: now } }],
+        },
+      }),
+      this.prisma.postingRun.count({
+        where: { status: PostingRunStatus.FAILED, createdAt: { gte: sevenDaysAgo } },
+      }),
       this.prisma.productionReadinessCheck.groupBy({
         by: ['status'],
         where: { deletedAt: null },
@@ -271,6 +392,21 @@ export class ProductionReadinessService {
         openHighErrors,
       ),
       this.buildGovernanceCheck(activeRetentionPolicies, systemRoles, permissions),
+      this.buildWestsidesReadinessCheck({
+        activeProducts: westsidesActiveProducts,
+        productsMissingActivePrice: westsidesProductsMissingActivePrice,
+        lowStockBalances: westsidesLowStockBalances,
+        outOfStockBalances: westsidesOutOfStockBalances,
+        expiredActiveBatches: westsidesExpiredActiveBatches,
+        expiringBatches: westsidesExpiringBatches,
+        pendingDamage: westsidesPendingDamage,
+        missingCashAccounts: westsidesMissingCashAccounts,
+        missingMobileReferences: westsidesMissingMobileReferences,
+        overdueDeliveries: westsidesOverdueDeliveries,
+        activePriceLists: westsidesActivePriceLists,
+        activeAgreements: westsidesActiveAgreements,
+        failedPostingRuns: westsidesFailedPostingRuns,
+      }),
     ];
 
     const score = averageScore(checks);
@@ -316,6 +452,19 @@ export class ProductionReadinessService {
         openCriticalErrors,
         openHighErrors,
         activeRetentionPolicies,
+        westsidesActiveProducts,
+        westsidesProductsMissingActivePrice,
+        westsidesLowStockBalances,
+        westsidesOutOfStockBalances,
+        westsidesExpiredActiveBatches,
+        westsidesExpiringBatches,
+        westsidesPendingDamage,
+        westsidesMissingCashAccounts,
+        westsidesMissingMobileReferences,
+        westsidesOverdueDeliveries,
+        westsidesActivePriceLists,
+        westsidesActiveAgreements,
+        westsidesFailedPostingRuns,
       },
       readinessByStatus: countBy(readinessByStatus as GroupCount[], 'status'),
       readinessByCategory: countBy(readinessByCategory as GroupCount[], 'category'),
@@ -582,6 +731,66 @@ export class ProductionReadinessService {
             ? 'RBAC foundations exist, but no active retention policy is configured.'
             : 'RBAC governance foundations are missing.',
       details: { activeRetentionPolicies, systemRoles, permissions },
+    };
+  }
+
+  private buildWestsidesReadinessCheck(input: {
+    activeProducts: number;
+    productsMissingActivePrice: number;
+    lowStockBalances: number;
+    outOfStockBalances: number;
+    expiredActiveBatches: number;
+    expiringBatches: number;
+    pendingDamage: number;
+    missingCashAccounts: number;
+    missingMobileReferences: number;
+    overdueDeliveries: number;
+    activePriceLists: number;
+    activeAgreements: number;
+    failedPostingRuns: number;
+  }): ProductionReadinessCheckResult {
+    const structuralBlockers =
+      input.missingCashAccounts +
+      input.missingMobileReferences +
+      input.expiredActiveBatches +
+      input.failedPostingRuns;
+    const operatingWarnings =
+      input.productsMissingActivePrice +
+      input.lowStockBalances +
+      input.outOfStockBalances +
+      input.expiringBatches +
+      input.pendingDamage +
+      input.overdueDeliveries +
+      (input.activeProducts > 0 && input.activePriceLists === 0 ? 1 : 0);
+    const status: ReadinessStatus =
+      structuralBlockers > 0 ? 'CRITICAL' : operatingWarnings > 0 ? 'WARNING' : 'READY';
+
+    return {
+      key: 'westsides-operating-readiness',
+      title: 'Westsides operating readiness',
+      status,
+      score: status === 'READY' ? 100 : status === 'WARNING' ? 90 : 55,
+      message:
+        status === 'READY'
+          ? 'Westsides commercial, pricing, stock, fulfillment, and close controls are clear.'
+          : status === 'WARNING'
+            ? 'Westsides is usable, but stock, pricing, delivery, or damage exceptions need review.'
+            : 'Westsides has close/accounting blockers that should be cleared before live sign-off.',
+      details: {
+        activeProducts: input.activeProducts,
+        activePriceLists: input.activePriceLists,
+        activeAgreements: input.activeAgreements,
+        productsMissingActivePrice: input.productsMissingActivePrice,
+        lowStockBalances: input.lowStockBalances,
+        outOfStockBalances: input.outOfStockBalances,
+        expiredActiveBatches: input.expiredActiveBatches,
+        expiringBatches: input.expiringBatches,
+        pendingDamage: input.pendingDamage,
+        missingCashAccounts: input.missingCashAccounts,
+        missingMobileReferences: input.missingMobileReferences,
+        overdueDeliveries: input.overdueDeliveries,
+        failedPostingRuns: input.failedPostingRuns,
+      },
     };
   }
 }

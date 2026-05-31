@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Btn, Card, FormSelect, FormInput, PageHeader, PageSpinner, PageToolbar } from '@/components/ui';
+import {
+  Btn,
+  Card,
+  FormSelect,
+  FormInput,
+  PageHeader,
+  PageSpinner,
+  PageToolbar,
+} from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -41,6 +49,15 @@ interface LiveResp {
 }
 
 type Tone = 'danger' | 'warn' | 'good' | 'info' | 'neutral';
+
+interface ReadinessCheck {
+  label: string;
+  status: string;
+  detail: string;
+  tone: Tone;
+  actionHref?: string;
+  actionLabel?: string;
+}
 
 interface InventorySummary {
   allItems: Item[];
@@ -95,11 +112,49 @@ function formatMovement(value?: string | null) {
   return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+function formatDateTime(value: Date | null) {
+  if (!value) return DASH;
+  return value.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatAge(value: Date | null) {
+  if (!value) return 'Not loaded';
+  const seconds = Math.max(0, Math.floor((Date.now() - value.getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m ago`;
+}
+
 function daysSince(value?: string | null) {
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
   return Math.floor((Date.now() - date.getTime()) / 86_400_000);
+}
+
+function buildHref(path: string, params: Record<string, string | null | undefined>) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value) query.set(key, value);
+  });
+  const suffix = query.toString();
+  return suffix ? `${path}?${suffix}` : path;
+}
+
+function productActionHref(path: string, item: Item) {
+  return buildHref(path, {
+    productId: item.productId,
+    branchId: item.location.branchId,
+    search: item.product.sku ?? item.product.name,
+  });
 }
 
 function buildSummary(data: LiveResp | null): InventorySummary {
@@ -111,11 +166,13 @@ function buildSummary(data: LiveResp | null): InventorySummary {
   const atRiskValue = allItems
     .filter((item) => item.status !== 'OK')
     .reduce((sum, item) => sum + toNumber(item.totalValue), 0);
-  const locationsAtRisk = data?.locations.filter((location) => location.out + location.low > 0).length ?? 0;
+  const locationsAtRisk =
+    data?.locations.filter((location) => location.out + location.low > 0).length ?? 0;
   const criticalSkus = [...allItems]
     .filter((item) => item.status !== 'OK')
     .sort((a, b) => {
-      const statusWeight = (status: Item['status']) => (status === 'OUT' ? 0 : status === 'LOW' ? 1 : 2);
+      const statusWeight = (status: Item['status']) =>
+        status === 'OUT' ? 0 : status === 'LOW' ? 1 : 2;
       return (
         statusWeight(a.status) - statusWeight(b.status) ||
         toNumber(a.quantityAvailable) - toNumber(b.quantityAvailable) ||
@@ -128,8 +185,14 @@ function buildSummary(data: LiveResp | null): InventorySummary {
     const days = daysSince(item.lastMovementAt);
     return days !== null && days >= 30 && toNumber(item.quantityOnHand) > 0;
   }).length;
-  const riskLabel = toNumber(data?.totals.out) > 0 ? 'Critical' : toNumber(data?.totals.low) > 0 ? 'Watch' : 'Stable';
-  const riskTone: Tone = riskLabel === 'Critical' ? 'danger' : riskLabel === 'Watch' ? 'warn' : 'good';
+  const riskLabel =
+    toNumber(data?.totals.out) > 0
+      ? 'Critical'
+      : toNumber(data?.totals.low) > 0
+        ? 'Watch'
+        : 'Stable';
+  const riskTone: Tone =
+    riskLabel === 'Critical' ? 'danger' : riskLabel === 'Watch' ? 'warn' : 'good';
 
   return {
     allItems,
@@ -161,6 +224,7 @@ export default function LiveInventoryPage() {
   const [error, setError] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
 
   const {
     companyOptions,
@@ -171,6 +235,7 @@ export default function LiveInventoryPage() {
   const load = useCallback(async () => {
     if (!companyId) {
       setData(null);
+      setLastLoadedAt(null);
       return;
     }
     setLoading(true);
@@ -187,6 +252,7 @@ export default function LiveInventoryPage() {
       }
       const j = await res.json();
       setData(j.data ?? j);
+      setLastLoadedAt(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Load failed');
     } finally {
@@ -214,9 +280,79 @@ export default function LiveInventoryPage() {
 
   const summary = useMemo(() => buildSummary(data), [data]);
   const selectedCompanyLabel =
-    companyOptions.find((option) => option.value === companyId)?.label ?? (companyId ? 'Selected company' : 'Not selected');
+    companyOptions.find((option) => option.value === companyId)?.label ??
+    (companyId ? 'Selected company' : 'Not selected');
   const selectedBranchLabel =
-    branchOptions.find((option) => option.value === branchId)?.label ?? (branchId ? 'Selected branch' : 'All branches');
+    branchOptions.find((option) => option.value === branchId)?.label ??
+    (branchId ? 'Selected branch' : 'All branches');
+  const lastLoadAgeMs = lastLoadedAt ? Date.now() - lastLoadedAt.getTime() : null;
+  const freshnessTone: Tone = !lastLoadedAt
+    ? 'neutral'
+    : lastLoadAgeMs !== null && lastLoadAgeMs > 300_000
+      ? 'warn'
+      : 'good';
+  const readinessChecks = useMemo<ReadinessCheck[]>(() => {
+    if (!data) return [];
+    return [
+      {
+        label: 'Data freshness',
+        status:
+          lastLoadedAt && lastLoadAgeMs !== null && lastLoadAgeMs <= 300_000 ? 'Fresh' : 'Review',
+        detail: lastLoadedAt
+          ? `Loaded ${formatAge(lastLoadedAt)}. Auto-refresh ${autoRefresh ? 'is on' : 'is off'}.`
+          : 'No successful inventory load yet.',
+        tone: freshnessTone,
+      },
+      {
+        label: 'Scope control',
+        status: branchId ? 'Branch' : 'Company',
+        detail: branchId
+          ? `Showing ${selectedBranchLabel}.`
+          : `Showing every branch for ${selectedCompanyLabel}; use a branch filter before acting on a location-specific issue.`,
+        tone: branchId ? 'good' : 'info',
+      },
+      {
+        label: 'Stock blockers',
+        status: data.totals.out > 0 ? 'Blocked' : data.totals.low > 0 ? 'Warning' : 'Clear',
+        detail:
+          data.totals.out > 0
+            ? `${fmtInt(data.totals.out)} SKU${data.totals.out === 1 ? '' : 's'} are out of stock.`
+            : data.totals.low > 0
+              ? `${fmtInt(data.totals.low)} SKU${data.totals.low === 1 ? '' : 's'} are below threshold.`
+              : 'No low or out-of-stock blockers in the current view.',
+        tone: data.totals.out > 0 ? 'danger' : data.totals.low > 0 ? 'warn' : 'good',
+        actionHref: '/westsides/reports',
+        actionLabel: 'Open stock reports',
+      },
+      {
+        label: 'Reservation pressure',
+        status: summary.reservedPct > 60 ? 'High' : summary.reservedPct > 30 ? 'Watch' : 'Normal',
+        detail: `${summary.reservedPct.toFixed(1)}% of on-hand quantity is reserved; available stock is ${fmtUnits(summary.totalAvailable)} units.`,
+        tone: summary.reservedPct > 60 ? 'warn' : summary.reservedPct > 30 ? 'info' : 'good',
+      },
+      {
+        label: 'Movement hygiene',
+        status: summary.staleSkus > 0 ? 'Review' : 'Clean',
+        detail:
+          summary.staleSkus > 0
+            ? `${fmtInt(summary.staleSkus)} stocked SKU${summary.staleSkus === 1 ? '' : 's'} have not moved for 30+ days.`
+            : 'No stale movement signal in the loaded stock list.',
+        tone: summary.staleSkus > 0 ? 'warn' : 'good',
+        actionHref: '/westsides/reports',
+        actionLabel: 'Review slow movers',
+      },
+    ];
+  }, [
+    autoRefresh,
+    branchId,
+    data,
+    freshnessTone,
+    lastLoadAgeMs,
+    lastLoadedAt,
+    selectedBranchLabel,
+    selectedCompanyLabel,
+    summary,
+  ]);
 
   const toggleLocation = (lid: string) =>
     setExpanded((prev) => {
@@ -262,6 +398,9 @@ export default function LiveInventoryPage() {
                 <StatusChip tone="neutral">Not loaded</StatusChip>
               )}
               {autoRefresh && <StatusChip tone="info">Auto 30s</StatusChip>}
+              {lastLoadedAt && (
+                <StatusChip tone={freshnessTone}>Fresh {formatAge(lastLoadedAt)}</StatusChip>
+              )}
               {loading && <StatusChip tone="neutral">Refreshing</StatusChip>}
             </div>
           </div>
@@ -329,7 +468,13 @@ export default function LiveInventoryPage() {
               </>
             }
             actions={
-              <Btn variant="primary" size="sm" onClick={load} disabled={!companyId} loading={loading}>
+              <Btn
+                variant="primary"
+                size="sm"
+                onClick={load}
+                disabled={!companyId}
+                loading={loading}
+              >
                 Refresh
               </Btn>
             }
@@ -338,20 +483,43 @@ export default function LiveInventoryPage() {
         </div>
 
         <div
-          className="grid gap-3 border-t px-4 py-3 sm:grid-cols-2 lg:grid-cols-4"
+          className="grid gap-3 border-t px-4 py-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5"
           style={{ borderColor: 'var(--aurora-border)' }}
         >
           <ScopeFact label="Company" value={selectedCompanyLabel} muted={!companyId} />
           <ScopeFact label="Branch filter" value={selectedBranchLabel} />
-          <ScopeFact label="Locations in view" value={data ? fmtInt(data.locations.length) : DASH} />
-          <ScopeFact label="LOW rule" value={`≤ ${data?.lowThreshold ?? (lowThreshold || 0)} units`} />
+          <ScopeFact
+            label="Locations in view"
+            value={data ? fmtInt(data.locations.length) : DASH}
+          />
+          <ScopeFact
+            label="LOW rule"
+            value={`≤ ${data?.lowThreshold ?? (lowThreshold || 0)} units`}
+          />
+          <ScopeFact
+            label="Last successful refresh"
+            value={formatDateTime(lastLoadedAt)}
+            muted={!lastLoadedAt}
+          />
         </div>
       </Card>
 
       {error && (
-        <Card className="border-red-500/30 p-3 text-sm">
-          <span style={{ color: 'var(--aurora-danger-text)' }}>{error}</span>
-        </Card>
+        <RecoveryState
+          title="Live inventory could not load"
+          detail={error}
+          action={
+            <Btn
+              variant="secondary"
+              size="sm"
+              onClick={load}
+              disabled={!companyId}
+              loading={loading}
+            >
+              Retry
+            </Btn>
+          }
+        />
       )}
 
       {data && (
@@ -387,31 +555,59 @@ export default function LiveInventoryPage() {
             />
           </div>
 
+          <Card padding="none" className="overflow-hidden">
+            <PanelHeader
+              title="Inventory readiness"
+              subtitle="Freshness, blockers, and operating controls before stock decisions."
+              action={<StatusChip tone={summary.riskTone}>{summary.riskLabel}</StatusChip>}
+            />
+            <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-5">
+              {readinessChecks.map((check) => (
+                <ReadinessCard key={check.label} check={check} />
+              ))}
+            </div>
+          </Card>
+
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
             <Card padding="none" className="overflow-hidden">
               <PanelHeader
                 title="Critical SKU queue"
                 subtitle="Out-of-stock and low-stock items sorted by urgency."
-                action={<StatusChip tone={summary.atRiskSkus > 0 ? 'danger' : 'good'}>{fmtInt(summary.atRiskSkus)} flagged</StatusChip>}
+                action={
+                  <StatusChip tone={summary.atRiskSkus > 0 ? 'danger' : 'good'}>
+                    {fmtInt(summary.atRiskSkus)} flagged
+                  </StatusChip>
+                }
               />
               {summary.criticalSkus.length === 0 ? (
-                <EmptyState>No critical SKUs match the current filters.</EmptyState>
+                <InlineEmptyState
+                  title="No critical SKUs"
+                  detail="The current scope has no low or out-of-stock items."
+                />
               ) : (
-                <ul className="divide-y divide-slate-100">
+                <ul>
                   {summary.criticalSkus.map((item) => (
                     <li
                       key={`${item.id}-critical`}
-                      className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto]"
+                      className="grid gap-3 border-b px-4 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_auto]"
                       style={{ borderColor: 'var(--aurora-border)' }}
                     >
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <StatusChip tone={item.status === 'OUT' ? 'danger' : 'warn'}>{item.status}</StatusChip>
-                          <span className="truncate text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                          <StatusChip tone={item.status === 'OUT' ? 'danger' : 'warn'}>
+                            {item.status}
+                          </StatusChip>
+                          <span
+                            className="truncate text-sm font-semibold"
+                            style={{ color: 'var(--aurora-text)' }}
+                          >
                             {item.product.name}
                           </span>
                         </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
+                        <div
+                          className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
+                          style={{ color: 'var(--aurora-text-secondary)' }}
+                        >
                           <span className="font-mono">{item.product.sku ?? 'No SKU'}</span>
                           <span>{item.location.name}</span>
                           <span>{formatMovement(item.lastMovementAt)}</span>
@@ -420,10 +616,25 @@ export default function LiveInventoryPage() {
                       <div className="flex flex-wrap items-center gap-4 md:justify-end">
                         <MiniMeasure label="On hand" value={fmtUnits(item.quantityOnHand)} />
                         <MiniMeasure label="Reserved" value={fmtUnits(item.quantityReserved)} />
-                        <MiniMeasure label="Available" value={fmtUnits(item.quantityAvailable)} strong />
+                        <MiniMeasure
+                          label="Available"
+                          value={fmtUnits(item.quantityAvailable)}
+                          strong
+                        />
                         <div className="flex items-center gap-2">
-                          <LinkText href="/westsides/product-batches">Batches</LinkText>
-                          <LinkText href="/westsides/stock-damage">Damage</LinkText>
+                          <LinkText href={productActionHref('/westsides/product-batches', item)}>
+                            Batches
+                          </LinkText>
+                          <LinkText href={productActionHref('/westsides/stock-damage', item)}>
+                            Damage
+                          </LinkText>
+                          <LinkText
+                            href={buildHref('/westsides/reports', {
+                              search: item.product.sku ?? item.product.name,
+                            })}
+                          >
+                            Reports
+                          </LinkText>
                         </div>
                       </div>
                     </li>
@@ -436,7 +647,11 @@ export default function LiveInventoryPage() {
               <PanelHeader
                 title="Operator actions"
                 subtitle="Routes available for investigation and follow-up."
-                action={<StatusChip tone={summary.staleSkus > 0 ? 'warn' : 'good'}>{fmtInt(summary.staleSkus)} stale</StatusChip>}
+                action={
+                  <StatusChip tone={summary.staleSkus > 0 ? 'warn' : 'good'}>
+                    {fmtInt(summary.staleSkus)} stale
+                  </StatusChip>
+                }
               />
               <div className="grid gap-3 p-4">
                 <ActionPanel
@@ -468,20 +683,41 @@ export default function LiveInventoryPage() {
             <PanelHeader
               title="Location risk map"
               subtitle="Per-location inventory depth, reservation pressure, and SKU status."
-              action={<span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{fmtInt(data.locations.length)} locations</span>}
+              action={
+                <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                  {fmtInt(data.locations.length)} locations
+                </span>
+              }
             />
             {data.locations.length === 0 ? (
-              <EmptyState>No inventory balances match the filters.</EmptyState>
+              <InlineEmptyState
+                title="No balances found"
+                detail="No stock rows match the selected company, branch, threshold, and search filters."
+                action={<LinkText href="/westsides/product-batches">Check batches</LinkText>}
+              />
             ) : (
-              <div className="divide-y divide-slate-100">
+              <div>
                 {data.locations.map((loc) => {
                   const isOpen = expanded.has(loc.locationId);
                   const hotness = loc.out + loc.low;
-                  const locReserved = loc.items.reduce((sum, item) => sum + toNumber(item.quantityReserved), 0);
-                  const locAvailable = loc.items.reduce((sum, item) => sum + toNumber(item.quantityAvailable), 0);
-                  const locOnHand = loc.items.reduce((sum, item) => sum + toNumber(item.quantityOnHand), 0);
+                  const locReserved = loc.items.reduce(
+                    (sum, item) => sum + toNumber(item.quantityReserved),
+                    0,
+                  );
+                  const locAvailable = loc.items.reduce(
+                    (sum, item) => sum + toNumber(item.quantityAvailable),
+                    0,
+                  );
+                  const locOnHand = loc.items.reduce(
+                    (sum, item) => sum + toNumber(item.quantityOnHand),
+                    0,
+                  );
                   return (
-                    <div key={loc.locationId}>
+                    <div
+                      key={loc.locationId}
+                      className="border-b last:border-b-0"
+                      style={{ borderColor: 'var(--aurora-border)' }}
+                    >
                       <button
                         type="button"
                         onClick={() => toggleLocation(loc.locationId)}
@@ -490,35 +726,55 @@ export default function LiveInventoryPage() {
                         <div className="flex flex-wrap items-center gap-3">
                           <span
                             className="h-2.5 w-2.5 rounded-full"
-                            style={{ background: hotness > 0 ? 'var(--aurora-danger)' : 'var(--aurora-success)' }}
+                            style={{
+                              background:
+                                hotness > 0 ? 'var(--aurora-danger)' : 'var(--aurora-success)',
+                            }}
                           />
                           <div className="min-w-[180px] flex-1">
                             <div className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
                               {loc.locationName}
                             </div>
-                            <div className="text-[11px] font-mono" style={{ color: 'var(--aurora-text-muted)' }}>
+                            <div
+                              className="text-[11px] font-mono"
+                              style={{ color: 'var(--aurora-text-muted)' }}
+                            >
                               {loc.locationCode}
                             </div>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
-                            <StatusChip tone={loc.out > 0 ? 'danger' : 'neutral'}>{fmtInt(loc.out)} OUT</StatusChip>
-                            <StatusChip tone={loc.low > 0 ? 'warn' : 'neutral'}>{fmtInt(loc.low)} LOW</StatusChip>
+                            <StatusChip tone={loc.out > 0 ? 'danger' : 'neutral'}>
+                              {fmtInt(loc.out)} OUT
+                            </StatusChip>
+                            <StatusChip tone={loc.low > 0 ? 'warn' : 'neutral'}>
+                              {fmtInt(loc.low)} LOW
+                            </StatusChip>
                             <StatusChip tone="good">{fmtInt(loc.ok)} OK</StatusChip>
                           </div>
                           <div className="ml-auto grid min-w-[280px] grid-cols-4 gap-3 text-right">
                             <MiniMeasure label="On hand" value={fmtUnits(locOnHand)} />
                             <MiniMeasure label="Reserved" value={fmtUnits(locReserved)} />
                             <MiniMeasure label="Available" value={fmtUnits(locAvailable)} strong />
-                            <MiniMeasure label="Value" value={`TZS ${fmt(loc.totalValue)}`} strong />
+                            <MiniMeasure
+                              label="Value"
+                              value={`TZS ${fmt(loc.totalValue)}`}
+                              strong
+                            />
                           </div>
-                          <span className="text-lg leading-none" style={{ color: 'var(--aurora-text-muted)' }}>
+                          <span
+                            className="text-lg leading-none"
+                            style={{ color: 'var(--aurora-text-muted)' }}
+                          >
                             {isOpen ? '▴' : '▾'}
                           </span>
                         </div>
                       </button>
 
                       {isOpen && (
-                        <div className="overflow-x-auto border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+                        <div
+                          className="overflow-x-auto border-t"
+                          style={{ borderColor: 'var(--aurora-border)' }}
+                        >
                           <table className="w-full min-w-[1060px] text-sm">
                             <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                               <tr>
@@ -537,10 +793,16 @@ export default function LiveInventoryPage() {
                               {loc.items.map((it) => (
                                 <tr key={it.id} className="transition hover:bg-white/5">
                                   <BodyCell>
-                                    <div className="font-medium" style={{ color: 'var(--aurora-text)' }}>
+                                    <div
+                                      className="font-medium"
+                                      style={{ color: 'var(--aurora-text)' }}
+                                    >
                                       {it.product.name}
                                     </div>
-                                    <div className="text-[11px] font-mono" style={{ color: 'var(--aurora-text-muted)' }}>
+                                    <div
+                                      className="text-[11px] font-mono"
+                                      style={{ color: 'var(--aurora-text-muted)' }}
+                                    >
                                       {it.product.sku ?? 'No SKU'}
                                     </div>
                                   </BodyCell>
@@ -561,14 +823,37 @@ export default function LiveInventoryPage() {
                                   </BodyCell>
                                   <BodyCell muted>{formatMovement(it.lastMovementAt)}</BodyCell>
                                   <BodyCell>
-                                    <StatusChip tone={it.status === 'OUT' ? 'danger' : it.status === 'LOW' ? 'warn' : 'good'}>
+                                    <StatusChip
+                                      tone={
+                                        it.status === 'OUT'
+                                          ? 'danger'
+                                          : it.status === 'LOW'
+                                            ? 'warn'
+                                            : 'good'
+                                      }
+                                    >
                                       {it.status}
                                     </StatusChip>
                                   </BodyCell>
                                   <BodyCell>
                                     <div className="flex items-center gap-2">
-                                      <LinkText href="/westsides/product-batches">Batches</LinkText>
-                                      <LinkText href="/westsides/stock-damage">Damage</LinkText>
+                                      <LinkText
+                                        href={productActionHref('/westsides/product-batches', it)}
+                                      >
+                                        Batches
+                                      </LinkText>
+                                      <LinkText
+                                        href={productActionHref('/westsides/stock-damage', it)}
+                                      >
+                                        Damage
+                                      </LinkText>
+                                      <LinkText
+                                        href={buildHref('/westsides/reports', {
+                                          search: it.product.sku ?? it.product.name,
+                                        })}
+                                      >
+                                        Reports
+                                      </LinkText>
                                     </div>
                                   </BodyCell>
                                 </tr>
@@ -585,7 +870,8 @@ export default function LiveInventoryPage() {
           </Card>
 
           <p className="text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
-            Threshold currently {data.lowThreshold}. Items at or below this count flag as LOW; zero stock flags OUT.
+            Threshold currently {data.lowThreshold}. Items at or below this count flag as LOW; zero
+            stock flags OUT.
           </p>
         </>
       )}
@@ -593,9 +879,10 @@ export default function LiveInventoryPage() {
       {loading && !data && <PageSpinner />}
 
       {!data && !loading && !error && (
-        <Card className="p-8 text-center text-sm">
-          <span style={{ color: 'var(--aurora-text-muted)' }}>Pick a company to load live stock.</span>
-        </Card>
+        <EmptyState
+          title="Select a company to start"
+          detail="Live inventory loads after a company is selected. Add a branch filter for location-specific decisions."
+        />
       )}
     </div>
   );
@@ -619,10 +906,21 @@ function ActionLink({ href, children }: { href: string; children: React.ReactNod
   );
 }
 
-function FilterField({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
+function FilterField({
+  label,
+  className,
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className={`block ${className ?? ''}`}>
-      <span className="mb-1 block text-[11px] font-semibold uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+      <span
+        className="mb-1 block text-[11px] font-semibold uppercase"
+        style={{ color: 'var(--aurora-text-muted)' }}
+      >
         {label}
       </span>
       {children}
@@ -633,7 +931,10 @@ function FilterField({ label, className, children }: { label: string; className?
 function ScopeFact({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
   return (
     <div>
-      <div className="text-[11px] font-semibold uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+      <div
+        className="text-[11px] font-semibold uppercase"
+        style={{ color: 'var(--aurora-text-muted)' }}
+      >
         {label}
       </div>
       <div
@@ -704,12 +1005,18 @@ function MetricPanel({
       <div className="h-1.5" style={{ background: accent }} />
       <div className="p-4">
         <div className="flex items-center justify-between gap-2">
-          <div className="text-[11px] font-semibold uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+          <div
+            className="text-[11px] font-semibold uppercase"
+            style={{ color: 'var(--aurora-text-muted)' }}
+          >
             {label}
           </div>
           <StatusChip tone={tone}>{Math.round(progress)}%</StatusChip>
         </div>
-        <div className="mt-2 text-xl font-bold leading-tight" style={{ color: 'var(--aurora-text)' }}>
+        <div
+          className="mt-2 text-xl font-bold leading-tight"
+          style={{ color: 'var(--aurora-text)' }}
+        >
           {value}
         </div>
         <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
@@ -720,7 +1027,10 @@ function MetricPanel({
           style={{ background: 'var(--aurora-bg-subtle)' }}
           aria-hidden="true"
         >
-          <div className="h-full rounded-full" style={{ width: `${Math.min(100, progress)}%`, background: accent }} />
+          <div
+            className="h-full rounded-full"
+            style={{ width: `${Math.min(100, progress)}%`, background: accent }}
+          />
         </div>
       </div>
     </Card>
@@ -730,7 +1040,10 @@ function MetricPanel({
 function MiniMeasure({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
     <div>
-      <div className="text-[10px] font-semibold uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+      <div
+        className="text-[10px] font-semibold uppercase"
+        style={{ color: 'var(--aurora-text-muted)' }}
+      >
         {label}
       </div>
       <div
@@ -778,7 +1091,10 @@ function ActionPanel({
           <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
             {title}
           </div>
-          <div className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--aurora-text-secondary)' }}>
+          <div
+            className="mt-1 text-xs leading-relaxed"
+            style={{ color: 'var(--aurora-text-secondary)' }}
+          >
             {body}
           </div>
         </div>
@@ -791,10 +1107,110 @@ function ActionPanel({
   );
 }
 
-function EmptyState({ children }: { children: React.ReactNode }) {
+function ReadinessCard({ check }: { check: ReadinessCheck }) {
   return (
-    <div className="px-4 py-10 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
-      {children}
+    <div
+      className="rounded-lg border p-3"
+      style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold" style={{ color: 'var(--aurora-text)' }}>
+            {check.label}
+          </div>
+          <p
+            className="mt-1 text-xs leading-relaxed"
+            style={{ color: 'var(--aurora-text-secondary)' }}
+          >
+            {check.detail}
+          </p>
+        </div>
+        <StatusChip tone={check.tone}>{check.status}</StatusChip>
+      </div>
+      {check.actionHref && check.actionLabel && (
+        <LinkText href={check.actionHref} className="mt-3 inline-flex">
+          {check.actionLabel}
+        </LinkText>
+      )}
+    </div>
+  );
+}
+
+function RecoveryState({
+  title,
+  detail,
+  action,
+}: {
+  title: string;
+  detail: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <Card className="border-red-500/30 p-4 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="font-semibold" style={{ color: 'var(--aurora-danger-text)' }}>
+            {title}
+          </div>
+          <p
+            className="mt-1 max-w-3xl text-xs leading-relaxed"
+            style={{ color: 'var(--aurora-text-secondary)' }}
+          >
+            {detail}
+          </p>
+        </div>
+        {action}
+      </div>
+    </Card>
+  );
+}
+
+function EmptyState({
+  title,
+  detail,
+  action,
+}: {
+  title: string;
+  detail: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <Card className="p-8 text-center text-sm">
+      <div className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+        {title}
+      </div>
+      <p
+        className="mx-auto mt-1 max-w-xl text-xs leading-relaxed"
+        style={{ color: 'var(--aurora-text-muted)' }}
+      >
+        {detail}
+      </p>
+      {action && <div className="mt-3 flex justify-center">{action}</div>}
+    </Card>
+  );
+}
+
+function InlineEmptyState({
+  title,
+  detail,
+  action,
+}: {
+  title: string;
+  detail: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="px-4 py-10 text-center text-sm">
+      <div className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+        {title}
+      </div>
+      <p
+        className="mx-auto mt-1 max-w-xl text-xs leading-relaxed"
+        style={{ color: 'var(--aurora-text-muted)' }}
+      >
+        {detail}
+      </p>
+      {action && <div className="mt-3 flex justify-center">{action}</div>}
     </div>
   );
 }
@@ -819,7 +1235,13 @@ function LinkText({
   );
 }
 
-function HeadCell({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {
+function HeadCell({
+  children,
+  align = 'left',
+}: {
+  children: React.ReactNode;
+  align?: 'left' | 'right';
+}) {
   return (
     <th
       className={`border-b px-4 py-2 text-xs font-semibold uppercase tracking-wide ${align === 'right' ? 'text-right' : 'text-left'}`}
@@ -868,7 +1290,9 @@ function StatusChip({ tone, children }: { tone: Tone; children: React.ReactNode 
             ? 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-500/40 dark:bg-cyan-500/15 dark:text-cyan-100'
             : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-500/40 dark:bg-slate-500/10 dark:text-slate-200';
   return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${cls}`}>
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${cls}`}
+    >
       {children}
     </span>
   );
