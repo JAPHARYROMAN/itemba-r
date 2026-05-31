@@ -3387,6 +3387,7 @@ model FuelNozzle {
   tankId              String
   productId           String
   nozzleName          String?
+  openingMeter        Decimal          @default(0) @db.Decimal(18, 3)
   currentMeterReading Decimal          @default(0) @db.Decimal(18, 3)
   status              FuelNozzleStatus @default(ACTIVE)
   notes               String?

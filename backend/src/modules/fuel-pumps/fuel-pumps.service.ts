@@ -14,7 +14,7 @@ export class FuelPumpsService {
 
   private readonly listInclude = {
     branch: { select: { id: true, code: true, name: true } },
-    tank: { select: { id: true, tankCode: true, tankName: true } },
+    tank: { select: { id: true, tankCode: true, tankName: true, productId: true } },
   } as const;
 
   private async assertTankBelongsToPumpScope(input: {

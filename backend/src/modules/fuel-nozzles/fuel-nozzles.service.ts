@@ -12,6 +12,49 @@ export class FuelNozzlesService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
+  private readonly listInclude = {
+    pump: { select: { id: true, pumpCode: true, pumpName: true, tankId: true } },
+    tank: { select: { id: true, tankCode: true, tankName: true, productId: true } },
+    product: { select: { id: true, productCode: true, name: true } },
+  } as const;
+
+  private async validatePumpTankScope(dto: {
+    companyId: string;
+    branchId: string;
+    pumpId: string;
+    tankId: string;
+    productId: string;
+  }) {
+    const pump = await this.prisma.fuelPump.findFirst({
+      where: {
+        id: dto.pumpId,
+        companyId: dto.companyId,
+        branchId: dto.branchId,
+        deletedAt: null,
+      },
+      select: { id: true, tankId: true },
+    });
+    if (!pump) throw new BadRequestException('Selected pump does not belong to this branch');
+    if (!pump.tankId) throw new BadRequestException('Selected pump has no assigned tank');
+    if (pump.tankId !== dto.tankId) {
+      throw new BadRequestException('Nozzle tank must match the tank assigned to the pump');
+    }
+
+    const tank = await this.prisma.fuelTank.findFirst({
+      where: {
+        id: dto.tankId,
+        companyId: dto.companyId,
+        branchId: dto.branchId,
+        deletedAt: null,
+      },
+      select: { id: true, productId: true },
+    });
+    if (!tank) throw new NotFoundException('Fuel tank not found');
+    if (tank.productId !== dto.productId) {
+      throw new BadRequestException('Nozzle product must match the product assigned to the tank');
+    }
+  }
+
   async findAll(query: Record<string, unknown>) {
     const page = parseInt(query.page as string) || 1;
     const limit = parseInt(query.limit as string) || 20;
@@ -28,6 +71,7 @@ export class FuelNozzlesService {
     const [data, total] = await Promise.all([
       this.prisma.fuelNozzle.findMany({
         where,
+        include: this.listInclude,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
@@ -39,7 +83,10 @@ export class FuelNozzlesService {
   }
 
   async findOne(id: string) {
-    const record = await this.prisma.fuelNozzle.findFirst({ where: { id, deletedAt: null } });
+    const record = await this.prisma.fuelNozzle.findFirst({
+      where: { id, deletedAt: null },
+      include: this.listInclude,
+    });
     if (!record) throw new NotFoundException('Fuel nozzle not found');
     return record;
   }
@@ -47,6 +94,7 @@ export class FuelNozzlesService {
   async findByPump(pumpId: string) {
     return this.prisma.fuelNozzle.findMany({
       where: { pumpId, deletedAt: null },
+      include: this.listInclude,
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -54,26 +102,26 @@ export class FuelNozzlesService {
   async findByBranch(branchId: string) {
     return this.prisma.fuelNozzle.findMany({
       where: { branchId, deletedAt: null },
+      include: this.listInclude,
       orderBy: { createdAt: 'desc' },
     });
   }
 
   async create(dto: CreateFuelNozzleDto, userId: string) {
-    // Validate that nozzle productId matches the tank's productId
-    const tank = await this.prisma.fuelTank.findFirst({
-      where: { id: dto.tankId, deletedAt: null },
+    await this.validatePumpTankScope({
+      companyId: dto.companyId,
+      branchId: dto.branchId,
+      pumpId: dto.pumpId,
+      tankId: dto.tankId,
+      productId: dto.productId,
     });
-    if (!tank) throw new NotFoundException('Fuel tank not found');
-    if (tank.productId !== dto.productId) {
-      throw new BadRequestException(
-        'Nozzle product must match the product assigned to the tank',
-      );
-    }
 
     const duplicate = await this.prisma.fuelNozzle.findFirst({
       where: { nozzleCode: dto.nozzleCode, pumpId: dto.pumpId, deletedAt: null },
     });
     if (duplicate) throw new BadRequestException('Nozzle code already exists for this pump');
+
+    const openingMeter = dto.openingMeter ?? dto.currentMeterReading ?? 0;
 
     const record = await this.prisma.fuelNozzle.create({
       data: {
@@ -85,10 +133,12 @@ export class FuelNozzlesService {
         tankId: dto.tankId,
         productId: dto.productId,
         nozzleName: dto.nozzleName,
-        currentMeterReading: dto.currentMeterReading ?? 0,
+        openingMeter,
+        currentMeterReading: dto.currentMeterReading ?? openingMeter,
         status: dto.status ?? FuelNozzleStatus.ACTIVE,
         notes: dto.notes,
       },
+      include: this.listInclude,
     });
 
     await this.auditLogs.log({
@@ -106,19 +156,19 @@ export class FuelNozzlesService {
   async update(id: string, dto: UpdateFuelNozzleDto, userId: string) {
     const existing = await this.findOne(id);
 
-    // If tankId or productId changes, re-validate product match
+    const companyId = dto.companyId ?? existing.companyId;
+    const branchId = dto.branchId ?? existing.branchId;
+    const pumpId = dto.pumpId ?? existing.pumpId;
     const tankId = dto.tankId ?? existing.tankId;
     const productId = dto.productId ?? existing.productId;
-    if (dto.tankId || dto.productId) {
-      const tank = await this.prisma.fuelTank.findFirst({
-        where: { id: tankId, deletedAt: null },
+    if (dto.companyId || dto.branchId || dto.pumpId || dto.tankId || dto.productId) {
+      await this.validatePumpTankScope({
+        companyId,
+        branchId,
+        pumpId,
+        tankId,
+        productId,
       });
-      if (!tank) throw new NotFoundException('Fuel tank not found');
-      if (tank.productId !== productId) {
-        throw new BadRequestException(
-          'Nozzle product must match the product assigned to the tank',
-        );
-      }
     }
 
     const record = await this.prisma.fuelNozzle.update({
@@ -132,10 +182,14 @@ export class FuelNozzlesService {
         ...(dto.pumpId !== undefined && { pumpId: dto.pumpId }),
         ...(dto.tankId !== undefined && { tankId: dto.tankId }),
         ...(dto.productId !== undefined && { productId: dto.productId }),
-        ...(dto.currentMeterReading !== undefined && { currentMeterReading: dto.currentMeterReading }),
+        ...(dto.openingMeter !== undefined && { openingMeter: dto.openingMeter }),
+        ...(dto.currentMeterReading !== undefined && {
+          currentMeterReading: dto.currentMeterReading,
+        }),
         ...(dto.status !== undefined && { status: dto.status }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
       },
+      include: this.listInclude,
     });
 
     await this.auditLogs.log({
