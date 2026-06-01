@@ -228,6 +228,8 @@ export default function QuickSalePage() {
   const [productResults, setProductResults] = useState<Product[]>([]);
   const [productSearching, setProductSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [pendingQty, setPendingQty] = useState(1);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -361,6 +363,11 @@ export default function QuickSalePage() {
   // Debounced product search — scoped to the selected division (if any).
   // Backend returns SKUs tagged to the division PLUS company-wide SKUs.
   useEffect(() => {
+    if (selectedProduct && productQuery.trim() === selectedProduct.name) {
+      setProductResults([]);
+      setShowResults(false);
+      return;
+    }
     if (!settings.companyId || !productQuery.trim()) {
       setProductResults([]);
       return;
@@ -394,14 +401,19 @@ export default function QuickSalePage() {
       ctrl.abort();
       clearTimeout(t);
     };
-  }, [productQuery, settings.companyId, settings.divisionId]);
+  }, [productQuery, selectedProduct, settings.companyId, settings.divisionId]);
 
   // ─── Cart actions ───────────────────────────────────────────────────────────
 
-  const addProduct = (p: Product) => {
+  const addProduct = (p: Product, quantity = pendingQty) => {
     if (!settings.branchId) {
       setError('Pick a branch/location in Settings before adding items');
       setSettingsOpen(true);
+      return;
+    }
+    const qty = Number(quantity);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setError('Enter a quantity greater than zero before adding the item');
       return;
     }
     setError('');
@@ -409,7 +421,7 @@ export default function QuickSalePage() {
     setCart((prev) => {
       const existing = prev.find((c) => c.productId === p.id);
       if (existing) {
-        return prev.map((c) => (c.productId === p.id ? { ...c, qty: c.qty + 1 } : c));
+        return prev.map((c) => (c.productId === p.id ? { ...c, qty: c.qty + qty } : c));
       }
       return [
         ...prev,
@@ -417,13 +429,15 @@ export default function QuickSalePage() {
           productId: p.id,
           productName: p.name,
           sku: p.sku ?? undefined,
-          qty: 1,
+          qty,
           unitId: p.defaultUnitId ?? units[0]?.id ?? '',
           unitSymbol: unit?.symbol ?? units[0]?.symbol ?? 'ea',
           unitPrice: Number(p.sellingPrice ?? 0),
         },
       ];
     });
+    setSelectedProduct(null);
+    setPendingQty(1);
     setProductQuery('');
     setProductResults([]);
     setShowResults(false);
@@ -552,7 +566,10 @@ export default function QuickSalePage() {
   // ─── Keyboard helpers ──────────────────────────────────────────────────────
 
   const handleSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && productResults.length > 0) {
+    if (e.key === 'Enter' && selectedProduct) {
+      e.preventDefault();
+      addProduct(selectedProduct);
+    } else if (e.key === 'Enter' && productResults.length > 0) {
       e.preventDefault();
       addProduct(productResults[0]);
     } else if (e.key === 'Escape') {
@@ -596,52 +613,110 @@ export default function QuickSalePage() {
             <label className="block text-xs uppercase tracking-wide text-slate-500 mb-1">
               Add product (name, SKU, or scan barcode)
             </label>
-            <div className="relative">
+            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_7rem_8rem]">
+              <div className="relative">
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  autoFocus
+                  value={productQuery}
+                  onChange={(e) => {
+                    setProductQuery(e.target.value);
+                    setSelectedProduct(null);
+                  }}
+                  onKeyDown={handleSearchKey}
+                  onFocus={() => productResults.length > 0 && setShowResults(true)}
+                  disabled={!settingsReady}
+                  placeholder={settingsReady ? 'Start typing…' : 'Pick settings first'}
+                  className="w-full text-base border rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  style={{
+                    borderColor: 'var(--aurora-border)',
+                    background: 'var(--aurora-card)',
+                    color: 'var(--aurora-text)',
+                  }}
+                />
+                {showResults && productResults.length > 0 && (
+                  <ul
+                    className="absolute z-10 left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-lg border shadow-lg"
+                    style={{
+                      borderColor: 'var(--aurora-border)',
+                      background: 'var(--aurora-card)',
+                    }}
+                  >
+                    {productResults.map((p, idx) => (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            setSelectedProduct(p);
+                            setProductQuery(p.name);
+                            setProductResults([]);
+                            setShowResults(false);
+                            searchInputRef.current?.focus();
+                          }}
+                          className={`w-full px-3 py-2 text-left hover:bg-white/10 ${idx === 0 ? 'bg-white/5' : ''}`}
+                        >
+                          <div className="font-medium text-sm">{p.name}</div>
+                          <div className="text-xs text-slate-500 flex gap-3">
+                            {p.sku && <span className="font-mono">{p.sku}</span>}
+                            {p.sellingPrice != null && <span>TZS {fmt(p.sellingPrice)}</span>}
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {productSearching && (
+                  <div className="absolute right-3 top-3 text-xs text-slate-400">…</div>
+                )}
+              </div>
               <input
-                ref={searchInputRef}
-                type="text"
-                autoFocus
-                value={productQuery}
-                onChange={(e) => setProductQuery(e.target.value)}
-                onKeyDown={handleSearchKey}
-                onFocus={() => productResults.length > 0 && setShowResults(true)}
+                type="number"
+                min="0.001"
+                step="any"
+                value={pendingQty}
+                onChange={(event) => setPendingQty(Number(event.target.value) || 0)}
                 disabled={!settingsReady}
-                placeholder={settingsReady ? 'Start typing…' : 'Pick settings first'}
-                className="w-full text-base border rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                className="w-full text-base border rounded-lg px-3 py-2.5 text-right focus:outline-none focus:ring-2 focus:ring-brand-500"
                 style={{
                   borderColor: 'var(--aurora-border)',
                   background: 'var(--aurora-card)',
                   color: 'var(--aurora-text)',
                 }}
+                aria-label="Quantity to add"
               />
-              {showResults && productResults.length > 0 && (
-                <ul
-                  className="absolute z-10 left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-lg border bg-white shadow-lg"
-                  style={{ borderColor: 'var(--aurora-border)' }}
-                >
-                  {productResults.map((p, idx) => (
-                    <li
-                      key={p.id}
-                      onClick={() => addProduct(p)}
-                      className={`px-3 py-2 cursor-pointer hover:bg-slate-100 ${idx === 0 ? 'bg-slate-50' : ''}`}
-                    >
-                      <div className="font-medium text-sm">{p.name}</div>
-                      <div className="text-xs text-slate-500 flex gap-3">
-                        {p.sku && <span className="font-mono">{p.sku}</span>}
-                        {p.sellingPrice != null && <span>TZS {fmt(p.sellingPrice)}</span>}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {productSearching && (
-                <div className="absolute right-3 top-3 text-xs text-slate-400">…</div>
-              )}
+              <Btn
+                variant="primary"
+                onClick={() => selectedProduct && addProduct(selectedProduct)}
+                disabled={!settingsReady || !selectedProduct || pendingQty <= 0}
+                className="h-[46px]"
+              >
+                Add Item
+              </Btn>
             </div>
             <p className="text-[11px] text-slate-500 mt-1.5">
-              Press <kbd className="px-1 bg-slate-100 rounded">Enter</kbd> to add the first match,{' '}
-              <kbd className="px-1 bg-slate-100 rounded">Esc</kbd> to dismiss.
+              Select a product, set quantity, then add it. Repeat for every item in the sale.
+              Press <kbd className="px-1 bg-slate-100 rounded">Enter</kbd> to add the selected or
+              first match.
             </p>
+            {selectedProduct && (
+              <div
+                className="mt-3 rounded-lg border px-3 py-2 text-sm"
+                style={{ borderColor: 'var(--aurora-border)' }}
+              >
+                <span className="text-slate-500">Selected: </span>
+                <span className="font-semibold">{selectedProduct.name}</span>
+                {selectedProduct.sku && (
+                  <span className="ml-2 font-mono text-xs text-slate-500">
+                    {selectedProduct.sku}
+                  </span>
+                )}
+                <span className="ml-2 text-slate-500">
+                  Price TZS {fmt(selectedProduct.sellingPrice ?? 0)}
+                </span>
+              </div>
+            )}
           </Card>
 
           <Card className="overflow-hidden">
