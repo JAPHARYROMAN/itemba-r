@@ -481,7 +481,7 @@ function summaryValue(key: string, value: unknown) {
 function ReportTable({ rows, report }: { rows: Record<string, unknown>[]; report: ReportDef }) {
   const columns = visibleColumns(rows, report);
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto print-table-wrap">
       <table className="w-full min-w-[980px] text-sm print-table">
         <thead>
           <tr>
@@ -519,7 +519,13 @@ function PrintStyles() {
       }
       @media print {
         @page {
-          margin: 14mm;
+          size: A4 landscape;
+          margin: 10mm;
+        }
+        html,
+        body {
+          margin: 0 !important;
+          width: 100% !important;
         }
         body {
           background: #ffffff !important;
@@ -527,6 +533,7 @@ function PrintStyles() {
         }
         body * {
           color: #111827 !important;
+          visibility: hidden !important;
         }
         .no-print {
           display: none !important;
@@ -535,10 +542,19 @@ function PrintStyles() {
           background: #ffffff !important;
           border: 0 !important;
           box-shadow: none !important;
+          left: 0 !important;
+          margin: 0 !important;
+          max-width: none !important;
+          overflow: visible !important;
+          padding: 0 !important;
+          position: absolute !important;
+          top: 0 !important;
+          width: 100% !important;
         }
         .print-area,
         .print-area * {
           background-color: #ffffff !important;
+          visibility: visible !important;
         }
         .print-letterhead {
           display: flex !important;
@@ -574,17 +590,32 @@ function PrintStyles() {
           margin-top: 2px;
           font-size: 11px;
         }
+        .print-table-wrap {
+          overflow: visible !important;
+          width: 100% !important;
+        }
         .print-table {
           border-collapse: collapse !important;
+          max-width: 100% !important;
+          min-width: 0 !important;
+          table-layout: fixed !important;
           width: 100% !important;
-          font-size: 10px !important;
+          font-size: 8px !important;
+          line-height: 1.2 !important;
         }
         .print-table th,
         .print-table td {
           border: 1px solid #d1d5db !important;
+          overflow-wrap: anywhere !important;
+          padding: 3px 4px !important;
+          vertical-align: top !important;
+          white-space: normal !important;
+          word-break: break-word !important;
         }
         .print-table th {
           background: #f3f4f6 !important;
+          font-size: 7px !important;
+          line-height: 1.15 !important;
         }
       }
     `}</style>
