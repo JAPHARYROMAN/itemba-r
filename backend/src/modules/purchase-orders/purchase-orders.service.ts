@@ -10,7 +10,10 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreatePurchaseOrderDto, PurchaseOrderLineDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { QueryPurchaseOrderDto } from './dto/query-purchase-order.dto';
-import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
+import {
+  ReceiveFuelTankAllocationDto,
+  ReceivePurchaseOrderDto,
+} from './dto/receive-purchase-order.dto';
 import { AccessLevel, AuditSeverity, Prisma, PurchaseType } from '@prisma/client';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 
@@ -26,6 +29,12 @@ type FuelPurchaseReceipt = {
   productId: string;
   quantity: number;
   totalCost: number;
+};
+
+type FuelTankReceiptTarget = {
+  id: string;
+  tankCode: string;
+  tankName: string;
 };
 
 function calcLineTotals(line: {
@@ -158,7 +167,13 @@ export class PurchaseOrdersService {
           supplier: { select: { id: true, name: true } },
           lines: {
             include: {
-              product: { select: { id: true, name: true } },
+              product: {
+                select: {
+                  id: true,
+                  name: true,
+                  category: { select: { id: true, name: true, categoryType: true } },
+                },
+              },
               unit: { select: { id: true, name: true, symbol: true } },
             },
           },
@@ -181,7 +196,14 @@ export class PurchaseOrdersService {
         supplier: { select: { id: true, name: true } },
         lines: {
           include: {
-            product: { select: { id: true, name: true, sku: true } },
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                category: { select: { id: true, name: true, categoryType: true } },
+              },
+            },
             unit: { select: { id: true, name: true, symbol: true } },
           },
         },
@@ -509,7 +531,7 @@ export class PurchaseOrdersService {
     return record;
   }
 
-  async receive(id: string, user: AuthUser, _dto: ReceivePurchaseOrderDto = {}) {
+  async receive(id: string, user: AuthUser, dto: ReceivePurchaseOrderDto = {}) {
     const userId = user.id;
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (!['CONFIRMED', 'PARTIALLY_RECEIVED'].includes(existing.status as string)) {
@@ -521,6 +543,11 @@ export class PurchaseOrdersService {
       throw new BadRequestException('Purchase order branch/location is required to receive stock');
     }
     const receivingBranchId = existing.branchId;
+    const requestedFuelAllocations = dto.fuelTankAllocations ?? [];
+    this.assertFuelTankAllocationsReferenceOrderLines(
+      existing.lines as any[],
+      requestedFuelAllocations,
+    );
 
     const record = await this.prisma.$transaction(async (tx) => {
       const receivedAt = new Date();
@@ -529,7 +556,12 @@ export class PurchaseOrdersService {
       for (const line of existing.lines as any[]) {
         const product = await tx.product.findUnique({
           where: { id: line.productId },
-          select: { id: true, trackInventory: true },
+          select: {
+            id: true,
+            name: true,
+            trackInventory: true,
+            category: { select: { categoryType: true } },
+          },
         });
 
         if (!product) {
@@ -541,6 +573,56 @@ export class PurchaseOrdersService {
             Number(line.quantity) > 0
               ? Number(line.lineTotal) / Number(line.quantity)
               : Number(line.unitCost);
+          const fuelReceiptPlan: FuelPurchaseReceipt[] = [];
+          const lineAllocations = this.fuelTankAllocationsForLine(line, requestedFuelAllocations);
+          if (lineAllocations.length > 0) {
+            const allocatedQuantity = lineAllocations.reduce(
+              (sum, allocation) => sum + Number(allocation.quantity),
+              0,
+            );
+            if (Math.abs(allocatedQuantity - Number(line.quantity)) > 0.0001) {
+              throw new BadRequestException(
+                `Fuel tank allocations for ${product.name} must equal the purchase line quantity`,
+              );
+            }
+
+            for (const allocation of lineAllocations) {
+              const tank = await this.resolveAllocatedFuelTankForReceipt({
+                companyId: existing.companyId,
+                branchId: receivingBranchId,
+                productId: line.productId,
+                tankId: allocation.tankId,
+                tx,
+              });
+              fuelReceiptPlan.push({
+                tankId: tank.id,
+                productId: line.productId,
+                quantity: Number(allocation.quantity),
+                totalCost:
+                  Number(line.quantity) > 0
+                    ? Number(line.lineTotal) * (Number(allocation.quantity) / Number(line.quantity))
+                    : 0,
+              });
+            }
+          } else {
+            const tank = await this.resolveSingleFuelTankForReceipt({
+              companyId: existing.companyId,
+              branchId: receivingBranchId,
+              productId: line.productId,
+              productLabel: product.name,
+              productIsFuel: product.category?.categoryType === 'FUEL',
+              tx,
+            });
+            if (tank) {
+              fuelReceiptPlan.push({
+                tankId: tank.id,
+                productId: line.productId,
+                quantity: Number(line.quantity),
+                totalCost: Number(line.lineTotal),
+              });
+            }
+          }
+
           await this.inventoryMovements.createMovement({
             companyId: existing.companyId,
             productId: line.productId,
@@ -559,23 +641,8 @@ export class PurchaseOrdersService {
             tx,
           });
 
-          const tank = await this.resolveSingleFuelTankForReceipt({
-            companyId: existing.companyId,
-            branchId: receivingBranchId,
-            productId: line.productId,
-            tx,
-          });
-          if (tank) {
-            const key = `${tank.id}:${line.productId}`;
-            const current = fuelReceipts.get(key) ?? {
-              tankId: tank.id,
-              productId: line.productId,
-              quantity: 0,
-              totalCost: 0,
-            };
-            current.quantity += Number(line.quantity);
-            current.totalCost += Number(line.lineTotal);
-            fuelReceipts.set(key, current);
+          for (const receipt of fuelReceiptPlan) {
+            this.addFuelReceipt(fuelReceipts, receipt);
           }
         }
       }
@@ -663,12 +730,93 @@ export class PurchaseOrdersService {
     return record;
   }
 
+  private assertFuelTankAllocationsReferenceOrderLines(
+    lines: Array<{ id?: string; productId: string }>,
+    allocations: ReceiveFuelTankAllocationDto[],
+  ) {
+    if (allocations.length === 0) return;
+    const lineIds = new Set(lines.map((line) => line.id).filter(Boolean));
+    const productIds = new Set(lines.map((line) => line.productId));
+
+    for (const allocation of allocations) {
+      if (!allocation.purchaseOrderLineId && !allocation.productId) {
+        throw new BadRequestException(
+          'Fuel tank allocation must reference a purchase order line or product',
+        );
+      }
+      if (allocation.purchaseOrderLineId && !lineIds.has(allocation.purchaseOrderLineId)) {
+        throw new BadRequestException(
+          'Fuel tank allocation references a line that is not on this purchase order',
+        );
+      }
+      if (allocation.productId && !productIds.has(allocation.productId)) {
+        throw new BadRequestException(
+          'Fuel tank allocation references a product that is not on this purchase order',
+        );
+      }
+    }
+  }
+
+  private fuelTankAllocationsForLine(
+    line: { id?: string; productId: string },
+    allocations: ReceiveFuelTankAllocationDto[],
+  ) {
+    const lineAllocations = allocations.filter(
+      (allocation) => allocation.purchaseOrderLineId && allocation.purchaseOrderLineId === line.id,
+    );
+    if (lineAllocations.length > 0) return lineAllocations;
+    return allocations.filter(
+      (allocation) => !allocation.purchaseOrderLineId && allocation.productId === line.productId,
+    );
+  }
+
+  private addFuelReceipt(receipts: Map<string, FuelPurchaseReceipt>, receipt: FuelPurchaseReceipt) {
+    const key = `${receipt.tankId}:${receipt.productId}`;
+    const current = receipts.get(key) ?? {
+      tankId: receipt.tankId,
+      productId: receipt.productId,
+      quantity: 0,
+      totalCost: 0,
+    };
+    current.quantity += receipt.quantity;
+    current.totalCost += receipt.totalCost;
+    receipts.set(key, current);
+  }
+
+  private async resolveAllocatedFuelTankForReceipt(input: {
+    companyId: string;
+    branchId: string;
+    productId: string;
+    tankId: string;
+    tx: Prisma.TransactionClient;
+  }): Promise<FuelTankReceiptTarget> {
+    const tank = await input.tx.fuelTank.findFirst({
+      where: {
+        id: input.tankId,
+        companyId: input.companyId,
+        branchId: input.branchId,
+        productId: input.productId,
+        deletedAt: null,
+        status: 'ACTIVE',
+      },
+      select: { id: true, tankCode: true, tankName: true },
+    });
+    if (!tank) {
+      throw new BadRequestException(
+        'Selected fuel tank must be active and match the purchase order company, branch, and product',
+      );
+    }
+    return tank;
+  }
+
   private async resolveSingleFuelTankForReceipt(input: {
     companyId: string;
     branchId: string;
     productId: string;
+    productLabel: string;
+    productIsFuel: boolean;
     tx: Prisma.TransactionClient;
-  }) {
+  }): Promise<FuelTankReceiptTarget | null> {
     const tanks = await input.tx.fuelTank.findMany({
       where: {
         companyId: input.companyId,
@@ -681,10 +829,17 @@ export class PurchaseOrdersService {
       orderBy: { tankCode: 'asc' },
     });
 
-    if (tanks.length === 0) return null;
+    if (tanks.length === 0) {
+      if (input.productIsFuel) {
+        throw new BadRequestException(
+          `Fuel product "${input.productLabel}" has no active tank at the purchase order receiving branch. Create a Petroleum fuel tank or select a tank allocation before receiving.`,
+        );
+      }
+      return null;
+    }
     if (tanks.length > 1) {
       throw new BadRequestException(
-        'This fuel product has multiple active tanks at the receiving branch. Receive it through Petroleum > Fuel Deliveries so the tank is selected explicitly.',
+        'This fuel product has multiple active tanks at the receiving branch. Select the destination tank in the Operations receive modal or receive it through Petroleum > Fuel Deliveries.',
       );
     }
     return tanks[0];

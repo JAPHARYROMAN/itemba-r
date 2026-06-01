@@ -33,6 +33,7 @@ function makeService() {
     },
     fuelTank: {
       findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue(null),
       update: jest.fn(async ({ data }: any) => ({ id: 'tank-1', ...data })),
     },
     fuelDelivery: {
@@ -248,5 +249,48 @@ describe('PurchaseOrdersService payment state', () => {
     expect(codes.next).toHaveBeenCalledWith(
       expect.objectContaining({ entityType: 'FuelDelivery', companyId: 'company-1' }),
     );
+  });
+
+  it('blocks fuel purchase receipt when no receiving-branch tank exists', async () => {
+    const { service, prisma, inventoryMovements } = makeService();
+    prisma.product.findUnique.mockResolvedValue({
+      id: 'product-1',
+      name: 'PETROL',
+      trackInventory: true,
+      category: { categoryType: 'FUEL' },
+    });
+    prisma.fuelTank.findMany.mockResolvedValue([]);
+    prisma.purchaseOrder.findFirst.mockResolvedValue({
+      id: 'po-1',
+      purchaseOrderNumber: 'PO-2026-000001',
+      companyId: 'company-1',
+      branchId: 'branch-1',
+      divisionId: 'division-1',
+      supplierId: 'supplier-1',
+      supplierName: 'Fuel Supplier Ltd',
+      purchaseType: 'CASH_PURCHASE',
+      totalAmount: 2000000,
+      expectedDate: null,
+      currency: 'TZS',
+      status: 'CONFIRMED',
+      payableId: null,
+      lines: [
+        {
+          id: 'line-1',
+          productId: 'product-1',
+          quantity: 1000,
+          unitId: 'unit-1',
+          unitCost: 2000,
+          lineTotal: 2000000,
+          batchNumber: null,
+          expiryDate: null,
+        },
+      ],
+    });
+
+    await expect(service.receive('po-1', user)).rejects.toThrow(
+      'has no active tank at the purchase order receiving branch',
+    );
+    expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
   });
 });
