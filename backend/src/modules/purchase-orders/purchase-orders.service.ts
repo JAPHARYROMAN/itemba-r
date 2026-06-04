@@ -192,8 +192,53 @@ export class PurchaseOrdersService {
     const record = await this.prisma.purchaseOrder.findFirst({
       where: { id, deletedAt: null },
       include: {
-        company: { select: { id: true, name: true, code: true } },
-        supplier: { select: { id: true, name: true } },
+        company: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            phone: true,
+            email: true,
+            website: true,
+            logoUrl: true,
+            group: {
+              select: {
+                name: true,
+                code: true,
+                address: true,
+                phone: true,
+                email: true,
+                website: true,
+              },
+            },
+            profile: {
+              select: {
+                registeredName: true,
+                tradingName: true,
+                brelaRegNumber: true,
+                tin: true,
+                vrn: true,
+                registeredAddress: true,
+                postalAddress: true,
+              },
+            },
+          },
+        },
+        branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
+        supplier: {
+          select: {
+            id: true,
+            name: true,
+            supplierCode: true,
+            tin: true,
+            vrn: true,
+            phone: true,
+            email: true,
+            address: true,
+            contactPerson: true,
+            paymentTerms: true,
+          },
+        },
         lines: {
           include: {
             product: {
@@ -201,6 +246,7 @@ export class PurchaseOrdersService {
                 id: true,
                 name: true,
                 sku: true,
+                productCode: true,
                 category: { select: { id: true, name: true, categoryType: true } },
               },
             },

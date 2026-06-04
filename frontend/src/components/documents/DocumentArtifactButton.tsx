@@ -5,6 +5,7 @@ import { backendPost } from '@/lib/api-client';
 
 export type DocumentEntityType =
   | 'SALES_ORDER'
+  | 'PURCHASE_ORDER'
   | 'QUOTATION'
   | 'PROFORMA_INVOICE'
   | 'DELIVERY_NOTE'

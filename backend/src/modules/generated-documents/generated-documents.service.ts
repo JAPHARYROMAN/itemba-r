@@ -154,6 +154,8 @@ export class GeneratedDocumentsService {
     switch (entityType) {
       case 'SALES_ORDER':
         return this.salesOrderPdf(entityId, user);
+      case 'PURCHASE_ORDER':
+        return this.purchaseOrderPdf(entityId, user);
       case 'QUOTATION':
         return this.quotationPdf(entityId, user);
       case 'PROFORMA_INVOICE':
@@ -241,6 +243,67 @@ export class GeneratedDocumentsService {
         ),
         notesSection(record.notes),
         { title: 'Authorization', signatures: ['Prepared By', 'Approved By', 'Customer'] },
+      ].filter(Boolean) as BusinessPdfSection[],
+    });
+  }
+
+  private async purchaseOrderPdf(id: string, user: AuthUser): Promise<ResolvedBusinessPdfModel> {
+    const where: any = { id, deletedAt: null };
+    applyCompanyScopeWhere(where, user);
+    const record = await this.prisma.purchaseOrder.findFirst({
+      where,
+      include: {
+        company: companySelect(),
+        branch: branchSelect(),
+        supplier: supplierSelect(),
+        createdBy: { select: { fullName: true } },
+        confirmedBy: { select: { fullName: true } },
+        receivedBy: { select: { fullName: true } },
+        lines: {
+          include: {
+            product: { select: { name: true, sku: true, productCode: true } },
+            unit: { select: { name: true, symbol: true } },
+          },
+        },
+      },
+    });
+    if (!record) throw new NotFoundException('Purchase order not found');
+
+    const reference = record.purchaseOrderNumber ?? record.id.slice(0, 8);
+    const supplierName = record.supplier?.name ?? record.supplierName ?? 'N/A';
+    return this.wrapPdf(record.companyId, record.branchId, reference, DocumentCategory.OTHER, {
+      title: 'Purchase Order',
+      subtitle: supplierName,
+      reference,
+      status: label(record.status),
+      organization: organization(record.company, record.branch),
+      generatedAt: new Date(),
+      meta: [
+        kv('Purchase Order', reference),
+        kv('Order Date', date(record.orderDate)),
+        kv('Expected Date', date(record.expectedDate)),
+        kv('Payment Status', label(record.paymentStatus)),
+      ],
+      sections: [
+        supplierDetails(supplierName, record.supplier, [
+          kv('Purchase Type', label(record.purchaseType)),
+          kv('Prepared By', value(record.createdBy?.fullName)),
+          kv('Confirmed By', value(record.confirmedBy?.fullName)),
+          kv('Received By', value(record.receivedBy?.fullName)),
+          kv('Confirmed At', date(record.confirmedAt)),
+          kv('Received At', date(record.receivedAt)),
+          kv('Currency', value(record.currency)),
+        ]),
+        lineSection(purchaseLineRows(record.lines, record.currency), record.currency, [
+          total('Subtotal', record.subtotal, record.currency),
+          total('Discount', record.discountAmount, record.currency),
+          total('Tax', record.taxAmount, record.currency),
+          total('Total', record.totalAmount, record.currency, true),
+          total('Paid', record.paidAmount, record.currency),
+          total('Outstanding', record.outstandingAmount, record.currency, true),
+        ]),
+        notesSection(record.notes),
+        { title: 'Authorization', signatures: ['Prepared By', 'Approved By', 'Supplier'] },
       ].filter(Boolean) as BusinessPdfSection[],
     });
   }
@@ -622,6 +685,22 @@ function customerSelect() {
   };
 }
 
+function supplierSelect() {
+  return {
+    select: {
+      name: true,
+      supplierCode: true,
+      tin: true,
+      vrn: true,
+      phone: true,
+      email: true,
+      address: true,
+      contactPerson: true,
+      paymentTerms: true,
+    },
+  };
+}
+
 function organization(company: any, branch?: any): BusinessPdfOrganization {
   const profile = company?.profile;
   const group = company?.group;
@@ -682,6 +761,28 @@ function customerDetails(
   };
 }
 
+function supplierDetails(
+  supplierName: string,
+  supplier: any,
+  extra: Array<{ label: string; value: string }>,
+) {
+  return {
+    title: 'Supplier and Order Details',
+    items: [
+      kv('Supplier', supplierName),
+      kv('Supplier Code', supplier?.supplierCode),
+      kv('TIN', supplier?.tin),
+      kv('VRN', supplier?.vrn),
+      kv('Phone', supplier?.phone),
+      kv('Email', supplier?.email),
+      kv('Contact Person', supplier?.contactPerson),
+      kv('Payment Terms', supplier?.paymentTerms),
+      kv('Address', supplier?.address),
+      ...extra,
+    ],
+  };
+}
+
 function standardLineRows(lines: any[], currency: string) {
   return lines.map((line) => [
     line.description || line.product?.name || 'N/A',
@@ -689,6 +790,19 @@ function standardLineRows(lines: any[], currency: string) {
     qty(line.quantity),
     line.unit?.symbol ?? line.unit?.name ?? 'N/A',
     money(line.unitPrice, currency),
+    money(line.discountAmount, currency),
+    money(line.taxAmount, currency),
+    money(line.lineTotal, currency),
+  ]);
+}
+
+function purchaseLineRows(lines: any[], currency: string) {
+  return lines.map((line) => [
+    line.description || line.product?.name || 'N/A',
+    line.product?.sku ?? line.product?.productCode ?? 'N/A',
+    qty(line.quantity),
+    line.unit?.symbol ?? line.unit?.name ?? 'N/A',
+    money(line.unitCost, currency),
     money(line.discountAmount, currency),
     money(line.taxAmount, currency),
     money(line.lineTotal, currency),
@@ -762,6 +876,8 @@ function safeFileStem(value: string) {
 
 function templateTypeFor(entityType: BusinessPdfEntityType): DocumentTemplateType {
   switch (entityType) {
+    case 'PURCHASE_ORDER':
+      return DocumentTemplateType.PURCHASE_ORDER;
     case 'QUOTATION':
       return DocumentTemplateType.QUOTATION;
     case 'PROFORMA_INVOICE':

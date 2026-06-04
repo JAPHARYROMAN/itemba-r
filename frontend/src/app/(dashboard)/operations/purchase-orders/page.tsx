@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { DocumentPreviewLink } from '@/components/documents';
 import {
   Card,
   PageHeader,
@@ -1214,6 +1215,7 @@ export default function PurchaseOrdersPage() {
                       <StatusBadge value={o.paymentStatus} />
                     </td>
                     <td className="px-4 py-3 text-right space-x-1">
+                      <DocumentPreviewLink href={`/operations/purchase-orders/${o.id}/print`} />
                       {o.status === 'DRAFT' && canCreate && (
                         <Btn variant="ghost" size="xs" onClick={() => setEditing(o)}>
                           Edit
