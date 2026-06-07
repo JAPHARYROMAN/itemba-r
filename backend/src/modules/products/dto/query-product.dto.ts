@@ -5,6 +5,7 @@ import { ProductType, ProductStatus } from '@prisma/client';
 export class QueryProductDto {
   @IsOptional() @IsString() companyId?: string;
   @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsString() categoryId?: string;
   @IsOptional() @IsString() productFamilyId?: string;
   @IsOptional() @IsEnum(ProductType) productType?: ProductType;

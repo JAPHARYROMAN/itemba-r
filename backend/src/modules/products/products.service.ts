@@ -48,6 +48,7 @@ export class ProductsService {
       limit = 20,
       companyId,
       divisionId,
+      branchId,
       categoryId,
       productFamilyId,
       productType,
@@ -106,19 +107,93 @@ export class ProductsService {
       this.prisma.product.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    const enrichedData = await this.withProductListAliasesAndAvailability(data, branchId);
+
+    return { data: enrichedData, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  private async withProductListAliasesAndAvailability<
+    TProduct extends {
+      id: string;
+      companyId: string;
+      baseUnitId: string;
+      defaultSellingPrice?: unknown;
+      retailPrice?: unknown;
+      wholesalePrice?: unknown;
+      baseUnit?: { name?: string | null; symbol?: string | null } | null;
+    },
+  >(products: TProduct[], branchId?: string | null) {
+    const balanceByProductId = new Map<
+      string,
+      {
+        quantityOnHand: number;
+        quantityReserved: number;
+        availableQuantity: number;
+      }
+    >();
+
+    if (branchId && products.length) {
+      const balances = await this.prisma.inventoryBalance.findMany({
+        where: {
+          branchId,
+          productId: { in: products.map((product) => product.id) },
+          companyId: { in: Array.from(new Set(products.map((product) => product.companyId))) },
+        },
+        select: {
+          productId: true,
+          quantityOnHand: true,
+          quantityReserved: true,
+        },
+      });
+
+      for (const balance of balances) {
+        const quantityOnHand = Number(balance.quantityOnHand);
+        const quantityReserved = Number(balance.quantityReserved);
+        balanceByProductId.set(balance.productId, {
+          quantityOnHand,
+          quantityReserved,
+          availableQuantity: Math.max(0, quantityOnHand - quantityReserved),
+        });
+      }
+    }
+
+    return products.map((product) => {
+      const balance = branchId
+        ? (balanceByProductId.get(product.id) ?? {
+            quantityOnHand: 0,
+            quantityReserved: 0,
+            availableQuantity: 0,
+          })
+        : null;
+      const sellingPrice =
+        product.defaultSellingPrice ?? product.retailPrice ?? product.wholesalePrice ?? null;
+
+      return {
+        ...product,
+        defaultUnitId: product.baseUnitId,
+        sellingPrice,
+        unitName: product.baseUnit?.name ?? null,
+        unitSymbol: product.baseUnit?.symbol ?? null,
+        ...(balance
+          ? {
+              inventoryBalance: {
+                branchId,
+                quantityOnHand: balance.quantityOnHand,
+                quantityReserved: balance.quantityReserved,
+                availableQuantity: balance.availableQuantity,
+                quantityAvailable: balance.availableQuantity,
+              },
+              availableQuantity: balance.availableQuantity,
+              quantityAvailable: balance.availableQuantity,
+              availableStock: balance.availableQuantity,
+            }
+          : {}),
+      };
+    });
   }
 
   async findFamilies(query: QueryProductFamilyDto, user: AuthUser) {
-    const {
-      page = 1,
-      limit = 50,
-      companyId,
-      divisionId,
-      categoryId,
-      isActive,
-      search,
-    } = query;
+    const { page = 1, limit = 50, companyId, divisionId, categoryId, isActive, search } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.ProductFamilyWhereInput = {
@@ -253,7 +328,7 @@ export class ProductsService {
     const productCode = normalizeProductCode(dto.productCode);
     const targetCategoryId = dto.categoryId ?? existing.categoryId;
     const targetDivisionId =
-      dto.divisionId !== undefined ? optionalText(dto.divisionId) ?? null : existing.divisionId;
+      dto.divisionId !== undefined ? (optionalText(dto.divisionId) ?? null) : existing.divisionId;
     const productFamilyId = await this.resolveProductFamilyId(
       existing.companyId,
       {
@@ -289,11 +364,15 @@ export class ProductsService {
         ...(dto.categoryId !== undefined && { categoryId: dto.categoryId }),
         ...(productFamilyId !== undefined && { productFamilyId }),
         ...(dto.name !== undefined && { name: dto.name }),
-        ...(dto.variantName !== undefined && { variantName: optionalText(dto.variantName) ?? null }),
+        ...(dto.variantName !== undefined && {
+          variantName: optionalText(dto.variantName) ?? null,
+        }),
         ...(dto.variantColor !== undefined && {
           variantColor: optionalText(dto.variantColor) ?? null,
         }),
-        ...(dto.variantSize !== undefined && { variantSize: optionalText(dto.variantSize) ?? null }),
+        ...(dto.variantSize !== undefined && {
+          variantSize: optionalText(dto.variantSize) ?? null,
+        }),
         ...(dto.variantFinish !== undefined && {
           variantFinish: optionalText(dto.variantFinish) ?? null,
         }),
@@ -390,7 +469,12 @@ export class ProductsService {
     if (refs.productFamilyId !== undefined) {
       const familyId = optionalText(refs.productFamilyId);
       if (!familyId) return null;
-      return this.assertProductFamilyMatchesProduct(companyId, familyId, categoryId, refs.divisionId);
+      return this.assertProductFamilyMatchesProduct(
+        companyId,
+        familyId,
+        categoryId,
+        refs.divisionId,
+      );
     }
 
     if (validateCurrent && currentProductFamilyId) {

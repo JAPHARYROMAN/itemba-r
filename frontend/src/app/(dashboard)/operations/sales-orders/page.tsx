@@ -23,7 +23,11 @@ import {
   backendPost,
 } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
-import { OrderLineEditor, mergeOrderProductOptions } from '../_components/order-line-editor';
+import {
+  OrderLineEditor,
+  mergeOrderProductOptions,
+  type OrderLineValidationState,
+} from '../_components/order-line-editor';
 
 interface Company {
   id: string;
@@ -51,6 +55,18 @@ interface Product {
   defaultSellingPrice?: number | string | null;
   wholesalePrice?: number | string | null;
   retailPrice?: number | string | null;
+  productType?: string | null;
+  trackInventory?: boolean | null;
+  sellingPrice?: number | string | null;
+  availableStock?: number | string | null;
+  availableQuantity?: number | string | null;
+  quantityAvailable?: number | string | null;
+  inventoryBalance?: {
+    quantityOnHand?: number | string | null;
+    quantityReserved?: number | string | null;
+    availableQuantity?: number | string | null;
+    quantityAvailable?: number | string | null;
+  } | null;
 }
 interface Unit {
   id: string;
@@ -327,6 +343,10 @@ function SalesOrderModal({
   const [branches, setBranches] = useState<Branch[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [lineValidation, setLineValidation] = useState<OrderLineValidationState>({
+    hasBlockingErrors: false,
+    stockWarnings: [],
+  });
   const selectedProductIdKey = form.lines
     .map((line) => line.productId)
     .filter(Boolean)
@@ -423,10 +443,10 @@ function SalesOrderModal({
     };
   }, [form.companyId, form.divisionId, form.branchId]);
 
-  // Reload products when company OR division changes; the backend filters
-  // to the chosen division (plus company-wide SKUs).
+  // Reload products when company, division, or branch changes; the backend
+  // filters to the chosen division and adds stock for the sale branch.
   useEffect(() => {
-    if (!form.companyId || !form.divisionId) {
+    if (!form.companyId || !form.divisionId || !form.branchId) {
       setProducts([]);
       setProductSearchLoading(false);
       return;
@@ -443,6 +463,7 @@ function SalesOrderModal({
           query: {
             companyId: form.companyId,
             divisionId: form.divisionId || undefined,
+            branchId: form.branchId,
             limit: search ? 50 : 200,
             ...(search && { search }),
           },
@@ -466,7 +487,7 @@ function SalesOrderModal({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [form.companyId, form.divisionId, productSearchQuery, selectedProductIdKey]);
+  }, [form.branchId, form.companyId, form.divisionId, productSearchQuery, selectedProductIdKey]);
 
   const setField = <K extends keyof SalesOrderForm>(k: K, v: SalesOrderForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
@@ -526,6 +547,10 @@ function SalesOrderModal({
       setError('Each line needs product and unit');
       return;
     }
+    if (lineValidation.hasBlockingErrors) {
+      setError(lineValidation.stockWarnings[0] ?? 'Resolve stock availability before saving');
+      return;
+    }
     if (form.paymentMethod !== 'CREDIT' && !form.cashAccountId) {
       setError(`Pick a ${accountSelectLabel(form.paymentMethod).toLowerCase()}`);
       return;
@@ -583,7 +608,12 @@ function SalesOrderModal({
           <Btn variant="secondary" onClick={onClose}>
             Cancel
           </Btn>
-          <Btn variant="primary" onClick={handleSubmit} loading={saving}>
+          <Btn
+            variant="primary"
+            onClick={handleSubmit}
+            loading={saving}
+            disabled={lineValidation.hasBlockingErrors}
+          >
             {mode === 'create' ? 'Create Draft' : 'Save Changes'}
           </Btn>
         </>
@@ -686,13 +716,17 @@ function SalesOrderModal({
             value={form.branchId}
             onChange={(e) => {
               const branchId = e.target.value;
+              setProductSearchQuery('');
               setForm((f) => ({
                 ...f,
                 branchId,
                 customerId: '',
                 salespersonId: '',
                 cashAccountId: '',
-                lines: f.lines,
+                lines: f.lines.map((line) => ({
+                  ...line,
+                  productId: '',
+                })),
               }));
             }}
             placeholder={form.divisionId ? 'Select branch' : 'Select division first'}
@@ -841,10 +875,12 @@ function SalesOrderModal({
           units={units}
           currency={form.currency}
           productSearchLoading={productSearchLoading}
+          enforceStockAvailability
           onAddLine={addLine}
           onRemoveLine={removeLine}
           onLineChange={setLine}
           onProductSearch={setProductSearchQuery}
+          onValidationChange={setLineValidation}
         />
       </div>
     </Modal>

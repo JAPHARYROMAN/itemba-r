@@ -41,11 +41,27 @@ interface Unit {
 interface Product {
   id: string;
   name: string;
+  productCode?: string | null;
   sku?: string | null;
   barcode?: string | null;
+  baseUnitId?: string | null;
+  baseUnit?: { name?: string | null; symbol?: string | null } | null;
   defaultUnitId?: string | null;
+  defaultSellingPrice?: number | string | null;
+  retailPrice?: number | string | null;
+  wholesalePrice?: number | string | null;
   sellingPrice?: number | string | null;
-  trackInventory?: boolean;
+  productType?: string | null;
+  trackInventory?: boolean | null;
+  availableStock?: number | string | null;
+  availableQuantity?: number | string | null;
+  quantityAvailable?: number | string | null;
+  inventoryBalance?: {
+    quantityOnHand?: number | string | null;
+    quantityReserved?: number | string | null;
+    availableQuantity?: number | string | null;
+    quantityAvailable?: number | string | null;
+  } | null;
 }
 interface Customer {
   id: string;
@@ -61,6 +77,9 @@ interface CartLine {
   unitId: string;
   unitSymbol: string;
   unitPrice: number;
+  trackInventory?: boolean | null;
+  productType?: string | null;
+  availableStock?: number | null;
 }
 
 interface ConfirmedOrder {
@@ -181,6 +200,51 @@ function fmt(n: number | string | undefined | null): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(Number.isFinite(Number(n ?? 0)) ? Number(n ?? 0) : 0);
+}
+
+function fmtQty(n: number | string | undefined | null): string {
+  const value = Number(n ?? 0);
+  return new Intl.NumberFormat('en-TZ', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function productCode(product: Product) {
+  return product.productCode ?? product.sku ?? product.barcode ?? '';
+}
+
+function productPrice(product: Product) {
+  return Number(
+    product.sellingPrice ??
+      product.defaultSellingPrice ??
+      product.retailPrice ??
+      product.wholesalePrice ??
+      0,
+  );
+}
+
+function productUnitId(product: Product) {
+  return product.defaultUnitId ?? product.baseUnitId ?? '';
+}
+
+function productAvailableStock(product: Product | null | undefined) {
+  if (!product) return null;
+  const value =
+    product.availableStock ??
+    product.availableQuantity ??
+    product.quantityAvailable ??
+    product.inventoryBalance?.availableQuantity ??
+    product.inventoryBalance?.quantityAvailable;
+  if (value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function itemTracksInventory(item: Product | CartLine | null | undefined) {
+  if (!item) return false;
+  if (item.trackInventory === false) return false;
+  return !['SERVICE', 'NON_STOCK_ITEM'].includes(String(item.productType ?? '').toUpperCase());
 }
 
 function getSettingsKey(userId: string): string {
@@ -368,7 +432,7 @@ export default function QuickSalePage() {
       setShowResults(false);
       return;
     }
-    if (!settings.companyId || !productQuery.trim()) {
+    if (!settings.companyId || !settings.branchId || !productQuery.trim()) {
       setProductResults([]);
       return;
     }
@@ -378,6 +442,7 @@ export default function QuickSalePage() {
       try {
         const params = new URLSearchParams({
           companyId: settings.companyId,
+          branchId: settings.branchId,
           search: productQuery.trim(),
           limit: '10',
         });
@@ -401,9 +466,50 @@ export default function QuickSalePage() {
       ctrl.abort();
       clearTimeout(t);
     };
-  }, [productQuery, selectedProduct, settings.companyId, settings.divisionId]);
+  }, [productQuery, selectedProduct, settings.branchId, settings.companyId, settings.divisionId]);
 
   // ─── Cart actions ───────────────────────────────────────────────────────────
+
+  const cartAllocatedByProduct = useMemo(() => {
+    const allocated = new Map<string, number>();
+    for (const line of cart) {
+      allocated.set(line.productId, (allocated.get(line.productId) ?? 0) + (Number(line.qty) || 0));
+    }
+    return allocated;
+  }, [cart]);
+
+  const selectedAvailableBeforeAdd =
+    selectedProduct && productAvailableStock(selectedProduct) != null
+      ? (productAvailableStock(selectedProduct) ?? 0) -
+        (cartAllocatedByProduct.get(selectedProduct.id) ?? 0)
+      : null;
+  const selectedRemainingAfterAdd =
+    selectedAvailableBeforeAdd == null
+      ? null
+      : selectedAvailableBeforeAdd - (Number(pendingQty) || 0);
+  const selectedProductStockBlocked = Boolean(
+    selectedProduct &&
+    itemTracksInventory(selectedProduct) &&
+    selectedAvailableBeforeAdd != null &&
+    Number(pendingQty || 0) > selectedAvailableBeforeAdd,
+  );
+
+  const cartStockIssues = useMemo(() => {
+    const issues: string[] = [];
+    const seen = new Set<string>();
+    for (const line of cart) {
+      if (seen.has(line.productId) || !itemTracksInventory(line)) continue;
+      seen.add(line.productId);
+      if (line.availableStock == null) continue;
+      const allocated = cartAllocatedByProduct.get(line.productId) ?? 0;
+      if (allocated > line.availableStock) {
+        issues.push(
+          `${line.productName} only has ${fmtQty(line.availableStock)} available; cart uses ${fmtQty(allocated)}.`,
+        );
+      }
+    }
+    return issues;
+  }, [cart, cartAllocatedByProduct]);
 
   const addProduct = (p: Product, quantity = pendingQty) => {
     if (!settings.branchId) {
@@ -416,23 +522,46 @@ export default function QuickSalePage() {
       setError('Enter a quantity greater than zero before adding the item');
       return;
     }
+    const available = productAvailableStock(p);
+    const alreadyAllocated = cartAllocatedByProduct.get(p.id) ?? 0;
+    const availableForThisAdd = available == null ? null : available - alreadyAllocated;
+    if (itemTracksInventory(p) && availableForThisAdd != null && qty > availableForThisAdd) {
+      setError(
+        `${p.name} only has ${fmtQty(Math.max(0, availableForThisAdd))} available for this branch.`,
+      );
+      return;
+    }
     setError('');
-    const unit = units.find((u) => u.id === p.defaultUnitId);
+    const unitId = productUnitId(p);
+    const unit = units.find((u) => u.id === unitId);
     setCart((prev) => {
       const existing = prev.find((c) => c.productId === p.id);
       if (existing) {
-        return prev.map((c) => (c.productId === p.id ? { ...c, qty: c.qty + qty } : c));
+        return prev.map((c) =>
+          c.productId === p.id
+            ? {
+                ...c,
+                qty: c.qty + qty,
+                trackInventory: p.trackInventory,
+                productType: p.productType,
+                availableStock: available,
+              }
+            : c,
+        );
       }
       return [
         ...prev,
         {
           productId: p.id,
           productName: p.name,
-          sku: p.sku ?? undefined,
+          sku: productCode(p) || undefined,
           qty,
-          unitId: p.defaultUnitId ?? units[0]?.id ?? '',
-          unitSymbol: unit?.symbol ?? units[0]?.symbol ?? 'ea',
-          unitPrice: Number(p.sellingPrice ?? 0),
+          unitId: unitId || units[0]?.id || '',
+          unitSymbol: p.baseUnit?.symbol ?? unit?.symbol ?? units[0]?.symbol ?? 'ea',
+          unitPrice: productPrice(p),
+          trackInventory: p.trackInventory,
+          productType: p.productType,
+          availableStock: available,
         },
       ];
     });
@@ -494,10 +623,16 @@ export default function QuickSalePage() {
     !!settings.branchId &&
     !!settings.cashAccountId &&
     cart.length > 0 &&
-    cart.every((l) => l.productId && l.qty > 0 && l.unitId);
+    cart.every((l) => l.productId && l.qty > 0 && l.unitId) &&
+    cartStockIssues.length === 0;
 
   const charge = async () => {
-    if (submitting || !canSubmit) return;
+    if (submitting) return;
+    if (cartStockIssues.length) {
+      setError(cartStockIssues[0]);
+      return;
+    }
+    if (!canSubmit) return;
     setSubmitting(true);
     setError('');
     try {
@@ -643,28 +778,48 @@ export default function QuickSalePage() {
                       background: 'var(--aurora-card)',
                     }}
                   >
-                    {productResults.map((p, idx) => (
-                      <li key={p.id}>
-                        <button
-                          type="button"
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                            setSelectedProduct(p);
-                            setProductQuery(p.name);
-                            setProductResults([]);
-                            setShowResults(false);
-                            searchInputRef.current?.focus();
-                          }}
-                          className={`w-full px-3 py-2 text-left hover:bg-white/10 ${idx === 0 ? 'bg-white/5' : ''}`}
-                        >
-                          <div className="font-medium text-sm">{p.name}</div>
-                          <div className="text-xs text-slate-500 flex gap-3">
-                            {p.sku && <span className="font-mono">{p.sku}</span>}
-                            {p.sellingPrice != null && <span>TZS {fmt(p.sellingPrice)}</span>}
-                          </div>
-                        </button>
-                      </li>
-                    ))}
+                    {productResults.map((p, idx) => {
+                      const available = productAvailableStock(p);
+                      const locallyAvailable =
+                        available == null
+                          ? null
+                          : available - (cartAllocatedByProduct.get(p.id) ?? 0);
+                      const unit = p.baseUnit?.symbol ?? p.baseUnit?.name;
+                      return (
+                        <li key={p.id}>
+                          <button
+                            type="button"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              setSelectedProduct(p);
+                              setProductQuery(p.name);
+                              setProductResults([]);
+                              setShowResults(false);
+                              searchInputRef.current?.focus();
+                            }}
+                            className={`w-full px-3 py-2 text-left hover:bg-white/10 ${idx === 0 ? 'bg-white/5' : ''}`}
+                          >
+                            <div className="font-medium text-sm">{p.name}</div>
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                              {productCode(p) && (
+                                <span className="font-mono">{productCode(p)}</span>
+                              )}
+                              {unit && <span>Unit: {unit}</span>}
+                              <span>TZS {fmt(productPrice(p))}</span>
+                              {itemTracksInventory(p) && locallyAvailable != null && (
+                                <span
+                                  className={
+                                    locallyAvailable <= 0 ? 'text-red-500' : 'text-emerald-500'
+                                  }
+                                >
+                                  Available: {fmtQty(Math.max(0, locallyAvailable))}
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
                 {productSearching && (
@@ -689,16 +844,21 @@ export default function QuickSalePage() {
               <Btn
                 variant="primary"
                 onClick={() => selectedProduct && addProduct(selectedProduct)}
-                disabled={!settingsReady || !selectedProduct || pendingQty <= 0}
+                disabled={
+                  !settingsReady ||
+                  !selectedProduct ||
+                  pendingQty <= 0 ||
+                  selectedProductStockBlocked
+                }
                 className="h-[46px]"
               >
                 Add Item
               </Btn>
             </div>
             <p className="text-[11px] text-slate-500 mt-1.5">
-              Select a product, set quantity, then add it. Repeat for every item in the sale.
-              Press <kbd className="px-1 bg-slate-100 rounded">Enter</kbd> to add the selected or
-              first match.
+              Select a product, set quantity, then add it. Repeat for every item in the sale. Press{' '}
+              <kbd className="px-1 bg-slate-100 rounded">Enter</kbd> to add the selected or first
+              match.
             </p>
             {selectedProduct && (
               <div
@@ -707,15 +867,29 @@ export default function QuickSalePage() {
               >
                 <span className="text-slate-500">Selected: </span>
                 <span className="font-semibold">{selectedProduct.name}</span>
-                {selectedProduct.sku && (
+                {productCode(selectedProduct) && (
                   <span className="ml-2 font-mono text-xs text-slate-500">
-                    {selectedProduct.sku}
+                    {productCode(selectedProduct)}
                   </span>
                 )}
                 <span className="ml-2 text-slate-500">
-                  Price TZS {fmt(selectedProduct.sellingPrice ?? 0)}
+                  Price TZS {fmt(productPrice(selectedProduct))}
                 </span>
+                {itemTracksInventory(selectedProduct) && (
+                  <span
+                    className={`ml-2 ${selectedProductStockBlocked ? 'text-red-600' : 'text-emerald-600'}`}
+                  >
+                    Available {fmtQty(Math.max(0, selectedAvailableBeforeAdd ?? 0))}; remaining{' '}
+                    {fmtQty(selectedRemainingAfterAdd ?? 0)}
+                  </span>
+                )}
               </div>
+            )}
+            {selectedProductStockBlocked && selectedProduct && (
+              <p className="mt-2 text-xs text-red-600">
+                {selectedProduct.name} only has{' '}
+                {fmtQty(Math.max(0, selectedAvailableBeforeAdd ?? 0))} available for this branch.
+              </p>
             )}
           </Card>
 
@@ -746,64 +920,94 @@ export default function QuickSalePage() {
                     </td>
                   </tr>
                 )}
-                {cart.map((l, i) => (
-                  <tr key={i} className="border-b border-slate-50">
-                    <td className="px-3 py-2">
-                      <div className="font-medium">{l.productName}</div>
-                      {l.sku && <div className="text-[11px] font-mono text-slate-400">{l.sku}</div>}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <div className="inline-flex items-center gap-1">
-                        <button
-                          onClick={() => updateLine(i, { qty: Math.max(0.001, l.qty - 1) })}
-                          className="w-7 h-7 rounded border text-slate-600 hover:bg-slate-100"
-                          style={{ borderColor: 'var(--aurora-border)' }}
-                        >
-                          −
-                        </button>
+                {cart.map((l, i) => {
+                  const allocated = cartAllocatedByProduct.get(l.productId) ?? 0;
+                  const remaining = l.availableStock == null ? null : l.availableStock - allocated;
+                  const hasStockIssue =
+                    itemTracksInventory(l) &&
+                    l.availableStock != null &&
+                    allocated > l.availableStock;
+                  const canIncrease =
+                    !itemTracksInventory(l) ||
+                    l.availableStock == null ||
+                    remaining == null ||
+                    remaining >= 1;
+                  return (
+                    <tr key={i} className="border-b border-slate-50">
+                      <td className="px-3 py-2">
+                        <div className="font-medium">{l.productName}</div>
+                        {l.sku && (
+                          <div className="text-[11px] font-mono text-slate-400">{l.sku}</div>
+                        )}
+                        {itemTracksInventory(l) && (
+                          <div
+                            className={`text-[11px] ${hasStockIssue ? 'text-red-600' : 'text-slate-500'}`}
+                          >
+                            Available {fmtQty(l.availableStock)} | Remaining{' '}
+                            {fmtQty(remaining ?? 0)}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            onClick={() => updateLine(i, { qty: Math.max(0.001, l.qty - 1) })}
+                            className="w-7 h-7 rounded border text-slate-600 hover:bg-slate-100"
+                            style={{ borderColor: 'var(--aurora-border)' }}
+                          >
+                            −
+                          </button>
+                          <input
+                            type="number"
+                            value={l.qty}
+                            step="any"
+                            min="0.001"
+                            onChange={(e) => updateLine(i, { qty: Number(e.target.value) || 0 })}
+                            className={`w-16 rounded border px-1 py-1 text-center ${
+                              hasStockIssue ? 'border-red-400 text-red-600' : ''
+                            }`}
+                            style={{
+                              borderColor: hasStockIssue ? undefined : 'var(--aurora-border)',
+                            }}
+                          />
+                          <span className="text-xs text-slate-500 ml-1">{l.unitSymbol}</span>
+                          <button
+                            onClick={() => canIncrease && updateLine(i, { qty: l.qty + 1 })}
+                            disabled={!canIncrease}
+                            className="w-7 h-7 rounded border text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 ml-1"
+                            style={{ borderColor: 'var(--aurora-border)' }}
+                          >
+                            +
+                          </button>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right">
                         <input
                           type="number"
-                          value={l.qty}
+                          value={l.unitPrice}
                           step="any"
-                          min="0.001"
-                          onChange={(e) => updateLine(i, { qty: Number(e.target.value) || 0 })}
-                          className="w-16 text-center border rounded px-1 py-1"
+                          min="0"
+                          onChange={(e) =>
+                            updateLine(i, { unitPrice: Number(e.target.value) || 0 })
+                          }
+                          className="w-24 text-right border rounded px-2 py-1 tabular-nums"
                           style={{ borderColor: 'var(--aurora-border)' }}
                         />
-                        <span className="text-xs text-slate-500 ml-1">{l.unitSymbol}</span>
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                        {fmt(l.qty * l.unitPrice)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
                         <button
-                          onClick={() => updateLine(i, { qty: l.qty + 1 })}
-                          className="w-7 h-7 rounded border text-slate-600 hover:bg-slate-100 ml-1"
-                          style={{ borderColor: 'var(--aurora-border)' }}
+                          onClick={() => removeLine(i)}
+                          className="text-slate-400 hover:text-red-600 text-lg leading-none"
                         >
-                          +
+                          ×
                         </button>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <input
-                        type="number"
-                        value={l.unitPrice}
-                        step="any"
-                        min="0"
-                        onChange={(e) => updateLine(i, { unitPrice: Number(e.target.value) || 0 })}
-                        className="w-24 text-right border rounded px-2 py-1 tabular-nums"
-                        style={{ borderColor: 'var(--aurora-border)' }}
-                      />
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums font-semibold">
-                      {fmt(l.qty * l.unitPrice)}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <button
-                        onClick={() => removeLine(i)}
-                        className="text-slate-400 hover:text-red-600 text-lg leading-none"
-                      >
-                        ×
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </Card>
@@ -852,6 +1056,12 @@ export default function QuickSalePage() {
             <Row label="Total" value={`TZS ${fmt(totals.total)}`} highlight />
           </Card>
 
+          {cartStockIssues.length > 0 && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {cartStockIssues[0]}
+            </div>
+          )}
+
           <Btn
             variant="success"
             onClick={charge}
@@ -859,7 +1069,11 @@ export default function QuickSalePage() {
             loading={submitting}
             className="w-full text-lg py-4"
           >
-            {canSubmit ? `Charge TZS ${fmt(totals.total)}` : 'Add items to charge'}
+            {cartStockIssues.length
+              ? 'Resolve stock before charging'
+              : canSubmit
+                ? `Charge TZS ${fmt(totals.total)}`
+                : 'Add items to charge'}
           </Btn>
         </div>
       </div>
@@ -880,15 +1094,20 @@ export default function QuickSalePage() {
             label="Company"
             required
             value={settings.companyId}
-            onChange={(e) =>
+            onChange={(e) => {
               setSettings((s) => ({
                 ...s,
                 companyId: e.target.value,
                 branchId: '',
                 divisionId: '',
                 cashAccountId: '',
-              }))
-            }
+              }));
+              setCart([]);
+              setSelectedProduct(null);
+              setProductQuery('');
+              setProductResults([]);
+              setShowResults(false);
+            }}
             options={companies.map((c) => ({ value: c.id, label: `${c.name} (${c.code})` }))}
             placeholder="Select company"
           />
@@ -896,14 +1115,19 @@ export default function QuickSalePage() {
             label="Division"
             required
             value={settings.divisionId}
-            onChange={(e) =>
+            onChange={(e) => {
               setSettings((s) => ({
                 ...s,
                 divisionId: e.target.value,
                 branchId: '',
                 cashAccountId: '',
-              }))
-            }
+              }));
+              setCart([]);
+              setSelectedProduct(null);
+              setProductQuery('');
+              setProductResults([]);
+              setShowResults(false);
+            }}
             options={divisions.map((d) => ({
               value: d.id,
               label: `${d.code ? d.code + ' - ' : ''}${d.name}`,
@@ -923,6 +1147,11 @@ export default function QuickSalePage() {
                 divisionId: branch?.divisionId ?? s.divisionId,
                 cashAccountId: '',
               }));
+              setCart([]);
+              setSelectedProduct(null);
+              setProductQuery('');
+              setProductResults([]);
+              setShowResults(false);
             }}
             options={branchOptions.map((b) => ({
               value: b.id,

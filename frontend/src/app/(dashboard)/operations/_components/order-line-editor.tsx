@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Btn } from '@/components/ui';
 
 export interface OrderProductOption {
@@ -16,6 +16,18 @@ export interface OrderProductOption {
   defaultSellingPrice?: number | string | null;
   wholesalePrice?: number | string | null;
   retailPrice?: number | string | null;
+  productType?: string | null;
+  trackInventory?: boolean | null;
+  sellingPrice?: number | string | null;
+  availableStock?: number | string | null;
+  availableQuantity?: number | string | null;
+  quantityAvailable?: number | string | null;
+  inventoryBalance?: {
+    quantityOnHand?: number | string | null;
+    quantityReserved?: number | string | null;
+    availableQuantity?: number | string | null;
+    quantityAvailable?: number | string | null;
+  } | null;
 }
 
 export interface OrderUnitOption {
@@ -39,6 +51,11 @@ export interface EditableOrderLine {
 
 type OrderVariant = 'purchase' | 'sales';
 
+export interface OrderLineValidationState {
+  hasBlockingErrors: boolean;
+  stockWarnings: string[];
+}
+
 interface OrderLineEditorProps<TLine extends EditableOrderLine> {
   variant: OrderVariant;
   lines: TLine[];
@@ -46,10 +63,12 @@ interface OrderLineEditorProps<TLine extends EditableOrderLine> {
   units: OrderUnitOption[];
   currency: string;
   productSearchLoading?: boolean;
+  enforceStockAvailability?: boolean;
   onAddLine: () => void;
   onRemoveLine: (index: number) => void;
   onLineChange: (index: number, patch: Partial<TLine>) => void;
   onProductSearch?: (query: string) => void;
+  onValidationChange?: (state: OrderLineValidationState) => void;
 }
 
 const fieldClass =
@@ -60,6 +79,14 @@ function money(value: number, currency: string) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value)}`;
+}
+
+function quantity(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '-';
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
+  }).format(value);
 }
 
 function numberOrZero(value: unknown) {
@@ -92,7 +119,58 @@ function defaultPriceForProduct(product: OrderProductOption, variant: OrderVaria
   if (variant === 'purchase') {
     return numberOrZero(product.defaultPurchasePrice ?? product.defaultSellingPrice);
   }
-  return numberOrZero(product.defaultSellingPrice ?? product.retailPrice ?? product.wholesalePrice);
+  return numberOrZero(
+    product.sellingPrice ??
+      product.defaultSellingPrice ??
+      product.retailPrice ??
+      product.wholesalePrice,
+  );
+}
+
+function productAvailableStock(product: OrderProductOption | undefined) {
+  if (!product) return null;
+  const value =
+    product.availableStock ??
+    product.availableQuantity ??
+    product.quantityAvailable ??
+    product.inventoryBalance?.availableQuantity ??
+    product.inventoryBalance?.quantityAvailable;
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function productTracksInventory(product: OrderProductOption | undefined) {
+  if (!product) return false;
+  if (product.trackInventory === false) return false;
+  return !['SERVICE', 'NON_STOCK_ITEM'].includes(String(product.productType ?? '').toUpperCase());
+}
+
+function availableAfterLocalAllocation(
+  product: OrderProductOption | undefined,
+  allocatedByProductId: Map<string, number>,
+) {
+  const available = productAvailableStock(product);
+  if (available == null || !product) return null;
+  return available - (allocatedByProductId.get(product.id) ?? 0);
+}
+
+function productSelectLabel(
+  product: OrderProductOption,
+  variant: OrderVariant,
+  currency: string,
+  allocatedByProductId: Map<string, number>,
+) {
+  const pieces = [productLabel(product)];
+  const unit = product.baseUnit?.symbol ?? product.baseUnit?.name;
+  if (unit) pieces.push(unit);
+  const price = defaultPriceForProduct(product, variant);
+  if (price > 0) pieces.push(money(price, currency));
+  const available = availableAfterLocalAllocation(product, allocatedByProductId);
+  if (available != null && productTracksInventory(product)) {
+    pieces.push(`Available: ${quantity(Math.max(0, available))}`);
+  }
+  return pieces.join(' | ');
 }
 
 export function mergeOrderProductOptions<TProduct extends OrderProductOption>(
@@ -131,12 +209,49 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
   units,
   currency,
   productSearchLoading = false,
+  enforceStockAvailability = false,
   onAddLine,
   onRemoveLine,
   onLineChange,
   onProductSearch,
+  onValidationChange,
 }: OrderLineEditorProps<TLine>) {
   const [productSearch, setProductSearch] = useState<Record<number, string>>({});
+  const productById = useMemo(
+    () => new Map(products.map((product) => [product.id, product])),
+    [products],
+  );
+  const allocatedByProductId = useMemo(() => {
+    const allocated = new Map<string, number>();
+    for (const line of lines) {
+      if (!line.productId) continue;
+      allocated.set(line.productId, (allocated.get(line.productId) ?? 0) + numberOrZero(line.qty));
+    }
+    return allocated;
+  }, [lines]);
+  const stockWarnings = useMemo(() => {
+    if (!enforceStockAvailability || variant !== 'sales') return [];
+    const warnings: string[] = [];
+    for (const [productId, allocated] of allocatedByProductId) {
+      const product = productById.get(productId);
+      if (!product || !productTracksInventory(product)) continue;
+      const available = productAvailableStock(product);
+      if (available == null) continue;
+      if (allocated > available) {
+        warnings.push(
+          `${productLabel(product)} only has ${quantity(available)} available; this order uses ${quantity(allocated)}.`,
+        );
+      }
+    }
+    return warnings;
+  }, [allocatedByProductId, enforceStockAvailability, productById, variant]);
+  const validationState = useMemo<OrderLineValidationState>(
+    () => ({
+      hasBlockingErrors: stockWarnings.length > 0,
+      stockWarnings,
+    }),
+    [stockWarnings],
+  );
   const totals = useMemo(
     () =>
       lines.reduce(
@@ -154,7 +269,12 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
   );
   const total = totals.subtotal - totals.discount + totals.tax;
   const invalidCount = lines.filter((line) => missingFields(line).length > 0).length;
+  const stockWarningCount = stockWarnings.length;
   const unitPriceLabel = variant === 'purchase' ? 'Unit Cost' : 'Unit Price';
+
+  useEffect(() => {
+    onValidationChange?.(validationState);
+  }, [onValidationChange, validationState]);
 
   function patchLine(index: number, patch: Partial<EditableOrderLine>) {
     onLineChange(index, patch as Partial<TLine>);
@@ -201,7 +321,11 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
           </h4>
           <p className="text-[12px]" style={{ color: 'var(--aurora-text-muted)' }}>
             {lines.length} line{lines.length === 1 ? '' : 's'}
-            {invalidCount ? `, ${invalidCount} incomplete` : ', ready'}
+            {stockWarningCount
+              ? `, ${stockWarningCount} stock warning${stockWarningCount === 1 ? '' : 's'}`
+              : invalidCount
+                ? `, ${invalidCount} incomplete`
+                : ', ready'}
           </p>
         </div>
         <Btn variant="secondary" size="xs" onClick={onAddLine}>
@@ -212,7 +336,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
         <div className="space-y-3">
           {lines.map((line, index) => {
-            const selectedProduct = products.find((product) => product.id === line.productId);
+            const selectedProduct = productById.get(line.productId);
             const query = productSearch[index] ?? '';
             const trimmedQuery = query.trim();
             const filteredProducts = products.filter((product) => productMatches(product, query));
@@ -223,6 +347,18 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                 : filteredProducts;
             const searchResults = trimmedQuery ? filteredProducts.slice(0, 8) : [];
             const missing = missingFields(line);
+            const lineTracksStock =
+              enforceStockAvailability &&
+              variant === 'sales' &&
+              productTracksInventory(selectedProduct);
+            const selectedAvailable = productAvailableStock(selectedProduct);
+            const productAllocated = selectedProduct
+              ? (allocatedByProductId.get(selectedProduct.id) ?? 0)
+              : 0;
+            const remainingAfterSale =
+              selectedAvailable == null ? null : selectedAvailable - productAllocated;
+            const lineHasStockError =
+              lineTracksStock && selectedAvailable != null && productAllocated > selectedAvailable;
 
             return (
               <div
@@ -240,7 +376,11 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                       {selectedProduct ? ` - ${productLabel(selectedProduct)}` : ''}
                     </p>
                     <p className="text-[12px]" style={{ color: 'var(--aurora-text-muted)' }}>
-                      {missing.length ? `Needs ${missing.join(', ')}` : 'Complete'}
+                      {lineHasStockError
+                        ? 'Insufficient stock'
+                        : missing.length
+                          ? `Needs ${missing.join(', ')}`
+                          : 'Complete'}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -308,7 +448,24 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                                 style={{ color: 'var(--aurora-text-muted)' }}
                               >
                                 {product.category?.name ?? 'Uncategorized'}
-                                {product.baseUnit?.symbol ? ` | ${product.baseUnit.symbol}` : ''}
+                                {product.baseUnit?.symbol
+                                  ? ` | Unit: ${product.baseUnit.symbol}`
+                                  : ''}
+                                {defaultPriceForProduct(product, variant) > 0
+                                  ? ` | ${money(defaultPriceForProduct(product, variant), currency)}`
+                                  : ''}
+                                {productTracksInventory(product) &&
+                                availableAfterLocalAllocation(product, allocatedByProductId) != null
+                                  ? ` | Available: ${quantity(
+                                      Math.max(
+                                        0,
+                                        availableAfterLocalAllocation(
+                                          product,
+                                          allocatedByProductId,
+                                        ) ?? 0,
+                                      ),
+                                    )}`
+                                  : ''}
                               </span>
                             </button>
                           ))
@@ -340,7 +497,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         </option>
                         {productOptions.map((product) => (
                           <option key={product.id} value={product.id}>
-                            {productLabel(product)}
+                            {productSelectLabel(product, variant, currency, allocatedByProductId)}
                           </option>
                         ))}
                       </select>
@@ -370,6 +527,24 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                             ? money(defaultPriceForProduct(selectedProduct, variant), currency)
                             : '-'}
                         </span>
+                        <span>
+                          Available stock:{' '}
+                          {lineTracksStock ? quantity(selectedAvailable) : 'Not tracked'}
+                        </span>
+                        <span>Quantity entered: {quantity(numberOrZero(line.qty))}</span>
+                        <span
+                          className={lineHasStockError ? 'text-red-600' : ''}
+                          style={lineHasStockError ? undefined : { color: 'var(--aurora-text)' }}
+                        >
+                          Remaining after sale:{' '}
+                          {lineTracksStock ? quantity(remainingAfterSale) : 'Not tracked'}
+                        </span>
+                      </div>
+                    )}
+                    {lineHasStockError && selectedProduct && (
+                      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+                        {productLabel(selectedProduct)} has {quantity(selectedAvailable)} available,
+                        but this order uses {quantity(productAllocated)} across its lines.
                       </div>
                     )}
                   </div>
@@ -576,6 +751,14 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
               }}
             >
               Complete every product, unit, location, and quantity before saving.
+            </div>
+          )}
+          {stockWarnings.length > 0 && (
+            <div className="mt-4 space-y-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+              <p className="font-semibold">Stock availability blocks this sale.</p>
+              {stockWarnings.map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
             </div>
           )}
         </aside>
