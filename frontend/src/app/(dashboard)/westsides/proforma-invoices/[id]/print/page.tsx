@@ -8,6 +8,7 @@ import {
   DocumentSection,
   DocumentShell,
   DocumentSignatureGrid,
+  DocumentStatGrid,
   DocumentTable,
   DocumentTd,
   DocumentTh,
@@ -56,6 +57,24 @@ interface ProformaInvoice {
     phone?: string | null;
     email?: string | null;
     website?: string | null;
+    logoUrl?: string | null;
+    group?: {
+      name?: string | null;
+      code?: string | null;
+      address?: string | null;
+      phone?: string | null;
+      email?: string | null;
+      website?: string | null;
+    } | null;
+    profile?: {
+      registeredName?: string | null;
+      tradingName?: string | null;
+      brelaRegNumber?: string | null;
+      tin?: string | null;
+      vrn?: string | null;
+      registeredAddress?: string | null;
+      postalAddress?: string | null;
+    } | null;
   } | null;
   branch?: {
     name?: string | null;
@@ -99,20 +118,23 @@ export default function ProformaInvoicePrintPage() {
 
   const customerName = record.customer?.name ?? record.customerName ?? 'N/A';
   const lines = record.lines ?? [];
+  const branchLabel = [record.branch?.code, record.branch?.name].filter(Boolean).join(' - ');
 
   return (
     <DocumentShell
-      title="Proforma Invoice"
-      subtitle={customerName}
+      title="PROFORMA INVOICE"
+      subtitle={`Prepared for ${customerName}`}
       reference={record.proformaNumber}
       status={labelDocumentValue(record.status)}
       statusTone={documentStatusTone(record.status)}
       organization={documentOrganization(record.company, record.branch)}
       generatedAt={generatedAt}
+      footerNote="This proforma invoice is issued for quotation and payment planning only. It is not a tax invoice or receipt until converted and formally invoiced in ITEMBA-R."
       meta={[
         { label: 'Proforma Number', value: record.proformaNumber },
         { label: 'Proforma Date', value: formatDocumentDate(record.proformaDate) },
         { label: 'Valid Until', value: formatDocumentDate(record.validUntil) },
+        { label: 'Currency', value: record.currency },
         {
           label: 'Related Quotation',
           value: valueOrNA(record.quotation?.quotationNumber ?? record.quotationId),
@@ -127,7 +149,32 @@ export default function ProformaInvoicePrintPage() {
         />
       }
     >
-      <DocumentSection title="Customer Details">
+      <DocumentStatGrid
+        items={[
+          {
+            label: 'Proforma Total',
+            value: formatDocumentMoney(record.totalAmount, record.currency),
+            tone: 'success',
+          },
+          {
+            label: 'Valid Until',
+            value: formatDocumentDate(record.validUntil),
+            tone: 'warning',
+          },
+          {
+            label: 'Line Items',
+            value: lines.length,
+            hint: 'Products and services quoted below.',
+          },
+          {
+            label: 'Status',
+            value: labelDocumentValue(record.status),
+            tone: documentStatusTone(record.status) === 'danger' ? 'danger' : 'neutral',
+          },
+        ]}
+      />
+
+      <DocumentSection title="Prepared For">
         <DocumentKeyValueGrid
           items={[
             { label: 'Customer', value: customerName },
@@ -136,8 +183,22 @@ export default function ProformaInvoicePrintPage() {
             { label: 'Email', value: valueOrNA(record.customer?.email) },
             { label: 'Contact Person', value: valueOrNA(record.customer?.contactPerson) },
             { label: 'Address', value: valueOrNA(record.customer?.address) },
+            { label: 'Branch / Location', value: valueOrNA(branchLabel) },
             { label: 'Converted Sales Order', value: valueOrNA(record.convertedSalesOrderId) },
+          ]}
+        />
+      </DocumentSection>
+
+      <DocumentSection title="Validity & Commercial Terms">
+        <DocumentKeyValueGrid
+          items={[
+            { label: 'Validity', value: formatDocumentDate(record.validUntil) },
             { label: 'Currency', value: record.currency },
+            { label: 'Pricing Basis', value: 'Subject to stock availability at confirmation.' },
+            {
+              label: 'Document Notice',
+              value: 'This is a proforma invoice, not a fiscal tax invoice or receipt.',
+            },
           ]}
         />
       </DocumentSection>

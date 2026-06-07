@@ -95,7 +95,15 @@ export class ProformaInvoicesService {
     if (customerId) where.customerId = customerId;
 
     const [data, total] = await Promise.all([
-      this.prisma.proformaInvoice.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
+      this.prisma.proformaInvoice.findMany({
+        where,
+        include: {
+          customer: { select: { id: true, name: true, customerCode: true } },
+        },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
       this.prisma.proformaInvoice.count({ where }),
     ]);
     return { data, total, page, limit };
