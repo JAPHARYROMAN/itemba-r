@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/hooks/use-auth';
+import { GlobalSearchBox } from '@/components/aurora/command';
 
 interface TopbarProps {
   onMenuClick: () => void;
@@ -50,8 +51,10 @@ export function Topbar({ onMenuClick }: TopbarProps) {
         </svg>
       </button>
 
-      {/* Right: user menu */}
-      <div className="ml-auto flex items-center gap-3">
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
+        <GlobalSearchBox />
+
+        {/* Right: user menu */}
         {!loading && user && (
           <div className="relative" ref={dropdownRef}>
             <button

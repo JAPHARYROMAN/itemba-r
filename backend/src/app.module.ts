@@ -37,6 +37,7 @@ import { PayablesModule } from './modules/payables/payables.module';
 import { IntercompanyTransactionsModule } from './modules/intercompany-transactions/intercompany-transactions.module';
 import { FinancialReportsModule } from './modules/financial-reports/financial-reports.module';
 import { ReportsCatalogModule } from './modules/reports-catalog/reports-catalog.module';
+import { GlobalSearchModule } from './modules/global-search/global-search.module';
 import { GroupReportsModule } from './modules/group-reports/group-reports.module';
 import { SettingsCatalogModule } from './modules/settings-catalog/settings-catalog.module';
 import { UserPreferencesModule } from './modules/user-preferences/user-preferences.module';
@@ -370,6 +371,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     IntercompanyTransactionsModule,
     FinancialReportsModule,
     ReportsCatalogModule,
+    GlobalSearchModule,
     GroupReportsModule,
     SettingsCatalogModule,
     UserPreferencesModule,

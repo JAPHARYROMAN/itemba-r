@@ -1,6 +1,8 @@
 'use client';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/hooks/use-auth';
+import { backendGet } from '@/lib/api-client';
 
 interface CommandItem {
   id: string;
@@ -11,6 +13,34 @@ interface CommandItem {
   group?: string;
   icon?: React.ReactNode;
   shortcut?: string;
+  permission?: string;
+  anyPermission?: string[];
+  source?: 'navigation' | 'record';
+  badge?: string;
+  date?: string;
+}
+
+interface GlobalSearchApiResult {
+  id: string;
+  type: string;
+  module: string;
+  title: string;
+  subtitle?: string;
+  href: string;
+  badge?: string;
+  date?: string;
+}
+
+interface GlobalSearchApiGroup {
+  key: string;
+  label: string;
+  results: GlobalSearchApiResult[];
+}
+
+interface GlobalSearchApiResponse {
+  query: string;
+  total: number;
+  groups: GlobalSearchApiGroup[];
 }
 
 const DEFAULT_COMMANDS: CommandItem[] = [
@@ -21,14 +51,131 @@ const DEFAULT_COMMANDS: CommandItem[] = [
     href: '/group-control',
     group: 'Navigation',
     icon: '🔒',
+    permission: 'group-control.view',
   },
-  { id: 'finance', label: 'Finance', href: '/finance', group: 'Navigation', icon: '💰' },
+  {
+    id: 'finance',
+    label: 'Finance',
+    href: '/finance',
+    group: 'Navigation',
+    icon: '💰',
+    permission: 'finance.view',
+  },
+  {
+    id: 'finance-cash-accounts',
+    label: 'Cash Accounts',
+    description: 'Cash and bank account setup',
+    href: '/finance/cash-accounts',
+    group: 'Finance',
+    icon: '🏦',
+    permission: 'cash_accounts.view',
+  },
+  {
+    id: 'finance-reports',
+    label: 'Finance Reports',
+    description: 'Financial statements, AR/AP, and management reports',
+    href: '/finance/reports',
+    group: 'Finance',
+    icon: '📊',
+    permission: 'finance.reports.view',
+  },
+  {
+    id: 'operations',
+    label: 'Operations',
+    description: 'Inventory, sales, purchases, customers, and suppliers',
+    href: '/operations',
+    group: 'Navigation',
+    icon: '⚙️',
+    permission: 'operations.dashboard.view',
+  },
+  {
+    id: 'operations-products',
+    label: 'Products',
+    description: 'Find products, SKUs, and stock items',
+    href: '/operations/products',
+    group: 'Operations',
+    icon: '📦',
+    anyPermission: ['products.view', 'sales.create', 'purchases.create', 'inventory.view'],
+  },
+  {
+    id: 'operations-customers',
+    label: 'Customers',
+    description: 'Customer master data and profiles',
+    href: '/operations/customers',
+    group: 'Operations',
+    icon: '👤',
+    permission: 'customers.view',
+  },
+  {
+    id: 'operations-suppliers',
+    label: 'Suppliers',
+    description: 'Supplier master data',
+    href: '/operations/suppliers',
+    group: 'Operations',
+    icon: '🏢',
+    permission: 'suppliers.view',
+  },
+  {
+    id: 'operations-sales-orders',
+    label: 'Sales Orders',
+    description: 'Customer orders, fulfillment, and revenue',
+    href: '/operations/sales-orders',
+    group: 'Operations',
+    icon: '🧾',
+    permission: 'sales.view',
+  },
+  {
+    id: 'operations-purchase-orders',
+    label: 'Purchase Orders',
+    description: 'Supplier orders and receiving',
+    href: '/operations/purchase-orders',
+    group: 'Operations',
+    icon: '🧾',
+    permission: 'purchases.view',
+  },
+  {
+    id: 'operations-reports',
+    label: 'Operations Reports',
+    description: 'Sales, purchases, inventory, and movement reports',
+    href: '/operations/reports',
+    group: 'Operations',
+    icon: '📈',
+    permission: 'operations.reports.view',
+  },
   {
     id: 'petroleum',
     label: 'Petroleum Operations',
     href: '/petroleum',
     group: 'Navigation',
     icon: '⛽',
+    permission: 'petroleum.dashboard.view',
+  },
+  {
+    id: 'petroleum-shifts',
+    label: 'Fuel Shifts',
+    description: 'Open, close, and review meter-based shifts',
+    href: '/petroleum/fuel-shifts',
+    group: 'Petroleum',
+    icon: '⛽',
+    permission: 'fuel_shifts.view',
+  },
+  {
+    id: 'petroleum-tanks',
+    label: 'Fuel Tanks',
+    description: 'Tank balances and fuel stock',
+    href: '/petroleum/fuel-tanks',
+    group: 'Petroleum',
+    icon: '🛢️',
+    permission: 'fuel_tanks.view',
+  },
+  {
+    id: 'petroleum-deliveries',
+    label: 'Fuel Deliveries',
+    description: 'Fuel delivery receiving and posting',
+    href: '/petroleum/fuel-deliveries',
+    group: 'Petroleum',
+    icon: '🚚',
+    permission: 'fuel_deliveries.view',
   },
   {
     id: 'westsides',
@@ -36,15 +183,51 @@ const DEFAULT_COMMANDS: CommandItem[] = [
     href: '/westsides',
     group: 'Navigation',
     icon: '🛒',
+    permission: 'westsides.dashboard.view',
+  },
+  {
+    id: 'westsides-quick-sale',
+    label: 'Quick Sale',
+    description: 'Counter sale flow',
+    href: '/westsides/quick-sale',
+    group: 'Westsides',
+    icon: '💳',
+    permission: 'sales.create',
+  },
+  {
+    id: 'westsides-proformas',
+    label: 'Proforma Invoices',
+    description: 'Customer proforma invoices and printouts',
+    href: '/westsides/proforma-invoices',
+    group: 'Westsides',
+    icon: '📄',
+    permission: 'proformas.view',
+  },
+  {
+    id: 'westsides-reports',
+    label: 'Westsides Reports',
+    description: 'Readable operations reports and exports',
+    href: '/westsides/reports',
+    group: 'Westsides',
+    icon: '📊',
+    permission: 'westsides.reports.view',
   },
   { id: 'itemba', label: 'Itemba Enterprises', href: '/itemba', group: 'Navigation', icon: '🏗️' },
-  { id: 'hr', label: 'HR & Payroll', href: '/hr', group: 'Navigation', icon: '👥' },
+  {
+    id: 'hr',
+    label: 'HR & Payroll',
+    href: '/hr',
+    group: 'Navigation',
+    icon: '👥',
+    permission: 'hr.dashboard.view',
+  },
   {
     id: 'compliance',
     label: 'Compliance & Tax',
     href: '/compliance',
     group: 'Navigation',
     icon: '📋',
+    permission: 'compliance.dashboard.view',
   },
   {
     id: 'approvals',
@@ -52,6 +235,7 @@ const DEFAULT_COMMANDS: CommandItem[] = [
     href: '/approvals/pending',
     group: 'Quick Actions',
     icon: '✅',
+    permission: 'approval_requests.view',
   },
   {
     id: 'bi-executive',
@@ -59,6 +243,7 @@ const DEFAULT_COMMANDS: CommandItem[] = [
     href: '/bi/executive',
     group: 'BI & Reports',
     icon: '📊',
+    permission: 'dashboards.view',
   },
   {
     id: 'bi-reports',
@@ -66,6 +251,7 @@ const DEFAULT_COMMANDS: CommandItem[] = [
     href: '/bi/reports',
     group: 'BI & Reports',
     icon: '📄',
+    permission: 'report_definitions.view',
   },
   {
     id: 'bi-insights',
@@ -73,6 +259,7 @@ const DEFAULT_COMMANDS: CommandItem[] = [
     href: '/bi/insights',
     group: 'BI & Reports',
     icon: '💡',
+    permission: 'executive_insights.view',
   },
   {
     id: 'data-quality',
@@ -80,6 +267,7 @@ const DEFAULT_COMMANDS: CommandItem[] = [
     href: '/bi/data-quality',
     group: 'BI & Reports',
     icon: '🛡️',
+    permission: 'data_quality.view',
   },
   {
     id: 'notifications',
@@ -97,27 +285,100 @@ interface CommandPaletteProps {
   additionalCommands?: CommandItem[];
 }
 
+function iconForRecord(type: string) {
+  switch (type) {
+    case 'customer':
+      return '👤';
+    case 'supplier':
+      return '🏢';
+    case 'product':
+      return '📦';
+    case 'sales-order':
+      return '🧾';
+    case 'purchase-order':
+      return '📥';
+    case 'quotation':
+      return '📋';
+    case 'proforma':
+      return '📄';
+    case 'delivery-note':
+      return '🚚';
+    case 'fuel-tank':
+      return '🛢️';
+    case 'fuel-shift':
+      return '⛽';
+    case 'fuel-delivery':
+      return '🚛';
+    case 'report-definition':
+      return '📊';
+    default:
+      return '⌕';
+  }
+}
+
 export function CommandPalette({ open, onClose, additionalCommands = [] }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
+  const [remoteGroups, setRemoteGroups] = useState<GlobalSearchApiGroup[]>([]);
+  const [remoteLoading, setRemoteLoading] = useState(false);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+  const { user, hasPermission } = useAuth();
 
   const allCommands = useMemo(
     () => [...DEFAULT_COMMANDS, ...additionalCommands],
     [additionalCommands],
   );
 
-  const filtered = useMemo(() => {
-    if (!query.trim()) return allCommands;
+  const canSeeCommand = useCallback(
+    (command: CommandItem) => {
+      if (command.permission && !hasPermission(command.permission)) return false;
+      if (
+        command.anyPermission?.length &&
+        !command.anyPermission.some((permission) => user?.permissions.includes(permission))
+      ) {
+        return false;
+      }
+      return true;
+    },
+    [hasPermission, user],
+  );
+
+  const visibleCommands = useMemo(
+    () => allCommands.filter(canSeeCommand),
+    [allCommands, canSeeCommand],
+  );
+
+  const filteredCommands = useMemo(() => {
+    if (!query.trim()) return visibleCommands;
     const q = query.toLowerCase();
-    return allCommands.filter(
+    return visibleCommands.filter(
       (c) =>
         c.label.toLowerCase().includes(q) ||
         c.description?.toLowerCase().includes(q) ||
         c.group?.toLowerCase().includes(q),
     );
-  }, [query, allCommands]);
+  }, [query, visibleCommands]);
+
+  const remoteItems = useMemo<CommandItem[]>(() => {
+    return remoteGroups.flatMap((group) =>
+      group.results.map((result) => ({
+        id: `record:${result.type}:${result.id}`,
+        label: result.title,
+        description: [result.subtitle, result.date].filter(Boolean).join(' - '),
+        href: result.href,
+        group: group.label,
+        icon: iconForRecord(result.type),
+        source: 'record' as const,
+        badge: result.badge,
+      })),
+    );
+  }, [remoteGroups]);
+
+  const filtered = useMemo(() => {
+    return [...filteredCommands, ...remoteItems];
+  }, [filteredCommands, remoteItems]);
 
   const grouped = useMemo(() => {
     const groups: Record<string, CommandItem[]> = {};
@@ -128,6 +389,12 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
     });
     return groups;
   }, [filtered]);
+
+  const flatItems = useMemo(() => {
+    const items: CommandItem[] = [];
+    Object.values(grouped).forEach((groupItems) => items.push(...groupItems));
+    return items;
+  }, [grouped]);
 
   const executeCommand = useCallback(
     (item: CommandItem) => {
@@ -142,9 +409,50 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
     if (open) {
       setQuery('');
       setSelected(0);
+      setRemoteGroups([]);
+      setRemoteError(null);
+      setRemoteLoading(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      setRemoteGroups([]);
+      setRemoteError(null);
+      setRemoteLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setRemoteError(null);
+    const timer = window.setTimeout(async () => {
+      setRemoteLoading(true);
+      try {
+        const response = await backendGet<GlobalSearchApiResponse>('/global-search', {
+          query: { q: trimmed, limit: 5 },
+        });
+        if (!cancelled) {
+          setRemoteGroups(response.groups ?? []);
+        }
+      } catch {
+        if (!cancelled) {
+          setRemoteGroups([]);
+          setRemoteError('Record search is unavailable');
+        }
+      } finally {
+        if (!cancelled) setRemoteLoading(false);
+      }
+    }, 220);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, query]);
 
   useEffect(() => {
     if (!open) return;
@@ -155,7 +463,7 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
       }
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelected((s) => Math.min(s + 1, filtered.length - 1));
+        setSelected((s) => Math.min(s + 1, Math.max(flatItems.length - 1, 0)));
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
@@ -163,19 +471,19 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
       }
       if (e.key === 'Enter') {
         e.preventDefault();
-        const item = filtered[selected];
+        const item = flatItems[selected];
         if (item) executeCommand(item);
       }
     }
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [executeCommand, filtered, onClose, open, selected]);
+  }, [executeCommand, flatItems, onClose, open, selected]);
+
+  useEffect(() => {
+    setSelected((current) => Math.min(current, Math.max(flatItems.length - 1, 0)));
+  }, [flatItems.length]);
 
   if (!open) return null;
-
-  // Build a flat index map so we can compute selected state without mutation in render
-  const flatItems: CommandItem[] = [];
-  Object.values(grouped).forEach((items) => flatItems.push(...items));
 
   return (
     <div
@@ -188,7 +496,7 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
         onClick={onClose}
       />
       <div
-        className="relative w-full max-w-xl rounded-aurora-lg overflow-hidden"
+        className="relative w-full max-w-2xl rounded-aurora-lg overflow-hidden"
         style={{
           background: 'var(--aurora-card)',
           border: '1px solid var(--aurora-border)',
@@ -214,7 +522,7 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
           <input
             ref={inputRef}
             type="text"
-            placeholder="Search commands, modules, actions..."
+            placeholder="Search pages, reports, customers, products, orders..."
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -236,13 +544,13 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
         </div>
 
         {/* Results */}
-        <div className="max-h-80 overflow-y-auto py-2">
+        <div className="max-h-[28rem] overflow-y-auto py-2">
           {flatItems.length === 0 ? (
             <p
               className="px-4 py-8 text-sm text-center"
               style={{ color: 'var(--aurora-text-muted)' }}
             >
-              No commands found
+              {remoteLoading ? 'Searching records...' : 'No results found'}
             </p>
           ) : (
             Object.entries(grouped).map(([group, items]) => {
@@ -283,6 +591,18 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
                             </p>
                           )}
                         </div>
+                        {item.badge && (
+                          <span
+                            className="max-w-28 truncate rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase"
+                            style={{
+                              background: 'var(--aurora-bg-muted)',
+                              color: 'var(--aurora-text-muted)',
+                              border: '1px solid var(--aurora-border)',
+                            }}
+                          >
+                            {item.badge}
+                          </span>
+                        )}
                         {item.shortcut && (
                           <kbd
                             className="text-xs px-1.5 py-0.5 rounded flex-shrink-0"
@@ -301,6 +621,14 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
                 </div>
               );
             })
+          )}
+          {(remoteLoading || remoteError) && flatItems.length > 0 && (
+            <div
+              className="px-4 py-2 text-xs"
+              style={{ color: remoteError ? '#f87171' : 'var(--aurora-text-muted)' }}
+            >
+              {remoteError ?? 'Searching records...'}
+            </div>
           )}
         </div>
 
