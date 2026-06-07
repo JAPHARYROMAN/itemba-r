@@ -35,6 +35,8 @@ interface BranchLike {
   phone?: string | null;
 }
 
+const DEFAULT_DOCUMENT_LOGO_URL = '/brand/itemba-group-logo.png';
+
 export function formatDocumentMoney(value: number | string | null | undefined, currency = 'TZS') {
   return `${currency} ${new Intl.NumberFormat('en-TZ', {
     minimumFractionDigits: 2,
@@ -126,7 +128,7 @@ export function documentOrganization(
     tin: profile?.tin,
     vrn: profile?.vrn,
     registrationNumber: profile?.brelaRegNumber,
-    logoUrl: company?.logoUrl,
+    logoUrl: firstPresent(company?.logoUrl, DEFAULT_DOCUMENT_LOGO_URL),
   };
 }
 

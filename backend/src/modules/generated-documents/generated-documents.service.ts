@@ -1,4 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   DocumentCategory,
   DocumentOwnerType,
@@ -13,13 +20,20 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { applyCompanyScopeWhere } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { DocumentsService } from '../documents/documents.service';
-import { BusinessPdfEntityType, GenerateBusinessPdfDto } from './dto/generate-business-pdf.dto';
 import {
+  BUSINESS_PDF_ENTITY_TYPES,
+  BusinessPdfEntityType,
+  GenerateBusinessPdfDto,
+} from './dto/generate-business-pdf.dto';
+import {
+  BusinessPdfImage,
   BusinessPdfModel,
   BusinessPdfOrganization,
   BusinessPdfSection,
   buildBusinessPdf,
 } from './pdf-builder';
+
+const DEFAULT_ITEMBA_LOGO_URL = '/brand/itemba-group-logo.png';
 
 @Injectable()
 export class GeneratedDocumentsService {
@@ -60,6 +74,7 @@ export class GeneratedDocumentsService {
   }
 
   async generateBusinessPdf(dto: GenerateBusinessPdfDto, user: AuthUser, ipAddress?: string) {
+    this.assertCanAccessBusinessPdfSource(dto.entityType, user);
     const model = await this.buildBusinessPdfModel(dto.entityType, dto.entityId, user);
     await this.attachLogoImage(model.pdf.organization, user);
     const buffer = buildBusinessPdf(model.pdf);
@@ -133,16 +148,54 @@ export class GeneratedDocumentsService {
     return { generatedDocument, document };
   }
 
+  async download(id: string, user: AuthUser, ipAddress?: string) {
+    const item = await this.prisma.generatedDocument.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!item) throw new NotFoundException('Generated document not found');
+
+    const where: any = { id, deletedAt: null };
+    applyCompanyScopeWhere(where, user, item.companyId);
+    const scoped = await this.prisma.generatedDocument.findFirst({ where });
+    if (!scoped) throw new NotFoundException('Generated document not found');
+
+    const entityType = scoped.entityType;
+    if (isBusinessPdfEntityType(entityType)) {
+      this.assertCanAccessBusinessPdfSource(entityType, user);
+    } else if (
+      !hasPermission(user, 'documents.manage') &&
+      !hasPermission(user, 'generated_documents.view')
+    ) {
+      throw new ForbiddenException('Access denied for this generated document');
+    }
+
+    if (!scoped.documentId) throw new NotFoundException('Generated document file not found');
+    return this.documents.download(scoped.documentId, user, ipAddress);
+  }
+
   private async attachLogoImage(organization: BusinessPdfOrganization, user: AuthUser) {
     const documentId = logoDocumentId(organization.logoUrl);
-    if (!documentId) return;
+    if (!documentId) {
+      organization.logoImage = defaultLogoImage(organization.logoUrl);
+      return;
+    }
 
     try {
       const file = await this.documents.readFileBuffer(documentId, user);
       const mimeType = file.mimeType.toLowerCase();
       organization.logoImage = { data: file.buffer, mimeType };
     } catch {
-      organization.logoImage = null;
+      organization.logoImage = defaultLogoImage();
+    }
+  }
+
+  private assertCanAccessBusinessPdfSource(entityType: BusinessPdfEntityType, user: AuthUser) {
+    if (hasPermission(user, 'documents.manage')) return;
+    const requiredPermission = permissionForBusinessPdfEntity(entityType);
+    if (!hasPermission(user, requiredPermission)) {
+      throw new ForbiddenException(
+        `Access denied. Missing permission for ${label(entityType)} PDF generation`,
+      );
     }
   }
 
@@ -726,8 +779,12 @@ function organization(company: any, branch?: any): BusinessPdfOrganization {
     tin: profile?.tin,
     vrn: profile?.vrn,
     registrationNumber: profile?.brelaRegNumber,
-    logoUrl: company?.logoUrl,
+    logoUrl: firstPresent(company?.logoUrl, DEFAULT_ITEMBA_LOGO_URL),
   };
+}
+
+function firstPresent(...values: Array<string | null | undefined>) {
+  return values.find((value) => String(value ?? '').trim().length > 0) ?? null;
 }
 
 function logoDocumentId(logoUrl?: string | null) {
@@ -736,6 +793,59 @@ function logoDocumentId(logoUrl?: string | null) {
     text.match(/\/api\/backend\/documents\/([^/?#]+)\/download/) ??
     text.match(/\/documents\/([^/?#]+)\/download/);
   return match ? decodeURIComponent(match[1]) : null;
+}
+
+function defaultLogoImage(logoUrl?: string | null): BusinessPdfImage | null {
+  const text = String(logoUrl ?? '').trim();
+  if (text && text !== DEFAULT_ITEMBA_LOGO_URL) return null;
+
+  const configuredPath = process.env.ITEMBA_DEFAULT_LOGO_PATH?.trim();
+  const candidates = [
+    configuredPath,
+    path.resolve(process.cwd(), 'assets/brand/itemba-group-logo.png'),
+    path.resolve(process.cwd(), '../frontend/public/brand/itemba-group-logo.png'),
+    path.resolve(process.cwd(), 'frontend/public/brand/itemba-group-logo.png'),
+    path.resolve(__dirname, '../assets/brand/itemba-group-logo.png'),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) {
+        return { data: fs.readFileSync(candidate), mimeType: 'image/png' };
+      }
+    } catch {
+      // Continue to text fallback if the packaged default logo cannot be read.
+    }
+  }
+
+  return null;
+}
+
+function hasPermission(user: AuthUser, permission: string) {
+  return user.permissions.includes(permission);
+}
+
+function isBusinessPdfEntityType(value: string): value is BusinessPdfEntityType {
+  return (BUSINESS_PDF_ENTITY_TYPES as readonly string[]).includes(value);
+}
+
+function permissionForBusinessPdfEntity(entityType: BusinessPdfEntityType) {
+  switch (entityType) {
+    case 'SALES_ORDER':
+      return 'sales.view';
+    case 'PURCHASE_ORDER':
+      return 'purchases.view';
+    case 'QUOTATION':
+      return 'quotations.view';
+    case 'PROFORMA_INVOICE':
+      return 'proformas.view';
+    case 'DELIVERY_NOTE':
+      return 'delivery_notes.view';
+    case 'CUSTOMER_PROFILE':
+      return 'customers.view';
+    default:
+      return 'documents.manage';
+  }
 }
 
 function kv(labelText: string, rawValue: unknown) {

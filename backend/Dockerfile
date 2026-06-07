@@ -54,6 +54,7 @@ COPY --from=builder /app/backend/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/database/prisma /app/database/prisma
 
 COPY --from=builder /app/backend/dist ./dist
+COPY frontend/public/brand/itemba-group-logo.png ./assets/brand/itemba-group-logo.png
 
 RUN mkdir -p /app/storage /app/backups /app/backend/uploads \
  && chown -R app:app /app

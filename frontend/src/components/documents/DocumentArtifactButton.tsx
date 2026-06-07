@@ -12,6 +12,9 @@ export type DocumentEntityType =
   | 'CUSTOMER_PROFILE';
 
 interface GeneratedDocumentResponse {
+  generatedDocument?: {
+    id: string;
+  };
   document: {
     id: string;
     fileName: string;
@@ -25,7 +28,7 @@ export function DocumentArtifactButton({
   entityType: DocumentEntityType;
   entityId: string;
 }) {
-  const [documentId, setDocumentId] = useState<string | null>(null);
+  const [downloadHref, setDownloadHref] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -37,12 +40,11 @@ export function DocumentArtifactButton({
         entityType,
         entityId,
       });
-      setDocumentId(result.document.id);
-      window.open(
-        `/api/backend/documents/${result.document.id}/download`,
-        '_blank',
-        'noopener,noreferrer',
-      );
+      const href = result.generatedDocument?.id
+        ? `/api/backend/generated-documents/${result.generatedDocument.id}/download?inline=1`
+        : `/api/backend/documents/${result.document.id}/download?inline=1`;
+      setDownloadHref(href);
+      window.open(href, '_blank', 'noopener,noreferrer');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not generate PDF');
     } finally {
@@ -60,9 +62,9 @@ export function DocumentArtifactButton({
       >
         {busy ? 'Generating...' : 'Generate PDF'}
       </button>
-      {documentId && (
+      {downloadHref && (
         <a
-          href={`/api/backend/documents/${documentId}/download`}
+          href={downloadHref}
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[12px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
