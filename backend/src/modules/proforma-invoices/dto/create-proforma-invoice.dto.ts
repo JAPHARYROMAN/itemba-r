@@ -1,4 +1,13 @@
-﻿import { IsString, IsOptional, IsUUID, IsDateString, IsNumber, IsArray, ValidateNested } from 'class-validator';
+﻿import {
+  IsString,
+  IsOptional,
+  IsUUID,
+  IsDateString,
+  IsNumber,
+  IsArray,
+  ValidateNested,
+} from 'class-validator';
+import { IsNotEmpty } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -6,7 +15,7 @@ export class CreateProformaInvoiceLineDto {
   @ApiProperty() @IsUUID() productId!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
   @ApiProperty() @IsNumber() quantity!: number;
-  @ApiProperty() @IsUUID() unitId!: string;
+  @ApiProperty() @IsString() @IsNotEmpty() unitId!: string;
   @ApiProperty() @IsNumber() unitPrice!: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() discountAmount?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() taxAmount?: number;
@@ -24,6 +33,8 @@ export class CreateProformaInvoiceDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() quotationId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() notes?: string;
   @ApiProperty({ type: [CreateProformaInvoiceLineDto] })
-  @IsArray() @ValidateNested({ each: true }) @Type(() => CreateProformaInvoiceLineDto)
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateProformaInvoiceLineDto)
   lines!: CreateProformaInvoiceLineDto[];
 }

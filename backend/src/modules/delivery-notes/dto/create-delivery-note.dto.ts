@@ -1,4 +1,13 @@
-﻿import { IsString, IsOptional, IsUUID, IsDateString, IsNumber, IsArray, ValidateNested } from 'class-validator';
+﻿import {
+  IsString,
+  IsOptional,
+  IsUUID,
+  IsDateString,
+  IsNumber,
+  IsArray,
+  ValidateNested,
+} from 'class-validator';
+import { IsNotEmpty } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -6,7 +15,7 @@ export class CreateDeliveryNoteLineDto {
   @ApiProperty() @IsUUID() productId!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
   @ApiProperty() @IsNumber() quantity!: number;
-  @ApiProperty() @IsUUID() unitId!: string;
+  @ApiProperty() @IsString() @IsNotEmpty() unitId!: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() salesOrderLineId?: string;
 }
 
@@ -23,6 +32,8 @@ export class CreateDeliveryNoteDto {
   @ApiPropertyOptional() @IsOptional() @IsString() driverName?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() notes?: string;
   @ApiProperty({ type: [CreateDeliveryNoteLineDto] })
-  @IsArray() @ValidateNested({ each: true }) @Type(() => CreateDeliveryNoteLineDto)
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateDeliveryNoteLineDto)
   lines!: CreateDeliveryNoteLineDto[];
 }

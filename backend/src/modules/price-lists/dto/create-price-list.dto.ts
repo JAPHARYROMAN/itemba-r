@@ -1,11 +1,22 @@
-﻿import { IsString, IsOptional, IsEnum, IsUUID, IsDateString, IsNumber, IsArray, ValidateNested, Min } from 'class-validator';
+﻿import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsUUID,
+  IsDateString,
+  IsNumber,
+  IsArray,
+  ValidateNested,
+  Min,
+} from 'class-validator';
+import { IsNotEmpty } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { PriceListType } from '@prisma/client';
 
 export class CreatePriceListItemDto {
   @ApiProperty() @IsUUID() productId!: string;
-  @ApiProperty() @IsUUID() unitId!: string;
+  @ApiProperty() @IsString() @IsNotEmpty() unitId!: string;
   @ApiProperty() @IsNumber() price!: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) minimumQuantity?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) maximumQuantity?: number;
@@ -20,6 +31,9 @@ export class CreatePriceListDto {
   @ApiPropertyOptional() @IsOptional() @IsDateString() effectiveTo?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() notes?: string;
   @ApiPropertyOptional({ type: [CreatePriceListItemDto] })
-  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => CreatePriceListItemDto)
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreatePriceListItemDto)
   items?: CreatePriceListItemDto[];
 }

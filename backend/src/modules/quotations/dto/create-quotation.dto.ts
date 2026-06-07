@@ -1,4 +1,14 @@
-﻿import { IsString, IsOptional, IsEnum, IsUUID, IsDateString, IsNumber, IsArray, ValidateNested } from 'class-validator';
+﻿import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsUUID,
+  IsDateString,
+  IsNumber,
+  IsArray,
+  ValidateNested,
+} from 'class-validator';
+import { IsNotEmpty } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { QuotationType } from '@prisma/client';
@@ -7,7 +17,7 @@ export class CreateQuotationLineDto {
   @ApiProperty() @IsUUID() productId!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
   @ApiProperty() @IsNumber() quantity!: number;
-  @ApiProperty() @IsUUID() unitId!: string;
+  @ApiProperty() @IsString() @IsNotEmpty() unitId!: string;
   @ApiProperty() @IsNumber() unitPrice!: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() discountAmount?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() taxAmount?: number;
@@ -25,6 +35,8 @@ export class CreateQuotationDto {
   @ApiProperty() @IsString() currency!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() notes?: string;
   @ApiProperty({ type: [CreateQuotationLineDto] })
-  @IsArray() @ValidateNested({ each: true }) @Type(() => CreateQuotationLineDto)
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateQuotationLineDto)
   lines!: CreateQuotationLineDto[];
 }

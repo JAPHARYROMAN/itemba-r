@@ -1,4 +1,5 @@
 ﻿import { IsString, IsOptional, IsUUID, IsDateString, IsNumber } from 'class-validator';
+import { IsNotEmpty } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateProductBatchDto {
@@ -11,7 +12,7 @@ export class CreateProductBatchDto {
   @ApiPropertyOptional() @IsOptional() @IsDateString() expiryDate?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() receivedDate?: string;
   @ApiProperty() @IsNumber() initialQuantity!: number;
-  @ApiProperty() @IsUUID() unitId!: string;
+  @ApiProperty() @IsString() @IsNotEmpty() unitId!: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() unitCost?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() notes?: string;
 }
