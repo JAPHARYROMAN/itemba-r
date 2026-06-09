@@ -6,7 +6,7 @@ export function GET() {
       name: 'Westsides Mobile POS',
       short_name: 'Westsides POS',
       description: 'Minimal Westsides counter-sale entry connected to ITEMBA-R.',
-      start_url: '/westsides/mobile-pos',
+      start_url: '/operations/mobile-pos',
       scope: '/',
       display: 'standalone',
       background_color: '#07111f',

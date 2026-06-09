@@ -47,7 +47,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
-  const mobilePosStandalone = pathname?.startsWith('/westsides/mobile-pos');
+  const mobilePosStandalone =
+    pathname?.startsWith('/westsides/mobile-pos') || pathname?.startsWith('/operations/mobile-pos');
 
   useEffect(() => {
     initTheme();

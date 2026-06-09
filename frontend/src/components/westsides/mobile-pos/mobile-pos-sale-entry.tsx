@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   Btn,
@@ -689,7 +690,7 @@ export function MobilePosSaleEntry() {
   if (!canUseMobilePos) {
     return (
       <div className="p-4 sm:p-6">
-        <PageHeader title="Mobile POS" subtitle="Westsides sale entry" />
+        <PageHeader title="Operations Mobile POS" subtitle="Westsides sale entry" />
         <PermissionDeniedState description="You need sales.create or pos.create to enter POS sales." />
       </div>
     );
@@ -698,13 +699,33 @@ export function MobilePosSaleEntry() {
   return (
     <div className="mx-auto max-w-md p-3 pb-6 sm:max-w-5xl sm:p-6">
       <PageHeader
-        title="Mobile POS"
-        subtitle="Westsides sale entry"
+        title="Operations Mobile POS"
+        subtitle="Westsides counter sales through Operations Sales Orders"
         actions={
-          <Btn variant="secondary" size="sm" onClick={() => setSettingsOpen(true)}>
-            Settings
-          </Btn>
+          <>
+            <Link
+              href="/operations/sales-orders"
+              className="hidden min-h-9 items-center rounded-lg border px-3 text-[12px] font-semibold sm:inline-flex"
+              style={{
+                borderColor: 'var(--aurora-border)',
+                color: 'var(--aurora-text-secondary)',
+              }}
+            >
+              Sales Orders
+            </Link>
+            <Btn variant="secondary" size="sm" onClick={() => setSettingsOpen(true)}>
+              Settings
+            </Btn>
+          </>
         }
+      />
+
+      <OperationsSalesOrderOnboarding
+        settingsReady={settingsReady}
+        customerReady={settingsReady || Boolean(customerId || walkInName.trim())}
+        receiptReady={receiptAccountReady}
+        linesReady={cart.length > 0}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
 
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_20rem]">
@@ -749,7 +770,7 @@ export function MobilePosSaleEntry() {
                   className="mb-1 block text-[12px] font-medium"
                   style={{ color: 'var(--aurora-text-secondary)' }}
                 >
-                  Product
+                  Find Product
                 </label>
                 <input
                   ref={searchInputRef}
@@ -761,7 +782,7 @@ export function MobilePosSaleEntry() {
                   }}
                   onKeyDown={handleSearchKey}
                   disabled={!settingsReady || Boolean(confirmed)}
-                  placeholder={settingsReady ? 'Search or scan' : 'Pick settings'}
+                  placeholder={settingsReady ? 'Search name, code, SKU, barcode' : 'Pick settings'}
                   autoComplete="off"
                 />
                 {(productResults.length > 0 || productSearching) && (
@@ -1025,6 +1046,85 @@ function SettingValue({ label, value }: { label: string; value?: string }) {
         {value || '-'}
       </div>
     </div>
+  );
+}
+
+function OperationsSalesOrderOnboarding({
+  settingsReady,
+  customerReady,
+  receiptReady,
+  linesReady,
+  onOpenSettings,
+}: {
+  settingsReady: boolean;
+  customerReady: boolean;
+  receiptReady: boolean;
+  linesReady: boolean;
+  onOpenSettings: () => void;
+}) {
+  const steps = [
+    {
+      label: 'Scope',
+      detail: 'Company, division, and branch',
+      done: settingsReady,
+    },
+    {
+      label: 'Customer & receipt',
+      detail: 'Walk-in/customer and receipt account',
+      done: customerReady && receiptReady,
+    },
+    {
+      label: 'Products & stock',
+      detail: 'Search products, verify available stock',
+      done: linesReady,
+    },
+  ];
+
+  return (
+    <Card padding="sm" className="mb-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Operations sales order flow
+          </div>
+          <p className="mt-1 text-[12px]" style={{ color: 'var(--aurora-text-secondary)' }}>
+            This POS follows the same setup path as Operations &gt; Sales Orders, then posts a paid
+            cash sale.
+          </p>
+        </div>
+        <Btn variant="ghost" size="xs" onClick={onOpenSettings}>
+          Scope
+        </Btn>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {steps.map((step, index) => (
+          <div
+            key={step.label}
+            className="rounded-lg border px-3 py-2"
+            style={{
+              borderColor: step.done ? 'rgba(16, 185, 129, 0.35)' : 'var(--aurora-border)',
+              background: step.done ? 'rgba(16, 185, 129, 0.08)' : 'var(--aurora-bg-subtle)',
+            }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[12px] font-semibold">
+                {index + 1}. {step.label}
+              </span>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                  step.done ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                }`}
+              >
+                {step.done ? 'Ready' : 'Open'}
+              </span>
+            </div>
+            <div className="mt-1 text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+              {step.detail}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 

@@ -255,6 +255,12 @@ const NAV: NavItem[] = [
         permission: 'sales.view',
       },
       {
+        href: '/operations/mobile-pos',
+        label: 'Mobile POS',
+        iconKey: 'creditCard',
+        permission: 'sales.create',
+      },
+      {
         href: '/operations/purchase-orders',
         label: 'Purchase Orders',
         iconKey: 'creditCard',

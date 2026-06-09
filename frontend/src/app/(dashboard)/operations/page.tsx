@@ -170,6 +170,26 @@ export default function OperationsDashboardPage() {
         <PageHeader
           title="Operations Dashboard"
           subtitle="Overview of customers, products, inventory, sales, and purchases"
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href="/operations/mobile-pos"
+                className="inline-flex min-h-9 items-center rounded-lg bg-brand-600 px-3 text-[12px] font-semibold text-white transition hover:bg-brand-700"
+              >
+                Mobile POS
+              </a>
+              <a
+                href="/operations/sales-orders"
+                className="inline-flex min-h-9 items-center rounded-lg border px-3 text-[12px] font-semibold transition"
+                style={{
+                  borderColor: 'var(--aurora-border)',
+                  color: 'var(--aurora-text-secondary)',
+                }}
+              >
+                Sales Orders
+              </a>
+            </div>
+          }
         />
         <select
           value={companyId}
