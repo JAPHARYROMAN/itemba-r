@@ -17,6 +17,7 @@ export class ProductsController {
   @Get()
   @RequireAnyPermissions(
     'products.view',
+    'pos.create',
     'sales.create',
     'purchases.create',
     'inventory.view',
@@ -36,6 +37,7 @@ export class ProductsController {
   @Get(':id')
   @RequireAnyPermissions(
     'products.view',
+    'pos.create',
     'sales.create',
     'purchases.create',
     'inventory.view',

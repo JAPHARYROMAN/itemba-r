@@ -430,6 +430,70 @@ export class SalesOrdersService {
       .slice(0, max);
   }
 
+  async mobilePosBootstrap(user: AuthUser) {
+    const company = await this.findWestsidesCompany();
+    await this.companyScope.assertCanAccessCompany(user, company.id, AccessLevel.READ);
+
+    const [divisions, branches, customers] = await Promise.all([
+      this.prisma.division.findMany({
+        where: { companyId: company.id, deletedAt: null, isActive: true },
+        select: { id: true, name: true, code: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.branch.findMany({
+        where: { division: { companyId: company.id }, deletedAt: null, isActive: true },
+        select: { id: true, name: true, code: true, divisionId: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.customer.findMany({
+        where: { companyId: company.id, deletedAt: null, status: 'ACTIVE' },
+        select: {
+          id: true,
+          name: true,
+          customerCode: true,
+          divisionId: true,
+          branchId: true,
+          customerType: true,
+        },
+        orderBy: { name: 'asc' },
+        take: 500,
+      }),
+    ]);
+
+    return {
+      company,
+      divisions,
+      branches,
+      customers,
+      defaults: {
+        currency: CurrencyCode.TZS,
+        salesType: SalesType.CASH_SALE,
+        paymentMethod: SalesPaymentMethod.CASH,
+      },
+    };
+  }
+
+  async mobilePosQuickSale(dto: CreateSalesOrderDto, user: AuthUser) {
+    const company = await this.findWestsidesCompany();
+    if (dto.companyId !== company.id) {
+      throw new BadRequestException('Mobile POS is restricted to Westsides Company Ltd');
+    }
+    if (dto.paymentMethod === SalesPaymentMethod.CREDIT) {
+      throw new BadRequestException('Mobile POS only supports paid counter sales');
+    }
+
+    const safeDto: CreateSalesOrderDto = {
+      ...dto,
+      companyId: company.id,
+      salesType: SalesType.CASH_SALE,
+      currency: dto.currency ?? CurrencyCode.TZS,
+      notes: [dto.notes, 'Created from Westsides Mobile POS'].filter(Boolean).join('\n'),
+      paymentMethod: dto.paymentMethod ?? SalesPaymentMethod.CASH,
+    };
+
+    return this.quickSale(safeDto, user);
+  }
+
   async create(dto: CreateSalesOrderDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const paymentMethod = normalizePaymentMethodForSalesType(dto.salesType, dto.paymentMethod);
@@ -508,6 +572,15 @@ export class SalesOrdersService {
     });
 
     return this.findOne(record.id, user);
+  }
+
+  private async findWestsidesCompany() {
+    const company = await this.prisma.company.findFirst({
+      where: { code: 'WESTSIDES', deletedAt: null },
+      select: { id: true, name: true, code: true },
+    });
+    if (!company) throw new NotFoundException('Westsides Company Ltd is not configured');
+    return company;
   }
 
   async update(id: string, dto: UpdateSalesOrderDto, user: AuthUser) {

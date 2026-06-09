@@ -1,18 +1,12 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Body,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { SalesOrdersService } from './sales-orders.service';
 import { CreateSalesOrderDto } from './dto/create-sales-order.dto';
 import { UpdateSalesOrderDto } from './dto/update-sales-order.dto';
 import { QuerySalesOrderDto } from './dto/query-sales-order.dto';
-import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import {
+  RequireAnyPermissions,
+  RequirePermissions,
+} from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('sales-orders')
@@ -26,9 +20,21 @@ export class SalesOrdersController {
   }
 
   @Get('receipt-accounts')
-  @RequirePermissions('sales.create')
+  @RequireAnyPermissions('pos.create', 'sales.create')
   findReceiptAccounts(@Query() query: any, @CurrentUser() user: AuthUser) {
     return this.service.findReceiptAccounts(query, user);
+  }
+
+  @Get('mobile-pos/bootstrap')
+  @RequireAnyPermissions('pos.view', 'sales.create')
+  mobilePosBootstrap(@CurrentUser() user: AuthUser) {
+    return this.service.mobilePosBootstrap(user);
+  }
+
+  @Post('mobile-pos/quick-sale')
+  @RequireAnyPermissions('pos.create', 'sales.create')
+  mobilePosQuickSale(@Body() dto: CreateSalesOrderDto, @CurrentUser() user: AuthUser) {
+    return this.service.mobilePosQuickSale(dto, user);
   }
 
   @Get(':id')
@@ -55,11 +61,7 @@ export class SalesOrdersController {
 
   @Patch(':id')
   @RequirePermissions('sales.create')
-  update(
-    @Param('id') id: string,
-    @Body() dto: UpdateSalesOrderDto,
-    @CurrentUser() user: AuthUser,
-  ) {
+  update(@Param('id') id: string, @Body() dto: UpdateSalesOrderDto, @CurrentUser() user: AuthUser) {
     return this.service.update(id, dto, user);
   }
 

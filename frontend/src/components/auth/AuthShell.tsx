@@ -1,5 +1,11 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import type { ReactNode } from 'react';
+import { InstallQrCode } from '@/components/westsides/mobile-pos-install/InstallQrCode';
+import {
+  WESTSIDES_MOBILE_POS_INSTALL_PATH,
+  WESTSIDES_MOBILE_POS_NAME,
+} from '@/components/westsides/mobile-pos-install/routes';
 
 interface AuthShellProps {
   eyebrow: string;
@@ -13,6 +19,9 @@ const ACCESS_POINTS = ['Governance', 'Operations', 'Finance', 'Documents'];
 const WEBSITE_URL = process.env.NEXT_PUBLIC_WEBSITE_URL ?? 'https://itembagrouptz.com';
 
 export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthShellProps) {
+  const showMobilePosInstall =
+    eyebrow.toLowerCase().includes('secure workspace') || title.toLowerCase().includes('sign in');
+
   return (
     <main className="auth-light min-h-screen bg-[#f7f8f6] text-slate-950">
       <div className="grid min-h-screen lg:grid-cols-[minmax(420px,0.92fr)_minmax(460px,1.08fr)]">
@@ -20,9 +29,11 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
           <div>
             <Link href="/login" className="inline-flex items-center gap-3">
               <span className="flex h-16 w-16 items-center justify-center rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
-                <img
+                <Image
                   src="/brand/itemba-group-logo.png"
                   alt="Itemba Group"
+                  width={64}
+                  height={64}
                   className="h-full w-full object-contain"
                 />
               </span>
@@ -46,6 +57,32 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
           </div>
 
           <div className="mt-10 space-y-5">
+            {showMobilePosInstall && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-4">
+                <div className="flex items-start gap-3">
+                  <InstallQrCode size={88} className="h-[88px] w-[88px] flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                      Counter install
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-slate-900">
+                      {WESTSIDES_MOBILE_POS_NAME}
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-slate-600">
+                      Scan this code or open the gateway to install the mobile POS, then sign in and
+                      launch the counter sale screen.
+                    </p>
+                    <Link
+                      href={WESTSIDES_MOBILE_POS_INSTALL_PATH}
+                      className="mt-2 inline-flex text-xs font-semibold text-emerald-700 underline-offset-4 hover:text-emerald-800 hover:underline"
+                    >
+                      Open install gateway
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
               {ACCESS_POINTS.map((item) => (
                 <div
