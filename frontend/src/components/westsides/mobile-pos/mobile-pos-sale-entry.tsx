@@ -120,7 +120,53 @@ interface ConfirmedOrder {
   id?: string;
   salesOrderNumber?: string;
   orderNumber?: string;
+  orderDate?: string | null;
+  customerName?: string | null;
+  salesType?: string | null;
+  paymentMethod?: string | null;
+  paymentReference?: string | null;
+  currency?: string | null;
+  subtotal?: number | string | null;
+  discountAmount?: number | string | null;
+  taxAmount?: number | string | null;
   totalAmount?: number | string | null;
+  paidAmount?: number | string | null;
+  outstandingAmount?: number | string | null;
+  company?: {
+    name?: string | null;
+    code?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    website?: string | null;
+  } | null;
+  branch?: {
+    name?: string | null;
+    code?: string | null;
+    address?: string | null;
+    phone?: string | null;
+  } | null;
+  customer?: { name?: string | null } | null;
+  cashAccount?: { accountName?: string | null; accountType?: string | null } | null;
+  createdBy?: { fullName?: string | null } | null;
+  confirmedBy?: { fullName?: string | null } | null;
+  lines?: ConfirmedOrderLine[];
+}
+
+interface ConfirmedOrderLine {
+  id?: string;
+  description?: string | null;
+  quantity?: number | string | null;
+  qty?: number | string | null;
+  unitPrice?: number | string | null;
+  discountAmount?: number | string | null;
+  taxAmount?: number | string | null;
+  lineTotal?: number | string | null;
+  product?: {
+    name?: string | null;
+    sku?: string | null;
+    productCode?: string | null;
+  } | null;
+  unit?: { name?: string | null; symbol?: string | null } | null;
 }
 
 interface MobilePosBootstrap {
@@ -190,6 +236,15 @@ function formatQty(value: number | string | null | undefined) {
     minimumFractionDigits: 0,
     maximumFractionDigits: 4,
   }).format(normalizeNumber(value));
+}
+
+function formatDateTime(value: string | null | undefined) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return value ?? '-';
+  return new Intl.DateTimeFormat('en-TZ', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
 }
 
 function normalizeNumber(value: number | string | null | undefined) {
@@ -303,6 +358,185 @@ function employeeOptionLabel(employee: Employee) {
   return `${employee.fullName ?? employee.employeeCode ?? employee.id}${ratePct}`;
 }
 
+function receiptNumber(order: ConfirmedOrder) {
+  return order.salesOrderNumber ?? order.orderNumber ?? order.id ?? 'Receipt';
+}
+
+function receiptCustomerName(order: ConfirmedOrder) {
+  return order.customer?.name ?? order.customerName ?? 'Walk-in customer';
+}
+
+function receiptCurrency(order: ConfirmedOrder, fallback = 'TZS') {
+  return order.currency ?? fallback;
+}
+
+function receiptLines(order: ConfirmedOrder, fallbackCart: CartLine[]): ConfirmedOrderLine[] {
+  if (order.lines?.length) return order.lines;
+  return fallbackCart.map((line) => ({
+    id: line.productId,
+    description: line.productName,
+    quantity: line.qty,
+    unitPrice: line.unitPrice,
+    lineTotal: line.qty * line.unitPrice,
+    product: { name: line.productName, sku: line.sku },
+    unit: { symbol: line.unitSymbol },
+  }));
+}
+
+function receiptLineName(line: ConfirmedOrderLine) {
+  return line.description || line.product?.name || 'Item';
+}
+
+function receiptLineCode(line: ConfirmedOrderLine) {
+  return line.product?.sku ?? line.product?.productCode ?? '';
+}
+
+function receiptLineQty(line: ConfirmedOrderLine) {
+  return line.quantity ?? line.qty ?? 0;
+}
+
+function receiptLineTotal(line: ConfirmedOrderLine) {
+  const recorded = line.lineTotal;
+  if (recorded != null) return recorded;
+  return normalizeNumber(receiptLineQty(line)) * normalizeNumber(line.unitPrice);
+}
+
+function escapeHtml(value: string | number | null | undefined) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function receiptPlainText(
+  order: ConfirmedOrder,
+  lines: ConfirmedOrderLine[],
+  fallbackCurrency = 'TZS',
+) {
+  const currency = receiptCurrency(order, fallbackCurrency);
+  const number = receiptNumber(order);
+  const company = order.company?.name ?? 'WESTSIDES COMPANY LTD';
+  const branch = order.branch?.name ? ` - ${order.branch.name}` : '';
+  const itemLines = lines
+    .map((line) => {
+      const qty = formatQty(receiptLineQty(line));
+      const unit = line.unit?.symbol ?? line.unit?.name ?? '';
+      const total = `${currency} ${formatMoney(receiptLineTotal(line))}`;
+      return `${receiptLineName(line)}${receiptLineCode(line) ? ` (${receiptLineCode(line)})` : ''} x ${qty}${unit ? ` ${unit}` : ''} - ${total}`;
+    })
+    .join('\n');
+
+  return [
+    `${company}${branch}`,
+    `Receipt: ${number}`,
+    `Customer: ${receiptCustomerName(order)}`,
+    `Date: ${formatDateTime(order.orderDate)}`,
+    '',
+    itemLines,
+    '',
+    `Subtotal: ${currency} ${formatMoney(order.subtotal ?? order.totalAmount)}`,
+    `Discount: ${currency} ${formatMoney(order.discountAmount)}`,
+    `Tax: ${currency} ${formatMoney(order.taxAmount)}`,
+    `Total: ${currency} ${formatMoney(order.totalAmount)}`,
+    `Paid: ${currency} ${formatMoney(order.paidAmount ?? order.totalAmount)}`,
+    `Payment: ${formatEnumLabel(order.paymentMethod ?? 'CASH')}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function receiptHtml(order: ConfirmedOrder, lines: ConfirmedOrderLine[], fallbackCurrency = 'TZS') {
+  const currency = receiptCurrency(order, fallbackCurrency);
+  const number = receiptNumber(order);
+  const company = order.company?.name ?? 'WESTSIDES COMPANY LTD';
+  const branch = order.branch?.name ?? '';
+  const generatedAt = formatDateTime(order.orderDate);
+  const rows = lines
+    .map((line) => {
+      const name = receiptLineName(line);
+      const code = receiptLineCode(line);
+      const qty = formatQty(receiptLineQty(line));
+      const unit = line.unit?.symbol ?? line.unit?.name ?? '';
+      const unitPrice = `${currency} ${formatMoney(line.unitPrice)}`;
+      const total = `${currency} ${formatMoney(receiptLineTotal(line))}`;
+      return `
+        <tr>
+          <td>
+            <strong>${escapeHtml(name)}</strong>
+            ${code ? `<div class="muted">${escapeHtml(code)}</div>` : ''}
+          </td>
+          <td class="num">${escapeHtml(qty)}${unit ? ` ${escapeHtml(unit)}` : ''}</td>
+          <td class="num">${escapeHtml(unitPrice)}</td>
+          <td class="num">${escapeHtml(total)}</td>
+        </tr>`;
+    })
+    .join('');
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(number)} Receipt</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f3f4f6; color: #111827; font-family: Arial, sans-serif; }
+    .receipt { width: min(420px, 100%); margin: 0 auto; background: #fff; padding: 18px; }
+    .head { text-align: center; border-bottom: 2px solid #111827; padding-bottom: 12px; }
+    .brand { font-size: 18px; font-weight: 800; letter-spacing: .02em; }
+    .muted { color: #6b7280; font-size: 11px; margin-top: 2px; }
+    .meta { margin: 12px 0; display: grid; gap: 5px; font-size: 12px; }
+    .row { display: flex; justify-content: space-between; gap: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { text-align: left; border-bottom: 1px solid #d1d5db; padding: 7px 0; color: #374151; }
+    td { border-bottom: 1px solid #e5e7eb; padding: 8px 0; vertical-align: top; }
+    .num { text-align: right; white-space: nowrap; }
+    .totals { margin-top: 12px; border-top: 2px solid #111827; padding-top: 8px; font-size: 13px; }
+    .total { font-size: 16px; font-weight: 800; }
+    .foot { margin-top: 16px; text-align: center; font-size: 11px; color: #6b7280; }
+    @page { margin: 8mm; }
+    @media print { body { background: #fff; } .receipt { width: 100%; padding: 0; } }
+  </style>
+</head>
+<body>
+  <main class="receipt">
+    <section class="head">
+      <div class="brand">${escapeHtml(company)}</div>
+      ${branch ? `<div class="muted">${escapeHtml(branch)}</div>` : ''}
+      ${order.branch?.phone ? `<div class="muted">${escapeHtml(order.branch.phone)}</div>` : ''}
+      ${order.company?.phone ? `<div class="muted">${escapeHtml(order.company.phone)}</div>` : ''}
+    </section>
+    <section class="meta">
+      <div class="row"><span>Receipt</span><strong>${escapeHtml(number)}</strong></div>
+      <div class="row"><span>Date</span><strong>${escapeHtml(generatedAt)}</strong></div>
+      <div class="row"><span>Customer</span><strong>${escapeHtml(receiptCustomerName(order))}</strong></div>
+      <div class="row"><span>Payment</span><strong>${escapeHtml(formatEnumLabel(order.paymentMethod ?? 'CASH'))}</strong></div>
+      ${order.cashAccount?.accountName ? `<div class="row"><span>Account</span><strong>${escapeHtml(order.cashAccount.accountName)}</strong></div>` : ''}
+    </section>
+    <table>
+      <thead>
+        <tr><th>Item</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Total</th></tr>
+      </thead>
+      <tbody>${rows || '<tr><td colspan="4">No items</td></tr>'}</tbody>
+    </table>
+    <section class="totals">
+      <div class="row"><span>Subtotal</span><strong>${escapeHtml(currency)} ${escapeHtml(formatMoney(order.subtotal ?? order.totalAmount))}</strong></div>
+      <div class="row"><span>Discount</span><strong>${escapeHtml(currency)} ${escapeHtml(formatMoney(order.discountAmount))}</strong></div>
+      <div class="row"><span>Tax</span><strong>${escapeHtml(currency)} ${escapeHtml(formatMoney(order.taxAmount))}</strong></div>
+      <div class="row total"><span>Total</span><strong>${escapeHtml(currency)} ${escapeHtml(formatMoney(order.totalAmount))}</strong></div>
+      <div class="row"><span>Paid</span><strong>${escapeHtml(currency)} ${escapeHtml(formatMoney(order.paidAmount ?? order.totalAmount))}</strong></div>
+    </section>
+    <section class="foot">
+      Thank you for your business.<br />
+      Generated by ITEMBA-R Operations Mobile POS
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
 function getSettingsKey(userId: string) {
   return `${SETTINGS_KEY}.${userId}`;
 }
@@ -362,6 +596,7 @@ export function MobilePosSaleEntry() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState<ConfirmedOrder | null>(null);
+  const [receiptMessage, setReceiptMessage] = useState('');
 
   useEffect(() => {
     if (authLoading) return;
@@ -612,6 +847,10 @@ export function MobilePosSaleEntry() {
     const subtotal = cart.reduce((sum, line) => sum + line.qty * line.unitPrice, 0);
     return { subtotal, total: subtotal };
   }, [cart]);
+  const confirmedReceiptLines = useMemo(
+    () => (confirmed ? receiptLines(confirmed, cart) : []),
+    [cart, confirmed],
+  );
 
   const selectedCompany = companies.find((company) => company.id === settings.companyId);
   const selectedDivision = divisions.find((division) => division.id === settings.divisionId);
@@ -646,6 +885,7 @@ export function MobilePosSaleEntry() {
     setPendingQty(1);
     setError('');
     setConfirmed(null);
+    setReceiptMessage('');
     setSettings((current) => ({
       ...current,
       orderDate: todayIsoDate(),
@@ -788,10 +1028,71 @@ export function MobilePosSaleEntry() {
 
       const order = await createQuickSale(body);
       setConfirmed(order);
+      setReceiptMessage('Receipt ready.');
     } catch (checkoutError) {
       setError(checkoutError instanceof Error ? checkoutError.message : 'Checkout failed.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const printReceipt = () => {
+    if (!confirmed) return;
+    setReceiptMessage('');
+    const html = receiptHtml(confirmed, confirmedReceiptLines, settings.currency);
+    const popup = window.open('', '_blank', 'noopener,noreferrer,width=420,height=720');
+    if (!popup) {
+      setReceiptMessage('Allow pop-ups to print this receipt.');
+      return;
+    }
+    popup.document.write(html);
+    popup.document.close();
+    popup.focus();
+    window.setTimeout(() => popup.print(), 250);
+  };
+
+  const downloadReceipt = () => {
+    if (!confirmed) return;
+    setReceiptMessage('');
+    const number = receiptNumber(confirmed).replace(/[^\w.-]+/g, '-');
+    const html = receiptHtml(confirmed, confirmedReceiptLines, settings.currency);
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${number}-receipt.html`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    setReceiptMessage('Receipt downloaded.');
+  };
+
+  const shareReceipt = async () => {
+    if (!confirmed) return;
+    setReceiptMessage('');
+    const text = receiptPlainText(confirmed, confirmedReceiptLines, settings.currency);
+    const url = confirmed.id
+      ? `${window.location.origin}/operations/sales-orders/${confirmed.id}/print`
+      : undefined;
+    try {
+      if (navigator.share) {
+        const sharePayload: ShareData = {
+          title: `${receiptNumber(confirmed)} receipt`,
+          text,
+        };
+        if (url) sharePayload.url = url;
+        await navigator.share({
+          ...sharePayload,
+        });
+        setReceiptMessage('Receipt shared.');
+        return;
+      }
+      await navigator.clipboard.writeText(url ? `${text}\n\n${url}` : text);
+      setReceiptMessage('Receipt copied to clipboard.');
+    } catch (shareError) {
+      if (shareError instanceof DOMException && shareError.name === 'AbortError') return;
+      setReceiptMessage('Could not share receipt. Try download or print.');
     }
   };
 
@@ -861,20 +1162,16 @@ export function MobilePosSaleEntry() {
           )}
 
           {confirmed && (
-            <Card padding="sm" className="border-emerald-200 bg-emerald-50">
-              <div className="text-[12px] font-medium uppercase tracking-wide text-emerald-700">
-                Sale posted
-              </div>
-              <div className="mt-1 text-[15px] font-semibold">
-                {confirmed.salesOrderNumber ?? confirmed.orderNumber ?? confirmed.id ?? 'Complete'}
-              </div>
-              <div className="mt-1 text-[13px] text-emerald-700">
-                TZS {formatMoney(confirmed.totalAmount ?? totals.total)}
-              </div>
-              <Btn className="mt-3 w-full" variant="success" onClick={resetSaleFields}>
-                New Sale
-              </Btn>
-            </Card>
+            <MobileReceiptCard
+              order={confirmed}
+              lines={confirmedReceiptLines}
+              fallbackCurrency={settings.currency}
+              message={receiptMessage}
+              onPrint={printReceipt}
+              onShare={shareReceipt}
+              onDownload={downloadReceipt}
+              onNewSale={resetSaleFields}
+            />
           )}
 
           <Card padding="sm" className="space-y-3">
@@ -1108,6 +1405,176 @@ export function MobilePosSaleEntry() {
           if (scopeChanged) resetForScopeChange();
         }}
       />
+    </div>
+  );
+}
+
+function MobileReceiptCard({
+  order,
+  lines,
+  fallbackCurrency,
+  message,
+  onPrint,
+  onShare,
+  onDownload,
+  onNewSale,
+}: {
+  order: ConfirmedOrder;
+  lines: ConfirmedOrderLine[];
+  fallbackCurrency: string;
+  message: string;
+  onPrint: () => void;
+  onShare: () => void;
+  onDownload: () => void;
+  onNewSale: () => void;
+}) {
+  const currency = receiptCurrency(order, fallbackCurrency);
+  const number = receiptNumber(order);
+  const customerName = receiptCustomerName(order);
+  const total =
+    order.totalAmount ??
+    lines.reduce((sum, line) => sum + normalizeNumber(receiptLineTotal(line)), 0);
+  const paid = order.paidAmount ?? total;
+
+  return (
+    <Card padding="sm" className="border-emerald-200 bg-emerald-50">
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[12px] font-semibold uppercase tracking-wide text-emerald-700">
+            Receipt ready
+          </div>
+          <div className="mt-0.5 text-[12px] text-emerald-800">
+            Print, share, or download before starting the next sale.
+          </div>
+        </div>
+        <div className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+          Posted
+        </div>
+      </div>
+      <div className="rounded-xl bg-white p-3 shadow-sm">
+        <div className="border-b border-slate-900 pb-3 text-center">
+          <div className="text-[16px] font-extrabold tracking-wide">
+            {order.company?.name ?? 'WESTSIDES COMPANY LTD'}
+          </div>
+          <div className="mt-1 text-[11px] text-slate-500">
+            {[order.branch?.name, order.branch?.phone ?? order.company?.phone]
+              .filter(Boolean)
+              .join(' - ')}
+          </div>
+        </div>
+
+        <div className="mt-3 space-y-1 text-[12px]">
+          <ReceiptMetaRow label="Receipt" value={number} strong />
+          <ReceiptMetaRow label="Date" value={formatDateTime(order.orderDate)} />
+          <ReceiptMetaRow label="Customer" value={customerName} />
+          <ReceiptMetaRow label="Payment" value={formatEnumLabel(order.paymentMethod ?? 'CASH')} />
+          {order.cashAccount?.accountName && (
+            <ReceiptMetaRow label="Account" value={order.cashAccount.accountName} />
+          )}
+        </div>
+
+        <div className="mt-3 border-y border-slate-200">
+          {lines.length === 0 ? (
+            <div className="py-4 text-center text-[12px] text-slate-500">No items attached.</div>
+          ) : (
+            lines.map((line, index) => {
+              const code = receiptLineCode(line);
+              const unit = line.unit?.symbol ?? line.unit?.name ?? '';
+              return (
+                <div
+                  key={line.id ?? `${receiptLineName(line)}-${index}`}
+                  className="border-b border-slate-100 py-2 last:border-b-0"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-semibold text-slate-950">
+                        {receiptLineName(line)}
+                      </div>
+                      {code && <div className="font-mono text-[10px] text-slate-500">{code}</div>}
+                    </div>
+                    <div className="whitespace-nowrap text-right text-[13px] font-semibold text-slate-950">
+                      {currency} {formatMoney(receiptLineTotal(line))}
+                    </div>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>
+                      {formatQty(receiptLineQty(line))}
+                      {unit ? ` ${unit}` : ''} x {currency} {formatMoney(line.unitPrice)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div className="mt-3 space-y-1 text-[12px]">
+          <ReceiptMetaRow
+            label="Subtotal"
+            value={`${currency} ${formatMoney(order.subtotal ?? total)}`}
+          />
+          <ReceiptMetaRow
+            label="Discount"
+            value={`${currency} ${formatMoney(order.discountAmount)}`}
+          />
+          <ReceiptMetaRow label="Tax" value={`${currency} ${formatMoney(order.taxAmount)}`} />
+          <ReceiptMetaRow label="Total" value={`${currency} ${formatMoney(total)}`} strong />
+          <ReceiptMetaRow label="Paid" value={`${currency} ${formatMoney(paid)}`} />
+        </div>
+
+        <div className="mt-4 text-center text-[11px] text-slate-500">
+          Thank you for your business.
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <Btn variant="secondary" size="sm" onClick={onPrint}>
+          Print
+        </Btn>
+        <Btn variant="secondary" size="sm" onClick={onShare}>
+          Share
+        </Btn>
+        <Btn variant="secondary" size="sm" onClick={onDownload}>
+          Download
+        </Btn>
+      </div>
+      {order.id && (
+        <Link
+          href={`/operations/sales-orders/${order.id}/print`}
+          className="mt-2 flex min-h-10 items-center justify-center rounded-lg border px-3 text-[12px] font-semibold"
+          style={{
+            borderColor: 'var(--aurora-border)',
+            color: 'var(--aurora-text-secondary)',
+          }}
+        >
+          Open full receipt
+        </Link>
+      )}
+      {message && (
+        <div className="mt-2 rounded-lg bg-white px-3 py-2 text-center text-[12px] text-emerald-700">
+          {message}
+        </div>
+      )}
+      <Btn className="mt-3 w-full" variant="success" onClick={onNewSale}>
+        New Sale
+      </Btn>
+    </Card>
+  );
+}
+
+function ReceiptMetaRow({
+  label,
+  value,
+  strong,
+}: {
+  label: string;
+  value?: string | null;
+  strong?: boolean;
+}) {
+  return (
+    <div className={`flex items-center justify-between gap-4 ${strong ? 'font-bold' : ''}`}>
+      <span className="text-slate-500">{label}</span>
+      <span className="text-right text-slate-950">{value || '-'}</span>
     </div>
   );
 }
