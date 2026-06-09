@@ -175,6 +175,38 @@ function accountOptionLabel(account: CashAccount) {
   return `${account.accountName}${bankName} (${typeLabel}${currency})`;
 }
 
+function normalizeMatchText(value: string | null | undefined) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function receiptAccountScore(account: CashAccount, branch?: Branch | null) {
+  let score = 0;
+  const accountText = normalizeMatchText(account.accountName);
+  const branchName = normalizeMatchText(branch?.name);
+  const branchCode = normalizeMatchText(branch?.code);
+
+  if (account.accountType === 'CASH_ON_HAND') score -= 30;
+  if (account.accountType === 'PETTY_CASH') score -= 20;
+  if (accountText.includes('cash')) score -= 10;
+  if (branchName && accountText.includes(branchName)) score -= 40;
+  if (branchCode && accountText.includes(branchCode)) score -= 25;
+  if (branchName.includes('kisimani') && accountText.includes('kisimani')) score -= 60;
+  if (accountText.includes('default')) score -= 5;
+
+  return score;
+}
+
+function sortReceiptAccounts(accounts: CashAccount[], branch?: Branch | null) {
+  return [...accounts].sort((left, right) => {
+    const scoreDiff = receiptAccountScore(left, branch) - receiptAccountScore(right, branch);
+    if (scoreDiff !== 0) return scoreDiff;
+    return accountOptionLabel(left).localeCompare(accountOptionLabel(right));
+  });
+}
+
 const SETTINGS_KEY = 'itemba.quickSale.settings.v1';
 
 interface Settings {
@@ -593,17 +625,24 @@ export default function QuickSalePage() {
         : [],
     [branches, settings.divisionId],
   );
+  const selectedBranch = useMemo(
+    () => branches.find((branch) => branch.id === settings.branchId) ?? null,
+    [branches, settings.branchId],
+  );
   const allowedAccountTypes = useMemo(
     () => accountTypesForPaymentMethod(settings.paymentMethod),
     [settings.paymentMethod],
   );
   const selectableCashAccounts = useMemo(
     () =>
-      cashAccounts.filter(
-        (account) =>
-          account.isActive !== false && allowedAccountTypes.includes(account.accountType),
+      sortReceiptAccounts(
+        cashAccounts.filter(
+          (account) =>
+            account.isActive !== false && allowedAccountTypes.includes(account.accountType),
+        ),
+        selectedBranch,
       ),
-    [allowedAccountTypes, cashAccounts],
+    [allowedAccountTypes, cashAccounts, selectedBranch],
   );
 
   useEffect(() => {
@@ -612,6 +651,13 @@ export default function QuickSalePage() {
       !selectableCashAccounts.some((account) => account.id === settings.cashAccountId)
     ) {
       setSettings((current) => ({ ...current, cashAccountId: '' }));
+      return;
+    }
+    if (!settings.cashAccountId && selectableCashAccounts.length > 0) {
+      setSettings((current) => ({
+        ...current,
+        cashAccountId: selectableCashAccounts[0]!.id,
+      }));
     }
   }, [selectableCashAccounts, settings.cashAccountId]);
 

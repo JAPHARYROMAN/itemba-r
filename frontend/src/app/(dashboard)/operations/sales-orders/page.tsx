@@ -252,6 +252,38 @@ function accountOptionLabel(account: CashAccount) {
   return `${account.accountName}${bankName} (${typeLabel}${currency})`;
 }
 
+function normalizeMatchText(value: string | null | undefined) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function receiptAccountScore(account: CashAccount, branch?: Branch | null) {
+  let score = 0;
+  const accountText = normalizeMatchText(account.accountName);
+  const branchName = normalizeMatchText(branch?.name);
+  const branchCode = normalizeMatchText(branch?.code);
+
+  if (account.accountType === 'CASH_ON_HAND') score -= 30;
+  if (account.accountType === 'PETTY_CASH') score -= 20;
+  if (accountText.includes('cash')) score -= 10;
+  if (branchName && accountText.includes(branchName)) score -= 40;
+  if (branchCode && accountText.includes(branchCode)) score -= 25;
+  if (branchName.includes('kisimani') && accountText.includes('kisimani')) score -= 60;
+  if (accountText.includes('default')) score -= 5;
+
+  return score;
+}
+
+function sortReceiptAccounts(accounts: CashAccount[], branch?: Branch | null) {
+  return [...accounts].sort((left, right) => {
+    const scoreDiff = receiptAccountScore(left, branch) - receiptAccountScore(right, branch);
+    if (scoreDiff !== 0) return scoreDiff;
+    return accountOptionLabel(left).localeCompare(accountOptionLabel(right));
+  });
+}
+
 const BLANK_LINE = (): SalesOrderLine => ({
   productId: '',
   description: '',
@@ -398,6 +430,7 @@ function SalesOrderModal({
     }
 
     let cancelled = false;
+    setCashAccounts([]);
     backendList<CashAccount>('/sales-orders/receipt-accounts', {
       query: {
         companyId: form.companyId,
@@ -502,17 +535,23 @@ function SalesOrderModal({
   const branchOptions = form.divisionId
     ? branches.filter((branch) => branch.divisionId === form.divisionId)
     : [];
+  const selectedBranch = branches.find((branch) => branch.id === form.branchId) ?? null;
   const receiptAccounts =
     form.paymentMethod === 'CREDIT'
       ? []
-      : cashAccounts.filter((account) => account.isActive !== false);
+      : sortReceiptAccounts(
+          cashAccounts.filter((account) => account.isActive !== false),
+          selectedBranch,
+        );
 
   useEffect(() => {
     setForm((current) => {
       if (current.paymentMethod === 'CREDIT') {
         return current.cashAccountId ? { ...current, cashAccountId: '' } : current;
       }
-      if (!current.cashAccountId) return current;
+      if (!current.cashAccountId) {
+        return receiptAccounts[0] ? { ...current, cashAccountId: receiptAccounts[0].id } : current;
+      }
 
       const selected = cashAccounts.find((account) => account.id === current.cashAccountId);
       if (!selected) {

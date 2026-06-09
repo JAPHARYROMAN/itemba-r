@@ -39,8 +39,12 @@ interface CashAccount {
   id: string;
   accountName: string;
   accountType: string;
+  divisionId?: string | null;
+  branchId?: string | null;
   currency?: string | null;
   isActive?: boolean | null;
+  division?: { name?: string | null; code?: string | null } | null;
+  branch?: { name?: string | null; code?: string | null } | null;
   linkedBank?: { bankName?: string | null } | null;
 }
 
@@ -330,6 +334,61 @@ function accountMatchesPaymentMethod(account: CashAccount, paymentMethod: string
     default:
       return false;
   }
+}
+
+function emptyReceiptAccountHint(method: string) {
+  switch (method) {
+    case 'CASH':
+      return 'No active cash-on-hand or petty-cash account is available for this branch.';
+    case 'BANK_CARD':
+    case 'BANK_TRANSFER':
+      return 'No active bank receipt account is available for this company, division, or branch.';
+    case 'MOBILE_MONEY':
+      return 'No active mobile-money account is available for this branch.';
+    default:
+      return 'No active receipt account is available for this branch.';
+  }
+}
+
+function normalizeMatchText(value: string | null | undefined) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function receiptAccountScore(account: CashAccount, branch?: Branch | null) {
+  let score = 0;
+  const accountText = normalizeMatchText(account.accountName);
+  const branchName = normalizeMatchText(branch?.name ?? account.branch?.name);
+  const branchCode = normalizeMatchText(branch?.code ?? account.branch?.code);
+
+  if (account.accountType === 'CASH_ON_HAND') score -= 30;
+  if (account.accountType === 'PETTY_CASH') score -= 20;
+  if (accountText.includes('cash')) score -= 10;
+  if (branchName && accountText.includes(branchName)) score -= 40;
+  if (branchCode && accountText.includes(branchCode)) score -= 25;
+  if (branchName.includes('kisimani') && accountText.includes('kisimani')) score -= 60;
+  if (accountText.includes('default')) score -= 5;
+
+  return score;
+}
+
+function selectableReceiptAccounts(
+  accounts: CashAccount[],
+  paymentMethod: string,
+  branch?: Branch | null,
+) {
+  return accounts
+    .filter(
+      (account) =>
+        account.isActive !== false && accountMatchesPaymentMethod(account, paymentMethod),
+    )
+    .sort((left, right) => {
+      const scoreDiff = receiptAccountScore(left, branch) - receiptAccountScore(right, branch);
+      if (scoreDiff !== 0) return scoreDiff;
+      return accountOptionLabel(left).localeCompare(accountOptionLabel(right));
+    });
 }
 
 function accountSelectLabel(method: string) {
@@ -669,11 +728,13 @@ export function MobilePosSaleEntry() {
     }
     let cancelled = false;
     setCashAccountsLoading(true);
+    setCashAccounts([]);
     backendList<CashAccount>('/sales-orders/receipt-accounts', {
       query: {
         companyId: settings.companyId,
         divisionId: settings.divisionId,
         branchId: settings.branchId,
+        paymentMethod: settings.paymentMethod,
         limit: 500,
       },
     })
@@ -718,9 +779,18 @@ export function MobilePosSaleEntry() {
     };
   }, [settings.branchId, settings.companyId]);
 
-  const receiptAccountReady = Boolean(
-    settings.cashAccountId && cashAccounts.some((account) => account.id === settings.cashAccountId),
+  const selectedCompany = companies.find((company) => company.id === settings.companyId);
+  const selectedDivision = divisions.find((division) => division.id === settings.divisionId);
+  const selectedBranch = branches.find((branch) => branch.id === settings.branchId);
+  const selectableCashAccounts = useMemo(
+    () => selectableReceiptAccounts(cashAccounts, settings.paymentMethod, selectedBranch),
+    [cashAccounts, selectedBranch, settings.paymentMethod],
   );
+  const selectedAccount = selectableCashAccounts.find(
+    (account) => account.id === settings.cashAccountId,
+  );
+  const selectedEmployee = employees.find((employee) => employee.id === settings.salespersonId);
+  const receiptAccountReady = Boolean(settings.cashAccountId && selectedAccount);
   const settingsReady = Boolean(
     settings.companyId &&
     settings.divisionId &&
@@ -777,23 +847,22 @@ export function MobilePosSaleEntry() {
   }, [productQuery, selectedProduct, settings.branchId, settings.companyId, settings.divisionId]);
 
   useEffect(() => {
-    if (cashAccountsLoading || cashAccounts.length === 0) return;
+    if (cashAccountsLoading) return;
     if (
       settings.cashAccountId &&
-      !cashAccounts.some((account) => account.id === settings.cashAccountId)
+      !selectableCashAccounts.some((account) => account.id === settings.cashAccountId)
     ) {
       setSettings((current) => ({ ...current, cashAccountId: '' }));
       return;
     }
-    if (!settings.cashAccountId && cashAccounts.length > 0) {
-      const defaultAccount = cashAccounts[0]!;
+    if (!settings.cashAccountId && selectableCashAccounts.length > 0) {
+      const defaultAccount = selectableCashAccounts[0]!;
       setSettings((current) => ({
         ...current,
         cashAccountId: defaultAccount.id,
-        paymentMethod: paymentMethodForAccount(defaultAccount) ?? current.paymentMethod,
       }));
     }
-  }, [cashAccounts, cashAccountsLoading, settings.cashAccountId]);
+  }, [cashAccountsLoading, selectableCashAccounts, settings.cashAccountId]);
 
   const branchOptions = useMemo(
     () =>
@@ -852,11 +921,6 @@ export function MobilePosSaleEntry() {
     [cart, confirmed],
   );
 
-  const selectedCompany = companies.find((company) => company.id === settings.companyId);
-  const selectedDivision = divisions.find((division) => division.id === settings.divisionId);
-  const selectedBranch = branches.find((branch) => branch.id === settings.branchId);
-  const selectedAccount = cashAccounts.find((account) => account.id === settings.cashAccountId);
-  const selectedEmployee = employees.find((employee) => employee.id === settings.salespersonId);
   const canUseMobilePos = hasPermission('sales.create') || hasPermission('pos.create');
   const customerOptions = customers.filter((customer) => {
     if (customer.branchId && settings.branchId && customer.branchId !== settings.branchId)
@@ -1314,9 +1378,7 @@ export function MobilePosSaleEntry() {
                 const nextAccount =
                   currentAccount && accountMatchesPaymentMethod(currentAccount, nextMethod)
                     ? currentAccount
-                    : cashAccounts.find((account) =>
-                        accountMatchesPaymentMethod(account, nextMethod),
-                      );
+                    : selectableReceiptAccounts(cashAccounts, nextMethod, selectedBranch)[0];
                 setSettings((current) => ({
                   ...current,
                   paymentMethod: nextMethod,
@@ -1341,10 +1403,15 @@ export function MobilePosSaleEntry() {
               }}
               disabled={!settings.branchId || cashAccountsLoading || Boolean(confirmed)}
               placeholder={cashAccountsLoading ? 'Loading accounts' : 'Select account'}
-              options={cashAccounts.map((account) => ({
+              options={selectableCashAccounts.map((account) => ({
                 value: account.id,
                 label: accountOptionLabel(account),
               }))}
+              hint={
+                settings.branchId && !cashAccountsLoading && selectableCashAccounts.length === 0
+                  ? `${emptyReceiptAccountHint(settings.paymentMethod)} Create or activate it under Finance > Cash Accounts, then re-open settings.`
+                  : undefined
+              }
             />
             {settings.paymentMethod !== 'CASH' && (
               <FormInput
@@ -1957,6 +2024,12 @@ function SettingsModal({
   onClose: () => void;
   onChange: (patch: Partial<Settings>) => void;
 }) {
+  const selectedBranch = branchOptions.find((branch) => branch.id === settings.branchId);
+  const selectableCashAccounts = useMemo(
+    () => selectableReceiptAccounts(cashAccounts, settings.paymentMethod, selectedBranch),
+    [cashAccounts, selectedBranch, settings.paymentMethod],
+  );
+
   return (
     <Modal
       open={open}
@@ -2099,9 +2172,7 @@ function SettingsModal({
                 const nextAccount =
                   currentAccount && accountMatchesPaymentMethod(currentAccount, nextMethod)
                     ? currentAccount
-                    : cashAccounts.find((account) =>
-                        accountMatchesPaymentMethod(account, nextMethod),
-                      );
+                    : selectableReceiptAccounts(cashAccounts, nextMethod, selectedBranch)[0];
                 onChange({
                   paymentMethod: nextMethod,
                   cashAccountId: nextAccount?.id ?? '',
@@ -2124,10 +2195,15 @@ function SettingsModal({
               }}
               placeholder={cashAccountsLoading ? 'Loading accounts' : 'Select account'}
               disabled={!settings.branchId || cashAccountsLoading}
-              options={cashAccounts.map((account) => ({
+              options={selectableCashAccounts.map((account) => ({
                 value: account.id,
                 label: accountOptionLabel(account),
               }))}
+              hint={
+                settings.branchId && !cashAccountsLoading && selectableCashAccounts.length === 0
+                  ? `${emptyReceiptAccountHint(settings.paymentMethod)} Create or activate it under Finance > Cash Accounts, then re-open this setup.`
+                  : undefined
+              }
             />
           </div>
         </div>
