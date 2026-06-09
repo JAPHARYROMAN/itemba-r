@@ -127,6 +127,7 @@ const PAYMENT_METHODS = [
   { value: 'MOBILE_MONEY', label: 'Mobile money' },
   { value: 'BANK_CARD', label: 'Bank card' },
   { value: 'BANK_TRANSFER', label: 'Bank transfer' },
+  { value: 'OTHER', label: 'Other' },
 ];
 
 const ACCOUNT_TYPE_LABELS: Record<string, string> = {
@@ -211,6 +212,37 @@ function accountOptionLabel(account: CashAccount) {
       : '';
   const currency = account.currency ? ` - ${account.currency}` : '';
   return `${account.accountName}${bank} (${type}${currency})`;
+}
+
+function paymentMethodForAccount(account?: CashAccount | null) {
+  switch (account?.accountType) {
+    case 'BANK':
+      return 'BANK_TRANSFER';
+    case 'MOBILE_MONEY':
+      return 'MOBILE_MONEY';
+    case 'CASH_ON_HAND':
+    case 'PETTY_CASH':
+      return 'CASH';
+    default:
+      return account ? 'OTHER' : undefined;
+  }
+}
+
+function accountMatchesPaymentMethod(account: CashAccount, paymentMethod: string) {
+  switch (paymentMethod) {
+    case 'CASH':
+      return ['CASH_ON_HAND', 'PETTY_CASH'].includes(account.accountType);
+    case 'BANK_CARD':
+    case 'BANK_TRANSFER':
+      return account.accountType === 'BANK';
+    case 'MOBILE_MONEY':
+      return account.accountType === 'MOBILE_MONEY';
+    case 'MIXED':
+    case 'OTHER':
+      return true;
+    default:
+      return false;
+  }
 }
 
 function getSettingsKey(userId: string) {
@@ -345,7 +377,6 @@ export function MobilePosSaleEntry() {
         companyId: settings.companyId,
         divisionId: settings.divisionId,
         branchId: settings.branchId,
-        paymentMethod: settings.paymentMethod,
         limit: 500,
       },
     })
@@ -424,8 +455,13 @@ export function MobilePosSaleEntry() {
       setSettings((current) => ({ ...current, cashAccountId: '' }));
       return;
     }
-    if (!settings.cashAccountId && cashAccounts.length === 1) {
-      setSettings((current) => ({ ...current, cashAccountId: cashAccounts[0]!.id }));
+    if (!settings.cashAccountId && cashAccounts.length > 0) {
+      const defaultAccount = cashAccounts[0]!;
+      setSettings((current) => ({
+        ...current,
+        cashAccountId: defaultAccount.id,
+        paymentMethod: paymentMethodForAccount(defaultAccount) ?? current.paymentMethod,
+      }));
     }
   }, [cashAccounts, cashAccountsLoading, settings.cashAccountId]);
 
@@ -619,7 +655,7 @@ export function MobilePosSaleEntry() {
         salesType: 'CASH_SALE',
         orderDate: new Date().toISOString(),
         currency: 'TZS',
-        paymentMethod: settings.paymentMethod,
+        paymentMethod: paymentMethodForAccount(selectedAccount) ?? settings.paymentMethod,
         cashAccountId: settings.cashAccountId,
         lines: cart.map((line) => ({
           productId: line.productId,
@@ -838,22 +874,39 @@ export function MobilePosSaleEntry() {
             <FormSelect
               label="Payment method"
               value={settings.paymentMethod}
-              onChange={(event) =>
+              onChange={(event) => {
+                const nextMethod = event.target.value;
+                const currentAccount = cashAccounts.find(
+                  (account) => account.id === settings.cashAccountId,
+                );
+                const nextAccount =
+                  currentAccount && accountMatchesPaymentMethod(currentAccount, nextMethod)
+                    ? currentAccount
+                    : cashAccounts.find((account) =>
+                        accountMatchesPaymentMethod(account, nextMethod),
+                      );
                 setSettings((current) => ({
                   ...current,
-                  paymentMethod: event.target.value,
-                  cashAccountId: '',
-                }))
-              }
+                  paymentMethod: nextMethod,
+                  cashAccountId: nextAccount?.id ?? '',
+                }));
+              }}
               disabled={Boolean(confirmed)}
               options={PAYMENT_METHODS}
             />
             <FormSelect
               label="Receipt account"
               value={settings.cashAccountId}
-              onChange={(event) =>
-                setSettings((current) => ({ ...current, cashAccountId: event.target.value }))
-              }
+              onChange={(event) => {
+                const account = cashAccounts.find(
+                  (candidate) => candidate.id === event.target.value,
+                );
+                setSettings((current) => ({
+                  ...current,
+                  cashAccountId: event.target.value,
+                  paymentMethod: paymentMethodForAccount(account) ?? current.paymentMethod,
+                }));
+              }}
               disabled={!settings.branchId || cashAccountsLoading || Boolean(confirmed)}
               placeholder={cashAccountsLoading ? 'Loading accounts' : 'Select account'}
               options={cashAccounts.map((account) => ({
@@ -1277,19 +1330,33 @@ function SettingsModal({
         <FormSelect
           label="Payment method"
           value={settings.paymentMethod}
-          onChange={(event) =>
+          onChange={(event) => {
+            const nextMethod = event.target.value;
+            const currentAccount = cashAccounts.find(
+              (account) => account.id === settings.cashAccountId,
+            );
+            const nextAccount =
+              currentAccount && accountMatchesPaymentMethod(currentAccount, nextMethod)
+                ? currentAccount
+                : cashAccounts.find((account) => accountMatchesPaymentMethod(account, nextMethod));
             onChange({
-              paymentMethod: event.target.value,
-              cashAccountId: '',
-            })
-          }
+              paymentMethod: nextMethod,
+              cashAccountId: nextAccount?.id ?? '',
+            });
+          }}
           options={PAYMENT_METHODS}
         />
         <FormSelect
           label="Receipt account"
           required
           value={settings.cashAccountId}
-          onChange={(event) => onChange({ cashAccountId: event.target.value })}
+          onChange={(event) => {
+            const account = cashAccounts.find((candidate) => candidate.id === event.target.value);
+            onChange({
+              cashAccountId: event.target.value,
+              paymentMethod: paymentMethodForAccount(account) ?? settings.paymentMethod,
+            });
+          }}
           placeholder={cashAccountsLoading ? 'Loading accounts' : 'Select account'}
           disabled={!settings.branchId || cashAccountsLoading}
           options={cashAccounts.map((account) => ({

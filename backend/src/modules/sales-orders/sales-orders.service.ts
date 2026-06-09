@@ -40,6 +40,14 @@ type LinkedReceivableSnapshot = {
   status: string;
 };
 
+const RECEIPT_ACCOUNT_TYPES = [
+  CashAccountType.CASH_ON_HAND,
+  CashAccountType.PETTY_CASH,
+  CashAccountType.BANK,
+  CashAccountType.MOBILE_MONEY,
+  CashAccountType.OTHER,
+];
+
 function accountTypesForPaymentMethod(method?: SalesPaymentMethod | null): CashAccountType[] {
   switch (method) {
     case SalesPaymentMethod.CASH:
@@ -51,13 +59,7 @@ function accountTypesForPaymentMethod(method?: SalesPaymentMethod | null): CashA
       return [CashAccountType.MOBILE_MONEY];
     case SalesPaymentMethod.MIXED:
     case SalesPaymentMethod.OTHER:
-      return [
-        CashAccountType.CASH_ON_HAND,
-        CashAccountType.PETTY_CASH,
-        CashAccountType.BANK,
-        CashAccountType.MOBILE_MONEY,
-        CashAccountType.OTHER,
-      ];
+      return RECEIPT_ACCOUNT_TYPES;
     default:
       return [];
   }
@@ -389,7 +391,9 @@ export class SalesOrdersService {
     await this.companyScope.assertCanAccessCompany(user, query.companyId, AccessLevel.READ);
 
     const paymentMethod = query.paymentMethod as SalesPaymentMethod | undefined;
-    const allowedTypes = accountTypesForPaymentMethod(paymentMethod);
+    const allowedTypes = paymentMethod
+      ? accountTypesForPaymentMethod(paymentMethod)
+      : RECEIPT_ACCOUNT_TYPES;
     if (allowedTypes.length === 0) return [];
 
     const max = Math.min(Math.max(Number(query.limit ?? 500), 1), 1000);
