@@ -2958,6 +2958,10 @@ model SalesOrder {
   /// Used by the SalesCommission flow to attribute commission earnings.
   salespersonId     String?
   notes             String?
+  /// Client-supplied idempotency token for the atomic quick-sale path (Mobile
+  /// POS). A retried checkout carrying the same key returns the original order
+  /// instead of creating a duplicate. Unique per company; many NULLs allowed.
+  idempotencyKey    String?
   receivableId      String?
   journalEntryId    String?
   deletedAt         DateTime?
@@ -2985,6 +2989,7 @@ model SalesOrder {
   deliveryNotes    DeliveryNote[]
 
   @@unique([companyId, salesOrderNumber])
+  @@unique([companyId, idempotencyKey])
   @@index([companyId])
   @@index([customerId])
   @@index([status])

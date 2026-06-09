@@ -603,7 +603,8 @@ export class SalesOrdersService {
     // division, branch, sales type, customer, and payment method (including
     // CREDIT) the operator can access. Company-scope and reference ownership are
     // enforced inside create()/confirm() via assertCanAccessCompany(WRITE), so
-    // we only normalize defaults and tag the source here.
+    // we only normalize defaults and tag the source here. Unlike quickSale(),
+    // CREDIT is preserved — a counter operator may sell on account.
     const safeDto: CreateSalesOrderDto = {
       ...dto,
       salesType: dto.salesType ?? SalesType.CASH_SALE,
@@ -612,7 +613,7 @@ export class SalesOrdersService {
       paymentMethod: dto.paymentMethod ?? SalesPaymentMethod.CASH,
     };
 
-    return this.quickSale(safeDto, user);
+    return this.createAndConfirm(safeDto, user);
   }
 
   async create(dto: CreateSalesOrderDto, user: AuthUser) {
@@ -661,6 +662,7 @@ export class SalesOrdersService {
           paymentMethod,
           cashAccountId: cashAccountId ?? null,
           paymentReference: dto.paymentReference,
+          idempotencyKey: dto.idempotencyKey ?? null,
           createdById: userId,
         },
       });
@@ -1309,12 +1311,24 @@ export class SalesOrdersService {
   async quickSale(dto: CreateSalesOrderDto, user: AuthUser) {
     // Quick-sale defaults: never CREDIT (a counter sale is paid before
     // walking out). Operators who need credit should use the standard
-    // Sales Order flow.
+    // Sales Order flow or the Mobile POS, which preserves CREDIT.
     const safeDto: CreateSalesOrderDto = {
       ...dto,
       paymentMethod:
         dto.paymentMethod && dto.paymentMethod !== 'CREDIT' ? dto.paymentMethod : 'CASH',
     };
+    return this.createAndConfirm(safeDto, user);
+  }
+
+  /**
+   * Shared atomic create + confirm used by both quickSale() (cash-only) and
+   * mobilePosQuickSale() (full parity, CREDIT allowed). Backfills the division
+   * from the branch, and — when an idempotencyKey is supplied — replays the
+   * original order instead of creating a duplicate, so a retried checkout over
+   * a flaky mobile network is safe.
+   */
+  private async createAndConfirm(dto: CreateSalesOrderDto, user: AuthUser) {
+    const safeDto: CreateSalesOrderDto = { ...dto };
     if (!safeDto.divisionId && safeDto.branchId) {
       const branch = await this.prisma.branch.findFirst({
         where: { id: safeDto.branchId, deletedAt: null },
@@ -1322,8 +1336,37 @@ export class SalesOrdersService {
       });
       if (branch) safeDto.divisionId = branch.divisionId;
     }
-    const draft = await this.create(safeDto, user);
+
+    if (safeDto.idempotencyKey) {
+      const replay = await this.replayQuickSale(safeDto.companyId, safeDto.idempotencyKey, user);
+      if (replay) return replay;
+    }
+
+    let draft: Awaited<ReturnType<SalesOrdersService['create']>>;
+    try {
+      draft = await this.create(safeDto, user);
+    } catch (error) {
+      // Lost a race with a concurrent request carrying the same key — the
+      // company-scoped unique index rejected the duplicate. Replay the winner.
+      if (
+        safeDto.idempotencyKey &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const replay = await this.replayQuickSale(safeDto.companyId, safeDto.idempotencyKey, user);
+        if (replay) return replay;
+      }
+      throw error;
+    }
     return this.confirm(draft.id, user);
+  }
+
+  private async replayQuickSale(companyId: string, idempotencyKey: string, user: AuthUser) {
+    const existing = await this.prisma.salesOrder.findFirst({
+      where: { companyId, idempotencyKey, deletedAt: null },
+      select: { id: true },
+    });
+    return existing ? this.findOne(existing.id, user) : null;
   }
 
   async cancel(id: string, user: AuthUser) {

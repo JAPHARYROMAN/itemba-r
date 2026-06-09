@@ -6,6 +6,8 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -22,6 +24,7 @@ export class SalesOrderLineDto {
 
   @IsNotEmpty()
   @IsNumber()
+  @Min(0.0001)
   quantity!: number;
 
   @IsNotEmpty()
@@ -30,14 +33,17 @@ export class SalesOrderLineDto {
 
   @IsNotEmpty()
   @IsNumber()
+  @Min(0)
   unitPrice!: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   discountAmount?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   taxAmount?: number;
 
   /** Optional FK to a specific ProductBatch — for FIFO/expiry tracking. */
@@ -113,6 +119,16 @@ export class CreateSalesOrderDto {
   @IsOptional()
   @IsString()
   paymentReference?: string;
+
+  /**
+   * Client-supplied idempotency token for the atomic quick-sale path. A retried
+   * checkout carrying the same key returns the original order instead of
+   * creating a duplicate. Ignored by the two-step create/confirm flow.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  idempotencyKey?: string;
 
   @IsArray()
   @ValidateNested({ each: true })

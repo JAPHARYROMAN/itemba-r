@@ -620,6 +620,10 @@ export function MobilePosSaleEntry() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [pendingQty, setPendingQty] = useState(1);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  // Stable per-checkout idempotency token: created on the first checkout
+  // attempt, reused across retries so a lost-response retry replays the original
+  // order instead of duplicating it, and cleared on success / new sale.
+  const idempotencyKeyRef = useRef<string>('');
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerId, setCustomerId] = useState('');
@@ -1004,6 +1008,7 @@ export function MobilePosSaleEntry() {
     setError('');
     setConfirmed(null);
     setReceiptMessage('');
+    idempotencyKeyRef.current = '';
     setSettings((current) => ({
       ...current,
       orderDate: todayIsoDate(),
@@ -1107,6 +1112,14 @@ export function MobilePosSaleEntry() {
 
     setSubmitting(true);
     setError('');
+    // Create the idempotency token once and reuse it on retry, so a checkout
+    // whose response was lost replays the original order rather than duplicating.
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `pos-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
     try {
       const body: Record<string, unknown> = {
         companyId: settings.companyId,
@@ -1117,6 +1130,7 @@ export function MobilePosSaleEntry() {
         currency: settings.currency || 'TZS',
         paymentMethod: paymentMethodForAccount(selectedAccount) ?? settings.paymentMethod,
         cashAccountId: settings.cashAccountId,
+        idempotencyKey: idempotencyKeyRef.current,
         lines: cart.map((line) => ({
           productId: line.productId,
           quantity: line.qty,
@@ -1145,6 +1159,7 @@ export function MobilePosSaleEntry() {
       }
 
       const order = await createQuickSale(body);
+      idempotencyKeyRef.current = '';
       setConfirmed(order);
       setReceiptMessage('Receipt ready.');
     } catch (checkoutError) {
