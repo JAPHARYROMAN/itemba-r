@@ -485,11 +485,15 @@ export class SalesOrdersService {
     if (dto.paymentMethod === SalesPaymentMethod.CREDIT) {
       throw new BadRequestException('Mobile POS only supports paid counter sales');
     }
+    const salesType = dto.salesType ?? SalesType.CASH_SALE;
+    if (salesType !== SalesType.CASH_SALE && salesType !== SalesType.RETAIL) {
+      throw new BadRequestException('Mobile POS only supports cash or retail sales');
+    }
 
     const safeDto: CreateSalesOrderDto = {
       ...dto,
       companyId: company.id,
-      salesType: SalesType.CASH_SALE,
+      salesType,
       currency: dto.currency ?? CurrencyCode.TZS,
       notes: [dto.notes, 'Created from Westsides Mobile POS'].filter(Boolean).join('\n'),
       paymentMethod: dto.paymentMethod ?? SalesPaymentMethod.CASH,
