@@ -397,9 +397,31 @@ export class SalesOrdersService {
     if (allowedTypes.length === 0) return [];
 
     const max = Math.min(Math.max(Number(query.limit ?? 500), 1), 1000);
-    const accounts = await this.prisma.cashAccount.findMany({
+    const accounts = await this.findReceiptAccountRows(query.companyId, allowedTypes);
+    let filtered = this.filterReceiptAccountRows(accounts, query);
+
+    if (
+      filtered.length === 0 &&
+      paymentMethod === SalesPaymentMethod.CASH &&
+      query.divisionId &&
+      query.branchId
+    ) {
+      const provisioned = await this.ensureBranchCashReceiptAccount(
+        query.companyId,
+        query.divisionId,
+        query.branchId,
+        user,
+      );
+      filtered = [provisioned];
+    }
+
+    return filtered.slice(0, max);
+  }
+
+  private findReceiptAccountRows(companyId: string, allowedTypes: CashAccountType[]) {
+    return this.prisma.cashAccount.findMany({
       where: {
-        companyId: query.companyId,
+        companyId,
         deletedAt: null,
         isActive: true,
         accountType: { in: allowedTypes },
@@ -414,24 +436,124 @@ export class SalesOrdersService {
       orderBy: { accountName: 'asc' },
       take: 1000,
     });
+  }
 
-    return accounts
-      .filter((account) => {
-        if (account.accountType === CashAccountType.BANK) {
-          return (
-            (!account.divisionId || account.divisionId === query.divisionId) &&
-            (!account.branchId || account.branchId === query.branchId)
-          );
-        }
-
+  private filterReceiptAccountRows(
+    accounts: Awaited<ReturnType<SalesOrdersService['findReceiptAccountRows']>>,
+    query: { divisionId?: string; branchId?: string },
+  ) {
+    return accounts.filter((account) => {
+      if (account.accountType === CashAccountType.BANK) {
         return (
-          Boolean(query.divisionId) &&
-          Boolean(query.branchId) &&
-          account.divisionId === query.divisionId &&
-          account.branchId === query.branchId
+          (!account.divisionId || account.divisionId === query.divisionId) &&
+          (!account.branchId || account.branchId === query.branchId)
         );
-      })
-      .slice(0, max);
+      }
+
+      return (
+        Boolean(query.divisionId) &&
+        Boolean(query.branchId) &&
+        account.divisionId === query.divisionId &&
+        account.branchId === query.branchId
+      );
+    });
+  }
+
+  private async ensureBranchCashReceiptAccount(
+    companyId: string,
+    divisionId: string,
+    branchId: string,
+    user: AuthUser,
+  ) {
+    const branch = await this.prisma.branch.findFirst({
+      where: {
+        id: branchId,
+        divisionId,
+        division: { companyId },
+        deletedAt: null,
+        isActive: true,
+      },
+      select: { id: true, name: true, code: true, divisionId: true },
+    });
+    if (!branch) {
+      throw new BadRequestException('Branch/location does not belong to the selected division');
+    }
+
+    const existing = await this.prisma.cashAccount.findFirst({
+      where: {
+        companyId,
+        divisionId,
+        branchId,
+        deletedAt: null,
+        accountType: { in: [CashAccountType.CASH_ON_HAND, CashAccountType.PETTY_CASH] },
+      },
+      include: {
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
+        linkedBank: {
+          select: { id: true, bankName: true, accountName: true, accountNumber: true },
+        },
+      },
+      orderBy: { accountName: 'asc' },
+    });
+
+    if (existing?.isActive) return existing;
+
+    if (existing) {
+      const reactivated = await this.prisma.cashAccount.update({
+        where: { id: existing.id },
+        data: { isActive: true },
+        include: {
+          division: { select: { id: true, name: true, code: true } },
+          branch: { select: { id: true, name: true, code: true } },
+          linkedBank: {
+            select: { id: true, bankName: true, accountName: true, accountNumber: true },
+          },
+        },
+      });
+      await this.auditLogs.log({
+        action: 'CASH_ACCOUNT_REACTIVATE',
+        entityType: 'CashAccount',
+        entityId: reactivated.id,
+        userId: user.id,
+        companyId,
+        oldValue: existing as any,
+        newValue: reactivated as any,
+      });
+      return reactivated;
+    }
+
+    const accountName = `${branch.code || branch.name} Cash Account`;
+    const created = await this.prisma.cashAccount.create({
+      data: {
+        companyId,
+        divisionId,
+        branchId,
+        accountName,
+        accountType: CashAccountType.CASH_ON_HAND,
+        currency: CurrencyCode.TZS,
+        openingBalance: 0,
+        currentBalance: 0,
+        isActive: true,
+        notes: 'Auto-created for Operations Mobile POS cash receipt posting.',
+      },
+      include: {
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
+        linkedBank: {
+          select: { id: true, bankName: true, accountName: true, accountNumber: true },
+        },
+      },
+    });
+    await this.auditLogs.log({
+      action: 'CASH_ACCOUNT_CREATE',
+      entityType: 'CashAccount',
+      entityId: created.id,
+      userId: user.id,
+      companyId,
+      newValue: created as any,
+    });
+    return created;
   }
 
   async mobilePosBootstrap(user: AuthUser) {

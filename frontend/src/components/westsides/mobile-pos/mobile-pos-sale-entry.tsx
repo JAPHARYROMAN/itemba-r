@@ -1459,9 +1459,13 @@ export function MobilePosSaleEntry() {
         companies={companies}
         divisions={divisions}
         branchOptions={branchOptions}
+        customers={customerOptions}
         employees={employees}
         cashAccounts={cashAccounts}
         cashAccountsLoading={cashAccountsLoading}
+        customerId={customerId}
+        walkInName={walkInName}
+        paymentReference={paymentReference}
         onClose={() => setSettingsOpen(false)}
         onChange={(patch) => {
           const scopeChanged =
@@ -1471,6 +1475,9 @@ export function MobilePosSaleEntry() {
           setSettings((current) => ({ ...current, ...patch }));
           if (scopeChanged) resetForScopeChange();
         }}
+        onCustomerIdChange={setCustomerId}
+        onWalkInNameChange={setWalkInName}
+        onPaymentReferenceChange={setPaymentReference}
       />
     </div>
   );
@@ -2006,11 +2013,18 @@ function SettingsModal({
   companies,
   divisions,
   branchOptions,
+  customers,
   employees,
   cashAccounts,
   cashAccountsLoading,
+  customerId,
+  walkInName,
+  paymentReference,
   onClose,
   onChange,
+  onCustomerIdChange,
+  onWalkInNameChange,
+  onPaymentReferenceChange,
 }: {
   open: boolean;
   settings: Settings;
@@ -2018,11 +2032,18 @@ function SettingsModal({
   companies: Company[];
   divisions: Division[];
   branchOptions: Branch[];
+  customers: Customer[];
   employees: Employee[];
   cashAccounts: CashAccount[];
   cashAccountsLoading: boolean;
+  customerId: string;
+  walkInName: string;
+  paymentReference: string;
   onClose: () => void;
   onChange: (patch: Partial<Settings>) => void;
+  onCustomerIdChange: (value: string) => void;
+  onWalkInNameChange: (value: string) => void;
+  onPaymentReferenceChange: (value: string) => void;
 }) {
   const selectedBranch = branchOptions.find((branch) => branch.id === settings.branchId);
   const selectableCashAccounts = useMemo(
@@ -2035,7 +2056,7 @@ function SettingsModal({
       open={open}
       onClose={onClose}
       title="Operations sales order setup"
-      size="2xl"
+      size="3xl"
       footer={
         <Btn variant="primary" onClick={onClose} disabled={!settingsReady}>
           Done
@@ -2043,178 +2064,191 @@ function SettingsModal({
       }
     >
       <div className="space-y-4">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            Scope
-          </div>
-          <div className="mt-2 grid gap-3 md:grid-cols-3">
-            <FormSelect
-              label="Company"
-              required
-              value={settings.companyId}
-              onChange={(event) =>
-                onChange({
-                  companyId: event.target.value,
-                  divisionId: '',
-                  branchId: '',
-                  salespersonId: '',
-                  cashAccountId: '',
-                })
-              }
-              placeholder="Select company"
-              options={companies.map((company) => ({
-                value: company.id,
-                label: company.code ? `${company.name} (${company.code})` : company.name,
-              }))}
-            />
-            <FormSelect
-              label="Sales Type"
-              required
-              value={settings.salesType}
-              onChange={(event) =>
-                onChange({
-                  salesType: event.target.value,
-                  paymentMethod:
-                    event.target.value === 'CASH_SALE' || event.target.value === 'RETAIL'
-                      ? settings.paymentMethod === 'CREDIT'
-                        ? 'CASH'
-                        : settings.paymentMethod
-                      : settings.paymentMethod,
-                })
-              }
-              options={SALES_TYPES}
-            />
-            <FormSelect
-              label="Division"
-              required
-              value={settings.divisionId}
-              onChange={(event) =>
-                onChange({
-                  divisionId: event.target.value,
-                  branchId: '',
-                  salespersonId: '',
-                  cashAccountId: '',
-                })
-              }
-              placeholder={settings.companyId ? 'Select division' : 'Pick company first'}
-              disabled={!settings.companyId}
-              options={divisions.map((division) => ({
-                value: division.id,
-                label: division.code ? `${division.code} - ${division.name}` : division.name,
-              }))}
-            />
-            <FormSelect
-              label="Branch / Location"
-              required
-              value={settings.branchId}
-              onChange={(event) =>
-                onChange({
-                  branchId: event.target.value,
-                  salespersonId: '',
-                  cashAccountId: '',
-                })
-              }
-              placeholder={settings.divisionId ? 'Select branch' : 'Pick division first'}
-              disabled={!settings.divisionId}
-              options={branchOptions.map((branch) => ({
-                value: branch.id,
-                label: branch.code ? `${branch.code} - ${branch.name}` : branch.name,
-              }))}
-            />
-            <FormSelect
-              label="Currency"
-              required
-              value={settings.currency}
-              onChange={(event) => onChange({ currency: event.target.value })}
-              options={CURRENCIES.map((currency) => ({ value: currency, label: currency }))}
-            />
-            <FormSelect
-              label="Salesperson"
-              value={settings.salespersonId}
-              onChange={(event) => onChange({ salespersonId: event.target.value })}
-              placeholder={settings.branchId ? 'None (no commission)' : 'Pick branch first'}
-              disabled={!settings.branchId}
-              options={employees.map((employee) => ({
-                value: employee.id,
-                label: employeeOptionLabel(employee),
-              }))}
-            />
-          </div>
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          Sales order fields
         </div>
-
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            Dates and payment
-          </div>
-          <div className="mt-2 grid gap-3 md:grid-cols-2">
-            <FormInput
-              label="Order Date"
-              required
-              type="date"
-              value={settings.orderDate}
-              onChange={(event) => onChange({ orderDate: event.target.value })}
-            />
-            <FormInput
-              label="Due Date"
-              type="date"
-              value={settings.dueDate}
-              onChange={(event) => onChange({ dueDate: event.target.value })}
-            />
-            <FormSelect
-              label="Payment Method"
-              required
-              value={settings.paymentMethod}
-              onChange={(event) => {
-                const nextMethod = event.target.value;
-                const currentAccount = cashAccounts.find(
-                  (account) => account.id === settings.cashAccountId,
-                );
-                const nextAccount =
-                  currentAccount && accountMatchesPaymentMethod(currentAccount, nextMethod)
-                    ? currentAccount
-                    : selectableReceiptAccounts(cashAccounts, nextMethod, selectedBranch)[0];
-                onChange({
-                  paymentMethod: nextMethod,
-                  cashAccountId: nextAccount?.id ?? '',
-                });
-              }}
-              options={PAYMENT_METHODS}
-            />
-            <FormSelect
-              label={accountSelectLabel(settings.paymentMethod)}
-              required
-              value={settings.cashAccountId}
-              onChange={(event) => {
-                const account = cashAccounts.find(
-                  (candidate) => candidate.id === event.target.value,
-                );
-                onChange({
-                  cashAccountId: event.target.value,
-                  paymentMethod: paymentMethodForAccount(account) ?? settings.paymentMethod,
-                });
-              }}
-              placeholder={cashAccountsLoading ? 'Loading accounts' : 'Select account'}
-              disabled={!settings.branchId || cashAccountsLoading}
-              options={selectableCashAccounts.map((account) => ({
-                value: account.id,
-                label: accountOptionLabel(account),
-              }))}
-              hint={
-                settings.branchId && !cashAccountsLoading && selectableCashAccounts.length === 0
-                  ? `${emptyReceiptAccountHint(settings.paymentMethod)} Create or activate it under Finance > Cash Accounts, then re-open this setup.`
-                  : undefined
-              }
-            />
-          </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <FormSelect
+            label="Company"
+            required
+            value={settings.companyId}
+            onChange={(event) =>
+              onChange({
+                companyId: event.target.value,
+                divisionId: '',
+                branchId: '',
+                salespersonId: '',
+                cashAccountId: '',
+              })
+            }
+            placeholder="Select company"
+            options={companies.map((company) => ({
+              value: company.id,
+              label: company.code ? `${company.name} (${company.code})` : company.name,
+            }))}
+          />
+          <FormSelect
+            label="Sales Type"
+            required
+            value={settings.salesType}
+            onChange={(event) =>
+              onChange({
+                salesType: event.target.value,
+                paymentMethod:
+                  event.target.value === 'CASH_SALE' || event.target.value === 'RETAIL'
+                    ? settings.paymentMethod === 'CREDIT'
+                      ? 'CASH'
+                      : settings.paymentMethod
+                    : settings.paymentMethod,
+              })
+            }
+            options={SALES_TYPES}
+          />
+          <FormSelect
+            label="Division"
+            required
+            value={settings.divisionId}
+            onChange={(event) =>
+              onChange({
+                divisionId: event.target.value,
+                branchId: '',
+                salespersonId: '',
+                cashAccountId: '',
+              })
+            }
+            placeholder={settings.companyId ? 'Select division' : 'Pick company first'}
+            disabled={!settings.companyId}
+            options={divisions.map((division) => ({
+              value: division.id,
+              label: division.code ? `${division.code} - ${division.name}` : division.name,
+            }))}
+          />
+          <FormSelect
+            label="Branch / Location"
+            required
+            value={settings.branchId}
+            onChange={(event) =>
+              onChange({
+                branchId: event.target.value,
+                salespersonId: '',
+                cashAccountId: '',
+              })
+            }
+            placeholder={settings.divisionId ? 'Select branch' : 'Pick division first'}
+            disabled={!settings.divisionId}
+            options={branchOptions.map((branch) => ({
+              value: branch.id,
+              label: branch.code ? `${branch.code} - ${branch.name}` : branch.name,
+            }))}
+          />
+          <FormSelect
+            label="Currency"
+            required
+            value={settings.currency}
+            onChange={(event) => onChange({ currency: event.target.value })}
+            options={CURRENCIES.map((currency) => ({ value: currency, label: currency }))}
+          />
+          <FormSelect
+            label="Customer"
+            value={customerId}
+            onChange={(event) => onCustomerIdChange(event.target.value)}
+            placeholder="Walk-in (use name)"
+            options={customers.map((customer) => ({
+              value: customer.id,
+              label: customer.customerCode
+                ? `${customer.name} - ${customer.customerCode}`
+                : customer.name,
+            }))}
+          />
+          <FormInput
+            label="Walk-in Name"
+            value={walkInName}
+            onChange={(event) => onWalkInNameChange(event.target.value)}
+            disabled={Boolean(customerId)}
+            placeholder={customerId ? 'Customer selected' : 'If no customer selected'}
+          />
+          <FormInput
+            label="Order Date"
+            required
+            type="date"
+            value={settings.orderDate}
+            onChange={(event) => onChange({ orderDate: event.target.value })}
+          />
+          <FormInput
+            label="Due Date"
+            type="date"
+            value={settings.dueDate}
+            onChange={(event) => onChange({ dueDate: event.target.value })}
+          />
+          <FormSelect
+            label="Salesperson"
+            value={settings.salespersonId}
+            onChange={(event) => onChange({ salespersonId: event.target.value })}
+            placeholder={settings.branchId ? 'None (no commission)' : 'Pick branch first'}
+            disabled={!settings.branchId}
+            options={employees.map((employee) => ({
+              value: employee.id,
+              label: employeeOptionLabel(employee),
+            }))}
+          />
+          <FormSelect
+            label="Payment Method"
+            required
+            value={settings.paymentMethod}
+            onChange={(event) => {
+              const nextMethod = event.target.value;
+              const currentAccount = cashAccounts.find(
+                (account) => account.id === settings.cashAccountId,
+              );
+              const nextAccount =
+                currentAccount && accountMatchesPaymentMethod(currentAccount, nextMethod)
+                  ? currentAccount
+                  : selectableReceiptAccounts(cashAccounts, nextMethod, selectedBranch)[0];
+              onChange({
+                paymentMethod: nextMethod,
+                cashAccountId: nextAccount?.id ?? '',
+              });
+            }}
+            options={PAYMENT_METHODS}
+          />
+          <FormSelect
+            label={accountSelectLabel(settings.paymentMethod)}
+            required
+            value={settings.cashAccountId}
+            onChange={(event) => {
+              const account = cashAccounts.find((candidate) => candidate.id === event.target.value);
+              onChange({
+                cashAccountId: event.target.value,
+                paymentMethod: paymentMethodForAccount(account) ?? settings.paymentMethod,
+              });
+            }}
+            placeholder={cashAccountsLoading ? 'Loading accounts' : 'Select account'}
+            disabled={!settings.branchId || cashAccountsLoading}
+            options={selectableCashAccounts.map((account) => ({
+              value: account.id,
+              label: accountOptionLabel(account),
+            }))}
+            hint={
+              settings.branchId && !cashAccountsLoading && selectableCashAccounts.length === 0
+                ? `${emptyReceiptAccountHint(settings.paymentMethod)} The API will create a branch cash drawer when this setup reloads.`
+                : undefined
+            }
+          />
+          <FormInput
+            label="Payment Reference"
+            value={paymentReference}
+            onChange={(event) => onPaymentReferenceChange(event.target.value)}
+            placeholder="M-Pesa code, slip #, etc."
+          />
+          <FormTextarea
+            label="Notes"
+            rows={3}
+            value={settings.notes}
+            onChange={(event) => onChange({ notes: event.target.value })}
+            placeholder="Optional sale notes"
+            className="md:col-span-2"
+          />
         </div>
-
-        <FormTextarea
-          label="Notes"
-          rows={2}
-          value={settings.notes}
-          onChange={(event) => onChange({ notes: event.target.value })}
-          placeholder="Optional sale notes"
-        />
       </div>
     </Modal>
   );
