@@ -27,8 +27,11 @@ export class SalesOrdersController {
 
   @Get('mobile-pos/bootstrap')
   @RequireAnyPermissions('pos.view', 'sales.create')
-  mobilePosBootstrap(@CurrentUser() user: AuthUser) {
-    return this.service.mobilePosBootstrap(user);
+  mobilePosBootstrap(
+    @Query('companyId') companyId: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.mobilePosBootstrap(user, companyId);
   }
 
   @Post('mobile-pos/quick-sale')

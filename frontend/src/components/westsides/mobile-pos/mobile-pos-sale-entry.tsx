@@ -14,7 +14,14 @@ import {
   PermissionDeniedState,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
-import { backendGet, backendList, backendPost } from '@/lib/api-client';
+import { backendList, backendPost } from '@/lib/api-client';
+import {
+  SALES_TYPE_OPTIONS,
+  CURRENCIES,
+  PAYMENT_METHODS,
+  ACCOUNT_TYPE_LABELS,
+  defaultPaymentMethodForSalesType,
+} from '@/lib/sales-order-constants';
 
 interface Company {
   id: string;
@@ -173,42 +180,7 @@ interface ConfirmedOrderLine {
   unit?: { name?: string | null; symbol?: string | null } | null;
 }
 
-interface MobilePosBootstrap {
-  company: Company;
-  divisions: Division[];
-  branches: Branch[];
-  customers: Customer[];
-  defaults?: {
-    currency?: string;
-    salesType?: string;
-    paymentMethod?: string;
-  };
-}
-
 const SETTINGS_KEY = 'itemba.mobilePos.settings.v1';
-
-const SALES_TYPES = [
-  { value: 'CASH_SALE', label: 'Cash Sale' },
-  { value: 'RETAIL', label: 'Retail Sale' },
-];
-
-const CURRENCIES = ['TZS', 'USD', 'EUR'];
-
-const PAYMENT_METHODS = [
-  { value: 'CASH', label: 'Cash' },
-  { value: 'MOBILE_MONEY', label: 'Mobile money' },
-  { value: 'BANK_CARD', label: 'Bank card' },
-  { value: 'BANK_TRANSFER', label: 'Bank transfer' },
-  { value: 'OTHER', label: 'Other' },
-];
-
-const ACCOUNT_TYPE_LABELS: Record<string, string> = {
-  CASH_ON_HAND: 'Cash on hand',
-  PETTY_CASH: 'Petty cash',
-  BANK: 'Bank',
-  MOBILE_MONEY: 'Mobile money',
-  OTHER: 'Other',
-};
 
 function todayIsoDate() {
   return new Date().toISOString().slice(0, 10);
@@ -476,7 +448,7 @@ function receiptPlainText(
 ) {
   const currency = receiptCurrency(order, fallbackCurrency);
   const number = receiptNumber(order);
-  const company = order.company?.name ?? 'WESTSIDES COMPANY LTD';
+  const company = order.company?.name ?? 'Sales Receipt';
   const branch = order.branch?.name ? ` - ${order.branch.name}` : '';
   const itemLines = lines
     .map((line) => {
@@ -509,7 +481,7 @@ function receiptPlainText(
 function receiptHtml(order: ConfirmedOrder, lines: ConfirmedOrderLine[], fallbackCurrency = 'TZS') {
   const currency = receiptCurrency(order, fallbackCurrency);
   const number = receiptNumber(order);
-  const company = order.company?.name ?? 'WESTSIDES COMPANY LTD';
+  const company = order.company?.name ?? 'Sales Receipt';
   const branch = order.branch?.name ?? '';
   const generatedAt = formatDateTime(order.orderDate);
   const rows = lines
@@ -636,6 +608,7 @@ export function MobilePosSaleEntry() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customerSearch, setCustomerSearch] = useState('');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [bootstrapLoading, setBootstrapLoading] = useState(true);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
@@ -667,50 +640,39 @@ export function MobilePosSaleEntry() {
     if (hydrated && userId) saveSettings(userId, settings);
   }, [hydrated, settings, userId]);
 
+  // Load the companies the operator can access plus the shared unit list. This
+  // replaces the former Westsides-only bootstrap so the POS opens against any
+  // accessible company, exactly like the Operations sales-order screen.
   useEffect(() => {
     if (authLoading || !hydrated || !userId) return;
     let cancelled = false;
     setBootstrapLoading(true);
     Promise.allSettled([
-      backendGet<MobilePosBootstrap>('/sales-orders/mobile-pos/bootstrap'),
+      backendList<Company>('/companies', { query: { limit: 200 } }),
       backendList<Unit>('/units', { query: { limit: 200 } }),
-    ]).then(([bootstrapResult, unitResult]) => {
+    ]).then(([companyResult, unitResult]) => {
       if (cancelled) return;
       setUnits(unitResult.status === 'fulfilled' ? unitResult.value : []);
-      if (bootstrapResult.status === 'fulfilled') {
-        const bootstrap = bootstrapResult.value;
-        setCompanies([bootstrap.company]);
-        setDivisions(bootstrap.divisions);
-        setBranches(bootstrap.branches);
-        setCustomers(bootstrap.customers);
+      if (companyResult.status === 'fulfilled') {
+        const list = companyResult.value;
+        setCompanies(list);
         setSettings((current) => {
-          const divisionId = bootstrap.divisions.some(
-            (division) => division.id === current.divisionId,
-          )
-            ? current.divisionId
-            : (bootstrap.divisions[0]?.id ?? '');
-          const scopedBranches = divisionId
-            ? bootstrap.branches.filter((branch) => branch.divisionId === divisionId)
-            : bootstrap.branches;
-          const branchId = scopedBranches.some((branch) => branch.id === current.branchId)
-            ? current.branchId
-            : (scopedBranches[0]?.id ?? '');
+          if (list.some((company) => company.id === current.companyId)) return current;
+          const fallback =
+            (user?.companyId && list.some((company) => company.id === user.companyId)
+              ? user.companyId
+              : list[0]?.id) ?? '';
           return {
             ...current,
-            companyId: bootstrap.company.id,
-            divisionId,
-            branchId,
-            salesType: current.salesType || bootstrap.defaults?.salesType || 'CASH_SALE',
-            currency: current.currency || bootstrap.defaults?.currency || 'TZS',
+            companyId: fallback,
             orderDate: current.orderDate || todayIsoDate(),
-            paymentMethod: current.paymentMethod || bootstrap.defaults?.paymentMethod || 'CASH',
           };
         });
       } else {
         setError(
-          bootstrapResult.reason instanceof Error
-            ? bootstrapResult.reason.message
-            : 'Could not load Westsides Mobile POS settings.',
+          companyResult.reason instanceof Error
+            ? companyResult.reason.message
+            : 'Could not load companies for Mobile POS.',
         );
       }
       setBootstrapLoading(false);
@@ -718,10 +680,101 @@ export function MobilePosSaleEntry() {
     return () => {
       cancelled = true;
     };
-  }, [authLoading, hydrated, userId]);
+  }, [authLoading, hydrated, userId, user?.companyId]);
+
+  // Cascade: reload divisions and branches whenever the company changes, then
+  // keep the selected division/branch if still valid or default to the first.
+  useEffect(() => {
+    if (!settings.companyId) {
+      setDivisions([]);
+      setBranches([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.allSettled([
+      backendList<Division>('/divisions', { query: { companyId: settings.companyId, limit: 200 } }),
+      backendList<Branch>('/branches', {
+        query: { companyId: settings.companyId, activeOnly: true, limit: 500 },
+      }),
+    ]).then(([divisionResult, branchResult]) => {
+      if (cancelled) return;
+      const nextDivisions = divisionResult.status === 'fulfilled' ? divisionResult.value : [];
+      const nextBranches = branchResult.status === 'fulfilled' ? branchResult.value : [];
+      setDivisions(nextDivisions);
+      setBranches(nextBranches);
+      setSettings((current) => {
+        const divisionId = nextDivisions.some((division) => division.id === current.divisionId)
+          ? current.divisionId
+          : (nextDivisions[0]?.id ?? '');
+        const scopedBranches = divisionId
+          ? nextBranches.filter((branch) => branch.divisionId === divisionId)
+          : nextBranches;
+        const branchId = scopedBranches.some((branch) => branch.id === current.branchId)
+          ? current.branchId
+          : (scopedBranches[0]?.id ?? '');
+        if (divisionId === current.divisionId && branchId === current.branchId) return current;
+        return { ...current, divisionId, branchId };
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.companyId]);
+
+  // Cascade: reload customers for the chosen company/branch with debounced
+  // server-side search (name, code, phone, email, TIN) so any system customer
+  // is reachable — not just the first page cached at startup.
+  useEffect(() => {
+    if (!settings.companyId || !settings.branchId) {
+      setCustomers([]);
+      return;
+    }
+    let cancelled = false;
+    const search = customerSearch.trim();
+    const timer = setTimeout(
+      () => {
+        backendList<Customer>('/customers', {
+          query: {
+            companyId: settings.companyId,
+            branchId: settings.branchId,
+            limit: 200,
+            ...(search && { search }),
+          },
+        })
+          .then((rows) => {
+            if (!cancelled) setCustomers(rows);
+          })
+          .catch(() => {
+            if (!cancelled) setCustomers([]);
+          });
+      },
+      search ? 250 : 0,
+    );
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [settings.companyId, settings.branchId, customerSearch]);
+
+  // Defensive: clear the selected/typed customer and the search box whenever the
+  // sale scope changes. The settings-sheet path already resets via
+  // resetForScopeChange, but the automatic company→division→branch cascade can
+  // change scope without it — leaving a stale customerId that no longer belongs
+  // to the active branch. Keyed on scope only (not customerSearch) so typing a
+  // search never deselects a chosen customer.
+  useEffect(() => {
+    setCustomerId('');
+    setWalkInName('');
+    setCustomerSearch('');
+  }, [settings.companyId, settings.divisionId, settings.branchId]);
 
   useEffect(() => {
-    if (!settings.companyId || !settings.divisionId || !settings.branchId) {
+    if (
+      !settings.companyId ||
+      !settings.divisionId ||
+      !settings.branchId ||
+      settings.paymentMethod === 'CREDIT'
+    ) {
       setCashAccounts([]);
       setCashAccountsLoading(false);
       return;
@@ -791,6 +844,7 @@ export function MobilePosSaleEntry() {
   );
   const selectedEmployee = employees.find((employee) => employee.id === settings.salespersonId);
   const receiptAccountReady = Boolean(settings.cashAccountId && selectedAccount);
+  const isCreditSale = settings.paymentMethod === 'CREDIT';
   const settingsReady = Boolean(
     settings.companyId &&
     settings.divisionId &&
@@ -798,7 +852,7 @@ export function MobilePosSaleEntry() {
     settings.salesType &&
     settings.currency &&
     settings.orderDate &&
-    receiptAccountReady,
+    (isCreditSale || receiptAccountReady),
   );
 
   useEffect(() => {
@@ -1388,31 +1442,33 @@ export function MobilePosSaleEntry() {
               disabled={Boolean(confirmed)}
               options={PAYMENT_METHODS}
             />
-            <FormSelect
-              label={accountSelectLabel(settings.paymentMethod)}
-              value={settings.cashAccountId}
-              onChange={(event) => {
-                const account = cashAccounts.find(
-                  (candidate) => candidate.id === event.target.value,
-                );
-                setSettings((current) => ({
-                  ...current,
-                  cashAccountId: event.target.value,
-                  paymentMethod: paymentMethodForAccount(account) ?? current.paymentMethod,
-                }));
-              }}
-              disabled={!settings.branchId || cashAccountsLoading || Boolean(confirmed)}
-              placeholder={cashAccountsLoading ? 'Loading accounts' : 'Select account'}
-              options={selectableCashAccounts.map((account) => ({
-                value: account.id,
-                label: accountOptionLabel(account),
-              }))}
-              hint={
-                settings.branchId && !cashAccountsLoading && selectableCashAccounts.length === 0
-                  ? `${emptyReceiptAccountHint(settings.paymentMethod)} Create or activate it under Finance > Cash Accounts, then re-open settings.`
-                  : undefined
-              }
-            />
+            {settings.paymentMethod !== 'CREDIT' && (
+              <FormSelect
+                label={accountSelectLabel(settings.paymentMethod)}
+                value={settings.cashAccountId}
+                onChange={(event) => {
+                  const account = cashAccounts.find(
+                    (candidate) => candidate.id === event.target.value,
+                  );
+                  setSettings((current) => ({
+                    ...current,
+                    cashAccountId: event.target.value,
+                    paymentMethod: paymentMethodForAccount(account) ?? current.paymentMethod,
+                  }));
+                }}
+                disabled={!settings.branchId || cashAccountsLoading || Boolean(confirmed)}
+                placeholder={cashAccountsLoading ? 'Loading accounts' : 'Select account'}
+                options={selectableCashAccounts.map((account) => ({
+                  value: account.id,
+                  label: accountOptionLabel(account),
+                }))}
+                hint={
+                  settings.branchId && !cashAccountsLoading && selectableCashAccounts.length === 0
+                    ? `${emptyReceiptAccountHint(settings.paymentMethod)} Create or activate it under Finance > Cash Accounts, then re-open settings.`
+                    : undefined
+                }
+              />
+            )}
             {settings.paymentMethod !== 'CASH' && (
               <FormInput
                 label="Payment reference"
@@ -1460,6 +1516,7 @@ export function MobilePosSaleEntry() {
         divisions={divisions}
         branchOptions={branchOptions}
         customers={customerOptions}
+        customerSearch={customerSearch}
         employees={employees}
         cashAccounts={cashAccounts}
         cashAccountsLoading={cashAccountsLoading}
@@ -1476,6 +1533,7 @@ export function MobilePosSaleEntry() {
           if (scopeChanged) resetForScopeChange();
         }}
         onCustomerIdChange={setCustomerId}
+        onCustomerSearchChange={setCustomerSearch}
         onWalkInNameChange={setWalkInName}
         onPaymentReferenceChange={setPaymentReference}
       />
@@ -1528,7 +1586,7 @@ function MobileReceiptCard({
       <div className="rounded-xl bg-white p-3 shadow-sm">
         <div className="border-b border-slate-900 pb-3 text-center">
           <div className="text-[16px] font-extrabold tracking-wide">
-            {order.company?.name ?? 'WESTSIDES COMPANY LTD'}
+            {order.company?.name ?? 'Sales Receipt'}
           </div>
           <div className="mt-1 text-[11px] text-slate-500">
             {[order.branch?.name, order.branch?.phone ?? order.company?.phone]
@@ -2014,6 +2072,7 @@ function SettingsModal({
   divisions,
   branchOptions,
   customers,
+  customerSearch,
   employees,
   cashAccounts,
   cashAccountsLoading,
@@ -2023,6 +2082,7 @@ function SettingsModal({
   onClose,
   onChange,
   onCustomerIdChange,
+  onCustomerSearchChange,
   onWalkInNameChange,
   onPaymentReferenceChange,
 }: {
@@ -2033,6 +2093,7 @@ function SettingsModal({
   divisions: Division[];
   branchOptions: Branch[];
   customers: Customer[];
+  customerSearch: string;
   employees: Employee[];
   cashAccounts: CashAccount[];
   cashAccountsLoading: boolean;
@@ -2042,6 +2103,7 @@ function SettingsModal({
   onClose: () => void;
   onChange: (patch: Partial<Settings>) => void;
   onCustomerIdChange: (value: string) => void;
+  onCustomerSearchChange: (value: string) => void;
   onWalkInNameChange: (value: string) => void;
   onPaymentReferenceChange: (value: string) => void;
 }) {
@@ -2091,18 +2153,14 @@ function SettingsModal({
             label="Sales Type"
             required
             value={settings.salesType}
-            onChange={(event) =>
+            onChange={(event) => {
+              const nextType = event.target.value;
               onChange({
-                salesType: event.target.value,
-                paymentMethod:
-                  event.target.value === 'CASH_SALE' || event.target.value === 'RETAIL'
-                    ? settings.paymentMethod === 'CREDIT'
-                      ? 'CASH'
-                      : settings.paymentMethod
-                    : settings.paymentMethod,
-              })
-            }
-            options={SALES_TYPES}
+                salesType: nextType,
+                paymentMethod: defaultPaymentMethodForSalesType(nextType, settings.paymentMethod),
+              });
+            }}
+            options={SALES_TYPE_OPTIONS}
           />
           <FormSelect
             label="Division"
@@ -2147,6 +2205,14 @@ function SettingsModal({
             value={settings.currency}
             onChange={(event) => onChange({ currency: event.target.value })}
             options={CURRENCIES.map((currency) => ({ value: currency, label: currency }))}
+          />
+          <FormInput
+            label="Search customer"
+            value={customerSearch}
+            onChange={(event) => onCustomerSearchChange(event.target.value)}
+            placeholder="Name, code, phone, email, or TIN"
+            disabled={!settings.branchId}
+            hint={settings.branchId ? undefined : 'Pick a branch first'}
           />
           <FormSelect
             label="Customer"
@@ -2211,29 +2277,33 @@ function SettingsModal({
             }}
             options={PAYMENT_METHODS}
           />
-          <FormSelect
-            label={accountSelectLabel(settings.paymentMethod)}
-            required
-            value={settings.cashAccountId}
-            onChange={(event) => {
-              const account = cashAccounts.find((candidate) => candidate.id === event.target.value);
-              onChange({
-                cashAccountId: event.target.value,
-                paymentMethod: paymentMethodForAccount(account) ?? settings.paymentMethod,
-              });
-            }}
-            placeholder={cashAccountsLoading ? 'Loading accounts' : 'Select account'}
-            disabled={!settings.branchId || cashAccountsLoading}
-            options={selectableCashAccounts.map((account) => ({
-              value: account.id,
-              label: accountOptionLabel(account),
-            }))}
-            hint={
-              settings.branchId && !cashAccountsLoading && selectableCashAccounts.length === 0
-                ? `${emptyReceiptAccountHint(settings.paymentMethod)} The API will create a branch cash drawer when this setup reloads.`
-                : undefined
-            }
-          />
+          {settings.paymentMethod !== 'CREDIT' && (
+            <FormSelect
+              label={accountSelectLabel(settings.paymentMethod)}
+              required
+              value={settings.cashAccountId}
+              onChange={(event) => {
+                const account = cashAccounts.find(
+                  (candidate) => candidate.id === event.target.value,
+                );
+                onChange({
+                  cashAccountId: event.target.value,
+                  paymentMethod: paymentMethodForAccount(account) ?? settings.paymentMethod,
+                });
+              }}
+              placeholder={cashAccountsLoading ? 'Loading accounts' : 'Select account'}
+              disabled={!settings.branchId || cashAccountsLoading}
+              options={selectableCashAccounts.map((account) => ({
+                value: account.id,
+                label: accountOptionLabel(account),
+              }))}
+              hint={
+                settings.branchId && !cashAccountsLoading && selectableCashAccounts.length === 0
+                  ? `${emptyReceiptAccountHint(settings.paymentMethod)} The API will create a branch cash drawer when this setup reloads.`
+                  : undefined
+              }
+            />
+          )}
           <FormInput
             label="Payment Reference"
             value={paymentReference}

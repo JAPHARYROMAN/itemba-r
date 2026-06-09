@@ -24,6 +24,13 @@ import {
 } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
 import {
+  SALES_TYPES,
+  CURRENCIES,
+  PAYMENT_METHODS,
+  ACCOUNT_TYPE_LABELS,
+  defaultPaymentMethodForSalesType,
+} from '@/lib/sales-order-constants';
+import {
   OrderLineEditor,
   mergeOrderProductOptions,
   type OrderLineValidationState,
@@ -174,43 +181,8 @@ interface Paginated<T> {
 
 const emptyPaginated = <T,>(): Paginated<T> => ({ data: [], total: 0, page: 1, totalPages: 1 });
 
-const SALES_TYPES = [
-  'CASH_SALE',
-  'CREDIT_SALE',
-  'WHOLESALE',
-  'RETAIL',
-  'SERVICE',
-  'INTERNAL_COMPANY',
-  'OTHER',
-];
 const SALES_STATUSES = ['DRAFT', 'CONFIRMED', 'PARTIALLY_PAID', 'PAID', 'CANCELLED', 'CLOSED'];
 const PAYMENT_STATUSES = ['UNPAID', 'PARTIALLY_PAID', 'PAID'];
-const CURRENCIES = ['TZS', 'USD', 'EUR'];
-const PAYMENT_METHODS = [
-  { value: 'CASH', label: 'Cash' },
-  { value: 'MOBILE_MONEY', label: 'Mobile Money' },
-  { value: 'BANK_CARD', label: 'Bank Card' },
-  { value: 'BANK_TRANSFER', label: 'Bank Transfer' },
-  { value: 'CREDIT', label: 'Credit (invoice)' },
-  { value: 'MIXED', label: 'Mixed' },
-  { value: 'OTHER', label: 'Other' },
-];
-
-function defaultPaymentMethodForSalesType(salesType: string, current?: string) {
-  if (salesType === 'CASH_SALE' || salesType === 'RETAIL') {
-    return current && current !== 'CREDIT' ? current : 'CASH';
-  }
-  if (salesType === 'CREDIT_SALE') return 'CREDIT';
-  return current ?? 'CREDIT';
-}
-
-const ACCOUNT_TYPE_LABELS: Record<string, string> = {
-  CASH_ON_HAND: 'Cash on hand',
-  PETTY_CASH: 'Petty cash',
-  BANK: 'Bank',
-  MOBILE_MONEY: 'Mobile money',
-  OTHER: 'Other',
-};
 
 function accountSelectLabel(method: string) {
   switch (method) {

@@ -556,9 +556,8 @@ export class SalesOrdersService {
     return created;
   }
 
-  async mobilePosBootstrap(user: AuthUser) {
-    const company = await this.findWestsidesCompany();
-    await this.companyScope.assertCanAccessCompany(user, company.id, AccessLevel.READ);
+  async mobilePosBootstrap(user: AuthUser, requestedCompanyId?: string) {
+    const company = await this.resolveMobilePosCompany(user, requestedCompanyId);
 
     const [divisions, branches, customers] = await Promise.all([
       this.prisma.division.findMany({
@@ -600,24 +599,16 @@ export class SalesOrdersService {
   }
 
   async mobilePosQuickSale(dto: CreateSalesOrderDto, user: AuthUser) {
-    const company = await this.findWestsidesCompany();
-    if (dto.companyId !== company.id) {
-      throw new BadRequestException('Mobile POS is restricted to Westsides Company Ltd');
-    }
-    if (dto.paymentMethod === SalesPaymentMethod.CREDIT) {
-      throw new BadRequestException('Mobile POS only supports paid counter sales');
-    }
-    const salesType = dto.salesType ?? SalesType.CASH_SALE;
-    if (salesType !== SalesType.CASH_SALE && salesType !== SalesType.RETAIL) {
-      throw new BadRequestException('Mobile POS only supports cash or retail sales');
-    }
-
+    // Mobile POS now mirrors the Operations sales-order experience: any company,
+    // division, branch, sales type, customer, and payment method (including
+    // CREDIT) the operator can access. Company-scope and reference ownership are
+    // enforced inside create()/confirm() via assertCanAccessCompany(WRITE), so
+    // we only normalize defaults and tag the source here.
     const safeDto: CreateSalesOrderDto = {
       ...dto,
-      companyId: company.id,
-      salesType,
+      salesType: dto.salesType ?? SalesType.CASH_SALE,
       currency: dto.currency ?? CurrencyCode.TZS,
-      notes: [dto.notes, 'Created from Westsides Mobile POS'].filter(Boolean).join('\n'),
+      notes: [dto.notes, 'Created from Mobile POS'].filter(Boolean).join('\n'),
       paymentMethod: dto.paymentMethod ?? SalesPaymentMethod.CASH,
     };
 
@@ -704,12 +695,27 @@ export class SalesOrdersService {
     return this.findOne(record.id, user);
   }
 
-  private async findWestsidesCompany() {
+  /**
+   * Resolve the company a Mobile POS session should open against. Honors an
+   * explicit companyId (access-checked), otherwise falls back to the operator's
+   * primary company and finally the first company they can access. Replaces the
+   * former Westsides-only lookup so the POS works for any accessible company.
+   */
+  private async resolveMobilePosCompany(user: AuthUser, requestedCompanyId?: string) {
+    let targetId = requestedCompanyId ?? user.companyId ?? null;
+    if (!targetId) {
+      const accessible = await this.companyScope.accessibleCompanyIds(user);
+      targetId = accessible[0] ?? null;
+    }
+    if (!targetId) {
+      throw new NotFoundException('No accessible company is configured for Mobile POS');
+    }
+    await this.companyScope.assertCanAccessCompany(user, targetId, AccessLevel.READ);
     const company = await this.prisma.company.findFirst({
-      where: { code: 'WESTSIDES', deletedAt: null },
+      where: { id: targetId, deletedAt: null },
       select: { id: true, name: true, code: true },
     });
-    if (!company) throw new NotFoundException('Westsides Company Ltd is not configured');
+    if (!company) throw new NotFoundException('Company not found');
     return company;
   }
 
