@@ -73,7 +73,6 @@ import { FuelDailyReconciliationModule } from './modules/fuel-daily-reconciliati
 import { PetroleumDashboardModule } from './modules/petroleum-dashboard/petroleum-dashboard.module';
 import { PetroleumReportsModule } from './modules/petroleum-reports/petroleum-reports.module';
 import { WestsidesModule } from './modules/westsides/westsides.module';
-import { ItembaDashboardModule } from './modules/itemba-dashboard/itemba-dashboard.module';
 import { ItembaWorkUnitsModule } from './modules/itemba-work-units/itemba-work-units.module';
 import { EquipmentUsageModule } from './modules/equipment-usage/equipment-usage.module';
 import { LaborRecordsModule } from './modules/labor-records/labor-records.module';
@@ -85,14 +84,6 @@ import { TripExpensesModule } from './modules/trip-expenses/trip-expenses.module
 import { TripFuelUsageModule } from './modules/trip-fuel-usage/trip-fuel-usage.module';
 import { VehicleMaintenanceModule } from './modules/vehicle-maintenance/vehicle-maintenance.module';
 import { LogisticsDashboardModule } from './modules/logistics-dashboard/logistics-dashboard.module';
-import { FarmsModule } from './modules/farms/farms.module';
-import { FarmFieldsModule } from './modules/farm-fields/farm-fields.module';
-import { CropsModule } from './modules/crops/crops.module';
-import { CropSeasonsModule } from './modules/crop-seasons/crop-seasons.module';
-import { FarmInputApplicationsModule } from './modules/farm-input-applications/farm-input-applications.module';
-import { HarvestRecordsModule } from './modules/harvest-records/harvest-records.module';
-import { AgricultureActivitiesModule } from './modules/agriculture-activities/agriculture-activities.module';
-import { AgricultureDashboardModule } from './modules/agriculture-dashboard/agriculture-dashboard.module';
 import { ConstructionProjectsModule } from './modules/construction-projects/construction-projects.module';
 import { ConstructionSitesModule } from './modules/construction-sites/construction-sites.module';
 import { BOQItemsModule } from './modules/boq-items/boq-items.module';
@@ -407,7 +398,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     PetroleumDashboardModule,
     PetroleumReportsModule,
     WestsidesModule,
-    ItembaDashboardModule,
     ItembaWorkUnitsModule,
     EquipmentUsageModule,
     LaborRecordsModule,
@@ -419,14 +409,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     TripFuelUsageModule,
     VehicleMaintenanceModule,
     LogisticsDashboardModule,
-    FarmsModule,
-    FarmFieldsModule,
-    CropsModule,
-    CropSeasonsModule,
-    FarmInputApplicationsModule,
-    HarvestRecordsModule,
-    AgricultureActivitiesModule,
-    AgricultureDashboardModule,
     ConstructionProjectsModule,
     ConstructionSitesModule,
     BOQItemsModule,
