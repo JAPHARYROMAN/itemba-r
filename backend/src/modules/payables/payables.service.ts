@@ -60,7 +60,7 @@ export class PayablesService {
     const [data, total] = await Promise.all([
       this.prisma.payable.findMany({
         where,
-        include: this.includeScope(),
+        include: this.includeListScope(),
         orderBy: { issueDate: 'desc' },
         skip: paging.skip,
         take: paging.limit,
@@ -80,13 +80,35 @@ export class PayablesService {
   async findOne(id: string, user?: AuthUser) {
     const record = await this.prisma.payable.findFirst({
       where: { id, deletedAt: null },
-      include: this.includeScope(),
+      include: this.includeDetailScope(),
     });
     if (!record) throw new NotFoundException('Payable not found');
     if (user) {
       await this.companyScope.assertCanAccessCompany(user, record.companyId);
     }
-    return record;
+    const supplier = record.supplierId
+      ? await this.prisma.supplier.findFirst({
+          where: { id: record.supplierId, deletedAt: null },
+          select: {
+            id: true,
+            supplierCode: true,
+            name: true,
+            legalName: true,
+            supplierType: true,
+            tin: true,
+            vrn: true,
+            phone: true,
+            email: true,
+            address: true,
+            contactPerson: true,
+            creditLimit: true,
+            currentBalance: true,
+            paymentTerms: true,
+            status: true,
+          },
+        })
+      : null;
+    return { ...record, supplier };
   }
 
   async create(dto: CreatePayableDto, user: AuthUser) {
@@ -367,11 +389,90 @@ export class PayablesService {
     return { success: true };
   }
 
-  private includeScope() {
+  private includeListScope() {
     return {
       company: { select: { id: true, name: true, code: true } },
       division: { select: { id: true, name: true, code: true } },
       branch: { select: { id: true, name: true, code: true } },
+    };
+  }
+
+  private includeDetailScope() {
+    return {
+      ...this.includeListScope(),
+      journalEntry: {
+        select: {
+          id: true,
+          journalNumber: true,
+          transactionDate: true,
+          description: true,
+          referenceType: true,
+          referenceId: true,
+          status: true,
+          totalDebit: true,
+          totalCredit: true,
+          postedAt: true,
+          lines: {
+            select: {
+              id: true,
+              description: true,
+              debit: true,
+              credit: true,
+              account: {
+                select: {
+                  id: true,
+                  accountCode: true,
+                  accountName: true,
+                  accountType: true,
+                  accountSubType: true,
+                },
+              },
+            },
+            orderBy: { createdAt: 'asc' as const },
+          },
+        },
+      },
+      purchaseOrders: {
+        where: { deletedAt: null },
+        select: {
+          id: true,
+          purchaseOrderNumber: true,
+          orderDate: true,
+          expectedDate: true,
+          purchaseType: true,
+          status: true,
+          paymentStatus: true,
+          subtotal: true,
+          taxAmount: true,
+          discountAmount: true,
+          totalAmount: true,
+          paidAmount: true,
+          outstandingAmount: true,
+        },
+        orderBy: { orderDate: 'desc' as const },
+        take: 10,
+      },
+      fuelDeliveries: {
+        where: { deletedAt: null },
+        select: {
+          id: true,
+          deliveryNumber: true,
+          deliveryDate: true,
+          deliveryNoteNumber: true,
+          invoiceNumber: true,
+          status: true,
+          orderedLitres: true,
+          deliveredLitres: true,
+          acceptedLitres: true,
+          rejectedLitres: true,
+          unitCost: true,
+          totalCost: true,
+          product: { select: { id: true, productCode: true, name: true, sku: true } },
+          tank: { select: { id: true, tankCode: true, tankName: true } },
+        },
+        orderBy: { deliveryDate: 'desc' as const },
+        take: 10,
+      },
     };
   }
 
