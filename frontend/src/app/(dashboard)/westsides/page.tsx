@@ -425,7 +425,6 @@ const QUICK_LINKS = [
   { label: 'Customers', href: '/westsides/customers', tone: 'brand', group: 'Commercial' },
   { label: 'Live Inventory', href: '/westsides/inventory/live', tone: 'info', group: 'Stock' },
   { label: 'Daily Close', href: '/westsides/daily-close', tone: 'warn', group: 'Control' },
-  { label: 'Bookings', href: '/hospitality/bookings', tone: 'brand', group: 'Hospitality' },
   { label: 'Sales Orders', href: '/operations/sales-orders', tone: 'neutral', group: 'Commercial' },
   { label: 'Quotations', href: '/westsides/quotations', tone: 'neutral', group: 'Pipeline' },
   { label: 'Price Lists', href: '/westsides/price-lists', tone: 'info', group: 'Pricing' },
@@ -1616,15 +1615,6 @@ function buildExceptions(
           title: 'Open folio balances',
           description: `${formatMoney(derived.openFoliosTotal, true)} remains unsettled before close.`,
           href: '/westsides/daily-close',
-          tone: 'warn',
-        })
-      : null,
-    derived.roomsDirty + derived.roomsOutOfOrder > 0
-      ? normalizeException({
-          id: 'room-readiness',
-          title: 'Room readiness drag',
-          description: `${formatCount(derived.roomsDirty)} dirty and ${formatCount(derived.roomsOutOfOrder)} out-of-order rooms.`,
-          href: '/hospitality/bookings',
           tone: 'warn',
         })
       : null,

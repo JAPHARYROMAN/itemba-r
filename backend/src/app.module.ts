@@ -94,29 +94,6 @@ import { ProjectBillingModule } from './modules/project-billing/project-billing.
 import { ConstructionDashboardModule } from './modules/construction-dashboard/construction-dashboard.module';
 import { LicensedBusinessUnitsModule } from './modules/licensed-business-units/licensed-business-units.module';
 import { BusinessLicensesModule } from './modules/business-licenses/business-licenses.module';
-import { RentalPropertiesModule } from './modules/rental-properties/rental-properties.module';
-import { RentalUnitsModule } from './modules/rental-units/rental-units.module';
-import { TenantsModule } from './modules/tenants/tenants.module';
-import { LeaseAgreementsModule } from './modules/lease-agreements/lease-agreements.module';
-import { RentInvoicesModule } from './modules/rent-invoices/rent-invoices.module';
-import { RentPaymentsModule } from './modules/rent-payments/rent-payments.module';
-import { PropertyMaintenanceModule } from './modules/property-maintenance/property-maintenance.module';
-import { ParkingFacilitiesModule } from './modules/parking-facilities/parking-facilities.module';
-import { ParkingZonesModule } from './modules/parking-zones/parking-zones.module';
-import { ParkingRatesModule } from './modules/parking-rates/parking-rates.module';
-import { ParkingSessionsModule } from './modules/parking-sessions/parking-sessions.module';
-import { ParkingPaymentsModule } from './modules/parking-payments/parking-payments.module';
-import { HospitalityFacilitiesModule } from './modules/hospitality-facilities/hospitality-facilities.module';
-import { RoomsModule } from './modules/rooms/rooms.module';
-import { GuestsModule } from './modules/guests/guests.module';
-import { RoomBookingsModule } from './modules/room-bookings/room-bookings.module';
-import { HousekeepingModule } from './modules/housekeeping/housekeeping.module';
-import { MenuCategoriesModule } from './modules/menu-categories/menu-categories.module';
-import { MenuItemsModule } from './modules/menu-items/menu-items.module';
-import { RestaurantTablesModule } from './modules/restaurant-tables/restaurant-tables.module';
-import { RestaurantOrdersModule } from './modules/restaurant-orders/restaurant-orders.module';
-import { HospitalityPaymentsModule } from './modules/hospitality-payments/hospitality-payments.module';
-import { FoliosModule } from './modules/folios/folios.module';
 
 // ── Milestone 9 — HR & Payroll ───────────────────────────────────────────────
 import { DepartmentsModule } from './modules/hr/departments/departments.module';
@@ -419,29 +396,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     ConstructionDashboardModule,
     LicensedBusinessUnitsModule,
     BusinessLicensesModule,
-    RentalPropertiesModule,
-    RentalUnitsModule,
-    TenantsModule,
-    LeaseAgreementsModule,
-    RentInvoicesModule,
-    RentPaymentsModule,
-    PropertyMaintenanceModule,
-    ParkingFacilitiesModule,
-    ParkingZonesModule,
-    ParkingRatesModule,
-    ParkingSessionsModule,
-    ParkingPaymentsModule,
-    HospitalityFacilitiesModule,
-    RoomsModule,
-    GuestsModule,
-    RoomBookingsModule,
-    HousekeepingModule,
-    MenuCategoriesModule,
-    MenuItemsModule,
-    RestaurantTablesModule,
-    RestaurantOrdersModule,
-    HospitalityPaymentsModule,
-    FoliosModule,
 
     // Milestone 9 — HR & Payroll
     DepartmentsModule,
