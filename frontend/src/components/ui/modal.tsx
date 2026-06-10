@@ -82,7 +82,7 @@ export function Modal({
           </div>
           <button
             onClick={onClose}
-            className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-lg transition-colors hover:bg-zinc-100"
+            className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-lg transition-colors hover:bg-[var(--aurora-bg-subtle)]"
             style={{ color: 'var(--aurora-text-muted)' }}
             aria-label="Close"
           >
