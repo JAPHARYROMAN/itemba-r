@@ -20,6 +20,18 @@ const SIZE_MAP: Record<BtnSize, string> = {
   lg: 'px-5   py-2.5  text-[14px] rounded-xl  gap-2',
 };
 
+// Solid, prominent variants lift on hover for tactility; quiet variants
+// (secondary/ghost) keep their place to stay calm in dense toolbars/tables.
+// Every variant gets a subtle press response. Disabled buttons get none.
+const LIFT_MAP: Record<BtnVariant, string> = {
+  primary: 'hover:-translate-y-px hover:shadow-md active:translate-y-0 active:scale-[0.98]',
+  secondary: 'active:scale-[0.98]',
+  danger: 'hover:-translate-y-px hover:shadow-md active:translate-y-0 active:scale-[0.98]',
+  ghost: 'active:scale-[0.98]',
+  warning: 'hover:-translate-y-px hover:shadow-md active:translate-y-0 active:scale-[0.98]',
+  success: 'hover:-translate-y-px hover:shadow-md active:translate-y-0 active:scale-[0.98]',
+};
+
 interface BtnProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: BtnVariant;
   size?: BtnSize;
@@ -45,10 +57,10 @@ export function Btn({
     <button
       disabled={isDisabled}
       className={`
-        inline-flex items-center justify-center font-medium transition-colors select-none
+        inline-flex items-center justify-center font-medium transition duration-150 ease-out select-none
         ${VARIANT_MAP[variant]}
         ${SIZE_MAP[size]}
-        ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+        ${isDisabled ? 'opacity-50 cursor-not-allowed' : `cursor-pointer ${LIFT_MAP[variant]}`}
         ${className}
       `}
       {...props}
@@ -79,7 +91,7 @@ export function IconBtn({ variant = 'ghost', size = 'sm', label, children, class
     <button
       aria-label={label}
       className={`
-        inline-flex items-center justify-center rounded-lg transition-colors
+        inline-flex items-center justify-center rounded-lg transition duration-150 ease-out active:scale-95
         ${VARIANT_MAP[variant]}
         ${size === 'xs' ? 'w-6 h-6' : size === 'sm' ? 'w-7 h-7' : size === 'md' ? 'w-8 h-8' : 'w-9 h-9'}
         ${className}

@@ -121,7 +121,7 @@ export function StatusBadge({ status, value, className = '' }: StatusBadgeProps)
   const style = BADGE_MAP[label] ?? 'bg-zinc-100 text-zinc-600 border-zinc-200';
   return (
     <span
-      className={`inline-flex items-center border rounded-full px-2 py-0.5 text-[11px] font-medium leading-none whitespace-nowrap ${style} ${className}`}
+      className={`inline-flex items-center border rounded-full px-2 py-0.5 text-[11px] font-medium leading-none whitespace-nowrap transition-transform duration-150 hover:scale-105 ${style} ${className}`}
     >
       {humanize(label)}
     </span>

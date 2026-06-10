@@ -2,6 +2,7 @@
 export { PageHeader } from './page-header';
 export { Card } from './card';
 export { StatCard } from './stat-card';
+export type { StatCardTrend } from './stat-card';
 export { StatusBadge } from './status-badge';
 
 // Data
@@ -11,6 +12,13 @@ export type { Column } from './data-table';
 // State
 export { EmptyState } from './empty-state';
 export { LoadingState, PageSpinner } from './loading-state';
+export {
+  Skeleton,
+  SkeletonText,
+  SkeletonCard,
+  SkeletonCardGrid,
+  SkeletonTable,
+} from './skeleton';
 export { ErrorState } from './error-state';
 export { PermissionDeniedState } from './permission-denied-state';
 
@@ -38,3 +46,7 @@ export { AuditTimeline } from './audit-timeline';
 
 // Theme
 export { ThemeSelector } from './theme-selector';
+
+// Feedback — re-exported from the (already-mounted) aurora toast system so
+// pages have a single import surface for showing success/error toasts.
+export { showToast } from '@/components/aurora/feedback';
