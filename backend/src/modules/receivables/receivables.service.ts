@@ -69,7 +69,7 @@ export class ReceivablesService {
     const [data, total] = await Promise.all([
       this.prisma.receivable.findMany({
         where,
-        include: this.includeScope(),
+        include: this.includeListScope(),
         orderBy: { issueDate: 'desc' },
         skip: paging.skip,
         take: paging.limit,
@@ -89,13 +89,35 @@ export class ReceivablesService {
   async findOne(id: string, user?: AuthUser) {
     const record = await this.prisma.receivable.findFirst({
       where: { id, deletedAt: null },
-      include: this.includeScope(),
+      include: this.includeDetailScope(),
     });
     if (!record) throw new NotFoundException('Receivable not found');
     if (user) {
       await this.companyScope.assertCanAccessCompany(user, record.companyId);
     }
-    return record;
+    const customer = record.customerId
+      ? await this.prisma.customer.findFirst({
+          where: { id: record.customerId, deletedAt: null },
+          select: {
+            id: true,
+            customerCode: true,
+            name: true,
+            legalName: true,
+            customerType: true,
+            tin: true,
+            vrn: true,
+            phone: true,
+            email: true,
+            address: true,
+            contactPerson: true,
+            creditLimit: true,
+            currentBalance: true,
+            paymentTerms: true,
+            status: true,
+          },
+        })
+      : null;
+    return { ...record, customer };
   }
 
   async create(dto: CreateReceivableDto, user: AuthUser) {
@@ -341,11 +363,115 @@ export class ReceivablesService {
     return { success: true };
   }
 
-  private includeScope() {
+  private includeListScope() {
     return {
       company: { select: { id: true, name: true, code: true } },
       division: { select: { id: true, name: true, code: true } },
       branch: { select: { id: true, name: true, code: true } },
+    };
+  }
+
+  private includeDetailScope() {
+    return {
+      ...this.includeListScope(),
+      journalEntry: {
+        select: {
+          id: true,
+          journalNumber: true,
+          transactionDate: true,
+          description: true,
+          referenceType: true,
+          referenceId: true,
+          status: true,
+          totalDebit: true,
+          totalCredit: true,
+          postedAt: true,
+          lines: {
+            select: {
+              id: true,
+              description: true,
+              debit: true,
+              credit: true,
+              account: {
+                select: {
+                  id: true,
+                  accountCode: true,
+                  accountName: true,
+                  accountType: true,
+                  accountSubType: true,
+                },
+              },
+            },
+            orderBy: { createdAt: 'asc' as const },
+          },
+        },
+      },
+      salesOrders: {
+        where: { deletedAt: null },
+        select: {
+          id: true,
+          salesOrderNumber: true,
+          orderDate: true,
+          dueDate: true,
+          salesType: true,
+          status: true,
+          paymentStatus: true,
+          subtotal: true,
+          taxAmount: true,
+          discountAmount: true,
+          totalAmount: true,
+          paidAmount: true,
+          outstandingAmount: true,
+        },
+        orderBy: { orderDate: 'desc' as const },
+        take: 10,
+      },
+      fuelCreditSales: {
+        where: { deletedAt: null },
+        select: {
+          id: true,
+          creditSaleNumber: true,
+          saleDate: true,
+          status: true,
+          litres: true,
+          pricePerLitre: true,
+          totalAmount: true,
+          vehicleNumber: true,
+          driverName: true,
+          product: { select: { id: true, productCode: true, name: true, sku: true } },
+        },
+        orderBy: { saleDate: 'desc' as const },
+        take: 10,
+      },
+      projectBillings: {
+        where: { deletedAt: null },
+        select: {
+          id: true,
+          billingNumber: true,
+          billingDate: true,
+          description: true,
+          amount: true,
+          currency: true,
+          status: true,
+        },
+        orderBy: { billingDate: 'desc' as const },
+        take: 10,
+      },
+      trips: {
+        where: { deletedAt: null },
+        select: {
+          id: true,
+          tripNumber: true,
+          tripDate: true,
+          origin: true,
+          destination: true,
+          revenueAmount: true,
+          currency: true,
+          status: true,
+        },
+        orderBy: { tripDate: 'desc' as const },
+        take: 10,
+      },
     };
   }
 

@@ -15,6 +15,19 @@ import {
   FormTextarea,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import {
+  DetailGrid,
+  DetailItem,
+  DetailSection,
+  DetailTable,
+  EmptyDetail,
+  InlineStatus,
+  MoneyTile,
+  fmtDateOnly as fmtDetailDate,
+  fmtDateTime,
+  fmtMoney,
+  fmtQty,
+} from '../_components/ar-ap-detail-ui';
 
 interface Company {
   id: string;
@@ -25,7 +38,10 @@ interface Company {
 interface Receivable {
   id: string;
   receivableNumber?: string;
+  customerId?: string | null;
   customerName: string;
+  sourceType?: string | null;
+  sourceId?: string | null;
   amount: number | string;
   amountPaid?: number | string | null;
   paidAmount?: number | string | null;
@@ -37,7 +53,105 @@ interface Receivable {
   notes?: string | null;
   companyId: string;
   company?: { name: string } | null;
+  division?: { name: string; code?: string | null } | null;
+  branch?: { name: string; code?: string | null } | null;
+  customer?: CustomerSnapshot | null;
+  journalEntry?: JournalEntrySnapshot | null;
+  salesOrders?: SalesOrderSnapshot[];
+  fuelCreditSales?: FuelCreditSaleSnapshot[];
+  projectBillings?: ProjectBillingSnapshot[];
+  trips?: TripSnapshot[];
   createdAt: string;
+  updatedAt?: string;
+}
+
+interface CustomerSnapshot {
+  customerCode?: string | null;
+  name?: string | null;
+  legalName?: string | null;
+  customerType?: string | null;
+  tin?: string | null;
+  vrn?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  contactPerson?: string | null;
+  creditLimit?: number | string | null;
+  currentBalance?: number | string | null;
+  paymentTerms?: string | null;
+  status?: string | null;
+}
+
+interface JournalEntrySnapshot {
+  journalNumber: string;
+  transactionDate: string;
+  description: string;
+  status: string;
+  totalDebit: number | string;
+  totalCredit: number | string;
+  postedAt?: string | null;
+  lines?: Array<{
+    id: string;
+    description?: string | null;
+    debit: number | string;
+    credit: number | string;
+    account: {
+      accountCode: string;
+      accountName: string;
+      accountType: string;
+      accountSubType?: string | null;
+    };
+  }>;
+}
+
+interface SalesOrderSnapshot {
+  id: string;
+  salesOrderNumber: string;
+  orderDate: string;
+  dueDate?: string | null;
+  salesType: string;
+  status: string;
+  paymentStatus: string;
+  subtotal: number | string;
+  taxAmount: number | string;
+  discountAmount: number | string;
+  totalAmount: number | string;
+  paidAmount: number | string;
+  outstandingAmount: number | string;
+}
+
+interface FuelCreditSaleSnapshot {
+  id: string;
+  creditSaleNumber: string;
+  saleDate: string;
+  status: string;
+  litres: number | string;
+  pricePerLitre: number | string;
+  totalAmount: number | string;
+  vehicleNumber?: string | null;
+  driverName?: string | null;
+  product?: { productCode: string; name: string; sku?: string | null } | null;
+}
+
+interface ProjectBillingSnapshot {
+  id: string;
+  billingNumber: string;
+  billingDate: string;
+  description: string;
+  amount: number | string;
+  currency: string;
+  status: string;
+}
+
+interface TripSnapshot {
+  id: string;
+  tripNumber: string;
+  tripDate: string;
+  origin: string;
+  destination: string;
+  revenueAmount: number | string;
+  currency: string;
+  status: string;
 }
 
 interface Paginated<T> {
@@ -109,6 +223,333 @@ function agingBucket(dueDate: string): string {
   if (days <= 60) return '31-60 days';
   if (days <= 90) return '61-90 days';
   return '90+ days';
+}
+
+function scopeLabel(scope?: { name: string; code?: string | null } | null) {
+  if (!scope) return '-';
+  return scope.code ? `${scope.code} - ${scope.name}` : scope.name;
+}
+
+function ReceivableDetailModal({
+  receivable,
+  onClose,
+}: {
+  receivable: Receivable;
+  onClose: () => void;
+}) {
+  const [detail, setDetail] = useState<Receivable>(receivable);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setDetail(receivable);
+    setLoading(true);
+    setError('');
+
+    fetch(`/api/backend/receivables/${receivable.id}`)
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.message ?? 'Unable to load receivable details');
+        return json.data ?? json;
+      })
+      .then((next) => {
+        if (!cancelled) setDetail(next);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load details');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [receivable]);
+
+  const currency = detail.currency || 'TZS';
+  const paid = receivablePaidAmount(detail);
+  const outstanding = receivableOutstandingAmount(detail);
+  const customer = detail.customer;
+  const sourceCount =
+    (detail.salesOrders?.length ?? 0) +
+    (detail.fuelCreditSales?.length ?? 0) +
+    (detail.projectBillings?.length ?? 0) +
+    (detail.trips?.length ?? 0);
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Receivable ${detail.receivableNumber ?? detail.id.slice(0, 8)}`}
+      subtitle={`${detail.customerName} · ${detail.status}`}
+      size="3xl"
+      footer={
+        <Btn variant="secondary" onClick={onClose}>
+          Close
+        </Btn>
+      }
+    >
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+          {error}
+        </div>
+      )}
+      {loading && (
+        <div className="mb-4 text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+          Loading full debtor details...
+        </div>
+      )}
+
+      <div className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          <MoneyTile label="Invoice Amount" value={detail.amount} currency={currency} />
+          <MoneyTile label="Paid / Collected" value={paid} currency={currency} tone="success" />
+          <MoneyTile
+            label="Outstanding"
+            value={outstanding}
+            currency={currency}
+            tone={outstanding > 0 ? 'danger' : 'success'}
+          />
+          <div
+            className="rounded-xl border px-4 py-3"
+            style={{
+              borderColor: 'var(--aurora-border)',
+              background: 'var(--aurora-card)',
+            }}
+          >
+            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              Aging
+            </div>
+            <div className="mt-2 text-lg font-bold" style={{ color: 'var(--aurora-text)' }}>
+              {detail.dueDate ? agingBucket(detail.dueDate) : '-'}
+            </div>
+          </div>
+        </div>
+
+        <DetailSection
+          title="Debtor Details"
+          description="Customer identity, contact, and credit posture."
+        >
+          <DetailGrid>
+            <DetailItem label="Customer Name" value={customer?.name ?? detail.customerName} />
+            <DetailItem label="Customer Code" value={customer?.customerCode} mono />
+            <DetailItem label="Legal Name" value={customer?.legalName} />
+            <DetailItem label="Customer Type" value={customer?.customerType} />
+            <DetailItem label="Contact Person" value={customer?.contactPerson} />
+            <DetailItem label="Phone" value={customer?.phone} />
+            <DetailItem label="Email" value={customer?.email} />
+            <DetailItem label="TIN" value={customer?.tin} mono />
+            <DetailItem label="VRN" value={customer?.vrn} mono />
+            <DetailItem label="Payment Terms" value={customer?.paymentTerms} />
+            <DetailItem label="Credit Limit" value={fmtMoney(customer?.creditLimit, currency)} />
+            <DetailItem
+              label="Current Balance"
+              value={fmtMoney(customer?.currentBalance, currency)}
+            />
+            <DetailItem
+              label="Customer Status"
+              value={<InlineStatus status={customer?.status} />}
+            />
+            <DetailItem label="Address" value={customer?.address} />
+          </DetailGrid>
+        </DetailSection>
+
+        <DetailSection title="Receivable Details" description="Document scope, source, and dates.">
+          <DetailGrid>
+            <DetailItem label="AR Number" value={detail.receivableNumber} mono />
+            <DetailItem label="Source Type" value={detail.sourceType} />
+            <DetailItem label="Source ID" value={detail.sourceId} mono />
+            <DetailItem label="Company" value={detail.company?.name} />
+            <DetailItem label="Division" value={scopeLabel(detail.division)} />
+            <DetailItem label="Branch / Location" value={scopeLabel(detail.branch)} />
+            <DetailItem label="Issue Date" value={fmtDetailDate(detail.issueDate)} />
+            <DetailItem label="Due Date" value={fmtDetailDate(detail.dueDate)} />
+            <DetailItem label="Created" value={fmtDateTime(detail.createdAt)} />
+            <DetailItem label="Updated" value={fmtDateTime(detail.updatedAt)} />
+            <DetailItem label="Status" value={<InlineStatus status={detail.status} />} />
+          </DetailGrid>
+        </DetailSection>
+
+        <DetailSection
+          title="Source Documents"
+          description="Operational records that created or support this debtor balance."
+        >
+          {sourceCount === 0 ? (
+            <EmptyDetail>No linked source documents found for this receivable.</EmptyDetail>
+          ) : (
+            <div className="space-y-4">
+              {(detail.salesOrders?.length ?? 0) > 0 && (
+                <DetailTable
+                  columns={[
+                    'Sales Order',
+                    'Date',
+                    'Status',
+                    'Payment',
+                    'Total',
+                    'Paid',
+                    'Outstanding',
+                  ]}
+                  empty="No sales orders"
+                  rows={detail.salesOrders!.map((order) => (
+                    <tr key={order.id}>
+                      <td className="px-3 py-2 font-mono text-xs">{order.salesOrderNumber}</td>
+                      <td className="px-3 py-2">{fmtDetailDate(order.orderDate)}</td>
+                      <td className="px-3 py-2">
+                        <InlineStatus status={order.status} />
+                      </td>
+                      <td className="px-3 py-2">
+                        <InlineStatus status={order.paymentStatus} />
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {fmtMoney(order.totalAmount, currency)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {fmtMoney(order.paidAmount, currency)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {fmtMoney(order.outstandingAmount, currency)}
+                      </td>
+                    </tr>
+                  ))}
+                />
+              )}
+              {(detail.fuelCreditSales?.length ?? 0) > 0 && (
+                <DetailTable
+                  columns={[
+                    'Fuel Credit Sale',
+                    'Date',
+                    'Product',
+                    'Litres',
+                    'Price / L',
+                    'Total',
+                    'Status',
+                  ]}
+                  empty="No fuel credit sales"
+                  rows={detail.fuelCreditSales!.map((sale) => (
+                    <tr key={sale.id}>
+                      <td className="px-3 py-2 font-mono text-xs">{sale.creditSaleNumber}</td>
+                      <td className="px-3 py-2">{fmtDetailDate(sale.saleDate)}</td>
+                      <td className="px-3 py-2">{sale.product?.name ?? '-'}</td>
+                      <td className="px-3 py-2 text-right font-mono">{fmtQty(sale.litres, 3)}</td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {fmtMoney(sale.pricePerLitre, currency)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {fmtMoney(sale.totalAmount, currency)}
+                      </td>
+                      <td className="px-3 py-2">
+                        <InlineStatus status={sale.status} />
+                      </td>
+                    </tr>
+                  ))}
+                />
+              )}
+              {(detail.projectBillings?.length ?? 0) > 0 && (
+                <DetailTable
+                  columns={['Billing', 'Date', 'Description', 'Amount', 'Status']}
+                  empty="No project billings"
+                  rows={detail.projectBillings!.map((billing) => (
+                    <tr key={billing.id}>
+                      <td className="px-3 py-2 font-mono text-xs">{billing.billingNumber}</td>
+                      <td className="px-3 py-2">{fmtDetailDate(billing.billingDate)}</td>
+                      <td className="px-3 py-2">{billing.description}</td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {fmtMoney(billing.amount, billing.currency)}
+                      </td>
+                      <td className="px-3 py-2">
+                        <InlineStatus status={billing.status} />
+                      </td>
+                    </tr>
+                  ))}
+                />
+              )}
+              {(detail.trips?.length ?? 0) > 0 && (
+                <DetailTable
+                  columns={['Trip', 'Date', 'Route', 'Revenue', 'Status']}
+                  empty="No trips"
+                  rows={detail.trips!.map((trip) => (
+                    <tr key={trip.id}>
+                      <td className="px-3 py-2 font-mono text-xs">{trip.tripNumber}</td>
+                      <td className="px-3 py-2">{fmtDetailDate(trip.tripDate)}</td>
+                      <td className="px-3 py-2">
+                        {trip.origin} {'->'} {trip.destination}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {fmtMoney(trip.revenueAmount, trip.currency)}
+                      </td>
+                      <td className="px-3 py-2">
+                        <InlineStatus status={trip.status} />
+                      </td>
+                    </tr>
+                  ))}
+                />
+              )}
+            </div>
+          )}
+        </DetailSection>
+
+        <DetailSection title="Ledger Posting" description="Journal entry and debit/credit lines.">
+          {detail.journalEntry ? (
+            <div className="space-y-3">
+              <DetailGrid>
+                <DetailItem label="Journal Number" value={detail.journalEntry.journalNumber} mono />
+                <DetailItem
+                  label="Transaction Date"
+                  value={fmtDetailDate(detail.journalEntry.transactionDate)}
+                />
+                <DetailItem
+                  label="Status"
+                  value={<InlineStatus status={detail.journalEntry.status} />}
+                />
+                <DetailItem
+                  label="Total Debit"
+                  value={fmtMoney(detail.journalEntry.totalDebit, currency)}
+                />
+                <DetailItem
+                  label="Total Credit"
+                  value={fmtMoney(detail.journalEntry.totalCredit, currency)}
+                />
+                <DetailItem label="Posted At" value={fmtDateTime(detail.journalEntry.postedAt)} />
+              </DetailGrid>
+              <DetailTable
+                columns={['Account', 'Description', 'Debit', 'Credit']}
+                empty="No journal lines"
+                rows={
+                  detail.journalEntry.lines?.length
+                    ? detail.journalEntry.lines.map((line) => (
+                        <tr key={line.id}>
+                          <td className="px-3 py-2">
+                            <div className="font-mono text-xs">{line.account.accountCode}</div>
+                            <div>{line.account.accountName}</div>
+                          </td>
+                          <td className="px-3 py-2">{line.description ?? '-'}</td>
+                          <td className="px-3 py-2 text-right font-mono">
+                            {fmtMoney(line.debit, currency)}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono">
+                            {fmtMoney(line.credit, currency)}
+                          </td>
+                        </tr>
+                      ))
+                    : null
+                }
+              />
+            </div>
+          ) : (
+            <EmptyDetail>No journal entry is linked to this receivable.</EmptyDetail>
+          )}
+        </DetailSection>
+
+        <DetailSection title="Notes">
+          <p className="whitespace-pre-wrap text-sm" style={{ color: 'var(--aurora-text)' }}>
+            {detail.notes || 'No notes recorded.'}
+          </p>
+        </DetailSection>
+      </div>
+    </Modal>
+  );
 }
 
 // ─── Record Payment Modal ─────────────────────────────────────────────────────
@@ -516,6 +957,7 @@ export default function ReceivablesPage() {
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [viewing, setViewing] = useState<Receivable | null>(null);
   const [editing, setEditing] = useState<Receivable | null>(null);
   const [deleting, setDeleting] = useState<Receivable | null>(null);
   const [recordingPayment, setRecordingPayment] = useState<Receivable | null>(null);
@@ -596,6 +1038,7 @@ export default function ReceivablesPage() {
           }}
         />
       )}
+      {viewing && <ReceivableDetailModal receivable={viewing} onClose={() => setViewing(null)} />}
       {editing && (
         <ReceivableModal
           mode="edit"
@@ -705,7 +1148,7 @@ export default function ReceivablesPage() {
                 <th className="px-4 py-3">Due Date</th>
                 <th className="px-4 py-3">Aging</th>
                 <th className="px-4 py-3">Status</th>
-                {canManage && <th className="px-4 py-3 text-right">Actions</th>}
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -729,7 +1172,17 @@ export default function ReceivablesPage() {
                 data.data.map((r) => (
                   <tr key={r.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono text-xs">
-                      {r.receivableNumber ?? r.id.slice(0, 8)}
+                      <div className="space-y-1">
+                        <div>{r.receivableNumber ?? r.id.slice(0, 8)}</div>
+                        <button
+                          type="button"
+                          onClick={() => setViewing(r)}
+                          className="font-sans text-[11px] font-semibold hover:underline"
+                          style={{ color: 'var(--aurora-primary-text)' }}
+                        >
+                          View details
+                        </button>
+                      </div>
                     </td>
                     <td className="px-4 py-3 font-medium">{r.customerName}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmtTZS(r.amount)}</td>
@@ -749,34 +1202,43 @@ export default function ReceivablesPage() {
                     <td className="px-4 py-3">
                       <StatusBadge status={r.status} />
                     </td>
-                    {canManage && (
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {(r.status === 'OPEN' ||
-                            r.status === 'PARTIALLY_PAID' ||
-                            r.status === 'OVERDUE') && (
-                            <Btn variant="success" size="xs" onClick={() => setRecordingPayment(r)}>
-                              Pay
-                            </Btn>
-                          )}
-                          {(r.status === 'OPEN' || r.status === 'OVERDUE') && (
-                            <Btn variant="warning" size="xs" onClick={() => setWritingOff(r)}>
-                              Write Off
-                            </Btn>
-                          )}
-                          {r.status === 'OPEN' && (
-                            <Btn variant="ghost" size="xs" onClick={() => setEditing(r)}>
-                              Edit
-                            </Btn>
-                          )}
-                          {r.status === 'OPEN' && (
-                            <Btn variant="danger" size="xs" onClick={() => setDeleting(r)}>
-                              Delete
-                            </Btn>
-                          )}
-                        </div>
-                      </td>
-                    )}
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Btn variant="secondary" size="xs" onClick={() => setViewing(r)}>
+                          View
+                        </Btn>
+                        {canManage && (
+                          <>
+                            {(r.status === 'OPEN' ||
+                              r.status === 'PARTIALLY_PAID' ||
+                              r.status === 'OVERDUE') && (
+                              <Btn
+                                variant="success"
+                                size="xs"
+                                onClick={() => setRecordingPayment(r)}
+                              >
+                                Pay
+                              </Btn>
+                            )}
+                            {(r.status === 'OPEN' || r.status === 'OVERDUE') && (
+                              <Btn variant="warning" size="xs" onClick={() => setWritingOff(r)}>
+                                Write Off
+                              </Btn>
+                            )}
+                            {r.status === 'OPEN' && (
+                              <Btn variant="ghost" size="xs" onClick={() => setEditing(r)}>
+                                Edit
+                              </Btn>
+                            )}
+                            {r.status === 'OPEN' && (
+                              <Btn variant="danger" size="xs" onClick={() => setDeleting(r)}>
+                                Delete
+                              </Btn>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}

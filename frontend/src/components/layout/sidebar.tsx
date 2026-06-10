@@ -109,27 +109,27 @@ const ICONS = {
 };
 
 // ─── Nav Structure ────────────────────────────────────────────────────────────
-type NavLeaf = {
+export type NavLeaf = {
   href: string;
   label: string;
   iconKey: keyof typeof ICONS;
   permission?: string;
 };
 
-type NavGroup = {
+export type NavGroup = {
   label: string;
   iconKey: keyof typeof ICONS;
   permission?: string;
   children: NavLeaf[];
 };
 
-type NavItem = NavLeaf | NavGroup;
+export type NavItem = NavLeaf | NavGroup;
 
-function isGroup(item: NavItem): item is NavGroup {
+export function isGroup(item: NavItem): item is NavGroup {
   return 'children' in item;
 }
 
-const NAV: NavItem[] = [
+export const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', iconKey: 'dashboard' },
   {
     label: 'Group Control',

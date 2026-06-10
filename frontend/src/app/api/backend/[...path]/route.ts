@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import { getBackendInternalUrl } from '@/lib/backend-url';
 import { SESSION_COOKIE_MAX_AGE_SECONDS } from '@/lib/auth-cookie-config';
+import { backendProxyRequestOriginAllowed } from '@/lib/backend-proxy-origin';
 
 const BACKEND = getBackendInternalUrl();
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -66,34 +67,12 @@ const refreshInFlight = new Map<
 >();
 
 function requestOriginAllowed(req: NextRequest): boolean {
-  // Pin the allowlist to server-configured canonical origins only. Building it
-  // from client-controlled Host / X-Forwarded-Host headers let a forged Host
-  // satisfy the origin check, so those header-derived entries are not trusted.
-  const allowedOrigins = new Set<string>([req.nextUrl.origin]);
-  for (const value of [
-    process.env.ALLOWED_PROXY_ORIGINS,
-    process.env.NEXT_PUBLIC_WEBSITE_URL,
-  ]) {
-    if (!value) continue;
-    for (const entry of value.split(',')) {
-      const trimmed = entry.trim();
-      if (trimmed) allowedOrigins.add(trimmed);
-    }
-  }
-
-  const origin = req.headers.get('origin');
-  if (origin) return allowedOrigins.has(origin);
-
-  const referer = req.headers.get('referer');
-  if (referer) {
-    try {
-      return allowedOrigins.has(new URL(referer).origin);
-    } catch {
-      return false;
-    }
-  }
-
-  return process.env.NODE_ENV !== 'production';
+  return backendProxyRequestOriginAllowed({
+    origin: req.headers.get('origin'),
+    referer: req.headers.get('referer'),
+    requestOrigin: req.nextUrl.origin,
+    env: process.env,
+  });
 }
 
 function getForwardedFor(req: NextRequest) {
