@@ -89,6 +89,8 @@ interface Customer {
   id: string;
   name: string;
   customerCode?: string | null;
+  phone?: string | null;
+  email?: string | null;
   divisionId?: string | null;
   branchId?: string | null;
 }
@@ -151,6 +153,10 @@ interface ConfirmedOrder {
     phone?: string | null;
     email?: string | null;
     website?: string | null;
+  } | null;
+  division?: {
+    name?: string | null;
+    code?: string | null;
   } | null;
   branch?: {
     name?: string | null;
@@ -451,7 +457,7 @@ function receiptPlainText(
   const currency = receiptCurrency(order, fallbackCurrency);
   const number = receiptNumber(order);
   const company = order.company?.name ?? 'Sales Receipt';
-  const branch = order.branch?.name ? ` - ${order.branch.name}` : '';
+  const location = [order.division?.name, order.branch?.name].filter(Boolean).join(' - ');
   const itemLines = lines
     .map((line) => {
       const qty = formatQty(receiptLineQty(line));
@@ -462,7 +468,8 @@ function receiptPlainText(
     .join('\n');
 
   return [
-    `${company}${branch}`,
+    company,
+    ...(location ? [location] : []),
     `Receipt: ${number}`,
     `Customer: ${receiptCustomerName(order)}`,
     `Date: ${formatDateTime(order.orderDate)}`,
@@ -484,6 +491,7 @@ function receiptHtml(order: ConfirmedOrder, lines: ConfirmedOrderLine[], fallbac
   const currency = receiptCurrency(order, fallbackCurrency);
   const number = receiptNumber(order);
   const company = order.company?.name ?? 'Sales Receipt';
+  const division = order.division?.name ?? '';
   const branch = order.branch?.name ?? '';
   const generatedAt = formatDateTime(order.orderDate);
   const rows = lines
@@ -537,6 +545,7 @@ function receiptHtml(order: ConfirmedOrder, lines: ConfirmedOrderLine[], fallbac
   <main class="receipt">
     <section class="head">
       <div class="brand">${escapeHtml(company)}</div>
+      ${division ? `<div class="muted">${escapeHtml(division)}</div>` : ''}
       ${branch ? `<div class="muted">${escapeHtml(branch)}</div>` : ''}
       ${order.branch?.phone ? `<div class="muted">${escapeHtml(order.branch.phone)}</div>` : ''}
       ${order.company?.phone ? `<div class="muted">${escapeHtml(order.company.phone)}</div>` : ''}
@@ -615,6 +624,7 @@ export function MobilePosSaleEntry() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerSearch, setCustomerSearch] = useState('');
+  const [customerSearching, setCustomerSearching] = useState(false);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [bootstrapLoading, setBootstrapLoading] = useState(true);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
@@ -633,6 +643,7 @@ export function MobilePosSaleEntry() {
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerId, setCustomerId] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [walkInName, setWalkInName] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [error, setError] = useState('');
@@ -731,24 +742,25 @@ export function MobilePosSaleEntry() {
     };
   }, [settings.companyId]);
 
-  // Cascade: reload customers for the chosen company/branch with debounced
-  // server-side search (name, code, phone, email, TIN) so any system customer
-  // is reachable — not just the first page cached at startup.
+  // Customer search-as-you-type, mirroring the product search: debounced,
+  // company-scoped (NOT branch-scoped — most customers are company-level, so a
+  // branch filter would hide them), matching name/code/phone/email/TIN.
   useEffect(() => {
-    if (!settings.companyId || !settings.branchId) {
+    const search = customerSearch.trim();
+    if (!settings.companyId || !search) {
       setCustomers([]);
+      setCustomerSearching(false);
       return;
     }
     let cancelled = false;
-    const search = customerSearch.trim();
+    setCustomerSearching(true);
     const timer = setTimeout(
       () => {
         backendList<Customer>('/customers', {
           query: {
             companyId: settings.companyId,
-            branchId: settings.branchId,
-            limit: 200,
-            ...(search && { search }),
+            search,
+            limit: 12,
           },
         })
           .then((rows) => {
@@ -756,15 +768,18 @@ export function MobilePosSaleEntry() {
           })
           .catch(() => {
             if (!cancelled) setCustomers([]);
+          })
+          .finally(() => {
+            if (!cancelled) setCustomerSearching(false);
           });
       },
-      search ? 250 : 0,
+      220,
     );
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [settings.companyId, settings.branchId, customerSearch]);
+  }, [settings.companyId, customerSearch]);
 
   // Defensive: clear the selected/typed customer and the search box whenever the
   // sale scope changes. The settings-sheet path already resets via
@@ -774,6 +789,7 @@ export function MobilePosSaleEntry() {
   // search never deselects a chosen customer.
   useEffect(() => {
     setCustomerId('');
+    setSelectedCustomer(null);
     setWalkInName('');
     setCustomerSearch('');
   }, [settings.companyId, settings.divisionId, settings.branchId]);
@@ -986,14 +1002,6 @@ export function MobilePosSaleEntry() {
   );
 
   const canUseMobilePos = hasPermission('sales.create') || hasPermission('pos.create');
-  const customerOptions = customers.filter((customer) => {
-    if (customer.branchId && settings.branchId && customer.branchId !== settings.branchId)
-      return false;
-    if (customer.divisionId && settings.divisionId && customer.divisionId !== settings.divisionId) {
-      return false;
-    }
-    return true;
-  });
 
   const canCheckout =
     settingsReady &&
@@ -1005,6 +1013,10 @@ export function MobilePosSaleEntry() {
   const resetSaleFields = () => {
     setCart([]);
     setCustomerId('');
+    setSelectedCustomer(null);
+    setCustomerSearch('');
+    setCustomers([]);
+    setCustomerSearching(false);
     setWalkInName('');
     setPaymentReference('');
     setSelectedProduct(null);
@@ -1425,27 +1437,89 @@ export function MobilePosSaleEntry() {
 
         <div className="space-y-3">
           <Card padding="sm" className="space-y-3">
-            <FormSelect
-              label="Customer"
-              value={customerId}
-              onChange={(event) => setCustomerId(event.target.value)}
-              placeholder="Walk-in"
-              disabled={Boolean(confirmed)}
-              options={customerOptions.map((customer) => ({
-                value: customer.id,
-                label: customer.customerCode
-                  ? `${customer.name} - ${customer.customerCode}`
-                  : customer.name,
-              }))}
-            />
-            {!customerId && (
-              <FormInput
-                label="Walk-in name"
-                value={walkInName}
-                onChange={(event) => setWalkInName(event.target.value)}
-                disabled={Boolean(confirmed)}
-                placeholder="Walk-in"
-              />
+            {selectedCustomer ? (
+              <div
+                className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                style={{ borderColor: 'var(--aurora-border)' }}
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-[13px] font-medium">{selectedCustomer.name}</div>
+                  <div className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] text-slate-500">
+                    {selectedCustomer.customerCode && (
+                      <span className="font-mono">{selectedCustomer.customerCode}</span>
+                    )}
+                    {selectedCustomer.phone && <span>{selectedCustomer.phone}</span>}
+                  </div>
+                </div>
+                <Btn
+                  variant="secondary"
+                  size="sm"
+                  disabled={Boolean(confirmed)}
+                  onClick={() => {
+                    setSelectedCustomer(null);
+                    setCustomerId('');
+                    setCustomerSearch('');
+                    setCustomers([]);
+                  }}
+                >
+                  Change
+                </Btn>
+              </div>
+            ) : (
+              <>
+                <div className="relative">
+                  <label
+                    className="mb-1 block text-[12px] font-medium"
+                    style={{ color: 'var(--aurora-text-secondary)' }}
+                  >
+                    Customer
+                  </label>
+                  <input
+                    className="aurora-input w-full rounded-lg px-3 py-2 text-[13px] transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed"
+                    value={customerSearch}
+                    onChange={(event) => setCustomerSearch(event.target.value)}
+                    disabled={!settings.companyId || Boolean(confirmed)}
+                    placeholder={
+                      settings.companyId ? 'Search name, code, phone, email' : 'Pick a company first'
+                    }
+                    autoComplete="off"
+                  />
+                  {(customers.length > 0 || customerSearching) && (
+                    <div
+                      className="absolute left-0 right-0 z-30 mt-1 max-h-72 overflow-y-auto rounded-lg border shadow-lg"
+                      style={{
+                        background: 'var(--aurora-card)',
+                        borderColor: 'var(--aurora-border)',
+                      }}
+                    >
+                      {customerSearching && customers.length === 0 ? (
+                        <div className="px-3 py-2 text-[12px] text-slate-500">Searching</div>
+                      ) : (
+                        customers.map((customer) => (
+                          <CustomerResultButton
+                            key={customer.id}
+                            customer={customer}
+                            onPick={() => {
+                              setSelectedCustomer(customer);
+                              setCustomerId(customer.id);
+                              setWalkInName('');
+                              setCustomerSearch('');
+                              setCustomers([]);
+                            }}
+                          />
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+                <FormInput
+                  label="Walk-in name"
+                  value={walkInName}
+                  onChange={(event) => setWalkInName(event.target.value)}
+                  disabled={Boolean(confirmed)}
+                  placeholder="Or enter a walk-in name"
+                />
+              </>
             )}
             <FormSelect
               label="Payment method"
@@ -1541,7 +1615,7 @@ export function MobilePosSaleEntry() {
         companies={companies}
         divisions={divisions}
         branchOptions={branchOptions}
-        customers={customerOptions}
+        customers={customers}
         customerSearch={customerSearch}
         employees={employees}
         cashAccounts={cashAccounts}
@@ -1558,7 +1632,10 @@ export function MobilePosSaleEntry() {
           setSettings((current) => ({ ...current, ...patch }));
           if (scopeChanged) resetForScopeChange();
         }}
-        onCustomerIdChange={setCustomerId}
+        onCustomerIdChange={(value) => {
+          setCustomerId(value);
+          setSelectedCustomer(value ? (customers.find((c) => c.id === value) ?? null) : null);
+        }}
         onCustomerSearchChange={setCustomerSearch}
         onWalkInNameChange={setWalkInName}
         onPaymentReferenceChange={setPaymentReference}
@@ -1614,11 +1691,16 @@ function MobileReceiptCard({
           <div className="text-[16px] font-extrabold tracking-wide">
             {order.company?.name ?? 'Sales Receipt'}
           </div>
-          <div className="mt-1 text-[11px] text-slate-500">
-            {[order.branch?.name, order.branch?.phone ?? order.company?.phone]
-              .filter(Boolean)
-              .join(' - ')}
-          </div>
+          {(order.division?.name || order.branch?.name) && (
+            <div className="mt-1 text-[11px] font-medium text-slate-600">
+              {[order.division?.name, order.branch?.name].filter(Boolean).join(' • ')}
+            </div>
+          )}
+          {(order.branch?.phone ?? order.company?.phone) && (
+            <div className="mt-0.5 text-[11px] text-slate-500">
+              {order.branch?.phone ?? order.company?.phone}
+            </div>
+          )}
         </div>
 
         <div className="mt-3 space-y-1 text-[12px]">
@@ -1877,6 +1959,32 @@ function OperationsSalesOrderOnboarding({
         ))}
       </div>
     </Card>
+  );
+}
+
+function CustomerResultButton({
+  customer,
+  onPick,
+}: {
+  customer: Customer;
+  onPick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="block w-full px-3 py-2 text-left transition-colors hover:bg-zinc-50"
+      onMouseDown={(event) => {
+        event.preventDefault();
+        onPick();
+      }}
+    >
+      <div className="text-[13px] font-medium">{customer.name}</div>
+      <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+        {customer.customerCode && <span className="font-mono">{customer.customerCode}</span>}
+        {customer.phone && <span>{customer.phone}</span>}
+        {customer.email && <span>{customer.email}</span>}
+      </div>
+    </button>
   );
 }
 
@@ -2237,8 +2345,8 @@ function SettingsModal({
             value={customerSearch}
             onChange={(event) => onCustomerSearchChange(event.target.value)}
             placeholder="Name, code, phone, email, or TIN"
-            disabled={!settings.branchId}
-            hint={settings.branchId ? undefined : 'Pick a branch first'}
+            disabled={!settings.companyId}
+            hint={settings.companyId ? undefined : 'Pick a company first'}
           />
           <FormSelect
             label="Customer"

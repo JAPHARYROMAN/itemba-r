@@ -383,6 +383,7 @@ export class SalesOrdersService {
             },
           },
         },
+        division: { select: { id: true, name: true, code: true } },
         branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
         customer: { select: { id: true, name: true } },
         receivable: {
