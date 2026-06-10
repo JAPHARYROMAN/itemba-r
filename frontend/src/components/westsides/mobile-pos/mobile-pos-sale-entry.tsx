@@ -612,7 +612,7 @@ function isReceiptReadyOrder(order: ConfirmedOrder) {
 }
 
 export function MobilePosSaleEntry() {
-  const { user, loading: authLoading, hasPermission } = useAuth();
+  const { user, loading: authLoading, hasPermission, logout } = useAuth();
   const userId = user?.id ?? '';
   const [hydrated, setHydrated] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1252,6 +1252,14 @@ export function MobilePosSaleEntry() {
     }
   };
 
+  const handleLogout = async () => {
+    if (!confirmed && cart.length > 0) {
+      const proceed = window.confirm('You have items in the current sale. Log out and discard it?');
+      if (!proceed) return;
+    }
+    await logout();
+  };
+
   if (authLoading || !hydrated || bootstrapLoading) return <PageSpinner />;
 
   if (!canUseMobilePos) {
@@ -1267,7 +1275,11 @@ export function MobilePosSaleEntry() {
     <div className="mx-auto max-w-md p-3 pb-6 sm:max-w-5xl sm:p-6">
       <PageHeader
         title="Operations Mobile POS"
-        subtitle="Westsides counter sales through Operations Sales Orders"
+        subtitle={
+          user?.fullName
+            ? `Signed in as ${user.fullName}`
+            : 'Counter sales through Operations Sales Orders'
+        }
         actions={
           <>
             <Link
@@ -1282,6 +1294,9 @@ export function MobilePosSaleEntry() {
             </Link>
             <Btn variant="secondary" size="sm" onClick={() => setSettingsOpen(true)}>
               Settings
+            </Btn>
+            <Btn variant="secondary" size="sm" onClick={handleLogout}>
+              Log out
             </Btn>
           </>
         }
