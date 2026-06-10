@@ -68,17 +68,6 @@ interface Unit {
   symbol: string;
 }
 
-interface FuelTank {
-  id: string;
-  productId: string;
-  tankCode: string;
-  tankName: string;
-  capacityLitres: number | string;
-  currentBookBalance?: number | string | null;
-  status: string;
-  product?: { name?: string | null; productCode?: string | null } | null;
-}
-
 interface PurchaseOrderLine {
   id?: string;
   productId: string;
@@ -189,18 +178,6 @@ const blankForm = (): PurchaseOrderForm => ({
 function fmtMoney(n: number | string | null | undefined, ccy = 'TZS') {
   const value = Number(n ?? 0);
   return `${ccy} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0)}`;
-}
-
-function lineQuantity(line: PurchaseOrderLine) {
-  return Number(line.qty ?? line.quantity ?? 0) || 0;
-}
-
-function lineProductName(line: PurchaseOrderLine) {
-  return line.product?.name ?? line.description ?? line.productId;
-}
-
-function isFuelCategoryLine(line: PurchaseOrderLine) {
-  return line.product?.category?.categoryType === 'FUEL';
 }
 
 function PurchaseOrderModal({
@@ -691,60 +668,12 @@ function ReceiveOrderModal({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [tanks, setTanks] = useState<FuelTank[]>([]);
-  const [tankLoading, setTankLoading] = useState(false);
-  const [tankError, setTankError] = useState('');
-  const [tankAllocations, setTankAllocations] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (!order.branchId) return;
-    setTankLoading(true);
-    setTankError('');
-    backendList<FuelTank>(`/petroleum/fuel-tanks/branch/${order.branchId}`)
-      .then((rows) => {
-        const activeTanks = rows.filter((tank) => tank.status === 'ACTIVE');
-        setTanks(activeTanks);
-        setTankAllocations((current) => {
-          const next = { ...current };
-          for (const line of order.lines ?? []) {
-            const key = line.id ?? line.productId;
-            if (next[key]) continue;
-            const matching = activeTanks.filter((tank) => tank.productId === line.productId);
-            if (matching.length === 1) next[key] = matching[0].id;
-          }
-          return next;
-        });
-      })
-      .catch((err: unknown) =>
-        setTankError(err instanceof Error ? err.message : 'Failed to load petroleum tanks'),
-      )
-      .finally(() => setTankLoading(false));
-  }, [order.branchId, order.lines]);
-
-  const fuelLines = (order.lines ?? []).filter(
-    (line) => isFuelCategoryLine(line) || tanks.some((tank) => tank.productId === line.productId),
-  );
-  const unresolvedFuelLines = fuelLines.filter((line) => {
-    const key = line.id ?? line.productId;
-    return !tankAllocations[key];
-  });
 
   const handleReceive = async () => {
-    if (unresolvedFuelLines.length > 0) {
-      setError('Select a destination petroleum tank for every fuel line before receiving');
-      return;
-    }
     setSaving(true);
     setError('');
     try {
-      await backendPatch(`/purchase-orders/${order.id}/receive`, {
-        fuelTankAllocations: fuelLines.map((line) => ({
-          purchaseOrderLineId: line.id,
-          productId: line.productId,
-          tankId: tankAllocations[line.id ?? line.productId],
-          quantity: lineQuantity(line),
-        })),
-      });
+      await backendPatch(`/purchase-orders/${order.id}/receive`, {});
       onReceived();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to receive order');
@@ -786,68 +715,6 @@ function ReceiveOrderModal({
           </div>
           <div>Inventory will be received into this order&apos;s branch/location.</div>
         </div>
-        {fuelLines.length > 0 && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
-            <div className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
-              Petroleum Tank Allocation
-            </div>
-            <p className="mt-1 text-xs text-amber-800">
-              Fuel lines must be assigned to a tank so Operations stock and Petroleum tank stock
-              stay consistent.
-            </p>
-            {tankLoading && <p className="mt-2 text-xs text-amber-700">Loading tanks...</p>}
-            {tankError && <p className="mt-2 text-xs text-red-700">{tankError}</p>}
-            <div className="mt-3 space-y-3">
-              {fuelLines.map((line) => {
-                const key = line.id ?? line.productId;
-                const matchingTanks = tanks.filter((tank) => tank.productId === line.productId);
-                return (
-                  <div key={key} className="grid gap-2 md:grid-cols-[1fr_120px_1.2fr] md:items-end">
-                    <div>
-                      <div className="text-xs text-amber-700">Product</div>
-                      <div className="text-sm font-medium text-amber-950">
-                        {lineProductName(line)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-amber-700">Litres / Qty</div>
-                      <div className="text-sm font-mono text-amber-950">
-                        {new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 }).format(
-                          lineQuantity(line),
-                        )}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs text-amber-700 mb-1">Destination tank</label>
-                      <select
-                        value={tankAllocations[key] ?? ''}
-                        onChange={(event) =>
-                          setTankAllocations((current) => ({
-                            ...current,
-                            [key]: event.target.value,
-                          }))
-                        }
-                        className="w-full rounded-md border border-amber-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-300"
-                      >
-                        <option value="">Select tank</option>
-                        {matchingTanks.map((tank) => (
-                          <option key={tank.id} value={tank.id}>
-                            {tank.tankCode} - {tank.tankName}
-                          </option>
-                        ))}
-                      </select>
-                      {matchingTanks.length === 0 && (
-                        <div className="mt-1 text-[11px] text-red-700">
-                          No active petroleum tank matches this product at the receiving branch.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>
     </Modal>
   );

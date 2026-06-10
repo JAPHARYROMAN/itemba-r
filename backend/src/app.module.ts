@@ -59,19 +59,6 @@ import { SalesCommissionsModule } from './modules/sales-commissions/sales-commis
 import { PurchaseOrdersModule } from './modules/purchase-orders/purchase-orders.module';
 import { OperationsDashboardModule } from './modules/operations-dashboard/operations-dashboard.module';
 import { OperationsReportsModule } from './modules/operations-reports/operations-reports.module';
-import { FuelTanksModule } from './modules/fuel-tanks/fuel-tanks.module';
-import { FuelPumpsModule } from './modules/fuel-pumps/fuel-pumps.module';
-import { FuelNozzlesModule } from './modules/fuel-nozzles/fuel-nozzles.module';
-import { FuelPricesModule } from './modules/fuel-prices/fuel-prices.module';
-import { FuelShiftsModule } from './modules/fuel-shifts/fuel-shifts.module';
-import { FuelNozzleReadingsModule } from './modules/fuel-nozzle-readings/fuel-nozzle-readings.module';
-import { FuelShiftCollectionsModule } from './modules/fuel-shift-collections/fuel-shift-collections.module';
-import { FuelTankDipsModule } from './modules/fuel-tank-dips/fuel-tank-dips.module';
-import { FuelDeliveriesModule } from './modules/fuel-deliveries/fuel-deliveries.module';
-import { FuelCreditSalesModule } from './modules/fuel-credit-sales/fuel-credit-sales.module';
-import { FuelDailyReconciliationModule } from './modules/fuel-daily-reconciliation/fuel-daily-reconciliation.module';
-import { PetroleumDashboardModule } from './modules/petroleum-dashboard/petroleum-dashboard.module';
-import { PetroleumReportsModule } from './modules/petroleum-reports/petroleum-reports.module';
 import { WestsidesModule } from './modules/westsides/westsides.module';
 import { ItembaWorkUnitsModule } from './modules/itemba-work-units/itemba-work-units.module';
 import { EquipmentUsageModule } from './modules/equipment-usage/equipment-usage.module';
@@ -105,7 +92,6 @@ import { DisbursementsModule } from './modules/hr/disbursements/disbursements.mo
 import { StatutoryReturnsModule } from './modules/hr/statutory-returns/statutory-returns.module';
 import { PayrollPostingsModule } from './modules/hr/payroll-postings/payroll-postings.module';
 import { WcfAuditModule } from './modules/hr/wcf-audit/wcf-audit.module';
-import { PetroleumCommissionsModule } from './modules/hr/petroleum-commissions/petroleum-commissions.module';
 import { OshaRegistrationsModule } from './modules/hr/osha-registrations/osha-registrations.module';
 import { MedicalExamRecordsModule } from './modules/hr/medical-exam-records/medical-exam-records.module';
 import { EmploymentDisputesModule } from './modules/hr/employment-disputes/employment-disputes.module';
@@ -361,19 +347,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     PurchaseOrdersModule,
     OperationsDashboardModule,
     OperationsReportsModule,
-    FuelTanksModule,
-    FuelPumpsModule,
-    FuelNozzlesModule,
-    FuelPricesModule,
-    FuelShiftsModule,
-    FuelNozzleReadingsModule,
-    FuelShiftCollectionsModule,
-    FuelTankDipsModule,
-    FuelDeliveriesModule,
-    FuelCreditSalesModule,
-    FuelDailyReconciliationModule,
-    PetroleumDashboardModule,
-    PetroleumReportsModule,
     WestsidesModule,
     ItembaWorkUnitsModule,
     EquipmentUsageModule,
@@ -407,7 +380,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     StatutoryReturnsModule,
     PayrollPostingsModule,
     WcfAuditModule,
-    PetroleumCommissionsModule,
     OshaRegistrationsModule,
     MedicalExamRecordsModule,
     EmploymentDisputesModule,

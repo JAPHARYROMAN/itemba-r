@@ -14,7 +14,6 @@ export {
 } from './company-scope.service';
 export type { CompanyScopedWhere } from './company-scope.service';
 export { AccountingControlService } from './accounting-control.service';
-export { PetroleumShiftControlService } from './petroleum-shift-control.service';
 export { StagedImportValidationService } from './staged-import-validation.service';
 export { ObservabilityBudgetService } from './observability-budget.service';
 export { WebhookSignatureService } from './webhook-signature.service';
