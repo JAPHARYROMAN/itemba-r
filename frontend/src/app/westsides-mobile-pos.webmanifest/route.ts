@@ -3,9 +3,9 @@ export const dynamic = 'force-static';
 export function GET() {
   return new Response(
     JSON.stringify({
-      name: 'Westsides Mobile POS',
-      short_name: 'Westsides POS',
-      description: 'Minimal Westsides counter-sale entry connected to ITEMBA-R.',
+      name: 'Itemba Mobile POS',
+      short_name: 'Itemba POS',
+      description: 'Mobile counter-sale entry connected to ITEMBA-R.',
       start_url: '/operations/mobile-pos',
       scope: '/',
       display: 'standalone',

@@ -11,7 +11,7 @@ import {
 
 export const metadata: Metadata = {
   title: `${WESTSIDES_MOBILE_POS_NAME} Install`,
-  description: 'Install and open the Westsides Mobile POS route.',
+  description: 'Install and open the Itemba Mobile POS route.',
   manifest: WESTSIDES_MOBILE_POS_MANIFEST_PATH,
 };
 
@@ -177,7 +177,7 @@ export default function WestsidesMobilePosInstallPage() {
                 POS route
               </h2>
               <p className="mt-1 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
-                This gateway opens the dedicated Westsides Mobile POS screen.
+                This gateway opens the dedicated Itemba Mobile POS screen.
               </p>
             </div>
             <code

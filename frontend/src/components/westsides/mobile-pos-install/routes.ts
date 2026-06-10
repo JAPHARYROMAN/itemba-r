@@ -1,4 +1,4 @@
-export const WESTSIDES_MOBILE_POS_NAME = 'Westsides Mobile POS';
+export const WESTSIDES_MOBILE_POS_NAME = 'Itemba Mobile POS';
 export const WESTSIDES_MOBILE_POS_INSTALL_PATH = '/westsides/mobile-pos/install';
 export const WESTSIDES_MOBILE_POS_ROUTE = '/operations/mobile-pos';
 export const WESTSIDES_MOBILE_POS_MANIFEST_PATH = '/westsides-mobile-pos.webmanifest';
