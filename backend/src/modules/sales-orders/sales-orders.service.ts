@@ -1,4 +1,11 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
@@ -90,6 +97,10 @@ function normalizePaymentMethodForSalesType(
   return paymentMethod ?? SalesPaymentMethod.CREDIT;
 }
 
+function hasPermission(user: AuthUser, permission: string) {
+  return user.permissions?.includes(permission) ?? false;
+}
+
 function calculateLineTotals(
   lines: {
     productId: string;
@@ -142,6 +153,101 @@ function calculateLineTotals(
 
   const totalAmount = subtotal - totalDiscount + totalTax;
   return { computed, subtotal, totalDiscount, totalTax, totalAmount };
+}
+
+type IdempotentSalesOrderSnapshot = {
+  companyId: string;
+  divisionId: string | null;
+  branchId: string | null;
+  customerId: string | null;
+  customerName: string | null;
+  salesType: SalesType;
+  orderDate: Date | string;
+  dueDate: Date | string | null;
+  currency: CurrencyCode;
+  paymentMethod: SalesPaymentMethod | null;
+  cashAccountId: string | null;
+  subtotal: Prisma.Decimal | number | string;
+  discountAmount: Prisma.Decimal | number | string;
+  taxAmount: Prisma.Decimal | number | string;
+  totalAmount: Prisma.Decimal | number | string;
+  lines: Array<{
+    productId: string;
+    quantity: Prisma.Decimal | number | string;
+    unitId: string;
+    unitPrice: Prisma.Decimal | number | string;
+    discountAmount: Prisma.Decimal | number | string | null;
+    taxAmount: Prisma.Decimal | number | string | null;
+    batchId: string | null;
+  }>;
+};
+
+function dateKey(value: Date | string | null | undefined) {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+}
+
+function moneyValue(value: Prisma.Decimal | number | string | null | undefined) {
+  return roundMoney(Number(value ?? 0));
+}
+
+function sameMoney(left: Prisma.Decimal | number | string | null | undefined, right: number) {
+  return Math.abs(moneyValue(left) - roundMoney(right)) < 0.01;
+}
+
+function lineSignature(line: {
+  productId: string;
+  quantity: Prisma.Decimal | number | string;
+  unitId: string;
+  unitPrice: Prisma.Decimal | number | string;
+  discountAmount?: Prisma.Decimal | number | string | null;
+  taxAmount?: Prisma.Decimal | number | string | null;
+  batchId?: string | null;
+}) {
+  return [
+    line.productId,
+    line.unitId,
+    line.batchId ?? '',
+    moneyValue(line.quantity).toFixed(3),
+    moneyValue(line.unitPrice).toFixed(2),
+    moneyValue(line.discountAmount).toFixed(2),
+    moneyValue(line.taxAmount).toFixed(2),
+  ].join('|');
+}
+
+function idempotentSalesOrderMatchesDto(
+  existing: IdempotentSalesOrderSnapshot,
+  dto: CreateSalesOrderDto,
+) {
+  const paymentMethod = normalizePaymentMethodForSalesType(dto.salesType, dto.paymentMethod);
+  const cashAccountId =
+    paymentMethod === SalesPaymentMethod.CREDIT ? null : (dto.cashAccountId ?? null);
+  const { computed, subtotal, totalDiscount, totalTax, totalAmount } = calculateLineTotals(
+    dto.lines,
+  );
+  const expectedLines = computed.map(lineSignature).sort();
+  const existingLines = existing.lines.map(lineSignature).sort();
+
+  return (
+    existing.companyId === dto.companyId &&
+    existing.divisionId === (dto.divisionId ?? null) &&
+    existing.branchId === (dto.branchId ?? null) &&
+    existing.customerId === (dto.customerId ?? null) &&
+    (Boolean(dto.customerId) || (existing.customerName ?? '') === (dto.customerName ?? '')) &&
+    existing.salesType === dto.salesType &&
+    dateKey(existing.orderDate) === dateKey(dto.orderDate) &&
+    dateKey(existing.dueDate) === dateKey(dto.dueDate) &&
+    existing.currency === dto.currency &&
+    existing.paymentMethod === paymentMethod &&
+    existing.cashAccountId === cashAccountId &&
+    sameMoney(existing.subtotal, subtotal) &&
+    sameMoney(existing.discountAmount, totalDiscount) &&
+    sameMoney(existing.taxAmount, totalTax) &&
+    sameMoney(existing.totalAmount, totalAmount) &&
+    existingLines.length === expectedLines.length &&
+    existingLines.every((signature, index) => signature === expectedLines[index])
+  );
 }
 
 @Injectable()
@@ -612,6 +718,14 @@ export class SalesOrdersService {
       notes: [dto.notes, 'Created from Mobile POS'].filter(Boolean).join('\n'),
       paymentMethod: dto.paymentMethod ?? SalesPaymentMethod.CASH,
     };
+
+    const normalizedPaymentMethod = normalizePaymentMethodForSalesType(
+      safeDto.salesType,
+      safeDto.paymentMethod,
+    );
+    if (normalizedPaymentMethod === SalesPaymentMethod.CREDIT && !hasPermission(user, 'sales.create')) {
+      throw new ForbiddenException('Credit sales require sales.create permission');
+    }
 
     return this.createAndConfirm(safeDto, user);
   }
@@ -1338,7 +1452,12 @@ export class SalesOrdersService {
     }
 
     if (safeDto.idempotencyKey) {
-      const replay = await this.replayQuickSale(safeDto.companyId, safeDto.idempotencyKey, user);
+      const replay = await this.replayQuickSale(
+        safeDto.companyId,
+        safeDto.idempotencyKey,
+        safeDto,
+        user,
+      );
       if (replay) return replay;
     }
 
@@ -1353,7 +1472,12 @@ export class SalesOrdersService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        const replay = await this.replayQuickSale(safeDto.companyId, safeDto.idempotencyKey, user);
+        const replay = await this.replayQuickSale(
+          safeDto.companyId,
+          safeDto.idempotencyKey,
+          safeDto,
+          user,
+        );
         if (replay) return replay;
       }
       throw error;
@@ -1361,12 +1485,61 @@ export class SalesOrdersService {
     return this.confirm(draft.id, user);
   }
 
-  private async replayQuickSale(companyId: string, idempotencyKey: string, user: AuthUser) {
+  private async replayQuickSale(
+    companyId: string,
+    idempotencyKey: string,
+    dto: CreateSalesOrderDto,
+    user: AuthUser,
+  ) {
     const existing = await this.prisma.salesOrder.findFirst({
       where: { companyId, idempotencyKey, deletedAt: null },
-      select: { id: true },
+      select: {
+        id: true,
+        companyId: true,
+        divisionId: true,
+        branchId: true,
+        customerId: true,
+        customerName: true,
+        salesType: true,
+        orderDate: true,
+        dueDate: true,
+        currency: true,
+        paymentMethod: true,
+        cashAccountId: true,
+        subtotal: true,
+        discountAmount: true,
+        taxAmount: true,
+        totalAmount: true,
+        status: true,
+        lines: {
+          select: {
+            productId: true,
+            quantity: true,
+            unitId: true,
+            unitPrice: true,
+            discountAmount: true,
+            taxAmount: true,
+            batchId: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
-    return existing ? this.findOne(existing.id, user) : null;
+    if (!existing) return null;
+
+    if (!idempotentSalesOrderMatchesDto(existing, dto)) {
+      throw new ConflictException(
+        'This checkout retry key is already attached to a different sales order. Start a new sale and try again.',
+      );
+    }
+
+    if (existing.status !== 'CONFIRMED' && existing.status !== 'PAID') {
+      throw new ConflictException(
+        'The previous checkout attempt was not confirmed. Open the sales order list to retry or delete the draft before charging again.',
+      );
+    }
+
+    return this.findOne(existing.id, user);
   }
 
   async cancel(id: string, user: AuthUser) {

@@ -1,27 +1,56 @@
 import { SalesOrdersService } from './sales-orders.service';
 import { Prisma } from '@prisma/client';
 
+function persistedOrder(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'so-1',
+    companyId: 'company-1',
+    divisionId: 'division-1',
+    branchId: 'branch-1',
+    customerId: null,
+    customerName: 'Walk-in Customer',
+    salesOrderNumber: 'SO-2026-000001',
+    orderDate: new Date('2026-05-30T00:00:00.000Z'),
+    dueDate: null,
+    currency: 'TZS',
+    salesType: 'CASH_SALE',
+    paymentMethod: 'CASH',
+    cashAccountId: 'cash-account-1',
+    subtotal: 200,
+    discountAmount: 0,
+    taxAmount: 0,
+    totalAmount: 200,
+    paidAmount: 200,
+    outstandingAmount: 0,
+    status: 'CONFIRMED',
+    paymentStatus: 'PAID',
+    receivableId: null,
+    receivable: null,
+    lines: [
+      {
+        id: 'line-1',
+        productId: 'product-1',
+        description: 'Item',
+        quantity: 2,
+        unitId: 'unit-1',
+        unitPrice: 100,
+        discountAmount: 0,
+        taxAmount: 0,
+        lineTotal: 200,
+        batchId: null,
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function makeService() {
   const prisma = {
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     salesOrder: {
       create: jest.fn(async ({ data }: any) => ({ id: 'so-1', ...data })),
       update: jest.fn(async ({ data }: any) => ({ id: 'so-1', companyId: 'company-1', ...data })),
-      findFirst: jest.fn(async () => ({
-        id: 'so-1',
-        companyId: 'company-1',
-        salesOrderNumber: 'SO-2026-000001',
-        orderDate: new Date('2026-05-30'),
-        salesType: 'CREDIT_SALE',
-        paymentMethod: 'CREDIT',
-        cashAccountId: null,
-        paidAmount: 0,
-        outstandingAmount: 200,
-        paymentStatus: 'UNPAID',
-        receivableId: null,
-        receivable: null,
-        lines: [],
-      })),
+      findFirst: jest.fn(async () => persistedOrder()),
     },
     salesOrderLine: {
       createMany: jest.fn(),
@@ -83,6 +112,7 @@ function makeService() {
 }
 
 const user = { id: 'user-1', permissions: ['sales.create'] } as any;
+const posOnlyUser = { id: 'pos-user-1', permissions: ['pos.create'] } as any;
 
 function createDto(overrides: Record<string, unknown> = {}) {
   return {
@@ -186,19 +216,36 @@ describe('SalesOrdersService quick-sale CREDIT handling', () => {
       }),
     );
   });
+
+  it('requires sales.create before Mobile POS can create a credit sale', async () => {
+    const { service } = makeService();
+
+    await expect(
+      service.mobilePosQuickSale(
+        createDto({ salesType: 'CREDIT_SALE', paymentMethod: 'CREDIT', customerName: 'Walk-in' }),
+        posOnlyUser,
+      ),
+    ).rejects.toThrow('Credit sales require sales.create permission');
+  });
 });
 
 describe('SalesOrdersService quick-sale idempotency', () => {
-  it('replays the existing order and skips create when the idempotency key matches', async () => {
+  function cashSaleDto(overrides: Record<string, unknown> = {}) {
+    return createDto({
+      salesType: 'CASH_SALE',
+      paymentMethod: 'CASH',
+      cashAccountId: 'cash-account-1',
+      idempotencyKey: 'idem-1',
+      ...overrides,
+    });
+  }
+
+  it('replays a matching confirmed order and skips create/confirm', async () => {
     const { service, prisma } = makeService();
     const confirmSpy = jest.spyOn(service, 'confirm');
 
-    const result = await service.mobilePosQuickSale(
-      createDto({ idempotencyKey: 'idem-1' }),
-      user,
-    );
+    const result = await service.mobilePosQuickSale(cashSaleDto(), user);
 
-    // Replay short-circuits before create()/confirm().
     expect(prisma.salesOrder.create).not.toHaveBeenCalled();
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({ id: 'so-1' }));
@@ -213,6 +260,30 @@ describe('SalesOrdersService quick-sale idempotency', () => {
     );
   });
 
+  it('does not replay a matching draft order as a successful receipt', async () => {
+    const { service, prisma } = makeService();
+    const confirmSpy = jest.spyOn(service, 'confirm');
+    prisma.salesOrder.findFirst.mockResolvedValue(persistedOrder({ status: 'DRAFT' }));
+
+    await expect(service.mobilePosQuickSale(cashSaleDto(), user)).rejects.toThrow(
+      'The previous checkout attempt was not confirmed',
+    );
+    expect(prisma.salesOrder.create).not.toHaveBeenCalled();
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects an idempotency retry when the payload no longer matches', async () => {
+    const { service, prisma } = makeService();
+    const confirmSpy = jest.spyOn(service, 'confirm');
+    prisma.salesOrder.findFirst.mockResolvedValue(persistedOrder({ customerName: 'Walk-in A' }));
+
+    await expect(
+      service.mobilePosQuickSale(cashSaleDto({ customerName: 'Walk-in B' }), user),
+    ).rejects.toThrow('checkout retry key is already attached to a different sales order');
+    expect(prisma.salesOrder.create).not.toHaveBeenCalled();
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
   it('recovers from a concurrent P2002 race by replaying the winning order', async () => {
     const { service, prisma } = makeService();
     jest.spyOn(service, 'confirm').mockResolvedValue({ id: 'so-1' } as any);
@@ -224,21 +295,7 @@ describe('SalesOrdersService quick-sale idempotency', () => {
       accountType: 'CASH_ON_HAND',
     });
 
-    const winner = {
-      id: 'so-1',
-      companyId: 'company-1',
-      salesOrderNumber: 'SO-2026-000001',
-      orderDate: new Date('2026-05-30'),
-      salesType: 'CASH_SALE',
-      paymentMethod: 'CASH',
-      cashAccountId: 'cash-account-1',
-      paidAmount: 200,
-      outstandingAmount: 0,
-      paymentStatus: 'PAID',
-      receivableId: null,
-      receivable: null,
-      lines: [],
-    };
+    const winner = persistedOrder();
     // Pre-create replay misses; create() loses the unique-index race; the
     // post-create replay (and the findOne it triggers) return the winner.
     prisma.salesOrder.findFirst.mockResolvedValueOnce(null).mockResolvedValue(winner);
@@ -249,15 +306,7 @@ describe('SalesOrdersService quick-sale idempotency', () => {
       }),
     );
 
-    const result = await service.mobilePosQuickSale(
-      createDto({
-        salesType: 'CASH_SALE',
-        paymentMethod: 'CASH',
-        cashAccountId: 'cash-account-1',
-        idempotencyKey: 'idem-1',
-      }),
-      user,
-    );
+    const result = await service.mobilePosQuickSale(cashSaleDto(), user);
 
     expect(prisma.salesOrder.create).toHaveBeenCalledTimes(1);
     expect(result).toEqual(expect.objectContaining({ id: 'so-1' }));

@@ -131,6 +131,8 @@ interface ConfirmedOrder {
   id?: string;
   salesOrderNumber?: string;
   orderNumber?: string;
+  status?: string | null;
+  paymentStatus?: string | null;
   orderDate?: string | null;
   customerName?: string | null;
   salesType?: string | null;
@@ -594,6 +596,10 @@ function saveSettings(userId: string, settings: Settings) {
 
 async function createQuickSale(body: Record<string, unknown>) {
   return backendPost<ConfirmedOrder>('/sales-orders/mobile-pos/quick-sale', body);
+}
+
+function isReceiptReadyOrder(order: ConfirmedOrder) {
+  return ['CONFIRMED', 'PAID', 'PARTIALLY_PAID'].includes(String(order.status ?? ''));
 }
 
 export function MobilePosSaleEntry() {
@@ -1159,6 +1165,11 @@ export function MobilePosSaleEntry() {
       }
 
       const order = await createQuickSale(body);
+      if (!isReceiptReadyOrder(order)) {
+        throw new Error(
+          'Checkout was saved but not confirmed. Open Sales Orders to retry or delete the draft before charging again.',
+        );
+      }
       idempotencyKeyRef.current = '';
       setConfirmed(order);
       setReceiptMessage('Receipt ready.');
