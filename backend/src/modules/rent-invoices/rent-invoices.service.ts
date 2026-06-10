@@ -1,25 +1,55 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateRentInvoiceDto } from './dto/create-rent-invoice.dto';
 import { UpdateRentInvoiceDto } from './dto/update-rent-invoice.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
 
 @Injectable()
 export class RentInvoicesService {
-  constructor(private prisma: PrismaService, private audit: AuditLogsService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditLogsService,
+    private companyScope: CompanyScopeService,
+  ) {}
 
-  async create(dto: CreateRentInvoiceDto, userId: string) {
+  async create(dto: CreateRentInvoiceDto, user: AuthUser) {
+    await this.companyScope.assertCanAccessCompany(
+      user,
+      dto.companyId,
+      AccessLevel.WRITE,
+    );
+
+    const billingPeriodStart = new Date(dto.billingPeriodStart);
+    const billingPeriodEnd = new Date(dto.billingPeriodEnd);
+    const duplicate = await this.prisma.rentInvoice.findFirst({
+      where: {
+        companyId: dto.companyId,
+        leaseAgreementId: dto.leaseAgreementId,
+        deletedAt: null,
+        status: { notIn: ['CANCELLED', 'WRITTEN_OFF'] },
+        billingPeriodStart: { lt: billingPeriodEnd },
+        billingPeriodEnd: { gt: billingPeriodStart },
+      },
+    });
+    if (duplicate) {
+      throw new BadRequestException(
+        'A rent invoice already covers this lease billing period',
+      );
+    }
+
     const item = await this.prisma.rentInvoice.create({
       data: {
         ...dto,
         invoiceDate: new Date(dto.invoiceDate),
-        billingPeriodStart: new Date(dto.billingPeriodStart),
-        billingPeriodEnd: new Date(dto.billingPeriodEnd),
+        billingPeriodStart,
+        billingPeriodEnd,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
       },
     });
-    await this.audit.log({ userId, action: 'CREATE', entityType: 'RentInvoice', entityId: item.id, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({ userId: user.id, action: 'CREATE', entityType: 'RentInvoice', entityId: item.id, newValue: dto as unknown as Record<string, unknown> });
     return item;
   }
 
@@ -37,7 +67,7 @@ export class RentInvoicesService {
     return { data, total, page, limit };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const item = await this.prisma.rentInvoice.findFirst({
       where: { id, deletedAt: null },
       include: {
@@ -47,39 +77,53 @@ export class RentInvoicesService {
       },
     });
     if (!item) throw new NotFoundException('RentInvoice not found');
+    await this.companyScope.assertCanAccessCompany(user, item.companyId, minimum);
     return item;
   }
 
-  async update(id: string, dto: UpdateRentInvoiceDto, userId: string) {
-    await this.findOne(id);
+  async update(id: string, dto: UpdateRentInvoiceDto, user: AuthUser) {
+    await this.findOne(id, user, AccessLevel.WRITE);
+    const {
+      companyId: _companyId,
+      propertyId: _propertyId,
+      rentalUnitId: _rentalUnitId,
+      tenantId: _tenantId,
+      leaseAgreementId: _leaseAgreementId,
+      createdById: _createdById,
+      invoiceDate,
+      billingPeriodStart,
+      billingPeriodEnd,
+      dueDate,
+      ...rest
+    } = dto;
     const item = await this.prisma.rentInvoice.update({
       where: { id },
       data: {
-        ...dto,
-        invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : undefined,
-        billingPeriodStart: dto.billingPeriodStart ? new Date(dto.billingPeriodStart) : undefined,
-        billingPeriodEnd: dto.billingPeriodEnd ? new Date(dto.billingPeriodEnd) : undefined,
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+        ...rest,
+        invoiceDate: invoiceDate ? new Date(invoiceDate) : undefined,
+        billingPeriodStart: billingPeriodStart ? new Date(billingPeriodStart) : undefined,
+        billingPeriodEnd: billingPeriodEnd ? new Date(billingPeriodEnd) : undefined,
+        dueDate: dueDate ? new Date(dueDate) : undefined,
       },
     });
-    await this.audit.log({ userId, action: 'UPDATE', entityType: 'RentInvoice', entityId: id, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'RentInvoice', entityId: id, newValue: dto as unknown as Record<string, unknown> });
     return item;
   }
 
-  async issue(id: string, userId: string) {
-    await this.findOne(id);
+  async issue(id: string, user: AuthUser) {
+    await this.findOne(id, user, AccessLevel.WRITE);
     const item = await this.prisma.rentInvoice.update({
       where: { id },
       data: { status: 'ISSUED' as any },
     });
-    await this.audit.log({ userId, action: 'ISSUE', entityType: 'RentInvoice', entityId: id, newValue: { status: 'ISSUED' } });
+    await this.audit.log({ userId: user.id, action: 'ISSUE', entityType: 'RentInvoice', entityId: id, newValue: { status: 'ISSUED' } });
     return item;
   }
 
-  async remove(id: string, userId: string) {
-    await this.findOne(id);
+  async remove(id: string, user: AuthUser) {
+    await this.findOne(id, user, AccessLevel.WRITE);
     await this.prisma.rentInvoice.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.audit.log({ userId, action: 'DELETE', entityType: 'RentInvoice', entityId: id, newValue: {} });
+    await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'RentInvoice', entityId: id, newValue: {} });
     return { message: 'RentInvoice deleted' };
   }
 }

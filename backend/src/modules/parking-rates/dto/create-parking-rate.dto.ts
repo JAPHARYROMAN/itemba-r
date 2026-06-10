@@ -14,7 +14,5 @@ export class CreateParkingRateDto {
   @IsEnum(ParkingRateStatus) @IsOptional() status?: ParkingRateStatus;
   @IsString() @IsOptional() zoneId?: string;
   @IsDateString() @IsOptional() effectiveTo?: string;
-  @IsString() createdById!: string;
-  @IsString() @IsOptional() approvedById?: string;
   @IsString() @IsOptional() notes?: string;
 }

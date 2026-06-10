@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateBOQItemDto } from './dto/create-boq-item.dto';
@@ -9,15 +10,36 @@ import { applyCompanyScopeWhere } from '../../common/services';
 export class BOQItemsService {
   constructor(private prisma: PrismaService, private audit: AuditLogsService) {}
 
-  private async nextCode(projectId: string) {
-    const count = await this.prisma.bOQItem.count({ where: { projectId } });
+  private async nextCode(tx: Prisma.TransactionClient, projectId: string) {
+    const count = await tx.bOQItem.count({ where: { projectId } });
     return `BOQ-${String(count + 1).padStart(5, '0')}`;
   }
 
   async create(dto: CreateBOQItemDto, userId: string) {
-    const boqCode = await this.nextCode(dto.projectId);
     const totalAmount = dto.quantity * dto.unitRate;
-    const item = await this.prisma.bOQItem.create({ data: { ...dto, boqCode, totalAmount } });
+    // Generate the per-project BOQ code and create the row atomically so two
+    // concurrent creates cannot derive the same count()+1 number. Retry once on
+    // a unique-constraint clash (@@unique([projectId, boqCode])).
+    let item: Awaited<ReturnType<typeof this.prisma.bOQItem.create>> | undefined;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        item = await this.prisma.$transaction(async (tx) => {
+          const boqCode = await this.nextCode(tx, dto.projectId);
+          return tx.bOQItem.create({ data: { ...dto, boqCode, totalAmount } });
+        });
+        break;
+      } catch (err) {
+        if (
+          attempt === 0 &&
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (!item) throw new Error('Failed to allocate BOQ item code');
     await this.audit.log({ userId, action: 'CREATE', entityType: 'BOQItem', entityId: item.id, newValue: dto as unknown as Record<string, unknown> });
     return item;
   }

@@ -191,13 +191,35 @@ export class ExternalPaymentsService {
       throw new BadRequestException('Payment cannot be confirmed in its current status');
     }
 
-    const updated = await this.prisma.externalPayment.update({
-      where: { id: record.id },
+    // ITMB-078: close the check-then-act race with a conditional atomic update
+    // guarded on the current status so concurrent confirms cannot both win.
+    const { count } = await this.prisma.externalPayment.updateMany({
+      where: {
+        id: record.id,
+        status: { in: [ExternalPaymentStatus.INITIATED, ExternalPaymentStatus.PENDING] },
+      },
       data: {
         status: ExternalPaymentStatus.SUCCESS,
         confirmedById: userId ?? null,
         confirmedAt: new Date(),
       },
+    });
+    if (count === 0) {
+      // Another request already transitioned the row; return its current state.
+      const current = await this.prisma.externalPayment.findUnique({
+        where: { id: record.id },
+      });
+      if (current?.status === ExternalPaymentStatus.SUCCESS) {
+        return this.prisma.externalPayment.findUnique({
+          where: { id: record.id },
+          select: this.buildSelect(false),
+        });
+      }
+      throw new BadRequestException('Payment cannot be confirmed in its current status');
+    }
+
+    const updated = await this.prisma.externalPayment.findUnique({
+      where: { id: record.id },
       select: this.buildSelect(false),
     });
 
@@ -237,13 +259,41 @@ export class ExternalPaymentsService {
     metadata?: Record<string, unknown>,
   ) {
     if (!record) throw new NotFoundException('External payment not found');
+    if (record.status === ExternalPaymentStatus.REVERSED) {
+      return this.prisma.externalPayment.findUnique({
+        where: { id: record.id },
+        select: this.buildSelect(false),
+      });
+    }
     if (record.status !== ExternalPaymentStatus.SUCCESS) {
       throw new BadRequestException('Only successful payments can be reversed');
     }
 
-    const updated = await this.prisma.externalPayment.update({
-      where: { id: record.id },
+    // ITMB-078: close the check-then-act race with a conditional atomic update
+    // guarded on the SUCCESS status so concurrent reversals cannot both win.
+    const { count } = await this.prisma.externalPayment.updateMany({
+      where: {
+        id: record.id,
+        status: ExternalPaymentStatus.SUCCESS,
+      },
       data: { status: ExternalPaymentStatus.REVERSED },
+    });
+    if (count === 0) {
+      // Another request already transitioned the row; return its current state.
+      const current = await this.prisma.externalPayment.findUnique({
+        where: { id: record.id },
+      });
+      if (current?.status === ExternalPaymentStatus.REVERSED) {
+        return this.prisma.externalPayment.findUnique({
+          where: { id: record.id },
+          select: this.buildSelect(false),
+        });
+      }
+      throw new BadRequestException('Only successful payments can be reversed');
+    }
+
+    const updated = await this.prisma.externalPayment.findUnique({
+      where: { id: record.id },
       select: this.buildSelect(false),
     });
 

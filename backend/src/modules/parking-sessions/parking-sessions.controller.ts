@@ -42,31 +42,31 @@ export class ParkingSessionsController {
 
   @Get(':id')
   @RequirePermissions('parking_sessions.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Patch(':id')
   @RequirePermissions('parking_sessions.create')
   update(@Param('id') id: string, @Body() dto: UpdateParkingSessionDto, @CurrentUser() user: AuthUser) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user.id, user);
   }
 
   @Post(':id/close')
   @RequirePermissions('parking_sessions.close')
   close(@Param('id') id: string, @Body() body: CloseSessionDto, @CurrentUser() user: AuthUser) {
-    return this.service.close(id, body, user.id);
+    return this.service.close(id, body, user.id, user);
   }
 
   @Post(':id/void')
   @RequirePermissions('parking_sessions.void')
   void(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.voidSession(id, user.id);
+    return this.service.voidSession(id, user.id, user);
   }
 
   @Delete(':id')
   @RequirePermissions('parking_sessions.create')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user.id, user);
   }
 }

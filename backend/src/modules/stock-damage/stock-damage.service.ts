@@ -173,29 +173,49 @@ export class StockDamageService {
       throw new BadRequestException('Branch/location is required to post stock damage');
     }
 
-    await this.inventoryMovements.createMovement({
-      companyId,
-      productId,
-      branchId,
-      movementType: 'DAMAGE',
-      quantity: Number(quantity),
-      unitId,
-      movementDate: new Date(),
-      createdById: userId,
-      referenceType: 'StockDamage',
-      referenceId: id,
-    });
+    const damageQty = Number(quantity);
 
-    if (batchId) {
-      await this.prisma.productBatch.update({
-        where: { id: batchId },
-        data: { remainingQuantity: { decrement: Number(quantity) } },
+    // ITMB-043: Perform the movement, batch decrement and status flip in ONE transaction
+    // so they commit or roll back together. Claim the document atomically (guarded on
+    // status === APPROVED) so concurrent/retried posts cannot remove stock twice, and gate
+    // the batch decrement on availability so remainingQuantity can never go negative.
+    const record = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.stockDamage.updateMany({
+        where: { id, status: 'APPROVED' },
+        data: { status: 'POSTED' },
       });
-    }
+      if (claimed.count === 0) {
+        throw new BadRequestException('Only APPROVED records can be posted');
+      }
 
-    const record = await this.prisma.stockDamage.update({
-      where: { id },
-      data: { status: 'POSTED' },
+      await this.inventoryMovements.createMovement({
+        companyId,
+        productId,
+        branchId,
+        movementType: 'DAMAGE',
+        quantity: damageQty,
+        unitId,
+        movementDate: new Date(),
+        createdById: userId,
+        referenceType: 'StockDamage',
+        referenceId: id,
+        tx,
+      });
+
+      if (batchId) {
+        const res = await tx.productBatch.updateMany({
+          where: { id: batchId, remainingQuantity: { gte: damageQty } },
+          data: { remainingQuantity: { decrement: damageQty } },
+        });
+        if (res.count === 0) {
+          throw new BadRequestException('Insufficient batch quantity');
+        }
+      }
+
+      return tx.stockDamage.update({
+        where: { id },
+        data: { status: 'POSTED' },
+      });
     });
 
     await this.auditLogs.log({

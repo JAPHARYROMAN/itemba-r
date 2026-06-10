@@ -1,0 +1,45 @@
+./audit-logs/audit-logs.service.ts:140:  if (Array.isArray(value)) return value.map((v) => redactValue(v, depth + 1));
+./audit-logs/audit-logs.service.ts:147:      if (jsonValue !== value) return redactValue(jsonValue, depth + 1);
+./audit-logs/audit-logs.service.ts:152:      out[k] = shouldRedactKey(k) ? REDACTED_PLACEHOLDER : redactValue(v, depth + 1);
+./auth/auth.service.ts:173:      const attempts = user.failedLoginAttempts + 1;
+./auth/auth.service.ts:175:      const lockData = locked ? { lockedUntil: new Date(Date.now() + 15 * 60_000) } : {};
+./boq-items/boq-items.service.ts:14:    return `BOQ-${String(count + 1).padStart(5, '0')}`;
+./construction-labour-cost/construction-labour-cost.service.ts:440:  return Math.max(0, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+./entity-code-generator/entity-code-generator.service.ts:101:    const nextNum = willReset ? 1 : seq.currentNumber + 1;
+./entity-code-generator/sequence-backfill.service.ts:197:      // Create at maxFound so the next emit is maxFound + 1.
+./entity-code-generator/sequence-backfill.service.ts:247:    const months = Array.from({ length: 12 }, (_, i) => i + 1);
+./entity-code-generator/sequence-backfill.service.ts:248:    const days = Array.from({ length: 31 }, (_, i) => i + 1);
+./fuel-daily-reconciliation/fuel-daily-reconciliation.service.ts:33:    const reconciliationNumber = `RECON-${year}-${(count + 1).toString().padStart(5, '0')}`;
+./fuel-shifts/fuel-shifts.service.ts:567:          dateNext.setUTCDate(dateKey.getUTCDate() + 1);
+./hr/departments/departments.service.ts:95:    for (let next = 1; next <= existing.length + 1000; next += 1) {
+./hr/employees/employees.service.ts:140:    return `${prefix}-EMP-${String(count + 1).padStart(4, '0')}`;
+./hr/payroll-runs/payroll-runs.service.ts:252:              Math.floor((reqEnd.getTime() - reqStart.getTime()) / dayMs) + 1,
+./hr/positions/positions.service.ts:161:    for (let next = 1; next <= existing.length + 1000; next += 1) {
+./hr/wcf-audit/wcf-audit.service.ts:100:      const month = new Date(dt).getUTCMonth() + 1;
+./hr/wcf-audit/wcf-audit.service.ts:135:      const month = new Date(dt).getUTCMonth() + 1;
+./inventory-balances/inventory-balances.service.ts:156:        totalSkus: acc.totalSkus + 1,
+./job-worker/job-worker.service.ts:155:      const nextAttempts = job.attempts + 1;
+./job-worker/job-worker.service.ts:327:      const nextAttempts = job.attempts + 1;
+./loan-repayment-schedules/loan-repayment-schedules.service.ts:115:        const dueDate = this.addMonths(loan.disbursementDate, idx + 1);
+./loan-repayment-schedules/loan-repayment-schedules.service.ts:119:            repaymentScheduleNumber: `LRS-${loanId.slice(-6)}-${String(idx + 1).padStart(3, '0')}`,
+./loan-repayment-schedules/loan-repayment-schedules.service.ts:122:            installmentNumber: idx + 1,
+./print-engine/print-engine.service.ts:281:        worksheet.getColumn(index + 1).width = Math.max(header.length + 2, 14);
+./product-batches/product-batches.service.ts:21:    return `BATCH-${year}-${String(count + 1).padStart(5, '0')}`;
+./proforma-invoices/proforma-invoices.service.ts:33:    return `PRF-${year}-${String(count + 1).padStart(5, '0')}`;
+./project-billing/project-billing.service.ts:26:    return `PBIL-${year}-${String(count + 1).padStart(5, '0')}`;
+./project-progress/project-progress.service.ts:16:    return `PROG-${year}-${String(count + 1).padStart(5, '0')}`;
+./quotations/quotations.service.ts:33:    return `QUO-${year}-${String(count + 1).padStart(5, '0')}`;
+./reports-catalog/reports-catalog.service.ts:33:      sectorCounts[e.sector] = (sectorCounts[e.sector] ?? 0) + 1;
+./returnable-packages/returnable-packages.service.ts:21:    return `PKG-${year}-${String(count + 1).padStart(5, '0')}`;
+./scheduled-reports/scheduled-reports.service.ts:323:      body += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+./scheduled-reports/scheduled-reports.service.ts:326:    body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+./scheduled-reports/scheduled-reports.service.ts:330:    body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+./settings-catalog/settings-catalog.service.ts:41:      categoryCounts[e.category] = (categoryCounts[e.category] ?? 0) + 1;
+./stock-damage/stock-damage.service.ts:23:    return `DMG-${year}-${String(count + 1).padStart(5, '0')}`;
+./supplier-invoices/supplier-invoices.service.ts:381:      if (!description) throw new BadRequestException(`Line ${index + 1}: description is required`);
+./supplier-invoices/supplier-invoices.service.ts:391:        throw new BadRequestException(`Line ${index + 1}: quantity must be greater than zero`);
+./supplier-invoices/supplier-invoices.service.ts:394:        throw new BadRequestException(`Line ${index + 1}: amounts cannot be negative`);
+./supplier-invoices/supplier-invoices.service.ts:401:          `Line ${index + 1}: line total does not match quantity/price`,
+./trip-expenses/trip-expenses.service.ts:15:    return `TEXP-${year}-${String(count + 1).padStart(5, '0')}`;
+./vehicle-maintenance/vehicle-maintenance.service.ts:16:    return `MAINT-${year}-${String(count + 1).padStart(5, '0')}`;
+./westsides-reports/westsides-reports.service.ts:539:      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;

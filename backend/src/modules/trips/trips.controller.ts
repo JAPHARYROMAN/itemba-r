@@ -54,26 +54,26 @@ export class TripsController {
 
   @Get(':id')
   @RequirePermissions('trips.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Get(':id/profitability')
   @RequirePermissions('logistics.reports.view')
-  getProfitability(@Param('id') id: string) {
-    return this.service.getProfitability(id);
+  getProfitability(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.getProfitability(id, user);
   }
 
   @Patch(':id/dispatch')
   @RequirePermissions('trips.dispatch')
   dispatch(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.dispatch(id, user.id);
+    return this.service.dispatch(id, user);
   }
 
   @Patch(':id/in-transit')
   @RequirePermissions('trips.dispatch')
   markInTransit(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.markInTransit(id, user.id);
+    return this.service.markInTransit(id, user);
   }
 
   @Patch(':id/complete')
@@ -83,7 +83,7 @@ export class TripsController {
     @Body() body: { actualReturnDate: string },
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.complete(id, body.actualReturnDate, user.id);
+    return this.service.complete(id, body.actualReturnDate, user);
   }
 
   @Patch(':id/close')
@@ -95,7 +95,7 @@ export class TripsController {
   @Patch(':id/cancel')
   @RequirePermissions('trips.close')
   cancel(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.cancel(id, user.id);
+    return this.service.cancel(id, user);
   }
 
   @Put(':id')
@@ -107,6 +107,6 @@ export class TripsController {
   @Delete(':id')
   @RequirePermissions('trips.close')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user);
   }
 }

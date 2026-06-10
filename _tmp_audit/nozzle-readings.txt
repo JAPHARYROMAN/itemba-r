@@ -1,0 +1,111 @@
+   1: import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+   2: import { PrismaService } from '../../prisma/prisma.service';
+   3: import { AuditLogsService } from '../audit-logs/audit-logs.service';
+   4: import { UpdateNozzleReadingDto } from './dto/update-nozzle-reading.dto';
+   5: import { applyCompanyScopeWhere } from '../../common/services';
+   6: 
+   7: @Injectable()
+   8: export class FuelNozzleReadingsService {
+   9:   constructor(
+  10:     private readonly prisma: PrismaService,
+  11:     private readonly auditLogs: AuditLogsService,
+  12:   ) {}
+  13: 
+  14:   async findAll(
+  15:     query: {
+  16:       page?: number;
+  17:       limit?: number;
+  18:       shiftId?: string;
+  19:       nozzleId?: string;
+  20:       branchId?: string;
+  21:       companyId?: string;
+  22:       status?: string;
+  23:     },
+  24:     user?: any,
+  25:   ) {
+  26:     const { page = 1, limit = 20, shiftId, nozzleId, branchId, companyId, status } = query;
+  27:     const skip = (page - 1) * limit;
+  28: 
+  29:     const where: any = {};
+  30:     if (shiftId) where.fuelShiftId = shiftId;
+  31:     if (nozzleId) where.nozzleId = nozzleId;
+  32:     if (branchId) where.branchId = branchId;
+  33:     applyCompanyScopeWhere(where, user, companyId);
+  34:     if (status) where.status = status;
+  35: 
+  36:     const [data, total] = await Promise.all([
+  37:       this.prisma.fuelNozzleReading.findMany({
+  38:         where,
+  39:         include: {
+  40:           nozzle: { select: { id: true, nozzleName: true } },
+  41:           product: { select: { id: true, name: true } },
+  42:           attendant: { select: { id: true, fullName: true } },
+  43:           fuelShift: { select: { id: true, shiftNumber: true } },
+  44:         },
+  45:         orderBy: { createdAt: 'desc' },
+  46:         skip,
+  47:         take: limit,
+  48:       }),
+  49:       this.prisma.fuelNozzleReading.count({ where }),
+  50:     ]);
+  51: 
+  52:     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  53:   }
+  54: 
+  55:   async findOne(id: string) {
+  56:     const record = await this.prisma.fuelNozzleReading.findUnique({
+  57:       where: { id },
+  58:       include: {
+  59:         nozzle: { select: { id: true, nozzleName: true } },
+  60:         product: { select: { id: true, name: true } },
+  61:         attendant: { select: { id: true, fullName: true } },
+  62:         fuelShift: { select: { id: true, shiftNumber: true, status: true } },
+  63:       },
+  64:     });
+  65:     if (!record) throw new NotFoundException('Fuel nozzle reading not found');
+  66:     return record;
+  67:   }
+  68: 
+  69:   async update(id: string, dto: UpdateNozzleReadingDto, userId: string) {
+  70:     const existing = await this.findOne(id);
+  71: 
+  72:     let litresSold = Number(existing.litresSold);
+  73:     let expectedAmount = Number(existing.expectedAmount);
+  74: 
+  75:     if (dto.closingMeter !== undefined) {
+  76:       if (dto.closingMeter < Number(existing.openingMeter)) {
+  77:         throw new BadRequestException(
+  78:           'Closing meter must be greater than or equal to opening meter',
+  79:         );
+  80:       }
+  81:       litresSold = dto.closingMeter - Number(existing.openingMeter);
+  82:       expectedAmount = litresSold * Number(existing.pricePerLitre);
+  83:     }
+  84: 
+  85:     const record = await this.prisma.fuelNozzleReading.update({
+  86:       where: { id },
+  87:       data: {
+  88:         ...(dto.closingMeter !== undefined && {
+  89:           closingMeter: dto.closingMeter,
+  90:           litresSold,
+  91:           expectedAmount,
+  92:         }),
+  93:         ...(dto.attendantId !== undefined && { attendantId: dto.attendantId }),
+  94:         ...(dto.notes !== undefined && { notes: dto.notes }),
+  95:         ...(dto.status !== undefined && { status: dto.status }),
+  96:       },
+  97:     });
+  98: 
+  99:     await this.auditLogs.log({
+ 100:       action: 'NOZZLE_READING_UPDATE',
+ 101:       entityType: 'FuelNozzleReading',
+ 102:       entityId: id,
+ 103:       userId,
+ 104:       companyId: existing.companyId,
+ 105:       oldValue: existing as any,
+ 106:       newValue: record as any,
+ 107:     });
+ 108: 
+ 109:     return record;
+ 110:   }
+ 111: }

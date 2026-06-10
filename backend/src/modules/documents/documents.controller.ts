@@ -17,6 +17,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { DocumentOwnerType } from '@prisma/client';
 import { diskStorage } from 'multer';
+import { randomUUID } from 'crypto';
 import * as os from 'os';
 import { Response, Request } from 'express';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
@@ -63,7 +64,10 @@ export class DocumentsController {
     FileInterceptor('file', {
       storage: diskStorage({
         destination: os.tmpdir(),
-        filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
+        // Never use client originalname in the on-disk path (path traversal).
+        // Derive the temp filename from server-only values; originalname is kept
+        // only as DB metadata by the service.
+        filename: (_req, _file, cb) => cb(null, `${Date.now()}-${randomUUID()}`),
       }),
       fileFilter: (_req, file, cb) => {
         if (ALLOWED_UPLOAD_MIME_TYPES.has(file.mimetype)) return cb(null, true);

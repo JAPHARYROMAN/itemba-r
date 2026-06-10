@@ -5,11 +5,20 @@ import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { CreateProjectMaterialIssueDto } from './dto/create-project-material-issue.dto';
 import { UpdateProjectMaterialIssueDto } from './dto/update-project-material-issue.dto';
-import { MaterialIssueStatus, InventoryMovementType } from '@prisma/client';
+import { MaterialIssueStatus, InventoryMovementType, Prisma } from '@prisma/client';
 import { applyCompanyScopeWhere } from '../../common/services';
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+// Shape of the row returned by the FOR UPDATE balance lock (see ITMB-031).
+interface BalanceLockRow {
+  id: string;
+  quantityOnHand: Prisma.Decimal;
+  quantityReserved: Prisma.Decimal;
+  averageCost: Prisma.Decimal;
+  totalValue: Prisma.Decimal;
 }
 
 @Injectable()
@@ -137,17 +146,80 @@ export class ProjectMaterialIssuesService {
 
     await this.prisma.$transaction(async (tx) => {
       for (const line of issue.lines) {
+        const lineQty = Number(line.quantity);
+
+        // ITMB-069: over-issue control against the Bill of Quantities. Only
+        // enforced when the line is explicitly linked to a BOQ item, so
+        // unlinked (untracked) issues behave exactly as before — non-breaking
+        // on the live app. Sum the quantity already consumed against this BOQ
+        // line by other POSTED issues, add the current line, and block when it
+        // exceeds the budgeted BOQ quantity.
+        if (line.boqItemId) {
+          const boqItem = await tx.bOQItem.findUnique({
+            where: { id: line.boqItemId },
+            select: { quantity: true },
+          });
+          if (boqItem) {
+            const priorIssued = await tx.projectMaterialIssueLine.aggregate({
+              _sum: { quantity: true },
+              where: {
+                boqItemId: line.boqItemId,
+                projectMaterialIssueId: { not: id },
+                materialIssue: { status: MaterialIssueStatus.POSTED, deletedAt: null },
+              },
+            });
+            const alreadyIssued = Number(priorIssued._sum.quantity ?? 0);
+            const budgeted = Number(boqItem.quantity);
+            if (alreadyIssued + lineQty > budgeted) {
+              throw new BadRequestException(
+                `Material issue exceeds the BOQ quantity for a line: budgeted ${budgeted}, already issued ${alreadyIssued}, attempted ${lineQty}`,
+              );
+            }
+          }
+        }
+
+        // ITMB-031: take a row lock on the balance BEFORE reading on-hand,
+        // mirroring the locking inventory mutator (FOR UPDATE) so concurrent
+        // posts/sales cannot both decrement off the same stale read and drive
+        // stock negative. The lock also lets us guarantee that the outbound
+        // movement is never recorded without a matching balance decrement.
+        const lockedRows = await tx.$queryRaw<BalanceLockRow[]>(Prisma.sql`
+          SELECT id, "quantityOnHand", "quantityReserved", "averageCost", "totalValue"
+          FROM "inventory_balances"
+          WHERE "companyId" = ${issue.companyId}
+            AND "productId" = ${line.productId}
+            AND "branchId" = ${sourceBranchId}
+          FOR UPDATE
+        `);
+        const locked = lockedRows[0];
+
+        // ITMB-031: a movement must never be recorded without a balance to
+        // decrement. If no balance row exists, fail the post rather than book
+        // an outbound movement that permanently diverges the ledger from
+        // stored on-hand.
+        if (!locked) {
+          throw new BadRequestException(
+            'Cannot post material issue: no inventory balance exists for a line product at the source branch',
+          );
+        }
+
+        const currentQty = Number(locked.quantityOnHand);
+
         // Resolve unit cost: use what's on the line if set, otherwise fall
         // back to the inventory's running average. This catches the common
         // case where the issuer didn't record cost — we still book a real
         // cost figure based on what the warehouse paid.
-        const bal = await tx.inventoryBalance.findFirst({
-          where: { productId: line.productId, branchId: sourceBranchId },
-        });
         const lineUnitCost = Number(line.unitCost ?? 0);
-        const fallbackCost = bal ? Number(bal.averageCost) : 0;
+        const fallbackCost = Number(locked.averageCost);
         const resolvedUnitCost = lineUnitCost > 0 ? lineUnitCost : fallbackCost;
-        const lineTotalCost = round2(resolvedUnitCost * Number(line.quantity));
+        const lineTotalCost = round2(resolvedUnitCost * lineQty);
+
+        // ITMB-031: availability guard — never oversell to negative on-hand.
+        if (currentQty < lineQty) {
+          throw new BadRequestException(
+            `Insufficient stock at branch/location ${sourceBranchId}: requested ${lineQty}, available ${currentQty}`,
+          );
+        }
 
         // Persist the resolved cost back to the line so the audit trail
         // shows what was actually booked (not the pre-resolution null).
@@ -172,7 +244,7 @@ export class ProjectMaterialIssuesService {
             branchId: sourceBranchId,
             productId: line.productId,
             movementType: InventoryMovementType.INTERNAL_USE,
-            quantity: Number(line.quantity),
+            quantity: lineQty,
             unitId: line.unitId,
             movementDate: issue.issueDate,
             referenceType: 'ProjectMaterialIssue',
@@ -183,15 +255,15 @@ export class ProjectMaterialIssuesService {
         });
 
         // Decrement inventory balance + total value (so averageCost stays sane).
-        if (bal) {
-          await tx.inventoryBalance.update({
-            where: { id: bal.id },
-            data: {
-              quantityOnHand: { decrement: Number(line.quantity) },
-              totalValue: { decrement: lineTotalCost },
-            },
-          });
-        }
+        // The locked row is guaranteed to exist, so the movement above always
+        // has a matching balance change.
+        await tx.inventoryBalance.update({
+          where: { id: locked.id },
+          data: {
+            quantityOnHand: { decrement: lineQty },
+            totalValue: { decrement: lineTotalCost },
+          },
+        });
 
         totalCost += lineTotalCost;
       }

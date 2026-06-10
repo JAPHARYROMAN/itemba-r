@@ -87,6 +87,16 @@ export class LeaveRequestsController {
     return this.service.reject(id, body.reason, user);
   }
 
+  @Patch(':id/cancel')
+  @RequirePermissions('leave_requests.create')
+  cancel(
+    @Param('id') id: string,
+    @Body() body: { reason?: string },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.cancel(id, body.reason, user);
+  }
+
   @Delete(':id')
   @RequirePermissions('leave_requests.create')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {

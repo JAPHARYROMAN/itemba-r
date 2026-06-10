@@ -5,6 +5,7 @@ import { CreateQuotationDto } from './dto/create-quotation.dto';
 import { UpdateQuotationDto } from './dto/update-quotation.dto';
 import { QueryQuotationDto } from './dto/query-quotation.dto';
 import { applyCompanyScopeWhere } from '../../common/services';
+import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 
 function calcLines(lines: any[]) {
   let subtotal = 0, totalDiscount = 0, totalTax = 0;
@@ -23,21 +24,18 @@ export class QuotationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
+    private readonly codes: EntityCodeGeneratorService,
   ) {}
-
-  private async generateQuotationNumber(companyId: string): Promise<string> {
-    const year = new Date().getFullYear();
-    const count = await this.prisma.quotation.count({
-      where: { companyId, quotationNumber: { startsWith: `QUO-${year}` } },
-    });
-    return `QUO-${year}-${String(count + 1).padStart(5, '0')}`;
-  }
 
   async create(dto: CreateQuotationDto, userId: string) {
     const { computed, subtotal, totalDiscount, totalTax, totalAmount } = calcLines(dto.lines);
-    const quotationNumber = await this.generateQuotationNumber(dto.companyId);
 
     const record = await this.prisma.$transaction(async (tx) => {
+      const quotationNumber = await this.codes.next({
+        entityType: 'Quotation',
+        companyId: dto.companyId,
+        tx,
+      });
       const q = await tx.quotation.create({
         data: {
           quotationNumber,
@@ -238,46 +236,67 @@ export class QuotationsService {
     const quotation = await this.findOne(id);
     if (quotation.status !== 'ACCEPTED') throw new BadRequestException('Only ACCEPTED quotations can be converted');
 
-    const so = await this.prisma.salesOrder.create({
-      data: {
-        salesOrderNumber: `SO-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`,
+    const so = await this.prisma.$transaction(async (tx) => {
+      // Re-check status inside the transaction to prevent a double-convert race
+      // producing two sales orders (and later duplicate receivables).
+      const locked = await tx.quotation.findFirst({
+        where: { id, deletedAt: null },
+        select: { status: true },
+      });
+      if (!locked) throw new NotFoundException('Quotation not found');
+      if (locked.status !== 'ACCEPTED') {
+        throw new BadRequestException('Only ACCEPTED quotations can be converted');
+      }
+
+      const salesOrderNumber = await this.codes.next({
+        entityType: 'SalesOrder',
         companyId: quotation.companyId,
-        customerId: quotation.customerId,
-        divisionId: quotation.divisionId,
-        branchId: quotation.branchId,
-        salesType: 'CASH_SALE' as any,
-        orderDate: new Date(),
-        currency: quotation.currency as any,
-        subtotal: quotation.subtotal,
-        discountAmount: quotation.discountAmount,
-        taxAmount: quotation.taxAmount,
-        totalAmount: quotation.totalAmount,
-        paidAmount: 0,
-        outstandingAmount: quotation.totalAmount,
-        status: 'CONFIRMED' as any,
-        paymentStatus: 'UNPAID' as any,
-        createdById: userId,
-        notes: `Converted from quotation ${quotation.quotationNumber}`,
-      },
-    });
+        tx,
+      });
 
-    await this.prisma.salesOrderLine.createMany({
-      data: (quotation.lines as any[]).map((l) => ({
-        salesOrderId: so.id,
-        productId: l.productId,
-        description: l.description,
-        quantity: l.quantity,
-        unitId: l.unitId,
-        unitPrice: l.unitPrice,
-        discountAmount: l.discountAmount,
-        taxAmount: l.taxAmount,
-        lineTotal: l.lineTotal,
-      })),
-    });
+      const created = await tx.salesOrder.create({
+        data: {
+          salesOrderNumber,
+          companyId: quotation.companyId,
+          customerId: quotation.customerId,
+          divisionId: quotation.divisionId,
+          branchId: quotation.branchId,
+          salesType: 'CASH_SALE' as any,
+          orderDate: new Date(),
+          currency: quotation.currency as any,
+          subtotal: quotation.subtotal,
+          discountAmount: quotation.discountAmount,
+          taxAmount: quotation.taxAmount,
+          totalAmount: quotation.totalAmount,
+          paidAmount: 0,
+          outstandingAmount: quotation.totalAmount,
+          status: 'CONFIRMED' as any,
+          paymentStatus: 'UNPAID' as any,
+          createdById: userId,
+          notes: `Converted from quotation ${quotation.quotationNumber}`,
+        },
+      });
 
-    await this.prisma.quotation.update({
-      where: { id },
-      data: { status: 'CONVERTED' as any, convertedSalesOrderId: so.id },
+      await tx.salesOrderLine.createMany({
+        data: (quotation.lines as any[]).map((l) => ({
+          salesOrderId: created.id,
+          productId: l.productId,
+          description: l.description,
+          quantity: l.quantity,
+          unitId: l.unitId,
+          unitPrice: l.unitPrice,
+          discountAmount: l.discountAmount,
+          taxAmount: l.taxAmount,
+          lineTotal: l.lineTotal,
+        })),
+      });
+
+      await tx.quotation.update({
+        where: { id },
+        data: { status: 'CONVERTED' as any, convertedSalesOrderId: created.id },
+      });
+
+      return created;
     });
 
     await this.auditLogs.log({

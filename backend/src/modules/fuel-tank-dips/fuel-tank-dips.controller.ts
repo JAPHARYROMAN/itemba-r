@@ -25,19 +25,19 @@ export class FuelTankDipsController {
   @Post()
   @RequirePermissions('tank_dips.create')
   create(@Body() dto: CreateFuelTankDipDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Get()
   @RequirePermissions('tank_dips.view')
-  findAll(@Query() query: Record<string, unknown>) {
-    return this.service.findAll(query);
+  findAll(@Query() query: Record<string, unknown>, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')
   @RequirePermissions('tank_dips.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Patch(':id')
@@ -47,19 +47,19 @@ export class FuelTankDipsController {
     @Body() dto: UpdateFuelTankDipDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 
   @Patch(':id/submit')
   @RequirePermissions('tank_dips.create')
   submit(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.submit(id, user.id);
+    return this.service.submit(id, user);
   }
 
   @Patch(':id/approve')
   @RequirePermissions('tank_dips.approve')
   approve(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approve(id, user.id);
+    return this.service.approve(id, user);
   }
 
   @Patch(':id/reject')
@@ -69,18 +69,18 @@ export class FuelTankDipsController {
     @Body('reason') reason: string,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.reject(id, user.id, reason);
+    return this.service.reject(id, user, reason);
   }
 
   @Patch(':id/post')
   @RequirePermissions('tank_dips.post')
   post(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.post(id, user.id);
+    return this.service.post(id, user);
   }
 
   @Delete(':id')
   @RequirePermissions('tank_dips.create')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user);
   }
 }

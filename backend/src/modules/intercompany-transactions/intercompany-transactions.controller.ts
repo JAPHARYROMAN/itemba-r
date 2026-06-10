@@ -22,20 +22,20 @@ export class IntercompanyTransactionsController {
 
   @Get()
   @RequirePermissions('intercompany.view')
-  findAll(@Query() query: QueryIntercompanyTransactionDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryIntercompanyTransactionDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')
   @RequirePermissions('intercompany.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()
   @RequirePermissions('intercompany.manage')
   create(@Body() dto: CreateIntercompanyTransactionDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Patch(':id')
@@ -45,19 +45,19 @@ export class IntercompanyTransactionsController {
     @Body() dto: UpdateIntercompanyTransactionDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 
   @Patch(':id/submit')
   @RequirePermissions('intercompany.manage')
   submit(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.submit(id, user.id);
+    return this.service.submit(id, user);
   }
 
   @Patch(':id/approve')
   @RequirePermissions('intercompany.approve')
   approve(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approve(id, user.id);
+    return this.service.approve(id, user);
   }
 
   @Patch(':id/reject')
@@ -67,18 +67,18 @@ export class IntercompanyTransactionsController {
     @Body() dto: RejectIntercompanyTransactionDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.reject(id, dto, user.id);
+    return this.service.reject(id, dto, user);
   }
 
   @Patch(':id/post')
   @RequirePermissions('intercompany.post')
   post(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.post(id, user.id);
+    return this.service.post(id, user);
   }
 
   @Delete(':id')
   @RequirePermissions('intercompany.manage')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user);
   }
 }

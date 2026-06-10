@@ -1,14 +1,17 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { UpdateNozzleReadingDto } from './dto/update-nozzle-reading.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
 
 @Injectable()
 export class FuelNozzleReadingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   async findAll(
@@ -52,7 +55,7 @@ export class FuelNozzleReadingsService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const record = await this.prisma.fuelNozzleReading.findUnique({
       where: { id },
       include: {
@@ -63,11 +66,13 @@ export class FuelNozzleReadingsService {
       },
     });
     if (!record) throw new NotFoundException('Fuel nozzle reading not found');
+    await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
     return record;
   }
 
-  async update(id: string, dto: UpdateNozzleReadingDto, userId: string) {
-    const existing = await this.findOne(id);
+  async update(id: string, dto: UpdateNozzleReadingDto, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
 
     let litresSold = Number(existing.litresSold);
     let expectedAmount = Number(existing.expectedAmount);

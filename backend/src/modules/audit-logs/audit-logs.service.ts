@@ -357,11 +357,15 @@ export class AuditLogsService {
 
   /** Distinct list of entity types present in audit logs — for filter dropdown. */
   async getEntityTypes(user?: AuthUser): Promise<string[]> {
+    // Bound the distinct scan: entityType is a small finite enumeration, so a
+    // generous cap is more than enough for the dropdown while preventing an
+    // unbounded scan/sort over the ever-growing append-only audit table.
     const rows = await this.prisma.auditLog.findMany({
       where: { ...(user && companyWhereForUser(user)) },
       distinct: ['entityType'],
       select: { entityType: true },
       orderBy: { entityType: 'asc' },
+      take: 200,
     });
     return rows.map((r) => r.entityType);
   }

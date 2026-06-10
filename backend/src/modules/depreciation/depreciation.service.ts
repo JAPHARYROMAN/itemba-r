@@ -1,10 +1,11 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 
 /**
@@ -31,6 +32,7 @@ export class DepreciationService {
     private readonly accountResolver: AccountResolverService,
     private readonly codes: EntityCodeGeneratorService,
     private readonly postingEngine: PostingEngineService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   async findAll(query: any, user?: any) {
@@ -51,17 +53,19 @@ export class DepreciationService {
     return { items, total, page: Number(page), limit: Number(limit) };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const item = await this.prisma.depreciationSchedule.findFirst({
       where: { id, deletedAt: null },
     });
     if (!item) throw new NotFoundException('Depreciation schedule not found');
+    await this.companyScope.assertCanAccessCompany(user, item.companyId, minimum);
     return item;
   }
 
-  async create(dto: any, user: any) {
+  async create(dto: any, user: AuthUser) {
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const item = await this.prisma.depreciationSchedule.create({
-      data: { ...dto, createdById: user.id },
+      data: { ...dto, companyId: dto.companyId, createdById: user.id },
     });
     await this.auditLogs.log({
       action: 'CREATE',
@@ -73,15 +77,16 @@ export class DepreciationService {
     return item;
   }
 
-  async getEntries(scheduleId: string) {
+  async getEntries(scheduleId: string, user: AuthUser) {
+    await this.findOne(scheduleId, user);
     return this.prisma.depreciationEntry.findMany({
       where: { depreciationScheduleId: scheduleId },
       orderBy: { depreciationDate: 'asc' },
     });
   }
 
-  async addEntry(scheduleId: string, dto: any, user: any) {
-    await this.findOne(scheduleId);
+  async addEntry(scheduleId: string, dto: any, user: AuthUser) {
+    await this.findOne(scheduleId, user, AccessLevel.WRITE);
     const entry = await this.prisma.depreciationEntry.create({
       data: { ...dto, depreciationScheduleId: scheduleId, status: 'DRAFT' },
     });
@@ -102,12 +107,12 @@ export class DepreciationService {
   async generateEntries(
     scheduleId: string,
     months: number,
-    user: any,
+    user: AuthUser,
   ): Promise<{ created: number }> {
     if (months <= 0 || months > 600) {
       throw new BadRequestException('months must be between 1 and 600');
     }
-    const schedule = await this.findOne(scheduleId);
+    const schedule = await this.findOne(scheduleId, user, AccessLevel.WRITE);
     const existing = await this.prisma.depreciationEntry.findMany({
       where: { depreciationScheduleId: scheduleId, deletedAt: null },
       orderBy: { depreciationDate: 'asc' },
@@ -184,7 +189,7 @@ export class DepreciationService {
    * balanced journal entry (DR expense / CR accumulated depreciation), and
    * advances the schedule's accumulatedDepreciation.
    */
-  async postEntry(id: string, user: any) {
+  async postEntry(id: string, user: AuthUser) {
     const entry = await this.prisma.depreciationEntry.findFirst({
       where: { id },
       include: {
@@ -193,12 +198,29 @@ export class DepreciationService {
       },
     });
     if (!entry) throw new NotFoundException('Depreciation entry not found');
+    await this.companyScope.assertCanAccessCompany(
+      user,
+      entry.depreciationSchedule.companyId,
+      AccessLevel.WRITE,
+    );
     if (entry.status !== 'DRAFT') throw new BadRequestException('Only DRAFT entries can be posted');
 
     const amount = Number(entry.amount);
     const description = `Depreciation: ${entry.fixedAsset.assetCode ?? entry.fixedAsset.name}`;
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      // Re-assert the DRAFT status under the transaction as a conditional
+      // claim to prevent a TOCTOU double-post (concurrent posts of the same
+      // entry). Only one transaction can flip DRAFT -> POSTED; the loser sees
+      // count === 0 and aborts before posting the JE / incrementing the schedule.
+      const claimed = await tx.depreciationEntry.updateMany({
+        where: { id, status: 'DRAFT' },
+        data: { status: 'POSTED' },
+      });
+      if (claimed.count === 0) {
+        throw new BadRequestException('Only DRAFT entries can be posted');
+      }
+
       const expenseAccount = await this.accountResolver.resolve(
         entry.depreciationSchedule.companyId,
         'DEPRECIATION_EXPENSE',

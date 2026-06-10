@@ -1,4 +1,12 @@
-import { IsArray, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsNotEmpty,
+  IsNumberString,
+  IsOptional,
+  IsString,
+  Matches,
+} from 'class-validator';
 import {
   BorrowerLevel,
   CurrencyCode,
@@ -19,14 +27,29 @@ export class CreateLoanDto {
   @IsNotEmpty() @IsString() lenderName!: string;
   @IsOptional() @IsString() lenderType?: string;
   @IsOptional() @IsString() lenderContact?: string;
-  @IsNotEmpty() @IsString() principalAmount!: string;
+  @IsNotEmpty()
+  @IsNumberString()
+  @Matches(/^\d+(\.\d+)?$/, { message: 'principalAmount must be a non-negative number' })
+  principalAmount!: string;
   @IsOptional() @IsEnum(CurrencyCode) currency?: CurrencyCode;
-  @IsNotEmpty() @IsString() interestRate!: string;
+  @IsNotEmpty()
+  @IsNumberString()
+  @Matches(/^\d+(\.\d+)?$/, { message: 'interestRate must be a non-negative number' })
+  interestRate!: string;
   @IsNotEmpty() @IsString() disbursementDate!: string;
   @IsNotEmpty() @IsString() maturityDate!: string;
   @IsOptional() @IsEnum(RepaymentFrequency) repaymentFrequency?: RepaymentFrequency;
-  @IsOptional() @IsString() repaymentAmount?: string;
-  @IsNotEmpty() @IsString() outstandingBalance!: string;
+  @IsOptional()
+  @IsNumberString()
+  @Matches(/^\d+(\.\d+)?$/, { message: 'repaymentAmount must be a non-negative number' })
+  repaymentAmount?: string;
+  @IsNotEmpty()
+  @IsNumberString()
+  @Matches(/^\d+(\.\d+)?$/, { message: 'outstandingBalance must be a non-negative number' })
+  outstandingBalance!: string;
+  // status is server-controlled at creation (forced to ACTIVE in the service);
+  // any client-supplied value is ignored. Use the mark-loan-status endpoint to
+  // change the status afterwards.
   @IsOptional() @IsEnum(LoanStatus) status?: LoanStatus;
   @IsOptional() @IsEnum(RiskLevel) riskLevel?: RiskLevel;
   @IsOptional() @IsString() purpose?: string;

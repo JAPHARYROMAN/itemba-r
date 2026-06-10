@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsDateString, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsDateString, IsNumber, Min } from 'class-validator';
 import { LaborContextType, LaborPaymentStatus } from '@prisma/client';
 
 export class CreateLaborRecordDto {
@@ -11,9 +11,9 @@ export class CreateLaborRecordDto {
   @IsString() @IsOptional() workerName?: string;
   @IsDateString() laborDate!: string;
   @IsString() @IsOptional() role?: string;
-  @IsNumber() @IsOptional() hoursWorked?: number;
-  @IsNumber() @IsOptional() dayRate?: number;
-  @IsNumber() totalAmount!: number;
+  @IsNumber() @IsOptional() @Min(0) hoursWorked?: number;
+  @IsNumber() @IsOptional() @Min(0) dayRate?: number;
+  @IsNumber() @Min(0) totalAmount!: number;
   @IsString() currency!: string;
   @IsEnum(LaborPaymentStatus) @IsOptional() paymentStatus?: LaborPaymentStatus;
   @IsString() @IsOptional() notes?: string;

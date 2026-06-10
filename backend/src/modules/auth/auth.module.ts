@@ -21,6 +21,16 @@ const isNonExpiringJwtDuration = (value: string): boolean =>
   ['never', 'none', 'no-expiry', 'no_expiry', '0'].includes(value.trim().toLowerCase());
 
 /**
+ * ITMB-005: Access tokens MUST always carry an `exp` claim so a leaked/stolen
+ * access token expires on its own rather than living until the bound
+ * ActiveSession is manually revoked. When `JWT_ACCESS_EXPIRES_IN` is configured
+ * non-expiring (e.g. 'never'), fall back to a finite default instead of issuing
+ * an eternal token. This narrows token lifetime; refresh-token behaviour is
+ * unchanged.
+ */
+const ACCESS_TOKEN_FALLBACK_TTL = '15m';
+
+/**
  * AuthModule is intentionally @Global so the PermissionCacheService and
  * JwtStrategy are visible to every module that needs to invalidate a user's
  * cached permissions after a role/access mutation. Without this, role
@@ -40,11 +50,15 @@ const isNonExpiringJwtDuration = (value: string): boolean =>
       inject: [ConfigService],
       useFactory: (cfg: ConfigService) => {
         const accessExpiresIn = cfg.get<string>('JWT_ACCESS_EXPIRES_IN', 'never');
+        // ITMB-005: never mint a non-expiring access token. A configured
+        // non-expiring value falls back to a finite default so every access
+        // token carries an `exp` claim.
+        const effectiveAccessExpiresIn = isNonExpiringJwtDuration(accessExpiresIn)
+          ? ACCESS_TOKEN_FALLBACK_TTL
+          : accessExpiresIn;
         return {
           secret: cfg.getOrThrow<string>('JWT_ACCESS_SECRET'),
-          signOptions: isNonExpiringJwtDuration(accessExpiresIn)
-            ? {}
-            : { expiresIn: jwtExpiresIn(accessExpiresIn) },
+          signOptions: { expiresIn: jwtExpiresIn(effectiveAccessExpiresIn) },
         };
       },
     }),

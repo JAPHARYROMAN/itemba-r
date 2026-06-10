@@ -79,7 +79,7 @@ export class TripsService {
     return { data, total, page, limit };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const t = await this.prisma.trip.findFirst({
       where: { id, deletedAt: null },
       include: {
@@ -91,11 +91,13 @@ export class TripsService {
       },
     });
     if (!t) throw new NotFoundException('Trip not found');
+    await this.companyScope.assertCanAccessCompany(user, t.companyId, minimum);
     return t;
   }
 
-  async dispatch(id: string, userId: string) {
-    const trip = await this.findOne(id);
+  async dispatch(id: string, user: AuthUser) {
+    const userId = user.id;
+    const trip = await this.findOne(id, user, AccessLevel.WRITE);
     if (trip.status !== TripStatus.PLANNED)
       throw new BadRequestException('Only PLANNED trips can be dispatched');
     const updated = await this.prisma.trip.update({
@@ -112,15 +114,16 @@ export class TripsService {
     return updated;
   }
 
-  async markInTransit(id: string, userId: string) {
-    const trip = await this.findOne(id);
+  async markInTransit(id: string, user: AuthUser) {
+    const trip = await this.findOne(id, user, AccessLevel.WRITE);
     if (trip.status !== TripStatus.DISPATCHED)
       throw new BadRequestException('Only DISPATCHED trips can be marked IN_TRANSIT');
     return this.prisma.trip.update({ where: { id }, data: { status: TripStatus.IN_TRANSIT } });
   }
 
-  async complete(id: string, actualReturnDate: string, userId: string) {
-    const trip = await this.findOne(id);
+  async complete(id: string, actualReturnDate: string, user: AuthUser) {
+    const userId = user.id;
+    const trip = await this.findOne(id, user, AccessLevel.WRITE);
     if (!([TripStatus.DISPATCHED, TripStatus.IN_TRANSIT] as string[]).includes(trip.status))
       throw new BadRequestException('Only DISPATCHED or IN_TRANSIT trips can be completed');
     const updated = await this.prisma.trip.update({
@@ -143,7 +146,7 @@ export class TripsService {
 
   async close(id: string, user: import('../../common/decorators/current-user.decorator').AuthUser) {
     const userId = user.id;
-    const trip = await this.findOne(id);
+    const trip = await this.findOne(id, user, AccessLevel.WRITE);
     if (trip.status !== TripStatus.COMPLETED)
       throw new BadRequestException('Only COMPLETED trips can be closed');
 
@@ -282,8 +285,9 @@ export class TripsService {
     });
   }
 
-  async cancel(id: string, userId: string) {
-    const trip = await this.findOne(id);
+  async cancel(id: string, user: AuthUser) {
+    const userId = user.id;
+    const trip = await this.findOne(id, user, AccessLevel.WRITE);
     if (([TripStatus.COMPLETED, TripStatus.CLOSED] as string[]).includes(trip.status))
       throw new BadRequestException('Cannot cancel a completed or closed trip');
     const updated = await this.prisma.trip.update({
@@ -300,8 +304,8 @@ export class TripsService {
     return updated;
   }
 
-  async getProfitability(id: string) {
-    const trip = await this.findOne(id);
+  async getProfitability(id: string, user: AuthUser) {
+    const trip = await this.findOne(id, user);
     const totalExpenses = await this.prisma.tripExpense.aggregate({
       where: { tripId: id, deletedAt: null },
       _sum: { amount: true },
@@ -326,7 +330,7 @@ export class TripsService {
 
   async update(id: string, dto: UpdateTripDto, user: AuthUser) {
     const userId = user.id;
-    const existing = await this.findOne(id);
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
 
     if (dto.companyId && dto.companyId !== existing.companyId) {
@@ -356,8 +360,9 @@ export class TripsService {
     return trip;
   }
 
-  async remove(id: string, userId: string) {
-    await this.findOne(id);
+  async remove(id: string, user: AuthUser) {
+    const userId = user.id;
+    await this.findOne(id, user, AccessLevel.WRITE);
     await this.prisma.trip.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.audit.log({
       userId,

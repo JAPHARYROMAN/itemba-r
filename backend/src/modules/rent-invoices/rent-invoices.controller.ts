@@ -28,31 +28,31 @@ export class RentInvoicesController {
 
   @Get(':id')
   @RequirePermissions('rent_invoices.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()
   @RequirePermissions('rent_invoices.create')
   create(@Body() dto: CreateRentInvoiceDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Patch(':id')
   @RequirePermissions('rent_invoices.create')
   update(@Param('id') id: string, @Body() dto: UpdateRentInvoiceDto, @CurrentUser() user: AuthUser) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 
   @Post(':id/issue')
   @RequirePermissions('rent_invoices.issue')
   issue(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.issue(id, user.id);
+    return this.service.issue(id, user);
   }
 
   @Delete(':id')
   @RequirePermissions('rent_invoices.create')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user);
   }
 }

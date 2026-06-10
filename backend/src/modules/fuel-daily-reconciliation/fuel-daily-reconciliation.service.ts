@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -29,8 +30,8 @@ export class FuelDailyReconciliationService {
     });
 
     const year = dateObj.getFullYear();
-    const count = await this.prisma.fuelDailyReconciliation.count();
-    const reconciliationNumber = `RECON-${year}-${(count + 1).toString().padStart(5, '0')}`;
+    const yearStart = new Date(year, 0, 1);
+    const yearEnd = new Date(year + 1, 0, 1);
 
     const shifts = await this.prisma.fuelShift.findMany({
       where: {
@@ -88,28 +89,53 @@ export class FuelDailyReconciliationService {
     const cashShortage = difference < 0 ? Math.abs(difference) : 0;
     const cashExcess = difference > 0 ? difference : 0;
 
-    const recon = await this.prisma.fuelDailyReconciliation.create({
-      data: {
-        reconciliationNumber,
-        companyId: dto.companyId,
-        branchId: dto.branchId,
-        reconciliationDate: dateObj,
-        totalLitresSold,
-        totalExpectedSales,
-        totalCashCollected,
-        totalMobileMoneyCollected,
-        totalBankCardCollected,
-        totalCreditSales,
-        totalCollections,
-        cashShortage,
-        cashExcess,
-        totalTankVarianceLitres,
-        totalTankVarianceValue,
-        status: 'DRAFT',
-        preparedById: user.id,
-        notes: dto.notes,
-      },
-    });
+    // Scope the reconciliation-number sequence to the company (and year) so it is
+    // unique per company per @@unique([companyId, reconciliationNumber]). Compute the
+    // next number and create atomically, retrying once on a unique-constraint clash
+    // caused by a concurrent close.
+    const createWithNumber = () =>
+      this.prisma.$transaction(async (tx) => {
+        const count = await tx.fuelDailyReconciliation.count({
+          where: {
+            companyId: dto.companyId,
+            reconciliationDate: { gte: yearStart, lt: yearEnd },
+          },
+        });
+        const reconciliationNumber = `RECON-${year}-${(count + 1).toString().padStart(5, '0')}`;
+        return tx.fuelDailyReconciliation.create({
+          data: {
+            reconciliationNumber,
+            companyId: dto.companyId,
+            branchId: dto.branchId,
+            reconciliationDate: dateObj,
+            totalLitresSold,
+            totalExpectedSales,
+            totalCashCollected,
+            totalMobileMoneyCollected,
+            totalBankCardCollected,
+            totalCreditSales,
+            totalCollections,
+            cashShortage,
+            cashExcess,
+            totalTankVarianceLitres,
+            totalTankVarianceValue,
+            status: 'DRAFT',
+            preparedById: user.id,
+            notes: dto.notes,
+          },
+        });
+      });
+
+    let recon;
+    try {
+      recon = await createWithNumber();
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        recon = await createWithNumber();
+      } else {
+        throw e;
+      }
+    }
 
     await this.auditLogsService.log({
       userId: user.id,

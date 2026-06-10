@@ -11,11 +11,18 @@ const statusColor: Record<string,string> = { OPEN:'bg-blue-100 text-blue-800', I
 export default function MyTicketsPage() {
   const [tickets, setTickets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ title:'', description:'', ticketType:'QUESTION', priority:'NORMAL', moduleName:'' });
 
   const load = () => {
-    fetch('/api/backend/support/tickets/me').then(r=>r.json()).then(d=>{ setTickets(unwrapList(d)); setLoading(false); });
+    setLoading(true);
+    setError(null);
+    fetch('/api/backend/support/tickets/me')
+      .then(r=>{ if(!r.ok) throw new Error(`Request failed with status ${r.status}`); return r.json(); })
+      .then(d=>{ setTickets(unwrapList(d)); })
+      .catch(()=>{ setError('Failed to load tickets. Please try again.'); })
+      .finally(()=>{ setLoading(false); });
   };
   useEffect(()=>{ load(); },[]);
 
@@ -33,7 +40,12 @@ export default function MyTicketsPage() {
             <span className="font-semibold text-gray-900 dark:text-white">My Tickets ({tickets.length})</span>
             <button onClick={()=>setShowModal(true)} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">+ New Ticket</button>
           </div>
-          {loading ? <div className="p-8 text-center text-gray-500">Loading...</div> : (
+          {loading ? <div className="p-8 text-center text-gray-500">Loading...</div> : error ? (
+          <div className="p-8 text-center text-red-600">
+            <p>{error}</p>
+            <button onClick={load} className="mt-3 px-3 py-1.5 text-sm border border-gray-300 rounded-lg">Retry</button>
+          </div>
+          ) : (
           <table className="w-full text-sm">
             <thead className="bg-gray-50 dark:bg-gray-700"><tr>
               {['Ticket #','Title','Type','Priority','Status','Created',''].map(h=>(

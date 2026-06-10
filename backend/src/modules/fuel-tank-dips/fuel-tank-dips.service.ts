@@ -1,9 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { FuelTankDipStatus, FuelPriceStatus, InventoryMovementType } from '@prisma/client';
+import {
+  FuelTankDipStatus,
+  FuelPriceStatus,
+  InventoryMovementType,
+  AccessLevel,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { CompanyScopeService } from '../../common/services';
 import { CreateFuelTankDipDto } from './dto/create-fuel-tank-dip.dto';
 import { UpdateFuelTankDipDto } from './dto/update-fuel-tank-dip.dto';
 
@@ -14,15 +21,18 @@ export class FuelTankDipsService {
     private readonly auditLogs: AuditLogsService,
     private readonly inventoryMovements: InventoryMovementsService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
-  async findAll(query: Record<string, unknown>) {
+  async findAll(query: Record<string, unknown>, user: AuthUser) {
     const page = parseInt(query.page as string) || 1;
     const limit = parseInt(query.limit as string) || 20;
     const skip = (page - 1) * limit;
 
-    const where: Record<string, unknown> = { deletedAt: null };
-    if (query.companyId) where.companyId = query.companyId;
+    const where: Record<string, unknown> = {
+      deletedAt: null,
+      ...(await this.companyScope.companyWhereFor(user, query.companyId as string | undefined)),
+    };
     if (query.branchId) where.branchId = query.branchId;
     if (query.tankId) where.tankId = query.tankId;
     if (query.productId) where.productId = query.productId;
@@ -47,7 +57,7 @@ export class FuelTankDipsService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const record = await this.prisma.fuelTankDip.findFirst({
       where: { id, deletedAt: null },
       include: {
@@ -58,10 +68,14 @@ export class FuelTankDipsService {
       },
     });
     if (!record) throw new NotFoundException('Fuel tank dip not found');
+    await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
     return record;
   }
 
-  async create(dto: CreateFuelTankDipDto, userId: string) {
+  async create(dto: CreateFuelTankDipDto, user: AuthUser) {
+    const userId = user.id;
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+
     const tank = await this.prisma.fuelTank.findFirst({
       where: { id: dto.tankId, deletedAt: null },
     });
@@ -119,8 +133,9 @@ export class FuelTankDipsService {
     return record;
   }
 
-  async update(id: string, dto: UpdateFuelTankDipDto, userId: string) {
-    const existing = await this.findOne(id);
+  async update(id: string, dto: UpdateFuelTankDipDto, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== FuelTankDipStatus.DRAFT) {
       throw new BadRequestException('Only DRAFT dips can be updated');
     }
@@ -180,8 +195,9 @@ export class FuelTankDipsService {
     return record;
   }
 
-  async submit(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async submit(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== FuelTankDipStatus.DRAFT) {
       throw new BadRequestException('Only DRAFT dips can be submitted');
     }
@@ -204,8 +220,9 @@ export class FuelTankDipsService {
     return record;
   }
 
-  async approve(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async approve(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== FuelTankDipStatus.SUBMITTED) {
       throw new BadRequestException('Only SUBMITTED dips can be approved');
     }
@@ -232,8 +249,9 @@ export class FuelTankDipsService {
     return record;
   }
 
-  async reject(id: string, userId: string, reason: string) {
-    const existing = await this.findOne(id);
+  async reject(id: string, user: AuthUser, reason: string) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (
       existing.status !== FuelTankDipStatus.SUBMITTED &&
       existing.status !== FuelTankDipStatus.APPROVED
@@ -266,8 +284,9 @@ export class FuelTankDipsService {
     return record;
   }
 
-  async post(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async post(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== FuelTankDipStatus.APPROVED) {
       throw new BadRequestException('Only APPROVED dips can be posted');
     }
@@ -341,8 +360,9 @@ export class FuelTankDipsService {
     return record;
   }
 
-  async remove(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async remove(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (!['DRAFT', 'REJECTED'].includes(existing.status)) {
       throw new BadRequestException('Only DRAFT or REJECTED dips can be deleted');
     }

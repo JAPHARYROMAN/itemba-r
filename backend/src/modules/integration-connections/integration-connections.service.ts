@@ -1,4 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import * as dns from 'dns';
+import * as net from 'net';
 import { AuditSeverity, IntegrationConnectionStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -248,6 +250,9 @@ export class IntegrationConnectionsService {
   private async probeConnection(connection: Awaited<ReturnType<typeof this.findOneWithProvider>>) {
     const config = this.asRecord(connection.publicConfig);
     const probe = this.resolveProbeTarget(connection, config);
+    // SSRF guard: reject private/loopback/link-local/metadata targets before
+    // any network request is made.
+    await this.assertPublicUrl(probe.url);
     const startedAt = Date.now();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), probe.timeoutMs);
@@ -257,6 +262,9 @@ export class IntegrationConnectionsService {
         method: probe.method,
         headers: probe.headers,
         signal: controller.signal,
+        // Do not follow redirects — a 3xx could otherwise bypass the SSRF
+        // pre-flight check and reach an internal target.
+        redirect: 'error',
       });
       const durationMs = Date.now() - startedAt;
       if (!this.isExpectedStatus(response.status, probe.expectedStatuses)) {
@@ -347,6 +355,77 @@ export class IntegrationConnectionsService {
 
   private withTrailingSlash(value: string): string {
     return value.endsWith('/') ? value : `${value}/`;
+  }
+
+  /**
+   * SSRF guard. Rejects URLs whose host (literal IP, or any DNS-resolved
+   * address) falls in a private, loopback, link-local, unspecified or
+   * cloud-metadata range. Throws on rejection or DNS failure.
+   */
+  private async assertPublicUrl(rawUrl: string): Promise<void> {
+    const url = new URL(rawUrl);
+    const host = url.hostname.replace(/^\[|\]$/g, '');
+
+    if (net.isIP(host)) {
+      if (!this.isPublicIp(host)) {
+        throw new Error('Refusing to probe a non-public address');
+      }
+      return;
+    }
+
+    let addresses: Array<{ address: string }>;
+    try {
+      addresses = await dns.promises.lookup(host, { all: true });
+    } catch {
+      throw new Error(`Unable to resolve host ${host}`);
+    }
+    if (addresses.length === 0) {
+      throw new Error(`Unable to resolve host ${host}`);
+    }
+    for (const { address } of addresses) {
+      if (!this.isPublicIp(address)) {
+        throw new Error('Refusing to probe a non-public address');
+      }
+    }
+  }
+
+  /** Returns true only if the literal IP is a routable, non-internal address. */
+  private isPublicIp(ip: string): boolean {
+    const version = net.isIP(ip);
+    if (version === 4) return this.isPublicIpv4(ip);
+    if (version === 6) return this.isPublicIpv6(ip);
+    return false;
+  }
+
+  private isPublicIpv4(ip: string): boolean {
+    const parts = ip.split('.').map((part) => Number(part));
+    if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) {
+      return false;
+    }
+    const [a, b] = parts;
+    if (a === 0) return false; // 0.0.0.0/8 (unspecified / "this network")
+    if (a === 10) return false; // 10.0.0.0/8 private
+    if (a === 127) return false; // 127.0.0.0/8 loopback
+    if (a === 169 && b === 254) return false; // 169.254.0.0/16 link-local (incl. 169.254.169.254 metadata)
+    if (a === 172 && b >= 16 && b <= 31) return false; // 172.16.0.0/12 private
+    if (a === 192 && b === 168) return false; // 192.168.0.0/16 private
+    if (a === 100 && b >= 64 && b <= 127) return false; // 100.64.0.0/10 carrier-grade NAT
+    if (a === 192 && b === 0) return false; // 192.0.0.0/24 IETF, 192.0.2.0/24 TEST-NET-1
+    if (a === 198 && (b === 18 || b === 19)) return false; // 198.18.0.0/15 benchmarking
+    if (a >= 224) return false; // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved
+    return true;
+  }
+
+  private isPublicIpv6(ip: string): boolean {
+    const lower = ip.toLowerCase();
+    if (lower === '::' || lower === '::1') return false; // unspecified / loopback
+    // IPv4-mapped (::ffff:a.b.c.d) — validate the embedded IPv4.
+    const mapped = lower.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+    if (mapped) return this.isPublicIpv4(mapped[1]);
+    if (lower.startsWith('fe80')) return false; // link-local
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return false; // unique local fc00::/7
+    if (lower.startsWith('ff')) return false; // multicast
+    return true;
   }
 
   private encryptJson(obj: Record<string, any>): string {

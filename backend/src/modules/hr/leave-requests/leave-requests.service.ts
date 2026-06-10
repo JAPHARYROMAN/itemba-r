@@ -320,6 +320,42 @@ export class LeaveRequestsService {
     return { message: 'Leave request deleted' };
   }
 
+  /**
+   * Cancel a leave request (without deleting it). When the request was already
+   * APPROVED, the consumed leave-balance days are reversed inside the same
+   * transaction so usedDays is restored — closing the gap where the only path
+   * that returned an approved request's days was delete (remove()).
+   */
+  async cancel(id: string, reason: string | undefined, user: any) {
+    const existing = await this.findOne(id, user);
+    if (existing.status === 'CANCELLED') {
+      throw new BadRequestException('Leave request is already cancelled');
+    }
+    if (existing.status === 'REJECTED') {
+      throw new BadRequestException('Rejected leave requests cannot be cancelled');
+    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (existing.status === 'APPROVED') {
+        await this.reverseLeaveBalanceUsage(id, tx);
+      }
+      return tx.leaveRequest.update({
+        where: { id },
+        data: {
+          status: 'CANCELLED',
+          rejectionReason: reason ?? existing.rejectionReason ?? null,
+        } as any,
+      });
+    });
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'LeaveRequest',
+      entityId: id,
+      newValue: { status: 'CANCELLED' },
+    });
+    return updated;
+  }
+
   private async applyLeaveBalanceUsage(leaveRequestId: string, tx: Prisma.TransactionClient) {
     const request = await tx.leaveRequest.findUnique({
       where: { id: leaveRequestId },
@@ -330,61 +366,70 @@ export class LeaveRequestsService {
     const allowance = request.leaveType.annualAllowanceDays;
     if (!request.leaveType.paid || allowance == null) return;
 
-    const year = request.startDate.getUTCFullYear();
-    await tx.leaveBalance.upsert({
-      where: {
-        companyId_employeeId_leaveTypeId_year: {
+    // Split the request across the calendar years it spans so a Dec/Jan
+    // leave charges each year's balance for the days actually taken in it.
+    const splits = splitTotalDaysByYear(
+      request.startDate,
+      request.endDate,
+      decimal(request.totalDays),
+    );
+
+    for (const { year, days } of splits) {
+      if (days.lte(0)) continue;
+      await tx.leaveBalance.upsert({
+        where: {
+          companyId_employeeId_leaveTypeId_year: {
+            companyId: request.companyId,
+            employeeId: request.employeeId,
+            leaveTypeId: request.leaveTypeId,
+            year,
+          },
+        },
+        create: {
           companyId: request.companyId,
           employeeId: request.employeeId,
           leaveTypeId: request.leaveTypeId,
           year,
+          allocatedDays: allowance,
+          carriedForwardDays: 0,
+          usedDays: 0,
         },
-      },
-      create: {
-        companyId: request.companyId,
-        employeeId: request.employeeId,
-        leaveTypeId: request.leaveTypeId,
-        year,
-        allocatedDays: allowance,
-        carriedForwardDays: 0,
-        usedDays: 0,
-      },
-      update: { deletedAt: null },
-    });
+        update: { deletedAt: null },
+      });
 
-    const rows = await tx.$queryRaw<
-      Array<{
-        id: string;
-        allocatedDays: Prisma.Decimal;
-        carriedForwardDays: Prisma.Decimal;
-        usedDays: Prisma.Decimal;
-      }>
-    >`
-      SELECT id, "allocatedDays", "carriedForwardDays", "usedDays"
-      FROM "leave_balances"
-      WHERE "companyId" = ${request.companyId}
-        AND "employeeId" = ${request.employeeId}
-        AND "leaveTypeId" = ${request.leaveTypeId}
-        AND "year" = ${year}
-        AND "deletedAt" IS NULL
-      FOR UPDATE
-    `;
-    const balance = rows[0];
-    if (!balance) throw new BadRequestException('Leave balance could not be created');
+      const rows = await tx.$queryRaw<
+        Array<{
+          id: string;
+          allocatedDays: Prisma.Decimal;
+          carriedForwardDays: Prisma.Decimal;
+          usedDays: Prisma.Decimal;
+        }>
+      >`
+        SELECT id, "allocatedDays", "carriedForwardDays", "usedDays"
+        FROM "leave_balances"
+        WHERE "companyId" = ${request.companyId}
+          AND "employeeId" = ${request.employeeId}
+          AND "leaveTypeId" = ${request.leaveTypeId}
+          AND "year" = ${year}
+          AND "deletedAt" IS NULL
+        FOR UPDATE
+      `;
+      const balance = rows[0];
+      if (!balance) throw new BadRequestException('Leave balance could not be created');
 
-    const totalDays = decimal(request.totalDays);
-    const newUsed = decimal(balance.usedDays).plus(totalDays);
-    const available = decimal(balance.allocatedDays).plus(decimal(balance.carriedForwardDays));
-    if (newUsed.gt(available)) {
-      throw new BadRequestException(
-        `Insufficient leave balance: available ${available.toFixed(2)} day(s), requested ${totalDays.toFixed(2)} day(s).`,
-      );
+      const newUsed = decimal(balance.usedDays).plus(days);
+      const available = decimal(balance.allocatedDays).plus(decimal(balance.carriedForwardDays));
+      if (newUsed.gt(available)) {
+        throw new BadRequestException(
+          `Insufficient leave balance for ${year}: available ${available.toFixed(2)} day(s), requested ${days.toFixed(2)} day(s).`,
+        );
+      }
+
+      await tx.leaveBalance.update({
+        where: { id: balance.id },
+        data: { usedDays: newUsed },
+      });
     }
-
-    await tx.leaveBalance.update({
-      where: { id: balance.id },
-      data: { usedDays: newUsed },
-    });
   }
 
   private async reverseLeaveBalanceUsage(leaveRequestId: string, tx: Prisma.TransactionClient) {
@@ -394,31 +439,41 @@ export class LeaveRequestsService {
     });
     if (!request) return;
 
-    const year = request.startDate.getUTCFullYear();
-    const rows = await tx.$queryRaw<
-      Array<{
-        id: string;
-        usedDays: Prisma.Decimal;
-      }>
-    >`
-      SELECT id, "usedDays"
-      FROM "leave_balances"
-      WHERE "companyId" = ${request.companyId}
-        AND "employeeId" = ${request.employeeId}
-        AND "leaveTypeId" = ${request.leaveTypeId}
-        AND "year" = ${year}
-        AND "deletedAt" IS NULL
-      FOR UPDATE
-    `;
-    const balance = rows[0];
-    if (!balance) return;
+    // Mirror applyLeaveBalanceUsage: return each year's days to the year it
+    // was charged to, so reversal of a year-spanning request stays consistent.
+    const splits = splitTotalDaysByYear(
+      request.startDate,
+      request.endDate,
+      decimal(request.totalDays),
+    );
 
-    const reducedUsed = decimal(balance.usedDays).minus(decimal(request.totalDays));
-    const newUsed = reducedUsed.lt(0) ? decimal(0) : reducedUsed;
-    await tx.leaveBalance.update({
-      where: { id: balance.id },
-      data: { usedDays: newUsed },
-    });
+    for (const { year, days } of splits) {
+      if (days.lte(0)) continue;
+      const rows = await tx.$queryRaw<
+        Array<{
+          id: string;
+          usedDays: Prisma.Decimal;
+        }>
+      >`
+        SELECT id, "usedDays"
+        FROM "leave_balances"
+        WHERE "companyId" = ${request.companyId}
+          AND "employeeId" = ${request.employeeId}
+          AND "leaveTypeId" = ${request.leaveTypeId}
+          AND "year" = ${year}
+          AND "deletedAt" IS NULL
+        FOR UPDATE
+      `;
+      const balance = rows[0];
+      if (!balance) continue;
+
+      const reducedUsed = decimal(balance.usedDays).minus(days);
+      const newUsed = reducedUsed.lt(0) ? decimal(0) : reducedUsed;
+      await tx.leaveBalance.update({
+        where: { id: balance.id },
+        data: { usedDays: newUsed },
+      });
+    }
   }
 
   private async resolveEmployeeHierarchy(
@@ -476,4 +531,61 @@ type DecimalInput = ConstructorParameters<typeof Prisma.Decimal>[0];
 function decimal(value: DecimalInput | null | undefined): Prisma.Decimal {
   if (value instanceof Prisma.Decimal) return value;
   return new Prisma.Decimal(value ?? 0);
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Split a leave request's totalDays across the calendar years its
+ * [startDate, endDate] range spans, weighted by the number of inclusive
+ * calendar days that fall in each year. The allocated days always sum exactly
+ * to totalDays (any rounding remainder lands on the last year). A request that
+ * stays within one year returns a single { year, days: totalDays } entry.
+ */
+function splitTotalDaysByYear(
+  startDate: Date,
+  endDate: Date,
+  totalDays: Prisma.Decimal,
+): Array<{ year: number; days: Prisma.Decimal }> {
+  const startYear = startDate.getUTCFullYear();
+  const endYear = endDate.getUTCFullYear();
+  if (endYear <= startYear || endDate.getTime() < startDate.getTime()) {
+    return [{ year: startYear, days: totalDays }];
+  }
+
+  // Inclusive calendar-day count per year within the range.
+  const perYearDayCount = new Map<number, number>();
+  let totalSpanDays = 0;
+  for (let year = startYear; year <= endYear; year++) {
+    const yearStart = Date.UTC(year, 0, 1);
+    const yearEnd = Date.UTC(year + 1, 0, 1) - MS_PER_DAY; // Dec 31 of `year`
+    const segStart = Math.max(startDate.getTime(), yearStart);
+    const segEnd = Math.min(endDate.getTime(), yearEnd);
+    const days = Math.floor((segEnd - segStart) / MS_PER_DAY) + 1;
+    if (days > 0) {
+      perYearDayCount.set(year, days);
+      totalSpanDays += days;
+    }
+  }
+
+  if (totalSpanDays <= 0) {
+    return [{ year: startYear, days: totalDays }];
+  }
+
+  const splits: Array<{ year: number; days: Prisma.Decimal }> = [];
+  const years = [...perYearDayCount.keys()];
+  let allocated = decimal(0);
+  years.forEach((year, index) => {
+    const count = perYearDayCount.get(year) as number;
+    let portion: Prisma.Decimal;
+    if (index === years.length - 1) {
+      // Last year absorbs the remainder so the parts sum exactly to totalDays.
+      portion = totalDays.minus(allocated);
+    } else {
+      portion = totalDays.times(count).dividedBy(totalSpanDays);
+      allocated = allocated.plus(portion);
+    }
+    splits.push({ year, days: portion });
+  });
+  return splits;
 }

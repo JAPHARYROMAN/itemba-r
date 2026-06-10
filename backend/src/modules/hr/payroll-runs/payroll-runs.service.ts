@@ -182,7 +182,10 @@ export class PayrollRunsService {
       let overtimeHours = 0;
       const attendancePay = 0;
       let overtimePay = 0;
-      let attendanceUnpaidAbsentDays = 0;
+      // Unpaid-absence attendance records (weight + calendar date) for this
+      // period. Collected here but combined with LWOP leave below so a day
+      // covered by BOTH sources is not double-counted (ITMB-081).
+      const unpaidAbsenceAttendance: Array<{ date: Date; weight: number }> = [];
 
       if (periodStart && periodEnd) {
         const attendance = await this.prisma.attendanceRecord.findMany({
@@ -195,16 +198,19 @@ export class PayrollRunsService {
           select: {
             attendanceStatus: true,
             overtimeHours: true,
+            attendanceDate: true,
           },
         });
         daysWorked = attendance.reduce(
           (sum, a) => sum + attendanceDayWeight(a.attendanceStatus),
           0,
         );
-        attendanceUnpaidAbsentDays = attendance.reduce(
-          (sum, a) => sum + unpaidAbsenceWeight(a.attendanceStatus),
-          0,
-        );
+        for (const a of attendance) {
+          const weight = unpaidAbsenceWeight(a.attendanceStatus);
+          if (weight > 0) {
+            unpaidAbsenceAttendance.push({ date: a.attendanceDate, weight });
+          }
+        }
         overtimeHours = attendance
           .filter((a) => attendanceDayWeight(a.attendanceStatus) > 0)
           .reduce((sum, a) => sum + Number(a.overtimeHours ?? 0), 0);
@@ -217,6 +223,10 @@ export class PayrollRunsService {
       // period reduce gross pay. Daily rate = baseSalary / 22 (standard
       // working days for monthly-paid employees in Tanzania).
       let lwopDays = 0;
+      // Distinct in-period calendar dates already counted as LWOP via approved
+      // unpaid leave; used to suppress double-counting an UNPAID_ABSENT/ABSENT
+      // attendance record that falls on the same day (ITMB-081).
+      const lwopLeaveDates = new Set<string>();
       if (periodStart && periodEnd) {
         const lwopRequests = await this.prisma.leaveRequest.findMany({
           where: {
@@ -253,9 +263,20 @@ export class PayrollRunsService {
             );
             lwopDays += overlapDays;
           }
+          // Record every in-period calendar date this leave covers so an
+          // overlapping unpaid-absence attendance record is not added again.
+          for (const key of calendarDateKeys(reqStart, reqEnd)) {
+            lwopLeaveDates.add(key);
+          }
         }
       }
-      lwopDays += attendanceUnpaidAbsentDays;
+      // Add unpaid-absence attendance weight only for dates NOT already counted
+      // by approved unpaid leave above (de-duplicate per distinct calendar day).
+      for (const absence of unpaidAbsenceAttendance) {
+        if (!lwopLeaveDates.has(calendarDateKey(absence.date))) {
+          lwopDays += absence.weight;
+        }
+      }
       const dailyRate = fullBasePay / 22;
       const lwopDeduction = Math.min(fullBasePay, Math.round(lwopDays * dailyRate * 100) / 100);
       const basePay = Math.round((fullBasePay - lwopDeduction) * 100) / 100;
@@ -344,27 +365,75 @@ export class PayrollRunsService {
         orderBy: { paidAt: 'asc' },
       });
 
+      // ── Deduction capping & net-pay floor (ITMB-020 / ITMB-021) ──────────
+      // Withholding priority from gross pay: statutory first (mandatory), then
+      // non-statutory manual deductions, then salary-advance recovery (an
+      // internal receivable that must yield to actual pay availability). Net pay
+      // is never persisted negative, and each advance installment is capped to
+      // what can actually be withheld so syncAdvanceRecoveries credits only the
+      // amount really collected.
+      const totalEmployeeStatutory = breakdown.totalEmployeeStatutory;
+      if (decimal(totalEmployeeStatutory).gt(decimal(grossPay))) {
+        // Statutory alone exceeds gross — this cannot be silently floored to a
+        // zero paycheck; surface it for correction (bad LWOP/proration, stale
+        // statutory config, etc.).
+        throw new BadRequestException(
+          `Statutory deductions (${money(decimal(totalEmployeeStatutory)).toFixed(2)}) exceed gross pay (${money(decimal(grossPay)).toFixed(2)}) for employee ${employee.employeeCode ?? employee.id}. Review attendance/LWOP and statutory setup before recalculating.`,
+        );
+      }
+
+      // Pay available for discretionary (non-statutory) withholding.
+      let availableForDeductions = money(decimal(grossPay).minus(decimal(totalEmployeeStatutory)));
+
+      // Non-statutory manual deductions are capped at available pay. Cap each
+      // line sequentially (query order) so the persisted deduction line items
+      // sum exactly to the capped aggregate, keeping gross = net + deductions.
+      const nonStatutoryWithheld = new Map<string, number>();
+      let cappedNonStatutoryDec = decimal(0);
+      for (const d of nonStatutoryDeductions) {
+        if (availableForDeductions.lte(0)) {
+          nonStatutoryWithheld.set(d.id, 0);
+          continue;
+        }
+        const want = decimal(d.amount ?? 0);
+        let take = money(want.gt(availableForDeductions) ? availableForDeductions : want);
+        if (take.lt(0)) take = decimal(0);
+        nonStatutoryWithheld.set(d.id, take.toNumber());
+        cappedNonStatutoryDec = cappedNonStatutoryDec.plus(take);
+        availableForDeductions = money(availableForDeductions.minus(take));
+      }
+      const cappedNonStatutory = money(cappedNonStatutoryDec);
+
       const advanceRecoveries: Array<{ advanceId: string; advanceNumber: string; amount: number }> =
         [];
       for (const adv of outstandingAdvances) {
+        if (availableForDeductions.lte(0)) break;
         const remaining = decimal(adv.amount).minus(decimal(adv.recoveredAmount));
         if (remaining.lte(0)) continue;
         const installment =
           adv.installmentAmount != null ? decimal(adv.installmentAmount) : decimal(adv.amount);
-        const thisPeriod = money(installment.lt(remaining) ? installment : remaining);
+        // Withhold no more than the installment, the remaining balance, OR the
+        // pay still available after higher-priority deductions.
+        let thisPeriod = money(installment.lt(remaining) ? installment : remaining);
+        if (thisPeriod.gt(availableForDeductions)) thisPeriod = money(availableForDeductions);
         if (thisPeriod.gt(0)) {
           advanceRecoveries.push({
             advanceId: adv.id,
             advanceNumber: adv.advanceNumber,
             amount: thisPeriod.toNumber(),
           });
+          availableForDeductions = money(availableForDeductions.minus(thisPeriod));
         }
       }
       const totalAdvanceRecovery = advanceRecoveries.reduce((s, r) => s + r.amount, 0);
 
-      const totalDeductionsEmployee =
-        breakdown.totalEmployeeStatutory + totalManualNonStatutory + totalAdvanceRecovery;
-      const netPay = grossPay - totalDeductionsEmployee;
+      // Keep gross = net + totalDeductions exact, and never persist negative net.
+      const totalDeductionsEmployee = money(
+        decimal(totalEmployeeStatutory)
+          .plus(decimal(cappedNonStatutory))
+          .plus(decimal(totalAdvanceRecovery)),
+      ).toNumber();
+      const netPay = money(decimal(grossPay).minus(decimal(totalDeductionsEmployee))).toNumber();
       const totalAllowances = taxableAllowancesWithCommission + nonTaxableAllowances;
 
       const entry = await this.prisma.payrollEntry.create({
@@ -430,13 +499,15 @@ export class PayrollRunsService {
         }
       }
 
-      // Non-statutory manual deductions only (statutory written as PayrollStatutoryLine)
+      // Non-statutory manual deductions only (statutory written as PayrollStatutoryLine).
+      // Persist the actually-withheld (capped) amount so the deduction lines sum
+      // to the entry's totalDeductions and never imply more than was withheld.
       for (const d of nonStatutoryDeductions) {
         await this.prisma.payrollEntryDeduction.create({
           data: {
             payrollEntryId: entry.id,
             deductionTypeId: d.deductionTypeId,
-            amount: d.amount ?? 0,
+            amount: nonStatutoryWithheld.get(d.id) ?? Number(d.amount ?? 0),
             description: d.deductionType.name,
             statutory: false,
           },
@@ -969,6 +1040,26 @@ function endOfDay(value: Date): Date {
 
 function formatDateYmd(value: Date): string {
   return value.toISOString().slice(0, 10);
+}
+
+// Calendar-day key (UTC YYYY-MM-DD) used to de-duplicate unpaid days counted by
+// both approved unpaid leave and unpaid-absence attendance (ITMB-081).
+function calendarDateKey(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+// Distinct calendar-day keys covered by the inclusive [start, end] range.
+function calendarDateKeys(start: Date, end: Date): string[] {
+  const keys: string[] = [];
+  const cursor = new Date(start);
+  cursor.setUTCHours(0, 0, 0, 0);
+  const last = new Date(end);
+  last.setUTCHours(0, 0, 0, 0);
+  while (cursor.getTime() <= last.getTime()) {
+    keys.push(calendarDateKey(cursor));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return keys;
 }
 
 function filingCodeSegment(value: string): string {

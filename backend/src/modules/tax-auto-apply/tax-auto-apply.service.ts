@@ -19,10 +19,16 @@ import { PrismaService } from '../../prisma/prisma.service';
  *     sourceId, taxCodeId) is only created if one doesn't already exist.
  *     Re-running on the same order is safe and a no-op for already-booked
  *     lines.
- *   - **Soft-fails**: any error (missing tax code, missing default,
- *     misconfigured rate) is logged and the function returns `{ booked: 0,
- *     skipped: <n>, error: <msg> }` rather than throwing. Callers can pass
- *     this through inside a $transaction without risk to the source flow.
+ *   - **Hard failures are flagged, not failed-open**: a failure to *determine*
+ *     tax (source order lookup error, tax-code lookup error, or no active
+ *     default TaxCode) is logged at ERROR and returned with `failed: true` +
+ *     `error`, so it is visibly distinct from the legitimate booked:0 no-op and
+ *     can be alerted/reconciled. It does NOT throw, because this runs inside
+ *     the order-confirm $transaction and throwing would incorrectly roll back a
+ *     legitimate confirm. Per-line booking errors remain soft (logged + counted
+ *     as skipped) so one bad line doesn't abort the batch. "Legitimately
+ *     nothing to book" (feature disabled, zero-tax lines, already-booked)
+ *     returns normally with `failed` unset.
  *   - **No silent rate computation**: lines with `taxAmount: 0` are skipped.
  *     We only book what the operator already entered. Computing tax that
  *     wasn't on the document is anomaly-detection territory (C4).
@@ -119,7 +125,19 @@ export class TaxAutoApplyService {
         order = { ...o, transactionDate: o.orderDate };
       }
     } catch (err) {
+      // Hard failure to determine the source order: this is NOT "nothing to
+      // book". The feature is enabled here (entry points short-circuit when
+      // off). We must NOT fail open silently (a swallowed error understates VAT
+      // in downstream filing reports), but this runs inside the order-confirm
+      // $transaction, so throwing would incorrectly roll back a legitimate
+      // confirm. Instead we escalate to ERROR and flag the result via
+      // `failed`/`error` so callers/alerting can reconcile it — distinct from
+      // the legitimate booked:0 no-op.
       result.error = err instanceof Error ? err.message : String(err);
+      result.failed = true;
+      this.logger.error(
+        `Tax auto-apply FAILED (tax not determined) for ${input.sourceType} ${input.sourceId}: ${result.error}`,
+      );
       return result;
     }
 
@@ -159,14 +177,24 @@ export class TaxAutoApplyService {
       });
       defaultCode = candidates.find((c) => c.isDefault) ?? candidates[0] ?? null;
     } catch (err) {
+      // Hard failure to determine the applicable tax code — escalate + flag,
+      // but do not throw (see note above: we run inside the confirm tx).
       result.error = `Default tax code lookup failed: ${err instanceof Error ? err.message : String(err)}`;
+      result.failed = true;
+      this.logger.error(
+        `Tax auto-apply FAILED (tax not determined) for ${input.sourceType} ${input.sourceId}: ${result.error}`,
+      );
       return result;
     }
 
     if (!defaultCode) {
+      // Misconfiguration (no active TaxCode) means VAT cannot be determined.
+      // This is a hard failure, NOT a legitimate no-op: escalate to ERROR and
+      // flag the result so it is reconciled rather than silently lost.
       result.error = `No active TaxCode for appliesTo=${input.appliesTo} on company ${order.companyId}.`;
-      this.logger.warn(
-        `Tax auto-apply skipped for ${input.sourceType} ${input.sourceId}: ${result.error}`,
+      result.failed = true;
+      this.logger.error(
+        `Tax auto-apply FAILED (no active TaxCode) for ${input.sourceType} ${input.sourceId}: ${result.error}`,
       );
       return result;
     }
@@ -311,6 +339,12 @@ export interface TaxApplyResult {
   disabled?: boolean;
   /** Set to a human message on hard failure. The function still returns; it does not throw. */
   error?: string;
+  /**
+   * True when tax could NOT be determined (source lookup failed, tax-code
+   * lookup failed, or no active TaxCode). Distinguishes a hard failure from the
+   * legitimate booked:0 no-op so callers/alerting can reconcile the order.
+   */
+  failed?: boolean;
 }
 
 function round2(n: number): number {

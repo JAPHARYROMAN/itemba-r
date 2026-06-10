@@ -257,10 +257,29 @@ export class InventoryMovementsService {
       );
     }
 
+    // WAC valuation policy:
+    //  - Cost-bearing inbound (unitCost provided): roll the new units into the
+    //    running average and recompute totalValue = newQty * newAvgCost.
+    //  - Cost-less inbound (unitCost == null) and all outbound: do NOT value the
+    //    added/removed units at the existing average via a blanket
+    //    newQty * newAvgCost recompute — that would silently inflate (or, on
+    //    outbound, distort) totalValue. Instead carry the prior averageCost and
+    //    derive totalValue additively (existing total +/- removed-at-average),
+    //    so cost-less inbound leaves totalValue unchanged.
     let newAvgCost = Number(existing.averageCost);
+    let newTotalValue: number;
     if (isInbound && movement.unitCost != null) {
       const totalCost = Number(existing.totalValue) + quantity * Number(movement.unitCost);
       newAvgCost = newQty > 0 ? totalCost / newQty : 0;
+      newTotalValue = newQty * newAvgCost;
+    } else if (isInbound) {
+      // Cost-less inbound: added units carry no cost, so the stored value of the
+      // existing stock is unchanged. averageCost stays as-is; totalValue is held.
+      newTotalValue = Number(existing.totalValue);
+    } else {
+      // Outbound: relieve value at the current average cost; if the line goes to
+      // (or below) zero, the value is fully relieved.
+      newTotalValue = newQty > 0 ? newQty * newAvgCost : 0;
     }
 
     await db.inventoryBalance.update({
@@ -269,7 +288,7 @@ export class InventoryMovementsService {
         divisionId: movement.divisionId,
         quantityOnHand: newQty,
         averageCost: newAvgCost,
-        totalValue: newQty * newAvgCost,
+        totalValue: newTotalValue,
         lastMovementAt: movement.movementDate,
       },
     });

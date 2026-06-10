@@ -1,11 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CreateLaborRecordDto } from './dto/create-labor-record.dto';
 import { UpdateLaborRecordDto } from './dto/update-labor-record.dto';
-import { LaborPaymentStatus } from '@prisma/client';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { AccessLevel, LaborPaymentStatus } from '@prisma/client';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 @Injectable()
 export class LaborRecordsService {
@@ -13,14 +14,35 @@ export class LaborRecordsService {
     private prisma: PrismaService,
     private audit: AuditLogsService,
     private codes: EntityCodeGeneratorService,
+    private companyScope: CompanyScopeService,
   ) {}
 
-  async create(dto: CreateLaborRecordDto, userId: string) {
+  async create(dto: CreateLaborRecordDto, user: AuthUser) {
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    // Reject negative/unbounded money/quantity inputs (defence in depth on top
+    // of DTO @Min validation).
+    if (dto.totalAmount < 0) throw new BadRequestException('totalAmount must be >= 0');
+    if (dto.hoursWorked !== undefined && dto.hoursWorked < 0) {
+      throw new BadRequestException('hoursWorked must be >= 0');
+    }
+    if (dto.dayRate !== undefined && dto.dayRate < 0) {
+      throw new BadRequestException('dayRate must be >= 0');
+    }
     const laborRecordNumber = await this.codes.next({ entityType: 'LaborRecord', companyId: dto.companyId });
+    // Do not trust a client-supplied paymentStatus on create: strip it so the
+    // record starts at the schema default. Payment must be recorded via a
+    // dedicated flow, not by mass-assignment at creation time.
+    const { paymentStatus: _ignoredPaymentStatus, ...createData } = dto;
+    void _ignoredPaymentStatus;
     const record = await this.prisma.laborRecord.create({
-      data: { ...dto, laborRecordNumber, laborDate: new Date(dto.laborDate), createdById: userId },
+      data: {
+        ...createData,
+        laborRecordNumber,
+        laborDate: new Date(dto.laborDate),
+        createdById: user.id,
+      },
     });
-    await this.audit.log({ userId, action: 'CREATE', entityType: 'LaborRecord', entityId: record.id, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({ userId: user.id, action: 'CREATE', entityType: 'LaborRecord', entityId: record.id, newValue: dto as unknown as Record<string, unknown> });
     return record;
   }
 

@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateProformaInvoiceDto } from './dto/create-proforma-invoice.dto';
@@ -25,9 +26,12 @@ export class ProformaInvoicesService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  private async generateProformaNumber(companyId: string): Promise<string> {
+  private async generateProformaNumber(
+    db: Prisma.TransactionClient,
+    companyId: string,
+  ): Promise<string> {
     const year = new Date().getFullYear();
-    const count = await this.prisma.proformaInvoice.count({
+    const count = await db.proformaInvoice.count({
       where: { companyId, proformaNumber: { startsWith: `PRF-${year}` } },
     });
     return `PRF-${year}-${String(count + 1).padStart(5, '0')}`;
@@ -35,45 +39,64 @@ export class ProformaInvoicesService {
 
   async create(dto: CreateProformaInvoiceDto, userId: string) {
     const { computed, subtotal, totalDiscount, totalTax, totalAmount } = calcLines(dto.lines);
-    const proformaNumber = await this.generateProformaNumber(dto.companyId);
 
-    const record = await this.prisma.$transaction(async (tx) => {
-      const pf = await tx.proformaInvoice.create({
-        data: {
-          proformaNumber,
-          companyId: dto.companyId,
-          divisionId: dto.divisionId,
-          branchId: dto.branchId,
-          customerId: dto.customerId,
-          customerName: dto.customerName,
-          proformaDate: new Date(dto.proformaDate),
-          validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
-          currency: dto.currency as any,
-          subtotal,
-          discountAmount: totalDiscount,
-          taxAmount: totalTax,
-          totalAmount,
-          status: 'DRAFT' as any,
-          quotationId: dto.quotationId,
-          createdById: userId,
-          notes: dto.notes,
-        },
-      });
-      await tx.proformaInvoiceLine.createMany({
-        data: computed.map((l) => ({
-          proformaInvoiceId: pf.id,
-          productId: l.productId,
-          description: l.description,
-          quantity: l.quantity,
-          unitId: l.unitId,
-          unitPrice: l.unitPrice,
-          discountAmount: l.discountAmount ?? 0,
-          taxAmount: l.taxAmount ?? 0,
-          lineTotal: l.lineTotal,
-        })),
-      });
-      return pf;
-    });
+    // Generate the per-company proforma number and create the row inside one
+    // transaction so the count()+1 read-modify-write is atomic; retry once on a
+    // unique-constraint clash (@@unique([companyId, proformaNumber])).
+    let record: Awaited<ReturnType<typeof this.prisma.proformaInvoice.create>> | undefined;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        record = await this.prisma.$transaction(async (tx) => {
+          const proformaNumber = await this.generateProformaNumber(tx, dto.companyId);
+          const pf = await tx.proformaInvoice.create({
+            data: {
+              proformaNumber,
+              companyId: dto.companyId,
+              divisionId: dto.divisionId,
+              branchId: dto.branchId,
+              customerId: dto.customerId,
+              customerName: dto.customerName,
+              proformaDate: new Date(dto.proformaDate),
+              validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
+              currency: dto.currency as any,
+              subtotal,
+              discountAmount: totalDiscount,
+              taxAmount: totalTax,
+              totalAmount,
+              status: 'DRAFT' as any,
+              quotationId: dto.quotationId,
+              createdById: userId,
+              notes: dto.notes,
+            },
+          });
+          await tx.proformaInvoiceLine.createMany({
+            data: computed.map((l) => ({
+              proformaInvoiceId: pf.id,
+              productId: l.productId,
+              description: l.description,
+              quantity: l.quantity,
+              unitId: l.unitId,
+              unitPrice: l.unitPrice,
+              discountAmount: l.discountAmount ?? 0,
+              taxAmount: l.taxAmount ?? 0,
+              lineTotal: l.lineTotal,
+            })),
+          });
+          return pf;
+        });
+        break;
+      } catch (err) {
+        if (
+          attempt === 0 &&
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (!record) throw new Error('Failed to allocate proforma invoice number');
 
     await this.auditLogs.log({
       action: 'PROFORMA_INVOICE_CREATE',

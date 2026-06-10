@@ -178,9 +178,12 @@ export class PrintEngineService {
 
     let html: string = template.content ?? '';
     const vars: Record<string, unknown> = { ...(data ?? {}), entityType, entityId };
-    for (const [key, value] of Object.entries(vars)) {
-      html = html.replace(new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g'), String(value ?? ''));
-    }
+    // Replace {{ key }} placeholders via a single precompiled pattern, looking the
+    // captured name up in `vars`. Avoids compiling user-controlled keys into a
+    // RegExp (regex injection / ReDoS) while preserving legitimate placeholders.
+    html = html.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (match, name: string) =>
+      Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name] ?? '') : match,
+    );
     return { template, html };
   }
 
@@ -263,19 +266,19 @@ export class PrintEngineService {
     worksheet.addRow([`Generated ${new Date().toISOString()}`]).font = { italic: true };
     worksheet.addRow([]);
     for (const [key, value] of Object.entries(input.metadata)) {
-      worksheet.addRow([key, String(value ?? '')]);
+      worksheet.addRow([this.neutralizeFormula(key), this.neutralizeFormula(String(value ?? ''))]);
     }
     worksheet.addRow([]);
 
     if (input.rows.length > 0) {
       const headers = Object.keys(input.rows[0]);
-      const headerRow = worksheet.addRow(headers);
+      const headerRow = worksheet.addRow(headers.map((header) => this.neutralizeFormula(header)));
       headerRow.font = { bold: true };
       headerRow.eachCell((cell: any) => {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } };
       });
       for (const row of input.rows) {
-        worksheet.addRow(headers.map((header) => row[header] ?? ''));
+        worksheet.addRow(headers.map((header) => this.neutralizeFormula(row[header] ?? '')));
       }
       headers.forEach((header, index) => {
         worksheet.getColumn(index + 1).width = Math.max(header.length + 2, 14);
@@ -290,5 +293,17 @@ export class PrintEngineService {
 
   private safeFilename(value: string): string {
     return value.replace(/[^a-z0-9-]+/gi, '_').replace(/^_+|_+$/g, '') || 'document';
+  }
+
+  /**
+   * Neutralize spreadsheet formula injection (CSV/Excel). If a string cell value
+   * begins with a formula trigger (= + - @, TAB or CR), prefix it with a single
+   * quote so the spreadsheet treats it as literal text. Non-string values are
+   * returned unchanged so numbers/dates keep their native cell type.
+   */
+  private neutralizeFormula(value: unknown): unknown {
+    if (typeof value !== 'string') return value;
+    if (/^[=+\-@\t\r]/.test(value)) return `'${value}`;
+    return value;
   }
 }

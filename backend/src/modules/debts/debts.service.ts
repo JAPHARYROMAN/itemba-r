@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
@@ -15,6 +15,28 @@ export class DebtsService {
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
   ) {}
+
+  /**
+   * Derive the payment status from the amounts. A caller-supplied non-payment
+   * state (WRITTEN_OFF / DISPUTED / RESTRUCTURED) is preserved; otherwise the
+   * status is computed from amountPaid vs amount so the two can never drift.
+   */
+  private deriveStatus(
+    amount: Prisma.Decimal,
+    amountPaid: Prisma.Decimal,
+    requested?: DebtStatus,
+  ): DebtStatus {
+    if (
+      requested === DebtStatus.WRITTEN_OFF ||
+      requested === DebtStatus.DISPUTED ||
+      requested === DebtStatus.RESTRUCTURED
+    ) {
+      return requested;
+    }
+    if (amountPaid.lessThanOrEqualTo(0)) return DebtStatus.OUTSTANDING;
+    if (amountPaid.greaterThanOrEqualTo(amount)) return DebtStatus.PAID;
+    return DebtStatus.PARTIALLY_PAID;
+  }
 
   async findAll(query: QueryDebtDto, user: AuthUser) {
     const { page = 1, limit = 20, companyId, status, riskLevel, search, dueBefore } = query;
@@ -76,18 +98,30 @@ export class DebtsService {
   async create(dto: CreateDebtDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const createdById = user.id;
+    const amount = new Prisma.Decimal(dto.amount);
+    const amountPaid = dto.amountPaid ? new Prisma.Decimal(dto.amountPaid) : new Prisma.Decimal(0);
+    if (amount.isNegative()) {
+      throw new BadRequestException('amount must be >= 0');
+    }
+    if (amountPaid.isNegative()) {
+      throw new BadRequestException('amountPaid must be >= 0');
+    }
+    if (amountPaid.greaterThan(amount)) {
+      throw new BadRequestException('amountPaid cannot exceed amount');
+    }
+    const status = this.deriveStatus(amount, amountPaid, dto.status);
     const record = await this.prisma.debt.create({
       data: {
         companyId: dto.companyId,
         creditorName: dto.creditorName,
         creditorContact: dto.creditorContact,
-        amount: new Prisma.Decimal(dto.amount),
-        amountPaid: dto.amountPaid ? new Prisma.Decimal(dto.amountPaid) : new Prisma.Decimal(0),
+        amount,
+        amountPaid,
         currency: dto.currency,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
         description: dto.description,
         invoiceNumber: dto.invoiceNumber,
-        status: dto.status,
+        status,
         riskLevel: dto.riskLevel,
         notes: dto.notes,
         createdById,
@@ -108,6 +142,37 @@ export class DebtsService {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     const actorId = user.id;
+
+    // Validate the resulting amount / amountPaid server-side so a client cannot
+    // set amountPaid above the debt amount (or negative).
+    const nextAmount =
+      dto.amount !== undefined ? new Prisma.Decimal(dto.amount) : new Prisma.Decimal(existing.amount);
+    const nextAmountPaid =
+      dto.amountPaid !== undefined
+        ? dto.amountPaid
+          ? new Prisma.Decimal(dto.amountPaid)
+          : new Prisma.Decimal(0)
+        : new Prisma.Decimal(existing.amountPaid);
+    if (nextAmount.isNegative()) {
+      throw new BadRequestException('amount must be >= 0');
+    }
+    if (nextAmountPaid.isNegative()) {
+      throw new BadRequestException('amountPaid must be >= 0');
+    }
+    if (nextAmountPaid.greaterThan(nextAmount)) {
+      throw new BadRequestException('amountPaid cannot exceed amount');
+    }
+
+    // Derive the payment status server-side from the resulting amounts whenever
+    // amounts or status are touched, so amountPaid and status can never drift
+    // out of sync. Non-payment states (WRITTEN_OFF/DISPUTED/LEGAL_ACTION) the
+    // caller explicitly sets are preserved.
+    const amountsChanged = dto.amount !== undefined || dto.amountPaid !== undefined;
+    const nextStatus =
+      amountsChanged || dto.status !== undefined
+        ? this.deriveStatus(nextAmount, nextAmountPaid, dto.status ?? existing.status)
+        : undefined;
+
     const record = await this.prisma.debt.update({
       where: { id },
       data: {
@@ -120,7 +185,7 @@ export class DebtsService {
         ...(dto.dueDate !== undefined && { dueDate: dto.dueDate ? new Date(dto.dueDate) : null }),
         ...(dto.description && { description: dto.description }),
         ...(dto.invoiceNumber !== undefined && { invoiceNumber: dto.invoiceNumber }),
-        ...(dto.status && { status: dto.status }),
+        ...(nextStatus !== undefined && { status: nextStatus }),
         ...(dto.riskLevel && { riskLevel: dto.riskLevel }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
       },

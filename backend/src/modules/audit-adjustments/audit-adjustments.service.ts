@@ -142,10 +142,25 @@ export class AuditAdjustmentsService {
       );
     }
 
-    // Balance check: sum(debits) must equal sum(credits) within 1 cent.
+    // Balance check: sum(debits) must EXACTLY equal sum(credits).
+    // Compare in integer cents to avoid float drift and to reject any
+    // imbalance (no tolerance) before an unbalanced entry can post.
+    const toCents = (value: Prisma.Decimal | number) => {
+      const numeric = Number(value ?? 0);
+      if (!Number.isFinite(numeric)) {
+        throw new BadRequestException('Adjustment line amounts must be finite numbers');
+      }
+      const cents = Math.round(numeric * 100);
+      if (Math.abs(numeric * 100 - cents) > 1e-6) {
+        throw new BadRequestException('Adjustment line amounts cannot exceed 2 decimal places');
+      }
+      return cents;
+    };
     const totalDebit = existing.lines.reduce((s, l) => s + Number(l.debit), 0);
     const totalCredit = existing.lines.reduce((s, l) => s + Number(l.credit), 0);
-    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+    const totalDebitCents = existing.lines.reduce((s, l) => s + toCents(l.debit), 0);
+    const totalCreditCents = existing.lines.reduce((s, l) => s + toCents(l.credit), 0);
+    if (totalDebitCents !== totalCreditCents) {
       throw new BadRequestException(
         `Adjustment lines do not balance. Debits=${totalDebit}, Credits=${totalCredit}.`,
       );

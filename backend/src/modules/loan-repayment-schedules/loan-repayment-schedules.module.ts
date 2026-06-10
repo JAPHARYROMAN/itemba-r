@@ -5,11 +5,17 @@ import { LoanRepaymentSchedulesController } from './loan-repayment-schedules.con
 import { LoanRepaymentSchedulesService } from './loan-repayment-schedules.service';
 import { AccountingControlService } from '../../common/services/accounting-control.service';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
+import { CompanyScopeService } from '../../common/services';
 
 @Module({
   imports: [PrismaModule, AuditLogsModule],
   controllers: [LoanRepaymentSchedulesController],
-  providers: [LoanRepaymentSchedulesService, AccountingControlService, AccountResolverService],
+  providers: [
+    LoanRepaymentSchedulesService,
+    AccountingControlService,
+    AccountResolverService,
+    CompanyScopeService,
+  ],
   exports: [LoanRepaymentSchedulesService],
 })
 export class LoanRepaymentSchedulesModule {}

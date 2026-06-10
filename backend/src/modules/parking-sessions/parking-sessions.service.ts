@@ -3,8 +3,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateParkingSessionDto } from './dto/create-parking-session.dto';
 import { UpdateParkingSessionDto } from './dto/update-parking-session.dto';
-import { ParkingSessionStatus, ParkingPaymentStatus, ParkingRateType } from '@prisma/client';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { ParkingSessionStatus, ParkingPaymentStatus, ParkingRateType, AccessLevel } from '@prisma/client';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
 
 interface CloseSessionInput {
   exitTime?: string;
@@ -14,7 +15,11 @@ interface CloseSessionInput {
 
 @Injectable()
 export class ParkingSessionsService {
-  constructor(private prisma: PrismaService, private audit: AuditLogsService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditLogsService,
+    private companyScope: CompanyScopeService,
+  ) {}
 
   async create(dto: CreateParkingSessionDto, userId: string) {
     const existing = await this.prisma.parkingSession.findFirst({
@@ -75,7 +80,7 @@ export class ParkingSessionsService {
     return { data, total, page, limit };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const session = await this.prisma.parkingSession.findFirst({
       where: { id, deletedAt: null },
       include: {
@@ -89,11 +94,13 @@ export class ParkingSessionsService {
       },
     });
     if (!session) throw new NotFoundException('Parking session not found');
+    // ITMB-028: enforce tenant isolation on single-record reads/mutations.
+    await this.companyScope.assertCanAccessCompany(user, session.companyId, minimum);
     return session;
   }
 
-  async update(id: string, dto: UpdateParkingSessionDto, userId: string) {
-    const session = await this.findOne(id);
+  async update(id: string, dto: UpdateParkingSessionDto, userId: string, user: AuthUser) {
+    const session = await this.findOne(id, user, AccessLevel.WRITE);
     const updated = await this.prisma.parkingSession.update({
       where: { id },
       data: {
@@ -112,8 +119,8 @@ export class ParkingSessionsService {
     return updated;
   }
 
-  async close(id: string, body: CloseSessionInput, userId: string) {
-    const session = await this.findOne(id);
+  async close(id: string, body: CloseSessionInput, userId: string, user: AuthUser) {
+    const session = await this.findOne(id, user, AccessLevel.WRITE);
     if (session.status !== ParkingSessionStatus.ACTIVE) {
       throw new BadRequestException('Only active sessions can be closed');
     }
@@ -179,8 +186,8 @@ export class ParkingSessionsService {
     return updated;
   }
 
-  async voidSession(id: string, userId: string) {
-    const session = await this.findOne(id);
+  async voidSession(id: string, userId: string, user: AuthUser) {
+    const session = await this.findOne(id, user, AccessLevel.WRITE);
     if (session.status === ParkingSessionStatus.VOIDED) {
       throw new BadRequestException('Session is already voided');
     }
@@ -199,8 +206,8 @@ export class ParkingSessionsService {
     return updated;
   }
 
-  async remove(id: string, userId: string) {
-    const session = await this.findOne(id);
+  async remove(id: string, userId: string, user: AuthUser) {
+    const session = await this.findOne(id, user, AccessLevel.WRITE);
     await this.prisma.parkingSession.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.audit.log({
       userId,

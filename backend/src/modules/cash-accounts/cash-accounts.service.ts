@@ -84,9 +84,16 @@ export class CashAccountsService {
       accountType: dto.accountType ?? CashAccountType.CASH_ON_HAND,
       linkedBankAccountId: dto.linkedBankAccountId || null,
     });
+    // Never persist a client-supplied running balance on create: it would
+    // represent cash with no backing movement. Derive the opening running
+    // balance from the validated openingBalance only; subsequent changes must
+    // come from posted movements.
+    const { currentBalance: _ignoredCurrentBalance, ...createData } = dto;
+    void _ignoredCurrentBalance;
     const record = await this.prisma.cashAccount.create({
       data: {
-        ...dto,
+        ...createData,
+        currentBalance: dto.openingBalance ?? 0,
         divisionId: dto.divisionId || null,
         branchId: dto.branchId || null,
         linkedBankAccountId: dto.linkedBankAccountId || null,

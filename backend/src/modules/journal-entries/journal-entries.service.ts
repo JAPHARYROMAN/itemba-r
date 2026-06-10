@@ -47,6 +47,57 @@ export class JournalEntriesService {
     return { totalDebit: this.fromCents(debitCents), totalCredit: this.fromCents(creditCents) };
   }
 
+  /**
+   * Verify that any caller-supplied divisionId/branchId (journal header and
+   * per-line) belong to the journal's company, mirroring
+   * chart-of-accounts.resolveAccountScope. Validate-only: this does not mutate
+   * the IDs that get persisted, it only rejects cross-company scope IDs.
+   */
+  private async assertScopeBelongsToCompany(
+    companyId: string,
+    divisionId?: string | null,
+    branchId?: string | null,
+  ) {
+    if (branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: branchId, deletedAt: null },
+        select: { divisionId: true, division: { select: { companyId: true } } },
+      });
+      if (!branch || branch.division.companyId !== companyId) {
+        throw new BadRequestException('Branch/location does not belong to the journal company');
+      }
+      if (divisionId && branch.divisionId !== divisionId) {
+        throw new BadRequestException('Branch/location does not belong to the selected division');
+      }
+    }
+
+    if (divisionId) {
+      const division = await this.prisma.division.findFirst({
+        where: { id: divisionId, deletedAt: null },
+        select: { companyId: true },
+      });
+      if (!division || division.companyId !== companyId) {
+        throw new BadRequestException('Division does not belong to the journal company');
+      }
+    }
+  }
+
+  private async validateLineScopes(
+    companyId: string,
+    headerDivisionId: string | null | undefined,
+    headerBranchId: string | null | undefined,
+    lines: CreateJournalEntryDto['lines'],
+  ) {
+    await this.assertScopeBelongsToCompany(companyId, headerDivisionId, headerBranchId);
+    for (const line of lines) {
+      await this.assertScopeBelongsToCompany(
+        companyId,
+        line.divisionId ?? headerDivisionId,
+        line.branchId ?? headerBranchId,
+      );
+    }
+  }
+
   private async validateLineAccounts(
     companyId: string,
     lines: CreateJournalEntryDto['lines'],
@@ -198,6 +249,7 @@ export class JournalEntriesService {
       moduleName: 'journal_entries',
     });
     await this.validateLineAccounts(dto.companyId, dto.lines);
+    await this.validateLineScopes(dto.companyId, dto.divisionId, dto.branchId, dto.lines);
 
     const entry = await this.prisma.$transaction(async (tx) => {
       const journalNumber = await this.codes.next({
@@ -288,6 +340,13 @@ export class JournalEntriesService {
       moduleName: 'journal_entries',
     });
     if (lines) await this.validateLineAccounts(existing.companyId, lines);
+    if (lines)
+      await this.validateLineScopes(
+        existing.companyId,
+        existing.divisionId,
+        existing.branchId,
+        lines,
+      );
 
     const entry = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.journalEntry.update({

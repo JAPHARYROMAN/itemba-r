@@ -1,13 +1,16 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
 
 @Injectable()
 export class FinancialStatementsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   async findAll(query: any, user?: any) {
@@ -22,14 +25,16 @@ export class FinancialStatementsService {
     return { items, total, page: Number(page), limit: Number(limit) };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser) {
     const item = await this.prisma.financialStatementRun.findFirst({ where: { id } });
     if (!item) throw new NotFoundException('Financial statement run not found');
+    await this.companyScope.assertCanAccessCompany(user, item.companyId);
     return item;
   }
 
   async generate(dto: any, user: any) {
     const { companyId, periodStart, periodEnd, statementType } = dto;
+    await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.WRITE);
 
     // Build trial balance from journal entry lines
     const lines = await this.prisma.journalEntryLine.findMany({

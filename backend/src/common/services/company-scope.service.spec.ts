@@ -70,6 +70,30 @@ describe('CompanyScopeService', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('denies a read-only group-scoped user when WRITE is requested on an unlisted company', async () => {
+    await expect(
+      service.assertCanAccessCompany(
+        user({ roleScopes: ['GROUP'], companyId: null, companyAccess: [] }),
+        'company-2',
+        AccessLevel.WRITE,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('allows a group-scoped user to WRITE a company where they hold WRITE access', async () => {
+    await expect(
+      service.assertCanAccessCompany(
+        user({
+          roleScopes: ['GROUP'],
+          companyId: null,
+          companyAccess: [{ companyId: 'company-2', accessLevel: AccessLevel.WRITE }],
+        }),
+        'company-2',
+        AccessLevel.WRITE,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it('requires the requested minimum access level', async () => {
     const scopedUser = user({
       companyId: null,

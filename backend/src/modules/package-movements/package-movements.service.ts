@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
@@ -38,6 +38,27 @@ export class PackageMovementsService {
       });
 
       if (dto.customerId) {
+        // ITMB-064: read the current balance (inside this transaction) so
+        // decrements can be clamped to never drive an owed quantity negative,
+        // and so unhandled movement types are rejected rather than silently
+        // applying an empty (no-op) update that drifts the balance from the
+        // movement history.
+        const existingBalance = await tx.customerPackageBalance.findUnique({
+          where: {
+            companyId_customerId_returnablePackageId: {
+              companyId: dto.companyId,
+              customerId: dto.customerId,
+              returnablePackageId: dto.returnablePackageId,
+            },
+          },
+        });
+        const currentOwedByCustomer = existingBalance
+          ? Number(existingBalance.quantityOwedByCustomer)
+          : 0;
+        const currentOwedToCustomer = existingBalance
+          ? Number(existingBalance.quantityOwedToCustomer)
+          : 0;
+
         const balanceUpdate: any = {};
         const balanceCreate: any = {
           companyId: dto.companyId,
@@ -56,6 +77,12 @@ export class PackageMovementsService {
             balanceCreate.depositBalance = depositAmount;
             break;
           case 'RETURNED_BY_CUSTOMER':
+            // Guard: a customer cannot return more than they currently owe.
+            if (dto.quantity > currentOwedByCustomer) {
+              throw new BadRequestException(
+                'Returned quantity exceeds the quantity currently owed by the customer',
+              );
+            }
             balanceUpdate.quantityOwedByCustomer = { decrement: dto.quantity };
             balanceUpdate.depositBalance = { decrement: depositAmount };
             balanceCreate.quantityOwedByCustomer = -dto.quantity;
@@ -66,9 +93,22 @@ export class PackageMovementsService {
             balanceCreate.quantityOwedToCustomer = dto.quantity;
             break;
           case 'ADJUSTMENT_OUT':
+            // Guard: cannot adjust out more than is owed to the customer.
+            if (dto.quantity > currentOwedToCustomer) {
+              throw new BadRequestException(
+                'Adjustment exceeds the quantity currently owed to the customer',
+              );
+            }
             balanceUpdate.quantityOwedToCustomer = { decrement: dto.quantity };
             balanceCreate.quantityOwedToCustomer = -dto.quantity;
             break;
+          default:
+            // An unhandled movement type against a customer would otherwise
+            // upsert an empty update (silent no-op) and drift the customer
+            // package balance from the movement ledger.
+            throw new BadRequestException(
+              `Movement type ${dto.movementType} is not valid for a customer-linked package movement`,
+            );
         }
 
         await tx.customerPackageBalance.upsert({

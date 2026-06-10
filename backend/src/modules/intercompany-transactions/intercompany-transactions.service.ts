@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -7,13 +8,15 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountingControlService } from '../../common/services/accounting-control.service';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
+import { CompanyScopeService } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { CreateIntercompanyTransactionDto } from './dto/create-intercompany-transaction.dto';
 import { UpdateIntercompanyTransactionDto } from './dto/update-intercompany-transaction.dto';
 import { QueryIntercompanyTransactionDto } from './dto/query-intercompany-transaction.dto';
 import { RejectIntercompanyTransactionDto } from './dto/reject-intercompany-transaction.dto';
-import { AuditSeverity } from '@prisma/client';
+import { AccessLevel, AuditSeverity } from '@prisma/client';
 
 @Injectable()
 export class IntercompanyTransactionsService {
@@ -22,19 +25,68 @@ export class IntercompanyTransactionsService {
     private readonly auditLogs: AuditLogsService,
     private readonly accountingControl: AccountingControlService,
     private readonly accountResolver: AccountResolverService,
+    private readonly companyScope: CompanyScopeService,
     private readonly codes: EntityCodeGeneratorService,
     private readonly postingEngine: PostingEngineService,
   ) {}
 
-  async findAll(query: QueryIntercompanyTransactionDto) {
+  /**
+   * Assert the caller may access at least ONE side (from OR to) of an
+   * intercompany transaction. Used for read access in findOne.
+   */
+  private async assertCanAccessEitherSide(
+    user: AuthUser,
+    record: { fromCompanyId: string; toCompanyId: string },
+    minimum: AccessLevel = AccessLevel.READ,
+  ) {
+    try {
+      await this.companyScope.assertCanAccessCompany(user, record.fromCompanyId, minimum);
+      return;
+    } catch (err) {
+      if (!(err instanceof ForbiddenException)) throw err;
+    }
+    await this.companyScope.assertCanAccessCompany(user, record.toCompanyId, minimum);
+  }
+
+  /**
+   * Assert the caller may access BOTH sides (from AND to) of an intercompany
+   * transaction at the given access level. Used for mutations and posting,
+   * which write to both companies' ledgers/records.
+   */
+  private async assertCanAccessBothSides(
+    user: AuthUser,
+    record: { fromCompanyId: string; toCompanyId: string },
+    minimum: AccessLevel = AccessLevel.WRITE,
+  ) {
+    await this.companyScope.assertCanAccessCompany(user, record.fromCompanyId, minimum);
+    await this.companyScope.assertCanAccessCompany(user, record.toCompanyId, minimum);
+  }
+
+  async findAll(query: QueryIntercompanyTransactionDto, user: AuthUser) {
     const { page = 1, limit = 20, fromCompanyId, toCompanyId, status, type } = query;
     const skip = (page - 1) * limit;
 
     const where: any = { deletedAt: null };
-    if (fromCompanyId) where.fromCompanyId = fromCompanyId;
-    if (toCompanyId) where.toCompanyId = toCompanyId;
+    if (fromCompanyId) {
+      await this.companyScope.assertCanAccessCompany(user, fromCompanyId);
+      where.fromCompanyId = fromCompanyId;
+    }
+    if (toCompanyId) {
+      await this.companyScope.assertCanAccessCompany(user, toCompanyId);
+      where.toCompanyId = toCompanyId;
+    }
     if (status) where.status = status;
     if (type) where.transactionType = type;
+
+    // Group-scoped admins keep full visibility. Company-scoped users only see
+    // transactions where at least one side is a company they can access.
+    if (!this.companyScope.isGroupScoped(user)) {
+      const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
+      where.OR = [
+        { fromCompanyId: { in: accessibleIds } },
+        { toCompanyId: { in: accessibleIds } },
+      ];
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.interCompanyTransaction.findMany({
@@ -54,7 +106,7 @@ export class IntercompanyTransactionsService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser) {
     const record = await this.prisma.interCompanyTransaction.findFirst({
       where: { id, deletedAt: null },
       include: {
@@ -65,13 +117,21 @@ export class IntercompanyTransactionsService {
       },
     });
     if (!record) throw new NotFoundException('Intercompany transaction not found');
+    await this.assertCanAccessEitherSide(user, record);
     return record;
   }
 
-  async create(dto: CreateIntercompanyTransactionDto, userId: string) {
+  async create(dto: CreateIntercompanyTransactionDto, user: AuthUser) {
+    const userId = user.id;
     if (dto.fromCompanyId === dto.toCompanyId) {
       throw new BadRequestException('fromCompanyId and toCompanyId must be different');
     }
+
+    await this.assertCanAccessBothSides(
+      user,
+      { fromCompanyId: dto.fromCompanyId, toCompanyId: dto.toCompanyId },
+      AccessLevel.WRITE,
+    );
 
     const transactionNumber = await this.codes.next({ entityType: 'IntercompanyTransaction', companyId: dto.fromCompanyId });
     const record = await this.prisma.interCompanyTransaction.create({
@@ -100,8 +160,10 @@ export class IntercompanyTransactionsService {
     return record;
   }
 
-  async update(id: string, dto: UpdateIntercompanyTransactionDto, userId: string) {
-    const existing = await this.findOne(id);
+  async update(id: string, dto: UpdateIntercompanyTransactionDto, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user);
+    await this.assertCanAccessBothSides(user, existing, AccessLevel.WRITE);
     if (existing.status !== 'DRAFT') {
       throw new BadRequestException('Only DRAFT intercompany transactions can be updated');
     }
@@ -133,8 +195,10 @@ export class IntercompanyTransactionsService {
     return record;
   }
 
-  async submit(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async submit(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user);
+    await this.assertCanAccessBothSides(user, existing, AccessLevel.WRITE);
     if (existing.status !== 'DRAFT') {
       throw new BadRequestException('Only DRAFT transactions can be submitted');
     }
@@ -156,8 +220,10 @@ export class IntercompanyTransactionsService {
     return record;
   }
 
-  async approve(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async approve(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user);
+    await this.assertCanAccessBothSides(user, existing, AccessLevel.WRITE);
     if (existing.status !== 'PENDING_APPROVAL') {
       throw new BadRequestException('Only PENDING_APPROVAL transactions can be approved');
     }
@@ -179,8 +245,10 @@ export class IntercompanyTransactionsService {
     return record;
   }
 
-  async reject(id: string, dto: RejectIntercompanyTransactionDto, userId: string) {
-    const existing = await this.findOne(id);
+  async reject(id: string, dto: RejectIntercompanyTransactionDto, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user);
+    await this.assertCanAccessBothSides(user, existing, AccessLevel.WRITE);
     if (existing.status !== 'PENDING_APPROVAL') {
       throw new BadRequestException('Only PENDING_APPROVAL transactions can be rejected');
     }
@@ -202,8 +270,12 @@ export class IntercompanyTransactionsService {
     return record;
   }
 
-  async post(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async post(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user);
+    // Posting writes balanced POSTED journal entries into BOTH companies'
+    // ledgers, so the caller must have write access to BOTH sides.
+    await this.assertCanAccessBothSides(user, existing, AccessLevel.WRITE);
     if (existing.status !== 'APPROVED') {
       throw new BadRequestException('Only APPROVED transactions can be posted');
     }
@@ -322,8 +394,10 @@ export class IntercompanyTransactionsService {
     return result;
   }
 
-  async remove(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async remove(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user);
+    await this.assertCanAccessBothSides(user, existing, AccessLevel.WRITE);
     if (existing.status !== 'DRAFT') {
       throw new BadRequestException('Only DRAFT transactions can be deleted');
     }

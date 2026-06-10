@@ -1,12 +1,13 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountingControlService } from '../../common/services/accounting-control.service';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 /**
  * Loan repayment scheduling and payment posting.
@@ -33,6 +34,7 @@ export class LoanRepaymentSchedulesService {
     private readonly accountResolver: AccountResolverService,
     private readonly codes: EntityCodeGeneratorService,
     private readonly postingEngine: PostingEngineService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   async findAll(query: any, user?: any) {
@@ -62,9 +64,32 @@ export class LoanRepaymentSchedulesService {
     return item;
   }
 
-  async create(dto: any, user: any) {
+  async create(dto: any, user: AuthUser) {
+    // ITMB-026: the parent loan is the source of truth for tenant scoping.
+    // Never trust a client-supplied companyId/loanDebtId on a financial row.
+    const loanId = dto?.loanDebtId ?? dto?.loanId;
+    if (!loanId || typeof loanId !== 'string') {
+      throw new BadRequestException('loanDebtId is required');
+    }
+    const loan = await this.prisma.loan.findFirst({
+      where: { id: loanId, deletedAt: null },
+      select: { id: true, companyId: true },
+    });
+    if (!loan) throw new NotFoundException('Loan not found');
+    if (!loan.companyId) {
+      throw new BadRequestException('Loan without a companyId cannot have a repayment schedule');
+    }
+    await this.companyScope.assertCanAccessCompany(user, loan.companyId, AccessLevel.WRITE);
+
+    // Strip client-controlled scoping fields; derive them from the loan.
+    const { companyId: _companyId, loanDebtId: _loanDebtId, loanId: _loanId, createdById: _createdById, ...rest } = dto ?? {};
     const item = await this.prisma.loanRepaymentSchedule.create({
-      data: { ...dto, createdById: user.id },
+      data: {
+        ...rest,
+        companyId: loan.companyId,
+        loanDebtId: loan.id,
+        createdById: user.id,
+      },
     });
     await this.auditLogs.log({
       action: 'CREATE',
@@ -157,126 +182,160 @@ export class LoanRepaymentSchedulesService {
    * advance the schedule and the parent loan's outstanding balance, and
    * mark the schedule PAID / PARTIALLY_PAID accordingly.
    */
-  async recordPayment(scheduleId: string, dto: any, user: any) {
-    const schedule = await this.findOne(scheduleId);
+  async recordPayment(scheduleId: string, dto: any, user: AuthUser) {
+    // ITMB-026: load the schedule and assert the caller can write to its company.
+    const scheduleMeta = await this.findOne(scheduleId);
+    await this.companyScope.assertCanAccessCompany(
+      user,
+      scheduleMeta.companyId,
+      AccessLevel.WRITE,
+    );
+
     const amount = Number(dto.amount);
     if (!(amount > 0)) throw new BadRequestException('amount must be positive');
-    const outstanding = Number(schedule.outstandingAmount);
-    if (amount > outstanding + 0.01) {
-      throw new BadRequestException(
-        `Payment amount ${amount} exceeds outstanding ${outstanding}`,
-      );
-    }
 
     const paymentDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
     await this.accountingControl.assertPostingAllowed({
-      companyId: schedule.companyId,
+      companyId: scheduleMeta.companyId,
       transactionDate: paymentDate,
       moduleName: 'loan_repayment',
     });
 
-    // Allocate this payment proportionally between scheduled principal and interest.
-    const totalScheduled = Number(schedule.principalAmount) + Number(schedule.interestAmount);
-    const principalPortion =
-      totalScheduled > 0 ? (amount * Number(schedule.principalAmount)) / totalScheduled : amount;
-    const interestPortion = amount - principalPortion;
+    const companyId = scheduleMeta.companyId;
 
-    const result = await this.prisma.$transaction(async (tx) => {
-      const principalAccount = await this.accountResolver.resolve(
-        schedule.companyId,
-        'LOAN_PRINCIPAL_PAYABLE',
-        tx,
-      );
-      const interestAccount = await this.accountResolver.resolve(
-        schedule.companyId,
-        'LOAN_INTEREST_EXPENSE',
-        tx,
-      );
-      const cashAccount = await this.accountResolver.resolve(
-        schedule.companyId,
-        'CASH_ON_HAND',
-        tx,
-      );
+    const { result, principalPortion, interestPortion } = await this.prisma.$transaction(
+      async (tx) => {
+        // ITMB-062: serialize all payments for this loan by taking a row lock on
+        // the parent loan first (the "loans" table is the verified lock target,
+        // matching the loans module). Every payment against any installment of
+        // the loan must acquire this lock, so concurrent payments cannot race.
+        await tx.$queryRaw`SELECT "id" FROM "loans" WHERE "id" = ${scheduleMeta.loanDebtId} AND "deletedAt" IS NULL FOR UPDATE`;
 
-      const journalNumber = await this.codes.next({ entityType: 'LoanJournal', companyId: schedule.companyId, tx });
-      const je = await this.postingEngine.postLines({
-        journalNumber,
-        companyId: schedule.companyId,
-        transactionDate: paymentDate,
-        description: `Loan repayment installment #${schedule.installmentNumber}`,
-        referenceType: 'LoanRepaymentSchedule',
-        referenceId: schedule.id,
-        status: 'POSTED',
-        userId: user.id,
-        moduleName: 'loan_repayment',
-        lines: [
+        // Re-read the schedule inside the transaction (after the lock) so the
+        // outstanding/paid amounts and arithmetic use authoritative values.
+        const locked = await tx.loanRepaymentSchedule.findFirst({
+          where: { id: scheduleId, deletedAt: null },
+        });
+        if (!locked) {
+          throw new NotFoundException('Loan repayment schedule not found');
+        }
+        const outstanding = Number(locked.outstandingAmount);
+        if (amount > outstanding + 0.01) {
+          throw new BadRequestException(
+            `Payment amount ${amount} exceeds outstanding ${outstanding}`,
+          );
+        }
+
+        // Allocate this payment proportionally between scheduled principal and interest.
+        const totalScheduled = Number(locked.principalAmount) + Number(locked.interestAmount);
+        const principalPortion =
+          totalScheduled > 0 ? (amount * Number(locked.principalAmount)) / totalScheduled : amount;
+        const interestPortion = amount - principalPortion;
+
+        const principalAccount = await this.accountResolver.resolve(
+          companyId,
+          'LOAN_PRINCIPAL_PAYABLE',
+          tx,
+        );
+        const interestAccount = await this.accountResolver.resolve(
+          companyId,
+          'LOAN_INTEREST_EXPENSE',
+          tx,
+        );
+        const cashAccount = await this.accountResolver.resolve(companyId, 'CASH_ON_HAND', tx);
+
+        const journalNumber = await this.codes.next({
+          entityType: 'LoanJournal',
+          companyId,
+          tx,
+        });
+        const je = await this.postingEngine.postLines(
           {
-            accountId: principalAccount.id,
-            description: 'Principal portion',
-            debit: principalPortion,
-            credit: 0,
+            journalNumber,
+            companyId,
+            transactionDate: paymentDate,
+            description: `Loan repayment installment #${locked.installmentNumber}`,
+            referenceType: 'LoanRepaymentSchedule',
+            referenceId: scheduleId,
+            status: 'POSTED',
+            userId: user.id,
+            moduleName: 'loan_repayment',
+            lines: [
+              {
+                accountId: principalAccount.id,
+                description: 'Principal portion',
+                debit: principalPortion,
+                credit: 0,
+              },
+              {
+                accountId: interestAccount.id,
+                description: 'Interest portion',
+                debit: interestPortion,
+                credit: 0,
+              },
+              {
+                accountId: cashAccount.id,
+                description: 'Cash paid',
+                debit: 0,
+                credit: amount,
+              },
+            ],
           },
-          {
-            accountId: interestAccount.id,
-            description: 'Interest portion',
-            debit: interestPortion,
-            credit: 0,
+          tx,
+        );
+
+        const repaymentPaymentNumber = await this.codes.next({
+          entityType: 'LoanRepaymentPayment',
+          companyId,
+          tx,
+        });
+        const payment = await tx.loanRepaymentPayment.create({
+          data: {
+            repaymentPaymentNumber,
+            companyId,
+            loanRepaymentScheduleId: scheduleId,
+            paymentDate,
+            amount,
+            currency: dto.currency ?? 'TZS',
+            paymentMethod: dto.paymentMethod ?? 'BANK_TRANSFER',
+            cashAccountId: dto.cashAccountId,
+            reference: dto.reference,
+            journalEntryId: je.id,
+            paidById: user.id,
           },
-          {
-            accountId: cashAccount.id,
-            description: 'Cash paid',
-            debit: 0,
-            credit: amount,
+        });
+
+        const newPaid = Number(locked.paidAmount) + amount;
+        const newOutstanding = Math.max(0, outstanding - amount);
+        const newStatus: 'PAID' | 'PARTIALLY_PAID' =
+          newOutstanding === 0 ? 'PAID' : 'PARTIALLY_PAID';
+        await tx.loanRepaymentSchedule.update({
+          where: { id: scheduleId },
+          data: {
+            paidAmount: newPaid,
+            outstandingAmount: newOutstanding,
+            status: newStatus,
+            journalEntryId: je.id,
           },
-        ],
-      }, tx);
+        });
 
-      const repaymentPaymentNumber = await this.codes.next({ entityType: 'LoanRepaymentPayment', companyId: schedule.companyId, tx });
-      const payment = await tx.loanRepaymentPayment.create({
-        data: {
-          repaymentPaymentNumber,
-          companyId: schedule.companyId,
-          loanRepaymentScheduleId: schedule.id,
-          paymentDate,
-          amount,
-          currency: dto.currency ?? 'TZS',
-          paymentMethod: dto.paymentMethod ?? 'BANK_TRANSFER',
-          cashAccountId: dto.cashAccountId,
-          reference: dto.reference,
-          journalEntryId: je.id,
-          paidById: user.id,
-        },
-      });
+        // Decrement principal on the parent loan (row already locked above).
+        await tx.loan.update({
+          where: { id: locked.loanDebtId },
+          data: { outstandingBalance: { decrement: new Prisma.Decimal(principalPortion) } },
+        });
 
-      const newPaid = Number(schedule.paidAmount) + amount;
-      const newOutstanding = Math.max(0, outstanding - amount);
-      const newStatus: 'PAID' | 'PARTIALLY_PAID' = newOutstanding === 0 ? 'PAID' : 'PARTIALLY_PAID';
-      await tx.loanRepaymentSchedule.update({
-        where: { id: schedule.id },
-        data: {
-          paidAmount: newPaid,
-          outstandingAmount: newOutstanding,
-          status: newStatus,
-          journalEntryId: je.id,
-        },
-      });
-
-      // Decrement principal on the parent loan.
-      await tx.loan.update({
-        where: { id: schedule.loanDebtId },
-        data: { outstandingBalance: { decrement: new Prisma.Decimal(principalPortion) } },
-      });
-
-      return payment;
-    });
+        return { result: payment, principalPortion, interestPortion };
+      },
+    );
 
     await this.auditLogs.log({
       action: 'CREATE',
       entityType: 'LoanRepaymentPayment',
       entityId: result.id,
       userId: user.id,
-      companyId: schedule.companyId,
-      metadata: { amount, principalPortion, interestPortion, scheduleId: schedule.id },
+      companyId,
+      metadata: { amount, principalPortion, interestPortion, scheduleId },
     });
     return result;
   }

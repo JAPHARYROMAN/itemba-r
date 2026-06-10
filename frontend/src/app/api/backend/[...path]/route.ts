@@ -66,12 +66,19 @@ const refreshInFlight = new Map<
 >();
 
 function requestOriginAllowed(req: NextRequest): boolean {
-  const allowedOrigins = new Set([req.nextUrl.origin]);
-  const host = firstHeaderValue(req.headers.get('x-forwarded-host') ?? req.headers.get('host'));
-  const proto = firstHeaderValue(req.headers.get('x-forwarded-proto'));
-
-  if (host && proto) {
-    allowedOrigins.add(`${proto}://${host}`);
+  // Pin the allowlist to server-configured canonical origins only. Building it
+  // from client-controlled Host / X-Forwarded-Host headers let a forged Host
+  // satisfy the origin check, so those header-derived entries are not trusted.
+  const allowedOrigins = new Set<string>([req.nextUrl.origin]);
+  for (const value of [
+    process.env.ALLOWED_PROXY_ORIGINS,
+    process.env.NEXT_PUBLIC_WEBSITE_URL,
+  ]) {
+    if (!value) continue;
+    for (const entry of value.split(',')) {
+      const trimmed = entry.trim();
+      if (trimmed) allowedOrigins.add(trimmed);
+    }
   }
 
   const origin = req.headers.get('origin');
@@ -87,13 +94,6 @@ function requestOriginAllowed(req: NextRequest): boolean {
   }
 
   return process.env.NODE_ENV !== 'production';
-}
-
-function firstHeaderValue(value: string | null): string {
-  return value
-    ?.split(',')[0]
-    ?.trim()
-    .toLowerCase() ?? '';
 }
 
 function getForwardedFor(req: NextRequest) {

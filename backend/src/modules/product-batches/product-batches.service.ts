@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateProductBatchDto } from './dto/create-product-batch.dto';
@@ -13,35 +14,58 @@ export class ProductBatchesService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  private async generateBatchNumber(companyId: string): Promise<string> {
+  private async generateBatchNumber(
+    companyId: string,
+    client: Prisma.TransactionClient = this.prisma,
+  ): Promise<string> {
     const year = new Date().getFullYear();
-    const count = await this.prisma.productBatch.count({
+    const count = await client.productBatch.count({
       where: { companyId, batchNumber: { startsWith: `BATCH-${year}` } },
     });
     return `BATCH-${year}-${String(count + 1).padStart(5, '0')}`;
   }
 
   async create(dto: CreateProductBatchDto, userId: string) {
-    const batchNumber = await this.generateBatchNumber(dto.companyId);
-    const record = await this.prisma.productBatch.create({
-      data: {
-        batchNumber,
-        companyId: dto.companyId,
-        productId: dto.productId,
-        branchId: dto.branchId,
-        supplierId: dto.supplierId,
-        purchaseOrderId: dto.purchaseOrderId,
-        manufactureDate: dto.manufactureDate ? new Date(dto.manufactureDate) : undefined,
-        expiryDate: dto.expiryDate ? new Date(dto.expiryDate) : undefined,
-        receivedDate: dto.receivedDate ? new Date(dto.receivedDate) : undefined,
-        initialQuantity: dto.initialQuantity,
-        remainingQuantity: dto.initialQuantity,
-        unitId: dto.unitId,
-        unitCost: dto.unitCost,
-        status: 'ACTIVE',
-        notes: dto.notes,
-      },
+    // ITMB-029: generate the company-scoped batch number and create the row in a
+    // single transaction with a single P2002 retry, so concurrent creates for the
+    // same company cannot compute the same BATCH-YYYY-NNNNN and 500 on the loser.
+    const buildData = (batchNumber: string) => ({
+      batchNumber,
+      companyId: dto.companyId,
+      productId: dto.productId,
+      branchId: dto.branchId,
+      supplierId: dto.supplierId,
+      purchaseOrderId: dto.purchaseOrderId,
+      manufactureDate: dto.manufactureDate ? new Date(dto.manufactureDate) : undefined,
+      expiryDate: dto.expiryDate ? new Date(dto.expiryDate) : undefined,
+      receivedDate: dto.receivedDate ? new Date(dto.receivedDate) : undefined,
+      initialQuantity: dto.initialQuantity,
+      remainingQuantity: dto.initialQuantity,
+      unitId: dto.unitId,
+      unitCost: dto.unitCost,
+      status: 'ACTIVE' as const,
+      notes: dto.notes,
     });
+
+    const createBatch = () =>
+      this.prisma.$transaction(async (tx) => {
+        const batchNumber = await this.generateBatchNumber(dto.companyId, tx);
+        return tx.productBatch.create({ data: buildData(batchNumber) });
+      });
+
+    let record;
+    try {
+      record = await createBatch();
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        record = await createBatch();
+      } else {
+        throw error;
+      }
+    }
     await this.auditLogs.log({
       action: 'PRODUCT_BATCH_CREATE',
       entityType: 'ProductBatch',

@@ -45,9 +45,13 @@ export class EncryptionService implements OnModuleInit {
     if (secret.length < 32) {
       throw new Error('APP_ENCRYPTION_KEY must be at least 32 characters');
     }
-    // scrypt with a fixed salt — gives deterministic 32-byte key across
-    // replicas. Salt is intentionally constant; entropy lives in the secret.
-    this.key = crypto.scryptSync(secret, 'itemba-r-app-encryption-v1', 32);
+    // scrypt salt — deterministic 32-byte key across replicas. The salt may be
+    // overridden per-deployment via APP_ENCRYPTION_SALT; it defaults to the
+    // original constant so existing ciphertext (keyed to that salt) still
+    // decrypts. Changing APP_ENCRYPTION_SALT re-keys: only set it on a fresh
+    // deployment or after re-encrypting all stored data.
+    const salt = this.config.get<string>('APP_ENCRYPTION_SALT') || 'itemba-r-app-encryption-v1';
+    this.key = crypto.scryptSync(secret, salt, 32);
   }
 
   /**

@@ -59,6 +59,10 @@ export class ConstructionLabourCostService {
 
     const periodStart = new Date(period.startDate);
     const periodEnd = new Date(period.endDate);
+    // Total available days the employee is paid for in this period. Project
+    // allocation is a fraction of THIS, so time NOT spent on projects stays in
+    // general salaries instead of being forced to 100% project cost.
+    const totalAvailableDays = Math.max(1, daysBetween(periodStart, periodEnd));
 
     const entries = await db.payrollEntry.findMany({
       where: { payrollRunId, deletedAt: null },
@@ -102,6 +106,11 @@ export class ConstructionLabourCostService {
         skipped++;
         continue;
       }
+      // Cap total project days at the available days in the period so multiple
+      // overlapping assignments cannot push the combined project fraction past
+      // 100% (and so cumulative project cost never exceeds the employee's cost).
+      const cappedProjectDays = Math.min(totalOverlapDays, totalAvailableDays);
+      const overlapScale = cappedProjectDays / totalOverlapDays;
 
       const employerStatutory = entry.statutoryLines.reduce(
         (s, l) => s + Number(l.employerContribution),
@@ -116,7 +125,9 @@ export class ConstructionLabourCostService {
       const currency = 'TZS';
 
       for (const [projectId, days] of overlaps) {
-        const fraction = days / totalOverlapDays;
+        // Allocate the project-time portion of the period only; non-project
+        // days remain in general salaries (fraction = projectDays / availDays).
+        const fraction = (days * overlapScale) / totalAvailableDays;
         const allocatedGross = round2(gross * fraction);
         const allocatedEr = round2(employerStatutory * fraction);
         const allocatedTotal = round2(grossPlusEr * fraction);
@@ -295,10 +306,16 @@ export class ConstructionLabourCostService {
       }
       const totalOverlapDays = Array.from(projectOverlaps.values()).reduce((s, d) => s + d, 0);
       if (totalOverlapDays === 0) continue;
+      // Divide by the employee's available days in the period (not the sum of
+      // project-only days) so non-project time stays out of project cost. Cap
+      // the combined project fraction at 100% of available days.
+      const totalAvailableDays = Math.max(1, periodDays);
+      const cappedProjectDays = Math.min(totalOverlapDays, totalAvailableDays);
+      const overlapScale = cappedProjectDays / totalOverlapDays;
 
       // Allocate.
       for (const [projectId, days] of projectOverlaps) {
-        const fraction = days / totalOverlapDays;
+        const fraction = (days * overlapScale) / totalAvailableDays;
         const allocatedGross = Number(entry.grossPay) * fraction;
         const allocatedEr = employerStatutory * fraction;
         const allocatedTotal = grossPlusEr * fraction;

@@ -123,6 +123,19 @@ export class LoansService {
       throw new BadRequestException('groupId is required when borrowerLevel is GROUP');
     }
     await this.companyScope.assertCanAccessCompany(user, dto.companyId);
+
+    // ITMB-105: amounts are validated as non-negative numeric strings by the DTO.
+    // Enforce the cross-field invariant that the opening outstanding balance
+    // cannot exceed the principal, and reject a non-positive principal.
+    const principalDecimal = new Prisma.Decimal(dto.principalAmount);
+    const outstandingDecimal = new Prisma.Decimal(dto.outstandingBalance);
+    if (principalDecimal.lte(0)) {
+      throw new BadRequestException('principalAmount must be greater than zero');
+    }
+    if (outstandingDecimal.gt(principalDecimal)) {
+      throw new BadRequestException('outstandingBalance cannot exceed principalAmount');
+    }
+
     const scope = await this.resolveLoanScope({
       companyId: dto.companyId,
       divisionId: dto.divisionId || null,
@@ -144,15 +157,16 @@ export class LoansService {
         lenderName: dto.lenderName,
         lenderType: dto.lenderType,
         lenderContact: dto.lenderContact,
-        principalAmount: new Prisma.Decimal(dto.principalAmount),
+        principalAmount: principalDecimal,
         currency: dto.currency,
         interestRate: new Prisma.Decimal(dto.interestRate),
         disbursementDate: new Date(dto.disbursementDate),
         maturityDate: new Date(dto.maturityDate),
         repaymentFrequency: dto.repaymentFrequency,
         repaymentAmount: dto.repaymentAmount ? new Prisma.Decimal(dto.repaymentAmount) : undefined,
-        outstandingBalance: new Prisma.Decimal(dto.outstandingBalance),
-        status: dto.status,
+        outstandingBalance: outstandingDecimal,
+        // ITMB-105: status is server-controlled at creation; ignore client input.
+        status: LoanStatus.ACTIVE,
         riskLevel: dto.riskLevel,
         purpose: dto.purpose,
         collateralDescription: dto.collateralDescription,
@@ -256,7 +270,25 @@ export class LoansService {
     if (amount.lte(0)) throw new BadRequestException('Repayment amount must be greater than zero');
 
     const repayment = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT "id" FROM "loans" WHERE "id" = ${loanId} AND "deletedAt" IS NULL FOR UPDATE`;
+      // ITMB-063: lock the loan row and read the authoritative prior balance.
+      const rows = await tx.$queryRaw<Array<{ outstandingBalance: Prisma.Decimal }>>`
+        SELECT "outstandingBalance" FROM "loans" WHERE "id" = ${loanId} AND "deletedAt" IS NULL FOR UPDATE`;
+      if (rows.length === 0) throw new NotFoundException('Loan not found');
+      const priorBalance = new Prisma.Decimal(rows[0].outstandingBalance);
+
+      // Derive the principal portion server-side (default the full amount to
+      // principal when the caller does not split it out), and clamp the new
+      // outstanding balance to >= 0. The client cannot set the balance directly.
+      const principalPortion = dto.principal ? new Prisma.Decimal(dto.principal) : amount;
+      if (principalPortion.lt(0)) {
+        throw new BadRequestException('Principal portion cannot be negative');
+      }
+      if (principalPortion.gt(amount)) {
+        throw new BadRequestException('Principal portion cannot exceed the repayment amount');
+      }
+      let newBalance = priorBalance.minus(principalPortion);
+      if (newBalance.lt(0)) newBalance = new Prisma.Decimal(0);
+
       const created = await tx.loanRepayment.create({
         data: {
           loanId,
@@ -266,9 +298,8 @@ export class LoansService {
           principal: dto.principal ? new Prisma.Decimal(dto.principal) : undefined,
           interest: dto.interest ? new Prisma.Decimal(dto.interest) : undefined,
           penalties: dto.penalties ? new Prisma.Decimal(dto.penalties) : undefined,
-          remainingBalance: dto.remainingBalance
-            ? new Prisma.Decimal(dto.remainingBalance)
-            : undefined,
+          // Record the server-derived remaining balance (not client-controlled).
+          remainingBalance: newBalance,
           paymentMethod: dto.paymentMethod,
           referenceNumber: dto.referenceNumber,
           notes: dto.notes,
@@ -276,12 +307,11 @@ export class LoansService {
         },
       });
 
-      if (dto.remainingBalance !== undefined) {
-        await tx.loan.update({
-          where: { id: loanId },
-          data: { outstandingBalance: new Prisma.Decimal(dto.remainingBalance) },
-        });
-      }
+      // Always update the outstanding balance from the server-side derivation.
+      await tx.loan.update({
+        where: { id: loanId },
+        data: { outstandingBalance: newBalance },
+      });
 
       return created;
     });

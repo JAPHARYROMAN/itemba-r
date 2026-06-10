@@ -18,7 +18,5 @@ export class CreateLeaseAgreementDto {
   @IsNumber() @IsOptional() @Type(() => Number) securityDepositAmount?: number;
   @IsNumber() @IsOptional() @Type(() => Number) securityDepositPaid?: number;
   @IsString() @IsOptional() paymentTerms?: string;
-  @IsString() createdById!: string;
-  @IsString() @IsOptional() approvedById?: string;
   @IsString() @IsOptional() notes?: string;
 }

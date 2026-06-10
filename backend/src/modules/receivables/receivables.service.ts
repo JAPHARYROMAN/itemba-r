@@ -226,34 +226,63 @@ export class ReceivablesService {
   }
 
   async recordPayment(id: string, dto: RecordReceivablePaymentDto, user: AuthUser) {
-    const existing = await this.findOne(id);
-    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     const userId = user.id;
-    const outstanding = Number(existing.outstandingAmount);
+    const paymentAmount = new Prisma.Decimal(dto.amount).toDecimalPlaces(2);
+    if (paymentAmount.lte(0))
+      throw new BadRequestException('Payment amount must be greater than zero');
 
-    if (dto.amount > outstanding) {
-      throw new BadRequestException(
-        `Payment amount (${dto.amount}) exceeds outstanding amount (${outstanding})`,
-      );
-    }
+    // ITMB-036: make the read-modify-write atomic by locking the receivable row
+    // FOR UPDATE inside the transaction, then running the checks and Decimal
+    // arithmetic on the locked row before updating and syncing the sales order.
+    const { existing, record, newOutstanding, newPaid, newStatus } = await this.prisma.$transaction(
+      async (tx) => {
+        const [locked] = await tx.$queryRaw<
+          Array<{
+            id: string;
+            companyId: string;
+            outstandingAmount: Prisma.Decimal;
+            paidAmount: Prisma.Decimal;
+            status: string;
+          }>
+        >`SELECT "id", "companyId", "outstandingAmount", "paidAmount", "status"
+          FROM "receivables"
+          WHERE "id" = ${id} AND "deletedAt" IS NULL
+          FOR UPDATE`;
 
-    const newOutstanding = Math.round((outstanding - dto.amount) * 100) / 100;
-    const newPaid = Math.round((Number(existing.paidAmount) + dto.amount) * 100) / 100;
-    const newStatus = newOutstanding === 0 ? 'PAID' : 'PARTIALLY_PAID';
+        if (!locked) throw new NotFoundException('Receivable not found');
+        await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);
 
-    const record = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.receivable.update({
-        where: { id },
-        data: {
-          outstandingAmount: newOutstanding,
-          paidAmount: newPaid,
-          status: newStatus,
-        },
-      });
+        const outstanding = new Prisma.Decimal(locked.outstandingAmount);
+        if (paymentAmount.gt(outstanding)) {
+          throw new BadRequestException(
+            `Payment amount (${paymentAmount.toString()}) exceeds outstanding amount (${outstanding.toString()})`,
+          );
+        }
 
-      await this.syncSalesOrderPaymentFromReceivable(tx, updated);
-      return updated;
-    });
+        const nextOutstanding = outstanding.minus(paymentAmount);
+        const nextPaid = new Prisma.Decimal(locked.paidAmount).plus(paymentAmount);
+        const nextStatus = nextOutstanding.isZero() ? 'PAID' : 'PARTIALLY_PAID';
+
+        const updated = await tx.receivable.update({
+          where: { id },
+          data: {
+            outstandingAmount: nextOutstanding,
+            paidAmount: nextPaid,
+            status: nextStatus,
+          },
+        });
+
+        await this.syncSalesOrderPaymentFromReceivable(tx, updated);
+
+        return {
+          existing: locked,
+          record: updated,
+          newOutstanding: nextOutstanding,
+          newPaid: nextPaid,
+          newStatus: nextStatus,
+        };
+      },
+    );
 
     await this.auditLogs.log({
       action: 'RECEIVABLE_PAYMENT',
@@ -261,7 +290,7 @@ export class ReceivablesService {
       entityId: id,
       userId,
       companyId: record.companyId,
-      oldValue: { outstandingAmount: outstanding, status: existing.status } as any,
+      oldValue: { outstandingAmount: existing.outstandingAmount, status: existing.status } as any,
       newValue: {
         outstandingAmount: newOutstanding,
         paidAmount: newPaid,

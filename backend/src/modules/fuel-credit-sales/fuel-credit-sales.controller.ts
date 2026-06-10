@@ -30,8 +30,8 @@ export class FuelCreditSalesController {
 
   @Get()
   @RequirePermissions('fuel_credit_sales.view')
-  findAll(@Query() query: Record<string, string>) {
-    return this.service.findAll(query);
+  findAll(@Query() query: Record<string, string>, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':id')

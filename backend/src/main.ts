@@ -11,21 +11,28 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
 async function bootstrap() {
+  const isProd = process.env.NODE_ENV === 'production';
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-    logger: ['error', 'warn', 'log', 'debug'],
+    logger: isProd ? ['error', 'warn', 'log'] : ['error', 'warn', 'log', 'debug'],
   });
 
   const config = app.get(ConfigService);
   const port = config.get<number>('PORT', 3001);
   const apiPrefix = config.get<string>('API_PREFIX', 'api/v1');
   const corsOrigin = config.getOrThrow<string>('CORS_ORIGIN');
-  const isProd = config.get<string>('NODE_ENV') === 'production';
 
   if (isProd) {
     app.set('trust proxy', 1);
   }
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      hsts: isProd
+        ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+        : false,
+    }),
+  );
   const corsOrigins = corsOrigin
     .split(',')
     .map((origin) => origin.trim())

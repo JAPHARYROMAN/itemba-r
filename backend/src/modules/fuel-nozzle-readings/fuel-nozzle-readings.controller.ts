@@ -36,8 +36,8 @@ export class FuelNozzleReadingsController {
 
   @Get(':id')
   @RequirePermissions('fuel_readings.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Patch(':id')
@@ -47,6 +47,6 @@ export class FuelNozzleReadingsController {
     @Body() dto: UpdateNozzleReadingDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 }

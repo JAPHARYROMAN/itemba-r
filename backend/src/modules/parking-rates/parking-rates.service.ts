@@ -16,9 +16,17 @@ export class ParkingRatesService {
     });
     if (existing) throw new BadRequestException('Rate code already exists for this company');
 
+    // ITMB-027: createdById is derived from the authenticated user, never the
+    // request body; approval (approvedById/ACTIVE) only happens via approve().
+    // A client may not self-activate a rate at creation. The schema default for
+    // status is ACTIVE, so an ACTIVE (or omitted) request must be coerced to a
+    // non-active status (INACTIVE) explicitly; approve() flips it to ACTIVE.
+    const { status, ...rest } = dto;
     const rate = await this.prisma.parkingRate.create({
       data: {
-        ...dto,
+        ...rest,
+        status: status && status !== ParkingRateStatus.ACTIVE ? status : ParkingRateStatus.INACTIVE,
+        createdById: userId,
         effectiveFrom: new Date(dto.effectiveFrom),
         effectiveTo: dto.effectiveTo ? new Date(dto.effectiveTo) : undefined,
       },

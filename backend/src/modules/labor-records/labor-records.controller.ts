@@ -16,7 +16,7 @@ export class LaborRecordsController {
   @Post()
   @RequirePermissions('labor_records.manage')
   create(@Body() dto: CreateLaborRecordDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Get()

@@ -10,9 +10,14 @@ export class LeaseAgreementsService {
   constructor(private prisma: PrismaService, private audit: AuditLogsService) {}
 
   async create(dto: CreateLeaseAgreementDto, userId: string) {
+    // ITMB-025: createdById is derived from the authenticated user, never the
+    // request body; approval (approvedById/ACTIVE) only happens via approve().
+    const { status, ...rest } = dto;
     const item = await this.prisma.leaseAgreement.create({
       data: {
-        ...dto,
+        ...rest,
+        status: status && status !== 'ACTIVE' ? status : ('DRAFT' as any),
+        createdById: userId,
         startDate: new Date(dto.startDate),
         endDate: dto.endDate ? new Date(dto.endDate) : undefined,
       },

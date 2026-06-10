@@ -283,7 +283,9 @@ export class TaxFilingEngineService {
 
     const profitBeforeTax = income - expenses - cogs;
     // Apply the chargeable tax rate from the most-recent active rate row for
-    // this taxType. Falls back to 30% if no rate is configured.
+    // this taxType. Do NOT silently default: a missing/mis-dated TaxRate must
+    // surface as notSupported so the operator configures the rate before any
+    // draft return is booked, rather than producing an un-governed figure.
     const rateRow = await this.prisma.taxRate.findFirst({
       where: {
         taxTypeId: base.taxTypeId,
@@ -294,7 +296,12 @@ export class TaxFilingEngineService {
       },
       orderBy: { effectiveFrom: 'desc' },
     });
-    const ratePct = rateRow ? Number(rateRow.rate) : 30;
+    if (!rateRow) {
+      const reason = `No active TaxRate covers ${base.periodStart.toISOString().slice(0, 10)}–${base.periodEnd.toISOString().slice(0, 10)} for INCOME_TAX (${base.taxTypeCode}). Configure an effective CIT rate before computing this return.`;
+      this.logger.warn(reason);
+      return { ...base, notSupported: true, reason };
+    }
+    const ratePct = Number(rateRow.rate);
     const taxPayable = Math.max(round2((profitBeforeTax * ratePct) / 100), 0);
 
     return {
@@ -313,9 +320,7 @@ export class TaxFilingEngineService {
       ],
       assumptions: [
         'Baseline: profit-before-tax × statutory rate. Add-backs (depreciation tax disallowed, fines, donations beyond limits), capital allowances, and prior-year losses are NOT applied — supervisory accountants must overlay these before submission.',
-        rateRow
-          ? `Rate ${ratePct}% sourced from TaxRate ${rateRow.rateName}.`
-          : `No active TaxRate found — defaulted to 30% (TZ standard).`,
+        `Rate ${ratePct}% sourced from TaxRate ${rateRow.rateName}.`,
       ],
     };
   }
@@ -346,7 +351,15 @@ export class TaxFilingEngineService {
       },
       orderBy: { effectiveFrom: 'desc' },
     });
-    const ratePct = rateRow ? Number(rateRow.rate) : 0.3;
+    // Do NOT silently default to 0.3%: a council may assess a different levy.
+    // Surface a missing/mis-dated rate as notSupported so the operator
+    // configures it before a draft return is booked.
+    if (!rateRow) {
+      const reason = `No active TaxRate covers ${base.periodStart.toISOString().slice(0, 10)}–${base.periodEnd.toISOString().slice(0, 10)} for SERVICE_LEVY (${base.taxTypeCode}). Configure the effective City Service Levy rate before computing this return.`;
+      this.logger.warn(reason);
+      return { ...base, notSupported: true, reason };
+    }
+    const ratePct = Number(rateRow.rate);
     const taxPayable = round2((turnover * ratePct) / 100);
 
     return {

@@ -87,7 +87,15 @@ export class AccountingControlService {
       scopeOr.push({ fiscalYearId: input.fiscalYearId });
     }
 
+    // ITMB-048: a date-window lock should only act company-wide when it is NOT
+    // scoped to a specific period or fiscal year. Period-/fiscal-year-scoped
+    // locks that also carry a date window must only block their own scope
+    // (handled by the exact-id branches above), not every posting whose date
+    // falls inside the window. Require both scope ids to be null here so a
+    // global date-range lock still blocks while scoped locks do not over-block.
     scopeOr.push({
+      accountingPeriodId: null,
+      fiscalYearId: null,
       AND: [
         { OR: [{ lockedFrom: null }, { lockedFrom: { lte: input.transactionDate } }] },
         { OR: [{ lockedTo: null }, { lockedTo: { gte: input.transactionDate } }] },

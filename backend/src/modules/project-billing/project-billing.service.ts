@@ -11,6 +11,11 @@ const CONSTRUCTION_PRODUCT_CODE = 'CONST-SVC';
 const CONSTRUCTION_CATEGORY_NAME = 'Construction Services';
 const SERVICE_UNIT_SYMBOL = 'svc';
 
+// Allowed over-billing margin above the contract value to accommodate
+// legitimate variation orders before a billing is hard-blocked. Configurable
+// via PROJECT_BILLING_OVERBILL_TOLERANCE_PCT (percent of contract value).
+const DEFAULT_OVERBILL_TOLERANCE_PCT = 10;
+
 @Injectable()
 export class ProjectBillingService {
   private readonly logger = new Logger(ProjectBillingService.name);
@@ -63,6 +68,30 @@ export class ProjectBillingService {
   async send(id: string, userId: string) {
     const b = await this.findOne(id);
     if (b.status !== ProjectBillingStatus.DRAFT) throw new BadRequestException('Only DRAFT billings can be sent');
+
+    // Cap cumulative billing against the contract value (plus a variation-order
+    // tolerance) so a project cannot be billed arbitrarily beyond contract.
+    // Only enforced when a positive contractValue is recorded, so projects with
+    // no contract value set are unaffected.
+    const contractValue = Number(b.project.contractValue ?? 0);
+    if (contractValue > 0) {
+      const tolerancePct = Number(
+        process.env.PROJECT_BILLING_OVERBILL_TOLERANCE_PCT ?? DEFAULT_OVERBILL_TOLERANCE_PCT,
+      );
+      const tolerance = Number.isFinite(tolerancePct)
+        ? tolerancePct
+        : DEFAULT_OVERBILL_TOLERANCE_PCT;
+      const cap = contractValue * (1 + tolerance / 100);
+      const alreadyBilled = Number(b.project.billedAmount ?? 0);
+      const projected = alreadyBilled + Number(b.amount);
+      if (projected > cap) {
+        throw new BadRequestException(
+          `Billing would exceed the project contract value (${contractValue}) plus the ${tolerance}% variation tolerance. ` +
+            `Already billed ${alreadyBilled}, this billing ${Number(b.amount)} would total ${projected} (cap ${cap}).`,
+        );
+      }
+    }
+
     const updated = await this.prisma.projectBilling.update({ where: { id }, data: { status: ProjectBillingStatus.SENT } });
     // Update project billed amount
     await this.prisma.constructionProject.update({ where: { id: b.projectId }, data: { billedAmount: { increment: Number(b.amount) } } });

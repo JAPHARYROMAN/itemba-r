@@ -1,9 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { CurrencyCode } from '@prisma/client';
+import { AccessLevel, CurrencyCode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { CompanyScopeService } from '../../common/services';
 import { CreateFuelCreditSaleDto } from './dto/create-fuel-credit-sale.dto';
 import { UpdateFuelCreditSaleDto } from './dto/update-fuel-credit-sale.dto';
 
@@ -13,37 +14,52 @@ export class FuelCreditSalesService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   async create(dto: CreateFuelCreditSaleDto, user: AuthUser) {
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+
+    // Recompute totalAmount server-side and reject a mismatching client value (ITMB-079).
+    const computedTotal = Math.round(dto.litres * dto.pricePerLitre * 100) / 100;
+    if (
+      dto.totalAmount === undefined ||
+      Math.abs(dto.totalAmount - computedTotal) > 0.01
+    ) {
+      throw new BadRequestException(
+        'totalAmount must equal litres * pricePerLitre',
+      );
+    }
+    const totalAmount = computedTotal;
+
     const creditSaleNumber = await this.codes.next({ entityType: 'FuelCreditSale', companyId: dto.companyId });
+    const receivableNumber = await this.codes.next({ entityType: 'Receivable', companyId: dto.companyId });
+    const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId } });
+    const branch = await this.prisma.branch.findUnique({ where: { id: dto.branchId }, select: { divisionId: true } });
 
-    const sale = await this.prisma.fuelCreditSale.create({
-      data: {
-        creditSaleNumber,
-        companyId: dto.companyId,
-        branchId: dto.branchId,
-        customerId: dto.customerId,
-        productId: dto.productId,
-        fuelShiftId: dto.fuelShiftId,
-        vehicleNumber: dto.vehicleNumber,
-        driverName: dto.driverName,
-        litres: dto.litres,
-        pricePerLitre: dto.pricePerLitre,
-        totalAmount: dto.totalAmount,
-        saleDate: new Date(dto.saleDate),
-        salesOrderId: dto.salesOrderId,
-        notes: dto.notes,
-        status: 'OPEN',
-        createdById: user.id,
-      },
-    });
+    const sale = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.fuelCreditSale.create({
+        data: {
+          creditSaleNumber,
+          companyId: dto.companyId,
+          branchId: dto.branchId,
+          customerId: dto.customerId,
+          productId: dto.productId,
+          fuelShiftId: dto.fuelShiftId,
+          vehicleNumber: dto.vehicleNumber,
+          driverName: dto.driverName,
+          litres: dto.litres,
+          pricePerLitre: dto.pricePerLitre,
+          totalAmount,
+          saleDate: new Date(dto.saleDate),
+          salesOrderId: dto.salesOrderId,
+          notes: dto.notes,
+          status: 'OPEN',
+          createdById: user.id,
+        },
+      });
 
-    try {
-      const receivableNumber = await this.codes.next({ entityType: 'Receivable', companyId: dto.companyId });
-      const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId } });
-      const branch = await this.prisma.branch.findUnique({ where: { id: dto.branchId }, select: { divisionId: true } });
-      const receivable = await this.prisma.receivable.create({
+      const receivable = await tx.receivable.create({
         data: {
           receivableNumber,
           companyId: dto.companyId,
@@ -52,21 +68,20 @@ export class FuelCreditSalesService {
           customerId: dto.customerId,
           customerName: customer?.name ?? 'Unknown',
           sourceType: 'FUEL_CREDIT_SALE',
-          sourceId: sale.id,
-          amount: dto.totalAmount,
-          outstandingAmount: dto.totalAmount,
+          sourceId: created.id,
+          amount: totalAmount,
+          outstandingAmount: totalAmount,
           paidAmount: 0,
           currency: CurrencyCode.TZS,
           issueDate: new Date(dto.saleDate),
         },
       });
-      await this.prisma.fuelCreditSale.update({
-        where: { id: sale.id },
+
+      return tx.fuelCreditSale.update({
+        where: { id: created.id },
         data: { receivableId: receivable.id },
       });
-    } catch {
-      // Receivable creation failure must not block the credit sale
-    }
+    });
 
     const updated = await this.prisma.fuelCreditSale.findUnique({ where: { id: sale.id } });
 
@@ -82,13 +97,15 @@ export class FuelCreditSalesService {
     return updated;
   }
 
-  async findAll(query: Record<string, string>) {
+  async findAll(query: Record<string, string>, user: AuthUser) {
     const page = parseInt(query.page) || 1;
     const limit = parseInt(query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const where: Record<string, unknown> = { deletedAt: null };
-    if (query.companyId) where.companyId = query.companyId;
+    const where: Record<string, unknown> = {
+      deletedAt: null,
+      ...(await this.companyScope.companyWhereFor(user, query.companyId)),
+    };
     if (query.branchId) where.branchId = query.branchId;
     if (query.customerId) where.customerId = query.customerId;
     if (query.status) where.status = query.status;
@@ -120,6 +137,7 @@ export class FuelCreditSalesService {
       },
     });
     if (!sale) throw new NotFoundException('Fuel credit sale not found');
+    await this.companyScope.assertCanAccessCompany(user, sale.companyId);
 
     await this.auditLogs.log({
       action: 'FUEL_CREDIT_SALE_VIEW',
@@ -135,6 +153,7 @@ export class FuelCreditSalesService {
   async update(id: string, dto: UpdateFuelCreditSaleDto, user: AuthUser) {
     const existing = await this.prisma.fuelCreditSale.findFirst({ where: { id, deletedAt: null } });
     if (!existing) throw new NotFoundException('Fuel credit sale not found');
+    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     if (existing.status !== 'OPEN') {
       throw new BadRequestException('Only OPEN credit sales can be updated');
     }
@@ -172,6 +191,7 @@ export class FuelCreditSalesService {
   async markInvoiced(id: string, user: AuthUser) {
     const existing = await this.prisma.fuelCreditSale.findFirst({ where: { id, deletedAt: null } });
     if (!existing) throw new NotFoundException('Fuel credit sale not found');
+    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     if (existing.status !== 'OPEN') {
       throw new BadRequestException('Only OPEN credit sales can be marked as invoiced');
     }
@@ -197,6 +217,7 @@ export class FuelCreditSalesService {
   async cancel(id: string, reason: string, user: AuthUser) {
     const existing = await this.prisma.fuelCreditSale.findFirst({ where: { id, deletedAt: null } });
     if (!existing) throw new NotFoundException('Fuel credit sale not found');
+    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     if (!['OPEN', 'INVOICED'].includes(existing.status)) {
       throw new BadRequestException('Only OPEN or INVOICED credit sales can be cancelled');
     }
@@ -226,6 +247,7 @@ export class FuelCreditSalesService {
   async softDelete(id: string, user: AuthUser) {
     const existing = await this.prisma.fuelCreditSale.findFirst({ where: { id, deletedAt: null } });
     if (!existing) throw new NotFoundException('Fuel credit sale not found');
+    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     if (!['OPEN', 'CANCELLED'].includes(existing.status)) {
       throw new BadRequestException('Only OPEN or CANCELLED credit sales can be deleted');
     }

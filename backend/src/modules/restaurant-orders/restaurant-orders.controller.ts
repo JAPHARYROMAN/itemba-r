@@ -16,7 +16,7 @@ export class RestaurantOrdersController {
   @Post()
   @RequirePermissions('restaurant_orders.create')
   create(@Body() dto: CreateRestaurantOrderDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user.id, user);
   }
 
   @Get()
@@ -36,8 +36,8 @@ export class RestaurantOrdersController {
 
   @Get(':id')
   @RequirePermissions('restaurant_orders.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Patch(':id')

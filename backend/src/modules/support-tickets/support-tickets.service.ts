@@ -61,6 +61,9 @@ export class SupportTicketsService {
         skip,
         take: Number(pageSize),
         orderBy: { createdAt: 'desc' },
+        include: {
+          reportedBy: { select: { id: true, fullName: true, email: true } },
+        },
       }),
       this.prisma.supportTicket.count({ where }),
     ]);
@@ -71,6 +74,9 @@ export class SupportTicketsService {
     return this.prisma.supportTicket.findMany({
       where: { reportedById: userId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
+      include: {
+        reportedBy: { select: { id: true, fullName: true, email: true } },
+      },
     });
   }
 
@@ -79,9 +85,14 @@ export class SupportTicketsService {
     const record = await this.prisma.supportTicket.findFirst({
       where: { id, deletedAt: null },
       include: {
+        reportedBy: { select: { id: true, fullName: true, email: true } },
+        assignedTo: { select: { id: true, fullName: true, email: true } },
         comments: {
           where: { deletedAt: null, ...(canViewInternal ? {} : { internal: false }) },
           orderBy: { createdAt: 'asc' },
+          include: {
+            user: { select: { id: true, fullName: true, email: true } },
+          },
         },
       },
     });

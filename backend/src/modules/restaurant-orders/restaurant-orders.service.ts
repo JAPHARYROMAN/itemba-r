@@ -3,30 +3,68 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateRestaurantOrderDto } from './dto/create-restaurant-order.dto';
 import { UpdateRestaurantOrderDto } from './dto/update-restaurant-order.dto';
-import { RestaurantOrderStatus, RestaurantOrderType, RestaurantOrderPaymentStatus } from '@prisma/client';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { AccessLevel, RestaurantOrderStatus, RestaurantOrderType, RestaurantOrderPaymentStatus } from '@prisma/client';
+import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 @Injectable()
 export class RestaurantOrdersService {
   constructor(private prisma: PrismaService, private audit: AuditLogsService) {}
 
-  async create(dto: CreateRestaurantOrderDto, userId: string) {
+  async create(dto: CreateRestaurantOrderDto, userId: string, user?: AuthUser) {
+    // ITMB-073: ensure the caller may write to the target company before insert.
+    if (user) assertCanAccessCompanyFromUser(user, dto.companyId, AccessLevel.WRITE);
+
     const existing = await this.prisma.restaurantOrder.findFirst({
       where: { companyId: dto.companyId, orderNumber: dto.orderNumber, deletedAt: null },
     });
     if (existing) throw new BadRequestException('Order number already exists for this company');
 
     const { lines, ...orderData } = dto;
+
+    // ITMB-002 / ITMB-038: never trust client-supplied monetary totals or
+    // paymentStatus. Compute all line and header amounts server-side from the
+    // validated lines, and initialise the order as fully unpaid.
+    const computedLines = (lines ?? []).map((line) => {
+      const quantity = Number(line.quantity) || 0;
+      const unitPrice = Number(line.unitPrice) || 0;
+      const lineDiscount = Number(line.discountAmount) || 0;
+      const lineTax = Number(line.taxAmount) || 0;
+      const lineTotal = quantity * unitPrice - lineDiscount + lineTax;
+      return {
+        menuItemId: line.menuItemId,
+        quantity,
+        unitPrice,
+        discountAmount: lineDiscount,
+        taxAmount: lineTax,
+        productId: line.productId,
+        notes: line.notes,
+        lineTotal,
+      };
+    });
+
+    const subtotal = computedLines.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0);
+    const taxAmount = computedLines.reduce((sum, l) => sum + l.taxAmount, 0);
+    const discountAmount = computedLines.reduce((sum, l) => sum + l.discountAmount, 0);
+    const totalAmount = subtotal - discountAmount + taxAmount;
+
     const order = await this.prisma.$transaction(async (tx) => {
       const created = await tx.restaurantOrder.create({
         data: {
           ...orderData,
           orderDate: new Date(orderData.orderDate),
+          subtotal,
+          discountAmount,
+          taxAmount,
+          totalAmount,
+          paidAmount: 0,
+          outstandingAmount: totalAmount,
+          paymentStatus: RestaurantOrderPaymentStatus.UNPAID,
         },
       });
-      if (lines && lines.length > 0) {
+      if (computedLines.length > 0) {
         await tx.restaurantOrderLine.createMany({
-          data: lines.map((line) => ({ ...line, restaurantOrderId: created.id })),
+          data: computedLines.map((line) => ({ ...line, restaurantOrderId: created.id })),
         });
       }
       return tx.restaurantOrder.findUniqueOrThrow({
@@ -60,9 +98,13 @@ export class RestaurantOrdersService {
     return { data, total, page, limit };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: any) {
+    // ITMB-073: scope the lookup to companies the caller may access so order
+    // details cannot be read cross-tenant by id.
+    const where: any = { id, deletedAt: null };
+    applyCompanyScopeWhere(where, user);
     const order = await this.prisma.restaurantOrder.findFirst({
-      where: { id, deletedAt: null },
+      where,
       include: {
         lines: { include: { menuItem: { select: { name: true, itemType: true } } } },
         table: { select: { tableNumber: true } },

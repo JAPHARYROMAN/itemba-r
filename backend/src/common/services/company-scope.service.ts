@@ -35,8 +35,6 @@ export function assertCanAccessCompanyFromUser(
   companyId: string | null | undefined,
   minimum: AccessLevel = AccessLevel.READ,
 ) {
-  if (companyId && isGroupScopedUser(user)) return;
-
   if (!companyId) {
     if (!isGroupScopedUser(user)) {
       throw new ForbiddenException('Group-scoped role required to access group-level records');
@@ -56,6 +54,20 @@ export function assertCanAccessCompanyFromUser(
   }
 
   const granted = access.get(companyId);
+
+  // ITMB-094: group scope grants the company-membership bypass (a group user
+  // may reach any company in the group even without an explicit grant) but must
+  // NOT unconditionally satisfy the requested access level. Evaluate the
+  // requested minimum against the user's effective capability for this company,
+  // defaulting an unlisted company to READ for a group-scoped user.
+  if (isGroupScopedUser(user)) {
+    const effective = granted ?? AccessLevel.READ;
+    if (ACCESS_RANK[effective] < ACCESS_RANK[minimum]) {
+      throw new ForbiddenException('Insufficient access level for this company');
+    }
+    return;
+  }
+
   if (!granted || ACCESS_RANK[granted] < ACCESS_RANK[minimum]) {
     throw new ForbiddenException('You do not have access to this company');
   }
@@ -119,8 +131,6 @@ export class CompanyScopeService {
     companyId: string | null | undefined,
     minimum: AccessLevel = AccessLevel.READ,
   ) {
-    if (companyId && this.isGroupScoped(user)) return;
-
     if (!companyId) {
       this.assertGroupScoped(user, 'access group-level records');
       return;
@@ -128,6 +138,19 @@ export class CompanyScopeService {
 
     const accessible = await this.getAccessibleCompanyAccess(user);
     const match = accessible.find((a) => a.companyId === companyId);
+
+    // ITMB-094: group scope keeps the company-membership bypass (any company in
+    // the group is reachable) but must still satisfy the requested access level.
+    // Evaluate the minimum against the user's effective level, defaulting an
+    // unlisted company to READ for a group-scoped user; do NOT return early.
+    if (this.isGroupScoped(user)) {
+      const effective = match ? match.accessLevel : AccessLevel.READ;
+      if (ACCESS_RANK[effective] < ACCESS_RANK[minimum]) {
+        throw new ForbiddenException('Insufficient access level for this company');
+      }
+      return;
+    }
+
     if (!match || ACCESS_RANK[match.accessLevel] < ACCESS_RANK[minimum]) {
       throw new ForbiddenException('You do not have access to this company');
     }

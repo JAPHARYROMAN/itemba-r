@@ -1,11 +1,66 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { RoleScope } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { isGroupScopedUser } from '../../common/services/company-scope.service';
 
 @Injectable()
 export class RolesService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Authority guard for role mutations (ITMB-039) — prevents a delegated
+   * role-admin from escalating privilege:
+   *  - Only a GROUP-scoped actor may create or keep a GROUP-scoped role.
+   *  - An actor may only grant permission codes they themselves already hold;
+   *    a GROUP-scoped actor (group control layer) is exempt and may grant any
+   *    permission.
+   * `effectiveScope` is the scope the role will carry after the mutation;
+   * `permissionIds` is the requested permission set (undefined when not editing
+   * the permission set).
+   */
+  private async assertRoleMutationAllowed(
+    user: AuthUser | undefined,
+    effectiveScope: RoleScope | undefined,
+    permissionIds: string[] | undefined,
+  ): Promise<void> {
+    if (!user) {
+      throw new ForbiddenException('Authenticated user required to manage roles');
+    }
+
+    const actorIsGroup = isGroupScopedUser(user);
+
+    if (effectiveScope === RoleScope.GROUP && !actorIsGroup) {
+      throw new ForbiddenException(
+        'Only group-scoped administrators can manage group-scoped roles',
+      );
+    }
+
+    // A group-scoped actor (group control layer) may assign any permission.
+    if (actorIsGroup) {
+      return;
+    }
+
+    if (!permissionIds || permissionIds.length === 0) {
+      return;
+    }
+
+    // The actor may only grant permissions they currently possess.
+    const actorPerms = new Set(user.permissions ?? []);
+    const requested = await this.prisma.permission.findMany({
+      where: { id: { in: permissionIds } },
+      select: { code: true },
+    });
+    for (const perm of requested) {
+      if (!actorPerms.has(perm.code)) {
+        throw new ForbiddenException(
+          `Cannot grant a permission you do not hold: ${perm.code}`,
+        );
+      }
+    }
+  }
 
   /**
    * List all roles with their permissions and per-role counts the UI uses to
@@ -32,7 +87,8 @@ export class RolesService {
     });
   }
 
-  create(dto: CreateRoleDto) {
+  async create(dto: CreateRoleDto, user?: AuthUser) {
+    await this.assertRoleMutationAllowed(user, dto.scope, dto.permissionIds);
     return this.prisma.role.create({
       data: {
         name: dto.name,
@@ -51,7 +107,17 @@ export class RolesService {
    * Replacement is wrapped in a single transaction so a partial failure
    * doesn't leave the role with half-applied permissions.
    */
-  async update(id: string, dto: UpdateRoleDto) {
+  async update(id: string, dto: UpdateRoleDto, user?: AuthUser) {
+    // Authorize against the effective scope (requested scope if changing,
+    // otherwise the role's current scope) so a non-group actor cannot edit a
+    // group-scoped role's permission set either.
+    const current = await this.prisma.role.findUniqueOrThrow({
+      where: { id },
+      select: { scope: true },
+    });
+    const effectiveScope = dto.scope ?? current.scope;
+    await this.assertRoleMutationAllowed(user, effectiveScope, dto.permissionIds);
+
     return this.prisma.$transaction(async (tx) => {
       if (dto.permissionIds) {
         await tx.rolePermission.deleteMany({ where: { roleId: id } });

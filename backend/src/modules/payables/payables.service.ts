@@ -218,7 +218,7 @@ export class PayablesService {
 
   async recordPayment(id: string, dto: RecordPayablePaymentDto, user: AuthUser) {
     const userId = user.id;
-    const paymentAmount = new Prisma.Decimal(dto.amount);
+    const paymentAmount = new Prisma.Decimal(dto.amount).toDecimalPlaces(2);
     if (paymentAmount.lte(0))
       throw new BadRequestException('Payment amount must be greater than zero');
 
@@ -228,11 +228,15 @@ export class PayablesService {
           Array<{
             id: string;
             companyId: string;
+            divisionId: string | null;
+            branchId: string | null;
+            supplierName: string | null;
+            payableNumber: string;
             outstandingAmount: Prisma.Decimal;
             paidAmount: Prisma.Decimal;
             status: string;
           }>
-        >`SELECT "id", "companyId", "outstandingAmount", "paidAmount", "status"
+        >`SELECT "id", "companyId", "divisionId", "branchId", "supplierName", "payableNumber", "outstandingAmount", "paidAmount", "status"
           FROM "payables"
           WHERE "id" = ${id} AND "deletedAt" IS NULL
           FOR UPDATE`;
@@ -259,6 +263,42 @@ export class PayablesService {
             status: nextStatus,
           },
         });
+
+        // ITMB-045: post the balanced settlement entry so AP control reduces.
+        // DR AP_CONTROL (liability down) / CR Cash on hand (asset down).
+        const [apAccount, cashAccount] = await Promise.all([
+          this.accountResolver.resolve(locked.companyId, 'AP_CONTROL', tx),
+          this.accountResolver.resolve(locked.companyId, 'CASH_ON_HAND', tx),
+        ]);
+        const settlementDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
+        await this.postingEngine.postLines(
+          {
+            companyId: locked.companyId,
+            divisionId: locked.divisionId,
+            branchId: locked.branchId,
+            transactionDate: settlementDate,
+            description: `Payable settlement ${locked.payableNumber}`,
+            referenceType: 'Payable',
+            referenceId: locked.id,
+            moduleName: 'payables',
+            userId,
+            lines: [
+              {
+                accountId: apAccount!.id,
+                description: `Accounts payable settlement: ${locked.supplierName}`,
+                debit: paymentAmount,
+                credit: 0,
+              },
+              {
+                accountId: cashAccount!.id,
+                description: `Payment to supplier: ${locked.supplierName}`,
+                debit: 0,
+                credit: paymentAmount,
+              },
+            ],
+          },
+          tx,
+        );
 
         return {
           existing: locked,

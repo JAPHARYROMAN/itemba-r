@@ -8,17 +8,12 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import {
-  RestaurantOrderType,
-  RestaurantOrderStatus,
-  RestaurantOrderPaymentStatus,
-} from '@prisma/client';
+import { RestaurantOrderType } from '@prisma/client';
 
 export class CreateRestaurantOrderLineDto {
   @IsString() menuItemId!: string;
   @IsNumber() @Type(() => Number) quantity!: number;
   @IsNumber() @Type(() => Number) unitPrice!: number;
-  @IsNumber() @Type(() => Number) lineTotal!: number;
   @IsNumber() @IsOptional() @Type(() => Number) discountAmount?: number;
   @IsNumber() @IsOptional() @Type(() => Number) taxAmount?: number;
   @IsString() @IsOptional() productId?: string;
@@ -35,14 +30,9 @@ export class CreateRestaurantOrderDto {
   @IsString() @IsOptional() tableId?: string;
   @IsString() @IsOptional() guestId?: string;
   @IsString() @IsOptional() customerId?: string;
-  @IsNumber() @IsOptional() @Type(() => Number) subtotal?: number;
-  @IsNumber() @IsOptional() @Type(() => Number) discountAmount?: number;
-  @IsNumber() @IsOptional() @Type(() => Number) taxAmount?: number;
-  @IsNumber() @IsOptional() @Type(() => Number) totalAmount?: number;
-  @IsNumber() @IsOptional() @Type(() => Number) paidAmount?: number;
-  @IsNumber() @IsOptional() @Type(() => Number) outstandingAmount?: number;
-  @IsEnum(RestaurantOrderPaymentStatus) @IsOptional() paymentStatus?: RestaurantOrderPaymentStatus;
-  @IsEnum(RestaurantOrderStatus) @IsOptional() status?: RestaurantOrderStatus;
+  // Monetary totals (subtotal/taxAmount/totalAmount/paidAmount/outstandingAmount)
+  // and paymentStatus are NOT accepted from the client; they are computed
+  // server-side from the validated lines. See ITMB-002 / ITMB-038.
   @IsString() @IsOptional() waiterId?: string;
   @IsString() @IsOptional() cashierId?: string;
   @IsString() @IsOptional() notes?: string;

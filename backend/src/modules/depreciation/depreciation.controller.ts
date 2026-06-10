@@ -15,8 +15,8 @@ export class DepreciationController {
 
   @Get(':id')
   @RequirePermissions('depreciation.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()
@@ -27,8 +27,8 @@ export class DepreciationController {
 
   @Get(':scheduleId/entries')
   @RequirePermissions('depreciation.view')
-  getEntries(@Param('scheduleId') scheduleId: string) {
-    return this.service.getEntries(scheduleId);
+  getEntries(@Param('scheduleId') scheduleId: string, @CurrentUser() user: AuthUser) {
+    return this.service.getEntries(scheduleId, user);
   }
 
   @Post(':scheduleId/entries')

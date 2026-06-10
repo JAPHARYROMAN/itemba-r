@@ -61,9 +61,15 @@ export class PostingRunsService {
   async postRun(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== PostingRunStatus.DRAFT) throw new BadRequestException('Only DRAFT runs can be posted');
-    const updated = await this.prisma.postingRun.update({
-      where: { id },
-      data: { status: PostingRunStatus.POSTED, postedAt: new Date(), postedById: user.id },
+    // Atomic guarded transition: only flip DRAFT -> POSTED if the row is still
+    // DRAFT, so two concurrent posts cannot both succeed (check-then-update race).
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.postingRun.updateMany({
+        where: { id, status: PostingRunStatus.DRAFT, deletedAt: null },
+        data: { status: PostingRunStatus.POSTED, postedAt: new Date(), postedById: user.id },
+      });
+      if (result.count === 0) throw new BadRequestException('Only DRAFT runs can be posted');
+      return tx.postingRun.findUniqueOrThrow({ where: { id } });
     });
     await this.auditLogs.log({
       action: 'POST',
@@ -78,9 +84,15 @@ export class PostingRunsService {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== PostingRunStatus.POSTED)
       throw new BadRequestException('Only POSTED runs can be reversed');
-    const updated = await this.prisma.postingRun.update({
-      where: { id },
-      data: { status: PostingRunStatus.REVERSED, reversedAt: new Date(), reversedById: user.id },
+    // Atomic guarded transition: only flip POSTED -> REVERSED if the row is still
+    // POSTED, so a run cannot be reversed twice via a check-then-update race.
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.postingRun.updateMany({
+        where: { id, status: PostingRunStatus.POSTED, deletedAt: null },
+        data: { status: PostingRunStatus.REVERSED, reversedAt: new Date(), reversedById: user.id },
+      });
+      if (result.count === 0) throw new BadRequestException('Only POSTED runs can be reversed');
+      return tx.postingRun.findUniqueOrThrow({ where: { id } });
     });
     await this.auditLogs.log({
       action: 'REVERSE',

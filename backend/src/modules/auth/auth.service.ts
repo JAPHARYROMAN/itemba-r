@@ -65,6 +65,10 @@ const DUMMY_ARGON2_HASH_PROMISE: Promise<string> = (async () => {
 const EMAIL_LOGIN_WINDOW_MS = 15 * 60_000;
 const EMAIL_LOGIN_LOCK_MS = 15 * 60_000;
 const EMAIL_LOGIN_MAX_FAILURES = 5;
+// ITMB-051: 2FA challenge failures count toward the same per-account lockout as
+// password failures so MFA cannot be worn down by distributed OTP brute force.
+const TWO_FACTOR_MAX_FAILURES = 5;
+const TWO_FACTOR_LOCK_MS = 15 * 60_000;
 const REFRESH_TOKEN_ROTATION_GRACE_MS = 60_000;
 const DEFAULT_REFRESH_EXPIRES_IN = 'never';
 const PERSISTENT_SESSION_EXPIRES_AT = new Date('9999-12-31T23:59:59.999Z');
@@ -249,8 +253,54 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
     if (!user || user.status !== 'ACTIVE') throw new UnauthorizedException('Invalid credentials');
 
-    // Will throw if code is invalid
-    await twoFactorService.verifyChallenge(user.id, code, meta);
+    // ITMB-051: re-check account lockout before verifying the 2FA code so a
+    // locked account cannot be brute-forced through the 2FA challenge endpoint.
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      await this.logSecurityEvent('ACCOUNT_LOCKED', user.id, 'HIGH', meta);
+      await this.audit.log({
+        action: 'TWO_FACTOR_BLOCKED_ACCOUNT_LOCKED',
+        entityType: 'User',
+        entityId: user.id,
+        userId: user.id,
+        ipAddress: meta?.ipAddress,
+        userAgent: meta?.userAgent,
+      });
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // ITMB-051: count 2FA challenge failures toward the per-account lockout.
+    // verifyChallenge throws on an invalid code; treat that as a failed
+    // authentication attempt and lock the account after too many bad codes.
+    try {
+      await twoFactorService.verifyChallenge(user.id, code, meta);
+    } catch (err) {
+      const attempts = user.failedLoginAttempts + 1;
+      const locked = attempts >= TWO_FACTOR_MAX_FAILURES;
+      const lockData = locked
+        ? { lockedUntil: new Date(Date.now() + TWO_FACTOR_LOCK_MS) }
+        : {};
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginAttempts: attempts, ...lockData },
+      });
+      if (locked) await this.logSecurityEvent('ACCOUNT_LOCKED', user.id, 'HIGH', meta);
+      await this.audit.log({
+        action: 'TWO_FACTOR_CHALLENGE_FAILED',
+        entityType: 'User',
+        entityId: user.id,
+        userId: user.id,
+        metadata: { attempts },
+        ipAddress: meta?.ipAddress,
+        userAgent: meta?.userAgent,
+      });
+      throw err;
+    }
+
+    // Successful 2FA — clear the failure counter and any expired lock state.
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { failedLoginAttempts: 0, lockedUntil: null },
+    });
 
     await this.logSecurityEvent('LOGIN_SUCCESS', user.id, 'LOW', meta);
     await this.audit.log({

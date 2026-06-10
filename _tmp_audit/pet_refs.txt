@@ -1,0 +1,17 @@
+backend/src/common/services/index.ts:17:export { PetroleumShiftControlService } from './petroleum-shift-control.service';
+backend/src/common/services/petroleum-shift-control.service.spec.ts:2:import { PetroleumShiftControlService } from './petroleum-shift-control.service';
+backend/src/common/services/petroleum-shift-control.service.spec.ts:17:describe('PetroleumShiftControlService', () => {
+backend/src/common/services/petroleum-shift-control.service.spec.ts:18:  let service: PetroleumShiftControlService;
+backend/src/common/services/petroleum-shift-control.service.spec.ts:22:    service = new PetroleumShiftControlService(prisma as any);
+backend/src/common/services/petroleum-shift-control.service.ts:27:export class PetroleumShiftControlService {
+backend/src/modules/fuel-daily-reconciliation/fuel-daily-reconciliation.module.ts:6:import { PetroleumShiftControlService } from '../../common/services';
+backend/src/modules/fuel-daily-reconciliation/fuel-daily-reconciliation.module.ts:11:  providers: [FuelDailyReconciliationService, PetroleumShiftControlService],
+backend/src/modules/fuel-daily-reconciliation/fuel-daily-reconciliation.service.ts:5:import { PetroleumShiftControlService } from '../../common/services';
+backend/src/modules/fuel-daily-reconciliation/fuel-daily-reconciliation.service.ts:14:    private readonly petroleumShiftControl: PetroleumShiftControlService,
+backend/src/modules/fuel-shifts/fuel-shifts.module.ts:7:import { CompanyScopeService, PetroleumShiftControlService } from '../../common/services';
+backend/src/modules/fuel-shifts/fuel-shifts.module.ts:12:  providers: [FuelShiftsService, PetroleumShiftControlService, CompanyScopeService],
+backend/src/modules/fuel-shifts/fuel-shifts.service.ts:11:import { CompanyScopeService, PetroleumShiftControlService } from '../../common/services';
+backend/src/modules/fuel-shifts/fuel-shifts.service.ts:31:    private readonly petroleumShiftControl: PetroleumShiftControlService,
+docs/code-feature-audit-2026-05-fresh.md:140:  (`PetroleumShiftControlService.validateShiftClosing`). Inventory
+docs/company-operations-workflow-hardening.md:9:`PetroleumShiftControlService` centralizes operational checks that must hold before shift closure and daily fuel reconciliation.
+docs/company-operations-workflow-hardening.md:45:`PetroleumShiftControlService` has focused unit coverage for:
