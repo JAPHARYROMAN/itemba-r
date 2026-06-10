@@ -23,7 +23,6 @@ import { LoansModule } from './modules/loans/loans.module';
 import { DebtsModule } from './modules/debts/debts.module';
 import { ContractsModule } from './modules/contracts/contracts.module';
 import { FixedAssetsModule } from './modules/fixed-assets/fixed-assets.module';
-import { GroupControlModule } from './modules/group-control/group-control.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ChartOfAccountsModule } from './modules/chart-of-accounts/chart-of-accounts.module';
 import { FiscalYearsModule } from './modules/fiscal-years/fiscal-years.module';
@@ -38,7 +37,6 @@ import { IntercompanyTransactionsModule } from './modules/intercompany-transacti
 import { FinancialReportsModule } from './modules/financial-reports/financial-reports.module';
 import { ReportsCatalogModule } from './modules/reports-catalog/reports-catalog.module';
 import { GlobalSearchModule } from './modules/global-search/global-search.module';
-import { GroupReportsModule } from './modules/group-reports/group-reports.module';
 import { SettingsCatalogModule } from './modules/settings-catalog/settings-catalog.module';
 import { UserPreferencesModule } from './modules/user-preferences/user-preferences.module';
 import { TaxAutoApplyModule } from './modules/tax-auto-apply/tax-auto-apply.module';
@@ -302,7 +300,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     DebtsModule,
     ContractsModule,
     FixedAssetsModule,
-    GroupControlModule,
     DashboardModule,
     ChartOfAccountsModule,
     FiscalYearsModule,
@@ -317,7 +314,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     FinancialReportsModule,
     ReportsCatalogModule,
     GlobalSearchModule,
-    GroupReportsModule,
     SettingsCatalogModule,
     UserPreferencesModule,
     TaxAutoApplyModule,
