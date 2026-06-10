@@ -86,6 +86,11 @@ export class GlobalSearchService {
       this.searchProducts(query, user, companyWhere, limit),
       this.searchSalesOrders(query, user, companyWhere, limit),
       this.searchPurchaseOrders(query, user, companyWhere, limit),
+      this.searchReceivables(query, user, companyWhere, limit),
+      this.searchPayables(query, user, companyWhere, limit),
+      this.searchJournalEntries(query, user, companyWhere, limit),
+      this.searchCashAccounts(query, user, companyWhere, limit),
+      this.searchEmployees(query, user, companyWhere, limit),
       this.searchWestsidesDocuments(query, user, companyWhere, limit),
       this.searchReports(query, user, limit),
     ]);
@@ -412,6 +417,300 @@ export class GlobalSearchService {
         href: `/operations/purchase-orders/${row.id}/print`,
         badge: row.status,
         date: dateOnly(row.orderDate),
+      })),
+    };
+  }
+
+  private async searchReceivables(
+    query: string,
+    user: AuthUser,
+    companyWhere: CompanyScopedWhere,
+    limit: number,
+  ): Promise<SearchBucket> {
+    if (!hasAnyPermission(user, ['receivables.view'])) {
+      return this.empty('receivables', 'Receivables');
+    }
+
+    const rows = await this.prisma.receivable.findMany({
+      where: {
+        deletedAt: null,
+        ...companyWhere,
+        OR: [
+          { receivableNumber: contains(query) },
+          { customerName: contains(query) },
+          { sourceType: contains(query) },
+          { notes: contains(query) },
+        ],
+      },
+      select: {
+        id: true,
+        receivableNumber: true,
+        customerName: true,
+        outstandingAmount: true,
+        currency: true,
+        status: true,
+        sourceType: true,
+        issueDate: true,
+        dueDate: true,
+        company: { select: { code: true } },
+        branch: { select: { code: true, name: true } },
+      },
+      orderBy: { issueDate: 'desc' },
+      take: limit,
+    });
+
+    return {
+      key: 'receivables',
+      label: 'Receivables',
+      results: rows.map((row) => ({
+        id: row.id,
+        type: 'receivable',
+        module: 'Finance',
+        title: row.receivableNumber,
+        subtitle: compactSubtitle([
+          row.customerName,
+          row.sourceType,
+          `${row.currency} ${row.outstandingAmount} outstanding`,
+          row.company?.code,
+          row.branch?.code ?? row.branch?.name,
+        ]),
+        href: `/finance/receivables?search=${encodeSearch(row.receivableNumber)}`,
+        badge: row.status,
+        date: dateOnly(row.dueDate ?? row.issueDate),
+      })),
+    };
+  }
+
+  private async searchPayables(
+    query: string,
+    user: AuthUser,
+    companyWhere: CompanyScopedWhere,
+    limit: number,
+  ): Promise<SearchBucket> {
+    if (!hasAnyPermission(user, ['payables.view'])) {
+      return this.empty('payables', 'Payables');
+    }
+
+    const rows = await this.prisma.payable.findMany({
+      where: {
+        deletedAt: null,
+        ...companyWhere,
+        OR: [
+          { payableNumber: contains(query) },
+          { supplierName: contains(query) },
+          { sourceType: contains(query) },
+          { notes: contains(query) },
+        ],
+      },
+      select: {
+        id: true,
+        payableNumber: true,
+        supplierName: true,
+        outstandingAmount: true,
+        currency: true,
+        status: true,
+        sourceType: true,
+        issueDate: true,
+        dueDate: true,
+        company: { select: { code: true } },
+        branch: { select: { code: true, name: true } },
+      },
+      orderBy: { issueDate: 'desc' },
+      take: limit,
+    });
+
+    return {
+      key: 'payables',
+      label: 'Payables',
+      results: rows.map((row) => ({
+        id: row.id,
+        type: 'payable',
+        module: 'Finance',
+        title: row.payableNumber,
+        subtitle: compactSubtitle([
+          row.supplierName,
+          row.sourceType,
+          `${row.currency} ${row.outstandingAmount} outstanding`,
+          row.company?.code,
+          row.branch?.code ?? row.branch?.name,
+        ]),
+        href: `/finance/payables?search=${encodeSearch(row.payableNumber)}`,
+        badge: row.status,
+        date: dateOnly(row.dueDate ?? row.issueDate),
+      })),
+    };
+  }
+
+  private async searchJournalEntries(
+    query: string,
+    user: AuthUser,
+    companyWhere: CompanyScopedWhere,
+    limit: number,
+  ): Promise<SearchBucket> {
+    if (!hasAnyPermission(user, ['journal_entries.view'])) {
+      return this.empty('journal-entries', 'Journal Entries');
+    }
+
+    const rows = await this.prisma.journalEntry.findMany({
+      where: {
+        deletedAt: null,
+        ...companyWhere,
+        OR: [
+          { journalNumber: contains(query) },
+          { description: contains(query) },
+          { referenceType: contains(query) },
+        ],
+      },
+      select: {
+        id: true,
+        journalNumber: true,
+        description: true,
+        referenceType: true,
+        status: true,
+        totalDebit: true,
+        totalCredit: true,
+        transactionDate: true,
+        company: { select: { code: true } },
+      },
+      orderBy: { transactionDate: 'desc' },
+      take: limit,
+    });
+
+    return {
+      key: 'journal-entries',
+      label: 'Journal Entries',
+      results: rows.map((row) => ({
+        id: row.id,
+        type: 'journal-entry',
+        module: 'Finance',
+        title: row.journalNumber,
+        subtitle: compactSubtitle([
+          row.description,
+          row.referenceType,
+          `DR ${row.totalDebit} / CR ${row.totalCredit}`,
+          row.company?.code,
+        ]),
+        href: `/finance/journal-entries?search=${encodeSearch(row.journalNumber)}`,
+        badge: row.status,
+        date: dateOnly(row.transactionDate),
+      })),
+    };
+  }
+
+  private async searchCashAccounts(
+    query: string,
+    user: AuthUser,
+    companyWhere: CompanyScopedWhere,
+    limit: number,
+  ): Promise<SearchBucket> {
+    if (!hasAnyPermission(user, ['cash_accounts.view'])) {
+      return this.empty('cash-accounts', 'Cash Accounts');
+    }
+
+    const rows = await this.prisma.cashAccount.findMany({
+      where: {
+        deletedAt: null,
+        ...companyWhere,
+        OR: [
+          { accountName: contains(query) },
+          { notes: contains(query) },
+          { linkedBank: { accountName: contains(query) } },
+          { linkedBank: { bankName: contains(query) } },
+        ],
+      },
+      select: {
+        id: true,
+        accountName: true,
+        accountType: true,
+        currency: true,
+        currentBalance: true,
+        isActive: true,
+        company: { select: { code: true } },
+        branch: { select: { code: true, name: true } },
+        linkedBank: { select: { bankName: true, accountName: true } },
+      },
+      orderBy: { accountName: 'asc' },
+      take: limit,
+    });
+
+    return {
+      key: 'cash-accounts',
+      label: 'Cash Accounts',
+      results: rows.map((row) => ({
+        id: row.id,
+        type: 'cash-account',
+        module: 'Finance',
+        title: row.accountName,
+        subtitle: compactSubtitle([
+          row.accountType,
+          row.linkedBank?.bankName ?? row.linkedBank?.accountName,
+          `${row.currency} ${row.currentBalance}`,
+          row.company?.code,
+          row.branch?.code ?? row.branch?.name,
+        ]),
+        href: `/finance/cash-accounts?search=${encodeSearch(row.accountName)}`,
+        badge: row.isActive ? 'ACTIVE' : 'INACTIVE',
+      })),
+    };
+  }
+
+  private async searchEmployees(
+    query: string,
+    user: AuthUser,
+    companyWhere: CompanyScopedWhere,
+    limit: number,
+  ): Promise<SearchBucket> {
+    if (!hasAnyPermission(user, ['hr.employees.view'])) {
+      return this.empty('employees', 'Employees');
+    }
+
+    const rows = await this.prisma.employee.findMany({
+      where: {
+        deletedAt: null,
+        ...companyWhere,
+        OR: [
+          { employeeCode: contains(query) },
+          { fullName: contains(query) },
+          { firstName: contains(query) },
+          { lastName: contains(query) },
+          { phone: contains(query) },
+          { email: contains(query) },
+          { tin: contains(query) },
+          { nidaNumber: contains(query) },
+        ],
+      },
+      select: {
+        id: true,
+        employeeCode: true,
+        fullName: true,
+        phone: true,
+        email: true,
+        employmentStatus: true,
+        company: { select: { code: true } },
+        department: { select: { name: true } },
+        position: { select: { title: true } },
+      },
+      orderBy: { fullName: 'asc' },
+      take: limit,
+    });
+
+    return {
+      key: 'employees',
+      label: 'Employees',
+      results: rows.map((row) => ({
+        id: row.id,
+        type: 'employee',
+        module: 'HR',
+        title: row.fullName,
+        subtitle: compactSubtitle([
+          row.employeeCode,
+          row.position?.title,
+          row.department?.name,
+          row.phone ?? row.email,
+          row.company?.code,
+        ]),
+        href: `/hr/employees/${row.id}`,
+        badge: row.employmentStatus,
       })),
     };
   }

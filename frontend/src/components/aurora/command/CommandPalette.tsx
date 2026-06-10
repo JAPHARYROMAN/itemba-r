@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet } from '@/lib/api-client';
+import { NAV, isGroup, type NavItem, type NavLeaf } from '@/components/layout/sidebar';
 
 interface CommandItem {
   id: string;
@@ -18,6 +19,7 @@ interface CommandItem {
   source?: 'navigation' | 'record';
   badge?: string;
   date?: string;
+  keywords?: string[];
 }
 
 interface GlobalSearchApiResult {
@@ -43,172 +45,356 @@ interface GlobalSearchApiResponse {
   groups: GlobalSearchApiGroup[];
 }
 
-const DEFAULT_COMMANDS: CommandItem[] = [
-  { id: 'dashboard', label: 'Go to Dashboard', href: '/dashboard', group: 'Navigation', icon: '⊞' },
+const NAV_ICON_LABELS: Record<string, string> = {
+  dashboard: 'Dashboard',
+  lock: 'Security',
+  bank: 'Banking',
+  creditCard: 'Payments',
+  fileText: 'Document',
+  box: 'Inventory',
+  document: 'Document',
+  clipboardList: 'List',
+  building: 'Company',
+  users: 'People',
+  shield: 'Security',
+  barChart: 'Reports',
+  settings: 'Settings',
+  scale: 'Finance',
+  checkCircle: 'Approvals',
+  bell: 'Notifications',
+  exclamationTriangle: 'Alerts',
+  shieldCheck: 'Controls',
+  trendingUp: 'Analytics',
+  pieChart: 'Dashboard',
+  wrench: 'Operations',
+  lightBulb: 'Insights',
+  grid: 'Grid',
+  server: 'Server',
+  bookmark: 'Saved',
+  clock: 'Schedule',
+  play: 'Run',
+  integration: 'Integration',
+  apiGateway: 'API',
+  mobile: 'Mobile',
+  webhook: 'Webhook',
+  device: 'Device',
+  sync: 'Sync',
+  ShieldCheck: 'Security',
+  qa: 'QA',
+  launch: 'Launch',
+  help2: 'Help',
+  support2: 'Support',
+  accountingEngine: 'Accounting',
+  procurement: 'Procurement',
+  crm: 'CRM',
+  docTemplate: 'Templates',
+  automation: 'Automation',
+  performance: 'Performance',
+  jobs: 'Jobs',
+  isolation: 'Isolation',
+  deploy: 'Deployment',
+  Database: 'Backup',
+  Activity: 'Monitoring',
+  Archive: 'Archive',
+  CheckBadge: 'Certified',
+};
+
+const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
   {
-    id: 'group-control',
-    label: 'Group Control',
-    href: '/group-control',
-    group: 'Navigation',
-    icon: '🔒',
-    permission: 'group-control.view',
+    id: 'route:home',
+    label: 'Public Home',
+    href: '/',
+    group: 'Public',
+    icon: '⌂',
+    keywords: ['landing', 'website'],
   },
   {
-    id: 'finance',
-    label: 'Finance',
-    href: '/finance',
-    group: 'Navigation',
-    icon: '💰',
-    permission: 'finance.view',
+    id: 'route:login',
+    label: 'Login',
+    href: '/login',
+    group: 'Public',
+    icon: '⇥',
+    keywords: ['sign in', 'authentication'],
   },
   {
-    id: 'finance-cash-accounts',
-    label: 'Cash Accounts',
-    description: 'Cash and bank account setup',
-    href: '/finance/cash-accounts',
-    group: 'Finance',
-    icon: '🏦',
-    permission: 'cash_accounts.view',
+    id: 'route:signup',
+    label: 'Signup',
+    href: '/signup',
+    group: 'Public',
+    icon: '+',
+    keywords: ['create account', 'registration'],
   },
   {
-    id: 'finance-reports',
-    label: 'Finance Reports',
-    description: 'Financial statements, AR/AP, and management reports',
-    href: '/finance/reports',
-    group: 'Finance',
-    icon: '📊',
-    permission: 'finance.reports.view',
+    id: 'route:reports-run',
+    label: 'Run Report',
+    href: '/reports/run',
+    group: 'Reports',
+    icon: '▶',
+    permission: 'report_runs.create',
+    keywords: ['execute report', 'report viewer'],
   },
   {
-    id: 'operations',
-    label: 'Operations',
-    description: 'Inventory, sales, purchases, customers, and suppliers',
-    href: '/operations',
-    group: 'Navigation',
-    icon: '⚙️',
-    permission: 'operations.dashboard.view',
+    id: 'route:companies-new',
+    label: 'New Company',
+    href: '/companies/new',
+    group: 'Registry',
+    icon: '+',
+    permission: 'companies.create',
+    keywords: ['create company', 'registry'],
   },
   {
-    id: 'operations-products',
-    label: 'Products',
-    description: 'Find products, SKUs, and stock items',
-    href: '/operations/products',
-    group: 'Operations',
-    icon: '📦',
-    anyPermission: ['products.view', 'sales.create', 'purchases.create', 'inventory.view'],
+    id: 'route:settings-company-profile',
+    label: 'Company Profile Settings',
+    href: '/settings/company-profile',
+    group: 'Settings',
+    icon: '⚙',
+    keywords: ['company profile', 'letterhead', 'logo'],
   },
   {
-    id: 'operations-customers',
-    label: 'Customers',
-    description: 'Customer master data and profiles',
-    href: '/operations/customers',
-    group: 'Operations',
-    icon: '👤',
-    permission: 'customers.view',
+    id: 'route:settings-number-sequences',
+    label: 'Number Sequences',
+    href: '/settings/number-sequences',
+    group: 'Settings',
+    icon: '#',
+    keywords: ['document numbers', 'sequence setup'],
   },
   {
-    id: 'operations-suppliers',
-    label: 'Suppliers',
-    description: 'Supplier master data',
-    href: '/operations/suppliers',
-    group: 'Operations',
-    icon: '🏢',
-    permission: 'suppliers.view',
+    id: 'route:settings-preferences',
+    label: 'Preferences',
+    href: '/settings/preferences',
+    group: 'Settings',
+    icon: '⚙',
+    keywords: ['user preferences'],
   },
   {
-    id: 'operations-sales-orders',
-    label: 'Sales Orders',
-    description: 'Customer orders, fulfillment, and revenue',
-    href: '/operations/sales-orders',
-    group: 'Operations',
-    icon: '🧾',
-    permission: 'sales.view',
+    id: 'route:api-gateway-logs',
+    label: 'API Request Logs',
+    href: '/api-gateway/logs',
+    group: 'API Gateway',
+    icon: '↔',
+    permission: 'api_gateway.logs.view',
+    keywords: ['api logs', 'requests', 'gateway'],
   },
   {
-    id: 'operations-purchase-orders',
-    label: 'Purchase Orders',
-    description: 'Supplier orders and receiving',
-    href: '/operations/purchase-orders',
-    group: 'Operations',
-    icon: '🧾',
-    permission: 'purchases.view',
+    id: 'route:background-jobs',
+    label: 'Background Jobs',
+    href: '/background-jobs',
+    group: 'Performance & Ops',
+    icon: '⚙',
+    permission: 'background_jobs.view',
+    keywords: ['queue', 'worker', 'jobs'],
   },
   {
-    id: 'operations-reports',
-    label: 'Operations Reports',
-    description: 'Sales, purchases, inventory, and movement reports',
-    href: '/operations/reports',
-    group: 'Operations',
-    icon: '📈',
-    permission: 'operations.reports.view',
+    id: 'route:background-job-queues',
+    label: 'Background Job Queues',
+    href: '/background-jobs/queues',
+    group: 'Performance & Ops',
+    icon: '≡',
+    permission: 'background_jobs.view',
+    keywords: ['queue health', 'workers'],
   },
   {
-    id: 'westsides',
-    label: 'Westsides Operations',
-    href: '/westsides',
-    group: 'Navigation',
-    icon: '🛒',
-    permission: 'westsides.dashboard.view',
+    id: 'route:automation',
+    label: 'Business Automation',
+    href: '/automation',
+    group: 'Business Automation',
+    icon: '⚡',
+    permission: 'automation.dashboard.view',
+    keywords: ['rules', 'workflow automation'],
   },
   {
-    id: 'westsides-quick-sale',
-    label: 'Quick Sale',
-    description: 'Counter sale flow',
-    href: '/westsides/quick-sale',
-    group: 'Westsides',
-    icon: '💳',
-    permission: 'sales.create',
+    id: 'route:automation-rules',
+    label: 'Automation Rules',
+    href: '/automation/rules',
+    group: 'Business Automation',
+    icon: '⚡',
+    permission: 'automation_rules.view',
+    keywords: ['business rules'],
   },
   {
-    id: 'westsides-proformas',
-    label: 'Proforma Invoices',
-    description: 'Customer proforma invoices and printouts',
-    href: '/westsides/proforma-invoices',
-    group: 'Westsides',
-    icon: '📄',
-    permission: 'proformas.view',
+    id: 'route:automation-runs',
+    label: 'Automation Runs',
+    href: '/automation/runs',
+    group: 'Business Automation',
+    icon: '▶',
+    permission: 'automation_runs.view',
+    keywords: ['run history'],
   },
   {
-    id: 'westsides-reports',
-    label: 'Westsides Reports',
-    description: 'Readable operations reports and exports',
-    href: '/westsides/reports',
-    group: 'Westsides',
-    icon: '📊',
-    permission: 'westsides.reports.view',
+    id: 'route:data-isolation',
+    label: 'Data Isolation',
+    href: '/data-isolation',
+    group: 'Security & Audit',
+    icon: '◇',
+    permission: 'data_isolation.view',
+    keywords: ['tenant isolation', 'multi company safety'],
   },
   {
-    id: 'hr',
-    label: 'HR & Payroll',
-    href: '/hr',
-    group: 'Navigation',
-    icon: '👥',
-    permission: 'hr.dashboard.view',
+    id: 'route:data-isolation-issues',
+    label: 'Data Isolation Issues',
+    href: '/data-isolation/issues',
+    group: 'Security & Audit',
+    icon: '!',
+    permission: 'data_isolation.view',
+    keywords: ['tenant issues', 'violations'],
   },
   {
-    id: 'compliance',
-    label: 'Compliance & Tax',
-    href: '/compliance',
-    group: 'Navigation',
-    icon: '📋',
+    id: 'route:data-isolation-test-runs',
+    label: 'Data Isolation Test Runs',
+    href: '/data-isolation/test-runs',
+    group: 'Security & Audit',
+    icon: '✓',
+    permission: 'data_isolation.view',
+    keywords: ['tenant tests'],
+  },
+  {
+    id: 'route:compliance-cockpit',
+    label: 'Compliance Cockpit',
+    href: '/compliance/cockpit',
+    group: 'Compliance & Tax',
+    icon: '✓',
     permission: 'compliance.dashboard.view',
+    keywords: ['compliance dashboard'],
   },
   {
-    id: 'approvals',
-    label: 'Pending Approvals',
-    href: '/approvals/pending',
-    group: 'Quick Actions',
-    icon: '✅',
-    permission: 'approval_requests.view',
+    id: 'route:compliance-osha',
+    label: 'OSHA Registrations',
+    href: '/compliance/osha-registrations',
+    group: 'Compliance & Tax',
+    icon: '✓',
+    permission: 'compliance_obligations.view',
+    keywords: ['osha', 'statutory registrations'],
   },
   {
-    id: 'notifications',
-    label: 'Notifications',
-    href: '/notifications',
-    group: 'Quick Actions',
-    icon: '🔔',
+    id: 'route:hr-medical-exams',
+    label: 'Medical Exams',
+    href: '/hr/medical-exams',
+    group: 'HR & Payroll',
+    icon: '☤',
+    permission: 'hr.employees.view',
+    keywords: ['employee medical'],
   },
-  { id: 'alerts', label: 'Alerts', href: '/alerts', group: 'Quick Actions', icon: '⚠️' },
+  {
+    id: 'route:hr-disputes',
+    label: 'Employment Disputes',
+    href: '/hr/disputes',
+    group: 'HR & Payroll',
+    icon: '!',
+    permission: 'hr.employees.view',
+    keywords: ['labor disputes'],
+  },
+  {
+    id: 'route:hr-disciplinary-actions',
+    label: 'Disciplinary Actions',
+    href: '/hr/disciplinary-actions',
+    group: 'HR & Payroll',
+    icon: '!',
+    permission: 'hr.employees.view',
+    keywords: ['employee discipline'],
+  },
+  {
+    id: 'route:hr-petroleum-commissions',
+    label: 'Petroleum Commissions',
+    href: '/hr/petroleum-commissions',
+    group: 'HR & Payroll',
+    icon: '%',
+    permission: 'hr.payroll.view',
+    keywords: ['fuel commission', 'sales commission'],
+  },
+  {
+    id: 'route:hr-statutory-reports',
+    label: 'HR Statutory Reports',
+    href: '/hr/reports/statutory',
+    group: 'HR & Payroll',
+    icon: '▦',
+    permission: 'hr.reports.view',
+    keywords: ['paye nssf wcf statutory'],
+  },
+  {
+    id: 'route:hr-wcf-exposure',
+    label: 'WCF Exposure Report',
+    href: '/hr/reports/wcf-exposure',
+    group: 'HR & Payroll',
+    icon: '▦',
+    permission: 'hr.reports.view',
+    keywords: ['workers compensation'],
+  },
+  {
+    id: 'route:sales-commissions',
+    label: 'Sales Commissions',
+    href: '/sales/commissions',
+    group: 'Sales',
+    icon: '%',
+    permission: 'sales.view',
+    keywords: ['salesperson commission'],
+  },
+  {
+    id: 'route:westsides-mobile-pos',
+    label: 'Westsides Mobile POS',
+    href: '/westsides/mobile-pos',
+    group: 'Westsides',
+    icon: '▣',
+    permission: 'sales.create',
+    keywords: ['mobile sales', 'phone pos'],
+  },
+  {
+    id: 'route:westsides-mobile-pos-install',
+    label: 'Mobile POS Install',
+    href: '/westsides/mobile-pos/install',
+    group: 'Westsides',
+    icon: '▣',
+    permission: 'sales.create',
+    keywords: ['qr install', 'phone app'],
+  },
+];
+
+function routeId(href: string) {
+  return `nav:${href.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'home'}`;
+}
+
+function labelForLeaf(leaf: NavLeaf, parentLabel?: string) {
+  if (!parentLabel) return leaf.label;
+  if (leaf.label === 'Dashboard') return `${parentLabel} Dashboard`;
+  if (leaf.label === 'Reports') return `${parentLabel} Reports`;
+  return leaf.label;
+}
+
+function navLeafToCommand(
+  leaf: NavLeaf,
+  parentLabel?: string,
+  parentPermission?: string,
+): CommandItem {
+  const iconLabel = NAV_ICON_LABELS[String(leaf.iconKey)] ?? String(leaf.iconKey);
+  return {
+    id: routeId(leaf.href),
+    label: labelForLeaf(leaf, parentLabel),
+    description: parentLabel ? `${parentLabel} - ${leaf.label}` : leaf.href,
+    href: leaf.href,
+    group: parentLabel ?? 'Navigation',
+    icon: iconLabel.slice(0, 1).toUpperCase(),
+    permission: leaf.permission ?? parentPermission,
+    source: 'navigation',
+    keywords: [leaf.href, leaf.label, parentLabel, iconLabel].filter(Boolean) as string[],
+  };
+}
+
+function flattenNavigationCommands(items: NavItem[]) {
+  const commands: CommandItem[] = [];
+  for (const item of items) {
+    if (isGroup(item)) {
+      item.children.forEach((child) => {
+        commands.push(navLeafToCommand(child, item.label, item.permission));
+      });
+    } else {
+      commands.push(navLeafToCommand(item));
+    }
+  }
+  return commands;
+}
+
+const DEFAULT_COMMANDS: CommandItem[] = [
+  ...flattenNavigationCommands(NAV),
+  ...EXTRA_ROUTE_COMMANDS,
 ];
 
 interface CommandPaletteProps {
@@ -229,6 +415,16 @@ function iconForRecord(type: string) {
       return '🧾';
     case 'purchase-order':
       return '📥';
+    case 'receivable':
+      return '↙';
+    case 'payable':
+      return '↗';
+    case 'journal-entry':
+      return '≡';
+    case 'cash-account':
+      return '🏦';
+    case 'employee':
+      return '👥';
     case 'quotation':
       return '📋';
     case 'proforma':
@@ -289,7 +485,9 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
       (c) =>
         c.label.toLowerCase().includes(q) ||
         c.description?.toLowerCase().includes(q) ||
-        c.group?.toLowerCase().includes(q),
+        c.group?.toLowerCase().includes(q) ||
+        c.href?.toLowerCase().includes(q) ||
+        c.keywords?.some((keyword) => keyword.toLowerCase().includes(q)),
     );
   }, [query, visibleCommands]);
 
