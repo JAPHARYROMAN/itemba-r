@@ -440,67 +440,6 @@ const NAV: NavItem[] = [
     ],
   },
   {
-    label: 'Logistics',
-    iconKey: 'box',
-    permission: 'logistics.dashboard.view',
-    children: [
-      {
-        href: '/logistics',
-        label: 'Dashboard',
-        iconKey: 'barChart',
-        permission: 'logistics.dashboard.view',
-      },
-      {
-        href: '/logistics/vehicles',
-        label: 'Vehicles',
-        iconKey: 'box',
-        permission: 'vehicles.view',
-      },
-      {
-        href: '/logistics/drivers',
-        label: 'Drivers',
-        iconKey: 'users',
-        permission: 'drivers.view',
-      },
-      {
-        href: '/logistics/routes',
-        label: 'Routes',
-        iconKey: 'fileText',
-        permission: 'routes.view',
-      },
-      {
-        href: '/logistics/trips',
-        label: 'Trips',
-        iconKey: 'clipboardList',
-        permission: 'trips.view',
-      },
-      {
-        href: '/logistics/maintenance',
-        label: 'Maintenance',
-        iconKey: 'settings',
-        permission: 'vehicle_maintenance.view',
-      },
-      {
-        href: '/logistics/trip-expenses',
-        label: 'Trip Expenses',
-        iconKey: 'fileText',
-        permission: 'trip_expenses.view',
-      },
-      {
-        href: '/logistics/trip-fuel-usage',
-        label: 'Fuel Usage',
-        iconKey: 'box',
-        permission: 'trip_fuel_usage.view',
-      },
-      {
-        href: '/logistics/reports',
-        label: 'Reports',
-        iconKey: 'barChart',
-        permission: 'logistics.reports.view',
-      },
-    ],
-  },
-  {
     label: 'Business Units',
     iconKey: 'building',
     permission: 'licensed_business_units.view',

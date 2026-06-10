@@ -61,14 +61,6 @@ import { WestsidesModule } from './modules/westsides/westsides.module';
 import { ItembaWorkUnitsModule } from './modules/itemba-work-units/itemba-work-units.module';
 import { EquipmentUsageModule } from './modules/equipment-usage/equipment-usage.module';
 import { LaborRecordsModule } from './modules/labor-records/labor-records.module';
-import { VehiclesModule } from './modules/vehicles/vehicles.module';
-import { DriversModule } from './modules/drivers/drivers.module';
-import { RoutesModule } from './modules/routes/routes.module';
-import { TripsModule } from './modules/trips/trips.module';
-import { TripExpensesModule } from './modules/trip-expenses/trip-expenses.module';
-import { TripFuelUsageModule } from './modules/trip-fuel-usage/trip-fuel-usage.module';
-import { VehicleMaintenanceModule } from './modules/vehicle-maintenance/vehicle-maintenance.module';
-import { LogisticsDashboardModule } from './modules/logistics-dashboard/logistics-dashboard.module';
 import { LicensedBusinessUnitsModule } from './modules/licensed-business-units/licensed-business-units.module';
 import { BusinessLicensesModule } from './modules/business-licenses/business-licenses.module';
 
@@ -338,14 +330,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     ItembaWorkUnitsModule,
     EquipmentUsageModule,
     LaborRecordsModule,
-    VehiclesModule,
-    DriversModule,
-    RoutesModule,
-    TripsModule,
-    TripExpensesModule,
-    TripFuelUsageModule,
-    VehicleMaintenanceModule,
-    LogisticsDashboardModule,
     LicensedBusinessUnitsModule,
     BusinessLicensesModule,
 
