@@ -648,6 +648,8 @@ export function MobilePosSaleEntry() {
   const [paymentReference, setPaymentReference] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
   const [confirmed, setConfirmed] = useState<ConfirmedOrder | null>(null);
   const [receiptMessage, setReceiptMessage] = useState('');
 
@@ -754,27 +756,24 @@ export function MobilePosSaleEntry() {
     }
     let cancelled = false;
     setCustomerSearching(true);
-    const timer = setTimeout(
-      () => {
-        backendList<Customer>('/customers', {
-          query: {
-            companyId: settings.companyId,
-            search,
-            limit: 12,
-          },
+    const timer = setTimeout(() => {
+      backendList<Customer>('/customers', {
+        query: {
+          companyId: settings.companyId,
+          search,
+          limit: 12,
+        },
+      })
+        .then((rows) => {
+          if (!cancelled) setCustomers(rows);
         })
-          .then((rows) => {
-            if (!cancelled) setCustomers(rows);
-          })
-          .catch(() => {
-            if (!cancelled) setCustomers([]);
-          })
-          .finally(() => {
-            if (!cancelled) setCustomerSearching(false);
-          });
-      },
-      220,
-    );
+        .catch(() => {
+          if (!cancelled) setCustomers([]);
+        })
+        .finally(() => {
+          if (!cancelled) setCustomerSearching(false);
+        });
+    }, 220);
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -1253,11 +1252,19 @@ export function MobilePosSaleEntry() {
   };
 
   const handleLogout = async () => {
+    if (signingOut) return;
     if (!confirmed && cart.length > 0) {
       const proceed = window.confirm('You have items in the current sale. Log out and discard it?');
       if (!proceed) return;
     }
-    await logout();
+    setLogoutError('');
+    setSigningOut(true);
+    try {
+      await logout();
+    } catch {
+      setLogoutError('Could not sign out. Check your connection and try again.');
+      setSigningOut(false);
+    }
   };
 
   if (authLoading || !hydrated || bootstrapLoading) return <PageSpinner />;
@@ -1265,7 +1272,20 @@ export function MobilePosSaleEntry() {
   if (!canUseMobilePos) {
     return (
       <div className="p-4 sm:p-6">
-        <PageHeader title="Operations Mobile POS" subtitle="Westsides sale entry" />
+        <PageHeader
+          title="Operations Mobile POS"
+          subtitle="Westsides sale entry"
+          actions={
+            <Btn variant="danger" size="sm" loading={signingOut} onClick={handleLogout}>
+              Sign out
+            </Btn>
+          }
+        />
+        {logoutError && (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+            {logoutError}
+          </div>
+        )}
         <PermissionDeniedState description="You need sales.create or pos.create to enter POS sales." />
       </div>
     );
@@ -1295,12 +1315,43 @@ export function MobilePosSaleEntry() {
             <Btn variant="secondary" size="sm" onClick={() => setSettingsOpen(true)}>
               Settings
             </Btn>
-            <Btn variant="secondary" size="sm" onClick={handleLogout}>
-              Log out
-            </Btn>
+            <span className="hidden sm:inline-flex">
+              <Btn variant="danger" size="sm" loading={signingOut} onClick={handleLogout}>
+                Sign out
+              </Btn>
+            </span>
           </>
         }
       />
+
+      <div
+        className="mb-4 flex items-center justify-between gap-3 rounded-xl border px-3 py-2 sm:hidden"
+        style={{
+          borderColor: 'var(--aurora-border)',
+          background: 'var(--aurora-surface)',
+        }}
+      >
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Signed in
+          </div>
+          <div
+            className="truncate text-[13px] font-semibold"
+            style={{ color: 'var(--aurora-text)' }}
+          >
+            {user?.fullName || user?.email || 'Mobile POS user'}
+          </div>
+        </div>
+        <Btn variant="danger" size="xs" loading={signingOut} onClick={handleLogout}>
+          Sign out
+        </Btn>
+      </div>
+
+      {logoutError && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+          {logoutError}
+        </div>
+      )}
 
       <OperationsSalesOrderOnboarding
         settingsReady={settingsReady}
@@ -1495,7 +1546,9 @@ export function MobilePosSaleEntry() {
                     onChange={(event) => setCustomerSearch(event.target.value)}
                     disabled={!settings.companyId || Boolean(confirmed)}
                     placeholder={
-                      settings.companyId ? 'Search name, code, phone, email' : 'Pick a company first'
+                      settings.companyId
+                        ? 'Search name, code, phone, email'
+                        : 'Pick a company first'
                     }
                     autoComplete="off"
                   />
@@ -1977,13 +2030,7 @@ function OperationsSalesOrderOnboarding({
   );
 }
 
-function CustomerResultButton({
-  customer,
-  onPick,
-}: {
-  customer: Customer;
-  onPick: () => void;
-}) {
+function CustomerResultButton({ customer, onPick }: { customer: Customer; onPick: () => void }) {
   return (
     <button
       type="button"
