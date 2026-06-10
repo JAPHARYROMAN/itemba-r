@@ -1,4 +1,5 @@
 import { SalesOrdersService } from './sales-orders.service';
+import { Prisma } from '@prisma/client';
 
 function makeService() {
   const prisma = {
@@ -137,5 +138,128 @@ describe('SalesOrdersService payment normalization', () => {
         }),
       }),
     );
+  });
+});
+
+describe('SalesOrdersService quick-sale CREDIT handling', () => {
+  it('mobilePosQuickSale preserves CREDIT (no coercion to CASH)', async () => {
+    const { service, prisma } = makeService();
+    // Stub confirm() so we isolate the create payload (CREDIT confirm posts a
+    // receivable via a heavier path covered elsewhere).
+    jest.spyOn(service, 'confirm').mockResolvedValue({ id: 'so-1' } as any);
+
+    await service.mobilePosQuickSale(
+      createDto({ salesType: 'CREDIT_SALE', paymentMethod: 'CREDIT', customerName: 'Walk-in' }),
+      user,
+    );
+
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ paymentMethod: 'CREDIT', cashAccountId: null }),
+      }),
+    );
+  });
+
+  it('quickSale still coerces CREDIT to CASH for the generic counter-sale flow', async () => {
+    const { service, prisma } = makeService();
+    jest.spyOn(service, 'confirm').mockResolvedValue({ id: 'so-1' } as any);
+    prisma.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-account-1',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      accountType: 'CASH_ON_HAND',
+    });
+
+    await service.quickSale(
+      createDto({
+        salesType: 'CASH_SALE',
+        paymentMethod: 'CREDIT',
+        cashAccountId: 'cash-account-1',
+      }),
+      user,
+    );
+
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ paymentMethod: 'CASH', cashAccountId: 'cash-account-1' }),
+      }),
+    );
+  });
+});
+
+describe('SalesOrdersService quick-sale idempotency', () => {
+  it('replays the existing order and skips create when the idempotency key matches', async () => {
+    const { service, prisma } = makeService();
+    const confirmSpy = jest.spyOn(service, 'confirm');
+
+    const result = await service.mobilePosQuickSale(
+      createDto({ idempotencyKey: 'idem-1' }),
+      user,
+    );
+
+    // Replay short-circuits before create()/confirm().
+    expect(prisma.salesOrder.create).not.toHaveBeenCalled();
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({ id: 'so-1' }));
+    expect(prisma.salesOrder.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          companyId: 'company-1',
+          idempotencyKey: 'idem-1',
+          deletedAt: null,
+        }),
+      }),
+    );
+  });
+
+  it('recovers from a concurrent P2002 race by replaying the winning order', async () => {
+    const { service, prisma } = makeService();
+    jest.spyOn(service, 'confirm').mockResolvedValue({ id: 'so-1' } as any);
+    prisma.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-account-1',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      accountType: 'CASH_ON_HAND',
+    });
+
+    const winner = {
+      id: 'so-1',
+      companyId: 'company-1',
+      salesOrderNumber: 'SO-2026-000001',
+      orderDate: new Date('2026-05-30'),
+      salesType: 'CASH_SALE',
+      paymentMethod: 'CASH',
+      cashAccountId: 'cash-account-1',
+      paidAmount: 200,
+      outstandingAmount: 0,
+      paymentStatus: 'PAID',
+      receivableId: null,
+      receivable: null,
+      lines: [],
+    };
+    // Pre-create replay misses; create() loses the unique-index race; the
+    // post-create replay (and the findOne it triggers) return the winner.
+    prisma.salesOrder.findFirst.mockResolvedValueOnce(null).mockResolvedValue(winner);
+    prisma.salesOrder.create.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '5.22.0',
+      }),
+    );
+
+    const result = await service.mobilePosQuickSale(
+      createDto({
+        salesType: 'CASH_SALE',
+        paymentMethod: 'CASH',
+        cashAccountId: 'cash-account-1',
+        idempotencyKey: 'idem-1',
+      }),
+      user,
+    );
+
+    expect(prisma.salesOrder.create).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({ id: 'so-1' }));
   });
 });
