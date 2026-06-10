@@ -40,25 +40,40 @@
   /* Status Colors */
   --aurora-success: #10b981;
   --aurora-success-bg: #d1fae5;
-  --aurora-success-text: #065f46;
+  --aurora-success-text: #064e3b;
   --aurora-warning: #f59e0b;
   --aurora-warning-bg: #fef3c7;
-  --aurora-warning-text: #92400e;
+  --aurora-warning-text: #78350f;
   --aurora-danger: #ef4444;
   --aurora-danger-bg: #fee2e2;
-  --aurora-danger-text: #991b1b;
+  --aurora-danger-text: #7f1d1d;
   --aurora-info: #06b6d4;
   --aurora-info-bg: #cffafe;
-  --aurora-info-text: #164e63;
+  --aurora-info-text: #083344;
   --aurora-restricted: #8b5cf6;
   --aurora-restricted-bg: #ede9fe;
-  --aurora-restricted-text: #4c1d95;
+  --aurora-restricted-text: #3b0764;
+
+  /* Accent — "brass": warm hardware-counter accent, reserved for celebration
+     and pride moments (sale complete, day closed, milestones). Deliberately
+     distinct from --aurora-warning, which keeps its alerting semantics. */
+  --aurora-accent: #d97706;
+  --aurora-accent-hover: #b45309;
+  --aurora-accent-subtle: #fffbeb;
+  --aurora-accent-text: #78350f;
 
   /* Shadows */
   --aurora-shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04);
   --aurora-shadow: 0 4px 12px -2px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.04);
   --aurora-shadow-lg: 0 10px 30px -4px rgb(0 0 0 / 0.1), 0 4px 8px -4px rgb(0 0 0 / 0.06);
   --aurora-shadow-command: 0 20px 60px -10px rgb(0 0 0 / 0.3), 0 4px 16px -4px rgb(0 0 0 / 0.2);
+
+  /* Elevation tiers — prominence hierarchy for cards (default cards keep
+     --aurora-shadow-sm; prominent/critical surfaces step up). */
+  --aurora-shadow-prominent: 0 12px 32px -6px rgb(2 6 23 / 0.14), 0 4px 12px -4px rgb(2 6 23 / 0.08);
+  --aurora-glow-primary: 0 0 0 1px rgb(37 99 235 / 0.18), 0 8px 24px -6px rgb(37 99 235 / 0.25);
+  --aurora-glow-success: 0 0 0 1px rgb(16 185 129 / 0.2), 0 8px 24px -6px rgb(16 185 129 / 0.25);
+  --aurora-glow-accent: 0 0 0 1px rgb(217 119 6 / 0.2), 0 8px 24px -6px rgb(217 119 6 / 0.28);
 
   /* Radius */
   --aurora-radius-sm: 0.375rem;
@@ -133,11 +148,23 @@
   --aurora-restricted-bg: #2e1065;
   --aurora-restricted-text: #c4b5fd;
 
+  /* Accent — brass, dark mode */
+  --aurora-accent: #fbbf24;
+  --aurora-accent-hover: #fcd34d;
+  --aurora-accent-subtle: #422006;
+  --aurora-accent-text: #fde68a;
+
   /* Shadows */
   --aurora-shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.2);
   --aurora-shadow: 0 4px 12px -2px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
   --aurora-shadow-lg: 0 10px 30px -4px rgb(0 0 0 / 0.5), 0 4px 8px -4px rgb(0 0 0 / 0.4);
   --aurora-shadow-command: 0 20px 60px -10px rgb(0 0 0 / 0.7), 0 4px 16px -4px rgb(0 0 0 / 0.5);
+
+  /* Elevation tiers — dark mode */
+  --aurora-shadow-prominent: 0 12px 32px -6px rgb(0 0 0 / 0.55), 0 4px 12px -4px rgb(0 0 0 / 0.4);
+  --aurora-glow-primary: 0 0 0 1px rgb(59 130 246 / 0.3), 0 8px 24px -6px rgb(59 130 246 / 0.35);
+  --aurora-glow-success: 0 0 0 1px rgb(16 185 129 / 0.3), 0 8px 24px -6px rgb(16 185 129 / 0.35);
+  --aurora-glow-accent: 0 0 0 1px rgb(251 191 36 / 0.3), 0 8px 24px -6px rgb(251 191 36 / 0.35);
 }
 
 /* ─── Base Styles ────────────────────────────────────────────────────────────── */
@@ -250,6 +277,34 @@ body {
     line-height: 1;
   }
 
+  /* Display numerals — hero KPI figures (dashboards, POS totals) */
+  .aurora-display {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1;
+  }
+
+  /* Staggered entrance for card grids: apply to the grid container; the
+     first 12 children cascade in at 50ms intervals. Lists/tables should NOT
+     use this (density first) — card grids only. */
+  .aurora-stagger > * {
+    animation: auroraFadeUp 0.35s var(--aurora-ease) both;
+  }
+  .aurora-stagger > *:nth-child(1) { animation-delay: 0ms; }
+  .aurora-stagger > *:nth-child(2) { animation-delay: 50ms; }
+  .aurora-stagger > *:nth-child(3) { animation-delay: 100ms; }
+  .aurora-stagger > *:nth-child(4) { animation-delay: 150ms; }
+  .aurora-stagger > *:nth-child(5) { animation-delay: 200ms; }
+  .aurora-stagger > *:nth-child(6) { animation-delay: 250ms; }
+  .aurora-stagger > *:nth-child(7) { animation-delay: 300ms; }
+  .aurora-stagger > *:nth-child(8) { animation-delay: 350ms; }
+  .aurora-stagger > *:nth-child(9) { animation-delay: 400ms; }
+  .aurora-stagger > *:nth-child(10) { animation-delay: 450ms; }
+  .aurora-stagger > *:nth-child(11) { animation-delay: 500ms; }
+  .aurora-stagger > *:nth-child(12) { animation-delay: 550ms; }
+
   /* Skeleton shimmer */
   .aurora-skeleton {
     background: linear-gradient(
@@ -281,6 +336,18 @@ body {
   }
   100% {
     background-position: -200% 0;
+  }
+}
+
+/* Defined here (not only in tailwind.config) so .aurora-stagger always has it. */
+@keyframes auroraFadeUp {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

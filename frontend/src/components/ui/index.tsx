@@ -35,3 +35,6 @@ export { PageToolbar, SectionHeader } from './page-toolbar';
 
 // Audit
 export { AuditTimeline } from './audit-timeline';
+
+// Theme
+export { ThemeSelector } from './theme-selector';

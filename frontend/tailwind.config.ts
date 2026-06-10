@@ -34,6 +34,19 @@ const config: Config = {
           border: '#1e2535',
           icon: '#64748b',
         },
+        brass: {
+          50: '#fffbeb',
+          100: '#fef3c7',
+          200: '#fde68a',
+          300: '#fcd34d',
+          400: '#fbbf24',
+          500: '#f59e0b',
+          600: '#d97706',
+          700: '#b45309',
+          800: '#92400e',
+          900: '#78350f',
+          950: '#451a03',
+        },
         aurora: {
           // Primary electric blue
           primary: '#3b82f6',
@@ -91,11 +104,15 @@ const config: Config = {
       },
       animation: {
         'fade-in': 'auroraFadeIn 0.15s ease-out',
+        'fade-out': 'auroraFadeOut 0.15s ease-in forwards',
         'fade-up': 'auroraFadeUp 0.2s ease-out',
         'slide-in-right': 'auroraSlideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
         'slide-in-left': 'auroraSlideInLeft 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
         'slide-up': 'auroraSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
         'scale-in': 'auroraScaleIn 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+        'scale-out': 'auroraScaleOut 0.15s cubic-bezier(0.4, 0, 1, 1) forwards',
+        'scale-pop': 'auroraScalePop 0.35s cubic-bezier(0.16, 1, 0.3, 1)',
+        shake: 'auroraShake 0.3s cubic-bezier(0.36, 0.07, 0.19, 0.97)',
         skeleton: 'auroraSkeleton 1.5s ease-in-out infinite',
         'spin-slow': 'spin 2s linear infinite',
         'pulse-subtle': 'auroraPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
@@ -124,6 +141,26 @@ const config: Config = {
         auroraScaleIn: {
           '0%': { transform: 'scale(0.95)', opacity: '0' },
           '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        auroraFadeOut: {
+          '0%': { opacity: '1' },
+          '100%': { opacity: '0' },
+        },
+        auroraScaleOut: {
+          '0%': { transform: 'scale(1)', opacity: '1' },
+          '100%': { transform: 'scale(0.95)', opacity: '0' },
+        },
+        auroraScalePop: {
+          '0%': { transform: 'scale(0.9)', opacity: '0' },
+          '60%': { transform: 'scale(1.03)', opacity: '1' },
+          '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        auroraShake: {
+          '0%, 100%': { transform: 'translateX(0)' },
+          '20%': { transform: 'translateX(-4px)' },
+          '40%': { transform: 'translateX(4px)' },
+          '60%': { transform: 'translateX(-3px)' },
+          '80%': { transform: 'translateX(2px)' },
         },
         auroraSkeleton: {
           '0%, 100%': { opacity: '1' },
