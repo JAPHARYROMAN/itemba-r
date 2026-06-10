@@ -41,14 +41,16 @@ interface LoanDetail {
 interface Repayment {
   id: string;
   amount: string;
-  principalPortion?: string;
-  interestPortion?: string;
-  penaltyAmount?: string;
-  paymentDate: string;
+  principal?: string;
+  interest?: string;
+  penalties?: string;
+  remainingBalance?: string;
+  repaymentDate: string;
   paymentMethod?: string;
-  reference?: string;
+  referenceNumber?: string;
   notes?: string;
   createdAt: string;
+  recordedById?: string;
   user?: { fullName: string } | null;
 }
 
@@ -126,19 +128,19 @@ function RecordRepaymentModal({ loan, onClose, onSaved }: { loan: LoanDetail; on
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          amount: parseFloat(form.amount),
-          principalPortion: form.principalPortion ? parseFloat(form.principalPortion) : undefined,
-          interestPortion: form.interestPortion ? parseFloat(form.interestPortion) : undefined,
-          penaltyAmount: form.penaltyAmount ? parseFloat(form.penaltyAmount) : undefined,
-          paymentDate: form.paymentDate,
+          amount: form.amount,
+          principal: form.principalPortion || undefined,
+          interest: form.interestPortion || undefined,
+          penalties: form.penaltyAmount || undefined,
+          repaymentDate: form.paymentDate,
           paymentMethod: form.paymentMethod || undefined,
-          reference: form.reference || undefined,
+          referenceNumber: form.reference || undefined,
           notes: form.notes || undefined,
         }),
       });
       if (!res.ok) {
         const err = await res.json();
-        setError(err.message ?? 'Failed to record repayment');
+        setError(Array.isArray(err.message) ? err.message.join(', ') : err.message ?? 'Failed to record repayment');
         return;
       }
       onSaved();
@@ -428,13 +430,13 @@ export default function LoanDetailPage() {
                   <tbody className="divide-y divide-slate-100">
                     {loan.repayments.map((r) => (
                       <tr key={r.id} className="hover:bg-slate-50">
-                        <td className="px-5 py-2 text-slate-700">{fmtDate(r.paymentDate)}</td>
+                        <td className="px-5 py-2 text-slate-700">{fmtDate(r.repaymentDate)}</td>
                         <td className="px-5 py-2 font-semibold text-slate-900">{loan.currency} {fmt(r.amount)}</td>
-                        <td className="px-5 py-2 text-slate-600">{r.principalPortion ? fmt(r.principalPortion) : '—'}</td>
-                        <td className="px-5 py-2 text-slate-600">{r.interestPortion ? fmt(r.interestPortion) : '—'}</td>
-                        <td className="px-5 py-2 text-slate-600">{r.penaltyAmount && parseFloat(r.penaltyAmount) > 0 ? fmt(r.penaltyAmount) : '—'}</td>
+                        <td className="px-5 py-2 text-slate-600">{r.principal ? fmt(r.principal) : '—'}</td>
+                        <td className="px-5 py-2 text-slate-600">{r.interest ? fmt(r.interest) : '—'}</td>
+                        <td className="px-5 py-2 text-slate-600">{r.penalties && parseFloat(r.penalties) > 0 ? fmt(r.penalties) : '—'}</td>
                         <td className="px-5 py-2 text-slate-500 text-xs">{r.paymentMethod?.replace(/_/g, ' ') ?? '—'}</td>
-                        <td className="px-5 py-2 font-mono text-xs text-slate-500">{r.reference ?? '—'}</td>
+                        <td className="px-5 py-2 font-mono text-xs text-slate-500">{r.referenceNumber ?? '—'}</td>
                         <td className="px-5 py-2 text-slate-500 text-xs">{r.user?.fullName ?? '—'}</td>
                       </tr>
                     ))}
