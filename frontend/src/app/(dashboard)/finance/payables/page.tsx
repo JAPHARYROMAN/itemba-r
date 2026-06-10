@@ -1102,7 +1102,17 @@ export default function PayablesPage() {
                 data.data.map((p) => (
                   <tr key={p.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono text-xs">
-                      {p.payableNumber ?? p.id.slice(0, 8)}
+                      <div className="space-y-1">
+                        <div>{p.payableNumber ?? p.id.slice(0, 8)}</div>
+                        <button
+                          type="button"
+                          onClick={() => setViewing(p)}
+                          className="font-sans text-[11px] font-semibold hover:underline"
+                          style={{ color: 'var(--aurora-primary-text)' }}
+                        >
+                          View details
+                        </button>
+                      </div>
                     </td>
                     <td className="px-4 py-3 font-medium">{p.supplierName}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmtTZS(p.amount)}</td>

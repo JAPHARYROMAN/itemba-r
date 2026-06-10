@@ -1172,7 +1172,17 @@ export default function ReceivablesPage() {
                 data.data.map((r) => (
                   <tr key={r.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono text-xs">
-                      {r.receivableNumber ?? r.id.slice(0, 8)}
+                      <div className="space-y-1">
+                        <div>{r.receivableNumber ?? r.id.slice(0, 8)}</div>
+                        <button
+                          type="button"
+                          onClick={() => setViewing(r)}
+                          className="font-sans text-[11px] font-semibold hover:underline"
+                          style={{ color: 'var(--aurora-primary-text)' }}
+                        >
+                          View details
+                        </button>
+                      </div>
                     </td>
                     <td className="px-4 py-3 font-medium">{r.customerName}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmtTZS(r.amount)}</td>
