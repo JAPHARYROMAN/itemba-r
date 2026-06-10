@@ -58,10 +58,6 @@ import { PurchaseOrdersModule } from './modules/purchase-orders/purchase-orders.
 import { OperationsDashboardModule } from './modules/operations-dashboard/operations-dashboard.module';
 import { OperationsReportsModule } from './modules/operations-reports/operations-reports.module';
 import { WestsidesModule } from './modules/westsides/westsides.module';
-import { ItembaWorkUnitsModule } from './modules/itemba-work-units/itemba-work-units.module';
-import { EquipmentUsageModule } from './modules/equipment-usage/equipment-usage.module';
-import { LaborRecordsModule } from './modules/labor-records/labor-records.module';
-import { LicensedBusinessUnitsModule } from './modules/licensed-business-units/licensed-business-units.module';
 import { BusinessLicensesModule } from './modules/business-licenses/business-licenses.module';
 
 // ── Milestone 9 — HR & Payroll ───────────────────────────────────────────────
@@ -121,7 +117,6 @@ import { ApprovalEngineModule } from './modules/approval-engine/approval-engine.
 import { SavedReportViewsModule } from './modules/saved-report-views/saved-report-views.module';
 import { ScheduledReportsModule } from './modules/scheduled-reports/scheduled-reports.module';
 import { UserDashboardPreferencesModule } from './modules/user-dashboard-preferences/user-dashboard-preferences.module';
-import { DataQualityModule } from './modules/data-quality/data-quality.module';
 
 // ── Milestone 13 — Integration, Webhooks, API Management, Mobile, Messaging ──
 import { IntegrationProvidersModule } from './modules/integration-providers/integration-providers.module';
@@ -147,7 +142,6 @@ import { SecurityEventsModule } from './modules/security-events/security-events.
 import { ActiveSessionsModule } from './modules/active-sessions/active-sessions.module';
 import { BackupJobsModule } from './modules/backup-jobs/backup-jobs.module';
 import { BackupRunsModule } from './modules/backup-runs/backup-runs.module';
-import { DataArchiveJobsModule } from './modules/data-archive-jobs/data-archive-jobs.module';
 import { SecurityModule } from './modules/security/security.module';
 import { BackupsModule } from './modules/backups/backups.module';
 
@@ -276,10 +270,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     OperationsDashboardModule,
     OperationsReportsModule,
     WestsidesModule,
-    ItembaWorkUnitsModule,
-    EquipmentUsageModule,
-    LaborRecordsModule,
-    LicensedBusinessUnitsModule,
     BusinessLicensesModule,
 
     // Milestone 9 — HR & Payroll
@@ -338,7 +328,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     SavedReportViewsModule,
     ScheduledReportsModule,
     UserDashboardPreferencesModule,
-    DataQualityModule,
     // Milestone 13 — Integration, Webhooks, API Management, Mobile, Messaging
     IntegrationProvidersModule,
     IntegrationConnectionsModule,
@@ -362,7 +351,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     ActiveSessionsModule,
     BackupJobsModule,
     BackupRunsModule,
-    DataArchiveJobsModule,
     SecurityModule,
     BackupsModule,
     // ── Milestone 14.5 — Advanced Accounting ───────────────────────────────────

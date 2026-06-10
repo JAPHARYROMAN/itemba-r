@@ -108,11 +108,6 @@ export default function ApprovalsDashboardPage() {
       href: '/approvals/delegations',
       desc: 'Approval continuity and cover assignments',
     },
-    {
-      label: 'Data Quality',
-      href: '/bi/data-quality',
-      desc: 'Resolve quality blockers before sign-off',
-    },
     { label: 'Tasks', href: '/tasks', desc: 'Follow-up actions and workflow remediation' },
   ];
 
