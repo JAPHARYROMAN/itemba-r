@@ -3,7 +3,6 @@ import { CompanyScopeService } from '../common/services';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { DataExportStatus } from '@prisma/client';
 import { DataExportsService } from './data-exports/data-exports.service';
-import { ReportRunsService } from './report-runs/report-runs.service';
 import { SavedReportViewsService } from './saved-report-views/saved-report-views.service';
 
 function authUser(overrides: Partial<AuthUser> = {}): AuthUser {
@@ -107,38 +106,6 @@ describe('Reports and exports company isolation (P0-01 regression)', () => {
       where: { id: 'export-A' },
       data: { status: DataExportStatus.IN_PROGRESS },
     });
-  });
-
-  it('report run list rejects another company filter before querying runs', async () => {
-    const prisma = makePrisma();
-    const service = new ReportRunsService(prisma, auditLogs(), new CompanyScopeService(prisma));
-
-    await expect(service.findAll(authUser(), { companyId: 'company-B' })).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
-    expect(prisma.reportRun.findMany).not.toHaveBeenCalled();
-  });
-
-  it('report run create rejects an unauthorized target company before writing', async () => {
-    const prisma = makePrisma();
-    const service = new ReportRunsService(prisma, auditLogs(), new CompanyScopeService(prisma));
-
-    await expect(
-      service.create({ reportDefinitionId: 'report-def-A', companyId: 'company-B' }, authUser()),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(prisma.reportRun.create).not.toHaveBeenCalled();
-  });
-
-  it('report run cancel requires write access to the run company', async () => {
-    const prisma = makePrisma();
-    prisma.reportRun.findFirst.mockResolvedValue({
-      id: 'run-B',
-      companyId: 'company-B',
-    });
-    const service = new ReportRunsService(prisma, auditLogs(), new CompanyScopeService(prisma));
-
-    await expect(service.cancel('run-B', authUser())).rejects.toBeInstanceOf(ForbiddenException);
-    expect(prisma.reportRun.update).not.toHaveBeenCalled();
   });
 
   it('saved report view list rejects another company filter before querying views', async () => {

@@ -118,19 +118,10 @@ import { InternalControlsModule } from './modules/internal-controls/internal-con
 import { ApprovalEngineModule } from './modules/approval-engine/approval-engine.module';
 
 // Milestone 12 — Advanced Reporting, BI Dashboards, Data Warehouse
-import { KpiIndicatorsModule } from './modules/kpi-indicators/kpi-indicators.module';
-import { KpiSnapshotsModule } from './modules/kpi-snapshots/kpi-snapshots.module';
-import { ReportDefinitionsModule } from './modules/report-definitions/report-definitions.module';
 import { SavedReportViewsModule } from './modules/saved-report-views/saved-report-views.module';
-import { ReportRunsModule } from './modules/report-runs/report-runs.module';
 import { ScheduledReportsModule } from './modules/scheduled-reports/scheduled-reports.module';
-import { DashboardDefinitionsModule } from './modules/dashboard-definitions/dashboard-definitions.module';
-import { DashboardWidgetsModule } from './modules/dashboard-widgets/dashboard-widgets.module';
 import { UserDashboardPreferencesModule } from './modules/user-dashboard-preferences/user-dashboard-preferences.module';
-import { AnalyticsSnapshotRunsModule } from './modules/analytics-snapshot-runs/analytics-snapshot-runs.module';
-import { ExecutiveInsightsModule } from './modules/executive-insights/executive-insights.module';
 import { DataQualityModule } from './modules/data-quality/data-quality.module';
-import { BiModule } from './modules/bi/bi.module';
 
 // ── Milestone 13 — Integration, Webhooks, API Management, Mobile, Messaging ──
 import { IntegrationProvidersModule } from './modules/integration-providers/integration-providers.module';
@@ -141,7 +132,6 @@ import { WebhookEventsModule } from './modules/webhook-events/webhook-events.mod
 import { ApiClientsModule } from './modules/api-clients/api-clients.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { ApiRequestLogsModule } from './modules/api-request-logs/api-request-logs.module';
-import { DeviceRegistrationsModule } from './modules/device-registrations/device-registrations.module';
 import { MobileSessionsModule } from './modules/mobile-sessions/mobile-sessions.module';
 import { OfflineSyncModule } from './modules/offline-sync/offline-sync.module';
 import { ExternalPaymentsModule } from './modules/external-payments/external-payments.module';
@@ -157,17 +147,8 @@ import { SecurityEventsModule } from './modules/security-events/security-events.
 import { ActiveSessionsModule } from './modules/active-sessions/active-sessions.module';
 import { BackupJobsModule } from './modules/backup-jobs/backup-jobs.module';
 import { BackupRunsModule } from './modules/backup-runs/backup-runs.module';
-import { RestoreTestsModule } from './modules/restore-tests/restore-tests.module';
-import { DisasterRecoveryModule } from './modules/disaster-recovery/disaster-recovery.module';
-import { SystemHealthModule } from './modules/system-health/system-health.module';
-import { SystemMetricsModule } from './modules/system-metrics/system-metrics.module';
-import { ErrorLogsModule } from './modules/error-logs/error-logs.module';
-import { RetentionPoliciesModule } from './modules/retention-policies/retention-policies.module';
 import { DataArchiveJobsModule } from './modules/data-archive-jobs/data-archive-jobs.module';
-import { ProductionReadinessModule } from './modules/production-readiness/production-readiness.module';
-import { EnvironmentConfigChecksModule } from './modules/environment-config-checks/environment-config-checks.module';
 import { SecurityModule } from './modules/security/security.module';
-import { MonitoringModule } from './modules/monitoring/monitoring.module';
 import { BackupsModule } from './modules/backups/backups.module';
 
 // ── Milestone 14.5 — Advanced Accounting ─────────────────────────────────────
@@ -208,49 +189,17 @@ import { PrintEngineModule } from './modules/print-engine/print-engine.module';
 // ── Milestone 14.5 — Business Automation ─────────────────────────────────────
 import { AutomationRulesModule } from './modules/automation-rules/automation-rules.module';
 import { AutomationRunsModule } from './modules/automation-runs/automation-runs.module';
-import { BusinessAutomationModule } from './modules/business-automation/business-automation.module';
 
 // ── Milestone 15 — Performance, Scalability, Deployment ──────────────────────
-import { PerformanceDashboardModule } from './modules/performance/performance.module';
-import { PerformanceTracesModule } from './modules/performance-traces/performance-traces.module';
 import { BackgroundJobsModule } from './modules/background-jobs/background-jobs.module';
 import { JobQueueConfigsModule } from './modules/job-queue-configs/job-queue-configs.module';
 import { JobWorkerModule } from './modules/job-worker/job-worker.module';
 import { CacheManagementModule } from './modules/cache-management/cache-management.module';
-import { ScalabilityModule } from './modules/scalability/scalability.module';
-import { LoadTestsModule } from './modules/load-tests/load-tests.module';
 import { DataIsolationModule } from './modules/data-isolation/data-isolation.module';
 import { DataIsolationTestsModule } from './modules/data-isolation-tests/data-isolation-tests.module';
 import { DataIsolationIssuesModule } from './modules/data-isolation-issues/data-isolation-issues.module';
-import { DeploymentModule } from './modules/deployment/deployment.module';
-import { DeploymentReleasesModule } from './modules/deployment-releases/deployment-releases.module';
-import { ProductionOpsModule } from './modules/production-ops/production-ops.module';
 
 // M16 - QA, Launch Readiness, Documentation, Training, Support
-import { QaModule } from './modules/qa/qa.module';
-import { QaTestSuitesModule } from './modules/qa-test-suites/qa-test-suites.module';
-import { QaTestCasesModule } from './modules/qa-test-cases/qa-test-cases.module';
-import { QaTestRunsModule } from './modules/qa-test-runs/qa-test-runs.module';
-import { QaTestResultsModule } from './modules/qa-test-results/qa-test-results.module';
-import { LaunchReadinessModule } from './modules/launch-readiness/launch-readiness.module';
-import { LaunchBlockersModule } from './modules/launch-blockers/launch-blockers.module';
-import { LaunchAssessmentsModule } from './modules/launch-assessments/launch-assessments.module';
-import { LaunchReadinessItemsModule } from './modules/launch-readiness-items/launch-readiness-items.module';
-import { DocumentationModule } from './modules/documentation/documentation.module';
-import { UserManualsModule } from './modules/user-manuals/user-manuals.module';
-import { HelpCenterModule } from './modules/help-center/help-center.module';
-import { HelpArticlesModule } from './modules/help-articles/help-articles.module';
-import { TrainingModule } from './modules/training/training.module';
-import { TrainingCoursesModule } from './modules/training-courses/training-courses.module';
-import { TrainingLessonsModule } from './modules/training-lessons/training-lessons.module';
-import { TrainingEnrollmentsModule } from './modules/training-enrollments/training-enrollments.module';
-import { GuidedWalkthroughsModule } from './modules/guided-walkthroughs/guided-walkthroughs.module';
-import { TrainingEnvironmentModule } from './modules/training-environment/training-environment.module';
-import { SupportModule } from './modules/support/support.module';
-import { SupportTicketsModule } from './modules/support-tickets/support-tickets.module';
-import { SupportTicketCommentsModule } from './modules/support-ticket-comments/support-ticket-comments.module';
-import { FinalQaDashboardModule } from './modules/final-qa-dashboard/final-qa-dashboard.module';
-import { GoLiveSignoffModule } from './modules/go-live-signoff/go-live-signoff.module';
 
 import { HealthController } from './common/health.controller';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -386,19 +335,10 @@ import { RolesGuard } from './common/guards/roles.guard';
     InternalControlsModule,
     ApprovalEngineModule,
     // Milestone 12 — Advanced Reporting, BI Dashboards, Data Warehouse
-    KpiIndicatorsModule,
-    KpiSnapshotsModule,
-    ReportDefinitionsModule,
     SavedReportViewsModule,
-    ReportRunsModule,
     ScheduledReportsModule,
-    DashboardDefinitionsModule,
-    DashboardWidgetsModule,
     UserDashboardPreferencesModule,
-    AnalyticsSnapshotRunsModule,
-    ExecutiveInsightsModule,
     DataQualityModule,
-    BiModule,
     // Milestone 13 — Integration, Webhooks, API Management, Mobile, Messaging
     IntegrationProvidersModule,
     IntegrationConnectionsModule,
@@ -408,7 +348,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     ApiClientsModule,
     ApiKeysModule,
     ApiRequestLogsModule,
-    DeviceRegistrationsModule,
     MobileSessionsModule,
     OfflineSyncModule,
     ExternalPaymentsModule,
@@ -423,17 +362,8 @@ import { RolesGuard } from './common/guards/roles.guard';
     ActiveSessionsModule,
     BackupJobsModule,
     BackupRunsModule,
-    RestoreTestsModule,
-    DisasterRecoveryModule,
-    SystemHealthModule,
-    SystemMetricsModule,
-    ErrorLogsModule,
-    RetentionPoliciesModule,
     DataArchiveJobsModule,
-    ProductionReadinessModule,
-    EnvironmentConfigChecksModule,
     SecurityModule,
-    MonitoringModule,
     BackupsModule,
     // ── Milestone 14.5 — Advanced Accounting ───────────────────────────────────
     PostingRulesModule,
@@ -473,47 +403,15 @@ import { RolesGuard } from './common/guards/roles.guard';
     // ── Milestone 14.5 — Business Automation ───────────────────────────────────
     AutomationRulesModule,
     AutomationRunsModule,
-    BusinessAutomationModule,
     // ── Milestone 15 — Performance, Scalability, Deployment ──────────────────
-    PerformanceDashboardModule,
-    PerformanceTracesModule,
     BackgroundJobsModule,
     JobQueueConfigsModule,
     JobWorkerModule,
     CacheManagementModule,
-    ScalabilityModule,
-    LoadTestsModule,
     DataIsolationModule,
     DataIsolationTestsModule,
     DataIsolationIssuesModule,
-    DeploymentModule,
-    DeploymentReleasesModule,
-    ProductionOpsModule,
     // M16 - QA, Launch Readiness, Documentation, Training, Support
-    QaModule,
-    QaTestSuitesModule,
-    QaTestCasesModule,
-    QaTestRunsModule,
-    QaTestResultsModule,
-    LaunchReadinessModule,
-    LaunchBlockersModule,
-    LaunchAssessmentsModule,
-    LaunchReadinessItemsModule,
-    DocumentationModule,
-    UserManualsModule,
-    HelpCenterModule,
-    HelpArticlesModule,
-    TrainingModule,
-    TrainingCoursesModule,
-    TrainingLessonsModule,
-    TrainingEnrollmentsModule,
-    GuidedWalkthroughsModule,
-    TrainingEnvironmentModule,
-    SupportModule,
-    SupportTicketsModule,
-    SupportTicketCommentsModule,
-    FinalQaDashboardModule,
-    GoLiveSignoffModule,
   ],
   controllers: [HealthController],
   providers: [
