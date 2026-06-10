@@ -14,10 +14,18 @@ export function EmptyState({
   action,
 }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-      {icon && <div className="mb-4 text-zinc-300">{icon}</div>}
-      <h3 className="text-[15px] font-medium text-zinc-700">{title}</h3>
-      <p className="text-[13px] text-zinc-400 mt-1 max-w-xs">{description}</p>
+    <div className="flex flex-col items-center justify-center px-4 py-16 text-center animate-fade-up">
+      {icon && (
+        <div className="mb-4" style={{ color: 'var(--aurora-text-disabled)' }}>
+          {icon}
+        </div>
+      )}
+      <h3 className="text-[15px] font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+        {title}
+      </h3>
+      <p className="mt-1 max-w-xs text-[13px]" style={{ color: 'var(--aurora-text-muted)' }}>
+        {description}
+      </p>
       {action && <div className="mt-5">{action}</div>}
     </div>
   );

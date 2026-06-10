@@ -1,7 +1,7 @@
 'use client';
 import React, { useState } from 'react';
-import { LoadingState } from './loading-state';
-import { EmptyState }   from './empty-state';
+import { EmptyState } from './empty-state';
+import { SkeletonTable } from './skeleton';
 
 export interface Column<T = Record<string, unknown>> {
   key: string;
@@ -31,11 +31,13 @@ interface DataTableProps<T = Record<string, unknown>> {
   onRowClick?: (row: T) => void;
   className?: string;
   compact?: boolean;
+  /** Skeleton rows shown while loading (matches the column count). Default 6. */
+  skeletonRows?: number;
 }
 
 export function DataTable<T = Record<string, unknown>>({
   columns, data, keyField, loading, emptyTitle, emptyDescription,
-  pagination, onRowClick, className = '', compact = false,
+  pagination, onRowClick, className = '', compact = false, skeletonRows = 6,
 }: DataTableProps<T>) {
   const [sortKey, setSortKey]     = useState<string | null>(null);
   const [sortDir, setSortDir]     = useState<'asc' | 'desc'>('asc');
@@ -80,25 +82,43 @@ export function DataTable<T = Record<string, unknown>>({
                 borderBottom: '1px solid var(--aurora-border)',
               }}
             >
-              {columns.map((col) => (
+              {columns.map((col) => {
+                const isActiveSort = col.sortable && sortKey === col.key;
+                return (
                 <th
                   key={col.key}
-                  style={{ width: col.width, color: 'var(--aurora-text-muted)' }}
-                  className={`${rowPad} font-medium text-[11px] uppercase tracking-wide whitespace-nowrap select-none
+                  style={{
+                    width: col.width,
+                    color: isActiveSort ? 'var(--aurora-primary)' : 'var(--aurora-text-muted)',
+                    boxShadow: isActiveSort ? 'inset 0 -2px 0 0 var(--aurora-primary)' : undefined,
+                  }}
+                  className={`${rowPad} font-medium text-[11px] uppercase tracking-wide whitespace-nowrap select-none transition-colors
                     ${col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : ''}
-                    ${col.sortable ? 'cursor-pointer' : ''}`}
+                    ${col.sortable ? 'cursor-pointer hover:text-[var(--aurora-text-secondary)]' : ''}`}
                   onClick={col.sortable ? () => handleSort(col.key) : undefined}
                 >
-                  <span className="inline-flex items-center gap-1">
+                  <span className={`inline-flex items-center gap-1 ${col.align === 'right' ? 'flex-row-reverse' : ''}`}>
                     {col.header}
-                    {col.sortable && sortKey === col.key && (
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d={sortDir === 'asc' ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'} />
+                    {col.sortable && (
+                      <svg
+                        className="w-3 h-3 transition-opacity"
+                        style={{ opacity: isActiveSort ? 1 : 0.3 }}
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d={isActiveSort && sortDir === 'asc' ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'}
+                        />
                       </svg>
                     )}
                   </span>
                 </th>
-              ))}
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -106,7 +126,7 @@ export function DataTable<T = Record<string, unknown>>({
               <tr
                 key={String(row[keyField])}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
-                className={`transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
+                className={`transition-colors hover:bg-[var(--aurora-bg-subtle)] ${onRowClick ? 'cursor-pointer' : ''}`}
                 style={{ borderTop: '1px solid var(--aurora-border)' }}
               >
                 {columns.map((col) => (
@@ -125,7 +145,11 @@ export function DataTable<T = Record<string, unknown>>({
           </tbody>
         </table>
 
-        {loading && <LoadingState rows={5} />}
+        {loading && (
+          <div className="p-3">
+            <SkeletonTable rows={skeletonRows} cols={columns.length || 4} />
+          </div>
+        )}
         {!loading && sorted.length === 0 && (
           <EmptyState title={emptyTitle} description={emptyDescription} />
         )}

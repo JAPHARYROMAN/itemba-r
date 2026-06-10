@@ -55,13 +55,13 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-[1200] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[1200] flex items-center justify-center p-4 animate-fade-in"
       style={{ background: 'var(--aurora-overlay)' }}
       onClick={dismissOnBackdrop ? onClose : undefined}
     >
       <div
         ref={panelRef}
-        className={`relative w-full ${SIZE_MAP[size]} rounded-2xl shadow-2xl flex flex-col max-h-[92vh]`}
+        className={`relative w-full ${SIZE_MAP[size]} rounded-2xl shadow-2xl flex flex-col max-h-[92vh] animate-scale-in`}
         style={{
           background: 'var(--aurora-card)',
           color: 'var(--aurora-text)',
