@@ -501,61 +501,6 @@ const NAV: NavItem[] = [
     ],
   },
   {
-    label: 'Construction',
-    iconKey: 'building',
-    permission: 'construction.dashboard.view',
-    children: [
-      {
-        href: '/construction',
-        label: 'Dashboard',
-        iconKey: 'barChart',
-        permission: 'construction.dashboard.view',
-      },
-      {
-        href: '/construction/projects',
-        label: 'Projects',
-        iconKey: 'clipboardList',
-        permission: 'construction_projects.view',
-      },
-      {
-        href: '/construction/sites',
-        label: 'Sites',
-        iconKey: 'building',
-        permission: 'construction_sites.view',
-      },
-      {
-        href: '/construction/boq',
-        label: 'BOQ / Budget',
-        iconKey: 'fileText',
-        permission: 'boq.view',
-      },
-      {
-        href: '/construction/materials',
-        label: 'Material Issues',
-        iconKey: 'box',
-        permission: 'project_materials.view',
-      },
-      {
-        href: '/construction/subcontractors',
-        label: 'Subcontractors',
-        iconKey: 'users',
-        permission: 'subcontractors.view',
-      },
-      {
-        href: '/construction/progress',
-        label: 'Progress Reports',
-        iconKey: 'barChart',
-        permission: 'project_progress.view',
-      },
-      {
-        href: '/construction/billing',
-        label: 'Project Billing',
-        iconKey: 'creditCard',
-        permission: 'project_billing.view',
-      },
-    ],
-  },
-  {
     label: 'Business Units',
     iconKey: 'building',
     permission: 'licensed_business_units.view',

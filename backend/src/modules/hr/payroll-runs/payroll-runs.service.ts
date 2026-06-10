@@ -4,7 +4,6 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { PayrollCalculatorService } from '../payroll-calculator/payroll-calculator.service';
 import { PayrollPostingsService } from '../payroll-postings/payroll-postings.service';
-import { ConstructionLabourCostService } from '../../construction-labour-cost/construction-labour-cost.service';
 import { CompanyScopeService } from '../../../common/services';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
 import { CreatePayrollRunDto } from './dto/create-payroll-run.dto';
@@ -39,7 +38,6 @@ export class PayrollRunsService {
     private readonly audit: AuditLogsService,
     private readonly calculator: PayrollCalculatorService,
     private readonly postings: PayrollPostingsService,
-    private readonly labourCost: ConstructionLabourCostService,
     private readonly companyScope: CompanyScopeService,
   ) {}
 
@@ -840,8 +838,6 @@ export class PayrollRunsService {
         await this.syncAdvanceRecoveries(id, tx);
         await this.settleSalesCommissions(id, tx);
         await this.postings.postPayment(id, user.id, tx);
-        await this.labourCost.allocateForRun(id, tx);
-        await this.postings.postLabourReclass(id, user.id, tx);
 
         return paid;
       },
@@ -979,7 +975,6 @@ export class PayrollRunsService {
         }
 
         await this.postings.reverseAccrual(id, user.id, reason, tx);
-        await this.labourCost.reverseForRun(id, tx);
 
         return tx.payrollRun.update({
           where: { id },

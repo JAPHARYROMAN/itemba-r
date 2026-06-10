@@ -71,14 +71,6 @@ import { TripExpensesModule } from './modules/trip-expenses/trip-expenses.module
 import { TripFuelUsageModule } from './modules/trip-fuel-usage/trip-fuel-usage.module';
 import { VehicleMaintenanceModule } from './modules/vehicle-maintenance/vehicle-maintenance.module';
 import { LogisticsDashboardModule } from './modules/logistics-dashboard/logistics-dashboard.module';
-import { ConstructionProjectsModule } from './modules/construction-projects/construction-projects.module';
-import { ConstructionSitesModule } from './modules/construction-sites/construction-sites.module';
-import { BOQItemsModule } from './modules/boq-items/boq-items.module';
-import { ProjectMaterialIssuesModule } from './modules/project-material-issues/project-material-issues.module';
-import { SubcontractorsModule } from './modules/subcontractors/subcontractors.module';
-import { ProjectProgressModule } from './modules/project-progress/project-progress.module';
-import { ProjectBillingModule } from './modules/project-billing/project-billing.module';
-import { ConstructionDashboardModule } from './modules/construction-dashboard/construction-dashboard.module';
 import { LicensedBusinessUnitsModule } from './modules/licensed-business-units/licensed-business-units.module';
 import { BusinessLicensesModule } from './modules/business-licenses/business-licenses.module';
 
@@ -97,7 +89,6 @@ import { MedicalExamRecordsModule } from './modules/hr/medical-exam-records/medi
 import { EmploymentDisputesModule } from './modules/hr/employment-disputes/employment-disputes.module';
 import { DisciplinaryActionsModule } from './modules/hr/disciplinary-actions/disciplinary-actions.module';
 import { CcmNoticesModule } from './modules/hr/ccm-notices/ccm-notices.module';
-import { ConstructionLabourCostModule } from './modules/construction-labour-cost/construction-labour-cost.module';
 import { EmployeeAssignmentsModule } from './modules/hr/employee-assignments/employee-assignments.module';
 import { EmploymentContractsModule } from './modules/hr/employment-contracts/employment-contracts.module';
 import { WorkShiftsModule } from './modules/hr/work-shifts/work-shifts.module';
@@ -359,14 +350,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     TripFuelUsageModule,
     VehicleMaintenanceModule,
     LogisticsDashboardModule,
-    ConstructionProjectsModule,
-    ConstructionSitesModule,
-    BOQItemsModule,
-    ProjectMaterialIssuesModule,
-    SubcontractorsModule,
-    ProjectProgressModule,
-    ProjectBillingModule,
-    ConstructionDashboardModule,
     LicensedBusinessUnitsModule,
     BusinessLicensesModule,
 
@@ -385,7 +368,6 @@ import { RolesGuard } from './common/guards/roles.guard';
     EmploymentDisputesModule,
     DisciplinaryActionsModule,
     CcmNoticesModule,
-    ConstructionLabourCostModule,
     EmployeeAssignmentsModule,
     EmploymentContractsModule,
     WorkShiftsModule,

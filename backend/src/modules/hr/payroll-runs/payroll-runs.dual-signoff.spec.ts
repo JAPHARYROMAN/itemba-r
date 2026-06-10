@@ -86,17 +86,12 @@ function makeServiceWithRun(initial: Partial<RunRow> = {}) {
     postRun: jest.fn().mockImplementation(async (id: string) => postedRuns.push(id)),
     reverseAccrual: jest.fn().mockResolvedValue(null),
     postPayment: jest.fn().mockResolvedValue(null),
-    postLabourReclass: jest.fn().mockResolvedValue(null),
   };
-  const labourCost: any = {
-    allocateForRun: jest.fn().mockResolvedValue({ allocated: 0, skipped: 0 }),
-    reverseForRun: jest.fn().mockResolvedValue({ reversed: 0 }),
-  };
-  const service = new PayrollRunsService(prisma, audit, {} as any, postings, labourCost, {
+  const service = new PayrollRunsService(prisma, audit, {} as any, postings, {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
   } as any);
 
-  return { service, row, postedRuns, postings, labourCost, tx, audit };
+  return { service, row, postedRuns, postings, tx, audit };
 }
 
 describe('PayrollRunsService dual sign-off', () => {
@@ -148,8 +143,8 @@ describe('PayrollRunsService dual sign-off', () => {
     expect(postedRuns).toHaveLength(0);
   });
 
-  it('reverses accrual postings and labour allocations before cancelling an approved run', async () => {
-    const { service, row, postings, labourCost } = makeServiceWithRun({
+  it('reverses accrual postings before cancelling an approved run', async () => {
+    const { service, row, postings } = makeServiceWithRun({
       status: 'APPROVED',
       journalEntryId: 'je-1',
       hrApprovedById: 'hr-user',
@@ -164,19 +159,17 @@ describe('PayrollRunsService dual sign-off', () => {
       'wrong period',
       expect.any(Object),
     );
-    expect(labourCost.reverseForRun).toHaveBeenCalledWith('run-1', expect.any(Object));
     expect(row.status).toBe('CANCELLED');
     expect(result?.status).toBe('CANCELLED');
   });
 
   it('treats repeat payroll pay calls as idempotent no-ops', async () => {
-    const { service, postings, labourCost, audit } = makeServiceWithRun({ status: 'PAID' });
+    const { service, postings, audit } = makeServiceWithRun({ status: 'PAID' });
 
     const result = await service.pay('run-1', user('pay-user'));
 
     expect(result.status).toBe('PAID');
     expect(postings.postPayment).not.toHaveBeenCalled();
-    expect(labourCost.allocateForRun).not.toHaveBeenCalled();
     expect(audit.log).not.toHaveBeenCalled();
   });
 
