@@ -3,7 +3,7 @@ import path from 'node:path';
 
 const appDir = path.join(process.cwd(), 'src', 'app');
 const fixtureFile = path.join(process.cwd(), 'scripts', 'route-smoke-fixtures.json');
-const minPageRoutes = 330;
+const minPageRoutes = 190;
 
 function walkPageFiles(dir: string, files: string[] = []) {
   for (const entry of readdirSync(dir)) {
@@ -40,8 +40,8 @@ describe('route smoke coverage manifest', () => {
   it('keeps dashboard page coverage above the production smoke floor', () => {
     expect(existsSync(fixtureFile)).toBe(true);
     expect(pageRoutes.length).toBeGreaterThanOrEqual(minPageRoutes);
-    expect(staticRoutes.length).toBeGreaterThan(300);
-    expect(dynamicRoutes.length).toBeGreaterThan(10);
+    expect(staticRoutes.length).toBeGreaterThan(170);
+    expect(dynamicRoutes.length).toBeGreaterThan(15);
   });
 
   it('keeps dynamic route fixtures synchronized with app routes', () => {

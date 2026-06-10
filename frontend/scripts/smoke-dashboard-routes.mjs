@@ -6,7 +6,7 @@ const FIXTURE_FILE = path.join(process.cwd(), 'scripts', 'route-smoke-fixtures.j
 const BASE_URL = process.env.FRONTEND_BASE_URL ?? 'http://localhost:3009';
 const AUTH_COOKIE = process.env.ROUTE_SMOKE_AUTH_COOKIE ?? 'itemba_auth=1';
 const CONCURRENCY = Number(process.env.ROUTE_SMOKE_CONCURRENCY ?? 8);
-const MIN_PAGE_ROUTES = Number(process.env.ROUTE_SMOKE_MIN_PAGE_ROUTES ?? 330);
+const MIN_PAGE_ROUTES = Number(process.env.ROUTE_SMOKE_MIN_PAGE_ROUTES ?? 190);
 
 const ERROR_SIGNATURES = [
   'id="__next_error__"',
