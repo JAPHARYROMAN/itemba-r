@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Image from 'next/image';
 import { Card, PageHeader, StatCard, showToast } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
 
@@ -976,7 +977,14 @@ export default function WestsideReportsPage() {
 
       <Card className="print-area overflow-hidden" padding="none">
         <div className="print-letterhead px-5 pt-5">
-          <img src="/brand/itemba-group-logo.png" alt="ITEMBA Group logo" />
+          <Image
+            src="/brand/itemba-group-logo.png"
+            alt="ITEMBA Group logo"
+            width={72}
+            height={72}
+            className="object-contain"
+            unoptimized
+          />
           <div>
             <div className="text-xl font-bold">{currentCompanyLabel ?? 'ITEMBA Group'}</div>
             <div className="text-sm">{activeReport.title}</div>

@@ -1,4 +1,5 @@
 import React from 'react';
+import Image from 'next/image';
 
 export interface DocumentOrganization {
   name: string;
@@ -106,10 +107,13 @@ export function DocumentShell({
           <div className="flex min-w-0 gap-4">
             <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center border-2 border-slate-900 bg-white p-1 text-sm font-bold uppercase text-slate-900">
               {organization.logoUrl ? (
-                <img
+                <Image
                   src={organization.logoUrl}
                   alt={`${groupName} logo`}
+                  width={64}
+                  height={64}
                   className="h-full w-full object-contain"
+                  unoptimized
                 />
               ) : (
                 (organization.logoText ?? initials(groupName))

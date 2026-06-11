@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DocumentPreviewLink } from '@/components/documents';
 import {
   Card,
@@ -508,14 +508,20 @@ function SalesOrderModal({
   const branchOptions = form.divisionId
     ? branches.filter((branch) => branch.divisionId === form.divisionId)
     : [];
-  const selectedBranch = branches.find((branch) => branch.id === form.branchId) ?? null;
-  const receiptAccounts =
-    form.paymentMethod === 'CREDIT'
-      ? []
-      : sortReceiptAccounts(
-          cashAccounts.filter((account) => account.isActive !== false),
-          selectedBranch,
-        );
+  const selectedBranch = useMemo(
+    () => branches.find((branch) => branch.id === form.branchId) ?? null,
+    [branches, form.branchId],
+  );
+  const receiptAccounts = useMemo(
+    () =>
+      form.paymentMethod === 'CREDIT'
+        ? []
+        : sortReceiptAccounts(
+            cashAccounts.filter((account) => account.isActive !== false),
+            selectedBranch,
+          ),
+    [cashAccounts, form.paymentMethod, selectedBranch],
+  );
 
   useEffect(() => {
     setForm((current) => {
@@ -532,7 +538,7 @@ function SalesOrderModal({
       }
       return current;
     });
-  }, [cashAccounts, form.paymentMethod, form.divisionId, form.branchId]);
+  }, [cashAccounts, form.paymentMethod, receiptAccounts]);
 
   const handleSubmit = async () => {
     if (!form.companyId) {

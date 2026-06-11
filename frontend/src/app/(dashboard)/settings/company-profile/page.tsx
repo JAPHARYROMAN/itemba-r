@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Image from 'next/image';
 import { Card, PageHeader, FormInput, FormSelect, FormTextarea, DateInput, Btn } from '@/components/ui';
 import { backendGet, backendPage, backendPatch, backendPut, backendUpload } from '@/lib/api-client';
 import { documentOrganization } from '@/components/documents';
@@ -371,7 +372,14 @@ export default function CompanyProfilePage() {
                 <div className="flex items-center gap-3">
                   <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center border border-slate-300 bg-white p-1 text-xs font-bold uppercase text-slate-700">
                     {companyForm.logoUrl ? (
-                      <img src={companyForm.logoUrl} alt="Company logo" className="h-full w-full object-contain" />
+                      <Image
+                        src={companyForm.logoUrl}
+                        alt="Company logo"
+                        width={56}
+                        height={56}
+                        className="h-full w-full object-contain"
+                        unoptimized
+                      />
                     ) : (
                       initials(companyForm.name || company?.group?.name || 'IR')
                     )}
@@ -610,7 +618,14 @@ function LetterheadPreview({ organization }: { organization: ReturnType<typeof d
         <div className="flex gap-4 border-b-2 border-slate-900 pb-4">
           <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center border-2 border-slate-900 p-1 text-sm font-bold uppercase">
             {organization.logoUrl ? (
-              <img src={organization.logoUrl} alt="Letterhead logo" className="h-full w-full object-contain" />
+              <Image
+                src={organization.logoUrl}
+                alt="Letterhead logo"
+                width={64}
+                height={64}
+                className="h-full w-full object-contain"
+                unoptimized
+              />
             ) : (
               initials(organization.groupName ?? organization.name)
             )}
