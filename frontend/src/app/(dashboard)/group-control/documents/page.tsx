@@ -201,7 +201,7 @@ export default function DocumentsPage() {
 
       {expiring60.length > 0 && (
         <Card className="p-4 border-amber-300 bg-amber-50">
-          <div className="text-sm font-semibold text-amber-900 mb-2">⚠ {expiring60.length} document(s) expiring within 60 days</div>
+          <div className="text-sm font-semibold text-amber-900 mb-2">{expiring60.length} document(s) expiring within 60 days</div>
           <ul className="space-y-1 text-xs">
             {expiring60.slice(0, 5).map((d) => (
               <li key={d.id}>
@@ -268,7 +268,7 @@ export default function DocumentsPage() {
                     <tr key={d.id} className={rowCls}>
                       <td className="px-4 py-3">
                         <Link href={`/group-control/documents/${d.id}`} className="text-brand-600 hover:underline">
-                          {d.isConfidential && <span className="mr-1">🔒</span>}{d.title}
+                          {d.isConfidential && <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">Confidential</span>}{d.title}
                         </Link>
                         {d.documentCode && <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{d.documentCode}</div>}
                       </td>

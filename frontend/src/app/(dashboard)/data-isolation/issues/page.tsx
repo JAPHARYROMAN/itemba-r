@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { PageSpinner } from '@/components/ui';
 
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-200 text-red-900',
@@ -84,7 +85,7 @@ export default function DataIsolationIssuesPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">Loading...</td></tr>
+              <tr><td colSpan={8} className="px-4 py-6"><PageSpinner label="Loading records" className="py-8" /></td></tr>
             ) : issues.length === 0 ? (
               <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">No issues found</td></tr>
             ) : issues.map((issue: any) => (

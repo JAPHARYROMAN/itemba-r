@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Card } from '@/components/ui';
+import { AppIcon, type AppIconName, Card } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { Modal } from '@/components/aurora/overlays/Modal';
 import { FormInput } from '@/components/aurora/forms/FormInput';
@@ -109,10 +109,17 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-const BRANCH_TYPE_ICONS: Record<string, string> = {
-  BRANCH: '🏪', SITE: '🏗️', PROJECT: '📋', FARM: '🌾',
-  WAREHOUSE: '🏭', FUEL_STATION: '⛽', OFFICE: '🏢',
-  PARKING_FACILITY: '🅿️', HOSPITALITY_FACILITY: '🏨', OTHER: '📍',
+const BRANCH_TYPE_ICONS: Record<string, AppIconName> = {
+  BRANCH: 'branch',
+  SITE: 'branch',
+  PROJECT: 'document',
+  FARM: 'inventory',
+  WAREHOUSE: 'inventory',
+  FUEL_STATION: 'cash',
+  OFFICE: 'company',
+  PARKING_FACILITY: 'branch',
+  HOSPITALITY_FACILITY: 'company',
+  OTHER: 'branch',
 };
 
 const DIVISION_TYPE_COLORS: Record<string, string> = {
@@ -188,7 +195,7 @@ export default function CompanyDetailPage() {
     <>
       <main className="p-6 flex-1 bg-slate-50 min-h-screen">
         <Card className="p-6">
-          <div className="text-red-600">⚠ {error ?? 'Company not found'}</div>
+          <div className="text-red-600">{error ?? 'Company not found'}</div>
           <button onClick={() => router.back()} className="mt-3 text-sm text-blue-600 hover:underline">← Back</button>
         </Card>
       </main>
@@ -277,7 +284,8 @@ export default function CompanyDetailPage() {
                 href={`/group-control?companyId=${company.id}`}
                 className="px-3 py-1.5 text-sm bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors flex items-center gap-1.5"
               >
-                🔐 Sensitive Records
+                <AppIcon name="lock" size={14} />
+                Sensitive Records
               </Link>
             )}
           </div>
@@ -292,17 +300,17 @@ export default function CompanyDetailPage() {
         {/* Summary Metric Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
           {[
-            { label: 'Divisions', value: company._count.divisions, icon: '🏢' },
-            { label: 'Bank Accounts', value: company._count.bankAccounts, icon: '🏦', sensitive: true },
-            { label: 'Loans', value: company._count.loans, icon: '💰', sensitive: true },
-            { label: 'Debts', value: company._count.debts, icon: '📉', sensitive: true },
-            { label: 'Contracts', value: company._count.contracts, icon: '📄', sensitive: true },
-            { label: 'Fixed Assets', value: company._count.fixedAssets, icon: '🏗️', sensitive: true },
+            { label: 'Divisions', value: company._count.divisions, icon: 'company' as AppIconName },
+            { label: 'Bank Accounts', value: company._count.bankAccounts, icon: 'bank' as AppIconName, sensitive: true },
+            { label: 'Loans', value: company._count.loans, icon: 'loan' as AppIconName, sensitive: true },
+            { label: 'Debts', value: company._count.debts, icon: 'trendDown' as AppIconName, sensitive: true },
+            { label: 'Contracts', value: company._count.contracts, icon: 'document' as AppIconName, sensitive: true },
+            { label: 'Fixed Assets', value: company._count.fixedAssets, icon: 'inventory' as AppIconName, sensitive: true },
           ].map(({ label, value, icon, sensitive }) => {
             if (sensitive && !hasPermission('bank-accounts.read')) return null;
             return (
               <Card key={label} className="p-3 text-center">
-                <div className="text-xl">{icon}</div>
+                <AppIcon name={icon} size={22} className="mx-auto text-slate-500" />
                 <div className="text-xl font-bold text-slate-900 mt-0.5">{value}</div>
                 <div className="text-xs text-slate-400">{label}</div>
               </Card>
@@ -583,7 +591,8 @@ function OverviewTab({ company }: { company: CompanyDetail }) {
           </dl>
         ) : (
           <div className="text-sm text-amber-600 flex items-center gap-2">
-            ⚠ Legal profile not yet configured.
+            <AppIcon name="alert" size={15} />
+            Legal profile not yet configured.
           </div>
         )}
       </Card>
@@ -888,7 +897,11 @@ function DivisionsTab({
                                 {branch.address && <div className="text-xs text-slate-500">{branch.address}</div>}
                               </td>
                               <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
-                                <span className="mr-1.5">{BRANCH_TYPE_ICONS[branch.type] ?? '📍'}</span>
+                                <AppIcon
+                                  name={BRANCH_TYPE_ICONS[branch.type] ?? 'branch'}
+                                  size={14}
+                                  className="mr-1.5 inline-block align-[-2px]"
+                                />
                                 {enumLabel(branch.type)}
                               </td>
                               <td className="px-4 py-3 text-slate-600">{branch.location || '—'}</td>
@@ -1311,12 +1324,12 @@ function BranchEditorModal({
 // ── Documents Tab ─────────────────────────────────────────────────────────────
 
 function DocumentsTab({ documents, companyId }: { documents: Document[]; companyId: string }) {
-  const MIME_ICONS: Record<string, string> = {
-    'application/pdf': '📄',
-    'image/jpeg': '🖼️',
-    'image/png': '🖼️',
-    'application/msword': '📝',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '📝',
+  const MIME_ICONS: Record<string, AppIconName> = {
+    'application/pdf': 'document',
+    'image/jpeg': 'document',
+    'image/png': 'document',
+    'application/msword': 'document',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'document',
   };
 
   if (documents.length === 0) return (
@@ -1341,7 +1354,10 @@ function DocumentsTab({ documents, companyId }: { documents: Document[]; company
           {documents.map((doc) => (
             <tr key={doc.id} className="hover:bg-slate-50">
               <td className="px-5 py-3 font-medium text-slate-800">
-                {MIME_ICONS[doc.mimeType] ?? '📎'} {doc.title}
+                <span className="inline-flex items-center gap-2">
+                  <AppIcon name={MIME_ICONS[doc.mimeType] ?? 'document'} size={14} />
+                  {doc.title}
+                </span>
               </td>
               <td className="px-5 py-3 text-slate-500 text-xs font-mono">{doc.mimeType}</td>
               <td className="px-5 py-3 text-slate-500">{doc.ownerType}</td>
@@ -1376,7 +1392,7 @@ function LegalProfileTab({
       <>
         <Card className="p-8">
           <div className="text-center mb-4">
-            <div className="text-4xl mb-2">📋</div>
+            <AppIcon name="document" size={36} className="mx-auto mb-2 text-slate-400" />
             <div className="font-semibold text-slate-700">No Legal Profile</div>
             <div className="text-sm text-slate-400 mt-1 max-w-md mx-auto">
               This company does not yet have a legal profile configured. Add the BRELA
@@ -1427,7 +1443,8 @@ function LegalProfileTab({
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <Card className="p-5">
             <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-              <span>🏛️</span> Registration Details
+              <AppIcon name="document" size={16} />
+              Registration Details
             </h3>
             <dl className="space-y-2.5 text-sm">
               <ProfileRow label="Registered Name" value={profile.registeredName} />
@@ -1443,7 +1460,8 @@ function LegalProfileTab({
 
           <Card className="p-5">
             <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-              <span>🏢</span> Address & Tax
+              <AppIcon name="company" size={16} />
+              Address & Tax
             </h3>
             <dl className="space-y-2.5 text-sm">
               <ProfileRow label="Registered Address" value={profile.registeredAddress} />

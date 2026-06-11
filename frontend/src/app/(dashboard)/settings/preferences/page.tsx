@@ -4,13 +4,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { Card, PageHeader, FormSelect, Btn, SkeletonCardGrid, showToast } from '@/components/ui';
 import { FormSwitch } from '@/components/aurora/forms/FormSwitch';
 import { useMotionPreference } from '@/hooks/use-motion-preference';
+import { useTheme, type ThemeMode } from '@/hooks/use-theme';
 
 interface Company { id: string; name: string; code: string; }
 interface Division { id: string; name: string; code: string; companyId: string; }
 interface Branch { id: string; name: string; code: string; divisionId: string; }
 
 interface UserPreference {
-  theme: string;
+  theme: ThemeMode;
   density: string;
   locale: string;
   timezone: string;
@@ -23,7 +24,7 @@ interface UserPreference {
   updatedAt?: string;
 }
 
-const THEMES = [
+const THEMES: Array<{ value: ThemeMode; label: string }> = [
   { value: 'system', label: 'System (follow OS)' },
   { value: 'light', label: 'Light' },
   { value: 'dark', label: 'Dark' },
@@ -68,7 +69,12 @@ const DEFAULTS: UserPreference = {
   persisted: false,
 };
 
+function normalizeTheme(value: unknown): ThemeMode {
+  return value === 'light' || value === 'dark' || value === 'system' ? value : 'system';
+}
+
 export default function UserPreferencesPage() {
+  const { setMode: setThemeMode } = useTheme();
   const {
     mode: motionMode,
     setMode: setMotionMode,
@@ -128,7 +134,9 @@ export default function UserPreferencesPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       const data: UserPreference = json.data ?? json;
-      setPrefs({ ...DEFAULTS, ...data });
+      const nextPrefs = { ...DEFAULTS, ...data, theme: normalizeTheme(data.theme) };
+      setPrefs(nextPrefs);
+      setThemeMode(nextPrefs.theme);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load preferences';
       setError(message);
@@ -136,7 +144,7 @@ export default function UserPreferencesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setThemeMode]);
 
   useEffect(() => { loadPrefs(); }, [loadPrefs]);
 
@@ -151,6 +159,7 @@ export default function UserPreferencesPage() {
       }
       return { ...p, [key]: value };
     });
+    if (key === 'theme') setThemeMode(normalizeTheme(value));
     setInfo('');
   };
 
@@ -179,7 +188,9 @@ export default function UserPreferencesPage() {
       }
       const json = await res.json();
       const data: UserPreference = json.data ?? json;
-      setPrefs({ ...DEFAULTS, ...data });
+      const nextPrefs = { ...DEFAULTS, ...data, theme: normalizeTheme(data.theme) };
+      setPrefs(nextPrefs);
+      setThemeMode(nextPrefs.theme);
       setInfo('Preferences saved.');
       showToast('success', 'Preferences saved', 'Your account preferences were updated.');
     } catch (err) {
@@ -197,6 +208,7 @@ export default function UserPreferencesPage() {
       const res = await fetch('/api/backend/user-preferences/me', { method: 'DELETE' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setPrefs(DEFAULTS);
+      setThemeMode(DEFAULTS.theme);
       setInfo('Preferences reset to defaults.');
       showToast('success', 'Preferences reset', 'Default preferences are active again.');
     } catch (err) {
@@ -234,7 +246,7 @@ export default function UserPreferencesPage() {
               <FormSelect
                 label="Theme"
                 value={prefs.theme}
-                onChange={(e) => update('theme', e.target.value)}
+                onChange={(e) => update('theme', normalizeTheme(e.target.value))}
                 options={THEMES}
                 hint="Light / Dark / follow OS."
               />

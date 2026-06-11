@@ -471,7 +471,7 @@ function PayrollRunsContent() {
                 </span>
                 {filesManifest.summary.unmapped > 0 && (
                   <span className="text-amber-700">
-                    ⚠ unmapped: <strong>{filesManifest.summary.unmapped}</strong>
+                    Unmapped: <strong>{filesManifest.summary.unmapped}</strong>
                   </span>
                 )}
               </div>

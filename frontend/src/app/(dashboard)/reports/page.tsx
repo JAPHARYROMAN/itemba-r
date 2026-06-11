@@ -864,7 +864,7 @@ function ReportCard({
               className="rounded-md border px-2 py-1 text-xs"
               style={{ borderColor: 'var(--aurora-border)', color: isFavorite ? 'var(--aurora-warning-text)' : 'var(--aurora-text-muted)' }}
             >
-              {isFavorite ? '★' : '☆'}
+              {isFavorite ? 'Pinned' : 'Pin'}
             </button>
           )}
           <Badge tone={badgeToneForStatus(entry.lifecycleStatus)}>{STATUS_LABELS[entry.lifecycleStatus]}</Badge>

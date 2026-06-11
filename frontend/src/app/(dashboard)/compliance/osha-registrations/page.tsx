@@ -268,7 +268,7 @@ export default function OshaRegistrationsPage() {
       {expired.length > 0 && (
         <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800">
           <strong>
-            ⚠ {expired.length} certificate{expired.length === 1 ? '' : 's'} expired
+            {expired.length} certificate{expired.length === 1 ? '' : 's'} expired
           </strong>{' '}
           — renew or update status before the next OSHA inspection.
         </div>

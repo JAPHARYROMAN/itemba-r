@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Card, PageHeader, SkeletonCardGrid, showToast } from '@/components/ui';
+import { AppIcon, type AppIconName, Card, PageHeader, SkeletonCardGrid, showToast } from '@/components/ui';
 
 type SettingCategory =
   | 'ORGANIZATION'
@@ -39,20 +39,20 @@ interface CatalogResponse {
   entries: SettingEntry[];
 }
 
-const CATEGORY_META: Record<SettingCategory, { label: string; color: string; icon: string }> = {
-  ORGANIZATION: { label: 'Organization', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: '◈' },
-  USERS_ACCESS: { label: 'Users & Access', color: 'bg-violet-50 text-violet-700 border-violet-200', icon: '◉' },
-  ACCOUNTING: { label: 'Accounting', color: 'bg-sky-50 text-sky-700 border-sky-200', icon: '◐' },
-  HR: { label: 'HR', color: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200', icon: '◇' },
-  COMPLIANCE: { label: 'Compliance & Tax', color: 'bg-amber-50 text-amber-700 border-amber-200', icon: '✓' },
-  OPERATIONS: { label: 'Operations Catalog', color: 'bg-teal-50 text-teal-700 border-teal-200', icon: '◭' },
-  TEMPLATES: { label: 'Templates', color: 'bg-rose-50 text-rose-700 border-rose-200', icon: '▣' },
-  NOTIFICATIONS: { label: 'Notifications', color: 'bg-orange-50 text-orange-700 border-orange-200', icon: '◆' },
-  INTEGRATIONS: { label: 'Integrations', color: 'bg-indigo-50 text-indigo-700 border-indigo-200', icon: '◢' },
-  APPROVALS: { label: 'Approvals', color: 'bg-lime-50 text-lime-700 border-lime-200', icon: '➤' },
-  LOCALIZATION: { label: 'Localization', color: 'bg-cyan-50 text-cyan-700 border-cyan-200', icon: '✿' },
-  PREFERENCES: { label: 'My Preferences', color: 'bg-zinc-100 text-zinc-700 border-zinc-200', icon: '◇' },
-  SYSTEM: { label: 'System', color: 'bg-slate-100 text-slate-700 border-slate-200', icon: '◆' },
+const CATEGORY_META: Record<SettingCategory, { label: string; color: string; icon: AppIconName }> = {
+  ORGANIZATION: { label: 'Organization', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: 'company' },
+  USERS_ACCESS: { label: 'Users & Access', color: 'bg-violet-50 text-violet-700 border-violet-200', icon: 'customers' },
+  ACCOUNTING: { label: 'Accounting', color: 'bg-sky-50 text-sky-700 border-sky-200', icon: 'finance' },
+  HR: { label: 'HR', color: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200', icon: 'hr' },
+  COMPLIANCE: { label: 'Compliance & Tax', color: 'bg-amber-50 text-amber-700 border-amber-200', icon: 'tax' },
+  OPERATIONS: { label: 'Operations Catalog', color: 'bg-teal-50 text-teal-700 border-teal-200', icon: 'inventory' },
+  TEMPLATES: { label: 'Templates', color: 'bg-rose-50 text-rose-700 border-rose-200', icon: 'document' },
+  NOTIFICATIONS: { label: 'Notifications', color: 'bg-orange-50 text-orange-700 border-orange-200', icon: 'bell' },
+  INTEGRATIONS: { label: 'Integrations', color: 'bg-indigo-50 text-indigo-700 border-indigo-200', icon: 'transfer' },
+  APPROVALS: { label: 'Approvals', color: 'bg-lime-50 text-lime-700 border-lime-200', icon: 'approved' },
+  LOCALIZATION: { label: 'Localization', color: 'bg-cyan-50 text-cyan-700 border-cyan-200', icon: 'settings' },
+  PREFERENCES: { label: 'My Preferences', color: 'bg-zinc-100 text-zinc-700 border-zinc-200', icon: 'settings' },
+  SYSTEM: { label: 'System', color: 'bg-slate-100 text-slate-700 border-slate-200', icon: 'settings' },
 };
 
 const SCOPE_META: Record<SettingScope, { label: string; color: string }> = {
@@ -185,7 +185,11 @@ export default function MasterSettingsPage() {
                 category === c ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
               }`}
             >
-              {CATEGORY_META[c].icon} {CATEGORY_META[c].label} <span className="ml-1 opacity-70">{catalog.categoryCounts[c] ?? 0}</span>
+              <span className="inline-flex items-center gap-1.5">
+                <AppIcon name={CATEGORY_META[c].icon} size={13} />
+                {CATEGORY_META[c].label}
+                <span className="ml-1 opacity-70">{catalog.categoryCounts[c] ?? 0}</span>
+              </span>
             </button>
           ))}
         </div>
@@ -203,8 +207,9 @@ export default function MasterSettingsPage() {
         <Card key={cat} className="overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className={`inline-flex items-center px-2 py-0.5 border rounded-full text-[11px] font-semibold ${CATEGORY_META[cat].color}`}>
-                {CATEGORY_META[cat].icon} {CATEGORY_META[cat].label}
+              <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 border rounded-full text-[11px] font-semibold ${CATEGORY_META[cat].color}`}>
+                <AppIcon name={CATEGORY_META[cat].icon} size={12} />
+                {CATEGORY_META[cat].label}
               </span>
               <span className="text-xs text-slate-500">
                 {entries.length} setting{entries.length === 1 ? '' : 's'}

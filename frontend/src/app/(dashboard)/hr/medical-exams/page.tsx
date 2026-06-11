@@ -265,7 +265,7 @@ export default function MedicalExamsPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {expired.length > 0 && (
           <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800">
-            <strong>⚠ {expired.length} expired</strong> — schedule renewal exams immediately.
+            <strong>{expired.length} expired</strong> - schedule renewal exams immediately.
           </div>
         )}
         {expiringSoon.length > 0 && (

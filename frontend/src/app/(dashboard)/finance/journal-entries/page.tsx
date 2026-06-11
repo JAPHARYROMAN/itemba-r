@@ -258,7 +258,7 @@ function JournalModal({ mode, initial, companies, onClose, onSaved }: {
             </table>
           </div>
           <div className={`mt-2 text-xs font-medium ${balanced ? 'text-emerald-600' : 'text-red-600'}`}>
-            {balanced ? '✓ Balanced' : `Difference: ${fmtMoney(Math.abs(totalDebit - totalCredit))}`}
+            {balanced ? 'Balanced' : `Difference: ${fmtMoney(Math.abs(totalDebit - totalCredit))}`}
           </div>
         </div>
       </div>

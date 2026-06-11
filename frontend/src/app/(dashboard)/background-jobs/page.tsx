@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { PageSpinner } from '@/components/ui';
 import { backendGet, backendPage, backendPut } from '@/lib/api-client';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -88,7 +89,7 @@ export default function BackgroundJobsPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-400">Loading...</td></tr>
+              <tr><td colSpan={9} className="px-4 py-6"><PageSpinner label="Loading records" className="py-8" /></td></tr>
             ) : jobs.length === 0 ? (
               <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-400">No jobs found</td></tr>
             ) : jobs.map((j: any) => (

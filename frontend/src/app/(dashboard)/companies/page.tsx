@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { PageHeader, Card, EmptyState, ErrorState, PermissionDeniedState } from '@/components/ui';
+import { AppIcon, PageHeader, Card, EmptyState, ErrorState, PermissionDeniedState } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useApiList } from '@/hooks/use-api-resource';
 
@@ -210,7 +210,7 @@ function CompanyCard({ company }: { company: Company }) {
       {/* Industry */}
       {company.industryType && (
         <div className="text-xs text-slate-500 flex items-center gap-1.5">
-          <span>🏭</span>
+          <AppIcon name="company" size={14} />
           <span>{company.industryType}</span>
         </div>
       )}
@@ -241,8 +241,8 @@ function CompanyCard({ company }: { company: Company }) {
       {/* Contact */}
       {(company.email || company.phone) && (
         <div className="text-xs text-slate-500 space-y-0.5">
-          {company.email && <div>✉ {company.email}</div>}
-          {company.phone && <div>📞 {company.phone}</div>}
+          {company.email && <div>Email: {company.email}</div>}
+          {company.phone && <div>Phone: {company.phone}</div>}
         </div>
       )}
 

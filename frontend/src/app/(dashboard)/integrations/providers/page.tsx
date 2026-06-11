@@ -99,8 +99,8 @@ export default function IntegrationProvidersPage() {
                   <td className="px-4 py-3 font-medium">{p.name}</td>
                   <td className="px-4 py-3"><StatusBadge status={p.providerType} /></td>
                   <td className="px-4 py-3"><StatusBadge status={p.status} /></td>
-                  <td className="px-4 py-3">{p.supportsWebhooks ? '✓' : '—'}</td>
-                  <td className="px-4 py-3">{p.supportsSandbox ? '✓' : '—'}</td>
+                  <td className="px-4 py-3">{p.supportsWebhooks ? 'Yes' : '—'}</td>
+                  <td className="px-4 py-3">{p.supportsSandbox ? 'Yes' : '—'}</td>
                   <td className="px-4 py-3">
                     <Btn variant="ghost" size="xs" onClick={() => openEdit(p)}>Edit</Btn>
                   </td>

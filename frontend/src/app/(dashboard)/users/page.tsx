@@ -394,7 +394,7 @@ export default function UsersPage() {
           )}
 
           {error && (
-            <div className="p-6 text-sm text-red-600">⚠ {error}</div>
+            <div className="p-6 text-sm text-red-600">{error}</div>
           )}
 
           {!loading && !error && filtered.length === 0 && (

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { PageSpinner } from '@/components/ui';
 import { backendList, backendPut } from '@/lib/api-client';
 
 export default function JobQueuesPage() {
@@ -45,7 +46,7 @@ export default function JobQueuesPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400">Loading...</td></tr>
+              <tr><td colSpan={7} className="px-4 py-6"><PageSpinner label="Loading records" className="py-8" /></td></tr>
             ) : queues.length === 0 ? (
               <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400">No queues configured</td></tr>
             ) : queues.map((q: any) => (

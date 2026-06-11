@@ -99,6 +99,12 @@ export function Topbar({ onMenuClick }: TopbarProps) {
                     {(user.roles ?? []).join(', ')}
                   </div>
                 </div>
+                <div className="border-b px-3.5 py-2.5 sm:hidden" style={{ borderColor: 'var(--aurora-border)' }}>
+                  <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                    Theme
+                  </div>
+                  <ThemeSelector />
+                </div>
                 <button
                   onClick={() => {
                     setDropdownOpen(false);

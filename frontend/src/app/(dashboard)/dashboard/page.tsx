@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/hooks/use-auth';
-import { showToast } from '@/components/ui';
+import { AppIcon, type AppIconName, showToast } from '@/components/ui';
 import {
   AuroraPage,
   AuroraPageHeader,
@@ -162,18 +162,18 @@ function fmtDateTime(d: Date | null) {
 
 // ─── Company meta ─────────────────────────────────────────────────────────────
 
-const COMPANY_META: Record<string, { icon: string; links: { label: string; href: string }[] }> = {
-  default: { icon: '🏢', links: [] },
+const COMPANY_META: Record<string, { icon: AppIconName; links: { label: string; href: string }[] }> = {
+  default: { icon: 'company', links: [] },
   mwanjalisi: {
-    icon: '⛽',
+    icon: 'cash',
     links: [{ label: 'Fixed Assets', href: '/group-control/fixed-assets' }],
   },
   itemba: {
-    icon: '🚛',
+    icon: 'delivery',
     links: [{ label: 'Contracts', href: '/group-control/contracts' }],
   },
   westsides: {
-    icon: '🍺',
+    icon: 'sale',
     links: [{ label: 'Documents', href: '/group-control/documents' }],
   },
 };
@@ -394,8 +394,8 @@ export default function DashboardPage() {
       />
 
       <AuroraToolbar
-        title="Executive operating rhythm"
-        description="Live session, dashboard freshness, and the highest-priority control signals."
+        title="Today's operation"
+        description="Live session, dashboard freshness, and the most important control signals."
         meta={
           <>
             <StatusBadge status={user ? 'ACTIVE' : 'PENDING'} size="sm" />
@@ -583,7 +583,7 @@ export default function DashboardPage() {
                     value={data.groupControl.loans.active}
                     subtitle={
                       data.groupControl.loans.overdue > 0
-                        ? `⚠️ ${data.groupControl.loans.overdue} overdue`
+                        ? `${data.groupControl.loans.overdue} overdue`
                         : 'none overdue'
                     }
                     variant={data.groupControl.loans.overdue > 0 ? 'warning' : 'default'}
@@ -678,7 +678,12 @@ export default function DashboardPage() {
                   <AuroraCard key={c.id} className="flex flex-col gap-3">
                     <div className="flex items-start justify-between">
                       <div>
-                        <span className="text-2xl">{meta.icon}</span>
+                        <AppIcon
+                          name={meta.icon}
+                          size={24}
+                          className="mt-0.5"
+                          strokeWidth={1.8}
+                        />
                         <h3
                           className="mt-1 font-bold text-sm"
                           style={{ color: 'var(--aurora-text)' }}

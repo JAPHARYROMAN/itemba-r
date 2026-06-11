@@ -505,7 +505,7 @@ export default function LoansDebtsPage() {
 
       {(loanSummary?.upcomingMaturity ?? 0) > 0 && (
         <Card className="p-4 border-amber-300 bg-amber-50">
-          <div className="text-sm font-semibold text-amber-900">⚠ {loanSummary?.upcomingMaturity} loan(s) maturing within 90 days</div>
+          <div className="text-sm font-semibold text-amber-900">{loanSummary?.upcomingMaturity} loan(s) maturing within 90 days</div>
         </Card>
       )}
 
@@ -606,7 +606,7 @@ export default function LoansDebtsPage() {
                         <td className="px-4 py-3 text-right tabular-nums">{l.currency} {fmt(l.principalAmount)}</td>
                         <td className="px-4 py-3 text-right tabular-nums">{l.currency} {fmt(l.outstandingBalance)}</td>
                         <td className="px-4 py-3 text-right text-xs">{(Number(l.interestRate) * 100).toFixed(2)}%</td>
-                        <td className={`px-4 py-3 text-xs ${overdue ? 'text-red-600 font-semibold' : ''}`}>{overdue && '⚠ '}{fmtDate(l.maturityDate)}</td>
+                        <td className={`px-4 py-3 text-xs ${overdue ? 'text-red-600 font-semibold' : ''}`}>{overdue ? 'Overdue - ' : ''}{fmtDate(l.maturityDate)}</td>
                         <td className="px-4 py-3"><StatusBadge value={l.status} /></td>
                         <td className="px-4 py-3"><StatusBadge value={l.riskLevel} /></td>
                         {canManageLoans && (
@@ -649,7 +649,7 @@ export default function LoansDebtsPage() {
                         <td className="px-4 py-3 text-xs">{d.company?.name ?? '—'}</td>
                         <td className="px-4 py-3 text-right tabular-nums">{d.currency} {fmt(d.amount)}</td>
                         <td className="px-4 py-3 text-right tabular-nums">{d.currency} {fmt(d.amountPaid)}</td>
-                        <td className={`px-4 py-3 text-xs ${overdue ? 'text-red-600 font-semibold' : ''}`}>{overdue && '⚠ '}{fmtDate(d.dueDate)}</td>
+                        <td className={`px-4 py-3 text-xs ${overdue ? 'text-red-600 font-semibold' : ''}`}>{overdue ? 'Overdue - ' : ''}{fmtDate(d.dueDate)}</td>
                         <td className="px-4 py-3"><StatusBadge value={d.status} /></td>
                         <td className="px-4 py-3"><StatusBadge value={d.riskLevel} /></td>
                         {canManageDebts && (

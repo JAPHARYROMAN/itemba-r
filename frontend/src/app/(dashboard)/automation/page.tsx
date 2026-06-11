@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { PageSpinner } from '@/components/ui';
 import Link from 'next/link';
 
 interface AutomationSummary {
@@ -116,7 +117,7 @@ export default function AutomationDashboardPage() {
       </div>
 
       {loading ? (
-        <div className="text-center py-10 text-gray-500">Loading...</div>
+        <PageSpinner label="Loading records" />
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">

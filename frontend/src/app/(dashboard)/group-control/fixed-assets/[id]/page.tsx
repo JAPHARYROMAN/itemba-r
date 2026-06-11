@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Card } from '@/components/ui';
+import { AppIcon, Card } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -343,7 +343,7 @@ export default function FixedAssetDetailPage() {
             </div>
             {asset.documents.length === 0 ? (
               <div className="px-5 py-12 text-center text-slate-400">
-                <div className="text-3xl mb-2">📎</div>
+                <AppIcon name="document" size={30} className="mx-auto mb-2" />
                 <p>No documents attached to this asset yet.</p>
               </div>
             ) : (

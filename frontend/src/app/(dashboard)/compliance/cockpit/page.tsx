@@ -459,7 +459,7 @@ export default function ComplianceCockpitPage() {
                   <div className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">{drillDown.taxReturnNumber ? `Return ${drillDown.taxReturnNumber}` : `${drillDown.taxTypeCode} preview`}</div>
                   <div className="text-sm text-slate-600">{drillDown.taxTypeCode} computed totals</div>
                 </div>
-                <button onClick={() => setDrillDown(null)} className="text-xs text-slate-500 hover:text-slate-700">✕ close</button>
+                <button onClick={() => setDrillDown(null)} className="text-xs text-slate-500 hover:text-slate-700">Close</button>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">

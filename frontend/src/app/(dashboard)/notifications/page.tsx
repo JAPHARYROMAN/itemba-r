@@ -1,13 +1,14 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { AppIcon, type AppIconName, SkeletonCardGrid } from '@/components/ui';
 
-const TYPE_ICONS: Record<string, string> = {
-  APPROVAL_REQUIRED: '✅',
-  ALERT: '⚠️',
-  REMINDER: '🔔',
-  INFO: 'ℹ️',
-  WARNING: '⚡',
-  SYSTEM: '🖥️',
+const TYPE_ICONS: Record<string, AppIconName> = {
+  APPROVAL_REQUIRED: 'approved',
+  ALERT: 'alert',
+  REMINDER: 'bell',
+  INFO: 'report',
+  WARNING: 'alert',
+  SYSTEM: 'settings',
 };
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -79,7 +80,7 @@ export default function NotificationsPage() {
       </div>
 
       {loading ? (
-        <div className="text-center py-10 text-gray-500">Loading...</div>
+        <SkeletonCardGrid count={4} className="grid grid-cols-1 gap-2" />
       ) : (
         <div className="space-y-2">
           {notifications.map(n => (
@@ -87,7 +88,11 @@ export default function NotificationsPage() {
               key={n.id}
               className={`bg-white rounded-xl border border-gray-200 p-4 flex items-start gap-3 hover:shadow-sm transition-shadow ${n.status === 'UNREAD' ? 'border-l-4 border-l-brand-500' : ''}`}
             >
-              <span className="text-xl">{TYPE_ICONS[n.notificationType] || '🔔'}</span>
+              <AppIcon
+                name={TYPE_ICONS[n.notificationType] ?? 'bell'}
+                size={20}
+                className="mt-0.5 flex-shrink-0"
+              />
               <div className="flex-1 min-w-0">
                 <div className={`font-medium text-sm ${PRIORITY_COLORS[n.priority] || 'text-gray-800'}`}>
                   {n.title}

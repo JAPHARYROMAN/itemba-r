@@ -148,7 +148,7 @@ export default function CustomerProfilePage() {
 
       {credit.overdueAmount > 0 && (
         <Card className="p-3 bg-red-50 border-red-200 text-red-700 text-sm font-medium flex items-center justify-between">
-          <span>⚠ Overdue: TZS {fmt(credit.overdueAmount)} across {credit.overdueCount} invoice{credit.overdueCount === 1 ? '' : 's'}</span>
+          <span>Overdue: TZS {fmt(credit.overdueAmount)} across {credit.overdueCount} invoice{credit.overdueCount === 1 ? '' : 's'}</span>
         </Card>
       )}
 

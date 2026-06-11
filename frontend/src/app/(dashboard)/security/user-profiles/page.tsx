@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { PageSpinner } from '@/components/ui';
 import { backendList } from '@/lib/api-client';
 
 const RISK_COLORS: Record<string, string> = {
@@ -31,7 +32,7 @@ export default function UserSecurityProfilesPage() {
       </div>
 
       {loading ? (
-        <div className="text-center py-10 text-gray-500">Loading...</div>
+        <PageSpinner label="Loading records" />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
           <table className="w-full text-sm">

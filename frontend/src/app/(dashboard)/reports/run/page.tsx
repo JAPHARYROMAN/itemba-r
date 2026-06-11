@@ -869,7 +869,7 @@ function ReportRunContent() {
             </div>
           )}
           <div className="text-[10px] text-slate-400 font-mono ml-auto">
-            {builtUrl || '⚠ insufficient parameters'}
+            {builtUrl || 'Insufficient parameters'}
           </div>
         </div>
       </Card>

@@ -153,7 +153,7 @@ function EditModal({
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
         <div className="flex items-center justify-between p-6 border-b">
           <h2 className="text-lg font-semibold text-gray-900">Edit Document Metadata</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+          <button onClick={onClose} className="text-xs font-medium text-gray-400 hover:text-gray-600">Close</button>
         </div>
         <form onSubmit={submit} className="p-6 space-y-4">
           {error && <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>}
@@ -309,7 +309,7 @@ export default function DocumentDetailPage() {
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
                   {doc.isConfidential && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">🔒 Confidential</span>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">Confidential</span>
                   )}
                   <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">{fmtLabel(doc.category)}</span>
                 </div>
@@ -400,7 +400,7 @@ export default function DocumentDetailPage() {
               <DetailRow label="Division" value={doc.division?.name} />
               <DetailRow label="Branch" value={doc.branch?.name} />
               <DetailRow label="Status" value={<StatusBadge status={doc.status} />} />
-              <DetailRow label="Confidential" value={doc.isConfidential ? '🔒 Yes — Group Control restricted' : 'No'} />
+              <DetailRow label="Confidential" value={doc.isConfidential ? 'Yes - Group Control restricted' : 'No'} />
               <DetailRow label="MIME Type" value={<span className="font-mono text-xs">{doc.mimeType}</span>} />
               <DetailRow label="Version" value={`v${doc.version}`} />
               <DetailRow label="Expiry Date" value={fmtDate(doc.expiryDate)} />

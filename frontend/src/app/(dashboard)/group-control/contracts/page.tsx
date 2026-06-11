@@ -357,7 +357,7 @@ export default function ContractsPage() {
 
       {expiring30.length > 0 && (
         <Card className="p-4 border-amber-300 bg-amber-50">
-          <div className="text-sm font-semibold text-amber-900 mb-2">⚠ {expiring30.length} contract(s) expiring within 30 days</div>
+          <div className="text-sm font-semibold text-amber-900 mb-2">{expiring30.length} contract(s) expiring within 30 days</div>
           <ul className="space-y-1 text-xs">
             {expiring30.slice(0, 5).map((c) => (
               <li key={c.id}>
@@ -435,7 +435,7 @@ export default function ContractsPage() {
                     <tr key={c.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3">
                         <Link href={`/group-control/contracts/${c.id}`} className="text-brand-600 hover:underline">
-                          {c.isSensitive && <span className="mr-1">🔒</span>}{c.title}
+                          {c.isSensitive && <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">Sensitive</span>}{c.title}
                         </Link>
                         {c.contractNumber && <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{c.contractNumber}</div>}
                       </td>

@@ -17,6 +17,7 @@ import {
   DataTable,
 } from '@/components/aurora';
 import type { Column } from '@/components/aurora/data-display/DataTable';
+import { AppIcon, type AppIconName } from '@/components/ui';
 import { getStatusVariant } from '@/lib/design-system';
 import { useAuth } from '@/hooks/use-auth';
 
@@ -170,13 +171,13 @@ const auditColumns: Column<AuditRow>[] = [
 
 // ─── Module navigation cards ──────────────────────────────────────────────────
 
-const SECTIONS = [
-  { href: '/group-control/bank-accounts', label: 'Bank Accounts', desc: 'Group-wide accounts & balances', icon: '🏦' },
-  { href: '/group-control/loans-debts', label: 'Loans & Debts', desc: 'Obligations, schedules, exposure', icon: '💳' },
-  { href: '/group-control/contracts', label: 'Contracts', desc: 'Counterparties, expiry, risk', icon: '📑' },
-  { href: '/group-control/fixed-assets', label: 'Fixed Assets', desc: 'Asset register & depreciation', icon: '📦' },
-  { href: '/group-control/documents', label: 'Documents Vault', desc: 'Confidential files & renewals', icon: '🔐' },
-  { href: '/audit-logs', label: 'Audit Trail', desc: 'Sensitive activity log', icon: '📋' },
+const SECTIONS: Array<{ href: string; label: string; desc: string; icon: AppIconName }> = [
+  { href: '/group-control/bank-accounts', label: 'Bank Accounts', desc: 'Group-wide accounts & balances', icon: 'bank' },
+  { href: '/group-control/loans-debts', label: 'Loans & Debts', desc: 'Obligations, schedules, exposure', icon: 'loan' },
+  { href: '/group-control/contracts', label: 'Contracts', desc: 'Counterparties, expiry, risk', icon: 'document' },
+  { href: '/group-control/fixed-assets', label: 'Fixed Assets', desc: 'Asset register & depreciation', icon: 'inventory' },
+  { href: '/group-control/documents', label: 'Documents Vault', desc: 'Confidential files & renewals', icon: 'lock' },
+  { href: '/audit-logs', label: 'Audit Trail', desc: 'Sensitive activity log', icon: 'report' },
 ];
 
 // ─── Main page ────────────────────────────────────────────────────────────────
@@ -322,8 +323,8 @@ export default function GroupControlPage() {
                       title="Active Loans"
                       value={data.groupControl.loans.active}
                       subtitle={
-                        data.groupControl.loans.overdue > 0
-                          ? `⚠️ ${data.groupControl.loans.overdue} overdue`
+                      data.groupControl.loans.overdue > 0
+                          ? `${data.groupControl.loans.overdue} overdue`
                           : 'none overdue'
                       }
                       variant={data.groupControl.loans.overdue > 0 ? 'warning' : 'default'}
@@ -410,7 +411,7 @@ export default function GroupControlPage() {
                     <Link key={s.href} href={s.href}>
                       <AuroraCard className="h-full hover:shadow-md transition-shadow cursor-pointer">
                         <div className="flex items-start gap-3">
-                          <span className="text-2xl">{s.icon}</span>
+                          <AppIcon name={s.icon} size={24} className="mt-0.5" />
                           <div>
                             <div
                               className="text-sm font-semibold"

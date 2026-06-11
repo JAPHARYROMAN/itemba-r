@@ -480,6 +480,87 @@ html.motion-reduced *::after {
   background-color: var(--aurora-bg-muted) !important;
 }
 
+.dark .bg-red-50,
+.dark .bg-red-100,
+.dark .hover\:bg-red-50:hover,
+.dark .hover\:bg-red-100:hover {
+  background-color: var(--aurora-danger-bg) !important;
+}
+
+.dark .bg-amber-50,
+.dark .bg-amber-100,
+.dark .bg-yellow-50,
+.dark .bg-yellow-100,
+.dark .hover\:bg-amber-50:hover,
+.dark .hover\:bg-amber-100:hover,
+.dark .hover\:bg-yellow-50:hover,
+.dark .hover\:bg-yellow-100:hover {
+  background-color: var(--aurora-warning-bg) !important;
+}
+
+.dark .bg-green-50,
+.dark .bg-green-100,
+.dark .bg-emerald-50,
+.dark .bg-emerald-100,
+.dark .hover\:bg-green-50:hover,
+.dark .hover\:bg-green-100:hover,
+.dark .hover\:bg-emerald-50:hover,
+.dark .hover\:bg-emerald-100:hover {
+  background-color: var(--aurora-success-bg) !important;
+}
+
+.dark .bg-blue-50,
+.dark .bg-blue-100,
+.dark .bg-indigo-50,
+.dark .bg-indigo-100,
+.dark .hover\:bg-blue-50:hover,
+.dark .hover\:bg-blue-100:hover,
+.dark .hover\:bg-indigo-50:hover,
+.dark .hover\:bg-indigo-100:hover {
+  background-color: var(--aurora-primary-subtle) !important;
+}
+
+.dark .bg-cyan-50,
+.dark .bg-cyan-100,
+.dark .bg-sky-50,
+.dark .bg-sky-100,
+.dark .hover\:bg-cyan-50:hover,
+.dark .hover\:bg-cyan-100:hover,
+.dark .hover\:bg-sky-50:hover,
+.dark .hover\:bg-sky-100:hover {
+  background-color: var(--aurora-info-bg) !important;
+}
+
+.dark .bg-purple-50,
+.dark .bg-purple-100,
+.dark .bg-violet-50,
+.dark .bg-violet-100,
+.dark .bg-fuchsia-50,
+.dark .bg-fuchsia-100,
+.dark .hover\:bg-purple-50:hover,
+.dark .hover\:bg-purple-100:hover,
+.dark .hover\:bg-violet-50:hover,
+.dark .hover\:bg-violet-100:hover,
+.dark .hover\:bg-fuchsia-50:hover,
+.dark .hover\:bg-fuchsia-100:hover {
+  background-color: var(--aurora-restricted-bg) !important;
+}
+
+.dark .bg-orange-50,
+.dark .bg-orange-100,
+.dark .bg-lime-50,
+.dark .bg-lime-100,
+.dark .bg-rose-50,
+.dark .bg-rose-100,
+.dark .hover\:bg-orange-50:hover,
+.dark .hover\:bg-orange-100:hover,
+.dark .hover\:bg-lime-50:hover,
+.dark .hover\:bg-lime-100:hover,
+.dark .hover\:bg-rose-50:hover,
+.dark .hover\:bg-rose-100:hover {
+  background-color: var(--aurora-accent-subtle) !important;
+}
+
 /* Text */
 .dark .text-slate-900,
 .dark .text-slate-800,
@@ -506,6 +587,117 @@ html.motion-reduced *::after {
   color: var(--aurora-text-muted) !important;
 }
 
+.dark .text-red-900,
+.dark .text-red-800,
+.dark .text-red-700,
+.dark .text-red-600,
+.dark .text-red-500,
+.dark .text-red-400 {
+  color: var(--aurora-danger-text) !important;
+}
+
+.dark .text-amber-900,
+.dark .text-amber-800,
+.dark .text-amber-700,
+.dark .text-amber-600,
+.dark .text-amber-500,
+.dark .text-amber-400,
+.dark .text-yellow-900,
+.dark .text-yellow-800,
+.dark .text-yellow-700,
+.dark .text-yellow-600,
+.dark .text-yellow-500,
+.dark .text-yellow-400 {
+  color: var(--aurora-warning-text) !important;
+}
+
+.dark .text-green-900,
+.dark .text-green-800,
+.dark .text-green-700,
+.dark .text-green-600,
+.dark .text-green-500,
+.dark .text-green-400,
+.dark .text-emerald-900,
+.dark .text-emerald-800,
+.dark .text-emerald-700,
+.dark .text-emerald-600,
+.dark .text-emerald-500,
+.dark .text-emerald-400 {
+  color: var(--aurora-success-text) !important;
+}
+
+.dark .text-blue-900,
+.dark .text-blue-800,
+.dark .text-blue-700,
+.dark .text-blue-600,
+.dark .text-blue-500,
+.dark .text-blue-400,
+.dark .text-indigo-900,
+.dark .text-indigo-800,
+.dark .text-indigo-700,
+.dark .text-indigo-600,
+.dark .text-indigo-500,
+.dark .text-indigo-400 {
+  color: var(--aurora-primary-text) !important;
+}
+
+.dark .text-cyan-900,
+.dark .text-cyan-800,
+.dark .text-cyan-700,
+.dark .text-cyan-600,
+.dark .text-cyan-500,
+.dark .text-cyan-400,
+.dark .text-sky-900,
+.dark .text-sky-800,
+.dark .text-sky-700,
+.dark .text-sky-600,
+.dark .text-sky-500,
+.dark .text-sky-400 {
+  color: var(--aurora-info-text) !important;
+}
+
+.dark .text-purple-900,
+.dark .text-purple-800,
+.dark .text-purple-700,
+.dark .text-purple-600,
+.dark .text-purple-500,
+.dark .text-purple-400,
+.dark .text-violet-900,
+.dark .text-violet-800,
+.dark .text-violet-700,
+.dark .text-violet-600,
+.dark .text-violet-500,
+.dark .text-violet-400,
+.dark .text-fuchsia-900,
+.dark .text-fuchsia-800,
+.dark .text-fuchsia-700,
+.dark .text-fuchsia-600,
+.dark .text-fuchsia-500,
+.dark .text-fuchsia-400 {
+  color: var(--aurora-restricted-text) !important;
+}
+
+.dark .text-orange-900,
+.dark .text-orange-800,
+.dark .text-orange-700,
+.dark .text-orange-600,
+.dark .text-orange-500,
+.dark .text-orange-400,
+.dark .text-lime-900,
+.dark .text-lime-800,
+.dark .text-lime-700,
+.dark .text-lime-600,
+.dark .text-lime-500,
+.dark .text-lime-400,
+.dark .text-rose-900,
+.dark .text-rose-800,
+.dark .text-rose-700,
+.dark .text-rose-600,
+.dark .text-rose-500,
+.dark .text-rose-400 {
+  color: var(--aurora-accent-text) !important;
+}
+
 /* Borders & dividers */
 .dark .border-slate-100,
 .dark .border-slate-200,
@@ -520,6 +712,72 @@ html.motion-reduced *::after {
 .dark .divide-gray-100 > * + *,
 .dark .divide-gray-200 > * + * {
   border-color: var(--aurora-border) !important;
+}
+
+.dark .border-red-100,
+.dark .border-red-200,
+.dark .border-red-300 {
+  border-color: color-mix(in srgb, var(--aurora-danger) 55%, transparent) !important;
+}
+
+.dark .border-amber-100,
+.dark .border-amber-200,
+.dark .border-amber-300,
+.dark .border-yellow-100,
+.dark .border-yellow-200,
+.dark .border-yellow-300 {
+  border-color: color-mix(in srgb, var(--aurora-warning) 55%, transparent) !important;
+}
+
+.dark .border-green-100,
+.dark .border-green-200,
+.dark .border-green-300,
+.dark .border-emerald-100,
+.dark .border-emerald-200,
+.dark .border-emerald-300 {
+  border-color: color-mix(in srgb, var(--aurora-success) 55%, transparent) !important;
+}
+
+.dark .border-blue-100,
+.dark .border-blue-200,
+.dark .border-blue-300,
+.dark .border-indigo-100,
+.dark .border-indigo-200,
+.dark .border-indigo-300 {
+  border-color: color-mix(in srgb, var(--aurora-primary) 55%, transparent) !important;
+}
+
+.dark .border-cyan-100,
+.dark .border-cyan-200,
+.dark .border-cyan-300,
+.dark .border-sky-100,
+.dark .border-sky-200,
+.dark .border-sky-300 {
+  border-color: color-mix(in srgb, var(--aurora-info) 55%, transparent) !important;
+}
+
+.dark .border-purple-100,
+.dark .border-purple-200,
+.dark .border-purple-300,
+.dark .border-violet-100,
+.dark .border-violet-200,
+.dark .border-violet-300,
+.dark .border-fuchsia-100,
+.dark .border-fuchsia-200,
+.dark .border-fuchsia-300 {
+  border-color: color-mix(in srgb, var(--aurora-restricted) 55%, transparent) !important;
+}
+
+.dark .border-orange-100,
+.dark .border-orange-200,
+.dark .border-orange-300,
+.dark .border-lime-100,
+.dark .border-lime-200,
+.dark .border-lime-300,
+.dark .border-rose-100,
+.dark .border-rose-200,
+.dark .border-rose-300 {
+  border-color: color-mix(in srgb, var(--aurora-accent) 55%, transparent) !important;
 }
 
 /* Auth pages are a fixed light brand surface, even when the dashboard theme is dark. */
