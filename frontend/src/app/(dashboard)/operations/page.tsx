@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, StatCard, PageSpinner } from '@/components/ui';
+import { Card, PageHeader, StatCard, SkeletonCardGrid, showToast } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList } from '@/lib/api-client';
 
@@ -137,7 +137,9 @@ export default function OperationsDashboardPage() {
       });
       setData(payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error loading dashboard');
+      const message = err instanceof Error ? err.message : 'Error loading dashboard';
+      setError(message);
+      showToast('error', 'Could not load operations dashboard', message);
     } finally {
       setLoading(false);
     }
@@ -217,12 +219,12 @@ export default function OperationsDashboardPage() {
         </div>
       )}
 
-      {companyId && loading && <PageSpinner />}
+      {companyId && loading && <SkeletonCardGrid count={8} />}
 
       {companyId && !loading && data && (
         <div className="space-y-6">
           {data.readiness && (
-            <div className="grid grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)] gap-4">
+            <div className="grid grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)] gap-4 aurora-stagger">
               <Card className="p-5">
                 <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
                   Operations Readiness
@@ -274,7 +276,7 @@ export default function OperationsDashboardPage() {
                   </div>
                   <span className="text-xs text-slate-400">Target {data.readiness.target}+</span>
                 </div>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 aurora-stagger">
                   {data.readiness.checks.map((check) => (
                     <div
                       key={check.key}
@@ -302,7 +304,7 @@ export default function OperationsDashboardPage() {
           )}
 
           {/* Row 1 — Entity counts */}
-          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 aurora-stagger">
             <StatCard
               label="Total Customers"
               value={fmtNum(data.customers.total)}
@@ -322,7 +324,7 @@ export default function OperationsDashboardPage() {
           </div>
 
           {/* Row 2 — Financial values */}
-          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 aurora-stagger">
             <StatCard label="Total Sales Value (TZS)" value={fmtTZS(data.salesOrders.totalValue)} />
             <StatCard
               label="Outstanding Sales (TZS)"
@@ -339,7 +341,7 @@ export default function OperationsDashboardPage() {
           </div>
 
           {/* Row 3 — Order status cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 aurora-stagger">
             <Card className="p-5">
               <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-4">
                 Sales Orders

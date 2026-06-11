@@ -10,7 +10,7 @@ import {
   StatusBadge,
   Modal,
   Btn,
-  PageSpinner,
+  SkeletonTable,
   FormInput,
   FormSelect,
   FormTextarea,
@@ -1111,7 +1111,7 @@ export default function SalesOrdersPage() {
 
       <PageHeader title="Sales Orders" subtitle="Customer orders, fulfillment, and revenue" />
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-4 gap-3 aurora-stagger">
         <StatCard label="Total Orders" value={data?.total ?? 0} />
         <StatCard label="Confirmed (page)" value={stats.confirmed} />
         <StatCard label="Unpaid (page)" value={stats.unpaid} />
@@ -1262,7 +1262,7 @@ export default function SalesOrdersPage() {
               {loading ? (
                 <tr>
                   <td colSpan={9}>
-                    <PageSpinner />
+                    <SkeletonTable rows={6} cols={9} />
                   </td>
                 </tr>
               ) : !data?.data.length ? (

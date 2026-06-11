@@ -10,10 +10,11 @@ import {
   StatusBadge,
   Modal,
   Btn,
-  PageSpinner,
+  SkeletonTable,
   FormInput,
   FormSelect,
   FormTextarea,
+  showToast,
 } from '@/components/ui';
 import {
   backendDelete,
@@ -415,9 +416,16 @@ function PurchaseOrderModal({
       } else {
         await backendPatch(`/purchase-orders/${initial!.id}`, body);
       }
+      showToast(
+        'success',
+        mode === 'create' ? 'Purchase order created' : 'Purchase order updated',
+        'Saved successfully.',
+      );
       onSaved();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      const message = err instanceof Error ? err.message : 'Failed';
+      setError(message);
+      showToast('error', 'Could not save purchase order', message);
     } finally {
       setSaving(false);
     }
@@ -621,9 +629,12 @@ function DeleteConfirm({
     setError('');
     try {
       await backendDelete(`/purchase-orders/${order.id}`);
+      showToast('success', 'Purchase order deleted', order.purchaseOrderNumber ?? order.id);
       onConfirmed();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      const message = err instanceof Error ? err.message : 'Failed';
+      setError(message);
+      showToast('error', 'Could not delete purchase order', message);
     } finally {
       setSaving(false);
     }
@@ -674,9 +685,12 @@ function ReceiveOrderModal({
     setError('');
     try {
       await backendPatch(`/purchase-orders/${order.id}/receive`, {});
+      showToast('success', 'Purchase order received', order.purchaseOrderNumber ?? order.id);
       onReceived();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to receive order');
+      const message = err instanceof Error ? err.message : 'Failed to receive order';
+      setError(message);
+      showToast('error', 'Could not receive purchase order', message);
     } finally {
       setSaving(false);
     }
@@ -776,8 +790,10 @@ export default function PurchaseOrdersPage() {
       if (filterDateTo) query.dateTo = filterDateTo;
       setData(await backendPage<PurchaseOrder>('/purchase-orders', { query }));
     } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to load purchase orders';
       setData(emptyPaginated<PurchaseOrder>());
-      setLoadError(err instanceof Error ? err.message : 'Failed to load purchase orders');
+      setLoadError(message);
+      showToast('error', 'Could not load purchase orders', message);
     } finally {
       setLoading(false);
     }
@@ -803,8 +819,11 @@ export default function PurchaseOrdersPage() {
     try {
       await backendPatch(`/purchase-orders/${id}/${action}`);
       await load();
+      showToast('success', action === 'confirm' ? 'Purchase order confirmed' : 'Purchase order cancelled');
     } catch (err: unknown) {
-      setActionError(err instanceof Error ? err.message : 'Failed');
+      const message = err instanceof Error ? err.message : 'Failed';
+      setActionError(message);
+      showToast('error', `Could not ${action} purchase order`, message);
     } finally {
       setActionLoading(null);
     }
@@ -888,7 +907,7 @@ export default function PurchaseOrdersPage() {
         subtitle="Supplier orders, receiving, and procurement spend"
       />
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-4 gap-3 aurora-stagger">
         <StatCard label="Total Orders" value={data?.total ?? 0} />
         <StatCard label="Confirmed (page)" value={stats.confirmed} />
         <StatCard label="Received (page)" value={stats.received} />
@@ -1039,7 +1058,7 @@ export default function PurchaseOrdersPage() {
               {loading ? (
                 <tr>
                   <td colSpan={9}>
-                    <PageSpinner />
+                    <SkeletonTable rows={6} cols={9} />
                   </td>
                 </tr>
               ) : !data?.data.length ? (

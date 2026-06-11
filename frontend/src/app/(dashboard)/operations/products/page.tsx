@@ -8,10 +8,11 @@ import {
   StatCard,
   Modal,
   Btn,
-  PageSpinner,
+  SkeletonTable,
   FormInput,
   FormSelect,
   FormTextarea,
+  showToast,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import {
@@ -365,9 +366,12 @@ function ProductModal({
       } else {
         await backendPatch(`/products/${initial!.id}`, body);
       }
+      showToast('success', mode === 'create' ? 'Product created' : 'Product updated', form.name.trim());
       onSaved();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      const message = err instanceof Error ? err.message : 'Failed';
+      setError(message);
+      showToast('error', 'Could not save product', message);
     } finally {
       setSaving(false);
     }
@@ -669,9 +673,12 @@ function DeleteConfirm({
     setError('');
     try {
       await backendDelete(`/products/${product.id}`);
+      showToast('success', 'Product deleted', product.name);
       onConfirmed();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      const message = err instanceof Error ? err.message : 'Failed';
+      setError(message);
+      showToast('error', 'Could not delete product', message);
     } finally {
       setSaving(false);
     }
@@ -819,7 +826,9 @@ export default function ProductsPage() {
       });
       setData(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load products');
+      const message = err instanceof Error ? err.message : 'Failed to load products';
+      setError(message);
+      showToast('error', 'Could not load products', message);
       setData(emptyPaginated<Product>(page));
     } finally {
       setLoading(false);
@@ -895,7 +904,7 @@ export default function ProductsPage() {
 
       <PageHeader title="Products" subtitle="Master data for goods and services" />
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-4 gap-3 aurora-stagger">
         <StatCard label="Total" value={data?.total ?? 0} />
         <StatCard label="Active (page)" value={counts.active} />
         <StatCard label="Inactive (page)" value={counts.inactive} />
@@ -1040,7 +1049,7 @@ export default function ProductsPage() {
               {loading ? (
                 <tr>
                   <td colSpan={canCreate || canDelete ? 12 : 11}>
-                    <PageSpinner />
+                    <SkeletonTable rows={6} cols={canCreate || canDelete ? 12 : 11} />
                   </td>
                 </tr>
               ) : !data?.data.length ? (

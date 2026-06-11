@@ -8,10 +8,11 @@ import {
   StatCard,
   Modal,
   Btn,
-  PageSpinner,
+  SkeletonTable,
   FormInput,
   FormSelect,
   FormTextarea,
+  showToast,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import {
@@ -252,9 +253,12 @@ function CustomerModal({
       } else {
         await backendPatch(`/customers/${initial!.id}`, body);
       }
+      showToast('success', mode === 'create' ? 'Customer created' : 'Customer updated', form.name.trim());
       onSaved();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      const message = err instanceof Error ? err.message : 'Failed';
+      setError(message);
+      showToast('error', 'Could not save customer', message);
     } finally {
       setSaving(false);
     }
@@ -436,9 +440,12 @@ function DeleteConfirm({
     setError('');
     try {
       await backendDelete(`/customers/${customer.id}`);
+      showToast('success', 'Customer deleted', customer.name);
       onConfirmed();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      const message = err instanceof Error ? err.message : 'Failed';
+      setError(message);
+      showToast('error', 'Could not delete customer', message);
     } finally {
       setSaving(false);
     }
@@ -529,7 +536,9 @@ export default function CustomersPage() {
       });
       setData(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load customers');
+      const message = err instanceof Error ? err.message : 'Failed to load customers';
+      setError(message);
+      showToast('error', 'Could not load customers', message);
       setData(emptyPaginated<Customer>(page));
     } finally {
       setLoading(false);
@@ -600,7 +609,7 @@ export default function CustomersPage() {
 
       <PageHeader title="Customers" subtitle="Master data for customer accounts" />
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-4 gap-3 aurora-stagger">
         <StatCard label="Total" value={data?.total ?? 0} />
         <StatCard label="Active (page)" value={activeCount} />
         <StatCard label="Blocked (page)" value={blockedCount} />
@@ -705,7 +714,7 @@ export default function CustomersPage() {
               {loading ? (
                 <tr>
                   <td colSpan={9}>
-                    <PageSpinner />
+                    <SkeletonTable rows={6} cols={9} />
                   </td>
                 </tr>
               ) : !data?.data.length ? (

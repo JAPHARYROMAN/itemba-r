@@ -8,10 +8,11 @@ import {
   StatCard,
   Modal,
   Btn,
-  PageSpinner,
+  SkeletonTable,
   FormInput,
   FormSelect,
   FormTextarea,
+  showToast,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import {
@@ -258,9 +259,12 @@ function SupplierModal({
       } else {
         await backendPatch(`/suppliers/${initial!.id}`, body);
       }
+      showToast('success', mode === 'create' ? 'Supplier created' : 'Supplier updated', form.name.trim());
       onSaved();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      const message = err instanceof Error ? err.message : 'Failed';
+      setError(message);
+      showToast('error', 'Could not save supplier', message);
     } finally {
       setSaving(false);
     }
@@ -460,9 +464,12 @@ function DeleteConfirm({
     setError('');
     try {
       await backendDelete(`/suppliers/${supplier.id}`);
+      showToast('success', 'Supplier deleted', supplier.name);
       onConfirmed();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      const message = err instanceof Error ? err.message : 'Failed';
+      setError(message);
+      showToast('error', 'Could not delete supplier', message);
     } finally {
       setSaving(false);
     }
@@ -553,7 +560,9 @@ export default function SuppliersPage() {
       });
       setData(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load suppliers');
+      const message = err instanceof Error ? err.message : 'Failed to load suppliers';
+      setError(message);
+      showToast('error', 'Could not load suppliers', message);
       setData(emptyPaginated<Supplier>(page));
     } finally {
       setLoading(false);
@@ -624,7 +633,7 @@ export default function SuppliersPage() {
 
       <PageHeader title="Suppliers" subtitle="Master data for supplier accounts" />
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-4 gap-3 aurora-stagger">
         <StatCard label="Total" value={data?.total ?? 0} />
         <StatCard label="Active (page)" value={activeCount} />
         <StatCard label="Blocked (page)" value={blockedCount} />
@@ -730,7 +739,7 @@ export default function SuppliersPage() {
               {loading ? (
                 <tr>
                   <td colSpan={10}>
-                    <PageSpinner />
+                    <SkeletonTable rows={6} cols={10} />
                   </td>
                 </tr>
               ) : !data?.data.length ? (

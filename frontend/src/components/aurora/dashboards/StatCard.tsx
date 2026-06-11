@@ -1,4 +1,7 @@
+'use client';
+
 import React from 'react';
+import { useCountUp } from '@/hooks/use-count-up';
 
 interface StatCardProps {
   title: string;
@@ -9,17 +12,32 @@ interface StatCardProps {
   variant?: 'default' | 'primary' | 'success' | 'warning' | 'danger';
   className?: string;
   loading?: boolean;
+  countUp?: boolean;
 }
 
 const VARIANT_STYLES = {
   default: { icon: 'var(--aurora-bg-muted)', iconText: 'var(--aurora-text-secondary)' },
   primary: { icon: 'var(--aurora-primary-subtle)', iconText: 'var(--aurora-primary)' },
-  success: { icon: '#d1fae5', iconText: '#059669' },
-  warning: { icon: '#fef3c7', iconText: '#d97706' },
-  danger: { icon: '#fee2e2', iconText: '#dc2626' },
+  success: { icon: 'var(--aurora-success-bg)', iconText: 'var(--aurora-success-text)' },
+  warning: { icon: 'var(--aurora-warning-bg)', iconText: 'var(--aurora-warning-text)' },
+  danger: { icon: 'var(--aurora-danger-bg)', iconText: 'var(--aurora-danger-text)' },
 };
 
-export function StatCard({ title, value, subtitle, icon, trend, variant = 'default', className = '', loading = false }: StatCardProps) {
+function AnimatedValue({ value, countUp }: { value: React.ReactNode; countUp: boolean }) {
+  const numeric = typeof value === 'number' && Number.isFinite(value);
+  const counted = useCountUp(numeric && countUp ? value : NaN);
+
+  if (!numeric) return <>{value}</>;
+
+  const shown = countUp && Number.isFinite(counted) ? counted : value;
+  const formatted = Number.isInteger(value)
+    ? Math.round(shown).toLocaleString()
+    : shown.toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+  return <>{formatted}</>;
+}
+
+export function StatCard({ title, value, subtitle, icon, trend, variant = 'default', className = '', loading = false, countUp = true }: StatCardProps) {
   const vstyle = VARIANT_STYLES[variant];
 
   if (loading) {
@@ -44,7 +62,7 @@ export function StatCard({ title, value, subtitle, icon, trend, variant = 'defau
             {title}
           </p>
           <div className="aurora-metric text-2xl font-bold" style={{ color: 'var(--aurora-text)', letterSpacing: '-0.02em' }}>
-            {value}
+            <AnimatedValue value={value} countUp={countUp} />
           </div>
           {subtitle && (
             <p className="text-xs mt-1.5" style={{ color: 'var(--aurora-text-muted)' }}>{subtitle}</p>
