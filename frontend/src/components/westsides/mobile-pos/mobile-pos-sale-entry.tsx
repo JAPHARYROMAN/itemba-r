@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import {
   Btn,
   Card,
+  ConfirmDialog,
   FormInput,
   FormSelect,
   FormTextarea,
@@ -650,6 +651,7 @@ export function MobilePosSaleEntry() {
   const [submitting, setSubmitting] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [logoutError, setLogoutError] = useState('');
+  const [confirmLogoutOpen, setConfirmLogoutOpen] = useState(false);
   const [confirmed, setConfirmed] = useState<ConfirmedOrder | null>(null);
   const [receiptMessage, setReceiptMessage] = useState('');
 
@@ -1098,6 +1100,10 @@ export function MobilePosSaleEntry() {
     setProductResults([]);
     setPendingQty(1);
     searchInputRef.current?.focus();
+    // Tactile add-to-cart confirmation (Android Chrome; no-ops elsewhere).
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      navigator.vibrate?.(30);
+    }
   };
 
   const updateLine = (index: number, patch: Partial<CartLine>) => {
@@ -1251,12 +1257,8 @@ export function MobilePosSaleEntry() {
     }
   };
 
-  const handleLogout = async () => {
-    if (signingOut) return;
-    if (!confirmed && cart.length > 0) {
-      const proceed = window.confirm('You have items in the current sale. Log out and discard it?');
-      if (!proceed) return;
-    }
+  const doLogout = async () => {
+    setConfirmLogoutOpen(false);
     setLogoutError('');
     setSigningOut(true);
     try {
@@ -1265,6 +1267,15 @@ export function MobilePosSaleEntry() {
       setLogoutError('Could not sign out. Check your connection and try again.');
       setSigningOut(false);
     }
+  };
+
+  const handleLogout = () => {
+    if (signingOut) return;
+    if (!confirmed && cart.length > 0) {
+      setConfirmLogoutOpen(true);
+      return;
+    }
+    void doLogout();
   };
 
   if (authLoading || !hydrated || bootstrapLoading) return <PageSpinner />;
@@ -1708,6 +1719,17 @@ export function MobilePosSaleEntry() {
         onWalkInNameChange={setWalkInName}
         onPaymentReferenceChange={setPaymentReference}
       />
+
+      <ConfirmDialog
+        open={confirmLogoutOpen}
+        title="Discard this sale?"
+        message="You have items in the current sale. Logging out now will discard them."
+        confirmLabel="Log out & discard"
+        cancelLabel="Keep selling"
+        variant="warning"
+        onConfirm={doLogout}
+        onCancel={() => setConfirmLogoutOpen(false)}
+      />
     </div>
   );
 }
@@ -1739,15 +1761,31 @@ function MobileReceiptCard({
     lines.reduce((sum, line) => sum + normalizeNumber(receiptLineTotal(line)), 0);
   const paid = order.paidAmount ?? total;
 
+  // Confirmation buzz when the sale lands (Android Chrome; silently no-ops
+  // elsewhere). Feedback only — fires after the order is already committed.
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      navigator.vibrate?.(50);
+    }
+  }, []);
+
   return (
-    <Card padding="sm" className="border-emerald-200 bg-emerald-50">
-      <div className="mb-2 flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[12px] font-semibold uppercase tracking-wide text-emerald-700">
-            Receipt ready
+    <Card padding="sm" className="animate-scale-pop border-emerald-200 bg-emerald-50">
+      <div className="mb-3 flex items-start gap-3">
+        <span
+          className="animate-scale-pop flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-amber-500 text-white shadow-md"
+          aria-hidden="true"
+        >
+          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[15px] font-extrabold tracking-tight text-emerald-900">
+            Sale complete!
           </div>
           <div className="mt-0.5 text-[12px] text-emerald-800">
-            Print, share, or download before starting the next sale.
+            {number} • {currency} {formatMoney(total)}
           </div>
         </div>
         <div className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">

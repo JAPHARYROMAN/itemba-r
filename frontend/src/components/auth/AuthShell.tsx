@@ -109,7 +109,7 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
         </section>
 
         <section className="flex items-center justify-center px-6 py-10 sm:px-10">
-          <div className="w-full max-w-md">
+          <div className="w-full max-w-md animate-fade-up">
             <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
               {children}
             </div>

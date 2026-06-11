@@ -10,6 +10,8 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // Set when auth succeeds: a short "Karibu" beat before the redirect lands.
+  const [welcomeName, setWelcomeName] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -40,7 +42,16 @@ export default function LoginPage() {
         return;
       }
       const from = new URLSearchParams(window.location.search).get('from');
-      window.location.href = from?.startsWith('/') && !from.startsWith('//') ? from : '/dashboard';
+      const target =
+        from?.startsWith('/') && !from.startsWith('//') ? from : '/dashboard';
+      const firstName =
+        typeof data?.user?.fullName === 'string' ? data.user.fullName.split(' ')[0] : '';
+      setWelcomeName(firstName || 'karibu');
+      // Brief welcome beat, then redirect. Skipped for reduced-motion users.
+      const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      window.setTimeout(() => {
+        window.location.href = target;
+      }, reduce ? 0 : 750);
     } catch {
       setError('Network error. Please try again.');
     } finally {
@@ -114,18 +125,48 @@ export default function LoginPage() {
         </div>
 
         {error && (
-          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
+          <div className="animate-shake flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <svg
+              className="h-4 w-4 flex-shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <path strokeLinecap="round" d="M12 8v4m0 4h.01" />
+            </svg>
+            <span>{error}</span>
           </div>
         )}
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded-md bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {loading ? 'Signing in...' : 'Sign in'}
-        </button>
+        {welcomeName ? (
+          <div
+            className="animate-scale-pop flex w-full items-center justify-center gap-2 rounded-md bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white"
+            role="status"
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={3}
+              aria-hidden="true"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            {welcomeName === 'karibu' ? 'Karibu!' : `Karibu, ${welcomeName}!`}
+          </div>
+        ) : (
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded-md bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? 'Signing in...' : 'Sign in'}
+          </button>
+        )}
       </form>
     </AuthShell>
   );
