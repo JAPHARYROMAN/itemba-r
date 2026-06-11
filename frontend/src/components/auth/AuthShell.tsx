@@ -39,14 +39,14 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
               </span>
               <span>
                 <span className="block text-lg font-semibold tracking-wide">ITEMBA GROUP</span>
-                <span className="block text-xs font-medium uppercase tracking-[0.18em] text-emerald-700">
+                <span className="block text-xs font-semibold uppercase text-slate-600">
                   Enterprise Platform
                 </span>
               </span>
             </Link>
 
             <div className="mt-14 max-w-xl">
-              <div className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">
+              <div className="text-xs font-semibold uppercase text-slate-800">
                 {eyebrow}
               </div>
               <h1 className="mt-4 text-4xl font-semibold leading-tight text-slate-950 sm:text-5xl">
@@ -62,7 +62,7 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
                 <div className="flex items-start gap-3">
                   <InstallQrCode size={88} className="h-[88px] w-[88px] flex-shrink-0" />
                   <div className="min-w-0">
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                    <div className="text-xs font-semibold uppercase text-slate-800">
                       Counter install
                     </div>
                     <div className="mt-1 text-sm font-semibold text-slate-900">
@@ -74,7 +74,7 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
                     </p>
                     <Link
                       href={WESTSIDES_MOBILE_POS_INSTALL_PATH}
-                      className="mt-2 inline-flex text-xs font-semibold text-emerald-700 underline-offset-4 hover:text-emerald-800 hover:underline"
+                      className="mt-2 inline-flex text-xs font-semibold text-slate-800 underline-offset-4 hover:text-slate-950 hover:underline"
                     >
                       Open install gateway
                     </Link>
@@ -89,7 +89,7 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
                   key={item}
                   className="rounded-lg border border-slate-200 bg-[#fbfcfb] px-3 py-3"
                 >
-                  <div className="h-1.5 w-8 rounded-full bg-emerald-600" />
+                  <div className="h-1.5 w-8 rounded-full bg-slate-800" />
                   <div className="mt-3 text-sm font-semibold text-slate-800">{item}</div>
                 </div>
               ))}

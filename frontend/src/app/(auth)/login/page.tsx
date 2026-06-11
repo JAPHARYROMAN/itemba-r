@@ -67,14 +67,14 @@ export default function LoginPage() {
       footer={
         <>
           Need an account?{' '}
-          <Link href="/signup" className="font-semibold text-emerald-700 hover:text-emerald-800">
+          <Link href="/signup" className="font-semibold text-slate-800 underline-offset-4 hover:text-slate-950 hover:underline">
             Request access
           </Link>
         </>
       }
     >
       <div className="mb-7">
-        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+        <div className="text-xs font-semibold uppercase text-slate-800">
           Welcome back
         </div>
         <h2 className="mt-3 text-2xl font-semibold text-slate-950">Account sign in</h2>
