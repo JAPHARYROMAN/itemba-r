@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, StatCard, PageSpinner } from '@/components/ui';
+import { Card, PageHeader, SkeletonCardGrid, StatCard, showToast } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -76,7 +76,9 @@ export default function FinanceDashboardPage() {
       const payload = json?.data ?? json;
       setData(payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error loading dashboard');
+      const message = err instanceof Error ? err.message : 'Error loading dashboard';
+      setError(message);
+      showToast('error', 'Finance dashboard unavailable', message);
     } finally {
       setLoading(false);
     }
@@ -125,10 +127,13 @@ export default function FinanceDashboardPage() {
       )}
 
       {loading ? (
-        <PageSpinner />
+        <SkeletonCardGrid
+          count={5}
+          className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+        />
       ) : data ? (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+          <div className="aurora-stagger grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             <StatCard label="Total Income" value={fmtTZS(data.totalIncome)} />
             <StatCard label="Total Expenses" value={fmtTZS(data.totalExpenses)} />
             <StatCard

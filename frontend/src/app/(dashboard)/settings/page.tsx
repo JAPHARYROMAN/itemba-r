@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Card, PageHeader } from '@/components/ui';
+import { Card, PageHeader, SkeletonCardGrid, showToast } from '@/components/ui';
 
 type SettingCategory =
   | 'ORGANIZATION'
@@ -83,7 +83,9 @@ export default function MasterSettingsPage() {
       const data: CatalogResponse = json.data ?? json;
       setCatalog(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load catalog');
+      const message = err instanceof Error ? err.message : 'Failed to load catalog';
+      setError(message);
+      showToast('error', 'Settings catalog unavailable', message);
     } finally {
       setLoading(false);
     }
@@ -190,7 +192,7 @@ export default function MasterSettingsPage() {
       )}
 
       {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
-      {loading && <div className="flex justify-center py-10"><div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" /></div>}
+      {loading && <SkeletonCardGrid count={6} className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3" />}
 
       {!loading && filteredEntries.length === 0 && (
         <Card className="p-10 text-center text-sm text-slate-500">No settings match the current filters.</Card>
@@ -209,7 +211,7 @@ export default function MasterSettingsPage() {
               </span>
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 p-4">
+          <div className="aurora-stagger grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
             {entries.map((entry) => {
               const planned = entry.status === 'PLANNED';
               return (

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Card, PageHeader } from '@/components/ui';
+import { Card, PageHeader, SkeletonCardGrid, showToast } from '@/components/ui';
 import { backendGet, backendList, backendPatch, backendPost } from '@/lib/api-client';
 
 type ReportSector =
@@ -970,7 +970,9 @@ export default function MasterReportsPage() {
       setCatalog(catalogData);
       setOverview(overviewData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load report catalog');
+      const message = err instanceof Error ? err.message : 'Failed to load report catalog';
+      setError(message);
+      showToast('error', 'Report catalog unavailable', message);
     } finally {
       setLoading(false);
     }
@@ -1234,9 +1236,12 @@ export default function MasterReportsPage() {
         statementRunNumber: result.snapshot?.statementRunNumber,
         manifestHash: result.manifest?.hash ?? result.snapshot?.manifestHash,
       });
+      showToast('success', 'Report pack generated', pack.name);
       void loadCatalog();
     } catch (err) {
-      setPackResult(err instanceof Error ? err.message : 'Failed to generate report pack');
+      const message = err instanceof Error ? err.message : 'Failed to generate report pack';
+      setPackResult(message);
+      showToast('error', 'Report pack generation failed', message);
     } finally {
       setGeneratingPack('');
     }
@@ -1260,10 +1265,14 @@ export default function MasterReportsPage() {
       setPackApprovalResult(
         `${pack.name} approval submitted as ${result.request?.approvalRequestNumber ?? 'an approval request'} (${result.request?.status ?? 'PENDING'}).`,
       );
+      showToast('success', 'Report pack approval submitted', pack.name);
       void loadCatalog();
       void loadPackApprovals();
     } catch (err) {
-      setPackApprovalResult(err instanceof Error ? err.message : 'Failed to submit report-pack approval');
+      const message =
+        err instanceof Error ? err.message : 'Failed to submit report-pack approval';
+      setPackApprovalResult(message);
+      showToast('error', 'Approval submission failed', message);
     } finally {
       setPackApprovalAction('');
     }
@@ -1290,9 +1299,12 @@ export default function MasterReportsPage() {
           result.artifact?.fileName ?? result.exportRecord?.fileName ?? 'artifact created'
         } (${result.artifact?.byteLength ?? 0} bytes). Audit ${result.artifact?.auditHash ?? 'logged'}.`,
       );
+      showToast('success', `${format} artifact generated`, pack.name);
       void loadCatalog();
     } catch (err) {
-      setPackRenderResult(err instanceof Error ? err.message : `Failed to render ${pack.name}`);
+      const message = err instanceof Error ? err.message : `Failed to render ${pack.name}`;
+      setPackRenderResult(message);
+      showToast('error', 'Report pack render failed', message);
     } finally {
       setRenderingPack('');
     }
@@ -1319,7 +1331,9 @@ export default function MasterReportsPage() {
         `${result.dataset.name} preview returned ${result.metrics.rowCount} row(s) in ${result.metrics.executionTimeMs}ms. Manifest ${result.manifestHash}.`,
       );
     } catch (err) {
-      setBuilderMessage(err instanceof Error ? err.message : 'Failed to preview semantic report');
+      const message = err instanceof Error ? err.message : 'Failed to preview semantic report';
+      setBuilderMessage(message);
+      showToast('error', 'Builder preview failed', message);
     } finally {
       setBuilderRunning(false);
     }
@@ -1347,9 +1361,12 @@ export default function MasterReportsPage() {
       setBuilderMessage(
         `${result.definition?.name ?? 'Report'} saved as ${result.definition?.reportCode ?? 'a report definition'} with run ${result.run?.reportRunNumber ?? 'created'}.`,
       );
+      showToast('success', 'Builder report saved', result.definition?.name ?? 'Report');
       void loadCatalog();
     } catch (err) {
-      setBuilderMessage(err instanceof Error ? err.message : 'Failed to save builder report');
+      const message = err instanceof Error ? err.message : 'Failed to save builder report';
+      setBuilderMessage(message);
+      showToast('error', 'Builder report was not saved', message);
     } finally {
       setBuilderSaving(false);
     }
@@ -1370,10 +1387,13 @@ export default function MasterReportsPage() {
       setPackApprovalResult(
         `${request.approvalRequestNumber} updated to ${result.request?.status ?? action}.`,
       );
+      showToast('success', 'Approval request updated', request.approvalRequestNumber);
       void loadCatalog();
       void loadPackApprovals();
     } catch (err) {
-      setPackApprovalResult(err instanceof Error ? err.message : 'Failed to update approval request');
+      const message = err instanceof Error ? err.message : 'Failed to update approval request';
+      setPackApprovalResult(message);
+      showToast('error', 'Approval update failed', message);
     } finally {
       setApprovalDecisionAction('');
     }
@@ -1397,9 +1417,12 @@ export default function MasterReportsPage() {
       setGovernanceResult(
         `${result.reportName} lifecycle action recorded: ${result.previousStatus} -> ${result.lifecycleStatus}.`,
       );
+      showToast('success', 'Lifecycle action recorded', result.reportName);
       void loadCatalog();
     } catch (err) {
-      setGovernanceResult(err instanceof Error ? err.message : 'Failed to record lifecycle action');
+      const message = err instanceof Error ? err.message : 'Failed to record lifecycle action';
+      setGovernanceResult(message);
+      showToast('error', 'Lifecycle action failed', message);
     } finally {
       setGovernanceAction('');
     }
@@ -1745,7 +1768,7 @@ export default function MasterReportsPage() {
               <Badge tone="green">{advancedReadiness.overallScore}% READY</Badge>
             </div>
           </div>
-          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-6">
+          <div className="aurora-stagger grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-6">
             {advancedReadiness.capabilities.map((capability) => (
               <div key={capability.key} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
                 <div className="flex items-start justify-between gap-2">
@@ -1773,9 +1796,7 @@ export default function MasterReportsPage() {
       )}
 
       {loading ? (
-        <div className="flex justify-center py-14">
-          <div className="h-7 w-7 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
-        </div>
+        <SkeletonCardGrid count={8} className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4" />
       ) : (
         <>
           {activeArea === 'reports' && (

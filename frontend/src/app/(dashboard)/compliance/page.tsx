@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, StatCard, PageSpinner, Btn } from '@/components/ui';
+import { Card, PageHeader, SkeletonCardGrid, StatCard, Btn, showToast } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 
 interface DashboardStats {
@@ -86,10 +86,26 @@ export default function CompliancePage() {
   const canView = hasPermission('compliance.dashboard.view');
 
   useEffect(() => {
-    fetch('/api/backend/compliance/dashboard')
-      .then((r) => r.json())
-      .then((j) => setStats(j.data ?? null))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+
+    async function loadComplianceDashboard() {
+      try {
+        const response = await fetch('/api/backend/compliance/dashboard');
+        if (!response.ok) throw new Error(`Compliance dashboard failed (${response.status})`);
+        const payload = await response.json();
+        if (!cancelled) setStats(payload.data ?? null);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to load compliance dashboard';
+        showToast('error', 'Compliance dashboard unavailable', message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadComplianceDashboard();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (!canView) {
@@ -107,7 +123,9 @@ export default function CompliancePage() {
     return (
       <div className="p-6">
         <PageHeader title="Compliance" subtitle="Statutory & tax governance" />
-        <PageSpinner />
+        <div className="mt-6">
+          <SkeletonCardGrid count={10} className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5" />
+        </div>
       </div>
     );
 
@@ -118,7 +136,7 @@ export default function CompliancePage() {
         subtitle="Statutory obligations, tax filings, document tracking, and audit evidence"
       />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="aurora-stagger grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
         <StatCard
           label="Overdue Obligations"
           value={stats?.overdueObligations ?? 0}
@@ -148,7 +166,7 @@ export default function CompliancePage() {
         <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--aurora-text)' }}>
           Modules
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="aurora-stagger grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
           {SECTIONS.map((s) => (
             <Link key={s.href} href={s.href}>
               <Card className="p-4 hover:shadow-md transition-shadow cursor-pointer h-full">

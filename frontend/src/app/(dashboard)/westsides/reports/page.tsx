@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Card, PageHeader, StatCard } from '@/components/ui';
+import { Card, PageHeader, StatCard, showToast } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
 
 type QueryMode = 'range' | 'daily-close';
@@ -759,7 +759,9 @@ export default function WestsideReportsPage() {
   const loadReport = useCallback(async () => {
     setReportResult({ rows: [], raw: null });
     if (!companyId) {
-      setError('Select a company before loading a report.');
+      const message = 'Select a company before loading a report.';
+      setError(message);
+      showToast('warning', 'Company required', message);
       return;
     }
     setLoading(true);
@@ -778,7 +780,9 @@ export default function WestsideReportsPage() {
       if (!response.ok) throw new Error(errorMessage(json, `HTTP ${response.status}`));
       setReportResult(normalizePayload(json, activeReport));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error loading report');
+      const message = err instanceof Error ? err.message : 'Error loading report';
+      setError(message);
+      showToast('error', 'Westsides report unavailable', message);
     } finally {
       setLoading(false);
     }

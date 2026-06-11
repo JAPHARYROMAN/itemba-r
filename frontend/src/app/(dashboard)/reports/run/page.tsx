@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Card, PageHeader } from '@/components/ui';
+import { Card, PageHeader, SkeletonCardGrid, showToast } from '@/components/ui';
 
 interface CatalogEntry {
   id: string;
@@ -399,7 +399,11 @@ function ReportRunContent() {
         const list: CatalogEntry[] = j.data?.entries ?? j.entries ?? [];
         setEntry(list.find((e) => e.id === reportId) ?? null);
       })
-      .catch(() => setError('Failed to load report catalog'))
+      .catch(() => {
+        const message = 'Failed to load report catalog';
+        setError(message);
+        showToast('error', 'Report catalog unavailable', message);
+      })
       .finally(() => setCatalogLoading(false));
   }, [reportId]);
 
@@ -554,7 +558,9 @@ function ReportRunContent() {
         // Report rendering remains available if manifest logging is temporarily unavailable.
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to run report');
+      const message = err instanceof Error ? err.message : 'Failed to run report';
+      setError(message);
+      showToast('error', 'Report run failed', message);
     } finally {
       setLoading(false);
     }
@@ -614,6 +620,7 @@ function ReportRunContent() {
         const payload = await response.json();
         const audit = (payload.data ?? payload) as ExportAuditResponse;
         setLastExportAudit(audit.audit ?? null);
+        showToast('success', `${format} export audited`, audit.audit?.auditHash);
         void loadExportHistory();
       }
     } catch {
@@ -667,9 +674,7 @@ function ReportRunContent() {
   if (catalogLoading) {
     return (
       <div className="p-6">
-        <div className="flex justify-center py-10">
-          <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-        </div>
+        <SkeletonCardGrid count={4} className="grid grid-cols-1 gap-4 md:grid-cols-2" />
       </div>
     );
   }
@@ -1002,9 +1007,7 @@ function ReportRunContent() {
         </div>
       )}
       {loading && (
-        <div className="flex justify-center py-10">
-          <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-        </div>
+        <SkeletonCardGrid count={6} className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3" />
       )}
 
       {!loading && data !== null && (
@@ -1310,9 +1313,7 @@ export default function ReportRunPage() {
     <Suspense
       fallback={
         <div className="p-6">
-          <div className="flex justify-center py-10">
-            <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-          </div>
+          <SkeletonCardGrid count={4} className="grid grid-cols-1 gap-4 md:grid-cols-2" />
         </div>
       }
     >

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, PageSpinner, StatCard } from '@/components/ui';
+import { Card, PageHeader, SkeletonCardGrid, StatCard, showToast } from '@/components/ui';
 
 type ReadinessStatus = 'READY' | 'WARNING' | 'CRITICAL';
 
@@ -74,7 +74,9 @@ export default function ApprovalsDashboardPage() {
       const result = await response.json();
       setReadiness(result.data ?? result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load approval readiness');
+      const message = err instanceof Error ? err.message : 'Failed to load approval readiness';
+      setError(message);
+      showToast('error', 'Approval readiness unavailable', message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -85,7 +87,19 @@ export default function ApprovalsDashboardPage() {
     void loadReadiness();
   }, [loadReadiness]);
 
-  if (loading) return <PageSpinner />;
+  if (loading)
+    return (
+      <div className="space-y-6 p-6">
+        <PageHeader
+          title="Approvals and Data Quality"
+          subtitle="Workflow governance, approval SLA, maker-checker evidence, and data-quality gates"
+        />
+        <SkeletonCardGrid count={4} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" />
+        <Card className="p-5">
+          <div className="aurora-skeleton h-36 rounded-lg" aria-hidden />
+        </Card>
+      </div>
+    );
 
   const indicators = readiness?.indicators ?? {};
   const score = readiness?.score ?? 0;
@@ -135,7 +149,7 @@ export default function ApprovalsDashboardPage() {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="aurora-stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Readiness Score"
           value={`${score}%`}
@@ -276,7 +290,7 @@ export default function ApprovalsDashboardPage() {
         <h2 className="mb-3 text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
           Workflow Links
         </h2>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="aurora-stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {quickLinks.map((link) => (
             <Link key={link.href} href={link.href}>
               <Card className="h-full p-4 transition-shadow hover:shadow-md">

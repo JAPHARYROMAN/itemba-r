@@ -18,6 +18,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   var t = window.localStorage.getItem('aurora-theme') || 'system';
                   var dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
                   if (dark) document.documentElement.classList.add('dark');
+                  var m = window.localStorage.getItem('aurora-motion') || 'system';
+                  var reduce = m === 'reduced' || (m === 'system' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+                  if (reduce) document.documentElement.classList.add('motion-reduced');
                 }
               } catch(e) {}
             `,

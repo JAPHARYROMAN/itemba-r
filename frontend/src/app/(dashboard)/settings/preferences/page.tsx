@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, FormSelect, Btn } from '@/components/ui';
+import { Card, PageHeader, FormSelect, Btn, SkeletonCardGrid, showToast } from '@/components/ui';
+import { FormSwitch } from '@/components/aurora/forms/FormSwitch';
+import { useMotionPreference } from '@/hooks/use-motion-preference';
 
 interface Company { id: string; name: string; code: string; }
 interface Division { id: string; name: string; code: string; companyId: string; }
@@ -67,6 +69,11 @@ const DEFAULTS: UserPreference = {
 };
 
 export default function UserPreferencesPage() {
+  const {
+    mode: motionMode,
+    setMode: setMotionMode,
+    hydrated: motionHydrated,
+  } = useMotionPreference();
   const [prefs, setPrefs] = useState<UserPreference>(DEFAULTS);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
@@ -123,7 +130,9 @@ export default function UserPreferencesPage() {
       const data: UserPreference = json.data ?? json;
       setPrefs({ ...DEFAULTS, ...data });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load preferences');
+      const message = err instanceof Error ? err.message : 'Failed to load preferences';
+      setError(message);
+      showToast('error', 'Preferences unavailable', message);
     } finally {
       setLoading(false);
     }
@@ -172,8 +181,11 @@ export default function UserPreferencesPage() {
       const data: UserPreference = json.data ?? json;
       setPrefs({ ...DEFAULTS, ...data });
       setInfo('Preferences saved.');
+      showToast('success', 'Preferences saved', 'Your account preferences were updated.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      const message = err instanceof Error ? err.message : 'Failed to save';
+      setError(message);
+      showToast('error', 'Preferences were not saved', message);
     } finally {
       setSaving(false);
     }
@@ -186,8 +198,11 @@ export default function UserPreferencesPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setPrefs(DEFAULTS);
       setInfo('Preferences reset to defaults.');
+      showToast('success', 'Preferences reset', 'Default preferences are active again.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reset');
+      const message = err instanceof Error ? err.message : 'Failed to reset';
+      setError(message);
+      showToast('error', 'Preferences were not reset', message);
     } finally {
       setSaving(false);
     }
@@ -209,13 +224,13 @@ export default function UserPreferencesPage() {
 
       {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
       {info && <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-700">{info}</div>}
-      {loading && <div className="flex justify-center py-10"><div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" /></div>}
+      {loading && <SkeletonCardGrid count={4} className="grid grid-cols-1 gap-4 md:grid-cols-2" />}
 
       {!loading && (
         <>
           <Card className="p-5 space-y-4">
             <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Appearance</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="aurora-stagger grid grid-cols-1 gap-4 md:grid-cols-2">
               <FormSelect
                 label="Theme"
                 value={prefs.theme}
@@ -230,12 +245,20 @@ export default function UserPreferencesPage() {
                 options={DENSITIES}
                 hint="How much padding tables and lists use."
               />
+              <div className="md:col-span-2">
+                <FormSwitch
+                  label="Reduce motion"
+                  checked={motionHydrated && motionMode === 'reduced'}
+                  onChange={(checked) => setMotionMode(checked ? 'reduced' : 'system')}
+                  help="Turns off UI transitions and entrance animations on this device."
+                />
+              </div>
             </div>
           </Card>
 
           <Card className="p-5 space-y-4">
             <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Locale & formatting</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="aurora-stagger grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
               <FormSelect
                 label="Language"
                 value={prefs.locale}
@@ -269,7 +292,7 @@ export default function UserPreferencesPage() {
             <p className="text-[12px] text-slate-500 -mt-1">
               Pages that ask &quot;which company?&quot; will pre-select these. You can still override on any page.
             </p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="aurora-stagger grid grid-cols-1 gap-4 md:grid-cols-3">
               <FormSelect
                 label="Default Company"
                 value={prefs.defaultCompanyId ?? ''}

@@ -13,6 +13,7 @@ import {
   PageHeader,
   PageSpinner,
   PermissionDeniedState,
+  showToast,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendList, backendPost } from '@/lib/api-client';
@@ -694,11 +695,12 @@ export function MobilePosSaleEntry() {
           };
         });
       } else {
-        setError(
+        const message =
           companyResult.reason instanceof Error
             ? companyResult.reason.message
-            : 'Could not load companies for Mobile POS.',
-        );
+            : 'Could not load companies for Mobile POS.';
+        setError(message);
+        showToast('error', 'Mobile POS setup unavailable', message);
       }
       setBootstrapLoading(false);
     });
@@ -1191,7 +1193,9 @@ export function MobilePosSaleEntry() {
       setConfirmed(order);
       setReceiptMessage('Receipt ready.');
     } catch (checkoutError) {
-      setError(checkoutError instanceof Error ? checkoutError.message : 'Checkout failed.');
+      const message = checkoutError instanceof Error ? checkoutError.message : 'Checkout failed.';
+      setError(message);
+      showToast('error', 'Checkout failed', message);
     } finally {
       setSubmitting(false);
     }
@@ -1254,6 +1258,7 @@ export function MobilePosSaleEntry() {
     } catch (shareError) {
       if (shareError instanceof DOMException && shareError.name === 'AbortError') return;
       setReceiptMessage('Could not share receipt. Try download or print.');
+      showToast('warning', 'Receipt was not shared', 'Try download or print instead.');
     }
   };
 
@@ -1265,6 +1270,7 @@ export function MobilePosSaleEntry() {
       await logout();
     } catch {
       setLogoutError('Could not sign out. Check your connection and try again.');
+      showToast('error', 'Sign out failed', 'Check your connection and try again.');
       setSigningOut(false);
     }
   };

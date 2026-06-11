@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Card, PageHeader, StatCard } from '@/components/ui';
+import { Card, PageHeader, StatCard, showToast } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useOrgScope } from '@/hooks/use-org-scope';
 import { backendGet } from '@/lib/api-client';
@@ -726,7 +726,9 @@ export default function OperationsReportsPage() {
   const loadReport = useCallback(async () => {
     setReportResult({ rows: [], raw: null });
     if (!companyId) {
-      setError('Select a company before loading a report.');
+      const message = 'Select a company before loading a report.';
+      setError(message);
+      showToast('warning', 'Company required', message);
       return;
     }
     setLoading(true);
@@ -742,7 +744,9 @@ export default function OperationsReportsPage() {
       const payload = await backendGet<unknown>(activeReport.endpoint, { query });
       setReportResult(normalizePayload(payload));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error loading report');
+      const message = err instanceof Error ? err.message : 'Error loading report';
+      setError(message);
+      showToast('error', 'Operations report unavailable', message);
     } finally {
       setLoading(false);
     }

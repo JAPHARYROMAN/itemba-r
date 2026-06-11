@@ -9,7 +9,16 @@ import {
   type ReactNode,
 } from 'react';
 import Link from 'next/link';
-import { AppIcon, Btn, Card, FormSelect, PageHeader, PageSpinner } from '@/components/ui';
+import {
+  AppIcon,
+  Btn,
+  Card,
+  FormSelect,
+  PageHeader,
+  PageSpinner,
+  SkeletonCardGrid,
+  showToast,
+} from '@/components/ui';
 import type { AppIconName } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
 import { useAuth } from '@/hooks/use-auth';
@@ -560,7 +569,9 @@ export default function WestsidesCockpitPage() {
       const body = await res.json();
       setData((body.data ?? body) || null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Load failed');
+      const message = err instanceof Error ? err.message : 'Load failed';
+      setError(message);
+      showToast('error', 'Westsides cockpit unavailable', message);
     } finally {
       setLoading(false);
     }
@@ -638,9 +649,16 @@ export default function WestsidesCockpitPage() {
         </Card>
       )}
 
+      {companyId && loading && !model && (
+        <SkeletonCardGrid
+          count={8}
+          className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8"
+        />
+      )}
+
       {model && (
         <>
-          <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8 gap-3">
+          <section className="aurora-stagger grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
             <KpiTile
               label="Revenue today"
               value={formatMoney(model.todaySales, true)}
@@ -974,7 +992,7 @@ export default function WestsidesCockpitPage() {
                     >
                       {group}
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-2">
+                    <div className="aurora-stagger grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
                       {links.map((link) => (
                         <QuickAction key={link.href} link={link} />
                       ))}

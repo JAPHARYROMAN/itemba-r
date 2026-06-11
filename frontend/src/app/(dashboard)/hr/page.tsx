@@ -2,15 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, StatCard } from '@/components/ui';
-
-function Spinner() {
-  return (
-    <div className="flex justify-center py-10">
-      <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-    </div>
-  );
-}
+import { Card, PageHeader, SkeletonCardGrid, StatCard, showToast } from '@/components/ui';
 
 interface HRDashboard {
   totalActiveEmployees: number;
@@ -94,7 +86,9 @@ export default function HRDashboardPage() {
         setLoading(false);
       })
       .catch((e) => {
-        setError(e.message);
+        const message = e instanceof Error ? e.message : 'Failed to load HR dashboard';
+        setError(message);
+        showToast('error', 'HR dashboard unavailable', message);
         setLoading(false);
       });
   }, []);
@@ -107,10 +101,12 @@ export default function HRDashboardPage() {
           {error}
         </div>
       )}
-      {loading && <Spinner />}
+      {loading && (
+        <SkeletonCardGrid count={8} className="grid grid-cols-2 gap-4 md:grid-cols-4" />
+      )}
       {data && !loading && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="aurora-stagger grid grid-cols-2 gap-4 md:grid-cols-4">
             <StatCard label="Active Employees" value={data.totalActiveEmployees} variant="blue" />
             <StatCard label="Active Contracts" value={data.activeContracts} variant="green" />
             <StatCard label="Pending Leave" value={data.pendingLeaveRequests} variant="amber" />
@@ -154,7 +150,7 @@ export default function HRDashboardPage() {
       )}
       <div>
         <h3 className="text-sm font-semibold text-slate-600 mb-3">Quick Links</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="aurora-stagger grid grid-cols-2 gap-3 md:grid-cols-4">
           {quickLinks.map((l) => (
             <Link key={l.href} href={l.href}>
               <Card className="p-4 hover:shadow-md transition-shadow cursor-pointer">

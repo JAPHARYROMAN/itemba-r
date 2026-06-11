@@ -20,7 +20,7 @@ export function LoadingState({ rows = 5, label = 'Loading content' }: LoadingSta
   );
 }
 
-export function PageSpinner({ label, className = '' }: PageSpinnerProps) {
+export function PageSpinner({ label = 'Loading', className = '' }: PageSpinnerProps) {
   return (
     <div
       className={`flex flex-col items-center justify-center gap-3 py-20 ${className}`}

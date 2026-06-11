@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, PageSpinner, StatCard } from '@/components/ui';
+import { Card, PageHeader, SkeletonCardGrid, StatCard, showToast } from '@/components/ui';
 
 type ReadinessStatus = 'READY' | 'WARNING' | 'CRITICAL';
 
@@ -123,7 +123,9 @@ export default function ProcurementDashboardPage() {
         readiness: data.readiness,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load procurement summary');
+      const message = err instanceof Error ? err.message : 'Failed to load procurement summary';
+      setError(message);
+      showToast('error', 'Procurement dashboard unavailable', message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -191,7 +193,19 @@ export default function ProcurementDashboardPage() {
     },
   ];
 
-  if (loading) return <PageSpinner />;
+  if (loading)
+    return (
+      <div className="space-y-6 p-6">
+        <PageHeader
+          title="Procurement"
+          subtitle="Procure-to-pay command center, readiness controls, sourcing, receiving, and AP handoff"
+        />
+        <SkeletonCardGrid count={4} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" />
+        <Card className="p-5">
+          <div className="aurora-skeleton h-36 rounded-lg" aria-hidden />
+        </Card>
+      </div>
+    );
 
   return (
     <div className="space-y-6 p-6">
@@ -217,7 +231,7 @@ export default function ProcurementDashboardPage() {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="aurora-stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Open Requisitions" value={stats.openRequisitions} variant="blue" />
         <StatCard label="Pending RFQs" value={stats.pendingRfqs} variant="amber" />
         <StatCard label="Pending GRNs" value={stats.pendingGrns} variant="purple" />
@@ -312,7 +326,7 @@ export default function ProcurementDashboardPage() {
             <h2 className="text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
               Control Indicators
             </h2>
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+            <div className="aurora-stagger mt-4 grid grid-cols-2 gap-3 text-sm">
               <div
                 className="rounded-lg border p-3"
                 style={{ borderColor: 'var(--aurora-border)' }}
@@ -402,7 +416,7 @@ export default function ProcurementDashboardPage() {
         <h2 className="mb-3 text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
           Procurement Workflow Links
         </h2>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="aurora-stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {quickLinks.map((link) => (
             <Link key={link.href} href={link.href}>
               <Card className="h-full p-4 transition-shadow hover:shadow-md">

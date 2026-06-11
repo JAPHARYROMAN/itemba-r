@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/hooks/use-auth';
+import { showToast } from '@/components/ui';
 import {
   AuroraPage,
   AuroraPageHeader,
@@ -265,7 +266,9 @@ export default function DashboardPage() {
       setData(json.data);
       setLastUpdated(new Date());
     } catch (e) {
-      setError(String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      showToast('error', 'Executive dashboard unavailable', message);
     } finally {
       setLoading(false);
     }
@@ -418,7 +421,7 @@ export default function DashboardPage() {
         className="mt-5"
       >
         {data && (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4 animate-fade-up">
+          <div className="aurora-stagger grid grid-cols-1 gap-3 animate-fade-up md:grid-cols-4">
             {operationalFocus.map((item) => {
               const edgeColor =
                 item.status === 'CRITICAL'
@@ -483,7 +486,7 @@ export default function DashboardPage() {
           {/* ── 1. Group Overview ───────────────────────────────────────────── */}
           <AuroraSection title="Group Overview">
             <div className="p-5">
-              <SummaryGrid cols={4}>
+              <SummaryGrid cols={4} className="aurora-stagger">
                 <StatCard
                   title="Companies"
                   value={data.overview.companies}
@@ -499,7 +502,7 @@ export default function DashboardPage() {
           {/* ── 2. Alerts ───────────────────────────────────────────────────── */}
           {totalAlerts > 0 && (
             <AuroraSection id="alerts" title={`Alerts (${totalAlerts})`} className="scroll-mt-6">
-              <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="aurora-stagger grid grid-cols-1 gap-4 p-5 md:grid-cols-2">
                 {data.alerts.expiringContracts.length > 0 && (
                   <AlertCard
                     title={`Contracts Expiring Soon (${data.alerts.expiringContracts.length})`}
@@ -569,7 +572,7 @@ export default function DashboardPage() {
               <RestrictedDataState requiredPermission="group-control.view" />
             ) : (
               <div className="p-5 space-y-4">
-                <SummaryGrid cols={4}>
+                <SummaryGrid cols={4} className="aurora-stagger">
                   <StatCard
                     title="Bank Accounts"
                     value={data.groupControl.bankAccounts.active}
@@ -595,7 +598,7 @@ export default function DashboardPage() {
                     subtitle={`TZS ${fmt(data.groupControl.debts.totalAmount, true)}`}
                   />
                 </SummaryGrid>
-                <SummaryGrid cols={4}>
+                <SummaryGrid cols={4} className="aurora-stagger">
                   <StatCard title="Active Contracts" value={data.groupControl.contracts.active} />
                   <StatCard
                     title="Expiring in 30 Days"
@@ -615,7 +618,7 @@ export default function DashboardPage() {
                     }
                   />
                 </SummaryGrid>
-                <SummaryGrid cols={4}>
+                <SummaryGrid cols={4} className="aurora-stagger">
                   <StatCard
                     title="Fixed Assets"
                     value={data.groupControl.fixedAssets.total}
@@ -638,7 +641,7 @@ export default function DashboardPage() {
                     variant={data.groupControl.documents.expiring > 0 ? 'warning' : 'default'}
                   />
                 </SummaryGrid>
-                <SummaryGrid cols={4}>
+                <SummaryGrid cols={4} className="aurora-stagger">
                   <StatCard title="Audit Events (24h)" value={data.groupControl.audit.events24h} />
                   <StatCard
                     title="Critical Events (24h)"
@@ -668,7 +671,7 @@ export default function DashboardPage() {
               </Link>
             }
           >
-            <div className="p-5 grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="aurora-stagger grid grid-cols-1 gap-5 p-5 md:grid-cols-3">
               {data.companies.map((c) => {
                 const meta = companyMeta(c.name);
                 return (

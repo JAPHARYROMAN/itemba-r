@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, PageSpinner, StatCard } from '@/components/ui';
+import { Card, PageHeader, SkeletonCardGrid, StatCard, showToast } from '@/components/ui';
 import { backendGet } from '@/lib/api-client';
 
 type ReadinessStatus = 'READY' | 'WARNING' | 'CRITICAL';
@@ -127,7 +127,9 @@ export default function SecurityDashboardPage() {
       });
       setEvents(Array.isArray(data.recentCriticalEvents) ? data.recentCriticalEvents : []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load security dashboard');
+      const message = err instanceof Error ? err.message : 'Failed to load security dashboard';
+      setError(message);
+      showToast('error', 'Security dashboard unavailable', message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -172,7 +174,19 @@ export default function SecurityDashboardPage() {
     { label: 'Users', href: '/users', desc: 'User access, status, and company assignments' },
   ];
 
-  if (loading) return <PageSpinner />;
+  if (loading)
+    return (
+      <div className="space-y-6 p-6">
+        <PageHeader
+          title="Security Dashboard"
+          subtitle="Auth, session continuity, role-based access control, MFA, and security event response"
+        />
+        <SkeletonCardGrid count={4} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" />
+        <Card className="p-5">
+          <div className="aurora-skeleton h-36 rounded-lg" aria-hidden />
+        </Card>
+      </div>
+    );
 
   return (
     <div className="space-y-6 p-6">
@@ -198,7 +212,7 @@ export default function SecurityDashboardPage() {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="aurora-stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Security Events (30d)" value={stats.totalEvents} variant="purple" />
         <StatCard label="Active Sessions" value={stats.activeSessions} variant="blue" />
         <StatCard label="Locked Accounts" value={stats.lockedAccounts} variant="red" />
@@ -362,7 +376,7 @@ export default function SecurityDashboardPage() {
         <h2 className="mb-3 text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
           Security & Access Links
         </h2>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="aurora-stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {quickLinks.map((link) => (
             <Link key={link.href} href={link.href}>
               <Card className="h-full p-4 transition-shadow hover:shadow-md">

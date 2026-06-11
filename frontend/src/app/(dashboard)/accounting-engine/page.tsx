@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, PageSpinner, StatCard } from '@/components/ui';
+import { Card, PageHeader, SkeletonCardGrid, StatCard, showToast } from '@/components/ui';
 
 type FinanceReadinessStatus = 'READY' | 'WARNING' | 'CRITICAL';
 
@@ -109,7 +109,9 @@ export default function AccountingEngineDashboardPage() {
         readiness: data.readiness,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load accounting summary');
+      const message = err instanceof Error ? err.message : 'Failed to load accounting summary';
+      setError(message);
+      showToast('error', 'Accounting engine unavailable', message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -187,7 +189,19 @@ export default function AccountingEngineDashboardPage() {
     },
   ];
 
-  if (loading) return <PageSpinner />;
+  if (loading)
+    return (
+      <div className="space-y-6 p-6">
+        <PageHeader
+          title="Accounting Engine"
+          subtitle="Finance setup readiness, posting controls, close workflow, and ledger automation"
+        />
+        <SkeletonCardGrid count={4} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" />
+        <Card className="p-5">
+          <div className="aurora-skeleton h-36 rounded-lg" aria-hidden />
+        </Card>
+      </div>
+    );
 
   return (
     <div className="space-y-6 p-6">
@@ -213,7 +227,7 @@ export default function AccountingEngineDashboardPage() {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="aurora-stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Pending Posting Runs" value={stats.pendingPostingRuns} variant="blue" />
         <StatCard label="Open Accounting Locks" value={stats.openAccountingLocks} variant="red" />
         <StatCard label="Pending Period Closes" value={stats.pendingPeriodCloses} variant="amber" />
@@ -317,7 +331,7 @@ export default function AccountingEngineDashboardPage() {
             <h2 className="text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
               Setup Indicators
             </h2>
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+            <div className="aurora-stagger mt-4 grid grid-cols-2 gap-3 text-sm">
               {Object.entries(readiness?.indicators ?? {})
                 .slice(0, 12)
                 .map(([key, value]) => (
@@ -386,7 +400,7 @@ export default function AccountingEngineDashboardPage() {
         <h2 className="mb-3 text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
           Finance Setup & Control Links
         </h2>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="aurora-stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {quickLinks.map((link) => (
             <Link key={link.href} href={link.href}>
               <Card className="h-full p-4 transition-shadow hover:shadow-md">
