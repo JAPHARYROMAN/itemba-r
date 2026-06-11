@@ -107,11 +107,13 @@ const config: Config = {
         'fade-out': 'auroraFadeOut 0.15s ease-in forwards',
         'fade-up': 'auroraFadeUp 0.2s ease-out',
         'slide-in-right': 'auroraSlideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+        'slide-out-right': 'auroraSlideOutRight 0.18s cubic-bezier(0.4, 0, 1, 1) forwards',
         'slide-in-left': 'auroraSlideInLeft 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
         'slide-up': 'auroraSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
         'scale-in': 'auroraScaleIn 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
         'scale-out': 'auroraScaleOut 0.15s cubic-bezier(0.4, 0, 1, 1) forwards',
         'scale-pop': 'auroraScalePop 0.35s cubic-bezier(0.16, 1, 0.3, 1)',
+        'route-progress': 'auroraRouteProgress 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards',
         shake: 'auroraShake 0.3s cubic-bezier(0.36, 0.07, 0.19, 0.97)',
         skeleton: 'auroraSkeleton 1.5s ease-in-out infinite',
         'spin-slow': 'spin 2s linear infinite',
@@ -129,6 +131,10 @@ const config: Config = {
         auroraSlideInRight: {
           '0%': { transform: 'translateX(100%)', opacity: '0' },
           '100%': { transform: 'translateX(0)', opacity: '1' },
+        },
+        auroraSlideOutRight: {
+          '0%': { transform: 'translateX(0)', opacity: '1' },
+          '100%': { transform: 'translateX(100%)', opacity: '0' },
         },
         auroraSlideInLeft: {
           '0%': { transform: 'translateX(-100%)', opacity: '0' },
@@ -154,6 +160,12 @@ const config: Config = {
           '0%': { transform: 'scale(0.9)', opacity: '0' },
           '60%': { transform: 'scale(1.03)', opacity: '1' },
           '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        auroraRouteProgress: {
+          '0%': { transform: 'translateX(-110%) scaleX(0.35)', opacity: '0' },
+          '20%': { opacity: '1' },
+          '70%': { transform: 'translateX(110%) scaleX(1)', opacity: '1' },
+          '100%': { transform: 'translateX(230%) scaleX(0.35)', opacity: '0' },
         },
         auroraShake: {
           '0%, 100%': { transform: 'translateX(0)' },

@@ -1,5 +1,6 @@
 'use client';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
+import { X } from 'lucide-react';
 
 interface ModalProps {
   open: boolean;
@@ -29,7 +30,19 @@ export function Modal({
   open, onClose, title, subtitle, size = 'md',
   dismissOnBackdrop = true, children, footer,
 }: ModalProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
+  const [rendered, setRendered] = useState(open);
+  const closing = rendered && !open;
+
+  useEffect(() => {
+    if (open) {
+      setRendered(true);
+      return;
+    }
+    if (!rendered) return;
+
+    const timer = window.setTimeout(() => setRendered(false), 160);
+    return () => window.clearTimeout(timer);
+  }, [open, rendered]);
 
   // ESC to close
   useEffect(() => {
@@ -51,17 +64,21 @@ export function Modal({
     return () => { document.body.style.overflow = ''; };
   }, [open]);
 
-  if (!open) return null;
+  if (!rendered) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[1200] flex items-center justify-center p-4 animate-fade-in"
+      className={`fixed inset-0 z-[1200] flex items-center justify-center p-4 ${closing ? 'animate-fade-out' : 'animate-fade-in'}`}
       style={{ background: 'var(--aurora-overlay)' }}
       onClick={dismissOnBackdrop ? onClose : undefined}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="aurora-modal-title"
     >
       <div
-        ref={panelRef}
-        className={`relative w-full ${SIZE_MAP[size]} rounded-2xl shadow-2xl flex flex-col max-h-[92vh] animate-scale-in`}
+        className={`relative w-full ${SIZE_MAP[size]} rounded-2xl shadow-2xl flex flex-col max-h-[92vh] ${
+          closing ? 'animate-scale-out' : 'animate-scale-in'
+        }`}
         style={{
           background: 'var(--aurora-card)',
           color: 'var(--aurora-text)',
@@ -73,7 +90,7 @@ export function Modal({
         {/* Header */}
         <div className="flex items-start justify-between gap-3 px-6 pt-5 pb-4 border-b" style={{ borderColor: 'var(--aurora-border)' }}>
           <div className="min-w-0">
-            <h2 className="text-[16px] font-semibold leading-snug truncate" style={{ color: 'var(--aurora-text)' }}>
+            <h2 id="aurora-modal-title" className="text-[16px] font-semibold leading-snug truncate" style={{ color: 'var(--aurora-text)' }}>
               {title}
             </h2>
             {subtitle && (
@@ -86,9 +103,7 @@ export function Modal({
             style={{ color: 'var(--aurora-text-muted)' }}
             aria-label="Close"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X aria-hidden className="h-4 w-4" />
           </button>
         </div>
 

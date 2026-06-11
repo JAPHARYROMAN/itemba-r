@@ -1,5 +1,6 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { X } from 'lucide-react';
 
 interface DetailDrawerProps {
   open: boolean;
@@ -17,6 +18,20 @@ const WIDTHS = {
 };
 
 export function DetailDrawer({ open, title, subtitle, onClose, children, width = 'md' }: DetailDrawerProps) {
+  const [rendered, setRendered] = useState(open);
+  const closing = rendered && !open;
+
+  useEffect(() => {
+    if (open) {
+      setRendered(true);
+      return;
+    }
+    if (!rendered) return;
+
+    const timer = window.setTimeout(() => setRendered(false), 180);
+    return () => window.clearTimeout(timer);
+  }, [open, rendered]);
+
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -24,31 +39,42 @@ export function DetailDrawer({ open, title, subtitle, onClose, children, width =
     return () => window.removeEventListener('keydown', handler);
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!rendered) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end animate-fade-in">
+    <div
+      className={`fixed inset-0 z-40 flex justify-end ${closing ? 'animate-fade-out' : 'animate-fade-in'}`}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="aurora-drawer-title"
+    >
       {/* Overlay */}
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} aria-hidden />
+      <div className="absolute inset-0" style={{ background: 'var(--aurora-overlay)' }} onClick={onClose} aria-hidden />
 
       {/* Panel */}
       <aside
-        className={`relative ${WIDTHS[width]} h-full bg-white border-l border-zinc-200 shadow-drawer flex flex-col animate-slide-in-right`}
+        className={`relative ${WIDTHS[width]} h-full border-l shadow-drawer flex flex-col ${
+          closing ? 'animate-slide-out-right' : 'animate-slide-in-right'
+        }`}
+        style={{
+          background: 'var(--aurora-card)',
+          borderColor: 'var(--aurora-border)',
+          color: 'var(--aurora-text)',
+        }}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-zinc-200 flex-shrink-0">
+        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b flex-shrink-0" style={{ borderColor: 'var(--aurora-border)' }}>
           <div className="min-w-0">
-            <h2 className="text-[16px] font-semibold text-zinc-900 leading-tight">{title}</h2>
-            {subtitle && <p className="text-[12px] text-zinc-400 mt-0.5">{subtitle}</p>}
+            <h2 id="aurora-drawer-title" className="text-[16px] font-semibold leading-tight" style={{ color: 'var(--aurora-text)' }}>{title}</h2>
+            {subtitle && <p className="text-[12px] mt-0.5" style={{ color: 'var(--aurora-text-muted)' }}>{subtitle}</p>}
           </div>
           <button
             onClick={onClose}
-            className="flex-shrink-0 p-1.5 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 transition-colors"
+            className="flex-shrink-0 p-1.5 rounded-md hover:bg-[var(--aurora-bg-subtle)] transition-colors"
+            style={{ color: 'var(--aurora-text-muted)' }}
             aria-label="Close"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X aria-hidden className="h-4 w-4" />
           </button>
         </div>
 

@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -17,9 +18,18 @@ interface ConfirmDialogProps {
 }
 
 const BTN_VARIANTS = {
-  danger: 'bg-red-600 hover:bg-red-700 text-white',
-  warning: 'bg-amber-500 hover:bg-amber-600 text-white',
-  default: 'bg-zinc-900 hover:bg-zinc-700 text-white',
+  danger: {
+    background: 'var(--aurora-danger)',
+    color: 'white',
+  },
+  warning: {
+    background: 'var(--aurora-warning)',
+    color: 'white',
+  },
+  default: {
+    background: 'var(--aurora-primary)',
+    color: 'white',
+  },
 };
 
 export function ConfirmDialog({
@@ -35,10 +45,23 @@ export function ConfirmDialog({
   loading: loadingProp,
 }: ConfirmDialogProps) {
   const [busy, setBusy] = useState(false);
+  const [rendered, setRendered] = useState(open);
   const loading = loadingProp ?? busy;
+  const closing = rendered && !open;
   const handleCancel = useCallback(() => {
     (onCancel ?? onClose)?.();
   }, [onCancel, onClose]);
+
+  useEffect(() => {
+    if (open) {
+      setRendered(true);
+      return;
+    }
+    if (!rendered) return;
+
+    const timer = window.setTimeout(() => setRendered(false), 160);
+    return () => window.clearTimeout(timer);
+  }, [open, rendered]);
 
   useEffect(() => {
     function handler(e: KeyboardEvent) {
@@ -49,7 +72,7 @@ export function ConfirmDialog({
     return () => window.removeEventListener('keydown', handler);
   }, [open, handleCancel]);
 
-  if (!open) return null;
+  if (!rendered) return null;
 
   const handleConfirm = async () => {
     setBusy(true);
@@ -61,22 +84,46 @@ export function ConfirmDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 animate-fade-in">
-      <div className="bg-white rounded-2xl shadow-card-md border border-zinc-200 w-full max-w-sm p-6">
-        <h2 className="text-[16px] font-semibold text-zinc-900">{title}</h2>
-        <p className="text-[13px] text-zinc-500 mt-2">{message}</p>
+    <div
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${closing ? 'animate-fade-out' : 'animate-fade-in'}`}
+      style={{ background: 'var(--aurora-overlay)' }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="aurora-confirm-title"
+    >
+      <div
+        className={`w-full max-w-sm rounded-2xl border p-6 ${closing ? 'animate-scale-out' : 'animate-scale-in'}`}
+        style={{
+          background: 'var(--aurora-card)',
+          borderColor: 'var(--aurora-border)',
+          boxShadow: 'var(--aurora-shadow-command)',
+        }}
+      >
+        <div
+          className="mb-4 flex h-10 w-10 items-center justify-center rounded-full"
+          style={{
+            background: variant === 'danger' ? 'var(--aurora-danger-bg)' : variant === 'warning' ? 'var(--aurora-warning-bg)' : 'var(--aurora-primary-subtle)',
+            color: variant === 'danger' ? 'var(--aurora-danger-text)' : variant === 'warning' ? 'var(--aurora-warning-text)' : 'var(--aurora-primary-text)',
+          }}
+        >
+          {variant === 'default' ? <CheckCircle2 aria-hidden className="h-5 w-5" /> : <AlertTriangle aria-hidden className="h-5 w-5" />}
+        </div>
+        <h2 id="aurora-confirm-title" className="text-[16px] font-semibold" style={{ color: 'var(--aurora-text)' }}>{title}</h2>
+        <p className="text-[13px] mt-2" style={{ color: 'var(--aurora-text-muted)' }}>{message}</p>
         <div className="flex justify-end gap-2 mt-6">
           <button
             onClick={handleCancel}
             disabled={loading}
-            className="px-4 py-2 text-[13px] font-medium text-zinc-600 border border-zinc-200 rounded-lg hover:bg-zinc-50 transition-colors disabled:opacity-50"
+            className="px-4 py-2 text-[13px] font-medium border rounded-lg hover:bg-[var(--aurora-bg-subtle)] transition-colors disabled:opacity-50"
+            style={{ color: 'var(--aurora-text-secondary)', borderColor: 'var(--aurora-border)' }}
           >
             {cancelLabel}
           </button>
           <button
             onClick={handleConfirm}
             disabled={loading}
-            className={`px-4 py-2 text-[13px] font-medium rounded-lg transition-colors disabled:opacity-50 ${BTN_VARIANTS[variant]}`}
+            className="px-4 py-2 text-[13px] font-medium rounded-lg transition-colors disabled:opacity-50"
+            style={BTN_VARIANTS[variant]}
           >
             {loading ? 'Please wait…' : confirmLabel}
           </button>

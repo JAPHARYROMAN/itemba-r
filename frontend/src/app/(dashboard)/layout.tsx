@@ -11,6 +11,7 @@ import { CommandPaletteProvider } from '@/components/aurora/command';
 import { ToastProvider } from '@/components/aurora/feedback';
 import { CsrfFetchProvider } from '@/components/security/CsrfFetchProvider';
 import { PageSpinner } from '@/components/ui';
+import { RouteProgress } from '@/components/layout/route-progress';
 
 const PUBLIC_DASHBOARD_PATHS = new Set(['/westsides/mobile-pos/install']);
 
@@ -36,7 +37,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
         className="flex min-h-screen items-center justify-center"
         style={{ background: 'var(--aurora-bg)' }}
       >
-        <PageSpinner />
+        <PageSpinner label="Checking your session" />
       </div>
     );
   }
@@ -59,6 +60,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <AuthGate>
         <CsrfFetchProvider>
           <CommandPaletteProvider>
+            <RouteProgress />
             <ToastProvider />
             {mobilePosStandalone ? (
               <main

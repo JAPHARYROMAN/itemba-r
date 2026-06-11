@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { ChevronDown, LogOut, Menu } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { GlobalSearchBox } from '@/components/aurora/command';
 import { ThemeSelector } from '@/components/ui/theme-selector';
@@ -34,22 +35,18 @@ export function Topbar({ onMenuClick }: TopbarProps) {
   }, []);
 
   return (
-    <header className="h-14 bg-white border-b border-zinc-200 flex items-center justify-between px-4 lg:px-6 flex-shrink-0">
+    <header
+      className="h-14 border-b flex items-center justify-between px-4 lg:px-6 flex-shrink-0"
+      style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
+    >
       {/* Left: hamburger (mobile) */}
       <button
         onClick={onMenuClick}
-        className="lg:hidden p-1.5 rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 transition-colors"
+        className="lg:hidden p-1.5 rounded-md transition-colors hover:bg-[var(--aurora-bg-subtle)] hover:text-[var(--aurora-text)]"
+        style={{ color: 'var(--aurora-text-muted)' }}
         aria-label="Open menu"
       >
-        <svg
-          className="w-5 h-5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
+        <Menu aria-hidden className="h-5 w-5" />
       </button>
 
       <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
@@ -62,34 +59,43 @@ export function Topbar({ onMenuClick }: TopbarProps) {
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setDropdownOpen((v) => !v)}
-              className="flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-lg hover:bg-zinc-50 transition-colors"
+              className="flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-lg hover:bg-[var(--aurora-bg-subtle)] transition-colors"
+              aria-expanded={dropdownOpen}
+              aria-haspopup="menu"
             >
-              <div className="w-7 h-7 rounded-full bg-brand-100 text-brand-700 font-semibold text-xs flex items-center justify-center">
+              <div
+                className="w-7 h-7 rounded-full font-semibold text-xs flex items-center justify-center"
+                style={{ background: 'var(--aurora-primary-subtle)', color: 'var(--aurora-primary-text)' }}
+              >
                 {initials}
               </div>
               <div className="hidden sm:block text-left">
-                <div className="text-[13px] font-medium text-zinc-900 leading-none">
+                <div className="text-[13px] font-medium leading-none" style={{ color: 'var(--aurora-text)' }}>
                   {user.fullName}
                 </div>
-                <div className="text-[11px] text-zinc-400 mt-0.5 leading-none">{user.email}</div>
+                <div className="text-[11px] mt-0.5 leading-none" style={{ color: 'var(--aurora-text-muted)' }}>{user.email}</div>
               </div>
-              <svg
-                className="w-3.5 h-3.5 text-zinc-400 hidden sm:block"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
+              <ChevronDown
+                aria-hidden
+                className="hidden h-3.5 w-3.5 sm:block"
+                style={{ color: 'var(--aurora-text-muted)' }}
+              />
             </button>
 
             {dropdownOpen && (
-              <div className="absolute right-0 top-full mt-1.5 w-52 bg-white rounded-xl border border-zinc-200 shadow-card-md py-1.5 z-50 animate-fade-in">
-                <div className="px-3.5 py-2.5 border-b border-zinc-100">
-                  <div className="text-[13px] font-medium text-zinc-900">{user.fullName}</div>
-                  <div className="text-[11px] text-zinc-400 mt-0.5">{user.email}</div>
-                  <div className="text-[11px] text-zinc-400 mt-0.5 capitalize">
+              <div
+                className="absolute right-0 top-full mt-1.5 w-52 rounded-xl border py-1.5 z-50 animate-fade-in"
+                style={{
+                  background: 'var(--aurora-card-elevated)',
+                  borderColor: 'var(--aurora-border)',
+                  boxShadow: 'var(--aurora-shadow)',
+                }}
+                role="menu"
+              >
+                <div className="px-3.5 py-2.5 border-b" style={{ borderColor: 'var(--aurora-border)' }}>
+                  <div className="text-[13px] font-medium" style={{ color: 'var(--aurora-text)' }}>{user.fullName}</div>
+                  <div className="text-[11px] mt-0.5" style={{ color: 'var(--aurora-text-muted)' }}>{user.email}</div>
+                  <div className="text-[11px] mt-0.5 capitalize" style={{ color: 'var(--aurora-text-muted)' }}>
                     {(user.roles ?? []).join(', ')}
                   </div>
                 </div>
@@ -98,8 +104,11 @@ export function Topbar({ onMenuClick }: TopbarProps) {
                     setDropdownOpen(false);
                     logout();
                   }}
-                  className="w-full text-left px-3.5 py-2 text-[13px] text-red-600 hover:bg-red-50 transition-colors"
+                  className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-[13px] transition-colors hover:bg-[var(--aurora-danger-bg)]"
+                  style={{ color: 'var(--aurora-danger-text)' }}
+                  role="menuitem"
                 >
+                  <LogOut aria-hidden className="h-3.5 w-3.5" />
                   Sign out
                 </button>
               </div>

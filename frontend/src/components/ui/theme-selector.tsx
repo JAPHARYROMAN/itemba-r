@@ -1,43 +1,24 @@
 'use client';
 
+import type { LucideIcon } from 'lucide-react';
+import { Monitor, Moon, Sun } from 'lucide-react';
 import { useTheme, type ThemeMode } from '@/hooks/use-theme';
 
-const MODES: Array<{ value: ThemeMode; label: string; icon: React.ReactNode }> = [
+const MODES: Array<{ value: ThemeMode; label: string; icon: LucideIcon }> = [
   {
     value: 'light',
     label: 'Light theme',
-    icon: (
-      <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="4" />
-        <path
-          strokeLinecap="round"
-          d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
-        />
-      </svg>
-    ),
+    icon: Sun,
   },
   {
     value: 'system',
     label: 'Follow system theme',
-    icon: (
-      <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-        <rect x="3" y="4" width="18" height="13" rx="2" />
-        <path strokeLinecap="round" d="M8 21h8m-4-4v4" />
-      </svg>
-    ),
+    icon: Monitor,
   },
   {
     value: 'dark',
     label: 'Dark theme',
-    icon: (
-      <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"
-        />
-      </svg>
-    ),
+    icon: Moon,
   },
 ];
 
@@ -55,7 +36,7 @@ export function ThemeSelector({ className = '' }: { className?: string }) {
       className={`flex items-center gap-0.5 rounded-lg border p-0.5 ${className}`}
       style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}
     >
-      {MODES.map(({ value, label, icon }) => {
+      {MODES.map(({ value, label, icon: Icon }) => {
         const active = hydrated && mode === value;
         return (
           <button
@@ -77,7 +58,7 @@ export function ThemeSelector({ className = '' }: { className?: string }) {
                 : { color: 'var(--aurora-text-muted)' }
             }
           >
-            {icon}
+            <Icon aria-hidden className="h-4 w-4" />
           </button>
         );
       })}
