@@ -9,7 +9,8 @@ import {
   type ReactNode,
 } from 'react';
 import Link from 'next/link';
-import { Btn, Card, FormSelect, PageHeader, PageSpinner } from '@/components/ui';
+import { AppIcon, Btn, Card, FormSelect, PageHeader, PageSpinner } from '@/components/ui';
+import type { AppIconName } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
 import { useAuth } from '@/hooks/use-auth';
 
@@ -421,23 +422,29 @@ interface ReadinessModel {
 }
 
 const QUICK_LINKS = [
-  { label: 'Quick Sale', href: '/westsides/quick-sale', tone: 'good', group: 'Commercial' },
-  { label: 'Customers', href: '/westsides/customers', tone: 'brand', group: 'Commercial' },
-  { label: 'Live Inventory', href: '/westsides/inventory/live', tone: 'info', group: 'Stock' },
-  { label: 'Daily Close', href: '/westsides/daily-close', tone: 'warn', group: 'Control' },
-  { label: 'Sales Orders', href: '/operations/sales-orders', tone: 'neutral', group: 'Commercial' },
-  { label: 'Quotations', href: '/westsides/quotations', tone: 'neutral', group: 'Pipeline' },
-  { label: 'Price Lists', href: '/westsides/price-lists', tone: 'info', group: 'Pricing' },
-  {
-    label: 'Delivery Notes',
-    href: '/westsides/delivery-notes',
-    tone: 'neutral',
-    group: 'Fulfilment',
-  },
-  { label: 'Product Batches', href: '/westsides/product-batches', tone: 'warn', group: 'Stock' },
-  { label: 'Stock Damage', href: '/westsides/stock-damage', tone: 'danger', group: 'Control' },
-  { label: 'Reports', href: '/westsides/reports', tone: 'brand', group: 'Insight' },
-] as const;
+  { label: 'Quick Sale', href: '/westsides/quick-sale', tone: 'good', group: 'Sell', icon: 'pos' },
+  { label: 'Sales Orders', href: '/operations/sales-orders', tone: 'neutral', group: 'Sell', icon: 'order' },
+  { label: 'Customers', href: '/westsides/customers', tone: 'brand', group: 'Sell', icon: 'customers' },
+  { label: 'Quotations', href: '/westsides/quotations', tone: 'neutral', group: 'Pipeline & pricing', icon: 'quotation' },
+  { label: 'Price Lists', href: '/westsides/price-lists', tone: 'info', group: 'Pipeline & pricing', icon: 'calculator' },
+  { label: 'Live Inventory', href: '/westsides/inventory/live', tone: 'info', group: 'Stock & fulfilment', icon: 'inventory' },
+  { label: 'Product Batches', href: '/westsides/product-batches', tone: 'warn', group: 'Stock & fulfilment', icon: 'product' },
+  { label: 'Delivery Notes', href: '/westsides/delivery-notes', tone: 'neutral', group: 'Stock & fulfilment', icon: 'delivery' },
+  { label: 'Daily Close', href: '/westsides/daily-close', tone: 'warn', group: 'Control & insight', icon: 'done' },
+  { label: 'Stock Damage', href: '/westsides/stock-damage', tone: 'danger', group: 'Control & insight', icon: 'alert' },
+  { label: 'Reports', href: '/westsides/reports', tone: 'brand', group: 'Control & insight', icon: 'report' },
+] as const satisfies readonly {
+  label: string;
+  href: string;
+  tone: Tone;
+  group: string;
+  icon: AppIconName;
+}[];
+
+/** Quick links grouped for rendering, preserving declaration order. */
+const QUICK_LINK_GROUPS = [...new Set(QUICK_LINKS.map((link) => link.group))].map(
+  (group) => [group, QUICK_LINKS.filter((link) => link.group === group)] as const,
+);
 
 const SETTINGS_KEY = 'itemba.cockpit.settings.v1';
 
@@ -958,9 +965,21 @@ export default function WestsidesCockpitPage() {
                 title="Quick actions"
                 subtitle="Primary Westsides workflows."
               />
-              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-2">
-                {QUICK_LINKS.map((link) => (
-                  <QuickAction key={link.href} link={link} />
+              <div className="p-4 space-y-4">
+                {QUICK_LINK_GROUPS.map(([group, links]) => (
+                  <div key={group}>
+                    <div
+                      className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide"
+                      style={TEXT_MUTED}
+                    >
+                      {group}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-2">
+                      {links.map((link) => (
+                        <QuickAction key={link.href} link={link} />
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             </Card>
@@ -2726,12 +2745,14 @@ function QuickAction({ link }: { link: (typeof QUICK_LINKS)[number] }) {
   return (
     <Link
       href={link.href}
-      className="rounded-lg border px-3 py-2 min-w-0"
+      className="rounded-lg border px-3 py-2 min-w-0 transition-all duration-150 hover:-translate-y-0.5 hover:shadow-sm"
       style={{ background: colors.background, borderColor: colors.border, color: colors.color }}
     >
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2.5">
+        <span className="flex-shrink-0 opacity-80" aria-hidden="true">
+          <AppIcon name={link.icon} size={15} />
+        </span>
         <span className="text-sm font-semibold truncate">{link.label}</span>
-        <span className="text-[11px] uppercase tracking-wide flex-shrink-0">{link.group}</span>
       </div>
     </Link>
   );
