@@ -21,6 +21,13 @@ import {
 } from '@/components/aurora';
 import type { Column } from '@/components/aurora/data-display/DataTable';
 import { getStatusVariant } from '@/lib/design-system';
+import { useCountUp } from '@/hooks/use-count-up';
+
+/** Count-up treatment for the operational-focus strip numbers. */
+function PulseValue({ value }: { value: number }) {
+  const counted = useCountUp(value);
+  return <>{Math.round(counted).toLocaleString()}</>;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -351,9 +358,14 @@ export default function DashboardPage() {
   return (
     <AuroraPage>
       <AuroraPageHeader
-        title={`${greeting} — Command Centre`}
+        title={
+          user?.fullName
+            ? `${greeting}, ${user.fullName.split(' ')[0]}`
+            : `${greeting} — Command Centre`
+        }
         subtitle={dateStr}
         eyebrow="Live"
+        live
         actions={
           <div className="flex gap-2">
             <Link
@@ -406,39 +418,50 @@ export default function DashboardPage() {
         className="mt-5"
       >
         {data && (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            {operationalFocus.map((item) => (
-              <Link
-                key={item.label}
-                href={item.href}
-                className="rounded-aurora border px-4 py-3 aurora-transition hover:shadow-sm"
-                style={{
-                  background: 'var(--aurora-bg-subtle)',
-                  borderColor: 'var(--aurora-border)',
-                }}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p
-                      className="text-xs font-semibold uppercase"
-                      style={{ color: 'var(--aurora-text-muted)' }}
-                    >
-                      {item.label}
-                    </p>
-                    <p
-                      className="mt-2 aurora-metric text-2xl"
-                      style={{ color: 'var(--aurora-text)' }}
-                    >
-                      {item.value}
-                    </p>
-                    <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
-                      {item.detail}
-                    </p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4 animate-fade-up">
+            {operationalFocus.map((item) => {
+              const edgeColor =
+                item.status === 'CRITICAL'
+                  ? 'var(--aurora-danger)'
+                  : item.status === 'ACTION_REQUIRED'
+                    ? 'var(--aurora-warning, #f59e0b)'
+                    : item.status === 'CLEAR'
+                      ? 'var(--aurora-success, #10b981)'
+                      : 'var(--aurora-border)';
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  className="rounded-aurora border px-4 py-3 aurora-transition hover:shadow-sm hover:-translate-y-0.5"
+                  style={{
+                    background: 'var(--aurora-bg-subtle)',
+                    borderColor: 'var(--aurora-border)',
+                    borderLeft: `3px solid ${edgeColor}`,
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p
+                        className="text-xs font-semibold uppercase"
+                        style={{ color: 'var(--aurora-text-muted)' }}
+                      >
+                        {item.label}
+                      </p>
+                      <p
+                        className="mt-2 aurora-metric text-2xl"
+                        style={{ color: 'var(--aurora-text)' }}
+                      >
+                        <PulseValue value={item.value} />
+                      </p>
+                      <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
+                        {item.detail}
+                      </p>
+                    </div>
+                    <StatusBadge status={item.status} size="sm" />
                   </div>
-                  <StatusBadge status={item.status} size="sm" />
-                </div>
-              </Link>
-            ))}
+                </Link>
+              );
+            })}
           </div>
         )}
       </AuroraToolbar>

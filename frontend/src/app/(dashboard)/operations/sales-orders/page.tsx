@@ -14,6 +14,7 @@ import {
   FormInput,
   FormSelect,
   FormTextarea,
+  showToast,
 } from '@/components/ui';
 import {
   backendDelete,
@@ -597,8 +598,10 @@ function SalesOrderModal({
       if (form.paymentReference) body.paymentReference = form.paymentReference;
       if (mode === 'create') {
         await backendPost('/sales-orders', body);
+        showToast('success', 'Sales order created', 'Saved as draft — confirm it to post.');
       } else {
         await backendPatch(`/sales-orders/${initial!.id}`, body);
+        showToast('success', 'Sales order updated');
       }
       onSaved();
     } catch (err: unknown) {
@@ -1030,9 +1033,16 @@ export default function SalesOrdersPage() {
     setActionError('');
     try {
       await backendPatch(`/sales-orders/${id}/${action}`);
+      showToast(
+        action === 'confirm' ? 'success' : 'info',
+        action === 'confirm' ? 'Order confirmed' : 'Order cancelled',
+        action === 'confirm' ? 'Inventory issued and posted to the ledger.' : undefined,
+      );
       await load();
     } catch (err: unknown) {
-      setActionError(err instanceof Error ? err.message : 'Failed');
+      const message = err instanceof Error ? err.message : 'Failed';
+      setActionError(message);
+      showToast('error', `Could not ${action} order`, message);
     } finally {
       setActionLoading(null);
     }
