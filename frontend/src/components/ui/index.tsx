@@ -4,6 +4,11 @@ export { Card } from './card';
 export { StatCard } from './stat-card';
 export type { StatCardTrend } from './stat-card';
 export { StatusBadge } from './status-badge';
+export { Sparkline } from './sparkline';
+
+// Icons — shared Lucide-based domain icon set
+export { AppIcon } from './icon-set';
+export type { AppIconName } from './icon-set';
 
 // Data
 export { DataTable } from './data-table';

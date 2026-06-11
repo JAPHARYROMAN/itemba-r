@@ -1,15 +1,56 @@
 'use client';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 // ── Shared base styles ────────────────────────────────────────────────────────
 //
 // Inputs use the `aurora-input` utility class defined in globals.css, which
 // already wires up bg/text/border/placeholder against the theme tokens for
-// both light and dark mode. We only add layout + width here.
+// both light and dark mode. We only add layout + width here. transition-all
+// (not transition-colors) so the focus ring — a box-shadow — animates too.
 const INPUT_BASE =
   'aurora-input w-full px-3 py-2 text-[13px] rounded-lg ' +
-  'focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors ' +
+  'focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-all duration-150 ' +
   'disabled:cursor-not-allowed';
+
+/** Border/ring treatment for the three field states. */
+function fieldStateClasses(error?: string, success?: boolean) {
+  if (error) return 'border-red-400 focus:ring-red-400 focus:border-red-400';
+  if (success) return 'border-emerald-400 focus:ring-emerald-400 focus:border-emerald-400';
+  return '';
+}
+
+/**
+ * Shake the field once whenever a NEW error appears (not on every render with
+ * the same error, and never re-mounting the input — focus and value survive).
+ */
+function useShakeOnError(error?: string) {
+  const [shaking, setShaking] = useState(false);
+  const prev = useRef(error);
+  useEffect(() => {
+    if (error && error !== prev.current) {
+      setShaking(true);
+      const t = setTimeout(() => setShaking(false), 320);
+      prev.current = error;
+      return () => clearTimeout(t);
+    }
+    prev.current = error;
+  }, [error]);
+  return shaking ? ' animate-shake' : '';
+}
+
+function SuccessCheck() {
+  return (
+    <span
+      className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 animate-fade-in"
+      style={{ color: 'var(--aurora-success, #10b981)' }}
+      aria-hidden="true"
+    >
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+      </svg>
+    </span>
+  );
+}
 
 // ── Label ─────────────────────────────────────────────────────────────────────
 function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
@@ -38,8 +79,22 @@ function Hint({ children }: { children: React.ReactNode }) {
 
 function FieldError({ children }: { children: React.ReactNode }) {
   return (
-    <p className="mt-1 text-[11px]" style={{ color: 'var(--aurora-danger)' }}>
-      {children}
+    <p
+      className="mt-1 text-[11px] flex items-center gap-1 animate-fade-in"
+      style={{ color: 'var(--aurora-danger)' }}
+    >
+      <svg
+        className="w-3 h-3 flex-shrink-0"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2}
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path strokeLinecap="round" d="M12 8v4m0 4h.01" />
+      </svg>
+      <span>{children}</span>
     </p>
   );
 }
@@ -49,13 +104,22 @@ interface FormInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   hint?: string;
   error?: string;
+  /** Show a green border + checkmark, e.g. after async validation passes. */
+  success?: boolean;
 }
 
-export function FormInput({ label, hint, error, className = '', ...props }: FormInputProps) {
+export function FormInput({ label, hint, error, success, className = '', ...props }: FormInputProps) {
+  const shake = useShakeOnError(error);
   return (
     <div className={className}>
       {label && <Label required={props.required}>{label}</Label>}
-      <input className={`${INPUT_BASE} ${error ? 'border-red-400 focus:ring-red-400' : ''}`} {...props} />
+      <div className="relative">
+        <input
+          className={`${INPUT_BASE} ${fieldStateClasses(error, success)}${shake} ${success && !error ? 'pr-8' : ''}`}
+          {...props}
+        />
+        {success && !error && <SuccessCheck />}
+      </div>
       {error ? <FieldError>{error}</FieldError> : hint ? <Hint>{hint}</Hint> : null}
     </div>
   );
@@ -68,16 +132,19 @@ interface FormSelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> 
   label?: string;
   hint?: string;
   error?: string;
+  /** Green border, e.g. after async validation passes (no check icon — the native arrow lives on the right). */
+  success?: boolean;
   options?: SelectOption[];
   placeholder?: string;
   children?: React.ReactNode;
 }
 
-export function FormSelect({ label, hint, error, options, placeholder, children, className = '', ...props }: FormSelectProps) {
+export function FormSelect({ label, hint, error, success, options, placeholder, children, className = '', ...props }: FormSelectProps) {
+  const shake = useShakeOnError(error);
   return (
     <div className={className}>
       {label && <Label required={props.required}>{label}</Label>}
-      <select className={`${INPUT_BASE} ${error ? 'border-red-400 focus:ring-red-400' : ''}`} {...props}>
+      <select className={`${INPUT_BASE} ${fieldStateClasses(error, success)}${shake}`} {...props}>
         {placeholder && <option value="">{placeholder}</option>}
         {options
           ? options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)
@@ -93,15 +160,17 @@ interface FormTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaEle
   label?: string;
   hint?: string;
   error?: string;
+  success?: boolean;
 }
 
-export function FormTextarea({ label, hint, error, className = '', ...props }: FormTextareaProps) {
+export function FormTextarea({ label, hint, error, success, className = '', ...props }: FormTextareaProps) {
+  const shake = useShakeOnError(error);
   return (
     <div className={className}>
       {label && <Label required={props.required}>{label}</Label>}
       <textarea
         rows={3}
-        className={`${INPUT_BASE} resize-y ${error ? 'border-red-400 focus:ring-red-400' : ''}`}
+        className={`${INPUT_BASE} resize-y ${fieldStateClasses(error, success)}${shake}`}
         {...props}
       />
       {error ? <FieldError>{error}</FieldError> : hint ? <Hint>{hint}</Hint> : null}
@@ -117,12 +186,13 @@ interface DateInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement
 }
 
 export function DateInput({ label, hint, error, className = '', ...props }: DateInputProps) {
+  const shake = useShakeOnError(error);
   return (
     <div className={className}>
       {label && <Label required={props.required}>{label}</Label>}
       <input
         type="date"
-        className={`${INPUT_BASE} ${error ? 'border-red-400 focus:ring-red-400' : ''}`}
+        className={`${INPUT_BASE} ${fieldStateClasses(error)}${shake}`}
         {...props}
       />
       {error ? <FieldError>{error}</FieldError> : hint ? <Hint>{hint}</Hint> : null}

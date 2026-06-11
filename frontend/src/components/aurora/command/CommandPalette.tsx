@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet } from '@/lib/api-client';
 import { NAV, isGroup, type NavItem, type NavLeaf } from '@/components/layout/sidebar';
+import { AppIcon, type AppIconName } from '@/components/ui/icon-set';
 
 interface CommandItem {
   id: string;
@@ -105,7 +106,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Public Home',
     href: '/',
     group: 'Public',
-    icon: '⌂',
+    icon: <AppIcon name="home" size={16} />,
     keywords: ['landing', 'website'],
   },
   {
@@ -113,7 +114,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Login',
     href: '/login',
     group: 'Public',
-    icon: '⇥',
+    icon: <AppIcon name="login" size={16} />,
     keywords: ['sign in', 'authentication'],
   },
   {
@@ -121,7 +122,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Signup',
     href: '/signup',
     group: 'Public',
-    icon: '+',
+    icon: <AppIcon name="signup" size={16} />,
     keywords: ['create account', 'registration'],
   },
   {
@@ -129,7 +130,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Run Report',
     href: '/reports/run',
     group: 'Reports',
-    icon: '▶',
+    icon: <AppIcon name="run" size={16} />,
     permission: 'report_runs.create',
     keywords: ['execute report', 'report viewer'],
   },
@@ -138,7 +139,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'New Company',
     href: '/companies/new',
     group: 'Registry',
-    icon: '+',
+    icon: <AppIcon name="company" size={16} />,
     permission: 'companies.create',
     keywords: ['create company', 'registry'],
   },
@@ -147,7 +148,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Company Profile Settings',
     href: '/settings/company-profile',
     group: 'Settings',
-    icon: '⚙',
+    icon: <AppIcon name="settings" size={16} />,
     keywords: ['company profile', 'letterhead', 'logo'],
   },
   {
@@ -155,7 +156,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Number Sequences',
     href: '/settings/number-sequences',
     group: 'Settings',
-    icon: '#',
+    icon: <AppIcon name="sequence" size={16} />,
     keywords: ['document numbers', 'sequence setup'],
   },
   {
@@ -163,7 +164,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Preferences',
     href: '/settings/preferences',
     group: 'Settings',
-    icon: '⚙',
+    icon: <AppIcon name="settings" size={16} />,
     keywords: ['user preferences'],
   },
   {
@@ -171,7 +172,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'API Request Logs',
     href: '/api-gateway/logs',
     group: 'API Gateway',
-    icon: '↔',
+    icon: <AppIcon name="transfer" size={16} />,
     permission: 'api_gateway.logs.view',
     keywords: ['api logs', 'requests', 'gateway'],
   },
@@ -180,7 +181,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Background Jobs',
     href: '/background-jobs',
     group: 'Performance & Ops',
-    icon: '⚙',
+    icon: <AppIcon name="inventory" size={16} />,
     permission: 'background_jobs.view',
     keywords: ['queue', 'worker', 'jobs'],
   },
@@ -189,7 +190,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Background Job Queues',
     href: '/background-jobs/queues',
     group: 'Performance & Ops',
-    icon: '≡',
+    icon: <AppIcon name="inventory" size={16} />,
     permission: 'background_jobs.view',
     keywords: ['queue health', 'workers'],
   },
@@ -198,7 +199,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Business Automation',
     href: '/automation',
     group: 'Business Automation',
-    icon: '⚡',
+    icon: <AppIcon name="automation" size={16} />,
     permission: 'automation.dashboard.view',
     keywords: ['rules', 'workflow automation'],
   },
@@ -207,7 +208,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Automation Rules',
     href: '/automation/rules',
     group: 'Business Automation',
-    icon: '⚡',
+    icon: <AppIcon name="automation" size={16} />,
     permission: 'automation_rules.view',
     keywords: ['business rules'],
   },
@@ -216,7 +217,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Automation Runs',
     href: '/automation/runs',
     group: 'Business Automation',
-    icon: '▶',
+    icon: <AppIcon name="run" size={16} />,
     permission: 'automation_runs.view',
     keywords: ['run history'],
   },
@@ -225,7 +226,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Data Isolation',
     href: '/data-isolation',
     group: 'Security & Audit',
-    icon: '◇',
+    icon: <AppIcon name="security" size={16} />,
     permission: 'data_isolation.view',
     keywords: ['tenant isolation', 'multi company safety'],
   },
@@ -234,7 +235,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Data Isolation Issues',
     href: '/data-isolation/issues',
     group: 'Security & Audit',
-    icon: '!',
+    icon: <AppIcon name="error" size={16} />,
     permission: 'data_isolation.view',
     keywords: ['tenant issues', 'violations'],
   },
@@ -243,7 +244,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Data Isolation Test Runs',
     href: '/data-isolation/test-runs',
     group: 'Security & Audit',
-    icon: '✓',
+    icon: <AppIcon name="done" size={16} />,
     permission: 'data_isolation.view',
     keywords: ['tenant tests'],
   },
@@ -252,7 +253,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Compliance Cockpit',
     href: '/compliance/cockpit',
     group: 'Compliance & Tax',
-    icon: '✓',
+    icon: <AppIcon name="approved" size={16} />,
     permission: 'compliance.dashboard.view',
     keywords: ['compliance dashboard'],
   },
@@ -261,7 +262,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'OSHA Registrations',
     href: '/compliance/osha-registrations',
     group: 'Compliance & Tax',
-    icon: '✓',
+    icon: <AppIcon name="approved" size={16} />,
     permission: 'compliance_obligations.view',
     keywords: ['osha', 'statutory registrations'],
   },
@@ -270,7 +271,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Medical Exams',
     href: '/hr/medical-exams',
     group: 'HR & Payroll',
-    icon: '☤',
+    icon: <AppIcon name="medical" size={16} />,
     permission: 'hr.employees.view',
     keywords: ['employee medical'],
   },
@@ -279,7 +280,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Employment Disputes',
     href: '/hr/disputes',
     group: 'HR & Payroll',
-    icon: '!',
+    icon: <AppIcon name="alert" size={16} />,
     permission: 'hr.employees.view',
     keywords: ['labor disputes'],
   },
@@ -288,7 +289,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Disciplinary Actions',
     href: '/hr/disciplinary-actions',
     group: 'HR & Payroll',
-    icon: '!',
+    icon: <AppIcon name="alert" size={16} />,
     permission: 'hr.employees.view',
     keywords: ['employee discipline'],
   },
@@ -297,7 +298,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Petroleum Commissions',
     href: '/hr/petroleum-commissions',
     group: 'HR & Payroll',
-    icon: '%',
+    icon: <AppIcon name="commission" size={16} />,
     permission: 'hr.payroll.view',
     keywords: ['fuel commission', 'sales commission'],
   },
@@ -306,7 +307,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'HR Statutory Reports',
     href: '/hr/reports/statutory',
     group: 'HR & Payroll',
-    icon: '▦',
+    icon: <AppIcon name="statement" size={16} />,
     permission: 'hr.reports.view',
     keywords: ['paye nssf wcf statutory'],
   },
@@ -315,7 +316,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'WCF Exposure Report',
     href: '/hr/reports/wcf-exposure',
     group: 'HR & Payroll',
-    icon: '▦',
+    icon: <AppIcon name="statement" size={16} />,
     permission: 'hr.reports.view',
     keywords: ['workers compensation'],
   },
@@ -324,7 +325,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Sales Commissions',
     href: '/sales/commissions',
     group: 'Sales',
-    icon: '%',
+    icon: <AppIcon name="commission" size={16} />,
     permission: 'sales.view',
     keywords: ['salesperson commission'],
   },
@@ -333,7 +334,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Westsides Mobile POS',
     href: '/westsides/mobile-pos',
     group: 'Westsides',
-    icon: '▣',
+    icon: <AppIcon name="pos" size={16} />,
     permission: 'sales.create',
     keywords: ['mobile sales', 'phone pos'],
   },
@@ -342,7 +343,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     label: 'Mobile POS Install',
     href: '/westsides/mobile-pos/install',
     group: 'Westsides',
-    icon: '▣',
+    icon: <AppIcon name="pos" size={16} />,
     permission: 'sales.create',
     keywords: ['qr install', 'phone app'],
   },
@@ -359,6 +360,48 @@ function labelForLeaf(leaf: NavLeaf, parentLabel?: string) {
   return leaf.label;
 }
 
+// Map sidebar iconKeys to the shared Lucide icon set (one icon language across
+// the app — replaces the old first-letter text glyphs).
+const NAV_ICON_KEY_TO_APP_ICON: Record<string, AppIconName> = {
+  dashboard: 'dashboard',
+  lock: 'lock',
+  bank: 'bank',
+  creditCard: 'pos',
+  fileText: 'document',
+  box: 'product',
+  document: 'document',
+  clipboardList: 'quotation',
+  building: 'company',
+  users: 'customers',
+  shield: 'security',
+  barChart: 'report',
+  settings: 'settings',
+  scale: 'tax',
+  checkCircle: 'done',
+  bell: 'bell',
+  exclamationTriangle: 'alert',
+  shieldCheck: 'approved',
+  trendingUp: 'trendUp',
+  pieChart: 'report',
+  wrench: 'settings',
+  lightBulb: 'alert',
+  accountingEngine: 'calculator',
+  procurement: 'purchase',
+  crm: 'customer',
+  docTemplate: 'statement',
+  automation: 'automation',
+  jobs: 'inventory',
+  Database: 'inventory',
+  Activity: 'trendUp',
+  Archive: 'inventory',
+  CheckBadge: 'approved',
+};
+
+function iconForNavKey(key: unknown): React.ReactNode {
+  const name = NAV_ICON_KEY_TO_APP_ICON[String(key)] ?? 'document';
+  return <AppIcon name={name} size={16} />;
+}
+
 function navLeafToCommand(
   leaf: NavLeaf,
   parentLabel?: string,
@@ -371,7 +414,7 @@ function navLeafToCommand(
     description: parentLabel ? `${parentLabel} - ${leaf.label}` : leaf.href,
     href: leaf.href,
     group: parentLabel ?? 'Navigation',
-    icon: iconLabel.slice(0, 1).toUpperCase(),
+    icon: iconForNavKey(leaf.iconKey),
     permission: leaf.permission ?? parentPermission,
     source: 'navigation',
     keywords: [leaf.href, leaf.label, parentLabel, iconLabel].filter(Boolean) as string[],
@@ -403,45 +446,26 @@ interface CommandPaletteProps {
   additionalCommands?: CommandItem[];
 }
 
+const RECORD_ICONS: Record<string, AppIconName> = {
+  customer: 'customer',
+  supplier: 'company',
+  product: 'product',
+  'sales-order': 'order',
+  'purchase-order': 'purchase',
+  receivable: 'cash',
+  payable: 'payment',
+  'journal-entry': 'ledger',
+  'cash-account': 'bank',
+  employee: 'employee',
+  quotation: 'quotation',
+  proforma: 'document',
+  'delivery-note': 'delivery',
+  'report-definition': 'report',
+  report: 'report',
+};
+
 function iconForRecord(type: string) {
-  switch (type) {
-    case 'customer':
-      return '👤';
-    case 'supplier':
-      return '🏢';
-    case 'product':
-      return '📦';
-    case 'sales-order':
-      return '🧾';
-    case 'purchase-order':
-      return '📥';
-    case 'receivable':
-      return '↙';
-    case 'payable':
-      return '↗';
-    case 'journal-entry':
-      return '≡';
-    case 'cash-account':
-      return '🏦';
-    case 'employee':
-      return '👥';
-    case 'quotation':
-      return '📋';
-    case 'proforma':
-      return '📄';
-    case 'delivery-note':
-      return '🚚';
-    case 'fuel-tank':
-      return '🛢️';
-    case 'fuel-shift':
-      return '⛽';
-    case 'fuel-delivery':
-      return '🚛';
-    case 'report-definition':
-      return '📊';
-    default:
-      return '⌕';
-  }
+  return <AppIcon name={RECORD_ICONS[type] ?? 'search'} size={16} />;
 }
 
 export function CommandPalette({ open, onClose, additionalCommands = [] }: CommandPaletteProps) {
@@ -706,7 +730,10 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
                         }}
                       >
                         {item.icon && (
-                          <span className="text-base w-5 text-center flex-shrink-0">
+                          <span
+                            className="w-5 flex items-center justify-center flex-shrink-0"
+                            style={{ color: 'var(--aurora-text-muted)' }}
+                          >
                             {item.icon}
                           </span>
                         )}

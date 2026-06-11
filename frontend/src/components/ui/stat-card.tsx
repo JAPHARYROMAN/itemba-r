@@ -1,6 +1,7 @@
 'use client';
 import React from 'react';
 import { useCountUp } from '@/hooks/use-count-up';
+import { Sparkline } from './sparkline';
 
 type StatCardVariant = 'default' | 'blue' | 'green' | 'amber' | 'red' | 'purple';
 type StatCardTier = 'default' | 'prominent' | 'critical';
@@ -41,6 +42,8 @@ interface StatCardProps {
   trend?: StatCardTrend;
   /** Animate numeric values up on mount. Default true; ignored for strings. */
   countUp?: boolean;
+  /** Mini series rendered along the card bottom (oldest first, >= 2 points). */
+  sparkline?: number[];
 }
 
 function AnimatedNumber({ target, enabled }: { target: number; enabled: boolean }) {
@@ -61,6 +64,7 @@ export function StatCard({
   tier = 'default',
   trend,
   countUp = true,
+  sparkline,
 }: StatCardProps) {
   const isNumeric = typeof value === 'number' && Number.isFinite(value);
   const trendUp = trend ? trend.value >= 0 : false;
@@ -116,6 +120,9 @@ export function StatCard({
           </div>
         )}
       </div>
+      {sparkline && sparkline.length >= 2 && (
+        <Sparkline data={sparkline} height={28} className="mt-3 block" />
+      )}
     </div>
   );
 }

@@ -214,6 +214,18 @@ body {
   color: var(--aurora-primary-text);
 }
 
+/* ─── Sparkline draw-in ──────────────────────────────────────────────────────── */
+/* Length is per-instance (set via --aurora-draw-length inline); covered by the
+   reduced-motion guard below like every other animation. */
+@keyframes aurora-draw-line {
+  from {
+    stroke-dashoffset: var(--aurora-draw-length, 200);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
 /* ─── Reduced Motion ─────────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   *,
