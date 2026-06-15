@@ -1153,10 +1153,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           )}
         </nav>
 
-        {/* Footer */}
-        <div className="px-5 py-3 border-t border-sidebar-border text-[10px] text-sidebar-text">
-          v0.1.0 · Phase 1 · ITEMBA-R
-        </div>
       </aside>
     </>
   );
