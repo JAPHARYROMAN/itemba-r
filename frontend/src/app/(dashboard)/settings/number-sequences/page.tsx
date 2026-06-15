@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Hash, ListFilter, Plus, RefreshCw, RotateCcw, Save, ShieldCheck } from 'lucide-react';
 import { Card, PageHeader, FormInput, FormSelect, Btn, Modal } from '@/components/ui';
 
 interface Company { id: string; name: string; code: string; }
@@ -60,6 +61,20 @@ function preview(form: { prefix: string; padding: string; suffix: string; startN
 
 const fmtDate = (s?: string | null) => (s ? new Date(s).toLocaleString() : '—');
 
+function formFromSequence(seq: NumberSequence): FormState {
+  return {
+    sequenceCode: seq.sequenceCode,
+    companyId: seq.companyId ?? '',
+    entityType: seq.entityType,
+    prefix: seq.prefix ?? '',
+    suffix: seq.suffix ?? '',
+    startNumber: String(seq.currentNumber),
+    padding: String(seq.padding),
+    resetFrequency: seq.resetFrequency,
+    isActive: seq.isActive,
+  };
+}
+
 export default function NumberSequencesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
@@ -73,6 +88,9 @@ export default function NumberSequencesPage() {
   const [editing, setEditing] = useState<NumberSequence | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const activeCount = useMemo(() => sequences.filter((seq) => seq.isActive).length, [sequences]);
+  const globalCount = useMemo(() => sequences.filter((seq) => !seq.companyId).length, [sequences]);
+  const selectedCompany = companies.find((company) => company.id === companyId);
 
   useEffect(() => {
     fetch('/api/backend/companies?limit=100')
@@ -114,19 +132,14 @@ export default function NumberSequencesPage() {
   };
   const openEdit = (seq: NumberSequence) => {
     setEditing(seq);
-    setForm({
-      sequenceCode: seq.sequenceCode,
-      companyId: seq.companyId ?? '',
-      entityType: seq.entityType,
-      prefix: seq.prefix ?? '',
-      suffix: seq.suffix ?? '',
-      startNumber: String(seq.currentNumber),
-      padding: String(seq.padding),
-      resetFrequency: seq.resetFrequency,
-      isActive: seq.isActive,
-    });
+    setForm(formFromSequence(seq));
     setOpen(true);
     setInfo(''); setError('');
+  };
+
+  const resetForm = () => {
+    setForm(editing ? formFromSequence(editing) : { ...EMPTY_FORM, companyId });
+    setError('');
   };
 
   const submit = async () => {
@@ -189,20 +202,56 @@ export default function NumberSequencesPage() {
         breadcrumbs={[{ label: 'Settings', href: '/settings' }, { label: 'Number Sequences' }]}
         actions={
           <div className="flex items-center gap-2">
-            <Btn variant="secondary" onClick={load} disabled={loading}>Reload</Btn>
-            <Btn onClick={openCreate}>New Sequence</Btn>
+            <Btn
+              variant="secondary"
+              icon={<RefreshCw className="h-3.5 w-3.5" />}
+              onClick={load}
+              disabled={loading}
+            >
+              Reload
+            </Btn>
+            <Btn icon={<Plus className="h-3.5 w-3.5" />} onClick={openCreate}>New sequence</Btn>
           </div>
         }
       />
 
-      <Card className="p-4">
-        <FormSelect
-          label="Filter by Company"
-          value={companyId}
-          onChange={(e) => setCompanyId(e.target.value)}
-          placeholder="— All companies —"
-          options={companies.map((c) => ({ value: c.id, label: c.name }))}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <SequenceSummary
+          icon={<Hash className="h-4 w-4" />}
+          label="Registered sequences"
+          value={String(total || sequences.length)}
+          note={`${activeCount} active in the current view.`}
         />
+        <SequenceSummary
+          icon={<ShieldCheck className="h-4 w-4" />}
+          label="Scope"
+          value={selectedCompany?.name ?? 'All companies'}
+          note={companyId ? 'Showing company-specific and linked numbering.' : `${globalCount} global sequences visible.`}
+        />
+        <SequenceSummary
+          icon={<ListFilter className="h-4 w-4" />}
+          label="Reset rules"
+          value={sequences.some((seq) => seq.resetFrequency !== 'NEVER') ? 'Configured' : 'Manual counters'}
+          note="Daily, monthly, or yearly reset rules appear in the table."
+        />
+      </div>
+
+      <Card className="p-5">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(260px,1fr)_minmax(0,2fr)] lg:items-end">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Find a sequence</div>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Filter by company before editing counters so document numbers stay scoped to the right business.
+            </p>
+          </div>
+          <FormSelect
+            label="Filter by Company"
+            value={companyId}
+            onChange={(e) => setCompanyId(e.target.value)}
+            placeholder="— All companies —"
+            options={companies.map((c) => ({ value: c.id, label: c.name }))}
+          />
+        </div>
       </Card>
 
       {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
@@ -211,8 +260,12 @@ export default function NumberSequencesPage() {
 
       {!loading && (
         <Card className="overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-100 text-xs text-slate-500">
-            {total} sequence{total === 1 ? '' : 's'}
+          <div className="flex flex-col gap-1 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">Document number rules</div>
+              <div className="text-xs text-slate-500">{total} sequence{total === 1 ? '' : 's'} in this view</div>
+            </div>
+            <div className="text-xs text-slate-500">Next number is shown before you edit or advance a counter.</div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -266,8 +319,22 @@ export default function NumberSequencesPage() {
         </Card>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title={editing ? 'Edit Sequence' : 'New Sequence'} size="lg">
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title={editing ? 'Edit Sequence' : 'New Sequence'}
+        subtitle="Define the prefix, counter, reset rule, and company scope for generated document numbers."
+        size="lg"
+      >
         <div className="space-y-4">
+          <SequenceEditorIntro
+            title={editing ? 'Update an existing sequence' : 'Create a new sequence'}
+            description={
+              editing
+                ? 'Code and current counter are protected here. Use Advance for audit-logged manual number use.'
+                : 'Start number is the last number used. The first generated number will be start number plus one.'
+            }
+          />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormInput
               label="Sequence Code"
@@ -349,8 +416,20 @@ export default function NumberSequencesPage() {
           {error && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700">{error}</div>}
 
           <div className="flex justify-end gap-2 pt-2">
+            <Btn
+              variant="secondary"
+              icon={<RotateCcw className="h-3.5 w-3.5" />}
+              onClick={resetForm}
+              disabled={saving}
+            >
+              Reset form
+            </Btn>
             <Btn variant="secondary" onClick={() => setOpen(false)}>Cancel</Btn>
-            <Btn onClick={submit} disabled={saving || !form.sequenceCode.trim() || !form.entityType.trim()}>
+            <Btn
+              icon={<Save className="h-3.5 w-3.5" />}
+              onClick={submit}
+              disabled={saving || !form.sequenceCode.trim() || !form.entityType.trim()}
+            >
               {saving ? 'Saving…' : editing ? 'Save' : 'Create'}
             </Btn>
           </div>
@@ -361,10 +440,46 @@ export default function NumberSequencesPage() {
         <p className="text-[11px] text-slate-400">
           Last updated {fmtDate(sequences[0]?.updatedAt)}.
           <span className="ml-2">
-            Note: most existing entity services still inline their own number generation — this catalog is informational until those services are refactored to call the sequence advancer.
+            Integration note: verify each document workflow before treating a sequence as official.
           </span>
         </p>
       )}
+    </div>
+  );
+}
+
+function SequenceSummary({
+  icon,
+  label,
+  value,
+  note,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  note: string;
+}) {
+  return (
+    <Card className="p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+          {icon}
+        </div>
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+          <div className="mt-1 truncate text-sm font-semibold text-slate-900">{value}</div>
+          <div className="mt-1 text-xs leading-5 text-slate-500">{note}</div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function SequenceEditorIntro({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+      <div className="text-sm font-semibold text-slate-900">{title}</div>
+      <p className="mt-1 text-xs leading-5 text-slate-600">{description}</p>
     </div>
   );
 }

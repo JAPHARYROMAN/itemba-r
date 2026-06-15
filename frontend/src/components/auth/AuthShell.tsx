@@ -58,7 +58,7 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
 
           <div className="mt-10 space-y-5">
             {showMobilePosInstall && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-4">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                 <div className="flex items-start gap-3">
                   <InstallQrCode size={88} className="h-[88px] w-[88px] flex-shrink-0" />
                   <div className="min-w-0">

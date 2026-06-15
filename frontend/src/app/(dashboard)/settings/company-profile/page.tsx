@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Image from 'next/image';
+import { Building2, Eye, FileText, Landmark, MapPin, RefreshCw, RotateCcw, Save, Upload } from 'lucide-react';
 import { Card, PageHeader, FormInput, FormSelect, FormTextarea, DateInput, Btn } from '@/components/ui';
 import { backendGet, backendPage, backendPatch, backendPut, backendUpload } from '@/lib/api-client';
 import { documentOrganization } from '@/components/documents';
@@ -211,6 +212,19 @@ export default function CompanyProfilePage() {
     [branchForm, selectedBranch],
   );
   const organization = documentOrganization(previewCompany, previewBranch);
+  const selectedCompanyName = companyForm.name || company?.name || 'No company selected';
+  const requiredComplete = Boolean(
+    companyForm.name.trim()
+      && profile.registeredName.trim()
+      && profile.brelaRegNumber.trim()
+      && profile.tin.trim()
+      && profile.registeredAddress.trim(),
+  );
+  const letterheadStatus = !companyId
+    ? 'Select a company'
+    : requiredComplete
+      ? isNewProfile ? 'Ready to create' : 'Ready'
+      : 'Needs required fields';
 
   function updateCompany<K extends keyof CompanyIdentityForm>(key: K, value: CompanyIdentityForm[K]) {
     setCompanyForm((current) => ({ ...current, [key]: value }));
@@ -231,6 +245,21 @@ export default function CompanyProfilePage() {
     setBranchId(nextBranchId);
     setBranchForm(toBranchForm(branches.find((branch) => branch.id === nextBranchId) ?? null));
     setInfo('');
+  }
+
+  function resetDraft() {
+    if (!company) return;
+    setCompanyForm({
+      name: company.name ?? '',
+      phone: company.phone ?? '',
+      email: company.email ?? '',
+      website: company.website ?? '',
+      logoUrl: company.logoUrl ?? '',
+    });
+    setProfile(toProfileForm(company.profile));
+    setBranchForm(toBranchForm(selectedBranch));
+    setError('');
+    setInfo('Unsaved changes were reset to the last loaded company profile.');
   }
 
   async function uploadLogo(file: File | null) {
@@ -342,21 +371,71 @@ export default function CompanyProfilePage() {
         breadcrumbs={[{ label: 'Settings', href: '/settings' }, { label: 'Company Letterhead' }]}
         actions={
           <div className="flex items-center gap-2">
-            <Btn variant="secondary" onClick={loadLetterhead} disabled={!companyId || loading}>Reload</Btn>
-            <Btn onClick={save} disabled={!companyId || saving || loading}>{saving ? 'Saving...' : 'Save Letterhead'}</Btn>
+            <Btn
+              variant="secondary"
+              icon={<RefreshCw className="h-3.5 w-3.5" />}
+              onClick={loadLetterhead}
+              disabled={!companyId || loading}
+            >
+              Reload
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon={<RotateCcw className="h-3.5 w-3.5" />}
+              onClick={resetDraft}
+              disabled={!companyId || loading || saving || !company}
+            >
+              Reset form
+            </Btn>
+            <Btn
+              icon={<Save className="h-3.5 w-3.5" />}
+              onClick={save}
+              disabled={!companyId || saving || loading}
+            >
+              {saving ? 'Saving...' : 'Save letterhead'}
+            </Btn>
           </div>
         }
       />
 
-      <Card className="p-4">
-        <FormSelect
-          label="Company"
-          value={companyId}
-          onChange={(event) => setCompanyId(event.target.value)}
-          required
-          placeholder="- Select Company -"
-          options={companies.map((item) => ({ value: item.id, label: `${item.name} (${item.code})` }))}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <ProfileSummary
+          icon={<Building2 className="h-4 w-4" />}
+          label="Selected company"
+          value={selectedCompanyName}
+          note={company?.code ? `Code ${company.code}` : 'Choose a company to edit its documents.'}
         />
+        <ProfileSummary
+          icon={<FileText className="h-4 w-4" />}
+          label="Letterhead status"
+          value={letterheadStatus}
+          note="Used on invoices, orders, reports, PDFs, and print views."
+        />
+        <ProfileSummary
+          icon={<MapPin className="h-4 w-4" />}
+          label="Branch line"
+          value={previewBranch?.name || 'No branch selected'}
+          note={branchId ? 'Branch details appear on matching documents.' : 'Optional for group/company documents.'}
+        />
+      </div>
+
+      <Card className="p-5">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(260px,1fr)_minmax(0,2fr)] lg:items-end">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Start here</div>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Pick the company whose legal identity, logo, contact line, and document header should be maintained.
+            </p>
+          </div>
+          <FormSelect
+            label="Company"
+            value={companyId}
+            onChange={(event) => setCompanyId(event.target.value)}
+            required
+            placeholder="- Select Company -"
+            options={companies.map((item) => ({ value: item.id, label: `${item.name} (${item.code})` }))}
+          />
+        </div>
       </Card>
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
@@ -367,7 +446,11 @@ export default function CompanyProfilePage() {
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
           <div className="space-y-5">
             <Card className="space-y-4 p-5">
-              <SectionTitle title="Logo and Contact" />
+              <SectionTitle
+                icon={<Landmark className="h-4 w-4" />}
+                title="Brand and contact line"
+                description="Controls the logo, company display name, telephone, email, and website printed on documents."
+              />
               <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">
                   <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center border border-slate-300 bg-white p-1 text-xs font-bold uppercase text-slate-700">
@@ -389,7 +472,8 @@ export default function CompanyProfilePage() {
                     <div className="text-xs text-slate-500">PNG or JPEG, up to 2 MB.</div>
                   </div>
                 </div>
-                <label className="inline-flex cursor-pointer items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50">
+                <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50">
+                  <Upload className="h-3.5 w-3.5" />
                   {uploadingLogo ? 'Uploading...' : 'Upload Logo'}
                   <input
                     type="file"
@@ -446,7 +530,11 @@ export default function CompanyProfilePage() {
             </Card>
 
             <Card className="space-y-4 p-5">
-              <SectionTitle title="Legal and Tax Details" />
+              <SectionTitle
+                icon={<FileText className="h-4 w-4" />}
+                title="Legal and tax details"
+                description="Required details for formal letterheads and official documents."
+              />
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <FormInput
                   label="Registered Name"
@@ -502,7 +590,11 @@ export default function CompanyProfilePage() {
             </Card>
 
             <Card className="space-y-4 p-5">
-              <SectionTitle title="Address and Defaults" />
+              <SectionTitle
+                icon={<Building2 className="h-4 w-4" />}
+                title="Address and company defaults"
+                description="Registered address, postal line, status, currency, and business description."
+              />
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <FormTextarea
                   label="Registered Address"
@@ -548,7 +640,11 @@ export default function CompanyProfilePage() {
             </Card>
 
             <Card className="space-y-4 p-5">
-              <SectionTitle title="Branch Line" />
+              <SectionTitle
+                icon={<MapPin className="h-4 w-4" />}
+                title="Branch line"
+                description="Optional branch-specific name, location, phone, and address for branch documents."
+              />
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <FormSelect
                   label="Branch"
@@ -591,7 +687,11 @@ export default function CompanyProfilePage() {
             </Card>
 
             <Card className="space-y-4 p-5">
-              <SectionTitle title="Internal Notes" />
+              <SectionTitle
+                icon={<FileText className="h-4 w-4" />}
+                title="Internal notes"
+                description="Notes are for administrators only and do not print on customer documents."
+              />
               <FormTextarea
                 value={profile.notes ?? ''}
                 onChange={(event) => updateProfile('notes', event.target.value)}
@@ -613,7 +713,10 @@ export default function CompanyProfilePage() {
 function LetterheadPreview({ organization }: { organization: ReturnType<typeof documentOrganization> }) {
   return (
     <Card className="p-5">
-      <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Preview</div>
+      <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <Eye className="h-4 w-4" />
+        Preview
+      </div>
       <div className="border border-slate-200 bg-white p-5 text-slate-900 shadow-sm">
         <div className="flex gap-4 border-b-2 border-slate-900 pb-4">
           <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center border-2 border-slate-900 p-1 text-sm font-bold uppercase">
@@ -657,8 +760,53 @@ function LetterheadPreview({ organization }: { organization: ReturnType<typeof d
   );
 }
 
-function SectionTitle({ title }: { title: string }) {
-  return <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</div>;
+function ProfileSummary({
+  icon,
+  label,
+  value,
+  note,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  note: string;
+}) {
+  return (
+    <Card className="p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+          {icon}
+        </div>
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+          <div className="mt-1 truncate text-sm font-semibold text-slate-900">{value}</div>
+          <div className="mt-1 text-xs leading-5 text-slate-500">{note}</div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function SectionTitle({
+  icon,
+  title,
+  description,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+        {icon}
+      </div>
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</div>
+        <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>
+      </div>
+    </div>
+  );
 }
 
 function toProfileForm(profile: CompanyProfile | null | undefined): CompanyProfile {

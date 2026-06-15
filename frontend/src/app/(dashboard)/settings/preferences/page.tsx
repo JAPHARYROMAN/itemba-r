@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Building2, Globe2, MonitorCog, RotateCcw, Save, ShieldCheck } from 'lucide-react';
 import { Card, PageHeader, FormSelect, Btn, SkeletonCardGrid, showToast } from '@/components/ui';
 import { FormSwitch } from '@/components/aurora/forms/FormSwitch';
 import { useMotionPreference } from '@/hooks/use-motion-preference';
@@ -203,6 +204,7 @@ export default function UserPreferencesPage() {
   };
 
   const reset = async () => {
+    if (!window.confirm('Reset your workspace settings back to the Itemba-R defaults?')) return;
     setSaving(true); setError(''); setInfo('');
     try {
       const res = await fetch('/api/backend/user-preferences/me', { method: 'DELETE' });
@@ -229,11 +231,45 @@ export default function UserPreferencesPage() {
         breadcrumbs={[{ label: 'Settings', href: '/settings' }, { label: 'My Workspace Settings' }]}
         actions={
           <div className="flex items-center gap-2">
-            <Btn variant="warning" onClick={reset} disabled={saving || loading}>Reset my settings</Btn>
-            <Btn onClick={save} disabled={saving || loading}>{saving ? 'Saving…' : 'Save settings'}</Btn>
+            <Btn
+              variant="secondary"
+              icon={<RotateCcw className="h-3.5 w-3.5" />}
+              onClick={reset}
+              disabled={saving || loading}
+            >
+              Reset
+            </Btn>
+            <Btn
+              icon={<Save className="h-3.5 w-3.5" />}
+              onClick={save}
+              disabled={saving || loading}
+            >
+              {saving ? 'Saving…' : 'Save settings'}
+            </Btn>
           </div>
         }
       />
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <PreferenceSummary
+          icon={<MonitorCog className="h-4 w-4" />}
+          title="Display"
+          value={`${THEMES.find((theme) => theme.value === prefs.theme)?.label ?? 'System'} / ${prefs.density}`}
+          note="Theme, density, and motion settings."
+        />
+        <PreferenceSummary
+          icon={<Globe2 className="h-4 w-4" />}
+          title="Format"
+          value={`${prefs.dateFormat} / ${prefs.timezone}`}
+          note="Dates, language, timezone, and number style."
+        />
+        <PreferenceSummary
+          icon={<Building2 className="h-4 w-4" />}
+          title="Default scope"
+          value={prefs.defaultCompanyId ? 'Pre-selected' : 'Not set'}
+          note="Company, division, and branch defaults."
+        />
+      </div>
 
       {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
       {info && <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-700">{info}</div>}
@@ -242,7 +278,11 @@ export default function UserPreferencesPage() {
       {!loading && (
         <>
           <Card className="p-5 space-y-4">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Appearance</div>
+            <SettingsSection
+              icon={<MonitorCog className="h-4 w-4" />}
+              title="Appearance"
+              description="Choose the visual comfort level for your own account."
+            />
             <div className="aurora-stagger grid grid-cols-1 gap-4 md:grid-cols-2">
               <FormSelect
                 label="Theme"
@@ -270,7 +310,11 @@ export default function UserPreferencesPage() {
           </Card>
 
           <Card className="p-5 space-y-4">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Locale & formatting</div>
+            <SettingsSection
+              icon={<Globe2 className="h-4 w-4" />}
+              title="Locale and formatting"
+              description="Control how dates, time, language, and numbers are shown."
+            />
             <div className="aurora-stagger grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
               <FormSelect
                 label="Language"
@@ -301,7 +345,11 @@ export default function UserPreferencesPage() {
           </Card>
 
           <Card className="p-5 space-y-4">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Default scope</div>
+            <SettingsSection
+              icon={<ShieldCheck className="h-4 w-4" />}
+              title="Default scope"
+              description="Pre-select the business area you normally work in."
+            />
             <p className="text-[12px] text-slate-500 -mt-1">
               Pages that ask &quot;which company?&quot; will pre-select these. You can still override on any page.
             </p>
@@ -341,6 +389,55 @@ export default function UserPreferencesPage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function PreferenceSummary({
+  icon,
+  title,
+  value,
+  note,
+}: {
+  icon: ReactNode;
+  title: string;
+  value: string;
+  note: string;
+}) {
+  return (
+    <Card className="p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+          {icon}
+        </div>
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</div>
+          <div className="mt-1 truncate text-sm font-semibold text-slate-900">{value}</div>
+          <div className="mt-1 text-xs leading-5 text-slate-500">{note}</div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function SettingsSection({
+  icon,
+  title,
+  description,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+        {icon}
+      </div>
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</div>
+        <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>
+      </div>
     </div>
   );
 }
