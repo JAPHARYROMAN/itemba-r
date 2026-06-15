@@ -209,8 +209,9 @@ export default function UserPreferencesPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setPrefs(DEFAULTS);
       setThemeMode(DEFAULTS.theme);
-      setInfo('Preferences reset to defaults.');
-      showToast('success', 'Preferences reset', 'Default preferences are active again.');
+      setMotionMode('system');
+      setInfo('Your workspace settings were reset to defaults.');
+      showToast('success', 'Preferences reset', 'Default workspace settings are active again.');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to reset';
       setError(message);
@@ -223,13 +224,13 @@ export default function UserPreferencesPage() {
   return (
     <div className="p-6 space-y-4">
       <PageHeader
-        title="My Preferences"
-        subtitle="Theme, density, locale, and default scope. These apply to your account only."
-        breadcrumbs={[{ label: 'Settings', href: '/settings' }, { label: 'My Preferences' }]}
+        title="My Workspace Settings"
+        subtitle="Personal display, formatting, and default company scope. These affect only your account."
+        breadcrumbs={[{ label: 'Settings', href: '/settings' }, { label: 'My Workspace Settings' }]}
         actions={
           <div className="flex items-center gap-2">
-            <Btn variant="secondary" onClick={reset} disabled={saving || loading}>Reset to defaults</Btn>
-            <Btn onClick={save} disabled={saving || loading}>{saving ? 'Saving…' : 'Save'}</Btn>
+            <Btn variant="warning" onClick={reset} disabled={saving || loading}>Reset my settings</Btn>
+            <Btn onClick={save} disabled={saving || loading}>{saving ? 'Saving…' : 'Save settings'}</Btn>
           </div>
         }
       />
