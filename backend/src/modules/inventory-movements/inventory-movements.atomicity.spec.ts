@@ -25,7 +25,8 @@ function makeService() {
     companyWhereFor: jest.fn().mockResolvedValue({}),
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
   } as any;
-  return new InventoryMovementsService(prisma, auditLogs, codes, companyScope);
+  const profit = { assertInventoryMovementHasCost: jest.fn().mockResolvedValue(undefined) } as any;
+  return new InventoryMovementsService(prisma, auditLogs, codes, companyScope, profit);
 }
 
 describe('InventoryMovementsService direction + guards (P0-04 regression)', () => {

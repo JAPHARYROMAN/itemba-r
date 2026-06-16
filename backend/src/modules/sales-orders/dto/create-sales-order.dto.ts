@@ -33,7 +33,7 @@ export class SalesOrderLineDto {
 
   @IsNotEmpty()
   @IsNumber()
-  @Min(0)
+  @Min(0.0001)
   unitPrice!: number;
 
   @IsOptional()

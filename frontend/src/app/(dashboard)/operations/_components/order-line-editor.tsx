@@ -25,6 +25,7 @@ export interface OrderProductOption {
   inventoryBalance?: {
     quantityOnHand?: number | string | null;
     quantityReserved?: number | string | null;
+    averageCost?: number | string | null;
     availableQuantity?: number | string | null;
     quantityAvailable?: number | string | null;
   } | null;
@@ -54,6 +55,7 @@ type OrderVariant = 'purchase' | 'sales';
 export interface OrderLineValidationState {
   hasBlockingErrors: boolean;
   stockWarnings: string[];
+  profitWarnings?: string[];
 }
 
 interface OrderLineEditorProps<TLine extends EditableOrderLine> {
@@ -144,6 +146,21 @@ function productTracksInventory(product: OrderProductOption | undefined) {
   if (!product) return false;
   if (product.trackInventory === false) return false;
   return !['SERVICE', 'NON_STOCK_ITEM'].includes(String(product.productType ?? '').toUpperCase());
+}
+
+function effectiveCostForProduct(product: OrderProductOption | undefined) {
+  if (!product || !productTracksInventory(product)) return null;
+  const averageCost = numberOrZero(product.inventoryBalance?.averageCost);
+  if (averageCost > 0) return averageCost;
+  const purchaseCost = numberOrZero(product.defaultPurchasePrice);
+  return purchaseCost > 0 ? purchaseCost : null;
+}
+
+function netUnitSalePrice(line: EditableOrderLine) {
+  const qty = numberOrZero(line.qty);
+  if (qty <= 0) return null;
+  const netSalesAmount = qty * numberOrZero(line.unitPrice) - numberOrZero(line.discount);
+  return netSalesAmount / qty;
 }
 
 function availableAfterLocalAllocation(
@@ -245,12 +262,33 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
     }
     return warnings;
   }, [allocatedByProductId, enforceStockAvailability, productById, variant]);
+  const profitWarnings = useMemo(() => {
+    if (variant !== 'sales') return [];
+    const warnings: string[] = [];
+    for (const line of lines) {
+      const product = productById.get(line.productId);
+      if (!product || !productTracksInventory(product)) continue;
+      const cost = effectiveCostForProduct(product);
+      if (cost == null) {
+        warnings.push(`${productLabel(product)} is missing purchase/average cost and cannot be sold.`);
+        continue;
+      }
+      const netUnitPrice = netUnitSalePrice(line);
+      if (netUnitPrice != null && netUnitPrice <= cost) {
+        warnings.push(
+          `${productLabel(product)} net unit price ${money(netUnitPrice, currency)} must be greater than cost ${money(cost, currency)}.`,
+        );
+      }
+    }
+    return warnings;
+  }, [currency, lines, productById, variant]);
   const validationState = useMemo<OrderLineValidationState>(
     () => ({
-      hasBlockingErrors: stockWarnings.length > 0,
+      hasBlockingErrors: stockWarnings.length > 0 || profitWarnings.length > 0,
       stockWarnings,
+      profitWarnings,
     }),
-    [stockWarnings],
+    [profitWarnings, stockWarnings],
   );
   const totals = useMemo(
     () =>
@@ -270,6 +308,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
   const total = totals.subtotal - totals.discount + totals.tax;
   const invalidCount = lines.filter((line) => missingFields(line).length > 0).length;
   const stockWarningCount = stockWarnings.length;
+  const profitWarningCount = profitWarnings.length;
   const unitPriceLabel = variant === 'purchase' ? 'Unit Cost' : 'Unit Price';
 
   useEffect(() => {
@@ -323,6 +362,8 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
             {lines.length} line{lines.length === 1 ? '' : 's'}
             {stockWarningCount
               ? `, ${stockWarningCount} stock warning${stockWarningCount === 1 ? '' : 's'}`
+              : profitWarningCount
+                ? `, ${profitWarningCount} profit warning${profitWarningCount === 1 ? '' : 's'}`
               : invalidCount
                 ? `, ${invalidCount} incomplete`
                 : ', ready'}
@@ -359,6 +400,20 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
               selectedAvailable == null ? null : selectedAvailable - productAllocated;
             const lineHasStockError =
               lineTracksStock && selectedAvailable != null && productAllocated > selectedAvailable;
+            const effectiveCost = effectiveCostForProduct(selectedProduct);
+            const netUnitPrice = netUnitSalePrice(line);
+            const lineHasProfitError =
+              variant === 'sales' &&
+              productTracksInventory(selectedProduct) &&
+              (effectiveCost == null ||
+                (netUnitPrice != null && netUnitPrice <= effectiveCost));
+            const marginPreview =
+              variant === 'sales' &&
+              effectiveCost != null &&
+              netUnitPrice != null &&
+              netUnitPrice > 0
+                ? ((netUnitPrice - effectiveCost) / netUnitPrice) * 100
+                : null;
 
             return (
               <div
@@ -378,6 +433,8 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                     <p className="text-[12px]" style={{ color: 'var(--aurora-text-muted)' }}>
                       {lineHasStockError
                         ? 'Insufficient stock'
+                        : lineHasProfitError
+                          ? 'Below cost'
                         : missing.length
                           ? `Needs ${missing.join(', ')}`
                           : 'Complete'}
@@ -531,6 +588,14 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                           Available stock:{' '}
                           {lineTracksStock ? quantity(selectedAvailable) : 'Not tracked'}
                         </span>
+                        <span>
+                          Cost:{' '}
+                          {lineTracksStock && effectiveCost != null
+                            ? money(effectiveCost, currency)
+                            : lineTracksStock
+                              ? 'Missing'
+                              : 'Not tracked'}
+                        </span>
                         <span>Quantity entered: {quantity(numberOrZero(line.qty))}</span>
                         <span
                           className={lineHasStockError ? 'text-red-600' : ''}
@@ -539,12 +604,30 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                           Remaining after sale:{' '}
                           {lineTracksStock ? quantity(remainingAfterSale) : 'Not tracked'}
                         </span>
+                        <span
+                          className={lineHasProfitError ? 'text-red-600' : ''}
+                          style={lineHasProfitError ? undefined : { color: 'var(--aurora-text)' }}
+                        >
+                          Margin:{' '}
+                          {marginPreview == null
+                            ? lineTracksStock
+                              ? 'Missing'
+                              : 'Not tracked'
+                            : `${marginPreview.toFixed(2)}%`}
+                        </span>
                       </div>
                     )}
                     {lineHasStockError && selectedProduct && (
                       <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
                         {productLabel(selectedProduct)} has {quantity(selectedAvailable)} available,
                         but this order uses {quantity(productAllocated)} across its lines.
+                      </div>
+                    )}
+                    {lineHasProfitError && selectedProduct && (
+                      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+                        {effectiveCost == null
+                          ? `${productLabel(selectedProduct)} is missing purchase/average cost and cannot be sold.`
+                          : `${productLabel(selectedProduct)} must sell above cost ${money(effectiveCost, currency)}.`}
                       </div>
                     )}
                   </div>

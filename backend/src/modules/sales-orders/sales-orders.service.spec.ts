@@ -97,6 +97,23 @@ function makeService() {
   } as any;
   const postingEngine = { postLines: jest.fn().mockResolvedValue({ id: 'je-1' }) } as any;
   const accountResolver = { resolveMany: jest.fn() } as any;
+  const profit = {
+    assertSaleLinesProfitable: jest.fn(async ({ lines }: any) =>
+      lines.map((line: any) => ({
+        productId: line.productId,
+        productName: 'Item',
+        trackInventory: false,
+        unitCostAtSale: null,
+        cogsAmount: 0,
+        grossProfitAmount: Number(line.quantity) * Number(line.unitPrice),
+        grossMarginPct: 100,
+        profitCostSource: null,
+        netSalesAmount: Number(line.quantity) * Number(line.unitPrice),
+        netUnitPrice: Number(line.unitPrice),
+      })),
+    ),
+    isStockProduct: jest.fn((product: any) => product?.trackInventory !== false),
+  } as any;
   const service = new SalesOrdersService(
     prisma,
     auditLogs,
@@ -106,6 +123,7 @@ function makeService() {
     companyScope,
     postingEngine,
     accountResolver,
+    profit,
   );
 
   return { service, prisma };

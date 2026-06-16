@@ -3012,6 +3012,11 @@ enum SalesPaymentMethod {
   OTHER
 }
 
+enum ProfitCostSource {
+  BRANCH_AVERAGE_COST
+  DEFAULT_PURCHASE_PRICE
+}
+
 /// Commission earned by an employee on a sales order. Created either manually
 /// by a sales manager or programmatically (Sprint D) when a SalesOrder hits
 /// a paid/closed state.
@@ -3099,9 +3104,14 @@ model SalesOrderLine {
   /// Optional FK to a specific ProductBatch — folded in from the retired POS
   /// module so beverage / perishable sales can be issued FIFO and decrement
   /// the right batch's remainingQuantity.
-  batchId        String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  batchId              String?
+  unitCostAtSale       Decimal?          @db.Decimal(18, 4)
+  cogsAmount           Decimal?          @db.Decimal(18, 2)
+  grossProfitAmount    Decimal?          @db.Decimal(18, 2)
+  grossMarginPct       Decimal?          @db.Decimal(9, 4)
+  profitCostSource     ProfitCostSource?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 
   salesOrder SalesOrder    @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
   product    Product       @relation(fields: [productId], references: [id], onDelete: Restrict)

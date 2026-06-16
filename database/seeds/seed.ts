@@ -267,6 +267,7 @@ const ALL_PERMISSIONS: PermDef[] = [
     action: 'dashboard.view',
     isGroupControl: false,
   },
+  ...perms('profit', ['view', 'manage_costs', 'audit']),
 
   // ── Petroleum Operations (Milestone 5) ──────────────────────────────────────
   ...perms('petroleum', ['setup.view', 'setup.manage', 'reports.view', 'dashboard.view']),

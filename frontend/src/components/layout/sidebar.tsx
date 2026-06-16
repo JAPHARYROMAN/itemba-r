@@ -272,6 +272,12 @@ export const NAV: NavItem[] = [
         iconKey: 'barChart',
         permission: 'operations.reports.view',
       },
+      {
+        href: '/operations/profit',
+        label: 'Profit',
+        iconKey: 'barChart',
+        permission: 'operations.reports.view',
+      },
     ],
   },
   {

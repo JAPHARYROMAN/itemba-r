@@ -7,6 +7,7 @@ import { AccessLevel, InventoryMovement, InventoryMovementType, Prisma } from '@
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
+import { ProfitService } from '../profit/profit.service';
 
 const INBOUND_TYPES: InventoryMovementType[] = [
   'OPENING_STOCK',
@@ -48,6 +49,7 @@ export class InventoryMovementsService {
     private readonly auditLogs: AuditLogsService,
     private readonly codes: EntityCodeGeneratorService,
     private readonly companyScope: CompanyScopeService,
+    private readonly profit: ProfitService,
   ) {}
 
   async findAll(query: QueryInventoryMovementDto, user: AuthUser) {
@@ -137,6 +139,7 @@ export class InventoryMovementsService {
     const run = async (db: Prisma.TransactionClient) => {
       const scope = await this.resolveMovementScope(data, db);
       await this.validateMovementReferences({ ...data, ...scope }, db);
+      await this.profit.assertInventoryMovementHasCost(data, db);
 
       const movementNumber = await this.codes.next({
         entityType: 'InventoryMovement',

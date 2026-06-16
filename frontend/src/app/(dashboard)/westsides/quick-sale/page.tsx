@@ -47,6 +47,7 @@ interface Product {
   baseUnitId?: string | null;
   baseUnit?: { name?: string | null; symbol?: string | null } | null;
   defaultUnitId?: string | null;
+  defaultPurchasePrice?: number | string | null;
   defaultSellingPrice?: number | string | null;
   retailPrice?: number | string | null;
   wholesalePrice?: number | string | null;
@@ -59,6 +60,7 @@ interface Product {
   inventoryBalance?: {
     quantityOnHand?: number | string | null;
     quantityReserved?: number | string | null;
+    averageCost?: number | string | null;
     availableQuantity?: number | string | null;
     quantityAvailable?: number | string | null;
   } | null;
@@ -80,6 +82,7 @@ interface CartLine {
   trackInventory?: boolean | null;
   productType?: string | null;
   availableStock?: number | null;
+  effectiveCost?: number | null;
 }
 
 interface ConfirmedOrder {
@@ -271,6 +274,14 @@ function productAvailableStock(product: Product | null | undefined) {
   if (value == null) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function productEffectiveCost(product: Product | null | undefined) {
+  if (!product || !itemTracksInventory(product)) return null;
+  const averageCost = Number(product.inventoryBalance?.averageCost ?? 0);
+  if (Number.isFinite(averageCost) && averageCost > 0) return averageCost;
+  const defaultCost = Number(product.defaultPurchasePrice ?? 0);
+  return Number.isFinite(defaultCost) && defaultCost > 0 ? defaultCost : null;
 }
 
 function itemTracksInventory(item: Product | CartLine | null | undefined) {
@@ -542,6 +553,23 @@ export default function QuickSalePage() {
     }
     return issues;
   }, [cart, cartAllocatedByProduct]);
+  const cartProfitIssues = useMemo(() => {
+    const issues: string[] = [];
+    for (const line of cart) {
+      if (!itemTracksInventory(line)) continue;
+      const cost = line.effectiveCost ?? null;
+      if (cost == null || cost <= 0) {
+        issues.push(`${line.productName} is missing purchase/average cost and cannot be sold.`);
+        continue;
+      }
+      if (line.unitPrice <= cost) {
+        issues.push(
+          `${line.productName} price TZS ${fmt(line.unitPrice)} must be greater than cost TZS ${fmt(cost)}.`,
+        );
+      }
+    }
+    return issues;
+  }, [cart]);
 
   const addProduct = (p: Product, quantity = pendingQty) => {
     if (!settings.branchId) {
@@ -563,6 +591,18 @@ export default function QuickSalePage() {
       );
       return;
     }
+    const effectiveCost = productEffectiveCost(p);
+    const unitPrice = productPrice(p);
+    if (itemTracksInventory(p) && (effectiveCost == null || effectiveCost <= 0)) {
+      setError(`${p.name} is missing purchase/average cost and cannot be sold.`);
+      return;
+    }
+    if (itemTracksInventory(p) && effectiveCost != null && unitPrice <= effectiveCost) {
+      setError(
+        `${p.name} price TZS ${fmt(unitPrice)} must be greater than cost TZS ${fmt(effectiveCost)}.`,
+      );
+      return;
+    }
     setError('');
     const unitId = productUnitId(p);
     const unit = units.find((u) => u.id === unitId);
@@ -577,6 +617,7 @@ export default function QuickSalePage() {
                 trackInventory: p.trackInventory,
                 productType: p.productType,
                 availableStock: available,
+                effectiveCost,
               }
             : c,
         );
@@ -590,10 +631,11 @@ export default function QuickSalePage() {
           qty,
           unitId: unitId || units[0]?.id || '',
           unitSymbol: p.baseUnit?.symbol ?? unit?.symbol ?? units[0]?.symbol ?? 'ea',
-          unitPrice: productPrice(p),
+          unitPrice,
           trackInventory: p.trackInventory,
           productType: p.productType,
           availableStock: available,
+          effectiveCost,
         },
       ];
     });
@@ -670,12 +712,17 @@ export default function QuickSalePage() {
     !!settings.cashAccountId &&
     cart.length > 0 &&
     cart.every((l) => l.productId && l.qty > 0 && l.unitId) &&
-    cartStockIssues.length === 0;
+    cartStockIssues.length === 0 &&
+    cartProfitIssues.length === 0;
 
   const charge = async () => {
     if (submitting) return;
     if (cartStockIssues.length) {
       setError(cartStockIssues[0]);
+      return;
+    }
+    if (cartProfitIssues.length) {
+      setError(cartProfitIssues[0]);
       return;
     }
     if (!canSubmit) return;
@@ -973,6 +1020,11 @@ export default function QuickSalePage() {
                     itemTracksInventory(l) &&
                     l.availableStock != null &&
                     allocated > l.availableStock;
+                  const hasProfitIssue =
+                    itemTracksInventory(l) &&
+                    (l.effectiveCost == null ||
+                      l.effectiveCost <= 0 ||
+                      l.unitPrice <= l.effectiveCost);
                   const canIncrease =
                     !itemTracksInventory(l) ||
                     l.availableStock == null ||
@@ -991,6 +1043,16 @@ export default function QuickSalePage() {
                           >
                             Available {fmtQty(l.availableStock)} | Remaining{' '}
                             {fmtQty(remaining ?? 0)}
+                          </div>
+                        )}
+                        {itemTracksInventory(l) && (
+                          <div
+                            className={`text-[11px] ${hasProfitIssue ? 'text-red-600' : 'text-slate-500'}`}
+                          >
+                            Cost{' '}
+                            {l.effectiveCost != null && l.effectiveCost > 0
+                              ? `TZS ${fmt(l.effectiveCost)}`
+                              : 'missing'}
                           </div>
                         )}
                       </td>
@@ -1107,6 +1169,11 @@ export default function QuickSalePage() {
               {cartStockIssues[0]}
             </div>
           )}
+          {cartProfitIssues.length > 0 && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {cartProfitIssues[0]}
+            </div>
+          )}
 
           <Btn
             variant="success"
@@ -1117,6 +1184,8 @@ export default function QuickSalePage() {
           >
             {cartStockIssues.length
               ? 'Resolve stock before charging'
+              : cartProfitIssues.length
+                ? 'Resolve profit before charging'
               : canSubmit
                 ? `Charge TZS ${fmt(totals.total)}`
                 : 'Add items to charge'}

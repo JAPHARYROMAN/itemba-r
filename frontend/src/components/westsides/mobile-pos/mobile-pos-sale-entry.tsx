@@ -71,6 +71,7 @@ interface Product {
   barcode?: string | null;
   baseUnitId?: string | null;
   defaultUnitId?: string | null;
+  defaultPurchasePrice?: number | string | null;
   baseUnit?: { name?: string | null; symbol?: string | null } | null;
   defaultSellingPrice?: number | string | null;
   retailPrice?: number | string | null;
@@ -82,6 +83,7 @@ interface Product {
   availableQuantity?: number | string | null;
   quantityAvailable?: number | string | null;
   inventoryBalance?: {
+    averageCost?: number | string | null;
     availableQuantity?: number | string | null;
     quantityAvailable?: number | string | null;
   } | null;
@@ -115,6 +117,7 @@ interface CartLine {
   trackInventory?: boolean | null;
   productType?: string | null;
   availableStock?: number | null;
+  effectiveCost?: number | null;
 }
 
 interface Settings {
@@ -267,6 +270,14 @@ function productAvailableStock(product: Product | null | undefined) {
   if (raw == null) return null;
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function productEffectiveCost(product: Product | null | undefined) {
+  if (!product || !tracksInventory(product)) return null;
+  const averageCost = normalizeNumber(product.inventoryBalance?.averageCost);
+  if (averageCost > 0) return averageCost;
+  const defaultCost = normalizeNumber(product.defaultPurchasePrice);
+  return defaultCost > 0 ? defaultCost : null;
 }
 
 function tracksInventory(item: Product | CartLine | null | undefined) {
@@ -994,6 +1005,23 @@ export function MobilePosSaleEntry() {
     }
     return issues;
   }, [allocatedByProduct, cart]);
+  const profitIssues = useMemo(() => {
+    const issues: string[] = [];
+    for (const line of cart) {
+      if (!tracksInventory(line)) continue;
+      const cost = line.effectiveCost ?? null;
+      if (cost == null || cost <= 0) {
+        issues.push(`${line.productName} is missing purchase/average cost and cannot be sold.`);
+        continue;
+      }
+      if (line.unitPrice <= cost) {
+        issues.push(
+          `${line.productName} price TZS ${formatMoney(line.unitPrice)} must be greater than cost TZS ${formatMoney(cost)}.`,
+        );
+      }
+    }
+    return issues;
+  }, [cart]);
 
   const totals = useMemo(() => {
     const subtotal = cart.reduce((sum, line) => sum + line.qty * line.unitPrice, 0);
@@ -1011,7 +1039,8 @@ export function MobilePosSaleEntry() {
     cart.length > 0 &&
     totals.total > 0 &&
     stockIssues.length === 0 &&
-    cart.every((line) => line.productId && line.unitId && line.qty > 0 && line.unitPrice >= 0);
+    profitIssues.length === 0 &&
+    cart.every((line) => line.productId && line.unitId && line.qty > 0 && line.unitPrice > 0);
 
   const resetSaleFields = () => {
     setCart([]);
@@ -1061,6 +1090,18 @@ export function MobilePosSaleEntry() {
       setError(`${product.name} has ${formatQty(Math.max(0, availableForAdd))} available.`);
       return;
     }
+    const effectiveCost = productEffectiveCost(product);
+    const unitPrice = productPrice(product);
+    if (tracksInventory(product) && (effectiveCost == null || effectiveCost <= 0)) {
+      setError(`${product.name} is missing purchase/average cost and cannot be sold.`);
+      return;
+    }
+    if (tracksInventory(product) && effectiveCost != null && unitPrice <= effectiveCost) {
+      setError(
+        `${product.name} price TZS ${formatMoney(unitPrice)} must be greater than cost TZS ${formatMoney(effectiveCost)}.`,
+      );
+      return;
+    }
 
     const unitId = productUnitId(product);
     const unit = units.find((candidate) => candidate.id === unitId);
@@ -1072,10 +1113,11 @@ export function MobilePosSaleEntry() {
             ? {
                 ...line,
                 qty: line.qty + qty,
-                unitPrice: productPrice(product),
+                unitPrice,
                 trackInventory: product.trackInventory,
                 productType: product.productType,
                 availableStock: available,
+                effectiveCost,
               }
             : line,
         );
@@ -1089,10 +1131,11 @@ export function MobilePosSaleEntry() {
           qty,
           unitId: unitId || units[0]?.id || '',
           unitSymbol: product.baseUnit?.symbol ?? unit?.symbol ?? units[0]?.symbol ?? 'ea',
-          unitPrice: productPrice(product),
+          unitPrice,
           trackInventory: product.trackInventory,
           productType: product.productType,
           availableStock: available,
+          effectiveCost,
         },
       ];
     });
@@ -1132,6 +1175,10 @@ export function MobilePosSaleEntry() {
     if (submitting || !canCheckout) return;
     if (stockIssues[0]) {
       setError(stockIssues[0]);
+      return;
+    }
+    if (profitIssues[0]) {
+      setError(profitIssues[0]);
       return;
     }
 
@@ -1679,6 +1726,11 @@ export function MobilePosSaleEntry() {
                   {stockIssues[0]}
                 </div>
               )}
+              {profitIssues[0] && (
+                <div className="rounded-lg bg-red-50 px-3 py-2 text-[12px] text-red-700">
+                  {profitIssues[0]}
+                </div>
+              )}
               <Btn
                 className="h-12 w-full text-[15px]"
                 variant="success"
@@ -1686,7 +1738,13 @@ export function MobilePosSaleEntry() {
                 disabled={!canCheckout || Boolean(confirmed)}
                 onClick={checkout}
               >
-                {canCheckout ? `Checkout TZS ${formatMoney(totals.total)}` : 'Checkout'}
+                {stockIssues[0]
+                  ? 'Resolve stock'
+                  : profitIssues[0]
+                    ? 'Resolve profit'
+                    : canCheckout
+                      ? `Checkout TZS ${formatMoney(totals.total)}`
+                      : 'Checkout'}
               </Btn>
             </Card>
           </div>
@@ -2189,6 +2247,9 @@ function CartLineCard({
 }) {
   const hasStockIssue =
     tracksInventory(line) && line.availableStock != null && allocated > line.availableStock;
+  const hasProfitIssue =
+    tracksInventory(line) &&
+    (line.effectiveCost == null || line.effectiveCost <= 0 || line.unitPrice <= line.effectiveCost);
   const remaining = line.availableStock == null ? null : line.availableStock - allocated;
   const canIncrease =
     !tracksInventory(line) || line.availableStock == null || remaining == null || remaining >= 1;
@@ -2197,7 +2258,8 @@ function CartLineCard({
     <div
       className="rounded-lg border p-3"
       style={{
-        borderColor: hasStockIssue ? 'var(--aurora-danger)' : 'var(--aurora-border)',
+        borderColor:
+          hasStockIssue || hasProfitIssue ? 'var(--aurora-danger)' : 'var(--aurora-border)',
       }}
     >
       <div className="flex items-start justify-between gap-3">
@@ -2208,6 +2270,14 @@ function CartLineCard({
             {tracksInventory(line) && line.availableStock != null && (
               <span className={hasStockIssue ? 'text-red-600' : ''}>
                 Available {formatQty(line.availableStock)}
+              </span>
+            )}
+            {tracksInventory(line) && (
+              <span className={hasProfitIssue ? 'text-red-600' : ''}>
+                Cost{' '}
+                {line.effectiveCost != null && line.effectiveCost > 0
+                  ? `TZS ${formatMoney(line.effectiveCost)}`
+                  : 'missing'}
               </span>
             )}
           </div>

@@ -176,6 +176,11 @@ function fmtTZS(n?: number | string | null) {
   );
 }
 
+function productRequiresCost(productType: string, trackInventory: boolean) {
+  if (!trackInventory) return false;
+  return !['SERVICE', 'NON_STOCK_ITEM'].includes(String(productType).toUpperCase());
+}
+
 function ProductModal({
   mode,
   initial,
@@ -230,6 +235,13 @@ function ProductModal({
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const requiresCost = productRequiresCost(form.productType, form.trackInventory);
+  const purchaseCost = Number(form.defaultPurchasePrice || 0);
+  const defaultSellingPrice = Number(form.defaultSellingPrice || 0);
+  const marginPreview =
+    requiresCost && purchaseCost > 0 && defaultSellingPrice > 0
+      ? ((defaultSellingPrice - purchaseCost) / defaultSellingPrice) * 100
+      : null;
 
   const set = <K extends keyof ProductForm>(k: K, v: ProductForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
@@ -308,6 +320,24 @@ function ProductModal({
     if (!form.baseUnitId) {
       setError('Base unit is required');
       return;
+    }
+    if (requiresCost && (!Number.isFinite(purchaseCost) || purchaseCost <= 0)) {
+      setError('Stock products must have a purchase price greater than zero');
+      return;
+    }
+    if (requiresCost) {
+      for (const [label, value] of [
+        ['Selling price', form.defaultSellingPrice],
+        ['Wholesale price', form.wholesalePrice],
+        ['Retail price', form.retailPrice],
+      ] as const) {
+        if (!value.trim()) continue;
+        const price = Number(value);
+        if (Number.isFinite(price) && price > 0 && price <= purchaseCost) {
+          setError(`${label} must be greater than purchase price`);
+          return;
+        }
+      }
     }
     setSaving(true);
     setError('');
@@ -576,6 +606,22 @@ function ProductModal({
           value={form.defaultPurchasePrice}
           onChange={(e) => set('defaultPurchasePrice', e.target.value)}
         />
+        {requiresCost && (
+          <div
+            className="col-span-2 rounded-lg border px-3 py-2 text-sm"
+            style={{
+              borderColor:
+                purchaseCost > 0 ? 'var(--aurora-border)' : 'rgba(239, 68, 68, 0.45)',
+              background: purchaseCost > 0 ? 'var(--aurora-card)' : 'rgba(239, 68, 68, 0.08)',
+              color: purchaseCost > 0 ? 'var(--aurora-text-secondary)' : 'rgb(185, 28, 28)',
+            }}
+          >
+            Purchase cost is required for stock products.{' '}
+            {marginPreview != null
+              ? `Default selling margin: ${marginPreview.toFixed(2)}%.`
+              : 'Enter purchase and selling prices to preview margin.'}
+          </div>
+        )}
         <FormInput
           label="Wholesale Price"
           type="number"

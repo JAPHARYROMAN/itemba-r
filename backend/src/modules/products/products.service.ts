@@ -7,6 +7,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductDto } from './dto/query-product.dto';
 import { QueryProductFamilyDto } from './dto/query-product-family.dto';
+import { ProfitService } from '../profit/profit.service';
 import { AccessLevel, AuditSeverity, Prisma } from '@prisma/client';
 
 type ProductReferenceIds = {
@@ -40,6 +41,7 @@ export class ProductsService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly profit: ProfitService,
   ) {}
 
   async findAll(query: QueryProductDto, user: AuthUser) {
@@ -129,6 +131,7 @@ export class ProductsService {
         quantityOnHand: number;
         quantityReserved: number;
         availableQuantity: number;
+        averageCost: number;
       }
     >();
 
@@ -143,6 +146,7 @@ export class ProductsService {
           productId: true,
           quantityOnHand: true,
           quantityReserved: true,
+          averageCost: true,
         },
       });
 
@@ -153,6 +157,7 @@ export class ProductsService {
           quantityOnHand,
           quantityReserved,
           availableQuantity: Math.max(0, quantityOnHand - quantityReserved),
+          averageCost: Number(balance.averageCost),
         });
       }
     }
@@ -160,10 +165,11 @@ export class ProductsService {
     return products.map((product) => {
       const balance = branchId
         ? (balanceByProductId.get(product.id) ?? {
-            quantityOnHand: 0,
-            quantityReserved: 0,
-            availableQuantity: 0,
-          })
+          quantityOnHand: 0,
+          quantityReserved: 0,
+          availableQuantity: 0,
+          averageCost: 0,
+        })
         : null;
       const sellingPrice =
         product.defaultSellingPrice ?? product.retailPrice ?? product.wholesalePrice ?? null;
@@ -180,6 +186,7 @@ export class ProductsService {
                 branchId,
                 quantityOnHand: balance.quantityOnHand,
                 quantityReserved: balance.quantityReserved,
+                averageCost: balance.averageCost,
                 availableQuantity: balance.availableQuantity,
                 quantityAvailable: balance.availableQuantity,
               },
@@ -269,6 +276,10 @@ export class ProductsService {
     if (existing) {
       throw new BadRequestException('A product with this code already exists in the company');
     }
+    this.profit.assertProductMasterPricing({
+      ...dto,
+      trackInventory: dto.trackInventory ?? true,
+    });
 
     const record = await this.prisma.product.create({
       data: {
@@ -355,6 +366,22 @@ export class ProductsService {
         throw new BadRequestException('A product with this code already exists in the company');
       }
     }
+    this.profit.assertProductMasterPricing({
+      name: dto.name ?? existing.name,
+      productType: dto.productType ?? existing.productType,
+      trackInventory: dto.trackInventory ?? existing.trackInventory,
+      defaultPurchasePrice:
+        dto.defaultPurchasePrice !== undefined
+          ? dto.defaultPurchasePrice
+          : existing.defaultPurchasePrice,
+      defaultSellingPrice:
+        dto.defaultSellingPrice !== undefined
+          ? dto.defaultSellingPrice
+          : existing.defaultSellingPrice,
+      retailPrice: dto.retailPrice !== undefined ? dto.retailPrice : existing.retailPrice,
+      wholesalePrice:
+        dto.wholesalePrice !== undefined ? dto.wholesalePrice : existing.wholesalePrice,
+    });
 
     const record = await this.prisma.product.update({
       where: { id },

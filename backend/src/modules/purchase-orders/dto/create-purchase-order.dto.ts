@@ -32,7 +32,7 @@ export class PurchaseOrderLineDto {
 
   @IsNotEmpty()
   @IsNumber()
-  @Min(0)
+  @Min(0.0001)
   unitCost!: number;
 
   @IsOptional()

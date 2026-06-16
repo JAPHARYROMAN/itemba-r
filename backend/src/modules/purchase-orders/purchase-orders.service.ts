@@ -10,6 +10,7 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreatePurchaseOrderDto, PurchaseOrderLineDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { QueryPurchaseOrderDto } from './dto/query-purchase-order.dto';
+import { ProfitService } from '../profit/profit.service';
 import {
   ReceiveFuelTankAllocationDto,
   ReceivePurchaseOrderDto,
@@ -50,8 +51,8 @@ function calcLineTotals(line: {
   if (!Number.isFinite(quantity) || quantity <= 0) {
     throw new BadRequestException('Purchase order line quantity must be greater than zero');
   }
-  if (!Number.isFinite(unitCost) || unitCost < 0) {
-    throw new BadRequestException('Purchase order line unit cost cannot be negative');
+  if (!Number.isFinite(unitCost) || unitCost <= 0) {
+    throw new BadRequestException('Purchase order line unit cost must be greater than zero');
   }
   if (!Number.isFinite(discount) || discount < 0) {
     throw new BadRequestException('Purchase order line discount cannot be negative');
@@ -118,6 +119,7 @@ export class PurchaseOrdersService {
     private readonly companyScope: CompanyScopeService,
     private readonly postingEngine: PostingEngineService,
     private readonly accountResolver: AccountResolverService,
+    private readonly profit: ProfitService,
   ) {}
 
   async findAll(query: QueryPurchaseOrderDto, user: AuthUser) {
@@ -266,6 +268,7 @@ export class PurchaseOrdersService {
   async create(dto: CreatePurchaseOrderDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     await this.assertReferencesBelongToCompany(dto.companyId, dto);
+    await this.profit.assertPurchaseLinesHaveCost(dto.companyId, dto.lines);
     const userId = user.id;
     let subtotal = 0;
     let totalDiscount = 0;
@@ -359,6 +362,7 @@ export class PurchaseOrdersService {
     let linesData: any[] | undefined;
 
     if (dto.lines) {
+      await this.profit.assertPurchaseLinesHaveCost(existing.companyId, dto.lines);
       subtotal = 0;
       totalDiscount = 0;
       totalTax = 0;
@@ -538,6 +542,7 @@ export class PurchaseOrdersService {
     if (existing.status !== 'DRAFT') {
       throw new BadRequestException('Only DRAFT purchase orders can be confirmed');
     }
+    await this.profit.assertPurchaseLinesHaveCost(existing.companyId, existing.lines as any[]);
 
     const record = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.purchaseOrder.update({

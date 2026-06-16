@@ -60,6 +60,9 @@ function makeService() {
       CASH_ON_HAND: { id: 'cash-account' },
     }),
   } as any;
+  const profit = {
+    assertPurchaseLinesHaveCost: jest.fn().mockResolvedValue(undefined),
+  } as any;
   const service = new PurchaseOrdersService(
     prisma,
     auditLogs,
@@ -69,6 +72,7 @@ function makeService() {
     companyScope,
     postingEngine,
     accountResolver,
+    profit,
   );
 
   return { service, prisma, postingEngine, accountResolver, inventoryMovements, codes };

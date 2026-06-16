@@ -17,6 +17,7 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateSalesOrderDto, SalesOrderLineDto } from './dto/create-sales-order.dto';
 import { UpdateSalesOrderDto } from './dto/update-sales-order.dto';
 import { QuerySalesOrderDto } from './dto/query-sales-order.dto';
+import { ProfitService, SaleLineProfitSnapshot } from '../profit/profit.service';
 import {
   AccessLevel,
   AuditSeverity,
@@ -129,8 +130,8 @@ function calculateLineTotals(
     if (!Number.isFinite(qty) || qty <= 0) {
       throw new BadRequestException('Sales order line quantity must be greater than zero');
     }
-    if (!Number.isFinite(price) || price < 0) {
-      throw new BadRequestException('Sales order line unit price cannot be negative');
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new BadRequestException('Sales order line unit price must be greater than zero');
     }
     if (!Number.isFinite(discount) || discount < 0) {
       throw new BadRequestException('Sales order line discount cannot be negative');
@@ -153,6 +154,17 @@ function calculateLineTotals(
 
   const totalAmount = subtotal - totalDiscount + totalTax;
   return { computed, subtotal, totalDiscount, totalTax, totalAmount };
+}
+
+function salesLineProfitData(snapshot: SaleLineProfitSnapshot | undefined) {
+  if (!snapshot) return {};
+  return {
+    unitCostAtSale: snapshot.unitCostAtSale,
+    cogsAmount: snapshot.cogsAmount,
+    grossProfitAmount: snapshot.grossProfitAmount,
+    grossMarginPct: snapshot.grossMarginPct,
+    profitCostSource: snapshot.profitCostSource,
+  };
 }
 
 type IdempotentSalesOrderSnapshot = {
@@ -262,6 +274,7 @@ export class SalesOrdersService {
     private readonly companyScope: CompanyScopeService,
     private readonly postingEngine: PostingEngineService,
     private readonly accountResolver: AccountResolverService,
+    private readonly profit: ProfitService,
   ) {}
 
   async findAll(query: QuerySalesOrderDto, user: AuthUser) {
@@ -745,6 +758,16 @@ export class SalesOrdersService {
     const { computed, subtotal, totalDiscount, totalTax, totalAmount } = calculateLineTotals(
       dto.lines,
     );
+    const profitSnapshots = await this.profit.assertSaleLinesProfitable({
+      companyId: dto.companyId,
+      branchId: dto.branchId,
+      lines: computed.map((line) => ({
+        productId: line.productId,
+        quantity: Number(line.quantity),
+        unitPrice: Number(line.unitPrice),
+        discountAmount: Number(line.discountAmount ?? 0),
+      })),
+    });
 
     const record = await this.prisma.$transaction(async (tx) => {
       const salesOrderNumber = await this.codes.next({
@@ -783,7 +806,7 @@ export class SalesOrdersService {
       });
 
       await tx.salesOrderLine.createMany({
-        data: computed.map((line) => ({
+        data: computed.map((line, index) => ({
           salesOrderId: order.id,
           productId: line.productId,
           description: line.description,
@@ -794,6 +817,7 @@ export class SalesOrdersService {
           taxAmount: line.taxAmount ?? 0,
           lineTotal: line.lineTotal,
           batchId: line.batchId,
+          ...salesLineProfitData(profitSnapshots[index]),
         })),
       });
 
@@ -864,12 +888,23 @@ export class SalesOrdersService {
     const linesToProcess = dto.lines ?? (existing.lines as any[]);
     const { computed, subtotal, totalDiscount, totalTax, totalAmount } =
       calculateLineTotals(linesToProcess);
+    const shouldRefreshLines = Boolean(dto.lines || dto.branchId !== undefined);
+    const profitSnapshots = await this.profit.assertSaleLinesProfitable({
+      companyId: existing.companyId,
+      branchId: dto.branchId ?? existing.branchId,
+      lines: computed.map((line) => ({
+        productId: line.productId,
+        quantity: Number(line.quantity),
+        unitPrice: Number(line.unitPrice),
+        discountAmount: Number(line.discountAmount ?? 0),
+      })),
+    });
 
     const record = await this.prisma.$transaction(async (tx) => {
-      if (dto.lines) {
+      if (shouldRefreshLines) {
         await tx.salesOrderLine.deleteMany({ where: { salesOrderId: id } });
         await tx.salesOrderLine.createMany({
-          data: computed.map((line) => ({
+          data: computed.map((line, index) => ({
             salesOrderId: id,
             productId: line.productId,
             description: line.description,
@@ -880,6 +915,7 @@ export class SalesOrdersService {
             taxAmount: line.taxAmount ?? 0,
             lineTotal: line.lineTotal,
             batchId: line.batchId,
+            ...salesLineProfitData(profitSnapshots[index]),
           })),
         });
       }
@@ -900,7 +936,7 @@ export class SalesOrdersService {
           paymentMethod: nextPaymentMethod,
           cashAccountId: nextCashAccountId,
           ...(dto.paymentReference !== undefined && { paymentReference: dto.paymentReference }),
-          ...(dto.lines && {
+          ...(shouldRefreshLines && {
             subtotal,
             discountAmount: totalDiscount,
             taxAmount: totalTax,
@@ -1096,24 +1132,35 @@ export class SalesOrdersService {
 
     const record = await this.prisma.$transaction(async (tx) => {
       let cogsAmount = 0;
+      const profitSnapshots = await this.profit.assertSaleLinesProfitable(
+        {
+          companyId: existing.companyId,
+          branchId: issuingBranchId,
+          lines: (existing.lines as any[]).map((line) => ({
+            productId: line.productId,
+            quantity: Number(line.quantity),
+            unitPrice: Number(line.unitPrice),
+            discountAmount: Number(line.discountAmount ?? 0),
+          })),
+        },
+        tx,
+      );
 
-      for (const line of existing.lines as any[]) {
+      for (const [index, line] of (existing.lines as any[]).entries()) {
+        const profitSnapshot = profitSnapshots[index];
+        if (profitSnapshot) {
+          await tx.salesOrderLine.update({
+            where: { id: line.id },
+            data: salesLineProfitData(profitSnapshot),
+          });
+          cogsAmount += profitSnapshot.cogsAmount;
+        }
+
         const product = await tx.product.findUnique({ where: { id: line.productId } });
-        if (!product?.trackInventory) continue;
+        if (!product || !this.profit.isStockProduct(product)) continue;
 
         try {
-          const balance = await tx.inventoryBalance.findUnique({
-            where: {
-              companyId_productId_branchId: {
-                companyId: existing.companyId,
-                productId: line.productId,
-                branchId: issuingBranchId,
-              },
-            },
-            select: { averageCost: true },
-          });
-          const unitCost = Number(balance?.averageCost ?? 0);
-          cogsAmount += Number(line.quantity) * unitCost;
+          const unitCost = Number(profitSnapshot?.unitCostAtSale ?? 0);
 
           await this.inventoryMovements.createMovement({
             companyId: existing.companyId,
@@ -1554,7 +1601,7 @@ export class SalesOrdersService {
       if (existing.status === 'CONFIRMED') {
         for (const line of existing.lines as any[]) {
           const product = await tx.product.findUnique({ where: { id: line.productId } });
-          if (!product?.trackInventory) continue;
+          if (!product || !this.profit.isStockProduct(product)) continue;
           if (!existing.branchId) {
             throw new BadRequestException(
               'Sales order branch/location is required to reverse stock',
@@ -1562,12 +1609,23 @@ export class SalesOrdersService {
           }
 
           try {
+            const quantity = Number(line.quantity);
+            const frozenUnitCost = Number(line.unitCostAtSale ?? 0);
+            const cogsUnitCost =
+              quantity > 0 && line.cogsAmount != null ? Number(line.cogsAmount) / quantity : 0;
+            const unitCost =
+              frozenUnitCost > 0
+                ? frozenUnitCost
+                : cogsUnitCost > 0
+                  ? cogsUnitCost
+                  : Number(product.defaultPurchasePrice ?? 0);
             await this.inventoryMovements.createMovement({
               companyId: existing.companyId,
               productId: line.productId,
               movementType: 'SALES_RETURN',
-              quantity: Number(line.quantity),
+              quantity,
               unitId: line.unitId,
+              unitCost,
               movementDate: new Date(),
               createdById: userId,
               referenceType: 'SalesOrder',

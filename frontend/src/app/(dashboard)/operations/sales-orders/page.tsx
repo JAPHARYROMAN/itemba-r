@@ -566,7 +566,11 @@ function SalesOrderModal({
       return;
     }
     if (lineValidation.hasBlockingErrors) {
-      setError(lineValidation.stockWarnings[0] ?? 'Resolve stock availability before saving');
+      setError(
+        lineValidation.stockWarnings[0] ??
+          lineValidation.profitWarnings?.[0] ??
+          'Resolve stock/profit validation before saving',
+      );
       return;
     }
     if (form.paymentMethod !== 'CREDIT' && !form.cashAccountId) {
