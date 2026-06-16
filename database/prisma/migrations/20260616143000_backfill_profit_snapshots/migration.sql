@@ -13,10 +13,10 @@ SET
   END,
   "profitCostSource" = costs."source"::"ProfitCostSource"
 FROM "sales_orders" AS so
-JOIN "products" AS p ON p."id" = sol."productId"
+CROSS JOIN "products" AS p
 LEFT JOIN "inventory_balances" AS ib
   ON ib."companyId" = so."companyId"
-  AND ib."productId" = sol."productId"
+  AND ib."productId" = p."id"
   AND ib."branchId" IS NOT DISTINCT FROM so."branchId"
 CROSS JOIN LATERAL (
   SELECT
@@ -27,6 +27,7 @@ CROSS JOIN LATERAL (
     END AS "source"
 ) AS costs
 WHERE sol."salesOrderId" = so."id"
+  AND p."id" = sol."productId"
   AND so."status" IN ('CONFIRMED', 'PARTIALLY_PAID', 'PAID')
   AND sol."unitCostAtSale" IS NULL
   AND p."trackInventory" = true
