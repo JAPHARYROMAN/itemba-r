@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Btn, Card, FormInput, FormSelect, PageHeader, PageSpinner, StatCard } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useOrgScope } from '@/hooks/use-org-scope';
-import { backendGet } from '@/lib/api-client';
+import { backendGet, backendPatch, backendPost } from '@/lib/api-client';
 
 interface ProfitSummary {
   revenue: number;
@@ -31,9 +31,9 @@ interface CostGapRow {
   productId: string;
   productCode?: string | null;
   productName: string;
-  company?: { name?: string | null; code?: string | null } | null;
-  division?: { name?: string | null; code?: string | null } | null;
-  branch?: { name?: string | null; code?: string | null } | null;
+  company?: { id?: string | null; name?: string | null; code?: string | null } | null;
+  division?: { id?: string | null; name?: string | null; code?: string | null } | null;
+  branch?: { id?: string | null; name?: string | null; code?: string | null } | null;
   quantityOnHand?: number | null;
   averageCost?: number | null;
   defaultPurchasePrice?: number | null;
@@ -53,6 +53,32 @@ interface LedgerRow {
   grossProfitAmount: number;
   grossMarginPct?: number | null;
   profitCostSource?: string | null;
+}
+
+interface BelowCostAttemptRow {
+  id: string;
+  createdAt: string;
+  company?: { name?: string | null; code?: string | null } | null;
+  user?: { fullName?: string | null; email?: string | null } | null;
+  source?: string;
+  referenceType?: string;
+  referenceId?: string;
+  message?: string;
+}
+
+interface ExportPayload {
+  fileName: string;
+  format: string;
+  contentType?: string;
+  content?: string;
+  rows?: Array<Record<string, unknown>>;
+}
+
+interface BackfillResult {
+  scanned: number;
+  updated: number;
+  skipped: number;
+  skippedSamples: Array<{ salesOrderNumber: string; productName: string; reason: string }>;
 }
 
 function fmtMoney(value: number | string | null | undefined) {
@@ -84,6 +110,8 @@ function monthStartIso() {
 export default function OperationsProfitPage() {
   const { hasPermission, loading: authLoading } = useAuth();
   const canView = hasPermission('profit.view') || hasPermission('operations.reports.view');
+  const canManageCosts = hasPermission('profit.manage_costs');
+  const canAudit = hasPermission('profit.audit') || hasPermission('profit.view');
   const [companyId, setCompanyId] = useState('');
   const [divisionId, setDivisionId] = useState('');
   const [branchId, setBranchId] = useState('');
@@ -98,10 +126,20 @@ export default function OperationsProfitPage() {
   const [products, setProducts] = useState<ProductProfitRow[]>([]);
   const [gaps, setGaps] = useState<CostGapRow[]>([]);
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [attempts, setAttempts] = useState<BelowCostAttemptRow[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<ProductProfitRow | null>(null);
+  const [costFix, setCostFix] = useState<{
+    productId: string;
+    productName: string;
+    branchId: string;
+    defaultPurchasePrice: string;
+    averageCost: string;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
   const query = useMemo(
     () => ({
@@ -118,22 +156,29 @@ export default function OperationsProfitPage() {
     if (!canView) return;
     setLoading(true);
     setError('');
+    setNotice('');
     try {
-      const [summaryPayload, gapsPayload] = await Promise.all([
+      const [summaryPayload, gapsPayload, attemptsPayload] = await Promise.all([
         backendGet<{ summary: ProfitSummary; products: ProductProfitRow[] }>('/profit/product-summary', {
           query,
         }),
         backendGet<{ rows: CostGapRow[]; total: number }>('/profit/cost-gaps', { query }),
+        canAudit
+          ? backendGet<{ rows: BelowCostAttemptRow[]; total: number }>('/profit/below-cost-attempts', {
+              query: { ...query, limit: 10 },
+            })
+          : Promise.resolve({ rows: [], total: 0 }),
       ]);
       setSummary(summaryPayload.summary);
       setProducts(summaryPayload.products);
       setGaps(gapsPayload.rows);
+      setAttempts(attemptsPayload.rows);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load profit module');
     } finally {
       setLoading(false);
     }
-  }, [canView, query]);
+  }, [canAudit, canView, query]);
 
   useEffect(() => {
     void load();
@@ -161,6 +206,83 @@ export default function OperationsProfitPage() {
     };
     // query fields are intentionally expanded so ledger refreshes with filters.
   }, [query, selectedProduct]);
+
+  const downloadExport = async (report: 'product-summary' | 'cost-gaps' | 'below-cost-attempts') => {
+    setActionLoading(true);
+    setError('');
+    setNotice('');
+    try {
+      const payload = await backendGet<ExportPayload>('/profit/export', {
+        query: { ...query, report, format: 'csv' },
+      });
+      const content = payload.content ?? '';
+      const blob = new Blob([content], { type: payload.contentType ?? 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = payload.fileName || `${report}.csv`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setNotice(`${payload.fileName || report} exported.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export profit report');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const runBackfill = async () => {
+    setActionLoading(true);
+    setError('');
+    setNotice('');
+    try {
+      const result = await backendPost<BackfillResult>('/profit/backfill-sales', undefined, { query });
+      setNotice(
+        `Backfill scanned ${result.scanned} lines, updated ${result.updated}, skipped ${result.skipped}.`,
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to backfill profit snapshots');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const startCostFix = (row: CostGapRow) => {
+    setCostFix({
+      productId: row.productId,
+      productName: row.productName,
+      branchId: row.branch?.id ?? '',
+      defaultPurchasePrice:
+        row.defaultPurchasePrice && row.defaultPurchasePrice > 0 ? String(row.defaultPurchasePrice) : '',
+      averageCost: row.averageCost && row.averageCost > 0 ? String(row.averageCost) : '',
+    });
+    setNotice('');
+    setError('');
+  };
+
+  const saveCostFix = async () => {
+    if (!costFix) return;
+    setActionLoading(true);
+    setError('');
+    setNotice('');
+    try {
+      await backendPatch(`/profit/products/${costFix.productId}/cost`, {
+        defaultPurchasePrice: costFix.defaultPurchasePrice || undefined,
+        branchId: costFix.branchId || undefined,
+        averageCost: costFix.branchId ? costFix.averageCost || undefined : undefined,
+      });
+      setNotice(`Cost updated for ${costFix.productName}.`);
+      setCostFix(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update cost');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   if (authLoading || scopeLoading) return <PageSpinner />;
   if (!canView) {
@@ -231,10 +353,109 @@ export default function OperationsProfitPage() {
         </div>
       </Card>
 
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold">Profit controls</h2>
+            <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              Export profitability, backfill historical COGS snapshots, and resolve blocked cost gaps.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Btn
+              variant="secondary"
+              size="sm"
+              disabled={actionLoading}
+              onClick={() => void downloadExport('product-summary')}
+            >
+              Export Profitability
+            </Btn>
+            <Btn
+              variant="secondary"
+              size="sm"
+              disabled={actionLoading}
+              onClick={() => void downloadExport('cost-gaps')}
+            >
+              Export Cost Gaps
+            </Btn>
+            {canAudit && (
+              <Btn
+                variant="secondary"
+                size="sm"
+                disabled={actionLoading}
+                onClick={() => void downloadExport('below-cost-attempts')}
+              >
+                Export Audit
+              </Btn>
+            )}
+            {canManageCosts && (
+              <Btn size="sm" disabled={actionLoading} onClick={() => void runBackfill()}>
+                Backfill COGS
+              </Btn>
+            )}
+          </div>
+        </div>
+      </Card>
+
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </div>
+      )}
+
+      {notice && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          {notice}
+        </div>
+      )}
+
+      {costFix && (
+        <Card>
+          <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr_1fr_auto] lg:items-end">
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                Fix Cost Gap
+              </label>
+              <div className="font-medium">{costFix.productName}</div>
+              <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                Positive costs are required before this stock item can be sold.
+              </div>
+            </div>
+            <FormInput
+              label="Default Purchase Cost"
+              type="number"
+              min="0"
+              step="0.01"
+              value={costFix.defaultPurchasePrice}
+              onChange={(event) =>
+                setCostFix((current) =>
+                  current ? { ...current, defaultPurchasePrice: event.target.value } : current,
+                )
+              }
+            />
+            <FormInput
+              label="Branch Average Cost"
+              type="number"
+              min="0"
+              step="0.0001"
+              value={costFix.averageCost}
+              disabled={!costFix.branchId}
+              onChange={(event) =>
+                setCostFix((current) =>
+                  current ? { ...current, averageCost: event.target.value } : current,
+                )
+              }
+            />
+            <div className="flex gap-2">
+              <Btn variant="secondary" disabled={actionLoading} onClick={() => setCostFix(null)}>
+                Cancel
+              </Btn>
+              <Btn disabled={actionLoading} onClick={() => void saveCostFix()}>
+                Save Cost
+              </Btn>
+            </div>
+          </div>
+        </Card>
       )}
 
       {loading ? (
@@ -390,12 +611,13 @@ export default function OperationsProfitPage() {
                     <th className="px-4 py-3 text-right">Avg Cost</th>
                     <th className="px-4 py-3 text-right">Default Cost</th>
                     <th className="px-4 py-3">Issue</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {gaps.length === 0 ? (
                     <tr>
-                      <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={6}>
+                      <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={7}>
                         No cost gaps found.
                       </td>
                     </tr>
@@ -415,6 +637,15 @@ export default function OperationsProfitPage() {
                         <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(row.averageCost)}</td>
                         <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(row.defaultPurchasePrice)}</td>
                         <td className="px-4 py-3 text-red-600">{row.message}</td>
+                        <td className="px-4 py-3 text-right">
+                          {canManageCosts ? (
+                            <Btn variant="secondary" size="xs" onClick={() => startCostFix(row)}>
+                              Fix Cost
+                            </Btn>
+                          ) : (
+                            <span className="text-xs text-slate-500">Restricted</span>
+                          )}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -422,6 +653,49 @@ export default function OperationsProfitPage() {
               </table>
             </div>
           </Card>
+
+          {canAudit && (
+            <Card padding="none" className="overflow-hidden">
+              <div className="border-b px-4 py-3" style={{ borderColor: 'var(--aurora-border)' }}>
+                <h2 className="text-sm font-semibold">Below-cost attempt audit</h2>
+                <p className="text-xs text-slate-500">Recent blocked sales caused by missing cost or net price at/below cost.</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
+                    <tr className="text-left text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                      <th className="px-4 py-3">Time</th>
+                      <th className="px-4 py-3">User</th>
+                      <th className="px-4 py-3">Source</th>
+                      <th className="px-4 py-3">Company</th>
+                      <th className="px-4 py-3">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {attempts.length === 0 ? (
+                      <tr>
+                        <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={5}>
+                          No blocked below-cost attempts in this filter.
+                        </td>
+                      </tr>
+                    ) : (
+                      attempts.map((row) => (
+                        <tr key={row.id} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+                          <td className="px-4 py-3 text-xs text-slate-500">
+                            {new Date(row.createdAt).toLocaleString('en-GB')}
+                          </td>
+                          <td className="px-4 py-3">{row.user?.fullName ?? row.user?.email ?? '-'}</td>
+                          <td className="px-4 py-3">{row.source ?? '-'}</td>
+                          <td className="px-4 py-3">{row.company?.code ?? row.company?.name ?? '-'}</td>
+                          <td className="px-4 py-3 text-red-600">{row.message ?? '-'}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
         </>
       )}
     </div>

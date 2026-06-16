@@ -28,7 +28,8 @@ function makeService({
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
     companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-1' }),
   } as any;
-  return { service: new ProfitService(prisma, companyScope), prisma };
+  const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
+  return { service: new ProfitService(prisma, companyScope, auditLogs), prisma, auditLogs };
 }
 
 describe('ProfitService no-loss rules', () => {
@@ -46,7 +47,7 @@ describe('ProfitService no-loss rules', () => {
   });
 
   it('blocks below-cost stock sales', async () => {
-    const { service } = makeService({
+    const { service, auditLogs } = makeService({
       balance: {
         productId: 'product-1',
         quantityOnHand: 5,
@@ -61,6 +62,9 @@ describe('ProfitService no-loss rules', () => {
         lines: [{ productId: 'product-1', quantity: 1, unitPrice: 100 }],
       }),
     ).rejects.toThrow('cannot be sold below cost');
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'PROFIT_VALIDATION_BLOCKED' }),
+    );
   });
 
   it('returns frozen gross profit snapshot from branch average cost', async () => {

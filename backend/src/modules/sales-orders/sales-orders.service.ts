@@ -767,7 +767,7 @@ export class SalesOrdersService {
         unitPrice: Number(line.unitPrice),
         discountAmount: Number(line.discountAmount ?? 0),
       })),
-    });
+    }, this.prisma, { user, source: 'SalesOrderCreate', referenceType: 'SalesOrder' });
 
     const record = await this.prisma.$transaction(async (tx) => {
       const salesOrderNumber = await this.codes.next({
@@ -898,6 +898,11 @@ export class SalesOrdersService {
         unitPrice: Number(line.unitPrice),
         discountAmount: Number(line.discountAmount ?? 0),
       })),
+    }, this.prisma, {
+      user,
+      source: 'SalesOrderUpdate',
+      referenceType: 'SalesOrder',
+      referenceId: id,
     });
 
     const record = await this.prisma.$transaction(async (tx) => {
@@ -1144,6 +1149,12 @@ export class SalesOrdersService {
           })),
         },
         tx,
+        {
+          user,
+          source: 'SalesOrderConfirm',
+          referenceType: 'SalesOrder',
+          referenceId: id,
+        },
       );
 
       for (const [index, line] of (existing.lines as any[]).entries()) {

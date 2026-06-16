@@ -560,7 +560,7 @@ export const REPORTS_CATALOG: CatalogEntry[] = [
     description: 'Audit trail and validation surface for attempted below-cost sales.',
     scopes: ['COMPANY', 'DIVISION'],
     permission: 'profit.audit',
-    apiPath: '/audit-logs',
+    apiPath: '/profit/below-cost-attempts',
     frontendPath: '/operations/profit',
   },
 
