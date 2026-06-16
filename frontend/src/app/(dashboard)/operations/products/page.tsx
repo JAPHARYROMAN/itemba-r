@@ -344,7 +344,6 @@ function ProductModal({
     try {
       const num = (s: string) => (s.trim() === '' ? undefined : Number(s));
       const body: Record<string, unknown> = {
-        companyId: form.companyId,
         name: form.name.trim(),
         categoryId: form.categoryId,
         productType: form.productType,
@@ -354,6 +353,7 @@ function ProductModal({
         trackBatch: form.trackBatch,
         trackExpiry: form.trackExpiry,
       };
+      if (mode === 'create') body.companyId = form.companyId;
       if (form.productCode.trim()) body.productCode = form.productCode.trim();
       if (form.description.trim()) body.description = form.description.trim();
       if (form.productFamilyName.trim()) {
