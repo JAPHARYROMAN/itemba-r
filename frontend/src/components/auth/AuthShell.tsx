@@ -23,12 +23,12 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
     eyebrow.toLowerCase().includes('secure workspace') || title.toLowerCase().includes('sign in');
 
   return (
-    <main className="auth-light min-h-screen bg-[#f7f8f6] text-slate-950">
-      <div className="grid min-h-screen lg:grid-cols-[minmax(420px,0.92fr)_minmax(460px,1.08fr)]">
-        <section className="flex min-h-[42vh] flex-col justify-between border-b border-slate-200 bg-white px-6 py-7 sm:px-10 lg:min-h-screen lg:border-b-0 lg:border-r">
+    <main className="auth-light min-h-screen bg-[#eef1ed] text-[#071321]">
+      <div className="grid min-h-screen lg:grid-cols-[minmax(460px,0.95fr)_minmax(460px,1.05fr)]">
+        <section className="flex min-h-[42vh] flex-col justify-between border-b border-[#d9dfd6] bg-[#faf8f1] px-6 py-8 sm:px-10 lg:min-h-screen lg:border-b-0 lg:border-r lg:px-14">
           <div>
             <Link href="/login" className="inline-flex items-center gap-3">
-              <span className="flex h-16 w-16 items-center justify-center rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+              <span className="flex h-[72px] w-[72px] items-center justify-center rounded-2xl border border-[#d8ded5] bg-white p-2 shadow-[0_12px_30px_rgba(7,19,33,0.08)]">
                 <Image
                   src="/brand/itemba-group-logo.png"
                   alt="Itemba Group"
@@ -38,43 +38,46 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
                 />
               </span>
               <span>
-                <span className="block text-lg font-semibold tracking-wide">ITEMBA GROUP</span>
-                <span className="block text-xs font-semibold uppercase text-slate-600">
+                <span className="block text-xl font-semibold text-[#071321]">ITEMBA GROUP</span>
+                <span className="block text-xs font-semibold uppercase text-[#607085]">
                   Enterprise Platform
                 </span>
               </span>
             </Link>
 
             <div className="mt-14 max-w-xl">
-              <div className="text-xs font-semibold uppercase text-slate-800">
+              <div className="inline-flex rounded-full border border-[#d6c59d] bg-[#fffdf7] px-3 py-1 text-xs font-semibold uppercase text-[#5a4720]">
                 {eyebrow}
               </div>
-              <h1 className="mt-4 text-4xl font-semibold leading-tight text-slate-950 sm:text-5xl">
+              <h1 className="mt-5 text-4xl font-semibold leading-tight text-[#071321] sm:text-5xl">
                 {title}
               </h1>
-              <p className="mt-5 max-w-lg text-base leading-7 text-slate-600">{subtitle}</p>
+              <p className="mt-5 max-w-lg text-base leading-7 text-[#3f4e61]">{subtitle}</p>
             </div>
           </div>
 
           <div className="mt-10 space-y-5">
             {showMobilePosInstall && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                <div className="flex items-start gap-3">
-                  <InstallQrCode size={88} className="h-[88px] w-[88px] flex-shrink-0" />
+              <div className="rounded-2xl border border-[#d8ded5] bg-white p-4 shadow-[0_14px_40px_rgba(7,19,33,0.07)]">
+                <div className="flex items-start gap-4">
+                  <InstallQrCode
+                    size={92}
+                    className="h-[92px] w-[92px] flex-shrink-0 ring-[#d8ded5]"
+                  />
                   <div className="min-w-0">
-                    <div className="text-xs font-semibold uppercase text-slate-800">
+                    <div className="text-xs font-semibold uppercase text-[#5a4720]">
                       Counter install
                     </div>
-                    <div className="mt-1 text-sm font-semibold text-slate-900">
+                    <div className="mt-1 text-base font-semibold text-[#071321]">
                       {WESTSIDES_MOBILE_POS_NAME}
                     </div>
-                    <p className="mt-1 text-xs leading-5 text-slate-600">
+                    <p className="mt-1 text-sm leading-6 text-[#526277]">
                       Scan this code or open the gateway to install the mobile POS, then sign in and
                       launch the counter sale screen.
                     </p>
                     <Link
                       href={WESTSIDES_MOBILE_POS_INSTALL_PATH}
-                      className="mt-2 inline-flex text-xs font-semibold text-slate-800 underline-offset-4 hover:text-slate-950 hover:underline"
+                      className="mt-2 inline-flex rounded-full border border-[#d6c59d] px-3 py-1 text-xs font-semibold text-[#5a4720] transition hover:border-[#b99b55] hover:bg-[#fff8e5]"
                     >
                       Open install gateway
                     </Link>
@@ -87,20 +90,20 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
               {ACCESS_POINTS.map((item) => (
                 <div
                   key={item}
-                  className="rounded-lg border border-slate-200 bg-[#fbfcfb] px-3 py-3"
+                  className="rounded-xl border border-[#d8ded5] bg-[#fffdf8] px-3 py-3 shadow-[0_8px_24px_rgba(7,19,33,0.04)]"
                 >
-                  <div className="h-1.5 w-8 rounded-full bg-slate-800" />
-                  <div className="mt-3 text-sm font-semibold text-slate-800">{item}</div>
+                  <div className="h-1.5 w-8 rounded-full bg-[#b99b55]" />
+                  <div className="mt-3 text-sm font-semibold text-[#1d2d3f]">{item}</div>
                 </div>
               ))}
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-950 px-4 py-3 text-sm text-white">
+            <div className="rounded-xl border border-[#0f2136] bg-[#071321] px-4 py-3 text-sm text-white shadow-[0_14px_34px_rgba(7,19,33,0.16)]">
               <span className="font-semibold">Permanent address:</span>{' '}
               <a
                 href={WEBSITE_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-slate-200 underline-offset-4 transition-colors hover:text-white hover:underline"
+                className="text-[#f0dfb2] underline-offset-4 transition-colors hover:text-white hover:underline"
               >
                 itembagrouptz.com
               </a>
@@ -110,10 +113,10 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
 
         <section className="flex items-center justify-center px-6 py-10 sm:px-10">
           <div className="w-full max-w-md animate-fade-up">
-            <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+            <div className="rounded-2xl border border-[#d8ded5] bg-[#fffefa] p-6 shadow-[0_24px_70px_rgba(7,19,33,0.11)] sm:p-8">
               {children}
             </div>
-            <div className="mt-5 text-center text-sm text-slate-600">{footer}</div>
+            <div className="mt-5 text-center text-sm text-[#526277]">{footer}</div>
           </div>
         </section>
       </div>

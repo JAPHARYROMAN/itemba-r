@@ -4,6 +4,9 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { AuthShell } from '@/components/auth/AuthShell';
 
+const inputClassName =
+  'mt-1 w-full rounded-xl border border-[#cbd5df] bg-white px-4 py-3 text-sm text-[#071321] shadow-sm outline-none transition placeholder:text-[#8290a3] focus:border-[#1e3a5f] focus:ring-2 focus:ring-[#d9e3ed]';
+
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -67,25 +70,28 @@ export default function LoginPage() {
       footer={
         <>
           Need an account?{' '}
-          <Link href="/signup" className="font-semibold text-slate-800 underline-offset-4 hover:text-slate-950 hover:underline">
+          <Link
+            href="/signup"
+            className="font-semibold text-[#071321] underline-offset-4 hover:text-[#5a4720] hover:underline"
+          >
             Request access
           </Link>
         </>
       }
     >
       <div className="mb-7">
-        <div className="text-xs font-semibold uppercase text-slate-800">
+        <div className="inline-flex rounded-full border border-[#d6c59d] bg-[#fff8e5] px-3 py-1 text-xs font-semibold uppercase text-[#5a4720]">
           Welcome back
         </div>
-        <h2 className="mt-3 text-2xl font-semibold text-slate-950">Account sign in</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
+        <h2 className="mt-4 text-2xl font-semibold text-[#071321]">Account sign in</h2>
+        <p className="mt-2 text-sm leading-6 text-[#526277]">
           Use the email and password assigned to your Itemba Group user profile.
         </p>
       </div>
 
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
-          <label htmlFor="email" className="block text-sm font-medium text-slate-800">
+          <label htmlFor="email" className="block text-sm font-semibold text-[#26364a]">
             Email address
           </label>
           <input
@@ -96,19 +102,19 @@ export default function LoginPage() {
             onChange={(e) => setEmail(e.target.value)}
             required
             placeholder="name@itembagrouptz.com"
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+            className={inputClassName}
           />
         </div>
 
         <div>
           <div className="flex items-center justify-between gap-3">
-            <label htmlFor="password" className="block text-sm font-medium text-slate-800">
+            <label htmlFor="password" className="block text-sm font-semibold text-[#26364a]">
               Password
             </label>
             <button
               type="button"
               onClick={() => setShowPassword((value) => !value)}
-              className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+              className="rounded-full px-2 py-1 text-xs font-semibold text-[#607085] transition hover:bg-[#eef1ed] hover:text-[#071321]"
             >
               {showPassword ? 'Hide' : 'Show'}
             </button>
@@ -120,12 +126,12 @@ export default function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+            className={inputClassName}
           />
         </div>
 
         {error && (
-          <div className="animate-shake flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <div className="animate-shake flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             <svg
               className="h-4 w-4 flex-shrink-0"
               fill="none"
@@ -143,7 +149,7 @@ export default function LoginPage() {
 
         {welcomeName ? (
           <div
-            className="animate-scale-pop flex w-full items-center justify-center gap-2 rounded-md bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white"
+            className="animate-scale-pop flex w-full items-center justify-center gap-2 rounded-xl bg-[#2f6b54] px-4 py-3 text-sm font-semibold text-white"
             role="status"
           >
             <svg
@@ -162,7 +168,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-md bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-xl bg-[#071321] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(7,19,33,0.18)] transition hover:bg-[#10243a] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? 'Signing in...' : 'Sign in'}
           </button>

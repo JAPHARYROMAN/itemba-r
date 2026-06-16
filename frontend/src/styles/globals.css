@@ -784,8 +784,8 @@ html.motion-reduced *::after {
 .auth-light,
 .dark .auth-light {
   color-scheme: light;
-  background: #f7f8f6 !important;
-  color: #020617 !important;
+  background: #eef1ed !important;
+  color: #071321 !important;
 }
 
 .dark .auth-light .bg-white {
@@ -820,20 +820,20 @@ html.motion-reduced *::after {
 .dark .auth-light textarea,
 .dark .auth-light select {
   background-color: #ffffff !important;
-  color: #020617 !important;
-  caret-color: #020617;
+  color: #071321 !important;
+  caret-color: #071321;
 }
 
 .auth-light input::placeholder,
 .auth-light textarea::placeholder {
-  color: #64748b;
+  color: #8290a3;
   opacity: 1;
 }
 
 .auth-light input:-webkit-autofill,
 .auth-light input:-webkit-autofill:hover,
 .auth-light input:-webkit-autofill:focus {
-  -webkit-text-fill-color: #020617;
+  -webkit-text-fill-color: #071321;
   box-shadow: 0 0 0 1000px #ffffff inset;
   transition: background-color 5000s ease-in-out 0s;
 }
