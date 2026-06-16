@@ -143,8 +143,8 @@ export class ReceivablesService {
           companyId: dto.companyId,
           divisionId: scope.divisionId,
           branchId: scope.branchId,
-          customerId: dto.customerId,
-          customerName: dto.customerName,
+          customerId: dto.customerId || null,
+          customerName: scope.customerName ?? dto.customerName,
           sourceType: dto.sourceType,
           sourceId: dto.sourceId,
           amount,
@@ -191,10 +191,12 @@ export class ReceivablesService {
         tx,
       );
 
-      return tx.receivable.update({
+      const updated = await tx.receivable.update({
         where: { id: created.id },
         data: { journalEntryId: journalEntry.id },
       });
+      await this.syncCustomerBalance(tx, updated.companyId, updated.customerId);
+      return updated;
     });
 
     await this.auditLogs.log({
@@ -221,17 +223,22 @@ export class ReceivablesService {
       customerId:
         dto.customerId !== undefined ? dto.customerId || null : existing.customerId || null,
     });
-    const record = await this.prisma.receivable.update({
-      where: { id },
-      data: {
-        divisionId: scope.divisionId,
-        branchId: scope.branchId,
-        ...(dto.customerName && { customerName: dto.customerName }),
-        ...(dto.customerId !== undefined && { customerId: dto.customerId }),
-        ...(dto.notes !== undefined && { notes: dto.notes }),
-        ...(dto.dueDate && { dueDate: new Date(dto.dueDate) }),
-        ...(dto.issueDate && { issueDate: new Date(dto.issueDate) }),
-      },
+    const record = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.receivable.update({
+        where: { id },
+        data: {
+          divisionId: scope.divisionId,
+          branchId: scope.branchId,
+          customerName: scope.customerName ?? dto.customerName ?? existing.customerName,
+          ...(dto.customerId !== undefined && { customerId: dto.customerId || null }),
+          ...(dto.notes !== undefined && { notes: dto.notes }),
+          ...(dto.dueDate && { dueDate: new Date(dto.dueDate) }),
+          ...(dto.issueDate && { issueDate: new Date(dto.issueDate) }),
+        },
+      });
+      await this.syncCustomerBalance(tx, existing.companyId, existing.customerId);
+      await this.syncCustomerBalance(tx, updated.companyId, updated.customerId);
+      return updated;
     });
 
     await this.auditLogs.log({
@@ -262,11 +269,12 @@ export class ReceivablesService {
           Array<{
             id: string;
             companyId: string;
+            customerId: string | null;
             outstandingAmount: Prisma.Decimal;
             paidAmount: Prisma.Decimal;
             status: string;
           }>
-        >`SELECT "id", "companyId", "outstandingAmount", "paidAmount", "status"
+        >`SELECT "id", "companyId", "customerId", "outstandingAmount", "paidAmount", "status"
           FROM "receivables"
           WHERE "id" = ${id} AND "deletedAt" IS NULL
           FOR UPDATE`;
@@ -295,6 +303,7 @@ export class ReceivablesService {
         });
 
         await this.syncSalesOrderPaymentFromReceivable(tx, updated);
+        await this.syncCustomerBalance(tx, updated.companyId, updated.customerId);
 
         return {
           existing: locked,
@@ -327,9 +336,13 @@ export class ReceivablesService {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
     const userId = user.id;
-    const record = await this.prisma.receivable.update({
-      where: { id },
-      data: { status: 'WRITTEN_OFF', notes: dto.reason },
+    const record = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.receivable.update({
+        where: { id },
+        data: { status: 'WRITTEN_OFF', notes: dto.reason },
+      });
+      await this.syncCustomerBalance(tx, updated.companyId, updated.customerId);
+      return updated;
     });
 
     await this.auditLogs.log({
@@ -349,7 +362,10 @@ export class ReceivablesService {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
     const userId = user.id;
-    await this.prisma.receivable.update({ where: { id }, data: { deletedAt: new Date() } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.receivable.update({ where: { id }, data: { deletedAt: new Date() } });
+      await this.syncCustomerBalance(tx, existing.companyId, existing.customerId);
+    });
 
     await this.auditLogs.log({
       action: 'RECEIVABLE_DELETE',
@@ -368,6 +384,25 @@ export class ReceivablesService {
       company: { select: { id: true, name: true, code: true } },
       division: { select: { id: true, name: true, code: true } },
       branch: { select: { id: true, name: true, code: true } },
+      customer: {
+        select: {
+          id: true,
+          customerCode: true,
+          name: true,
+          legalName: true,
+          customerType: true,
+          tin: true,
+          vrn: true,
+          phone: true,
+          email: true,
+          address: true,
+          contactPerson: true,
+          creditLimit: true,
+          currentBalance: true,
+          paymentTerms: true,
+          status: true,
+        },
+      },
     };
   }
 
@@ -487,7 +522,7 @@ export class ReceivablesService {
     if (input.customerId) {
       const customer = await this.prisma.customer.findFirst({
         where: { id: input.customerId, deletedAt: null },
-        select: { companyId: true, divisionId: true, branchId: true },
+        select: { companyId: true, divisionId: true, branchId: true, name: true },
       });
       if (!customer || customer.companyId !== input.companyId) {
         throw new BadRequestException('Customer does not belong to this company');
@@ -526,7 +561,37 @@ export class ReceivablesService {
       }
     }
 
-    return { divisionId, branchId };
+    const customerName = input.customerId
+      ? (
+          await this.prisma.customer.findFirst({
+            where: { id: input.customerId, deletedAt: null },
+            select: { name: true },
+          })
+        )?.name
+      : undefined;
+
+    return { divisionId, branchId, customerName };
+  }
+
+  private async syncCustomerBalance(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    customerId?: string | null,
+  ) {
+    if (!customerId) return;
+    const summary = await tx.receivable.aggregate({
+      where: {
+        companyId,
+        customerId,
+        deletedAt: null,
+        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as any },
+      },
+      _sum: { outstandingAmount: true },
+    });
+    await tx.customer.updateMany({
+      where: { id: customerId, companyId, deletedAt: null },
+      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
+    });
   }
 
   private async syncSalesOrderPaymentFromReceivable(

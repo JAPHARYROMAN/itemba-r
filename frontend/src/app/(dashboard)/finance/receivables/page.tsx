@@ -35,6 +35,12 @@ interface Company {
   code: string;
 }
 
+interface CustomerOption {
+  id: string;
+  customerCode?: string | null;
+  name: string;
+}
+
 interface Receivable {
   id: string;
   receivableNumber?: string;
@@ -66,6 +72,7 @@ interface Receivable {
 }
 
 interface CustomerSnapshot {
+  id?: string | null;
   customerCode?: string | null;
   name?: string | null;
   legalName?: string | null;
@@ -163,6 +170,7 @@ interface Paginated<T> {
 
 interface ReceivableForm {
   companyId: string;
+  customerId: string;
   customerName: string;
   amount: number | '';
   currency: string;
@@ -173,6 +181,7 @@ interface ReceivableForm {
 
 const BLANK_FORM: ReceivableForm = {
   companyId: '',
+  customerId: '',
   customerName: '',
   amount: '',
   currency: 'TZS',
@@ -751,6 +760,7 @@ function ReceivableModal({
     initial
       ? {
           companyId: initial.companyId,
+          customerId: initial.customerId ?? initial.customer?.id ?? '',
           customerName: initial.customerName,
           amount: moneyNumber(initial.amount),
           currency: initial.currency,
@@ -760,10 +770,42 @@ function ReceivableModal({
         }
       : { ...BLANK_FORM },
   );
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const set = (k: keyof ReceivableForm, v: string | number) => setForm((f) => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadCustomers = async () => {
+      if (!form.companyId) {
+        setCustomers([]);
+        return;
+      }
+      try {
+        const res = await fetch(
+          `/api/backend/customers?companyId=${encodeURIComponent(form.companyId)}&limit=500`,
+        );
+        if (!res.ok) throw new Error('Failed to load customers');
+        const json = await res.json();
+        const rows = Array.isArray(json?.data?.data)
+          ? json.data.data
+          : Array.isArray(json?.data)
+            ? json.data
+            : Array.isArray(json)
+              ? json
+              : [];
+        if (!cancelled) setCustomers(rows);
+      } catch {
+        if (!cancelled) setCustomers([]);
+      }
+    };
+    loadCustomers();
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
 
   const handleSubmit = async () => {
     if (!form.companyId) {
@@ -785,7 +827,12 @@ function ReceivableModal({
     setSaving(true);
     setError('');
     try {
-      const body = { ...form, amount: Number(form.amount), notes: form.notes || undefined };
+      const body = {
+        ...form,
+        customerId: form.customerId || null,
+        amount: Number(form.amount),
+        notes: form.notes || undefined,
+      };
       const res = await fetch(
         mode === 'create' ? '/api/backend/receivables' : `/api/backend/receivables/${initial!.id}`,
         {
@@ -834,7 +881,14 @@ function ReceivableModal({
           required
           disabled={mode === 'edit'}
           value={form.companyId}
-          onChange={(e) => set('companyId', e.target.value)}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              companyId: e.target.value,
+              customerId: '',
+              customerName: '',
+            }))
+          }
           placeholder="Select company…"
         >
           {companies.map((c) => (
@@ -843,9 +897,32 @@ function ReceivableModal({
             </option>
           ))}
         </FormSelect>
+        <FormSelect
+          label="Linked Customer"
+          value={form.customerId}
+          onChange={(e) => {
+            const customerId = e.target.value;
+            const customer = customers.find((c) => c.id === customerId);
+            setForm((f) => ({
+              ...f,
+              customerId,
+              customerName: customer?.name ?? '',
+            }));
+          }}
+          placeholder="Select an operations customer…"
+        >
+          <option value="">Manual / unlinked customer</option>
+          {customers.map((customer) => (
+            <option key={customer.id} value={customer.id}>
+              {customer.name}
+              {customer.customerCode ? ` (${customer.customerCode})` : ''}
+            </option>
+          ))}
+        </FormSelect>
         <FormInput
           label="Customer Name"
           required
+          disabled={Boolean(form.customerId)}
           value={form.customerName}
           onChange={(e) => set('customerName', e.target.value)}
           placeholder="Customer name"

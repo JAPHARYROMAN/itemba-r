@@ -78,7 +78,16 @@ export class CustomersService {
             email: true,
             website: true,
             logoUrl: true,
-            group: { select: { name: true, code: true, address: true, phone: true, email: true, website: true } },
+            group: {
+              select: {
+                name: true,
+                code: true,
+                address: true,
+                phone: true,
+                email: true,
+                website: true,
+              },
+            },
             profile: {
               select: {
                 registeredName: true,
@@ -114,10 +123,13 @@ export class CustomersService {
 
   async create(dto: CreateCustomerDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
-    const branch = await this.assertBranchBelongsToCompany(dto.companyId, dto.branchId, dto.divisionId);
+    const branch = await this.assertBranchBelongsToCompany(
+      dto.companyId,
+      dto.branchId,
+      dto.divisionId,
+    );
 
-    const customerCode =
-      dto.customerCode ?? `CUST-${Date.now().toString(36).toUpperCase()}`;
+    const customerCode = dto.customerCode ?? `CUST-${Date.now().toString(36).toUpperCase()}`;
 
     if (dto.customerCode) {
       const existing = await this.prisma.customer.findFirst({
@@ -257,7 +269,16 @@ export class CustomersService {
             email: true,
             website: true,
             logoUrl: true,
-            group: { select: { name: true, code: true, address: true, phone: true, email: true, website: true } },
+            group: {
+              select: {
+                name: true,
+                code: true,
+                address: true,
+                phone: true,
+                email: true,
+                website: true,
+              },
+            },
             profile: {
               select: {
                 registeredName: true,
@@ -288,15 +309,25 @@ export class CustomersService {
       salespersonGroups,
       lifetimeAgg,
     ] = await Promise.all([
-      // Outstanding (open + overdue, all-time).
+      // Outstanding exposure across all active receivables.
       this.prisma.receivable.aggregate({
-        where: { companyId: customer.companyId, customerId: id, status: { in: ['OPEN', 'OVERDUE'] as any }, deletedAt: null },
+        where: {
+          companyId: customer.companyId,
+          customerId: id,
+          status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as any },
+          deletedAt: null,
+        },
         _sum: { outstandingAmount: true },
         _count: { id: true },
       }),
       // Overdue subset.
       this.prisma.receivable.aggregate({
-        where: { companyId: customer.companyId, customerId: id, status: 'OVERDUE' as any, deletedAt: null },
+        where: {
+          companyId: customer.companyId,
+          customerId: id,
+          status: 'OVERDUE' as any,
+          deletedAt: null,
+        },
         _sum: { outstandingAmount: true },
         _count: { id: true },
       }),
@@ -370,12 +401,13 @@ export class CustomersService {
 
     // Resolve product names for the top SKUs (groupBy doesn't include relations).
     const topProductIds = topProductsRaw.map((p) => p.productId);
-    const productMeta = topProductIds.length > 0
-      ? await this.prisma.product.findMany({
-          where: { id: { in: topProductIds } },
-          select: { id: true, name: true, sku: true },
-        })
-      : [];
+    const productMeta =
+      topProductIds.length > 0
+        ? await this.prisma.product.findMany({
+            where: { id: { in: topProductIds } },
+            select: { id: true, name: true, sku: true },
+          })
+        : [];
     const productById = new Map(productMeta.map((p) => [p.id, p]));
     const topProducts = topProductsRaw.map((p) => ({
       productId: p.productId,
@@ -398,13 +430,14 @@ export class CustomersService {
     const overdueAmount = Number(overdueSummary._sum.outstandingAmount ?? 0);
     const creditLimit = Number(customer.creditLimit ?? 0);
     const creditAvailable = Math.max(0, creditLimit - totalReceivable);
-    const creditUtilizationPct = creditLimit > 0 ? Math.min(100, (totalReceivable / creditLimit) * 100) : 0;
+    const creditUtilizationPct =
+      creditLimit > 0 ? Math.min(100, (totalReceivable / creditLimit) * 100) : 0;
 
     return {
       customer,
       credit: {
         creditLimit,
-        currentBalance: Number(customer.currentBalance ?? 0),
+        currentBalance: totalReceivable,
         totalReceivable,
         overdueAmount,
         overdueCount: overdueSummary._count.id,

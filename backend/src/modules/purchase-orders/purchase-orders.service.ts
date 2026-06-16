@@ -744,10 +744,11 @@ export class PurchaseOrdersService {
       });
 
       if (payableId) {
-        await tx.payable.update({
+        const linkedPayable = await tx.payable.update({
           where: { id: payableId },
           data: { journalEntryId: journalEntry.id },
         });
+        await this.syncSupplierBalance(tx, linkedPayable.companyId, linkedPayable.supplierId);
       }
 
       return tx.purchaseOrder.update({
@@ -1050,9 +1051,22 @@ export class PurchaseOrdersService {
       throw new BadRequestException('Only DRAFT or CONFIRMED purchase orders can be cancelled');
     }
 
-    const record = await this.prisma.purchaseOrder.update({
-      where: { id },
-      data: { status: 'CANCELLED' },
+    const record = await this.prisma.$transaction(async (tx) => {
+      if (existing.payableId) {
+        const cancelledPayable = await tx.payable.update({
+          where: { id: existing.payableId },
+          data: {
+            status: 'CANCELLED',
+            outstandingAmount: 0,
+          },
+        });
+        await this.syncSupplierBalance(tx, cancelledPayable.companyId, cancelledPayable.supplierId);
+      }
+
+      return tx.purchaseOrder.update({
+        where: { id },
+        data: { status: 'CANCELLED' },
+      });
     });
 
     await this.auditLogs.log({
@@ -1088,5 +1102,26 @@ export class PurchaseOrdersService {
     });
 
     return { success: true };
+  }
+
+  private async syncSupplierBalance(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    supplierId?: string | null,
+  ) {
+    if (!supplierId) return;
+    const summary = await tx.payable.aggregate({
+      where: {
+        companyId,
+        supplierId,
+        deletedAt: null,
+        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as any },
+      },
+      _sum: { outstandingAmount: true },
+    });
+    await tx.supplier.updateMany({
+      where: { id: supplierId, companyId, deletedAt: null },
+      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
+    });
   }
 }

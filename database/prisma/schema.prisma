@@ -2180,6 +2180,7 @@ model Receivable {
   company         Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division        Division?        @relation(fields: [divisionId], references: [id], onDelete: SetNull)
   branch          Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer        Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
   journalEntry    JournalEntry?    @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   salesOrders     SalesOrder[]
   fuelCreditSales FuelCreditSale[]
@@ -2223,6 +2224,7 @@ model Payable {
   company        Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division       Division?       @relation(fields: [divisionId], references: [id], onDelete: SetNull)
   branch         Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  supplier       Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   journalEntry   JournalEntry?   @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   purchaseOrders PurchaseOrder[]
   fuelDeliveries FuelDelivery[]
@@ -2498,6 +2500,7 @@ model Customer {
   updatedBy       User?            @relation("CustomerUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   salesOrders     SalesOrder[]
   fuelCreditSales FuelCreditSale[]
+  receivables     Receivable[]
 
   // Westsides (Milestone 6)
   priceAgreements  CustomerPriceAgreement[]
@@ -2559,6 +2562,7 @@ model Supplier {
   updatedBy         User?                     @relation("SupplierUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   purchaseOrders    PurchaseOrder[]
   fuelDeliveries    FuelDelivery[]
+  payables          Payable[]
   productCategories SupplierProductCategory[]
 
   // Westsides (Milestone 6)
@@ -3091,27 +3095,27 @@ enum SalesCommissionStatus {
 }
 
 model SalesOrderLine {
-  id             String   @id @default(uuid())
-  salesOrderId   String
-  productId      String
-  description    String?
-  quantity       Decimal  @db.Decimal(18, 4)
-  unitId         String
-  unitPrice      Decimal  @db.Decimal(18, 4)
-  discountAmount Decimal  @default(0) @db.Decimal(18, 2)
-  taxAmount      Decimal  @default(0) @db.Decimal(18, 2)
-  lineTotal      Decimal  @db.Decimal(18, 2)
+  id                String            @id @default(uuid())
+  salesOrderId      String
+  productId         String
+  description       String?
+  quantity          Decimal           @db.Decimal(18, 4)
+  unitId            String
+  unitPrice         Decimal           @db.Decimal(18, 4)
+  discountAmount    Decimal           @default(0) @db.Decimal(18, 2)
+  taxAmount         Decimal           @default(0) @db.Decimal(18, 2)
+  lineTotal         Decimal           @db.Decimal(18, 2)
   /// Optional FK to a specific ProductBatch — folded in from the retired POS
   /// module so beverage / perishable sales can be issued FIFO and decrement
   /// the right batch's remainingQuantity.
-  batchId              String?
-  unitCostAtSale       Decimal?          @db.Decimal(18, 4)
-  cogsAmount           Decimal?          @db.Decimal(18, 2)
-  grossProfitAmount    Decimal?          @db.Decimal(18, 2)
-  grossMarginPct       Decimal?          @db.Decimal(9, 4)
-  profitCostSource     ProfitCostSource?
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
+  batchId           String?
+  unitCostAtSale    Decimal?          @db.Decimal(18, 4)
+  cogsAmount        Decimal?          @db.Decimal(18, 2)
+  grossProfitAmount Decimal?          @db.Decimal(18, 2)
+  grossMarginPct    Decimal?          @db.Decimal(9, 4)
+  profitCostSource  ProfitCostSource?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
   salesOrder SalesOrder    @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
   product    Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
@@ -7211,89 +7215,89 @@ model Position {
 }
 
 model Employee {
-  id                      String               @id @default(uuid())
-  employeeCode            String
-  companyId               String
-  divisionId              String?
-  branchId                String?
-  licensedBusinessUnitId  String?
-  departmentId            String?
-  positionId              String?
-  userId                  String?              @unique
-  firstName               String
-  middleName              String?
-  lastName                String
-  fullName                String
-  gender                  Gender               @default(NOT_SPECIFIED)
-  dateOfBirth             DateTime?
-  nationality             String?
-  phone                   String?
-  email                   String?
-  address                 String?
-  identificationType      String?
-  identificationNumber    String?
+  id                        String               @id @default(uuid())
+  employeeCode              String
+  companyId                 String
+  divisionId                String?
+  branchId                  String?
+  licensedBusinessUnitId    String?
+  departmentId              String?
+  positionId                String?
+  userId                    String?              @unique
+  firstName                 String
+  middleName                String?
+  lastName                  String
+  fullName                  String
+  gender                    Gender               @default(NOT_SPECIFIED)
+  dateOfBirth               DateTime?
+  nationality               String?
+  phone                     String?
+  email                     String?
+  address                   String?
+  identificationType        String?
+  identificationNumber      String?
   // ── Tanzania-specific identity ─────────────────────────────────────────
   /// National Identification Authority number — 20-digit format for citizens.
-  nidaNumber              String?
+  nidaNumber                String?
   /// Passport number for non-citizen employees.
-  passportNumber          String?
+  passportNumber            String?
   /// Issuing country for the passport (ISO-3166 alpha-2 or country name).
-  passportCountry         String?
+  passportCountry           String?
   /// Voter ID — accepted by some KYC flows in lieu of NIDA.
-  votersIdNumber          String?
+  votersIdNumber            String?
   // ── Tax & statutory ────────────────────────────────────────────────────
-  tin                     String?
-  nssfNumber              String?
-  nhifNumber              String?
+  tin                       String?
+  nssfNumber                String?
+  nhifNumber                String?
   /// PSSSF (Public Service Social Security Fund) registration — alternative to NSSF for public-sector.
-  pssfNumber              String?
+  pssfNumber                String?
   /// Workers Compensation Fund employee registration (where issued).
-  wcfRegistrationNumber   String?
+  wcfRegistrationNumber     String?
   /// HESLB graduate-loan account number.
-  heslbNumber             String?
+  heslbNumber               String?
   /// True when the employee is an active HESLB borrower; toggles 15% deduction.
-  heslbBorrower           Boolean              @default(false)
+  heslbBorrower             Boolean              @default(false)
   /// PAYE residency status — non-residents are taxed at a flat 15% (Tanzania).
-  taxResidencyStatus      EmployeeTaxResidency @default(RESIDENT)
+  taxResidencyStatus        EmployeeTaxResidency @default(RESIDENT)
   /// Disability status. PWD-certified employees get a PAYE relief of TZS 180,000/year.
-  disabilityStatus        DisabilityStatus     @default(NONE)
-  disabilityCertificateNo String?
+  disabilityStatus          DisabilityStatus     @default(NONE)
+  disabilityCertificateNo   String?
   /// Tax-relevant dependents count (used by some employer-policy allowances).
-  dependents              Int                  @default(0)
+  dependents                Int                  @default(0)
   /// Determines which PAYE band table applies — Mainland or Zanzibar.
-  payrollRegion           HolidayRegion        @default(MAINLAND)
+  payrollRegion             HolidayRegion        @default(MAINLAND)
   /// Default sales-commission rate when this employee is the salesperson on
   /// a SalesOrder. Stored as decimal (0.05 = 5%). When set, confirming an
   /// order auto-creates a DRAFT SalesCommission for review. Null → no
   /// auto-commission for this employee (manual creation still works).
-  defaultCommissionRate   Decimal?             @db.Decimal(8, 4)
+  defaultCommissionRate     Decimal?             @db.Decimal(8, 4)
   // ── Payment ────────────────────────────────────────────────────────────
-  bankName                String?
-  bankAccountName         String?
-  bankAccountNumber       String?
+  bankName                  String?
+  bankAccountName           String?
+  bankAccountNumber         String?
   /// Legacy single-account field. New code should use the MobileMoneyAccount table.
-  mobileMoneyNumber       String?
-  emergencyContactName    String?
-  emergencyContactPhone   String?
-  employmentType          EmploymentType       @default(FULL_TIME)
-  employmentStatus        EmploymentStatus     @default(ACTIVE)
-  hireDate                DateTime?
-  terminationDate         DateTime?
-  pendingTerminationDate  DateTime?
-  terminationRequestedById String?
-  terminationRequestedAt  DateTime?
-  terminationReason       String?
+  mobileMoneyNumber         String?
+  emergencyContactName      String?
+  emergencyContactPhone     String?
+  employmentType            EmploymentType       @default(FULL_TIME)
+  employmentStatus          EmploymentStatus     @default(ACTIVE)
+  hireDate                  DateTime?
+  terminationDate           DateTime?
+  pendingTerminationDate    DateTime?
+  terminationRequestedById  String?
+  terminationRequestedAt    DateTime?
+  terminationReason         String?
   terminationHrApprovedById String?
-  terminationHrApprovedAt DateTime?
+  terminationHrApprovedAt   DateTime?
   terminationGmApprovedById String?
-  terminationGmApprovedAt DateTime?
-  baseSalary              Decimal              @default(0) @db.Decimal(18, 2)
-  salaryCurrency          String               @default("TZS")
-  paymentFrequency        HRPaymentFrequency   @default(MONTHLY)
-  notes                   String?
-  createdAt               DateTime             @default(now())
-  updatedAt               DateTime             @updatedAt
-  deletedAt               DateTime?
+  terminationGmApprovedAt   DateTime?
+  baseSalary                Decimal              @default(0) @db.Decimal(18, 2)
+  salaryCurrency            String               @default("TZS")
+  paymentFrequency          HRPaymentFrequency   @default(MONTHLY)
+  notes                     String?
+  createdAt                 DateTime             @default(now())
+  updatedAt                 DateTime             @updatedAt
+  deletedAt                 DateTime?
 
   company              Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division             Division?               @relation(fields: [divisionId], references: [id], onDelete: SetNull)
@@ -7360,37 +7364,37 @@ model MobileMoneyAccount {
 }
 
 model EmployeeAssignment {
-  id                     String                @id @default(uuid())
-  employeeId             String
-  companyId              String
-  divisionId             String?
-  branchId               String?
-  licensedBusinessUnitId String?
-  departmentId           String?
-  positionId             String?
-  assignmentContextType  AssignmentContextType @default(COMPANY)
-  assignmentContextId    String?
-  startDate              DateTime
-  endDate                DateTime?
-  isPrimary              Boolean               @default(false)
-  status                 AssignmentStatus      @default(ACTIVE)
-  approvalStatus         String                @default("APPROVED")
-  transferRequestedById  String?
-  transferRequestedAt    DateTime?
+  id                         String                @id @default(uuid())
+  employeeId                 String
+  companyId                  String
+  divisionId                 String?
+  branchId                   String?
+  licensedBusinessUnitId     String?
+  departmentId               String?
+  positionId                 String?
+  assignmentContextType      AssignmentContextType @default(COMPANY)
+  assignmentContextId        String?
+  startDate                  DateTime
+  endDate                    DateTime?
+  isPrimary                  Boolean               @default(false)
+  status                     AssignmentStatus      @default(ACTIVE)
+  approvalStatus             String                @default("APPROVED")
+  transferRequestedById      String?
+  transferRequestedAt        DateTime?
   sourceDivisionApprovedById String?
-  sourceDivisionApprovedAt DateTime?
+  sourceDivisionApprovedAt   DateTime?
   targetDivisionApprovedById String?
-  targetDivisionApprovedAt DateTime?
-  companyGmApprovedById  String?
-  companyGmApprovedAt    DateTime?
-  groupHrApprovedById    String?
-  groupHrApprovedAt      DateTime?
-  groupCfoApprovedById   String?
-  groupCfoApprovedAt     DateTime?
-  notes                  String?
-  createdAt              DateTime              @default(now())
-  updatedAt              DateTime              @updatedAt
-  deletedAt              DateTime?
+  targetDivisionApprovedAt   DateTime?
+  companyGmApprovedById      String?
+  companyGmApprovedAt        DateTime?
+  groupHrApprovedById        String?
+  groupHrApprovedAt          DateTime?
+  groupCfoApprovedById       String?
+  groupCfoApprovedAt         DateTime?
+  notes                      String?
+  createdAt                  DateTime              @default(now())
+  updatedAt                  DateTime              @updatedAt
+  deletedAt                  DateTime?
 
   employee             Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   company              Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -7570,32 +7574,32 @@ model LeaveType {
 }
 
 model LeaveRequest {
-  id                 String             @id @default(uuid())
-  leaveRequestNumber String
-  companyId          String
-  divisionId         String?
-  branchId           String?
-  employeeId         String
-  leaveTypeId        String
-  startDate          DateTime
-  endDate            DateTime
-  totalDays          Decimal            @db.Decimal(5, 2)
-  reason             String?
-  status             LeaveRequestStatus @default(DRAFT)
-  lineApprovedById   String?
-  lineApprovedAt     DateTime?
+  id                  String             @id @default(uuid())
+  leaveRequestNumber  String
+  companyId           String
+  divisionId          String?
+  branchId            String?
+  employeeId          String
+  leaveTypeId         String
+  startDate           DateTime
+  endDate             DateTime
+  totalDays           Decimal            @db.Decimal(5, 2)
+  reason              String?
+  status              LeaveRequestStatus @default(DRAFT)
+  lineApprovedById    String?
+  lineApprovedAt      DateTime?
   groupHrApprovedById String?
-  groupHrApprovedAt  DateTime?
-  approvedById       String?
-  approvedAt         DateTime?
-  rejectedById       String?
-  rejectedAt         DateTime?
-  rejectionReason    String?
-  approvalNotes      String?
-  createdById        String
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  deletedAt          DateTime?
+  groupHrApprovedAt   DateTime?
+  approvedById        String?
+  approvedAt          DateTime?
+  rejectedById        String?
+  rejectedAt          DateTime?
+  rejectionReason     String?
+  approvalNotes       String?
+  createdById         String
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  deletedAt           DateTime?
 
   company    Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division   Division? @relation(fields: [divisionId], references: [id], onDelete: SetNull)
@@ -7799,17 +7803,17 @@ model PayrollRun {
   updatedAt                  DateTime         @updatedAt
   deletedAt                  DateTime?
 
-  company         Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  payrollPeriod   PayrollPeriod           @relation(fields: [payrollPeriodId], references: [id], onDelete: Restrict)
-  createdBy       User                    @relation("PayrollRunCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  submittedBy     User?                   @relation("PayrollRunSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
-  hrApprovedBy    User?                   @relation("PayrollRunHrApprovedBy", fields: [hrApprovedById], references: [id], onDelete: SetNull)
-  financeApprovedBy User?                 @relation("PayrollRunFinanceApprovedBy", fields: [financeApprovedById], references: [id], onDelete: SetNull)
-  approvedBy      User?                   @relation("PayrollRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
-  paidBy          User?                   @relation("PayrollRunPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
-  entries         PayrollEntry[]
-  salaryPayments  SalaryPayment[]
-  costAllocations ProjectCostAllocation[]
+  company           Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  payrollPeriod     PayrollPeriod           @relation(fields: [payrollPeriodId], references: [id], onDelete: Restrict)
+  createdBy         User                    @relation("PayrollRunCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  submittedBy       User?                   @relation("PayrollRunSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  hrApprovedBy      User?                   @relation("PayrollRunHrApprovedBy", fields: [hrApprovedById], references: [id], onDelete: SetNull)
+  financeApprovedBy User?                   @relation("PayrollRunFinanceApprovedBy", fields: [financeApprovedById], references: [id], onDelete: SetNull)
+  approvedBy        User?                   @relation("PayrollRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  paidBy            User?                   @relation("PayrollRunPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
+  entries           PayrollEntry[]
+  salaryPayments    SalaryPayment[]
+  costAllocations   ProjectCostAllocation[]
 
   @@unique([companyId, payrollRunNumber])
   @@index([companyId, status])
@@ -8050,11 +8054,11 @@ model PerformanceRecord {
   updatedAt         DateTime                @updatedAt
   deletedAt         DateTime?
 
-  company  Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division Division? @relation(fields: [divisionId], references: [id], onDelete: SetNull)
   branch   Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  reviewer User     @relation("PerformanceReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
+  employee Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  reviewer User      @relation("PerformanceReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
 
   @@unique([companyId, performanceNumber])
   @@index([employeeId, reviewDate])
@@ -10222,7 +10226,7 @@ model AnalyticsSnapshotRun {
   createdAt    DateTime           @default(now())
 
   company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  startedBy User? @relation("SnapshotRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
+  startedBy User?   @relation("SnapshotRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
 
   @@index([companyId, runType, status, createdAt])
   @@index([runType, status, createdAt])

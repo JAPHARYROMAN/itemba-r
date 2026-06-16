@@ -35,6 +35,12 @@ interface Company {
   code: string;
 }
 
+interface SupplierOption {
+  id: string;
+  supplierCode?: string | null;
+  name: string;
+}
+
 interface Payable {
   id: string;
   payableNumber?: string;
@@ -64,6 +70,7 @@ interface Payable {
 }
 
 interface SupplierSnapshot {
+  id?: string | null;
   supplierCode?: string | null;
   name?: string | null;
   legalName?: string | null;
@@ -144,6 +151,7 @@ interface Paginated<T> {
 
 interface PayableForm {
   companyId: string;
+  supplierId: string;
   supplierName: string;
   amount: number | '';
   currency: string;
@@ -154,6 +162,7 @@ interface PayableForm {
 
 const BLANK_FORM: PayableForm = {
   companyId: '',
+  supplierId: '',
   supplierName: '',
   amount: '',
   currency: 'TZS',
@@ -688,6 +697,7 @@ function PayableModal({
     initial
       ? {
           companyId: initial.companyId,
+          supplierId: initial.supplierId ?? initial.supplier?.id ?? '',
           supplierName: initial.supplierName,
           amount: moneyNumber(initial.amount),
           currency: initial.currency,
@@ -697,10 +707,42 @@ function PayableModal({
         }
       : { ...BLANK_FORM },
   );
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const set = (k: keyof PayableForm, v: string | number) => setForm((f) => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSuppliers = async () => {
+      if (!form.companyId) {
+        setSuppliers([]);
+        return;
+      }
+      try {
+        const res = await fetch(
+          `/api/backend/suppliers?companyId=${encodeURIComponent(form.companyId)}&limit=500`,
+        );
+        if (!res.ok) throw new Error('Failed to load suppliers');
+        const json = await res.json();
+        const rows = Array.isArray(json?.data?.data)
+          ? json.data.data
+          : Array.isArray(json?.data)
+            ? json.data
+            : Array.isArray(json)
+              ? json
+              : [];
+        if (!cancelled) setSuppliers(rows);
+      } catch {
+        if (!cancelled) setSuppliers([]);
+      }
+    };
+    loadSuppliers();
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
 
   const handleSubmit = async () => {
     if (!form.companyId) {
@@ -722,7 +764,12 @@ function PayableModal({
     setSaving(true);
     setError('');
     try {
-      const body = { ...form, amount: Number(form.amount), notes: form.notes || undefined };
+      const body = {
+        ...form,
+        supplierId: form.supplierId || null,
+        amount: Number(form.amount),
+        notes: form.notes || undefined,
+      };
       const res = await fetch(
         mode === 'create' ? '/api/backend/payables' : `/api/backend/payables/${initial!.id}`,
         {
@@ -771,7 +818,14 @@ function PayableModal({
           required
           disabled={mode === 'edit'}
           value={form.companyId}
-          onChange={(e) => set('companyId', e.target.value)}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              companyId: e.target.value,
+              supplierId: '',
+              supplierName: '',
+            }))
+          }
           placeholder="Select company…"
         >
           {companies.map((c) => (
@@ -780,9 +834,32 @@ function PayableModal({
             </option>
           ))}
         </FormSelect>
+        <FormSelect
+          label="Linked Supplier"
+          value={form.supplierId}
+          onChange={(e) => {
+            const supplierId = e.target.value;
+            const supplier = suppliers.find((s) => s.id === supplierId);
+            setForm((f) => ({
+              ...f,
+              supplierId,
+              supplierName: supplier?.name ?? '',
+            }));
+          }}
+          placeholder="Select an operations supplier…"
+        >
+          <option value="">Manual / unlinked supplier</option>
+          {suppliers.map((supplier) => (
+            <option key={supplier.id} value={supplier.id}>
+              {supplier.name}
+              {supplier.supplierCode ? ` (${supplier.supplierCode})` : ''}
+            </option>
+          ))}
+        </FormSelect>
         <FormInput
           label="Supplier Name"
           required
+          disabled={Boolean(form.supplierId)}
           value={form.supplierName}
           onChange={(e) => set('supplierName', e.target.value)}
           placeholder="Supplier name"

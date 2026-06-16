@@ -134,8 +134,8 @@ export class PayablesService {
           companyId: dto.companyId,
           divisionId: scope.divisionId,
           branchId: scope.branchId,
-          supplierId: dto.supplierId,
-          supplierName: dto.supplierName,
+          supplierId: dto.supplierId || null,
+          supplierName: scope.supplierName ?? dto.supplierName,
           sourceType: dto.sourceType,
           sourceId: dto.sourceId,
           amount,
@@ -182,10 +182,12 @@ export class PayablesService {
         tx,
       );
 
-      return tx.payable.update({
+      const updated = await tx.payable.update({
         where: { id: created.id },
         data: { journalEntryId: journalEntry.id },
       });
+      await this.syncSupplierBalance(tx, updated.companyId, updated.supplierId);
+      return updated;
     });
 
     await this.auditLogs.log({
@@ -212,17 +214,22 @@ export class PayablesService {
       supplierId:
         dto.supplierId !== undefined ? dto.supplierId || null : existing.supplierId || null,
     });
-    const record = await this.prisma.payable.update({
-      where: { id },
-      data: {
-        divisionId: scope.divisionId,
-        branchId: scope.branchId,
-        ...(dto.supplierName && { supplierName: dto.supplierName }),
-        ...(dto.supplierId !== undefined && { supplierId: dto.supplierId }),
-        ...(dto.notes !== undefined && { notes: dto.notes }),
-        ...(dto.dueDate && { dueDate: new Date(dto.dueDate) }),
-        ...(dto.issueDate && { issueDate: new Date(dto.issueDate) }),
-      },
+    const record = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.payable.update({
+        where: { id },
+        data: {
+          divisionId: scope.divisionId,
+          branchId: scope.branchId,
+          supplierName: scope.supplierName ?? dto.supplierName ?? existing.supplierName,
+          ...(dto.supplierId !== undefined && { supplierId: dto.supplierId || null }),
+          ...(dto.notes !== undefined && { notes: dto.notes }),
+          ...(dto.dueDate && { dueDate: new Date(dto.dueDate) }),
+          ...(dto.issueDate && { issueDate: new Date(dto.issueDate) }),
+        },
+      });
+      await this.syncSupplierBalance(tx, existing.companyId, existing.supplierId);
+      await this.syncSupplierBalance(tx, updated.companyId, updated.supplierId);
+      return updated;
     });
 
     await this.auditLogs.log({
@@ -252,13 +259,14 @@ export class PayablesService {
             companyId: string;
             divisionId: string | null;
             branchId: string | null;
+            supplierId: string | null;
             supplierName: string | null;
             payableNumber: string;
             outstandingAmount: Prisma.Decimal;
             paidAmount: Prisma.Decimal;
             status: string;
           }>
-        >`SELECT "id", "companyId", "divisionId", "branchId", "supplierName", "payableNumber", "outstandingAmount", "paidAmount", "status"
+        >`SELECT "id", "companyId", "divisionId", "branchId", "supplierId", "supplierName", "payableNumber", "outstandingAmount", "paidAmount", "status"
           FROM "payables"
           WHERE "id" = ${id} AND "deletedAt" IS NULL
           FOR UPDATE`;
@@ -321,6 +329,7 @@ export class PayablesService {
           },
           tx,
         );
+        await this.syncSupplierBalance(tx, updated.companyId, updated.supplierId);
 
         return {
           existing: locked,
@@ -353,9 +362,13 @@ export class PayablesService {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
     const userId = user.id;
-    const record = await this.prisma.payable.update({
-      where: { id },
-      data: { status: 'WRITTEN_OFF', notes: dto.reason },
+    const record = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.payable.update({
+        where: { id },
+        data: { status: 'WRITTEN_OFF', notes: dto.reason },
+      });
+      await this.syncSupplierBalance(tx, updated.companyId, updated.supplierId);
+      return updated;
     });
 
     await this.auditLogs.log({
@@ -375,7 +388,10 @@ export class PayablesService {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
     const userId = user.id;
-    await this.prisma.payable.update({ where: { id }, data: { deletedAt: new Date() } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.payable.update({ where: { id }, data: { deletedAt: new Date() } });
+      await this.syncSupplierBalance(tx, existing.companyId, existing.supplierId);
+    });
 
     await this.auditLogs.log({
       action: 'PAYABLE_DELETE',
@@ -394,6 +410,25 @@ export class PayablesService {
       company: { select: { id: true, name: true, code: true } },
       division: { select: { id: true, name: true, code: true } },
       branch: { select: { id: true, name: true, code: true } },
+      supplier: {
+        select: {
+          id: true,
+          supplierCode: true,
+          name: true,
+          legalName: true,
+          supplierType: true,
+          tin: true,
+          vrn: true,
+          phone: true,
+          email: true,
+          address: true,
+          contactPerson: true,
+          creditLimit: true,
+          currentBalance: true,
+          paymentTerms: true,
+          status: true,
+        },
+      },
     };
   }
 
@@ -488,7 +523,7 @@ export class PayablesService {
     if (input.supplierId) {
       const supplier = await this.prisma.supplier.findFirst({
         where: { id: input.supplierId, deletedAt: null },
-        select: { companyId: true, divisionId: true, branchId: true },
+        select: { companyId: true, divisionId: true, branchId: true, name: true },
       });
       if (!supplier || supplier.companyId !== input.companyId) {
         throw new BadRequestException('Supplier does not belong to this company');
@@ -527,6 +562,36 @@ export class PayablesService {
       }
     }
 
-    return { divisionId, branchId };
+    const supplierName = input.supplierId
+      ? (
+          await this.prisma.supplier.findFirst({
+            where: { id: input.supplierId, deletedAt: null },
+            select: { name: true },
+          })
+        )?.name
+      : undefined;
+
+    return { divisionId, branchId, supplierName };
+  }
+
+  private async syncSupplierBalance(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    supplierId?: string | null,
+  ) {
+    if (!supplierId) return;
+    const summary = await tx.payable.aggregate({
+      where: {
+        companyId,
+        supplierId,
+        deletedAt: null,
+        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as any },
+      },
+      _sum: { outstandingAmount: true },
+    });
+    await tx.supplier.updateMany({
+      where: { id: supplierId, companyId, deletedAt: null },
+      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
+    });
   }
 }

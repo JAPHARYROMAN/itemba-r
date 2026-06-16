@@ -737,7 +737,10 @@ export class SalesOrdersService {
       safeDto.salesType,
       safeDto.paymentMethod,
     );
-    if (normalizedPaymentMethod === SalesPaymentMethod.CREDIT && !hasPermission(user, 'sales.create')) {
+    if (
+      normalizedPaymentMethod === SalesPaymentMethod.CREDIT &&
+      !hasPermission(user, 'sales.create')
+    ) {
       throw new ForbiddenException('Credit sales require sales.create permission');
     }
 
@@ -758,16 +761,20 @@ export class SalesOrdersService {
     const { computed, subtotal, totalDiscount, totalTax, totalAmount } = calculateLineTotals(
       dto.lines,
     );
-    const profitSnapshots = await this.profit.assertSaleLinesProfitable({
-      companyId: dto.companyId,
-      branchId: dto.branchId,
-      lines: computed.map((line) => ({
-        productId: line.productId,
-        quantity: Number(line.quantity),
-        unitPrice: Number(line.unitPrice),
-        discountAmount: Number(line.discountAmount ?? 0),
-      })),
-    }, this.prisma, { user, source: 'SalesOrderCreate', referenceType: 'SalesOrder' });
+    const profitSnapshots = await this.profit.assertSaleLinesProfitable(
+      {
+        companyId: dto.companyId,
+        branchId: dto.branchId,
+        lines: computed.map((line) => ({
+          productId: line.productId,
+          quantity: Number(line.quantity),
+          unitPrice: Number(line.unitPrice),
+          discountAmount: Number(line.discountAmount ?? 0),
+        })),
+      },
+      this.prisma,
+      { user, source: 'SalesOrderCreate', referenceType: 'SalesOrder' },
+    );
 
     const record = await this.prisma.$transaction(async (tx) => {
       const salesOrderNumber = await this.codes.next({
@@ -889,21 +896,25 @@ export class SalesOrdersService {
     const { computed, subtotal, totalDiscount, totalTax, totalAmount } =
       calculateLineTotals(linesToProcess);
     const shouldRefreshLines = Boolean(dto.lines || dto.branchId !== undefined);
-    const profitSnapshots = await this.profit.assertSaleLinesProfitable({
-      companyId: existing.companyId,
-      branchId: dto.branchId ?? existing.branchId,
-      lines: computed.map((line) => ({
-        productId: line.productId,
-        quantity: Number(line.quantity),
-        unitPrice: Number(line.unitPrice),
-        discountAmount: Number(line.discountAmount ?? 0),
-      })),
-    }, this.prisma, {
-      user,
-      source: 'SalesOrderUpdate',
-      referenceType: 'SalesOrder',
-      referenceId: id,
-    });
+    const profitSnapshots = await this.profit.assertSaleLinesProfitable(
+      {
+        companyId: existing.companyId,
+        branchId: dto.branchId ?? existing.branchId,
+        lines: computed.map((line) => ({
+          productId: line.productId,
+          quantity: Number(line.quantity),
+          unitPrice: Number(line.unitPrice),
+          discountAmount: Number(line.discountAmount ?? 0),
+        })),
+      },
+      this.prisma,
+      {
+        user,
+        source: 'SalesOrderUpdate',
+        referenceType: 'SalesOrder',
+        referenceId: id,
+      },
+    );
 
     const record = await this.prisma.$transaction(async (tx) => {
       if (shouldRefreshLines) {
@@ -1260,10 +1271,11 @@ export class SalesOrdersService {
       });
 
       if (receivableId) {
-        await tx.receivable.update({
+        const linkedReceivable = await tx.receivable.update({
           where: { id: receivableId },
           data: { journalEntryId: journalEntry.id },
         });
+        await this.syncCustomerBalance(tx, linkedReceivable.companyId, linkedReceivable.customerId);
       }
 
       // ── Tax auto-apply (Sprint C2) ───────────────────────────────────────
@@ -1654,6 +1666,21 @@ export class SalesOrdersService {
         }
       }
 
+      if (existing.receivableId) {
+        const cancelledReceivable = await tx.receivable.update({
+          where: { id: existing.receivableId },
+          data: {
+            status: 'CANCELLED',
+            outstandingAmount: 0,
+          },
+        });
+        await this.syncCustomerBalance(
+          tx,
+          cancelledReceivable.companyId,
+          cancelledReceivable.customerId,
+        );
+      }
+
       return tx.salesOrder.update({
         where: { id },
         data: { status: 'CANCELLED' },
@@ -1693,5 +1720,26 @@ export class SalesOrdersService {
     });
 
     return { success: true };
+  }
+
+  private async syncCustomerBalance(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    customerId?: string | null,
+  ) {
+    if (!customerId) return;
+    const summary = await tx.receivable.aggregate({
+      where: {
+        companyId,
+        customerId,
+        deletedAt: null,
+        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as any },
+      },
+      _sum: { outstandingAmount: true },
+    });
+    await tx.customer.updateMany({
+      where: { id: customerId, companyId, deletedAt: null },
+      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
+    });
   }
 }

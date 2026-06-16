@@ -284,6 +284,13 @@ export class SupplierInvoicesService {
         }
       }
 
+      const oldPayable = existing.payableId
+        ? await tx.payable.findUnique({
+            where: { id: existing.payableId },
+            select: { companyId: true, supplierId: true },
+          })
+        : null;
+
       const payable = existing.payableId
         ? await tx.payable.update({
             where: { id: existing.payableId },
@@ -343,6 +350,13 @@ export class SupplierInvoicesService {
           data: { journalEntryId: journalEntry.id },
         });
       }
+
+      await this.syncSupplierBalance(
+        tx,
+        oldPayable?.companyId ?? payable.companyId,
+        oldPayable?.supplierId,
+      );
+      await this.syncSupplierBalance(tx, payable.companyId, payable.supplierId);
 
       return tx.supplierInvoice.update({
         where: { id },
@@ -862,5 +876,26 @@ export class SupplierInvoicesService {
       payable: item.payableId ? (payablesById.get(item.payableId) ?? null) : null,
       latestMatch: matchesByInvoiceId.get(item.id) ?? null,
     }));
+  }
+
+  private async syncSupplierBalance(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    supplierId?: string | null,
+  ) {
+    if (!supplierId) return;
+    const summary = await tx.payable.aggregate({
+      where: {
+        companyId,
+        supplierId,
+        deletedAt: null,
+        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as any },
+      },
+      _sum: { outstandingAmount: true },
+    });
+    await tx.supplier.updateMany({
+      where: { id: supplierId, companyId, deletedAt: null },
+      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
+    });
   }
 }
