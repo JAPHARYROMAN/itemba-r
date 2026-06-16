@@ -81,6 +81,22 @@ interface BackfillResult {
   skippedSamples: Array<{ salesOrderNumber: string; productName: string; reason: string }>;
 }
 
+function unwrapNested<T>(payload: unknown): T {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'data' in payload &&
+    ('success' in payload || 'timestamp' in payload)
+  ) {
+    return (payload as { data: T }).data;
+  }
+  return payload as T;
+}
+
+function safeRows<T>(rows: T[] | null | undefined): T[] {
+  return Array.isArray(rows) ? rows : [];
+}
+
 function fmtMoney(value: number | string | null | undefined) {
   const parsed = Number(value ?? 0);
   return `TZS ${new Intl.NumberFormat('en-US', {
@@ -159,20 +175,23 @@ export default function OperationsProfitPage() {
     setNotice('');
     try {
       const [summaryPayload, gapsPayload, attemptsPayload] = await Promise.all([
-        backendGet<{ summary: ProfitSummary; products: ProductProfitRow[] }>('/profit/product-summary', {
+        backendGet<unknown>('/profit/product-summary', {
           query,
         }),
-        backendGet<{ rows: CostGapRow[]; total: number }>('/profit/cost-gaps', { query }),
+        backendGet<unknown>('/profit/cost-gaps', { query }),
         canAudit
-          ? backendGet<{ rows: BelowCostAttemptRow[]; total: number }>('/profit/below-cost-attempts', {
+          ? backendGet<unknown>('/profit/below-cost-attempts', {
               query: { ...query, limit: 10 },
             })
           : Promise.resolve({ rows: [], total: 0 }),
       ]);
-      setSummary(summaryPayload.summary);
-      setProducts(summaryPayload.products);
-      setGaps(gapsPayload.rows);
-      setAttempts(attemptsPayload.rows);
+      const summaryResult = unwrapNested<{ summary?: ProfitSummary; products?: ProductProfitRow[] }>(summaryPayload);
+      const gapsResult = unwrapNested<{ rows?: CostGapRow[]; total?: number }>(gapsPayload);
+      const attemptsResult = unwrapNested<{ rows?: BelowCostAttemptRow[]; total?: number }>(attemptsPayload);
+      setSummary(summaryResult.summary ?? null);
+      setProducts(safeRows(summaryResult.products));
+      setGaps(safeRows(gapsResult.rows));
+      setAttempts(safeRows(attemptsResult.rows));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load profit module');
     } finally {
@@ -191,9 +210,9 @@ export default function OperationsProfitPage() {
     }
     let cancelled = false;
     setLedgerLoading(true);
-    backendGet<LedgerRow[]>(`/profit/products/${selectedProduct.productId}/ledger`, { query })
-      .then((rows) => {
-        if (!cancelled) setLedger(rows);
+    backendGet<unknown>(`/profit/products/${selectedProduct.productId}/ledger`, { query })
+      .then((payload) => {
+        if (!cancelled) setLedger(safeRows(unwrapNested<LedgerRow[]>(payload)));
       })
       .catch(() => {
         if (!cancelled) setLedger([]);
@@ -212,9 +231,9 @@ export default function OperationsProfitPage() {
     setError('');
     setNotice('');
     try {
-      const payload = await backendGet<ExportPayload>('/profit/export', {
+      const payload = unwrapNested<ExportPayload>(await backendGet<unknown>('/profit/export', {
         query: { ...query, report, format: 'csv' },
-      });
+      }));
       const content = payload.content ?? '';
       const blob = new Blob([content], { type: payload.contentType ?? 'text/csv' });
       const url = URL.createObjectURL(blob);
@@ -238,7 +257,9 @@ export default function OperationsProfitPage() {
     setError('');
     setNotice('');
     try {
-      const result = await backendPost<BackfillResult>('/profit/backfill-sales', undefined, { query });
+      const result = unwrapNested<BackfillResult>(
+        await backendPost<unknown>('/profit/backfill-sales', undefined, { query }),
+      );
       setNotice(
         `Backfill scanned ${result.scanned} lines, updated ${result.updated}, skipped ${result.skipped}.`,
       );

@@ -190,11 +190,8 @@ export class ProfitService {
       source: 'ManualSaleLineValidation',
     });
     return {
-      success: true,
-      data: {
-        lines,
-        hasBlockingErrors: false,
-      },
+      lines,
+      hasBlockingErrors: false,
     };
   }
 
@@ -369,22 +366,19 @@ export class ProfitService {
     const grossProfit = roundMoney(revenue - cogs);
     const gaps = await this.costGaps(query, user);
     return {
-      success: true,
-      data: {
-        summary: {
-          revenue: roundMoney(revenue),
-          cogs: roundMoney(cogs),
-          grossProfit,
-          grossMarginPct: revenue > 0 ? roundPercent((grossProfit / revenue) * 100) : 0,
-          costGaps: gaps.data.total,
-        },
-        products: Array.from(byProduct.values()).map((row) => ({
-          ...row,
-          revenue: roundMoney(row.revenue),
-          cogs: roundMoney(row.cogs),
-          grossProfit: roundMoney(row.grossProfit),
-        })),
+      summary: {
+        revenue: roundMoney(revenue),
+        cogs: roundMoney(cogs),
+        grossProfit,
+        grossMarginPct: revenue > 0 ? roundPercent((grossProfit / revenue) * 100) : 0,
+        costGaps: gaps.total,
       },
+      products: Array.from(byProduct.values()).map((row) => ({
+        ...row,
+        revenue: roundMoney(row.revenue),
+        cogs: roundMoney(row.cogs),
+        grossProfit: roundMoney(row.grossProfit),
+      })),
     };
   }
 
@@ -465,7 +459,7 @@ export class ProfitService {
       })),
     ];
 
-    return { success: true, data: { rows, total: rows.length } };
+    return { rows, total: rows.length };
   }
 
   async productLedger(productId: string, query: Record<string, string | undefined>, user: AuthUser) {
@@ -486,9 +480,7 @@ export class ProfitService {
       orderBy: { createdAt: 'desc' },
       take: 250,
     });
-    return {
-      success: true,
-      data: rows.map((line) => ({
+    return rows.map((line) => ({
         salesOrderId: line.salesOrder.id,
         salesOrderNumber: line.salesOrder.salesOrderNumber,
         orderDate: line.salesOrder.orderDate,
@@ -501,8 +493,7 @@ export class ProfitService {
         grossProfitAmount: Number(line.grossProfitAmount ?? 0),
         grossMarginPct: line.grossMarginPct == null ? null : Number(line.grossMarginPct),
         profitCostSource: line.profitCostSource,
-      })),
-    };
+      }));
   }
 
   async belowCostAttempts(query: Record<string, string | undefined>, user: AuthUser) {
@@ -536,23 +527,20 @@ export class ProfitService {
     ]);
 
     return {
-      success: true,
-      data: {
-        rows: rows.map((row) => ({
-          id: row.id,
-          createdAt: row.createdAt,
-          company: row.company,
-          user: row.user,
-          source: readJsonField(row.metadata, 'source'),
-          referenceType: readJsonField(row.metadata, 'referenceType'),
-          referenceId: readJsonField(row.metadata, 'referenceId'),
-          message: readJsonField(row.metadata, 'message'),
-          lines: readJsonField(row.newValue, 'lines') ?? [],
-        })),
-        total,
-        page,
-        totalPages: Math.ceil(total / limit),
-      },
+      rows: rows.map((row) => ({
+        id: row.id,
+        createdAt: row.createdAt,
+        company: row.company,
+        user: row.user,
+        source: readJsonField(row.metadata, 'source'),
+        referenceType: readJsonField(row.metadata, 'referenceType'),
+        referenceId: readJsonField(row.metadata, 'referenceId'),
+        message: readJsonField(row.metadata, 'message'),
+        lines: readJsonField(row.newValue, 'lines') ?? [],
+      })),
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
     };
   }
 
@@ -631,7 +619,7 @@ export class ProfitService {
       severity: AuditSeverity.HIGH,
     });
 
-    return { success: true, data: { productId, changes } };
+    return { productId, changes };
   }
 
   async backfillHistoricalSales(query: Record<string, string | undefined>, user: AuthUser) {
@@ -754,7 +742,7 @@ export class ProfitService {
       severity: skipped > 0 ? AuditSeverity.MEDIUM : AuditSeverity.LOW,
     });
 
-    return { success: true, data: { scanned: lines.length, updated, skipped, skippedSamples } };
+    return { scanned: lines.length, updated, skipped, skippedSamples };
   }
 
   async exportReport(query: Record<string, string | undefined>, user: AuthUser) {
@@ -765,7 +753,7 @@ export class ProfitService {
 
     if (report === 'cost-gaps') {
       const payload = await this.costGaps(query, user);
-      rows = payload.data.rows.map((row) => ({
+      rows = payload.rows.map((row) => ({
         type: row.type,
         productCode: row.productCode,
         productName: row.productName,
@@ -780,7 +768,7 @@ export class ProfitService {
       fileName = 'profit-cost-gaps';
     } else if (report === 'below-cost-attempts') {
       const payload = await this.belowCostAttempts(query, user);
-      rows = payload.data.rows.map((row) => ({
+      rows = payload.rows.map((row) => ({
         createdAt: row.createdAt,
         company: row.company?.code ?? row.company?.name ?? '',
         user: row.user?.email ?? row.user?.fullName ?? '',
@@ -792,7 +780,7 @@ export class ProfitService {
       fileName = 'below-cost-attempt-audit';
     } else {
       const payload = await this.productSummary(query, user);
-      rows = payload.data.products.map((row) => ({
+      rows = payload.products.map((row) => ({
         productCode: row.productCode,
         productName: row.productName,
         quantity: row.quantity,
@@ -815,17 +803,14 @@ export class ProfitService {
     });
 
     if (format === 'json') {
-      return { success: true, data: { fileName: `${fileName}.json`, format, rows } };
+      return { fileName: `${fileName}.json`, format, rows };
     }
 
     return {
-      success: true,
-      data: {
-        fileName: `${fileName}.csv`,
-        format: 'csv',
-        contentType: 'text/csv',
-        content: toCsv(rows),
-      },
+      fileName: `${fileName}.csv`,
+      format: 'csv',
+      contentType: 'text/csv',
+      content: toCsv(rows),
     };
   }
 
