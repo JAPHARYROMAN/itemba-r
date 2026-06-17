@@ -6,7 +6,14 @@ function makeService() {
     purchaseOrder: {
       create: jest.fn(async ({ data }: any) => ({ id: 'po-1', ...data, lines: [] })),
       update: jest.fn(async ({ data }: any) => ({ id: 'po-1', companyId: 'company-1', ...data })),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       findFirst: jest.fn(),
+    },
+    inventoryMovement: {
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
+    goodsReceivedNote: {
+      findFirst: jest.fn().mockResolvedValue(null),
     },
     payable: {
       create: jest.fn(async ({ data }: any) => ({ id: 'payable-1', ...data })),
@@ -188,6 +195,62 @@ describe('PurchaseOrdersService payment state', () => {
       }),
       prisma,
     );
+  });
+
+  it('does not receive a purchase order when another receipt already claimed it', async () => {
+    const { service, prisma, inventoryMovements } = makeService();
+    prisma.purchaseOrder.updateMany.mockResolvedValueOnce({ count: 0 });
+    prisma.purchaseOrder.findFirst.mockResolvedValue({
+      id: 'po-1',
+      companyId: 'company-1',
+      branchId: 'branch-1',
+      divisionId: 'division-1',
+      purchaseType: 'CASH_PURCHASE',
+      totalAmount: 200,
+      status: 'CONFIRMED',
+      lines: [
+        {
+          productId: 'product-1',
+          quantity: 2,
+          unitId: 'unit-1',
+          unitCost: 100,
+          lineTotal: 200,
+        },
+      ],
+    });
+
+    await expect(service.receive('po-1', user)).rejects.toThrow(
+      'already been received or is no longer receivable',
+    );
+    expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+  });
+
+  it('does not receive a purchase order that was already posted by a GRN', async () => {
+    const { service, prisma, inventoryMovements } = makeService();
+    prisma.goodsReceivedNote.findFirst.mockResolvedValueOnce({ grnNumber: 'GRN-2026-000001' });
+    prisma.purchaseOrder.findFirst.mockResolvedValue({
+      id: 'po-1',
+      companyId: 'company-1',
+      branchId: 'branch-1',
+      divisionId: 'division-1',
+      purchaseType: 'CASH_PURCHASE',
+      totalAmount: 200,
+      status: 'CONFIRMED',
+      lines: [
+        {
+          productId: 'product-1',
+          quantity: 2,
+          unitId: 'unit-1',
+          unitCost: 100,
+          lineTotal: 200,
+        },
+      ],
+    });
+
+    await expect(service.receive('po-1', user)).rejects.toThrow(
+      'already posted by GRN GRN-2026-000001',
+    );
+    expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
   });
 
   it('posts received fuel purchase lines into the matching petroleum tank', async () => {

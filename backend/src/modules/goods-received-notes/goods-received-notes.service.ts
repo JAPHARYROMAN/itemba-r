@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { AccessLevel } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
@@ -184,6 +184,24 @@ export class GoodsReceivedNotesService {
     const branchId = existing.branchId;
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      if (existing.purchaseOrderId) {
+        await this.assertLinkedPurchaseOrderCanReceiveStock({
+          purchaseOrderId: existing.purchaseOrderId,
+          companyId: existing.companyId,
+          goodsReceivedNoteId: existing.id,
+          tx,
+        });
+      }
+
+      const postedAt = new Date();
+      const claim = await tx.goodsReceivedNote.updateMany({
+        where: { id, deletedAt: null, status: 'APPROVED' as any },
+        data: { status: 'POSTED' as any, postedAt, postedById: user.id },
+      });
+      if (claim.count !== 1) {
+        throw new BadRequestException('GRN has already been posted or is no longer postable');
+      }
+
       const productIds = Array.from(new Set(existing.lines.map((line) => line.productId)));
       const products = await tx.product.findMany({
         where: { id: { in: productIds }, companyId: existing.companyId, deletedAt: null },
@@ -236,9 +254,29 @@ export class GoodsReceivedNotesService {
         });
       }
 
-      return tx.goodsReceivedNote.update({
+      if (existing.purchaseOrderId) {
+        await tx.purchaseOrder.updateMany({
+          where: {
+            id: existing.purchaseOrderId,
+            companyId: existing.companyId,
+            deletedAt: null,
+            status: { in: ['CONFIRMED', 'PARTIALLY_RECEIVED'] as any },
+          },
+          data: {
+            status: 'RECEIVED' as any,
+            receivedAt: existing.receivedDate,
+            receivedById: user.id,
+          },
+        });
+      }
+
+      return tx.goodsReceivedNote.findFirst({
         where: { id },
-        data: { status: 'POSTED', postedAt: new Date(), postedById: user.id },
+        include: {
+          division: { select: { id: true, name: true, code: true } },
+          branch: { select: { id: true, name: true, code: true } },
+          lines: true,
+        },
       });
     });
 
@@ -250,5 +288,62 @@ export class GoodsReceivedNotesService {
       companyId: existing.companyId,
     });
     return updated;
+  }
+
+  private async assertLinkedPurchaseOrderCanReceiveStock(input: {
+    purchaseOrderId: string;
+    companyId: string;
+    goodsReceivedNoteId: string;
+    tx: Prisma.TransactionClient;
+  }) {
+    const [purchaseOrder, directReceipt, postedGrn] = await Promise.all([
+      input.tx.purchaseOrder.findFirst({
+        where: { id: input.purchaseOrderId, companyId: input.companyId, deletedAt: null },
+        select: { status: true, purchaseOrderNumber: true },
+      }),
+      input.tx.inventoryMovement.findFirst({
+        where: {
+          companyId: input.companyId,
+          referenceType: 'PurchaseOrder',
+          referenceId: input.purchaseOrderId,
+          movementType: 'PURCHASE_RECEIPT',
+        },
+        select: { id: true },
+      }),
+      input.tx.goodsReceivedNote.findFirst({
+        where: {
+          companyId: input.companyId,
+          purchaseOrderId: input.purchaseOrderId,
+          status: 'POSTED',
+          deletedAt: null,
+          id: { not: input.goodsReceivedNoteId },
+        },
+        select: { grnNumber: true },
+      }),
+    ]);
+
+    if (!purchaseOrder) {
+      throw new BadRequestException('Linked purchase order not found');
+    }
+    if (purchaseOrder.status === 'RECEIVED') {
+      throw new BadRequestException(
+        `Purchase order ${purchaseOrder.purchaseOrderNumber} has already been received`,
+      );
+    }
+    if (!['CONFIRMED', 'PARTIALLY_RECEIVED'].includes(String(purchaseOrder.status))) {
+      throw new BadRequestException(
+        `Purchase order ${purchaseOrder.purchaseOrderNumber} is not ready to receive stock`,
+      );
+    }
+    if (directReceipt) {
+      throw new BadRequestException(
+        `Purchase order ${purchaseOrder.purchaseOrderNumber} already has posted stock receipts`,
+      );
+    }
+    if (postedGrn) {
+      throw new BadRequestException(
+        `Purchase order ${purchaseOrder.purchaseOrderNumber} was already posted by GRN ${postedGrn.grnNumber}`,
+      );
+    }
   }
 }

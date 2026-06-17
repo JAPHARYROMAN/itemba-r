@@ -603,6 +603,24 @@ export class PurchaseOrdersService {
     const record = await this.prisma.$transaction(async (tx) => {
       const receivedAt = new Date();
       const fuelReceipts = new Map<string, FuelPurchaseReceipt>();
+      const claim = await tx.purchaseOrder.updateMany({
+        where: {
+          id,
+          deletedAt: null,
+          status: { in: ['CONFIRMED', 'PARTIALLY_RECEIVED'] as any },
+        },
+        data: {
+          status: 'RECEIVED',
+          receivedById: userId,
+          receivedAt,
+        },
+      });
+      if (claim.count !== 1) {
+        throw new BadRequestException(
+          'Purchase order has already been received or is no longer receivable',
+        );
+      }
+      await this.assertPurchaseOrderStockNotAlreadyPosted(id, existing.companyId, tx);
 
       for (const line of existing.lines as any[]) {
         const product = await tx.product.findUnique({
@@ -780,6 +798,42 @@ export class PurchaseOrdersService {
     });
 
     return record;
+  }
+
+  private async assertPurchaseOrderStockNotAlreadyPosted(
+    purchaseOrderId: string,
+    companyId: string,
+    tx: Prisma.TransactionClient,
+  ) {
+    const [directReceipt, postedGrn] = await Promise.all([
+      tx.inventoryMovement.findFirst({
+        where: {
+          companyId,
+          referenceType: 'PurchaseOrder',
+          referenceId: purchaseOrderId,
+          movementType: 'PURCHASE_RECEIPT',
+        },
+        select: { id: true },
+      }),
+      tx.goodsReceivedNote.findFirst({
+        where: {
+          companyId,
+          purchaseOrderId,
+          status: 'POSTED' as any,
+          deletedAt: null,
+        },
+        select: { grnNumber: true },
+      }),
+    ]);
+
+    if (directReceipt) {
+      throw new BadRequestException('Purchase order stock has already been received');
+    }
+    if (postedGrn) {
+      throw new BadRequestException(
+        `Purchase order stock was already posted by GRN ${postedGrn.grnNumber}`,
+      );
+    }
   }
 
   private assertFuelTankAllocationsReferenceOrderLines(
