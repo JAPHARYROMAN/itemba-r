@@ -481,6 +481,33 @@ export class ReceivablesService {
           totalAmount: true,
           paidAmount: true,
           outstandingAmount: true,
+          lines: {
+            select: {
+              id: true,
+              description: true,
+              quantity: true,
+              unitPrice: true,
+              discountAmount: true,
+              taxAmount: true,
+              lineTotal: true,
+              product: {
+                select: {
+                  id: true,
+                  productCode: true,
+                  sku: true,
+                  name: true,
+                },
+              },
+              unit: {
+                select: {
+                  id: true,
+                  name: true,
+                  symbol: true,
+                },
+              },
+            },
+            orderBy: { createdAt: 'asc' as const },
+          },
         },
         orderBy: { orderDate: 'desc' as const },
         take: 10,

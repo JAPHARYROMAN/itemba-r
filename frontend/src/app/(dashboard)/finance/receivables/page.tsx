@@ -127,6 +127,28 @@ interface SalesOrderSnapshot {
   totalAmount: number | string;
   paidAmount: number | string;
   outstandingAmount: number | string;
+  lines?: SalesOrderLineSnapshot[];
+}
+
+interface SalesOrderLineSnapshot {
+  id: string;
+  description?: string | null;
+  quantity: number | string;
+  unitPrice: number | string;
+  discountAmount: number | string;
+  taxAmount: number | string;
+  lineTotal: number | string;
+  product?: {
+    id?: string | null;
+    productCode?: string | null;
+    sku?: string | null;
+    name?: string | null;
+  } | null;
+  unit?: {
+    id?: string | null;
+    name?: string | null;
+    symbol?: string | null;
+  } | null;
 }
 
 interface FuelCreditSaleSnapshot {
@@ -252,6 +274,11 @@ function scopeLabel(scope?: { name: string; code?: string | null } | null) {
   return scope.code ? `${scope.code} - ${scope.name}` : scope.name;
 }
 
+function unitLabel(unit?: { name?: string | null; symbol?: string | null } | null) {
+  if (!unit) return '-';
+  return unit.symbol ? `${unit.symbol} - ${unit.name ?? ''}`.trim() : (unit.name ?? '-');
+}
+
 function ReceivableDetailModal({
   receivable,
   onClose,
@@ -299,6 +326,14 @@ function ReceivableDetailModal({
     (detail.fuelCreditSales?.length ?? 0) +
     (detail.projectBillings?.length ?? 0) +
     (detail.trips?.length ?? 0);
+  const salesOrderProductLines =
+    detail.salesOrders?.flatMap((order) =>
+      (order.lines ?? []).map((line) => ({
+        ...line,
+        salesOrderNumber: order.salesOrderNumber,
+        orderDate: order.orderDate,
+      })),
+    ) ?? [];
 
   return (
     <Modal
@@ -509,6 +544,57 @@ function ReceivableDetailModal({
                 />
               )}
             </div>
+          )}
+        </DetailSection>
+
+        <DetailSection
+          title="Product Lines"
+          description="Actual products and quantities behind the debtor balance."
+        >
+          {salesOrderProductLines.length > 0 ? (
+            <DetailTable
+              columns={[
+                'Sales Order',
+                'Product',
+                'Description',
+                'Qty',
+                'Unit',
+                'Unit Price',
+                'Discount',
+                'Tax',
+                'Total',
+              ]}
+              empty="No product lines"
+              rows={salesOrderProductLines.map((line) => (
+                <tr key={`${line.salesOrderNumber}-${line.id}`}>
+                  <td className="px-3 py-2 font-mono text-xs">{line.salesOrderNumber}</td>
+                  <td className="px-3 py-2">
+                    <div className="font-medium">{line.product?.name ?? '-'}</div>
+                    <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                      {line.product?.productCode ?? '-'}
+                      {line.product?.sku ? ` · ${line.product.sku}` : ''}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">{line.description ?? '-'}</td>
+                  <td className="px-3 py-2 text-right font-mono">{fmtQty(line.quantity, 2)}</td>
+                  <td className="px-3 py-2">{unitLabel(line.unit)}</td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {fmtMoney(line.unitPrice, currency)}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {fmtMoney(line.discountAmount, currency)}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {fmtMoney(line.taxAmount, currency)}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {fmtMoney(line.lineTotal, currency)}
+                  </td>
+                </tr>
+              ))}
+            />
+          ) : (
+            <EmptyDetail>No sales order product lines found for this receivable.</EmptyDetail>
           )}
         </DetailSection>
 

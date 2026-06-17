@@ -483,6 +483,35 @@ export class PayablesService {
           totalAmount: true,
           paidAmount: true,
           outstandingAmount: true,
+          lines: {
+            select: {
+              id: true,
+              description: true,
+              quantity: true,
+              unitCost: true,
+              discountAmount: true,
+              taxAmount: true,
+              lineTotal: true,
+              batchNumber: true,
+              expiryDate: true,
+              product: {
+                select: {
+                  id: true,
+                  productCode: true,
+                  sku: true,
+                  name: true,
+                },
+              },
+              unit: {
+                select: {
+                  id: true,
+                  name: true,
+                  symbol: true,
+                },
+              },
+            },
+            orderBy: { createdAt: 'asc' as const },
+          },
         },
         orderBy: { orderDate: 'desc' as const },
         take: 10,

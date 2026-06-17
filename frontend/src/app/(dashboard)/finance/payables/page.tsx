@@ -123,6 +123,30 @@ interface PurchaseOrderSnapshot {
   totalAmount: number | string;
   paidAmount: number | string;
   outstandingAmount: number | string;
+  lines?: PurchaseOrderLineSnapshot[];
+}
+
+interface PurchaseOrderLineSnapshot {
+  id: string;
+  description?: string | null;
+  quantity: number | string;
+  unitCost: number | string;
+  discountAmount: number | string;
+  taxAmount: number | string;
+  lineTotal: number | string;
+  batchNumber?: string | null;
+  expiryDate?: string | null;
+  product?: {
+    id?: string | null;
+    productCode?: string | null;
+    sku?: string | null;
+    name?: string | null;
+  } | null;
+  unit?: {
+    id?: string | null;
+    name?: string | null;
+    symbol?: string | null;
+  } | null;
 }
 
 interface FuelDeliverySnapshot {
@@ -221,6 +245,11 @@ function scopeLabel(scope?: { name: string; code?: string | null } | null) {
   return scope.code ? `${scope.code} - ${scope.name}` : scope.name;
 }
 
+function unitLabel(unit?: { name?: string | null; symbol?: string | null } | null) {
+  if (!unit) return '-';
+  return unit.symbol ? `${unit.symbol} - ${unit.name ?? ''}`.trim() : (unit.name ?? '-');
+}
+
 function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: () => void }) {
   const [detail, setDetail] = useState<Payable>(payable);
   const [loading, setLoading] = useState(true);
@@ -258,6 +287,14 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
   const outstanding = payableOutstandingAmount(detail);
   const supplier = detail.supplier;
   const sourceCount = (detail.purchaseOrders?.length ?? 0) + (detail.fuelDeliveries?.length ?? 0);
+  const purchaseOrderProductLines =
+    detail.purchaseOrders?.flatMap((order) =>
+      (order.lines ?? []).map((line) => ({
+        ...line,
+        purchaseOrderNumber: order.purchaseOrderNumber,
+        orderDate: order.orderDate,
+      })),
+    ) ?? [];
 
   return (
     <Modal
@@ -439,6 +476,64 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
                 />
               )}
             </div>
+          )}
+        </DetailSection>
+
+        <DetailSection
+          title="Product Lines"
+          description="Actual products and quantities behind the creditor balance."
+        >
+          {purchaseOrderProductLines.length > 0 ? (
+            <DetailTable
+              columns={[
+                'Purchase Order',
+                'Product',
+                'Description',
+                'Qty',
+                'Unit',
+                'Unit Cost',
+                'Discount',
+                'Tax',
+                'Total',
+                'Batch / Expiry',
+              ]}
+              empty="No product lines"
+              rows={purchaseOrderProductLines.map((line) => (
+                <tr key={`${line.purchaseOrderNumber}-${line.id}`}>
+                  <td className="px-3 py-2 font-mono text-xs">{line.purchaseOrderNumber}</td>
+                  <td className="px-3 py-2">
+                    <div className="font-medium">{line.product?.name ?? '-'}</div>
+                    <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                      {line.product?.productCode ?? '-'}
+                      {line.product?.sku ? ` · ${line.product.sku}` : ''}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">{line.description ?? '-'}</td>
+                  <td className="px-3 py-2 text-right font-mono">{fmtQty(line.quantity, 2)}</td>
+                  <td className="px-3 py-2">{unitLabel(line.unit)}</td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {fmtMoney(line.unitCost, currency)}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {fmtMoney(line.discountAmount, currency)}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {fmtMoney(line.taxAmount, currency)}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {fmtMoney(line.lineTotal, currency)}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div>{line.batchNumber ?? '-'}</div>
+                    <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                      {fmtDetailDate(line.expiryDate)}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            />
+          ) : (
+            <EmptyDetail>No purchase order product lines found for this payable.</EmptyDetail>
           )}
         </DetailSection>
 
