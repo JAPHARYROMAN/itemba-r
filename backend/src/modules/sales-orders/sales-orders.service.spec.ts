@@ -71,6 +71,7 @@ function makeService() {
     },
     customer: {
       findFirst: jest.fn(),
+      create: jest.fn(async ({ data }: any) => ({ id: 'customer-auto-1', ...data })),
     },
     employee: {
       findFirst: jest.fn(),
@@ -90,7 +91,11 @@ function makeService() {
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const inventoryMovements = { createMovement: jest.fn().mockResolvedValue(undefined) } as any;
   const taxAutoApply = { applyForSalesOrder: jest.fn().mockResolvedValue({}) } as any;
-  const codes = { next: jest.fn().mockResolvedValue('SO-2026-000001') } as any;
+  const codes = {
+    next: jest.fn(async ({ entityType }: any) =>
+      entityType === 'Customer' ? 'CUST-2026-000001' : 'SO-2026-000001',
+    ),
+  } as any;
   const companyScope = {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
     companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-1' }),
@@ -183,6 +188,52 @@ describe('SalesOrdersService payment normalization', () => {
         data: expect.objectContaining({
           paymentMethod: 'CREDIT',
           cashAccountId: null,
+        }),
+      }),
+    );
+  });
+});
+
+describe('SalesOrdersService walk-in customer mastering', () => {
+  it('creates and links a customer master for a named walk-in sales order customer', async () => {
+    const { service, prisma } = makeService();
+    prisma.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-account-1',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      accountType: 'CASH_ON_HAND',
+    });
+    prisma.customer.findFirst.mockResolvedValue(null);
+
+    await service.create(
+      createDto({
+        customerName: '  Alinani   Sinkala  ',
+        salesType: 'CASH_SALE',
+        paymentMethod: 'CASH',
+        cashAccountId: 'cash-account-1',
+      }),
+      user,
+    );
+
+    expect(prisma.customer.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          customerCode: 'CUST-2026-000001',
+          companyId: 'company-1',
+          divisionId: 'division-1',
+          branchId: 'branch-1',
+          customerType: 'WALK_IN',
+          name: 'Alinani Sinkala',
+          status: 'ACTIVE',
+        }),
+      }),
+    );
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          customerId: 'customer-auto-1',
+          customerName: 'Alinani Sinkala',
         }),
       }),
     );

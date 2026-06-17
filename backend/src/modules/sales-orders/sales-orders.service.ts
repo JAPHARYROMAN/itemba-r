@@ -208,6 +208,30 @@ function sameMoney(left: Prisma.Decimal | number | string | null | undefined, ri
   return Math.abs(moneyValue(left) - roundMoney(right)) < 0.01;
 }
 
+function normalizeCustomerName(value?: string | null) {
+  const normalized = value?.trim().replace(/\s+/g, ' ');
+  return normalized || null;
+}
+
+function isGenericWalkInName(value?: string | null) {
+  const normalized = normalizeCustomerName(value)?.toLowerCase();
+  if (!normalized) return true;
+  return new Set([
+    'walk-in',
+    'walk in',
+    'walkin',
+    'walk-in customer',
+    'walk in customer',
+    'customer',
+    'cash customer',
+  ]).has(normalized);
+}
+
+function sameSalesOrderCustomer(existing: IdempotentSalesOrderSnapshot, dto: CreateSalesOrderDto) {
+  if (dto.customerId) return existing.customerId === dto.customerId;
+  return normalizeCustomerName(existing.customerName) === normalizeCustomerName(dto.customerName);
+}
+
 function lineSignature(line: {
   productId: string;
   quantity: Prisma.Decimal | number | string;
@@ -245,8 +269,7 @@ function idempotentSalesOrderMatchesDto(
     existing.companyId === dto.companyId &&
     existing.divisionId === (dto.divisionId ?? null) &&
     existing.branchId === (dto.branchId ?? null) &&
-    existing.customerId === (dto.customerId ?? null) &&
-    (Boolean(dto.customerId) || (existing.customerName ?? '') === (dto.customerName ?? '')) &&
+    sameSalesOrderCustomer(existing, dto) &&
     existing.salesType === dto.salesType &&
     dateKey(existing.orderDate) === dateKey(dto.orderDate) &&
     dateKey(existing.dueDate) === dateKey(dto.dueDate) &&
@@ -276,6 +299,79 @@ export class SalesOrdersService {
     private readonly accountResolver: AccountResolverService,
     private readonly profit: ProfitService,
   ) {}
+
+  private async resolveSalesOrderCustomer(
+    tx: Prisma.TransactionClient,
+    input: {
+      companyId: string;
+      divisionId?: string | null;
+      branchId?: string | null;
+      customerId?: string | null;
+      customerName?: string | null;
+      userId: string;
+    },
+  ): Promise<{ customerId: string | null; customerName: string | null }> {
+    if (input.customerId) {
+      const customer = await tx.customer.findFirst({
+        where: { id: input.customerId, companyId: input.companyId, deletedAt: null },
+        select: { id: true, name: true },
+      });
+      if (!customer) throw new BadRequestException('Customer does not belong to this company');
+      return { customerId: customer.id, customerName: customer.name };
+    }
+
+    const customerName = normalizeCustomerName(input.customerName);
+    if (!customerName) return { customerId: null, customerName: null };
+    if (isGenericWalkInName(customerName)) return { customerId: null, customerName };
+    if (!input.branchId) {
+      throw new BadRequestException('Branch/location is required to save a walk-in customer');
+    }
+
+    const branch = await tx.branch.findFirst({
+      where: { id: input.branchId, deletedAt: null },
+      select: { divisionId: true, division: { select: { companyId: true } } },
+    });
+    if (!branch || branch.division.companyId !== input.companyId) {
+      throw new BadRequestException('Branch does not belong to this company');
+    }
+    if (input.divisionId && branch.divisionId !== input.divisionId) {
+      throw new BadRequestException('Branch does not belong to the selected division');
+    }
+
+    const existing = await tx.customer.findFirst({
+      where: {
+        companyId: input.companyId,
+        branchId: input.branchId,
+        deletedAt: null,
+        name: { equals: customerName, mode: 'insensitive' },
+      },
+      select: { id: true, name: true },
+    });
+    if (existing) return { customerId: existing.id, customerName: existing.name };
+
+    const customerCode = await this.codes.next({
+      entityType: 'Customer',
+      companyId: input.companyId,
+      tx,
+    });
+    const created = await tx.customer.create({
+      data: {
+        customerCode,
+        companyId: input.companyId,
+        divisionId: input.divisionId ?? branch.divisionId,
+        branchId: input.branchId,
+        customerType: 'WALK_IN',
+        name: customerName,
+        status: 'ACTIVE',
+        notes: 'Auto-created from a sales order walk-in customer name.',
+        createdById: input.userId,
+        updatedById: input.userId,
+      },
+      select: { id: true, name: true },
+    });
+
+    return { customerId: created.id, customerName: created.name };
+  }
 
   async findAll(query: QuerySalesOrderDto, user: AuthUser) {
     const {
@@ -777,6 +873,14 @@ export class SalesOrdersService {
     );
 
     const record = await this.prisma.$transaction(async (tx) => {
+      const customer = await this.resolveSalesOrderCustomer(tx, {
+        companyId: dto.companyId,
+        divisionId: dto.divisionId,
+        branchId: dto.branchId,
+        customerId: dto.customerId,
+        customerName: dto.customerName,
+        userId,
+      });
       const salesOrderNumber = await this.codes.next({
         entityType: 'SalesOrder',
         companyId: dto.companyId,
@@ -788,8 +892,8 @@ export class SalesOrdersService {
           companyId: dto.companyId,
           divisionId: dto.divisionId,
           branchId: dto.branchId,
-          customerId: dto.customerId,
-          customerName: dto.customerName,
+          customerId: customer.customerId,
+          customerName: customer.customerName,
           salesType: dto.salesType,
           orderDate: new Date(dto.orderDate),
           dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
@@ -885,7 +989,7 @@ export class SalesOrdersService {
     await this.assertReferencesBelongToCompany(existing.companyId, {
       divisionId: dto.divisionId ?? existing.divisionId,
       branchId: dto.branchId ?? existing.branchId,
-      customerId: dto.customerId ?? existing.customerId,
+      customerId: dto.customerId !== undefined ? dto.customerId : existing.customerId,
       salespersonId: dto.salespersonId ?? existing.salespersonId,
       cashAccountId: nextCashAccountId ?? undefined,
       paymentMethod: nextPaymentMethod,
@@ -917,6 +1021,18 @@ export class SalesOrdersService {
     );
 
     const record = await this.prisma.$transaction(async (tx) => {
+      const customer =
+        dto.customerId !== undefined || dto.customerName !== undefined
+          ? await this.resolveSalesOrderCustomer(tx, {
+              companyId: existing.companyId,
+              divisionId: dto.divisionId ?? existing.divisionId,
+              branchId: dto.branchId ?? existing.branchId,
+              customerId: dto.customerId ?? null,
+              customerName: dto.customerName ?? null,
+              userId,
+            })
+          : null;
+
       if (shouldRefreshLines) {
         await tx.salesOrderLine.deleteMany({ where: { salesOrderId: id } });
         await tx.salesOrderLine.createMany({
@@ -939,8 +1055,7 @@ export class SalesOrdersService {
       return tx.salesOrder.update({
         where: { id },
         data: {
-          ...(dto.customerId !== undefined && { customerId: dto.customerId }),
-          ...(dto.customerName !== undefined && { customerName: dto.customerName }),
+          ...(customer && { customerId: customer.customerId, customerName: customer.customerName }),
           ...(dto.salesType && { salesType: dto.salesType }),
           ...(dto.orderDate && { orderDate: new Date(dto.orderDate) }),
           ...(dto.dueDate !== undefined && { dueDate: dto.dueDate ? new Date(dto.dueDate) : null }),
