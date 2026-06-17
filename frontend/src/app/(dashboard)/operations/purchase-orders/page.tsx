@@ -386,7 +386,6 @@ function PurchaseOrderModal({
     setError('');
     try {
       const body: Record<string, unknown> = {
-        companyId: form.companyId,
         divisionId: form.divisionId,
         branchId: form.branchId,
         purchaseType: form.purchaseType,
@@ -412,7 +411,7 @@ function PurchaseOrderModal({
       if (form.expectedDate) body.expectedDate = form.expectedDate;
       if (form.notes) body.notes = form.notes;
       if (mode === 'create') {
-        await backendPost('/purchase-orders', body);
+        await backendPost('/purchase-orders', { ...body, companyId: form.companyId });
       } else {
         await backendPatch(`/purchase-orders/${initial!.id}`, body);
       }
@@ -819,7 +818,10 @@ export default function PurchaseOrdersPage() {
     try {
       await backendPatch(`/purchase-orders/${id}/${action}`);
       await load();
-      showToast('success', action === 'confirm' ? 'Purchase order confirmed' : 'Purchase order cancelled');
+      showToast(
+        'success',
+        action === 'confirm' ? 'Purchase order confirmed' : 'Purchase order cancelled',
+      );
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed';
       setActionError(message);

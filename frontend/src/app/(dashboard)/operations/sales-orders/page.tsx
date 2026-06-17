@@ -581,7 +581,6 @@ function SalesOrderModal({
     setError('');
     try {
       const body: Record<string, unknown> = {
-        companyId: form.companyId,
         divisionId: form.divisionId,
         branchId: form.branchId,
         salesType: form.salesType,
@@ -607,7 +606,7 @@ function SalesOrderModal({
       if (form.cashAccountId) body.cashAccountId = form.cashAccountId;
       if (form.paymentReference) body.paymentReference = form.paymentReference;
       if (mode === 'create') {
-        await backendPost('/sales-orders', body);
+        await backendPost('/sales-orders', { ...body, companyId: form.companyId });
         showToast('success', 'Sales order created', 'Saved as draft — confirm it to post.');
       } else {
         await backendPatch(`/sales-orders/${initial!.id}`, body);
