@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   Btn,
   Card,
@@ -314,12 +315,13 @@ export default function LoanRepaymentsPage() {
                     <th className="px-4 py-3 text-right">Total</th>
                     <th className="px-4 py-3 text-right">Outstanding</th>
                     <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                      <td colSpan={8} className="px-4 py-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
                         No repayment schedules
                       </td>
                     </tr>
@@ -344,6 +346,15 @@ export default function LoanRepaymentsPage() {
                           <td className="px-4 py-3 text-right font-mono">{fmtMoney(row.totalAmount, currency)}</td>
                           <td className="px-4 py-3 text-right font-mono">{fmtMoney(row.outstandingAmount, currency)}</td>
                           <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
+                          <td className="px-4 py-3 text-right">
+                            <Link
+                              href={`/group-control/loans-debts/loans/${row.loanDebtId}`}
+                              className="inline-flex rounded-md px-2 py-1 text-xs font-semibold text-brand-600 hover:bg-brand-50"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              View Loan
+                            </Link>
+                          </td>
                         </tr>
                       );
                     })

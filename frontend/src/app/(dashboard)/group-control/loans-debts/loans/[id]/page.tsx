@@ -5,6 +5,16 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Card, PageHeader } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import {
+  DocumentKeyValueGrid,
+  DocumentSection,
+  DocumentShell,
+  DocumentStatGrid,
+  DocumentTable,
+  DocumentTd,
+  DocumentTh,
+} from '@/components/documents/DocumentShell';
+import { documentOrganization, documentStatusTone } from '@/components/documents/document-utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -34,6 +44,8 @@ interface LoanDetail {
   createdAt: string;
   updatedAt: string;
   company?: { id: string; name: string; code: string } | null;
+  division?: { id: string; name: string; code: string } | null;
+  branch?: { id: string; name: string; code: string } | null;
   group?: { id: string; name: string } | null;
   repayments?: Repayment[];
 }
@@ -110,6 +122,147 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
     <div className="flex flex-col sm:flex-row sm:gap-4 py-2.5 border-b border-slate-100 last:border-0">
       <dt className="text-sm text-slate-500 w-48 shrink-0">{label}</dt>
       <dd className="text-sm text-slate-900 font-medium">{value ?? '—'}</dd>
+    </div>
+  );
+}
+
+function loanMoney(loan: LoanDetail, value: number | string | null | undefined) {
+  return `${loan.currency} ${fmt(value)}`;
+}
+
+function LoanPrintDocument({ loan, audit }: { loan: LoanDetail; audit: AuditEntry[] }) {
+  const principalPaid = Math.max(0, Number(loan.principalAmount) - Number(loan.outstandingBalance));
+  const paidPercent = Number(loan.principalAmount) > 0 ? (principalPaid / Number(loan.principalAmount)) * 100 : 0;
+  const repayments = loan.repayments ?? [];
+
+  return (
+    <div className="hidden print:block">
+      <DocumentShell
+        title={`Loan Record - ${loan.lenderName}`}
+        subtitle={`${OBLIGATION_LABELS[loan.obligationType] ?? loan.obligationType} for ${loan.company?.name ?? loan.group?.name ?? 'ITEMBA Group'}`}
+        reference={loan.loanReference ?? `LOAN-${loan.id.slice(0, 8).toUpperCase()}`}
+        status={loan.status}
+        statusTone={documentStatusTone(loan.status)}
+        organization={documentOrganization(loan.company, loan.branch)}
+        meta={[
+          { label: 'Borrower', value: loan.company?.name ?? loan.group?.name ?? 'N/A' },
+          { label: 'Lender', value: loan.lenderName },
+          { label: 'Currency', value: loan.currency },
+          { label: 'Risk', value: loan.riskLevel },
+        ]}
+        footerNote="Loan records are generated from ITEMBA-R group control and accounting records."
+      >
+        <DocumentSection title="Financial Summary">
+          <DocumentStatGrid
+            items={[
+              { label: 'Principal', value: loanMoney(loan, loan.principalAmount) },
+              { label: 'Outstanding', value: loanMoney(loan, loan.outstandingBalance), tone: Number(loan.outstandingBalance) > 0 ? 'warning' : 'success' },
+              { label: 'Principal Paid', value: loanMoney(loan, principalPaid), tone: principalPaid > 0 ? 'success' : 'neutral' },
+              { label: 'Paid %', value: `${paidPercent.toFixed(1)}%` },
+            ]}
+          />
+        </DocumentSection>
+
+        <DocumentSection title="Loan Details">
+          <DocumentKeyValueGrid
+            items={[
+              { label: 'Obligation Type', value: OBLIGATION_LABELS[loan.obligationType] ?? loan.obligationType },
+              { label: 'Borrower Level', value: loan.borrowerLevel },
+              { label: 'Company', value: loan.company?.name ?? 'N/A' },
+              { label: 'Division', value: loan.division?.name ?? 'N/A' },
+              { label: 'Branch', value: loan.branch?.name ?? 'N/A' },
+              { label: 'Loan Reference', value: loan.loanReference ?? 'N/A' },
+              { label: 'Lender Type', value: loan.lenderType?.replace(/_/g, ' ') ?? 'N/A' },
+              { label: 'Purpose', value: loan.purpose ?? 'N/A' },
+              { label: 'Interest Rate', value: `${(parseFloat(loan.interestRate) * 100).toFixed(2)}% p.a.` },
+              { label: 'Repayment Frequency', value: loan.repaymentFrequency?.replace(/_/g, ' ') ?? 'N/A' },
+              { label: 'Scheduled Repayment', value: loan.repaymentAmount ? loanMoney(loan, loan.repaymentAmount) : 'N/A' },
+              { label: 'Start Date', value: fmtDate(loan.startDate) },
+              { label: 'Maturity Date', value: fmtDate(loan.maturityDate) },
+              { label: 'Created', value: fmtDateTime(loan.createdAt) },
+            ]}
+          />
+        </DocumentSection>
+
+        {(loan.collateralDescription || loan.guarantor || loan.guaranteeDetails || loan.notes) && (
+          <DocumentSection title="Security, Guarantees, And Notes">
+            <DocumentKeyValueGrid
+              items={[
+                { label: 'Collateral', value: loan.collateralDescription ?? 'N/A' },
+                { label: 'Guarantor', value: loan.guarantor ?? 'N/A' },
+                { label: 'Guarantee Details', value: loan.guaranteeDetails ?? 'N/A' },
+                { label: 'Notes', value: loan.notes ?? 'N/A' },
+              ]}
+            />
+          </DocumentSection>
+        )}
+
+        <DocumentSection title="Repayment History" description={`${repayments.length} recorded repayment(s)`}>
+          {repayments.length === 0 ? (
+            <div className="border border-dashed border-slate-200 px-4 py-5 text-center text-sm italic text-slate-500">
+              No repayments recorded.
+            </div>
+          ) : (
+            <DocumentTable>
+              <thead>
+                <tr>
+                  <DocumentTh>Date</DocumentTh>
+                  <DocumentTh align="right">Amount</DocumentTh>
+                  <DocumentTh align="right">Principal</DocumentTh>
+                  <DocumentTh align="right">Interest</DocumentTh>
+                  <DocumentTh align="right">Penalty</DocumentTh>
+                  <DocumentTh>Method</DocumentTh>
+                  <DocumentTh>Reference</DocumentTh>
+                  <DocumentTh>Recorded By</DocumentTh>
+                </tr>
+              </thead>
+              <tbody>
+                {repayments.map((repayment) => (
+                  <tr key={repayment.id}>
+                    <DocumentTd>{fmtDate(repayment.repaymentDate)}</DocumentTd>
+                    <DocumentTd align="right" mono>{loanMoney(loan, repayment.amount)}</DocumentTd>
+                    <DocumentTd align="right" mono>{repayment.principal ? loanMoney(loan, repayment.principal) : 'N/A'}</DocumentTd>
+                    <DocumentTd align="right" mono>{repayment.interest ? loanMoney(loan, repayment.interest) : 'N/A'}</DocumentTd>
+                    <DocumentTd align="right" mono>{repayment.penalties ? loanMoney(loan, repayment.penalties) : 'N/A'}</DocumentTd>
+                    <DocumentTd>{repayment.paymentMethod?.replace(/_/g, ' ') ?? 'N/A'}</DocumentTd>
+                    <DocumentTd mono>{repayment.referenceNumber ?? 'N/A'}</DocumentTd>
+                    <DocumentTd>{repayment.user?.fullName ?? 'N/A'}</DocumentTd>
+                  </tr>
+                ))}
+              </tbody>
+            </DocumentTable>
+          )}
+        </DocumentSection>
+
+        <DocumentSection title="Audit Trail" description={`${audit.length} audit event(s)`}>
+          {audit.length === 0 ? (
+            <div className="border border-dashed border-slate-200 px-4 py-5 text-center text-sm italic text-slate-500">
+              No audit entries found.
+            </div>
+          ) : (
+            <DocumentTable>
+              <thead>
+                <tr>
+                  <DocumentTh>Timestamp</DocumentTh>
+                  <DocumentTh>Action</DocumentTh>
+                  <DocumentTh>User</DocumentTh>
+                  <DocumentTh>IP Address</DocumentTh>
+                </tr>
+              </thead>
+              <tbody>
+                {audit.map((entry) => (
+                  <tr key={entry.id}>
+                    <DocumentTd>{fmtDateTime(entry.createdAt)}</DocumentTd>
+                    <DocumentTd mono>{entry.action}</DocumentTd>
+                    <DocumentTd>{entry.user ? `${entry.user.fullName} (${entry.user.email})` : 'N/A'}</DocumentTd>
+                    <DocumentTd mono>{entry.ipAddress ?? 'N/A'}</DocumentTd>
+                  </tr>
+                ))}
+              </tbody>
+            </DocumentTable>
+          )}
+        </DocumentSection>
+      </DocumentShell>
     </div>
   );
 }
@@ -268,7 +421,8 @@ export default function LoanDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <>
+    <div className="document-no-print min-h-screen bg-slate-50">
       <div className="max-w-screen-xl mx-auto px-6 py-8 space-y-6">
 
         {/* Breadcrumb */}
@@ -292,12 +446,21 @@ export default function LoanDetailPage() {
               <RiskBadge level={loan.riskLevel} />
             </div>
           </div>
-          {loan.status === 'ACTIVE' && (
-            <button onClick={() => setShowRepaymentModal(true)}
-              className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
-              + Record Repayment
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="px-4 py-2 border border-slate-200 bg-white text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50"
+            >
+              Print / Save PDF
             </button>
-          )}
+            {loan.status === 'ACTIVE' && (
+              <button onClick={() => setShowRepaymentModal(true)}
+                className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
+                + Record Repayment
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Key Metrics */}
@@ -489,5 +652,7 @@ export default function LoanDetailPage() {
         />
       )}
     </div>
+    <LoanPrintDocument loan={loan} audit={audit} />
+    </>
   );
 }

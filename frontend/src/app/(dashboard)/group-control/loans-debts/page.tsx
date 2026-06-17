@@ -587,12 +587,12 @@ export default function LoansDebtsPage() {
                   <th className="px-4 py-3">Maturity</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Risk</th>
-                  {canManageLoans && <th className="px-4 py-3 text-right">Actions</th>}
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {loading ? <tr><td colSpan={canManageLoans ? 10 : 9}><PageSpinner /></td></tr>
-                  : !loanData?.data.length ? <tr><td colSpan={canManageLoans ? 10 : 9} className="px-4 py-10 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No loans</td></tr>
+                {loading ? <tr><td colSpan={10}><PageSpinner /></td></tr>
+                  : !loanData?.data.length ? <tr><td colSpan={10} className="px-4 py-10 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No loans</td></tr>
                   : loanData.data.map((l) => {
                     const overdue = isOverdue(l.maturityDate) && l.status === 'ACTIVE';
                     return (
@@ -609,12 +609,20 @@ export default function LoansDebtsPage() {
                         <td className={`px-4 py-3 text-xs ${overdue ? 'text-red-600 font-semibold' : ''}`}>{overdue ? 'Overdue - ' : ''}{fmtDate(l.maturityDate)}</td>
                         <td className="px-4 py-3"><StatusBadge value={l.status} /></td>
                         <td className="px-4 py-3"><StatusBadge value={l.riskLevel} /></td>
-                        {canManageLoans && (
-                          <td className="px-4 py-3 text-right space-x-1 whitespace-nowrap">
+                        <td className="px-4 py-3 text-right space-x-1 whitespace-nowrap">
+                          <Link
+                            href={`/group-control/loans-debts/loans/${l.id}`}
+                            className="inline-flex rounded-md px-2 py-1 text-xs font-semibold text-brand-600 hover:bg-brand-50"
+                          >
+                            View
+                          </Link>
+                          {canManageLoans && (
+                            <>
                             <Btn variant="ghost" size="xs" onClick={() => setEditingLoan(l)}>Edit</Btn>
                             <Btn variant="ghost" size="xs" onClick={() => setDeletingLoan(l)}>Delete</Btn>
-                          </td>
-                        )}
+                            </>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
