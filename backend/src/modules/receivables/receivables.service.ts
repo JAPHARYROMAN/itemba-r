@@ -78,7 +78,7 @@ export class ReceivablesService {
     ]);
 
     return {
-      data,
+      data: data.map((receivable) => this.withDisplayCustomerName(receivable)),
       total,
       page: paging.page,
       limit: paging.limit,
@@ -117,7 +117,7 @@ export class ReceivablesService {
           },
         })
       : null;
-    return { ...record, customer };
+    return this.withDisplayCustomerName({ ...record, customer });
   }
 
   async create(dto: CreateReceivableDto, user: AuthUser) {
@@ -403,6 +403,28 @@ export class ReceivablesService {
           status: true,
         },
       },
+      salesOrders: {
+        where: { deletedAt: null },
+        select: {
+          id: true,
+          salesOrderNumber: true,
+          orderDate: true,
+          dueDate: true,
+          salesType: true,
+          status: true,
+          paymentStatus: true,
+          customerName: true,
+          customer: { select: { id: true, name: true } },
+          subtotal: true,
+          taxAmount: true,
+          discountAmount: true,
+          totalAmount: true,
+          paidAmount: true,
+          outstandingAmount: true,
+        },
+        orderBy: { orderDate: 'desc' as const },
+        take: 1,
+      },
     };
   }
 
@@ -451,6 +473,8 @@ export class ReceivablesService {
           salesType: true,
           status: true,
           paymentStatus: true,
+          customerName: true,
+          customer: { select: { id: true, name: true } },
           subtotal: true,
           taxAmount: true,
           discountAmount: true,
@@ -508,6 +532,26 @@ export class ReceivablesService {
         take: 10,
       },
     };
+  }
+
+  private withDisplayCustomerName<
+    T extends {
+      customerName: string;
+      customer?: { name?: string | null } | null;
+      salesOrders?: Array<{
+        customerName?: string | null;
+        customer?: { name?: string | null } | null;
+      }>;
+    },
+  >(receivable: T): T {
+    const sourceOrder = receivable.salesOrders?.[0];
+    const customerName =
+      receivable.customer?.name?.trim() ||
+      sourceOrder?.customer?.name?.trim() ||
+      sourceOrder?.customerName?.trim() ||
+      receivable.customerName ||
+      'Walk-in Customer';
+    return { ...receivable, customerName };
   }
 
   private async resolveReceivableScope(input: {

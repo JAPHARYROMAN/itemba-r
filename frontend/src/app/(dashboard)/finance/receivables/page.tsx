@@ -114,6 +114,8 @@ interface JournalEntrySnapshot {
 interface SalesOrderSnapshot {
   id: string;
   salesOrderNumber: string;
+  customerName?: string | null;
+  customer?: { id?: string | null; name?: string | null } | null;
   orderDate: string;
   dueDate?: string | null;
   salesType: string;
@@ -207,6 +209,17 @@ function receivableOutstandingAmount(receivable: Receivable) {
   return moneyNumber(receivable.outstandingAmount);
 }
 
+function receivableCustomerName(receivable: Receivable) {
+  const sourceOrder = receivable.salesOrders?.[0];
+  return (
+    receivable.customer?.name?.trim() ||
+    sourceOrder?.customer?.name?.trim() ||
+    sourceOrder?.customerName?.trim() ||
+    receivable.customerName ||
+    'Walk-in Customer'
+  );
+}
+
 function fmtTZS(n: unknown) {
   return (
     'TZS ' +
@@ -292,7 +305,7 @@ function ReceivableDetailModal({
       open
       onClose={onClose}
       title={`Receivable ${detail.receivableNumber ?? detail.id.slice(0, 8)}`}
-      subtitle={`${detail.customerName} · ${detail.status}`}
+      subtitle={`${receivableCustomerName(detail)} · ${detail.status}`}
       size="3xl"
       footer={
         <Btn variant="secondary" onClick={onClose}>
@@ -342,7 +355,7 @@ function ReceivableDetailModal({
           description="Customer identity, contact, and credit posture."
         >
           <DetailGrid>
-            <DetailItem label="Customer Name" value={customer?.name ?? detail.customerName} />
+            <DetailItem label="Customer Name" value={receivableCustomerName(detail)} />
             <DetailItem label="Customer Code" value={customer?.customerCode} mono />
             <DetailItem label="Legal Name" value={customer?.legalName} />
             <DetailItem label="Customer Type" value={customer?.customerType} />
@@ -1261,7 +1274,7 @@ export default function ReceivablesPage() {
                         </button>
                       </div>
                     </td>
-                    <td className="px-4 py-3 font-medium">{r.customerName}</td>
+                    <td className="px-4 py-3 font-medium">{receivableCustomerName(r)}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmtTZS(r.amount)}</td>
                     <td className="px-4 py-3 text-right font-mono text-green-700">
                       {fmtTZS(receivablePaidAmount(r))}

@@ -51,12 +51,22 @@ function makeService() {
       create: jest.fn(async ({ data }: any) => ({ id: 'so-1', ...data })),
       update: jest.fn(async ({ data }: any) => ({ id: 'so-1', companyId: 'company-1', ...data })),
       findFirst: jest.fn(async () => persistedOrder()),
+      findUnique: jest.fn(async () => null),
     },
     salesOrderLine: {
       createMany: jest.fn(),
       deleteMany: jest.fn(),
+      update: jest.fn(),
     },
     receivable: {
+      create: jest.fn(async ({ data }: any) => ({ id: 'receivable-1', ...data })),
+      update: jest.fn(async ({ data }: any) => ({
+        id: 'receivable-1',
+        companyId: 'company-1',
+        customerId: 'customer-1',
+        ...data,
+      })),
+      aggregate: jest.fn(async () => ({ _sum: { outstandingAmount: 0 } })),
       findFirst: jest.fn(async () => null),
       findMany: jest.fn(async () => []),
     },
@@ -72,12 +82,14 @@ function makeService() {
     customer: {
       findFirst: jest.fn(),
       create: jest.fn(async ({ data }: any) => ({ id: 'customer-auto-1', ...data })),
+      updateMany: jest.fn(),
     },
     employee: {
       findFirst: jest.fn(),
     },
     product: {
       findMany: jest.fn(async () => [{ id: 'product-1', companyId: 'company-1' }]),
+      findUnique: jest.fn(async () => ({ id: 'product-1', trackInventory: false })),
     },
     unitOfMeasure: {
       findMany: jest.fn(async () => [{ id: 'unit-1', companyId: 'company-1' }]),
@@ -234,6 +246,37 @@ describe('SalesOrdersService walk-in customer mastering', () => {
         data: expect.objectContaining({
           customerId: 'customer-auto-1',
           customerName: 'Alinani Sinkala',
+        }),
+      }),
+    );
+  });
+});
+
+describe('SalesOrdersService receivable customer names', () => {
+  it('uses the linked customer master name when confirming a credit sale receivable', async () => {
+    const { service, prisma } = makeService();
+    jest.spyOn(service as any, 'postSalesOrderLedger').mockResolvedValue({ id: 'journal-entry-1' });
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      persistedOrder({
+        status: 'DRAFT',
+        salesType: 'CREDIT_SALE',
+        paymentMethod: 'CREDIT',
+        cashAccountId: null,
+        customerId: 'customer-1',
+        customerName: 'Walk-in Customer',
+        customer: { id: 'customer-1', name: 'Aaron Town' },
+        totalAmount: 418000,
+        outstandingAmount: 418000,
+      }),
+    );
+
+    await service.confirm('so-1', user);
+
+    expect(prisma.receivable.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          customerId: 'customer-1',
+          customerName: 'Aaron Town',
         }),
       }),
     );

@@ -232,6 +232,17 @@ function sameSalesOrderCustomer(existing: IdempotentSalesOrderSnapshot, dto: Cre
   return normalizeCustomerName(existing.customerName) === normalizeCustomerName(dto.customerName);
 }
 
+function salesOrderReceivableCustomerName(order: {
+  customer?: { name?: string | null } | null;
+  customerName?: string | null;
+}) {
+  return (
+    normalizeCustomerName(order.customer?.name) ??
+    normalizeCustomerName(order.customerName) ??
+    'Walk-in Customer'
+  );
+}
+
 function lineSignature(line: {
   productId: string;
   quantity: Prisma.Decimal | number | string;
@@ -1339,6 +1350,7 @@ export class SalesOrdersService {
       let receivableId: string | null = null;
 
       if (paymentMethod === 'CREDIT') {
+        const receivableCustomerName = salesOrderReceivableCustomerName(existing);
         const recNumber = await this.codes.next({
           entityType: 'Receivable',
           companyId: existing.companyId,
@@ -1351,7 +1363,7 @@ export class SalesOrdersService {
             divisionId: existing.divisionId ?? null,
             branchId: existing.branchId ?? null,
             customerId: existing.customerId ?? null,
-            customerName: existing.customerName ?? 'Walk-in Customer',
+            customerName: receivableCustomerName,
             amount: existing.totalAmount,
             paidAmount: 0,
             outstandingAmount: existing.totalAmount,
