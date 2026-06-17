@@ -8,7 +8,6 @@ import type { AuthUser } from '@/lib/auth-types';
 const PUBLIC_PATHS = new Set<string>(['/login', '/forgot-password', '/reset-password']);
 const SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const SESSION_REFRESH_RETRY_MS = 30 * 1000;
-const AUTH_REJECTED_STATUSES = new Set([401, 403]);
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -52,9 +51,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const data = await res.json();
         setUser(data.data ?? data.user ?? data);
         return true;
-      }
-      if (AUTH_REJECTED_STATUSES.has(res.status)) {
-        setUser(null);
       }
     } catch {
       // Retryable network/backend failure. Keep any existing user state.
@@ -104,7 +100,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const ok = await fetchUser();
       if (!ok) {
         // /me failed — try silent refresh; only auth rejection redirects.
-        await silentRefresh();
+        const refreshed = await silentRefresh();
+        if (!refreshed) setUser(null);
       } else {
         armRefreshTimer();
       }
