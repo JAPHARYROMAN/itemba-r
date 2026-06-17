@@ -131,6 +131,12 @@ export class OperationsReportsController {
     return this.service.getSalesByProduct(q as Record<string, string | undefined>, user);
   }
 
+  @Get('customer-product-sales')
+  @RequirePermissions('operations.reports.view')
+  getCustomerProductSales(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getCustomerProductSales(q as Record<string, string | undefined>, user);
+  }
+
   @Get('purchase-report')
   @RequirePermissions('operations.reports.view')
   getPurchaseReport(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
@@ -147,6 +153,12 @@ export class OperationsReportsController {
   @RequirePermissions('operations.reports.view')
   getPurchasesByProduct(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.getPurchasesByProduct(q as Record<string, string | undefined>, user);
+  }
+
+  @Get('supplier-product-purchases')
+  @RequirePermissions('operations.reports.view')
+  getSupplierProductPurchases(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getSupplierProductPurchases(q as Record<string, string | undefined>, user);
   }
 
   @Get('low-stock')

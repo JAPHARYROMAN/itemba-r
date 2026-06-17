@@ -304,6 +304,14 @@ export class OperationsReportsService {
     ]);
   }
 
+  async getCustomerProductSales(query: OperationsReportQuery, user: AuthUser) {
+    return this.groupLineRowsByDimensions(await this.getSalesReport(query, user), {
+      dimensionKeys: ['customerCode', 'customer', 'productCode', 'sku', 'product', 'unit'],
+      documentKey: 'salesOrderNumber',
+      averageKey: 'averageUnitPrice',
+    });
+  }
+
   async getPurchaseReport(query: OperationsReportQuery, user: AuthUser) {
     const purchaseOrder = await this.purchaseOrderWhere(query, user);
     const where: Record<string, unknown> = { purchaseOrder };
@@ -400,6 +408,14 @@ export class OperationsReportsService {
       'sku',
       'product',
     ]);
+  }
+
+  async getSupplierProductPurchases(query: OperationsReportQuery, user: AuthUser) {
+    return this.groupLineRowsByDimensions(await this.getPurchaseReport(query, user), {
+      dimensionKeys: ['supplierCode', 'supplier', 'productCode', 'sku', 'product', 'unit'],
+      documentKey: 'purchaseOrderNumber',
+      averageKey: 'averageUnitCost',
+    });
   }
 
   async getLowStock(query: OperationsReportQuery, user: AuthUser) {
@@ -654,6 +670,55 @@ export class OperationsReportsService {
       current.taxAmount = this.toNumber(current.taxAmount) + this.toNumber(row.taxAmount);
       grouped.set(key, current);
     }
+    return Array.from(grouped.values()).sort(
+      (a, b) => this.toNumber(b.totalAmount) - this.toNumber(a.totalAmount),
+    );
+  }
+
+  private groupLineRowsByDimensions(
+    rows: Record<string, unknown>[],
+    input: {
+      dimensionKeys: string[];
+      documentKey: string;
+      averageKey: string;
+    },
+  ): Record<string, unknown>[] {
+    const grouped = new Map<string, Record<string, unknown>>();
+    const documentsByGroup = new Map<string, Set<string>>();
+
+    for (const row of rows) {
+      const key = input.dimensionKeys.map((dimension) => String(row[dimension] ?? '')).join('|');
+      const current =
+        grouped.get(key) ??
+        Object.fromEntries([
+          ...input.dimensionKeys.map((dimension) => [dimension, row[dimension]]),
+          ['documentCount', 0],
+          ['lineCount', 0],
+          ['quantity', 0],
+          ['totalAmount', 0],
+          ['discountAmount', 0],
+          ['taxAmount', 0],
+          [input.averageKey, 0],
+        ]);
+      const documents = documentsByGroup.get(key) ?? new Set<string>();
+      if (row[input.documentKey]) documents.add(String(row[input.documentKey]));
+
+      current.lineCount = this.toNumber(current.lineCount) + 1;
+      current.quantity = this.toNumber(current.quantity) + this.toNumber(row.quantity);
+      current.totalAmount = this.toNumber(current.totalAmount) + this.toNumber(row.amount);
+      current.discountAmount =
+        this.toNumber(current.discountAmount) + this.toNumber(row.discountAmount);
+      current.taxAmount = this.toNumber(current.taxAmount) + this.toNumber(row.taxAmount);
+      current.documentCount = documents.size;
+      current[input.averageKey] =
+        this.toNumber(current.quantity) > 0
+          ? this.toNumber(current.totalAmount) / this.toNumber(current.quantity)
+          : 0;
+
+      documentsByGroup.set(key, documents);
+      grouped.set(key, current);
+    }
+
     return Array.from(grouped.values()).sort(
       (a, b) => this.toNumber(b.totalAmount) - this.toNumber(a.totalAmount),
     );

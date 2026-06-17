@@ -24,6 +24,13 @@ export class WestsidesReportsController {
     return this.service.salesByCustomer(query, user);
   }
 
+  @Get('customer-product-sales')
+  @RequirePermissions('westsides.reports.view')
+  @ApiOperation({ summary: 'Customer purchases grouped by customer and product' })
+  customerProductSales(@Query() query: QueryReportDto, @CurrentUser() user: AuthUser) {
+    return this.service.customerProductSales(query, user);
+  }
+
   @Get('purchase-report')
   @RequirePermissions('westsides.reports.view')
   @ApiOperation({
@@ -38,6 +45,13 @@ export class WestsidesReportsController {
   @ApiOperation({ summary: 'Purchases grouped by supplier' })
   purchasesBySupplier(@Query() query: QueryReportDto, @CurrentUser() user: AuthUser) {
     return this.service.purchasesBySupplier(query, user);
+  }
+
+  @Get('supplier-product-purchases')
+  @RequirePermissions('westsides.reports.view')
+  @ApiOperation({ summary: 'Supplier purchases grouped by supplier and product' })
+  supplierProductPurchases(@Query() query: QueryReportDto, @CurrentUser() user: AuthUser) {
+    return this.service.supplierProductPurchases(query, user);
   }
 
   @Get('customers-report')
