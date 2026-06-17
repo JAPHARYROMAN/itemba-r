@@ -59,6 +59,12 @@ export class StockAdjustmentsController {
     return this.service.reject(id, user);
   }
 
+  @Patch(':id/revert')
+  @RequirePermissions('inventory.adjustments.approve')
+  revert(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.revertApproval(id, user);
+  }
+
   @Patch(':id/post')
   @RequirePermissions('inventory.adjustments.post')
   post(@Param('id') id: string, @CurrentUser() user: AuthUser) {

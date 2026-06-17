@@ -4,6 +4,21 @@ function makeService() {
   const prisma = {
     stockAdjustment: {
       create: jest.fn(async ({ data }: any) => ({ id: 'sa-1', ...data, lines: [] })),
+      findFirst: jest.fn(async () => ({
+        id: 'sa-1',
+        companyId: 'company-1',
+        divisionId: 'division-1',
+        branchId: 'branch-1',
+        status: 'APPROVED',
+        approvedById: 'approver-1',
+        approvedAt: new Date('2026-06-17T00:00:00.000Z'),
+        postedAt: null,
+        lines: [],
+      })),
+      update: jest.fn(async ({ data }: any) => ({ id: 'sa-1', companyId: 'company-1', ...data })),
+    },
+    inventoryMovement: {
+      count: jest.fn(async () => 0),
     },
     division: {
       findFirst: jest.fn(),
@@ -66,5 +81,38 @@ describe('StockAdjustmentsService aliases', () => {
         }),
       }),
     );
+  });
+});
+
+describe('StockAdjustmentsService approval revert', () => {
+  it('reverts an approved unposted adjustment back to draft and clears approval metadata', async () => {
+    const { service, prisma } = makeService();
+
+    await service.revertApproval('sa-1', user);
+
+    expect(prisma.inventoryMovement.count).toHaveBeenCalledWith({
+      where: {
+        referenceType: 'StockAdjustment',
+        referenceId: 'sa-1',
+      },
+    });
+    expect(prisma.stockAdjustment.update).toHaveBeenCalledWith({
+      where: { id: 'sa-1' },
+      data: {
+        status: 'DRAFT',
+        approvedById: null,
+        approvedAt: null,
+      },
+    });
+  });
+
+  it('blocks revert when inventory movements already exist', async () => {
+    const { service, prisma } = makeService();
+    prisma.inventoryMovement.count.mockResolvedValue(1);
+
+    await expect(service.revertApproval('sa-1', user)).rejects.toThrow(
+      'already has inventory movements',
+    );
+    expect(prisma.stockAdjustment.update).not.toHaveBeenCalled();
   });
 });

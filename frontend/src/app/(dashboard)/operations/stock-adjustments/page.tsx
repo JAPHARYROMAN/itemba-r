@@ -591,7 +591,7 @@ export default function StockAdjustmentsPage() {
     load();
   }, [load]);
 
-  const doAction = async (id: string, action: 'submit' | 'approve' | 'post') => {
+  const doAction = async (id: string, action: 'submit' | 'approve' | 'post' | 'revert') => {
     setActionLoading(`${id}:${action}`);
     setActionError('');
     try {
@@ -819,15 +819,29 @@ export default function StockAdjustmentsPage() {
                           </Btn>
                         </>
                       )}
-                      {a.status === 'APPROVED' && canPost && (
-                        <Btn
-                          variant="primary"
-                          size="xs"
-                          loading={actionLoading === `${a.id}:post`}
-                          onClick={() => doAction(a.id, 'post')}
-                        >
-                          Post
-                        </Btn>
+                      {a.status === 'APPROVED' && (
+                        <>
+                          {canPost && (
+                            <Btn
+                              variant="primary"
+                              size="xs"
+                              loading={actionLoading === `${a.id}:post`}
+                              onClick={() => doAction(a.id, 'post')}
+                            >
+                              Post
+                            </Btn>
+                          )}
+                          {canApprove && (
+                            <Btn
+                              variant="secondary"
+                              size="xs"
+                              loading={actionLoading === `${a.id}:revert`}
+                              onClick={() => doAction(a.id, 'revert')}
+                            >
+                              Revert
+                            </Btn>
+                          )}
+                        </>
                       )}
                       {(a.status === 'REJECTED' || a.status === 'CANCELLED') && canCreate && (
                         <Btn variant="ghost" size="xs" onClick={() => setDeleting(a)}>

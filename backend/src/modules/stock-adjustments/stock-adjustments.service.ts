@@ -84,6 +84,7 @@ export class StockAdjustmentsService {
           company: { select: { id: true, name: true, code: true } },
           branch: { select: { id: true, name: true, code: true } },
           createdBy: { select: { id: true, fullName: true } },
+          _count: { select: { lines: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -283,6 +284,51 @@ export class StockAdjustmentsService {
       companyId: record.companyId,
       oldValue: { status: 'PENDING_APPROVAL' } as any,
       newValue: { status: 'REJECTED' } as any,
+    });
+
+    return record;
+  }
+
+  async revertApproval(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (existing.status !== 'APPROVED') {
+      throw new BadRequestException('Only APPROVED adjustments can be reverted to draft');
+    }
+    if (existing.postedAt) {
+      throw new BadRequestException('Posted adjustments cannot be reverted to draft');
+    }
+
+    const movementCount = await this.prisma.inventoryMovement.count({
+      where: {
+        referenceType: 'StockAdjustment',
+        referenceId: id,
+      },
+    });
+    if (movementCount > 0) {
+      throw new BadRequestException(
+        'This adjustment already has inventory movements and cannot be reverted to draft',
+      );
+    }
+
+    const record = await this.prisma.stockAdjustment.update({
+      where: { id },
+      data: {
+        status: 'DRAFT',
+        approvedById: null,
+        approvedAt: null,
+      },
+    });
+
+    await this.auditLogs.log({
+      action: 'STOCK_ADJUSTMENT_REVERT_APPROVAL',
+      entityType: 'StockAdjustment',
+      entityId: id,
+      userId,
+      companyId: record.companyId,
+      oldValue: { status: 'APPROVED', approvedById: existing.approvedById } as any,
+      newValue: { status: 'DRAFT' } as any,
+      severity: AuditSeverity.HIGH,
     });
 
     return record;
