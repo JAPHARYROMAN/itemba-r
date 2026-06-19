@@ -7,6 +7,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductDto } from './dto/query-product.dto';
 import { QueryProductFamilyDto } from './dto/query-product-family.dto';
+import { CreateProductFamilyDto, UpdateProductFamilyDto } from './dto/manage-product-family.dto';
 import { ProfitService } from '../profit/profit.service';
 import { AccessLevel, AuditSeverity, Prisma } from '@prisma/client';
 
@@ -33,6 +34,24 @@ function normalizeProductCode(productCode?: string): string | undefined {
 function optionalText(value?: string | null): string | undefined {
   const trimmed = value?.trim();
   return trimmed || undefined;
+}
+
+function nullablePrice(value: number | string | Prisma.Decimal | null | undefined) {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  return Number(value);
+}
+
+function positivePrice(value: unknown) {
+  const price = Number(value ?? 0);
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
+function pricesAreDifferent(a: unknown, b: unknown) {
+  const left = positivePrice(a);
+  const right = positivePrice(b);
+  if (left == null || right == null) return false;
+  return Math.abs(left - right) > 0.0001;
 }
 
 @Injectable()
@@ -97,7 +116,17 @@ export class ProductsService {
         where,
         include: {
           category: { select: { id: true, name: true } },
-          productFamily: { select: { id: true, name: true, brand: true } },
+          productFamily: {
+            select: {
+              id: true,
+              name: true,
+              brand: true,
+              defaultPurchasePrice: true,
+              defaultSellingPrice: true,
+              wholesalePrice: true,
+              retailPrice: true,
+            },
+          },
           division: { select: { id: true, name: true, code: true } },
           company: { select: { id: true, name: true, code: true } },
           baseUnit: { select: { id: true, name: true, symbol: true } },
@@ -122,6 +151,11 @@ export class ProductsService {
       defaultSellingPrice?: unknown;
       retailPrice?: unknown;
       wholesalePrice?: unknown;
+      productFamily?: {
+        defaultSellingPrice?: unknown;
+        retailPrice?: unknown;
+        wholesalePrice?: unknown;
+      } | null;
       baseUnit?: { name?: string | null; symbol?: string | null } | null;
     },
   >(products: TProduct[], branchId?: string | null) {
@@ -171,13 +205,36 @@ export class ProductsService {
           averageCost: 0,
         })
         : null;
-      const sellingPrice =
-        product.defaultSellingPrice ?? product.retailPrice ?? product.wholesalePrice ?? null;
+      const productSellingPrice = positivePrice(product.defaultSellingPrice);
+      const productRetailPrice = positivePrice(product.retailPrice);
+      const productWholesalePrice = positivePrice(product.wholesalePrice);
+      const familySellingPrice = positivePrice(product.productFamily?.defaultSellingPrice);
+      const familyRetailPrice = positivePrice(product.productFamily?.retailPrice);
+      const familyWholesalePrice = positivePrice(product.productFamily?.wholesalePrice);
+      const effectiveSellingPrice =
+        productSellingPrice ??
+        productRetailPrice ??
+        productWholesalePrice ??
+        familySellingPrice ??
+        familyRetailPrice ??
+        familyWholesalePrice;
+      const effectiveWholesalePrice = productWholesalePrice ?? familyWholesalePrice;
+      const effectiveRetailPrice = productRetailPrice ?? familyRetailPrice;
+      const priceSource =
+        productSellingPrice != null || productRetailPrice != null || productWholesalePrice != null
+          ? 'PRODUCT_OVERRIDE'
+          : effectiveSellingPrice != null
+            ? 'FAMILY_DEFAULT'
+            : 'MISSING';
 
       return {
         ...product,
         defaultUnitId: product.baseUnitId,
-        sellingPrice,
+        effectiveSellingPrice,
+        effectiveWholesalePrice,
+        effectiveRetailPrice,
+        priceSource,
+        sellingPrice: effectiveSellingPrice,
         unitName: product.baseUnit?.name ?? null,
         unitSymbol: product.baseUnit?.symbol ?? null,
         ...(balance
@@ -237,7 +294,340 @@ export class ProductsService {
       this.prisma.productFamily.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    const enrichedData = await this.withFamilyPriceCounts(data);
+
+    return { data: enrichedData, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  async createFamily(dto: CreateProductFamilyDto, user: AuthUser) {
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    await this.assertFamilyReferences(dto.companyId, dto.categoryId, dto.divisionId);
+    this.assertFamilyPricing(dto);
+
+    const divisionId = optionalText(dto.divisionId) ?? null;
+    const duplicate = await this.prisma.productFamily.findFirst({
+      where: {
+        companyId: dto.companyId,
+        categoryId: dto.categoryId,
+        divisionId,
+        deletedAt: null,
+        name: { equals: dto.name.trim(), mode: 'insensitive' },
+      },
+      select: { id: true },
+    });
+    if (duplicate) {
+      throw new BadRequestException('A product family with this name already exists in this category');
+    }
+
+    const record = await this.prisma.productFamily.create({
+      data: {
+        companyId: dto.companyId,
+        divisionId,
+        categoryId: dto.categoryId,
+        name: dto.name.trim(),
+        brand: optionalText(dto.brand),
+        description: optionalText(dto.description),
+        defaultPurchasePrice: nullablePrice(dto.defaultPurchasePrice),
+        defaultSellingPrice: nullablePrice(dto.defaultSellingPrice),
+        wholesalePrice: nullablePrice(dto.wholesalePrice),
+        retailPrice: nullablePrice(dto.retailPrice),
+        isActive: dto.isActive ?? true,
+      },
+      include: {
+        category: { select: { id: true, name: true } },
+        division: { select: { id: true, name: true, code: true } },
+      },
+    });
+
+    await this.auditLogs.log({
+      action: 'PRODUCT_FAMILY_CREATE',
+      entityType: 'ProductFamily',
+      entityId: record.id,
+      userId: user.id,
+      companyId: record.companyId,
+      newValue: record as any,
+    });
+
+    const [enriched] = await this.withFamilyPriceCounts([record]);
+    return enriched;
+  }
+
+  async updateFamily(id: string, dto: UpdateProductFamilyDto, user: AuthUser) {
+    const existing = await this.prisma.productFamily.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!existing) throw new NotFoundException('Product family not found');
+    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
+
+    const categoryId = dto.categoryId ?? existing.categoryId;
+    const divisionId =
+      dto.divisionId !== undefined ? (optionalText(dto.divisionId) ?? null) : existing.divisionId;
+    await this.assertFamilyReferences(existing.companyId, categoryId, divisionId);
+    this.assertFamilyPricing({
+      defaultPurchasePrice:
+        dto.defaultPurchasePrice !== undefined ? dto.defaultPurchasePrice : existing.defaultPurchasePrice,
+      defaultSellingPrice:
+        dto.defaultSellingPrice !== undefined ? dto.defaultSellingPrice : existing.defaultSellingPrice,
+      wholesalePrice: dto.wholesalePrice !== undefined ? dto.wholesalePrice : existing.wholesalePrice,
+      retailPrice: dto.retailPrice !== undefined ? dto.retailPrice : existing.retailPrice,
+    });
+
+    const nextName = optionalText(dto.name) ?? existing.name;
+    if (nextName !== existing.name || categoryId !== existing.categoryId || divisionId !== existing.divisionId) {
+      const duplicate = await this.prisma.productFamily.findFirst({
+        where: {
+          companyId: existing.companyId,
+          categoryId,
+          divisionId,
+          deletedAt: null,
+          name: { equals: nextName, mode: 'insensitive' },
+          NOT: { id },
+        },
+        select: { id: true },
+      });
+      if (duplicate) {
+        throw new BadRequestException('A product family with this name already exists in this category');
+      }
+    }
+
+    const record = await this.prisma.productFamily.update({
+      where: { id },
+      data: {
+        ...(dto.categoryId !== undefined && { categoryId }),
+        ...(dto.divisionId !== undefined && { divisionId }),
+        ...(dto.name !== undefined && { name: nextName }),
+        ...(dto.brand !== undefined && { brand: optionalText(dto.brand) ?? null }),
+        ...(dto.description !== undefined && { description: optionalText(dto.description) ?? null }),
+        ...(dto.defaultPurchasePrice !== undefined && {
+          defaultPurchasePrice: nullablePrice(dto.defaultPurchasePrice),
+        }),
+        ...(dto.defaultSellingPrice !== undefined && {
+          defaultSellingPrice: nullablePrice(dto.defaultSellingPrice),
+        }),
+        ...(dto.wholesalePrice !== undefined && {
+          wholesalePrice: nullablePrice(dto.wholesalePrice),
+        }),
+        ...(dto.retailPrice !== undefined && { retailPrice: nullablePrice(dto.retailPrice) }),
+        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+      },
+      include: {
+        category: { select: { id: true, name: true } },
+        division: { select: { id: true, name: true, code: true } },
+      },
+    });
+
+    await this.auditLogs.log({
+      action: 'PRODUCT_FAMILY_UPDATE',
+      entityType: 'ProductFamily',
+      entityId: id,
+      userId: user.id,
+      companyId: record.companyId,
+      oldValue: existing as any,
+      newValue: record as any,
+    });
+
+    const [enriched] = await this.withFamilyPriceCounts([record]);
+    return enriched;
+  }
+
+  async removeFamily(id: string, user: AuthUser) {
+    const existing = await this.prisma.productFamily.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!existing) throw new NotFoundException('Product family not found');
+    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
+
+    const productCount = await this.prisma.product.count({
+      where: { productFamilyId: id, deletedAt: null },
+    });
+    if (productCount > 0) {
+      throw new BadRequestException('Product family is in use. Deactivate it instead of deleting it.');
+    }
+
+    await this.prisma.productFamily.update({
+      where: { id },
+      data: { deletedAt: new Date(), isActive: false },
+    });
+
+    await this.auditLogs.log({
+      action: 'PRODUCT_FAMILY_DELETE',
+      entityType: 'ProductFamily',
+      entityId: id,
+      userId: user.id,
+      companyId: existing.companyId,
+      oldValue: existing as any,
+      severity: AuditSeverity.HIGH,
+    });
+
+    return { success: true };
+  }
+
+  private async withFamilyPriceCounts<
+    TFamily extends {
+      id: string;
+      defaultSellingPrice?: unknown;
+      wholesalePrice?: unknown;
+      retailPrice?: unknown;
+    },
+  >(families: TFamily[]) {
+    if (!families.length) return families;
+    const familyIds = families.map((family) => family.id);
+    const products = await this.prisma.product.findMany({
+      where: { productFamilyId: { in: familyIds }, deletedAt: null },
+      select: {
+        productFamilyId: true,
+        defaultSellingPrice: true,
+        wholesalePrice: true,
+        retailPrice: true,
+      },
+    });
+    const byFamilyId = new Map<
+      string,
+      {
+        productCount: number;
+        inheritedPriceCount: number;
+        overridePriceCount: number;
+        missingPriceCount: number;
+        priceExceptionCount: number;
+      }
+    >();
+
+    for (const family of families) {
+      byFamilyId.set(family.id, {
+        productCount: 0,
+        inheritedPriceCount: 0,
+        overridePriceCount: 0,
+        missingPriceCount: 0,
+        priceExceptionCount: 0,
+      });
+    }
+
+    const familyById = new Map(families.map((family) => [family.id, family]));
+    for (const product of products) {
+      const familyId = product.productFamilyId;
+      if (!familyId) continue;
+      const stats = byFamilyId.get(familyId);
+      const family = familyById.get(familyId);
+      if (!stats || !family) continue;
+
+      stats.productCount += 1;
+      const hasProductPrice =
+        positivePrice(product.defaultSellingPrice) != null ||
+        positivePrice(product.retailPrice) != null ||
+        positivePrice(product.wholesalePrice) != null;
+      const hasFamilyPrice =
+        positivePrice(family.defaultSellingPrice) != null ||
+        positivePrice(family.retailPrice) != null ||
+        positivePrice(family.wholesalePrice) != null;
+
+      if (hasProductPrice) stats.overridePriceCount += 1;
+      if (!hasProductPrice && hasFamilyPrice) stats.inheritedPriceCount += 1;
+      if (!hasProductPrice && !hasFamilyPrice) stats.missingPriceCount += 1;
+      if (
+        pricesAreDifferent(product.defaultSellingPrice, family.defaultSellingPrice) ||
+        pricesAreDifferent(product.retailPrice, family.retailPrice) ||
+        pricesAreDifferent(product.wholesalePrice, family.wholesalePrice)
+      ) {
+        stats.priceExceptionCount += 1;
+      }
+    }
+
+    return families.map((family) => ({
+      ...family,
+      ...(byFamilyId.get(family.id) ?? {
+        productCount: 0,
+        inheritedPriceCount: 0,
+        overridePriceCount: 0,
+        missingPriceCount: 0,
+        priceExceptionCount: 0,
+      }),
+    }));
+  }
+
+  private async assertFamilyReferences(
+    companyId: string,
+    categoryId: string,
+    divisionId?: string | null,
+  ) {
+    const category = await this.prisma.productCategory.findFirst({
+      where: { id: categoryId, deletedAt: null },
+      select: { companyId: true },
+    });
+    if (!category || category.companyId !== companyId) {
+      throw new BadRequestException('Product family category must belong to this company');
+    }
+
+    if (divisionId) {
+      const division = await this.prisma.division.findFirst({
+        where: { id: divisionId, deletedAt: null },
+        select: { companyId: true },
+      });
+      if (!division || division.companyId !== companyId) {
+        throw new BadRequestException('Product family division must belong to this company');
+      }
+    }
+  }
+
+  private assertFamilyPricing(prices: {
+    defaultPurchasePrice?: number | string | Prisma.Decimal | null;
+    defaultSellingPrice?: number | string | Prisma.Decimal | null;
+    wholesalePrice?: number | string | Prisma.Decimal | null;
+    retailPrice?: number | string | Prisma.Decimal | null;
+  }) {
+    const defaultPurchasePrice = positivePrice(prices.defaultPurchasePrice);
+    if (defaultPurchasePrice == null) return;
+
+    for (const [label, raw] of [
+      ['default selling price', prices.defaultSellingPrice],
+      ['retail price', prices.retailPrice],
+      ['wholesale price', prices.wholesalePrice],
+    ] as const) {
+      const price = positivePrice(raw);
+      if (price != null && price <= defaultPurchasePrice) {
+        throw new BadRequestException(`Family ${label} must be greater than family purchase price`);
+      }
+    }
+  }
+
+  private async assertInheritedFamilyPriceAboveProductCost(input: {
+    productName: string;
+    productType?: string | null;
+    trackInventory?: boolean | null;
+    defaultPurchasePrice?: number | string | Prisma.Decimal | null;
+    defaultSellingPrice?: number | string | Prisma.Decimal | null;
+    retailPrice?: number | string | Prisma.Decimal | null;
+    wholesalePrice?: number | string | Prisma.Decimal | null;
+    productFamilyId?: string | null;
+  }) {
+    if (!this.profit.isStockProduct(input)) return;
+    if (!input.productFamilyId) return;
+
+    const hasProductSalePrice =
+      positivePrice(input.defaultSellingPrice) != null ||
+      positivePrice(input.retailPrice) != null ||
+      positivePrice(input.wholesalePrice) != null;
+    if (hasProductSalePrice) return;
+
+    const cost = positivePrice(input.defaultPurchasePrice);
+    if (cost == null) return;
+
+    const family = await this.prisma.productFamily.findFirst({
+      where: { id: input.productFamilyId, deletedAt: null, isActive: true },
+      select: {
+        defaultSellingPrice: true,
+        retailPrice: true,
+        wholesalePrice: true,
+      },
+    });
+    const inheritedPrice =
+      positivePrice(family?.defaultSellingPrice) ??
+      positivePrice(family?.retailPrice) ??
+      positivePrice(family?.wholesalePrice);
+    if (inheritedPrice != null && inheritedPrice <= cost) {
+      throw new BadRequestException(
+        `${input.productName} inherited family selling price must be greater than purchase cost`,
+      );
+    }
   }
 
   async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
@@ -254,7 +644,8 @@ export class ProductsService {
     });
     if (!record) throw new NotFoundException('Product not found');
     await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
-    return record;
+    const [enriched] = await this.withProductListAliasesAndAvailability([record]);
+    return enriched;
   }
 
   async create(dto: CreateProductDto, user: AuthUser) {
@@ -279,6 +670,16 @@ export class ProductsService {
     this.profit.assertProductMasterPricing({
       ...dto,
       trackInventory: dto.trackInventory ?? true,
+    });
+    await this.assertInheritedFamilyPriceAboveProductCost({
+      productName: dto.name,
+      productType: dto.productType,
+      trackInventory: dto.trackInventory ?? true,
+      defaultPurchasePrice: dto.defaultPurchasePrice,
+      defaultSellingPrice: dto.defaultSellingPrice,
+      retailPrice: dto.retailPrice,
+      wholesalePrice: dto.wholesalePrice,
+      productFamilyId,
     });
 
     const record = await this.prisma.product.create({
@@ -381,6 +782,24 @@ export class ProductsService {
       retailPrice: dto.retailPrice !== undefined ? dto.retailPrice : existing.retailPrice,
       wholesalePrice:
         dto.wholesalePrice !== undefined ? dto.wholesalePrice : existing.wholesalePrice,
+    });
+    await this.assertInheritedFamilyPriceAboveProductCost({
+      productName: dto.name ?? existing.name,
+      productType: dto.productType ?? existing.productType,
+      trackInventory: dto.trackInventory ?? existing.trackInventory,
+      defaultPurchasePrice:
+        dto.defaultPurchasePrice !== undefined
+          ? dto.defaultPurchasePrice
+          : existing.defaultPurchasePrice,
+      defaultSellingPrice:
+        dto.defaultSellingPrice !== undefined
+          ? dto.defaultSellingPrice
+          : existing.defaultSellingPrice,
+      retailPrice: dto.retailPrice !== undefined ? dto.retailPrice : existing.retailPrice,
+      wholesalePrice:
+        dto.wholesalePrice !== undefined ? dto.wholesalePrice : existing.wholesalePrice,
+      productFamilyId:
+        productFamilyId !== undefined ? productFamilyId : existing.productFamilyId,
     });
 
     const record = await this.prisma.product.update({

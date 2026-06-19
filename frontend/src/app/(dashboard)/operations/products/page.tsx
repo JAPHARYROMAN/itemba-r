@@ -38,6 +38,14 @@ interface ProductFamily {
   brand?: string | null;
   categoryId: string;
   divisionId?: string | null;
+  defaultPurchasePrice?: number | string | null;
+  defaultSellingPrice?: number | string | null;
+  wholesalePrice?: number | string | null;
+  retailPrice?: number | string | null;
+  productCount?: number;
+  inheritedPriceCount?: number;
+  overridePriceCount?: number;
+  missingPriceCount?: number;
 }
 interface Unit {
   id: string;
@@ -60,6 +68,10 @@ interface Product {
   defaultPurchasePrice?: number | null;
   wholesalePrice?: number | null;
   retailPrice?: number | null;
+  effectiveSellingPrice?: number | string | null;
+  effectiveWholesalePrice?: number | string | null;
+  effectiveRetailPrice?: number | string | null;
+  priceSource?: 'PRODUCT_OVERRIDE' | 'FAMILY_DEFAULT' | 'MISSING';
   minimumStockLevel?: number | null;
   reorderLevel?: number | null;
   trackInventory: boolean;
@@ -78,7 +90,15 @@ interface Product {
   company?: { name: string } | null;
   division?: { id: string; name: string; code: string } | null;
   category?: { name: string } | null;
-  productFamily?: { id: string; name: string; brand?: string | null } | null;
+  productFamily?: {
+    id: string;
+    name: string;
+    brand?: string | null;
+    defaultPurchasePrice?: number | string | null;
+    defaultSellingPrice?: number | string | null;
+    wholesalePrice?: number | string | null;
+    retailPrice?: number | string | null;
+  } | null;
   baseUnit?: { name: string; symbol: string } | null;
 }
 
@@ -136,6 +156,18 @@ const STATUS_BADGE: Record<string, string> = {
   INACTIVE: 'bg-zinc-100 text-zinc-500 border-zinc-200',
   DISCONTINUED: 'bg-red-50 text-red-700 border-red-200',
 };
+
+const PRICE_SOURCE_BADGE: Record<string, string> = {
+  PRODUCT_OVERRIDE: 'bg-blue-50 text-blue-700 border-blue-200',
+  FAMILY_DEFAULT: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  MISSING: 'bg-red-50 text-red-700 border-red-200',
+};
+
+function priceSourceLabel(source?: string | null) {
+  if (source === 'PRODUCT_OVERRIDE') return 'Product override';
+  if (source === 'FAMILY_DEFAULT') return 'Family default';
+  return 'Missing price';
+}
 
 const BLANK: ProductForm = {
   companyId: '',
@@ -233,14 +265,28 @@ function ProductModal({
   const [categories, setCategories] = useState<Category[]>([]);
   const [families, setFamilies] = useState<ProductFamily[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
+  const [useFamilyPrice, setUseFamilyPrice] = useState(() =>
+    Boolean(
+      initial?.productFamilyId &&
+        initial.defaultSellingPrice == null &&
+        initial.wholesalePrice == null &&
+        initial.retailPrice == null,
+    ),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const requiresCost = productRequiresCost(form.productType, form.trackInventory);
   const purchaseCost = Number(form.defaultPurchasePrice || 0);
-  const defaultSellingPrice = Number(form.defaultSellingPrice || 0);
+  const selectedFamily = families.find((family) => family.id === form.productFamilyId);
+  const familySellingPrice =
+    Number(selectedFamily?.defaultSellingPrice ?? 0) ||
+    Number(selectedFamily?.retailPrice ?? 0) ||
+    Number(selectedFamily?.wholesalePrice ?? 0);
+  const hasFamilyPrice = Boolean(selectedFamily && familySellingPrice > 0);
+  const displayedSellingPrice = useFamilyPrice ? familySellingPrice : Number(form.defaultSellingPrice || 0);
   const marginPreview =
-    requiresCost && purchaseCost > 0 && defaultSellingPrice > 0
-      ? ((defaultSellingPrice - purchaseCost) / defaultSellingPrice) * 100
+    requiresCost && purchaseCost > 0 && displayedSellingPrice > 0
+      ? ((displayedSellingPrice - purchaseCost) / displayedSellingPrice) * 100
       : null;
 
   const set = <K extends keyof ProductForm>(k: K, v: ProductForm[K]) =>
@@ -304,6 +350,12 @@ function ProductModal({
     };
   }, [form.companyId, form.categoryId, form.divisionId]);
 
+  useEffect(() => {
+    if (useFamilyPrice && !form.productFamilyId) {
+      setUseFamilyPrice(false);
+    }
+  }, [form.productFamilyId, useFamilyPrice]);
+
   const handleSubmit = async () => {
     if (!form.companyId) {
       setError('Company is required');
@@ -324,6 +376,16 @@ function ProductModal({
     if (requiresCost && (!Number.isFinite(purchaseCost) || purchaseCost <= 0)) {
       setError('Stock products must have a purchase price greater than zero');
       return;
+    }
+    if (requiresCost && useFamilyPrice) {
+      if (!hasFamilyPrice) {
+        setError('Select a priced product family or enter a product selling price');
+        return;
+      }
+      if (familySellingPrice <= purchaseCost) {
+        setError('Family selling price must be greater than purchase price');
+        return;
+      }
     }
     if (requiresCost) {
       for (const [label, value] of [
@@ -390,6 +452,11 @@ function ProductModal({
       for (const k of fields) {
         const v = num(form[k] as string);
         if (v !== undefined) body[k] = v;
+      }
+      if (useFamilyPrice) {
+        body.defaultSellingPrice = null;
+        body.wholesalePrice = null;
+        body.retailPrice = null;
       }
       if (mode === 'create') {
         await backendPost('/products', body);
@@ -498,15 +565,18 @@ function ProductModal({
         <FormSelect
           label="Product Family"
           value={form.productFamilyId}
-          onChange={(e) =>
+          onChange={(e) => {
+            const family = families.find((item) => item.id === e.target.value);
             setForm((f) => ({
               ...f,
               productFamilyId: e.target.value,
               productFamilyName: '',
-              productFamilyBrand:
-                families.find((family) => family.id === e.target.value)?.brand ?? '',
-            }))
-          }
+              productFamilyBrand: family?.brand ?? '',
+              ...(useFamilyPrice
+                ? { defaultSellingPrice: '', wholesalePrice: '', retailPrice: '' }
+                : {}),
+            }));
+          }}
           placeholder={form.categoryId ? 'No family / create below' : 'Select category first'}
           disabled={!form.categoryId}
         >
@@ -516,6 +586,23 @@ function ProductModal({
             </option>
           ))}
         </FormSelect>
+        <div
+          className="rounded-lg border px-3 py-2 text-xs"
+          style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-secondary)' }}
+        >
+          <div className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+            Family price
+          </div>
+          {selectedFamily ? (
+            <div className="mt-1 space-y-1">
+              <div>Selling: {fmtTZS(selectedFamily.defaultSellingPrice)}</div>
+              <div>Retail: {fmtTZS(selectedFamily.retailPrice)}</div>
+              <div>Wholesale: {fmtTZS(selectedFamily.wholesalePrice)}</div>
+            </div>
+          ) : (
+            <div className="mt-1">Select a priced family to inherit selling prices.</div>
+          )}
+        </div>
         <FormInput
           label="New Family Name"
           value={form.productFamilyName}
@@ -599,6 +686,7 @@ function ProductModal({
           type="number"
           value={form.defaultSellingPrice}
           onChange={(e) => set('defaultSellingPrice', e.target.value)}
+          disabled={useFamilyPrice}
         />
         <FormInput
           label="Purchase Price"
@@ -618,21 +706,51 @@ function ProductModal({
           >
             Purchase cost is required for stock products.{' '}
             {marginPreview != null
-              ? `Default selling margin: ${marginPreview.toFixed(2)}%.`
+              ? `${useFamilyPrice ? 'Inherited family' : 'Default selling'} margin: ${marginPreview.toFixed(2)}%.`
               : 'Enter purchase and selling prices to preview margin.'}
           </div>
         )}
+        <label
+          className="col-span-2 flex items-start gap-3 rounded-lg border px-3 py-2 text-sm"
+          style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
+        >
+          <input
+            type="checkbox"
+            className="mt-1 rounded"
+            checked={useFamilyPrice}
+            disabled={!selectedFamily}
+            onChange={(event) => {
+              setUseFamilyPrice(event.target.checked);
+              if (event.target.checked) {
+                setForm((f) => ({
+                  ...f,
+                  defaultSellingPrice: '',
+                  wholesalePrice: '',
+                  retailPrice: '',
+                }));
+              }
+            }}
+          />
+          <span>
+            <span className="block font-medium">Use family price</span>
+            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              Clears product selling-price overrides so this product inherits prices from the selected family.
+            </span>
+          </span>
+        </label>
         <FormInput
           label="Wholesale Price"
           type="number"
           value={form.wholesalePrice}
           onChange={(e) => set('wholesalePrice', e.target.value)}
+          disabled={useFamilyPrice}
         />
         <FormInput
           label="Retail Price"
           type="number"
           value={form.retailPrice}
           onChange={(e) => set('retailPrice', e.target.value)}
+          disabled={useFamilyPrice}
         />
         <FormInput
           label="Min Stock Level"
@@ -1145,7 +1263,12 @@ export default function ProductsPage() {
                       {p.baseUnit?.symbol ?? p.baseUnit?.name ?? '—'}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums">
-                      {fmtTZS(p.defaultSellingPrice)}
+                      <div>{fmtTZS(p.effectiveSellingPrice ?? p.defaultSellingPrice)}</div>
+                      <span
+                        className={`mt-1 inline-flex items-center rounded border px-2 py-0.5 text-[10px] ${PRICE_SOURCE_BADGE[p.priceSource ?? 'MISSING'] ?? PRICE_SOURCE_BADGE.MISSING}`}
+                      >
+                        {priceSourceLabel(p.priceSource)}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums">
                       {fmtTZS(p.defaultPurchasePrice)}

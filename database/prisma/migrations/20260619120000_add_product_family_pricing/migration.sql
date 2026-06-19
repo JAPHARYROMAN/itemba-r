@@ -1,0 +1,5 @@
+ALTER TABLE "product_families"
+ADD COLUMN IF NOT EXISTS "defaultPurchasePrice" DECIMAL(18,2),
+ADD COLUMN IF NOT EXISTS "defaultSellingPrice" DECIMAL(18,2),
+ADD COLUMN IF NOT EXISTS "wholesalePrice" DECIMAL(18,2),
+ADD COLUMN IF NOT EXISTS "retailPrice" DECIMAL(18,2);

@@ -2701,6 +2701,10 @@ model ProductFamily {
   name        String
   brand       String?
   description String?
+  defaultPurchasePrice Decimal?  @db.Decimal(18, 2)
+  defaultSellingPrice  Decimal?  @db.Decimal(18, 2)
+  wholesalePrice       Decimal?  @db.Decimal(18, 2)
+  retailPrice          Decimal?  @db.Decimal(18, 2)
   isActive    Boolean   @default(true)
   deletedAt   DateTime?
   createdAt   DateTime  @default(now())

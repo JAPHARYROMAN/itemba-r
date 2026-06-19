@@ -16,6 +16,10 @@ export interface OrderProductOption {
   defaultSellingPrice?: number | string | null;
   wholesalePrice?: number | string | null;
   retailPrice?: number | string | null;
+  effectiveSellingPrice?: number | string | null;
+  effectiveWholesalePrice?: number | string | null;
+  effectiveRetailPrice?: number | string | null;
+  priceSource?: string | null;
   productType?: string | null;
   trackInventory?: boolean | null;
   sellingPrice?: number | string | null;
@@ -122,9 +126,12 @@ function defaultPriceForProduct(product: OrderProductOption, variant: OrderVaria
     return numberOrZero(product.defaultPurchasePrice ?? product.defaultSellingPrice);
   }
   return numberOrZero(
-    product.sellingPrice ??
+    product.effectiveSellingPrice ??
+      product.sellingPrice ??
       product.defaultSellingPrice ??
+      product.effectiveRetailPrice ??
       product.retailPrice ??
+      product.effectiveWholesalePrice ??
       product.wholesalePrice,
   );
 }

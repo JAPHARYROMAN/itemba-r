@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import {
   Card,
   PageHeader,
@@ -18,6 +18,7 @@ import { useAuth } from '@/hooks/use-auth';
 import {
   backendDelete,
   backendGet,
+  backendList,
   backendPatch,
   backendPost,
   normalizePaginated,
@@ -41,12 +42,58 @@ interface ProductCategory {
   parentCategory?: { id: string; name: string } | null;
 }
 
+interface ProductFamily {
+  id: string;
+  companyId: string;
+  divisionId?: string | null;
+  categoryId: string;
+  name: string;
+  brand?: string | null;
+  description?: string | null;
+  defaultPurchasePrice?: number | string | null;
+  defaultSellingPrice?: number | string | null;
+  wholesalePrice?: number | string | null;
+  retailPrice?: number | string | null;
+  isActive: boolean;
+  productCount?: number;
+  inheritedPriceCount?: number;
+  overridePriceCount?: number;
+  missingPriceCount?: number;
+  priceExceptionCount?: number;
+  division?: { id: string; name: string; code?: string | null } | null;
+}
+
+interface ProductPriceException {
+  id: string;
+  name: string;
+  productCode?: string | null;
+  defaultSellingPrice?: number | string | null;
+  wholesalePrice?: number | string | null;
+  retailPrice?: number | string | null;
+  effectiveSellingPrice?: number | string | null;
+  priceSource?: string | null;
+}
+
 interface CategoryForm {
   companyId: string;
   name: string;
   categoryType: string;
   parentCategoryId: string;
   description: string;
+  isActive: boolean;
+}
+
+interface FamilyForm {
+  companyId: string;
+  categoryId: string;
+  divisionId: string;
+  name: string;
+  brand: string;
+  description: string;
+  defaultPurchasePrice: string;
+  defaultSellingPrice: string;
+  wholesalePrice: string;
+  retailPrice: string;
   isActive: boolean;
 }
 
@@ -89,6 +136,24 @@ const BLANK_FORM: CategoryForm = {
 };
 
 const NEW_PARENT_VALUE = '__new_parent_category__';
+
+function fmtTZS(value?: number | string | null) {
+  if (value == null || value === '') return '—';
+  const n = Number(value);
+  return `TZS ${new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(n) ? n : 0)}`;
+}
+
+function familyLabel(family: ProductFamily) {
+  return family.brand ? `${family.brand} — ${family.name}` : family.name;
+}
+
+function hasPositivePrice(value: number | string | null | undefined) {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) && n > 0;
+}
 
 function CategoryModal({
   mode,
@@ -316,6 +381,174 @@ function CategoryModal({
   );
 }
 
+function FamilyModal({
+  mode,
+  category,
+  initial,
+  onClose,
+  onSaved,
+}: {
+  mode: 'create' | 'edit';
+  category: ProductCategory;
+  initial?: ProductFamily;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState<FamilyForm>(() =>
+    initial
+      ? {
+          companyId: initial.companyId,
+          categoryId: initial.categoryId,
+          divisionId: initial.divisionId ?? '',
+          name: initial.name,
+          brand: initial.brand ?? '',
+          description: initial.description ?? '',
+          defaultPurchasePrice:
+            initial.defaultPurchasePrice != null ? String(initial.defaultPurchasePrice) : '',
+          defaultSellingPrice:
+            initial.defaultSellingPrice != null ? String(initial.defaultSellingPrice) : '',
+          wholesalePrice: initial.wholesalePrice != null ? String(initial.wholesalePrice) : '',
+          retailPrice: initial.retailPrice != null ? String(initial.retailPrice) : '',
+          isActive: initial.isActive,
+        }
+      : {
+          companyId: category.companyId ?? '',
+          categoryId: category.id,
+          divisionId: '',
+          name: '',
+          brand: '',
+          description: '',
+          defaultPurchasePrice: '',
+          defaultSellingPrice: '',
+          wholesalePrice: '',
+          retailPrice: '',
+          isActive: true,
+        },
+  );
+  const [divisions, setDivisions] = useState<Array<{ id: string; name: string; code?: string | null }>>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!form.companyId) {
+      setDivisions([]);
+      return;
+    }
+    backendGet<unknown>('/divisions', { query: { companyId: form.companyId, limit: 200 } })
+      .then((payload) => {
+        if (!cancelled) setDivisions(normalizePaginated<{ id: string; name: string; code?: string | null }>(payload).data);
+      })
+      .catch(() => {
+        if (!cancelled) setDivisions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
+
+  const set = <K extends keyof FamilyForm>(key: K, value: FamilyForm[K]) =>
+    setForm((current) => ({ ...current, [key]: value }));
+
+  const handleSubmit = async () => {
+    if (!form.name.trim()) {
+      setError('Family name is required');
+      return;
+    }
+    const purchase = Number(form.defaultPurchasePrice || 0);
+    if (purchase > 0) {
+      for (const [label, value] of [
+        ['Selling price', form.defaultSellingPrice],
+        ['Wholesale price', form.wholesalePrice],
+        ['Retail price', form.retailPrice],
+      ] as const) {
+        const price = Number(value || 0);
+        if (price > 0 && price <= purchase) {
+          setError(`${label} must be greater than family purchase price`);
+          return;
+        }
+      }
+    }
+
+    const numberOrNull = (value: string) => (value.trim() ? Number(value) : null);
+    const body = {
+      companyId: form.companyId,
+      categoryId: form.categoryId,
+      divisionId: form.divisionId || null,
+      name: form.name.trim(),
+      brand: form.brand.trim() || null,
+      description: form.description.trim() || null,
+      defaultPurchasePrice: numberOrNull(form.defaultPurchasePrice),
+      defaultSellingPrice: numberOrNull(form.defaultSellingPrice),
+      wholesalePrice: numberOrNull(form.wholesalePrice),
+      retailPrice: numberOrNull(form.retailPrice),
+      isActive: form.isActive,
+    };
+
+    setSaving(true);
+    setError('');
+    try {
+      if (mode === 'create') {
+        await backendPost('/products/families', body);
+      } else {
+        await backendPatch(`/products/families/${initial!.id}`, body);
+      }
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save family');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={mode === 'create' ? `New Family In ${category.name}` : `Edit ${initial ? familyLabel(initial) : 'Family'}`}
+      size="lg"
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn variant="primary" onClick={handleSubmit} loading={saving}>
+            {mode === 'create' ? 'Create Family' : 'Save Family'}
+          </Btn>
+        </>
+      }
+    >
+      {error && (
+        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        <FormInput label="Family Name" required value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Example: 4L" />
+        <FormInput label="Brand" value={form.brand} onChange={(e) => set('brand', e.target.value)} placeholder="Example: Coral" />
+        <FormSelect label="Division" value={form.divisionId} onChange={(e) => set('divisionId', e.target.value)} placeholder="Company-wide">
+          {divisions.map((division) => (
+            <option key={division.id} value={division.id}>
+              {division.code ? `${division.code} — ${division.name}` : division.name}
+            </option>
+          ))}
+        </FormSelect>
+        <FormInput label="Family Purchase Price" type="number" value={form.defaultPurchasePrice} onChange={(e) => set('defaultPurchasePrice', e.target.value)} />
+        <FormInput label="Family Selling Price" type="number" value={form.defaultSellingPrice} onChange={(e) => set('defaultSellingPrice', e.target.value)} />
+        <FormInput label="Family Wholesale Price" type="number" value={form.wholesalePrice} onChange={(e) => set('wholesalePrice', e.target.value)} />
+        <FormInput label="Family Retail Price" type="number" value={form.retailPrice} onChange={(e) => set('retailPrice', e.target.value)} />
+        <label className="flex items-center gap-2 text-sm self-end" style={{ color: 'var(--aurora-text)' }}>
+          <input className="rounded" type="checkbox" checked={form.isActive} onChange={(e) => set('isActive', e.target.checked)} />
+          Active
+        </label>
+        <div className="col-span-2">
+          <FormTextarea label="Description" rows={2} value={form.description} onChange={(e) => set('description', e.target.value)} />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export default function ProductCategoriesPage() {
   const { hasPermission } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -330,10 +563,83 @@ export default function ProductCategoriesPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ProductCategory | null>(null);
   const [deleting, setDeleting] = useState<ProductCategory | null>(null);
+  const [expandedCategoryId, setExpandedCategoryId] = useState('');
+  const [familiesByCategory, setFamiliesByCategory] = useState<Record<string, ProductFamily[]>>({});
+  const [familyLoading, setFamilyLoading] = useState<Record<string, boolean>>({});
+  const [creatingFamilyFor, setCreatingFamilyFor] = useState<ProductCategory | null>(null);
+  const [editingFamily, setEditingFamily] = useState<{ category: ProductCategory; family: ProductFamily } | null>(null);
+  const [exceptionsFamily, setExceptionsFamily] = useState<{ category: ProductCategory; family: ProductFamily } | null>(null);
+  const [familyExceptions, setFamilyExceptions] = useState<ProductPriceException[]>([]);
+  const [exceptionsLoading, setExceptionsLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const canView = hasPermission('product_categories.view');
   const canCreate = hasPermission('product_categories.manage');
+
+  const loadFamiliesForCategory = useCallback(async (category: ProductCategory) => {
+    if (!category.companyId) return;
+    setFamilyLoading((current) => ({ ...current, [category.id]: true }));
+    try {
+      const records = await backendList<ProductFamily>('/products/families', {
+        query: {
+          companyId: category.companyId,
+          categoryId: category.id,
+          limit: 500,
+        },
+      });
+      setFamiliesByCategory((current) => ({ ...current, [category.id]: records }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load product families');
+      setFamiliesByCategory((current) => ({ ...current, [category.id]: [] }));
+    } finally {
+      setFamilyLoading((current) => ({ ...current, [category.id]: false }));
+    }
+  }, []);
+
+  const toggleFamilies = async (category: ProductCategory) => {
+    if (expandedCategoryId === category.id) {
+      setExpandedCategoryId('');
+      return;
+    }
+    setExpandedCategoryId(category.id);
+    if (!familiesByCategory[category.id]) {
+      await loadFamiliesForCategory(category);
+    }
+  };
+
+  const refreshFamilies = async (category: ProductCategory) => {
+    await loadFamiliesForCategory(category);
+  };
+
+  const openExceptions = async (category: ProductCategory, family: ProductFamily) => {
+    setExceptionsFamily({ category, family });
+    setExceptionsLoading(true);
+    setFamilyExceptions([]);
+    try {
+      const products = await backendList<ProductPriceException>('/products', {
+        query: {
+          companyId: category.companyId || undefined,
+          categoryId: category.id,
+          productFamilyId: family.id,
+          limit: 500,
+        },
+      });
+      setFamilyExceptions(
+        products.filter(
+          (product) =>
+            product.priceSource !== 'FAMILY_DEFAULT' ||
+            (hasPositivePrice(product.defaultSellingPrice) &&
+              hasPositivePrice(family.defaultSellingPrice) &&
+              Number(product.defaultSellingPrice) !== Number(family.defaultSellingPrice)),
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load price exceptions');
+      setFamilyExceptions([]);
+    } finally {
+      setExceptionsLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!canView) return;
@@ -443,6 +749,83 @@ export default function ProductCategoriesPage() {
             load();
           }}
         />
+      )}
+      {creatingFamilyFor && (
+        <FamilyModal
+          mode="create"
+          category={creatingFamilyFor}
+          onClose={() => setCreatingFamilyFor(null)}
+          onSaved={() => {
+            const category = creatingFamilyFor;
+            setCreatingFamilyFor(null);
+            void refreshFamilies(category);
+          }}
+        />
+      )}
+      {editingFamily && (
+        <FamilyModal
+          mode="edit"
+          category={editingFamily.category}
+          initial={editingFamily.family}
+          onClose={() => setEditingFamily(null)}
+          onSaved={() => {
+            const category = editingFamily.category;
+            setEditingFamily(null);
+            void refreshFamilies(category);
+          }}
+        />
+      )}
+      {exceptionsFamily && (
+        <Modal
+          open
+          title={`Price Exceptions - ${familyLabel(exceptionsFamily.family)}`}
+          onClose={() => setExceptionsFamily(null)}
+          size="lg"
+          footer={
+            <Btn variant="secondary" onClick={() => setExceptionsFamily(null)}>
+              Close
+            </Btn>
+          }
+        >
+          <div className="mb-3 rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-secondary)' }}>
+            Family selling price: <span className="font-semibold" style={{ color: 'var(--aurora-text)' }}>{fmtTZS(exceptionsFamily.family.defaultSellingPrice)}</span>
+          </div>
+          {exceptionsLoading ? (
+            <PageSpinner />
+          ) : familyExceptions.length === 0 ? (
+            <p className="py-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+              No price exceptions found for this family.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
+                    <th className="px-3 py-2">Product</th>
+                    <th className="px-3 py-2 text-right">Product Price</th>
+                    <th className="px-3 py-2 text-right">Effective Price</th>
+                    <th className="px-3 py-2">Source</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {familyExceptions.map((product) => (
+                    <tr key={product.id}>
+                      <td className="px-3 py-2">
+                        <div className="font-medium">{product.name}</div>
+                        <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                          {product.productCode ?? 'No code'}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right">{fmtTZS(product.defaultSellingPrice)}</td>
+                      <td className="px-3 py-2 text-right">{fmtTZS(product.effectiveSellingPrice)}</td>
+                      <td className="px-3 py-2 text-xs">{product.priceSource?.replace(/_/g, ' ') ?? 'MISSING'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Modal>
       )}
       <ConfirmDialog
         open={!!deleting}
@@ -572,8 +955,18 @@ export default function ProductCategoriesPage() {
                 </tr>
               ) : (
                 data.data.map((cat) => (
+                  <Fragment key={cat.id}>
                   <tr key={cat.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium">{cat.name}</td>
+                    <td className="px-4 py-3">
+                      <div className="font-medium">{cat.name}</div>
+                      <button
+                        type="button"
+                        className="mt-1 text-xs font-semibold text-brand-600 hover:underline"
+                        onClick={() => void toggleFamilies(cat)}
+                      >
+                        {expandedCategoryId === cat.id ? 'Hide families' : 'View families'}
+                      </button>
+                    </td>
                     <td className="px-4 py-3 text-xs">{cat.categoryType.replace(/_/g, ' ')}</td>
                     <td className="px-4 py-3 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
                       {cat.parentCategory?.name ?? '—'}
@@ -589,6 +982,9 @@ export default function ProductCategoriesPage() {
                     {canCreate && (
                       <td className="px-4 py-3 text-right">
                         <div className="flex justify-end gap-1">
+                          <Btn variant="ghost" size="xs" onClick={() => setCreatingFamilyFor(cat)}>
+                            + Family
+                          </Btn>
                           <Btn variant="ghost" size="xs" onClick={() => setEditing(cat)}>
                             Edit
                           </Btn>
@@ -599,6 +995,78 @@ export default function ProductCategoriesPage() {
                       </td>
                     )}
                   </tr>
+                  {expandedCategoryId === cat.id && (
+                    <tr key={`${cat.id}-families`}>
+                      <td colSpan={6} className="bg-slate-50 px-4 py-4">
+                        {familyLoading[cat.id] ? (
+                          <PageSpinner />
+                        ) : !(familiesByCategory[cat.id] ?? []).length ? (
+                          <div className="rounded-lg border border-dashed px-4 py-6 text-center text-sm" style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}>
+                            No families in this category yet.
+                            {canCreate && (
+                              <button type="button" className="ml-2 font-semibold text-brand-600 hover:underline" onClick={() => setCreatingFamilyFor(cat)}>
+                                Create family
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto rounded-lg border bg-white" style={{ borderColor: 'var(--aurora-border)' }}>
+                            <table className="w-full text-xs min-w-[900px]">
+                              <thead>
+                                <tr className="text-left uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                                  <th className="px-3 py-2">Family</th>
+                                  <th className="px-3 py-2 text-right">Selling</th>
+                                  <th className="px-3 py-2 text-right">Wholesale</th>
+                                  <th className="px-3 py-2 text-right">Retail</th>
+                                  <th className="px-3 py-2 text-center">Products</th>
+                                  <th className="px-3 py-2 text-center">Inherited</th>
+                                  <th className="px-3 py-2 text-center">Overrides</th>
+                                  <th className="px-3 py-2 text-center">Missing</th>
+                                  <th className="px-3 py-2">Status</th>
+                                  <th className="px-3 py-2 text-right">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {(familiesByCategory[cat.id] ?? []).map((family) => (
+                                  <tr key={family.id}>
+                                    <td className="px-3 py-2">
+                                      <div className="font-semibold">{familyLabel(family)}</div>
+                                      <div style={{ color: 'var(--aurora-text-muted)' }}>
+                                        {family.division?.name ?? 'Company-wide'}
+                                      </div>
+                                    </td>
+                                    <td className="px-3 py-2 text-right">{fmtTZS(family.defaultSellingPrice)}</td>
+                                    <td className="px-3 py-2 text-right">{fmtTZS(family.wholesalePrice)}</td>
+                                    <td className="px-3 py-2 text-right">{fmtTZS(family.retailPrice)}</td>
+                                    <td className="px-3 py-2 text-center">{family.productCount ?? 0}</td>
+                                    <td className="px-3 py-2 text-center text-emerald-700">{family.inheritedPriceCount ?? 0}</td>
+                                    <td className="px-3 py-2 text-center text-blue-700">{family.overridePriceCount ?? 0}</td>
+                                    <td className="px-3 py-2 text-center text-red-700">{family.missingPriceCount ?? 0}</td>
+                                    <td className="px-3 py-2">
+                                      <span className={`inline-flex rounded border px-2 py-0.5 ${family.isActive ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-zinc-200 bg-zinc-100 text-zinc-500'}`}>
+                                        {family.isActive ? 'Active' : 'Inactive'}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                                      <Btn variant="ghost" size="xs" onClick={() => void openExceptions(cat, family)}>
+                                        Exceptions
+                                      </Btn>
+                                      {canCreate && (
+                                        <Btn variant="ghost" size="xs" onClick={() => setEditingFamily({ category: cat, family })}>
+                                          Edit
+                                        </Btn>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))
               )}
             </tbody>

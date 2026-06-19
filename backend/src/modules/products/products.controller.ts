@@ -4,6 +4,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductDto } from './dto/query-product.dto';
 import { QueryProductFamilyDto } from './dto/query-product-family.dto';
+import { CreateProductFamilyDto, UpdateProductFamilyDto } from './dto/manage-product-family.dto';
 import {
   RequireAnyPermissions,
   RequirePermissions,
@@ -32,6 +33,28 @@ export class ProductsController {
   @RequireAnyPermissions('products.view', 'operations.dashboard.view')
   findFamilies(@Query() query: QueryProductFamilyDto, @CurrentUser() user: AuthUser) {
     return this.service.findFamilies(query, user);
+  }
+
+  @Post('families')
+  @RequirePermissions('product_categories.manage')
+  createFamily(@Body() dto: CreateProductFamilyDto, @CurrentUser() user: AuthUser) {
+    return this.service.createFamily(dto, user);
+  }
+
+  @Patch('families/:id')
+  @RequirePermissions('product_categories.manage')
+  updateFamily(
+    @Param('id') id: string,
+    @Body() dto: UpdateProductFamilyDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.updateFamily(id, dto, user);
+  }
+
+  @Delete('families/:id')
+  @RequirePermissions('product_categories.manage')
+  removeFamily(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.removeFamily(id, user);
   }
 
   @Get(':id')

@@ -77,6 +77,10 @@ interface Product {
   retailPrice?: number | string | null;
   wholesalePrice?: number | string | null;
   sellingPrice?: number | string | null;
+  effectiveSellingPrice?: number | string | null;
+  effectiveRetailPrice?: number | string | null;
+  effectiveWholesalePrice?: number | string | null;
+  priceSource?: string | null;
   productType?: string | null;
   trackInventory?: boolean | null;
   availableStock?: number | string | null;
@@ -247,9 +251,12 @@ function productCode(product: Product) {
 
 function productPrice(product: Product) {
   return normalizeNumber(
-    product.sellingPrice ??
+    product.effectiveSellingPrice ??
+      product.sellingPrice ??
       product.defaultSellingPrice ??
+      product.effectiveRetailPrice ??
       product.retailPrice ??
+      product.effectiveWholesalePrice ??
       product.wholesalePrice ??
       0,
   );
