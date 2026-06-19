@@ -148,10 +148,12 @@ export class ProductsService {
       id: string;
       companyId: string;
       baseUnitId: string;
+      defaultPurchasePrice?: unknown;
       defaultSellingPrice?: unknown;
       retailPrice?: unknown;
       wholesalePrice?: unknown;
       productFamily?: {
+        defaultPurchasePrice?: unknown;
         defaultSellingPrice?: unknown;
         retailPrice?: unknown;
         wholesalePrice?: unknown;
@@ -206,8 +208,10 @@ export class ProductsService {
         })
         : null;
       const productSellingPrice = positivePrice(product.defaultSellingPrice);
+      const productPurchasePrice = positivePrice(product.defaultPurchasePrice);
       const productRetailPrice = positivePrice(product.retailPrice);
       const productWholesalePrice = positivePrice(product.wholesalePrice);
+      const familyPurchasePrice = positivePrice(product.productFamily?.defaultPurchasePrice);
       const familySellingPrice = positivePrice(product.productFamily?.defaultSellingPrice);
       const familyRetailPrice = positivePrice(product.productFamily?.retailPrice);
       const familyWholesalePrice = positivePrice(product.productFamily?.wholesalePrice);
@@ -218,6 +222,7 @@ export class ProductsService {
         familySellingPrice ??
         familyRetailPrice ??
         familyWholesalePrice;
+      const effectivePurchasePrice = productPurchasePrice ?? familyPurchasePrice;
       const effectiveWholesalePrice = productWholesalePrice ?? familyWholesalePrice;
       const effectiveRetailPrice = productRetailPrice ?? familyRetailPrice;
       const priceSource =
@@ -231,6 +236,7 @@ export class ProductsService {
         ...product,
         defaultUnitId: product.baseUnitId,
         effectiveSellingPrice,
+        effectivePurchasePrice,
         effectiveWholesalePrice,
         effectiveRetailPrice,
         priceSource,
@@ -568,6 +574,19 @@ export class ProductsService {
     }
   }
 
+  private async findFamilyPricing(productFamilyId?: string | null) {
+    if (!productFamilyId) return null;
+    return this.prisma.productFamily.findFirst({
+      where: { id: productFamilyId, deletedAt: null, isActive: true },
+      select: {
+        defaultPurchasePrice: true,
+        defaultSellingPrice: true,
+        retailPrice: true,
+        wholesalePrice: true,
+      },
+    });
+  }
+
   private assertFamilyPricing(prices: {
     defaultPurchasePrice?: number | string | Prisma.Decimal | null;
     defaultSellingPrice?: number | string | Prisma.Decimal | null;
@@ -608,17 +627,19 @@ export class ProductsService {
       positivePrice(input.wholesalePrice) != null;
     if (hasProductSalePrice) return;
 
-    const cost = positivePrice(input.defaultPurchasePrice);
-    if (cost == null) return;
-
     const family = await this.prisma.productFamily.findFirst({
       where: { id: input.productFamilyId, deletedAt: null, isActive: true },
       select: {
+        defaultPurchasePrice: true,
         defaultSellingPrice: true,
         retailPrice: true,
         wholesalePrice: true,
       },
     });
+    const cost =
+      positivePrice(input.defaultPurchasePrice) ?? positivePrice(family?.defaultPurchasePrice);
+    if (cost == null) return;
+
     const inheritedPrice =
       positivePrice(family?.defaultSellingPrice) ??
       positivePrice(family?.retailPrice) ??
@@ -660,6 +681,9 @@ export class ProductsService {
     });
     const userId = user.id;
     const productCode = normalizeProductCode(dto.productCode) ?? generateProductCode();
+    const familyPricing = await this.findFamilyPricing(productFamilyId);
+    const effectiveDefaultPurchasePrice =
+      dto.defaultPurchasePrice ?? familyPricing?.defaultPurchasePrice ?? null;
 
     const existing = await this.prisma.product.findFirst({
       where: { productCode, companyId: dto.companyId, deletedAt: null },
@@ -670,12 +694,13 @@ export class ProductsService {
     this.profit.assertProductMasterPricing({
       ...dto,
       trackInventory: dto.trackInventory ?? true,
+      defaultPurchasePrice: effectiveDefaultPurchasePrice,
     });
     await this.assertInheritedFamilyPriceAboveProductCost({
       productName: dto.name,
       productType: dto.productType,
       trackInventory: dto.trackInventory ?? true,
-      defaultPurchasePrice: dto.defaultPurchasePrice,
+      defaultPurchasePrice: effectiveDefaultPurchasePrice,
       defaultSellingPrice: dto.defaultSellingPrice,
       retailPrice: dto.retailPrice,
       wholesalePrice: dto.wholesalePrice,
@@ -701,7 +726,7 @@ export class ProductsService {
         salesUnitId: dto.salesUnitId,
         barcode: dto.barcode,
         sku: dto.sku,
-        defaultPurchasePrice: dto.defaultPurchasePrice,
+        defaultPurchasePrice: effectiveDefaultPurchasePrice,
         defaultSellingPrice: dto.defaultSellingPrice,
         wholesalePrice: dto.wholesalePrice,
         retailPrice: dto.retailPrice,
@@ -753,6 +778,13 @@ export class ProductsService {
       existing.productFamilyId,
       dto.categoryId !== undefined || dto.divisionId !== undefined,
     );
+    const effectiveProductFamilyId =
+      productFamilyId !== undefined ? productFamilyId : existing.productFamilyId;
+    const familyPricing = await this.findFamilyPricing(effectiveProductFamilyId);
+    const effectiveDefaultPurchasePrice =
+      dto.defaultPurchasePrice !== undefined
+        ? dto.defaultPurchasePrice
+        : existing.defaultPurchasePrice ?? familyPricing?.defaultPurchasePrice ?? null;
 
     if (productCode && productCode !== existing.productCode) {
       const duplicate = await this.prisma.product.findFirst({
@@ -771,10 +803,7 @@ export class ProductsService {
       name: dto.name ?? existing.name,
       productType: dto.productType ?? existing.productType,
       trackInventory: dto.trackInventory ?? existing.trackInventory,
-      defaultPurchasePrice:
-        dto.defaultPurchasePrice !== undefined
-          ? dto.defaultPurchasePrice
-          : existing.defaultPurchasePrice,
+      defaultPurchasePrice: effectiveDefaultPurchasePrice,
       defaultSellingPrice:
         dto.defaultSellingPrice !== undefined
           ? dto.defaultSellingPrice
@@ -787,10 +816,7 @@ export class ProductsService {
       productName: dto.name ?? existing.name,
       productType: dto.productType ?? existing.productType,
       trackInventory: dto.trackInventory ?? existing.trackInventory,
-      defaultPurchasePrice:
-        dto.defaultPurchasePrice !== undefined
-          ? dto.defaultPurchasePrice
-          : existing.defaultPurchasePrice,
+      defaultPurchasePrice: effectiveDefaultPurchasePrice,
       defaultSellingPrice:
         dto.defaultSellingPrice !== undefined
           ? dto.defaultSellingPrice
@@ -798,8 +824,7 @@ export class ProductsService {
       retailPrice: dto.retailPrice !== undefined ? dto.retailPrice : existing.retailPrice,
       wholesalePrice:
         dto.wholesalePrice !== undefined ? dto.wholesalePrice : existing.wholesalePrice,
-      productFamilyId:
-        productFamilyId !== undefined ? productFamilyId : existing.productFamilyId,
+      productFamilyId: effectiveProductFamilyId,
     });
 
     const record = await this.prisma.product.update({

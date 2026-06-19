@@ -38,6 +38,9 @@ type ProductForProfit = {
   productType: string;
   trackInventory: boolean;
   defaultPurchasePrice: Prisma.Decimal | number | string | null;
+  productFamily?: {
+    defaultPurchasePrice: Prisma.Decimal | number | string | null;
+  } | null;
 };
 
 type BalanceForProfit = {
@@ -141,6 +144,7 @@ export class ProfitService {
         productType: true,
         trackInventory: true,
         defaultPurchasePrice: true,
+        productFamily: { select: { defaultPurchasePrice: true } },
       },
     });
     const productById = new Map(products.map((product) => [product.id, product]));
@@ -171,6 +175,7 @@ export class ProfitService {
         productType: true,
         trackInventory: true,
         defaultPurchasePrice: true,
+        productFamily: { select: { defaultPurchasePrice: true } },
       },
     });
     if (!product || !this.isStockProduct(product)) return;
@@ -225,6 +230,7 @@ export class ProfitService {
         productType: true,
         trackInventory: true,
         defaultPurchasePrice: true,
+        productFamily: { select: { defaultPurchasePrice: true } },
       },
     });
     const productById = new Map(products.map((product) => [product.id, product]));
@@ -396,7 +402,24 @@ export class ProfitService {
       this.prisma.product.findMany({
         where: {
           ...productWhere,
-          OR: [{ defaultPurchasePrice: null }, { defaultPurchasePrice: { lte: 0 } }],
+          AND: [
+            { OR: [{ defaultPurchasePrice: null }, { defaultPurchasePrice: { lte: 0 } }] },
+            {
+              OR: [
+                { productFamilyId: null },
+                {
+                  productFamily: {
+                    is: {
+                      OR: [
+                        { defaultPurchasePrice: null },
+                        { defaultPurchasePrice: { lte: 0 } },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+          ],
         },
         select: {
           id: true,
@@ -405,6 +428,7 @@ export class ProfitService {
           companyId: true,
           divisionId: true,
           defaultPurchasePrice: true,
+          productFamily: { select: { defaultPurchasePrice: true } },
           company: { select: { id: true, name: true, code: true } },
           division: { select: { id: true, name: true, code: true } },
         },
@@ -420,7 +444,15 @@ export class ProfitService {
           product: productWhere,
         },
         include: {
-          product: { select: { id: true, productCode: true, name: true, defaultPurchasePrice: true } },
+          product: {
+            select: {
+              id: true,
+              productCode: true,
+              name: true,
+              defaultPurchasePrice: true,
+              productFamily: { select: { defaultPurchasePrice: true } },
+            },
+          },
           company: { select: { id: true, name: true, code: true } },
           division: { select: { id: true, name: true, code: true } },
           branch: { select: { id: true, name: true, code: true } },
@@ -441,7 +473,9 @@ export class ProfitService {
         branch: null,
         quantityOnHand: null,
         averageCost: null,
-        defaultPurchasePrice: Number(product.defaultPurchasePrice ?? 0),
+        defaultPurchasePrice: Number(
+          product.defaultPurchasePrice ?? product.productFamily?.defaultPurchasePrice ?? 0,
+        ),
         message: 'Product master purchase cost is missing or zero.',
       })),
       ...stockCostGaps.map((balance) => ({
@@ -454,7 +488,11 @@ export class ProfitService {
         branch: balance.branch,
         quantityOnHand: Number(balance.quantityOnHand),
         averageCost: Number(balance.averageCost),
-        defaultPurchasePrice: Number(balance.product.defaultPurchasePrice ?? 0),
+        defaultPurchasePrice: Number(
+          balance.product.defaultPurchasePrice ??
+            balance.product.productFamily?.defaultPurchasePrice ??
+            0,
+        ),
         message: 'Branch stock exists with missing or zero average cost.',
       })),
     ];
@@ -645,6 +683,7 @@ export class ProfitService {
             productType: true,
             trackInventory: true,
             defaultPurchasePrice: true,
+            productFamily: { select: { defaultPurchasePrice: true } },
           },
         },
         salesOrder: {
@@ -834,7 +873,9 @@ export class ProfitService {
       return { unitCost: averageCost, source: ProfitCostSource.BRANCH_AVERAGE_COST };
     }
 
-    const defaultCost = Number(product.defaultPurchasePrice ?? 0);
+    const defaultCost = Number(
+      product.defaultPurchasePrice ?? product.productFamily?.defaultPurchasePrice ?? 0,
+    );
     if (Number.isFinite(defaultCost) && defaultCost > 0) {
       return { unitCost: defaultCost, source: ProfitCostSource.DEFAULT_PURCHASE_PRICE };
     }

@@ -69,6 +69,7 @@ interface Product {
   wholesalePrice?: number | null;
   retailPrice?: number | null;
   effectiveSellingPrice?: number | string | null;
+  effectivePurchasePrice?: number | string | null;
   effectiveWholesalePrice?: number | string | null;
   effectiveRetailPrice?: number | string | null;
   priceSource?: 'PRODUCT_OVERRIDE' | 'FAMILY_DEFAULT' | 'MISSING';
@@ -208,6 +209,32 @@ function fmtTZS(n?: number | string | null) {
   );
 }
 
+function priceInputValue(value?: number | string | null) {
+  if (value == null || value === '') return '';
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? String(value) : '';
+}
+
+function familyPricePatch(family?: ProductFamily | null): Pick<
+  ProductForm,
+  'defaultPurchasePrice' | 'defaultSellingPrice' | 'wholesalePrice' | 'retailPrice'
+> {
+  return {
+    defaultPurchasePrice: priceInputValue(family?.defaultPurchasePrice),
+    defaultSellingPrice: priceInputValue(family?.defaultSellingPrice),
+    wholesalePrice: priceInputValue(family?.wholesalePrice),
+    retailPrice: priceInputValue(family?.retailPrice),
+  };
+}
+
+function familySellingPriceValue(family?: ProductFamily | null) {
+  return (
+    Number(family?.defaultSellingPrice ?? 0) ||
+    Number(family?.retailPrice ?? 0) ||
+    Number(family?.wholesalePrice ?? 0)
+  );
+}
+
 function productRequiresCost(productType: string, trackInventory: boolean) {
   if (!trackInventory) return false;
   return !['SERVICE', 'NON_STOCK_ITEM'].includes(String(productType).toUpperCase());
@@ -276,14 +303,12 @@ function ProductModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const requiresCost = productRequiresCost(form.productType, form.trackInventory);
-  const purchaseCost = Number(form.defaultPurchasePrice || 0);
   const selectedFamily = families.find((family) => family.id === form.productFamilyId);
-  const familySellingPrice =
-    Number(selectedFamily?.defaultSellingPrice ?? 0) ||
-    Number(selectedFamily?.retailPrice ?? 0) ||
-    Number(selectedFamily?.wholesalePrice ?? 0);
+  const familySellingPrice = familySellingPriceValue(selectedFamily);
   const hasFamilyPrice = Boolean(selectedFamily && familySellingPrice > 0);
-  const displayedSellingPrice = useFamilyPrice ? familySellingPrice : Number(form.defaultSellingPrice || 0);
+  const purchaseCost = Number(form.defaultPurchasePrice || selectedFamily?.defaultPurchasePrice || 0);
+  const displayedSellingPrice =
+    Number(form.defaultSellingPrice || 0) || (useFamilyPrice ? familySellingPrice : 0);
   const marginPreview =
     requiresCost && purchaseCost > 0 && displayedSellingPrice > 0
       ? ((displayedSellingPrice - purchaseCost) / displayedSellingPrice) * 100
@@ -510,6 +535,7 @@ function ProductModal({
               productFamilyId: '',
               productFamilyName: '',
               productFamilyBrand: '',
+              ...(useFamilyPrice ? familyPricePatch(null) : {}),
             }))
           }
           placeholder="Select company"
@@ -532,6 +558,7 @@ function ProductModal({
               productFamilyId: '',
               productFamilyName: '',
               productFamilyBrand: '',
+              ...(useFamilyPrice ? familyPricePatch(null) : {}),
             }))
           }
           placeholder={form.companyId ? 'Select category' : 'Select company first'}
@@ -552,6 +579,7 @@ function ProductModal({
               productFamilyId: '',
               productFamilyName: '',
               productFamilyBrand: '',
+              ...(useFamilyPrice ? familyPricePatch(null) : {}),
             }))
           }
           placeholder={form.companyId ? 'Company-wide (no division)' : 'Select company first'}
@@ -567,14 +595,14 @@ function ProductModal({
           value={form.productFamilyId}
           onChange={(e) => {
             const family = families.find((item) => item.id === e.target.value);
+            const shouldUseFamilyPrice = Boolean(family && familySellingPriceValue(family) > 0);
+            setUseFamilyPrice(shouldUseFamilyPrice);
             setForm((f) => ({
               ...f,
               productFamilyId: e.target.value,
               productFamilyName: '',
               productFamilyBrand: family?.brand ?? '',
-              ...(useFamilyPrice
-                ? { defaultSellingPrice: '', wholesalePrice: '', retailPrice: '' }
-                : {}),
+              ...(family ? familyPricePatch(family) : familyPricePatch(null)),
             }));
           }}
           placeholder={form.categoryId ? 'No family / create below' : 'Select category first'}
@@ -595,6 +623,7 @@ function ProductModal({
           </div>
           {selectedFamily ? (
             <div className="mt-1 space-y-1">
+              <div>Purchase: {fmtTZS(selectedFamily.defaultPurchasePrice)}</div>
               <div>Selling: {fmtTZS(selectedFamily.defaultSellingPrice)}</div>
               <div>Retail: {fmtTZS(selectedFamily.retailPrice)}</div>
               <div>Wholesale: {fmtTZS(selectedFamily.wholesalePrice)}</div>
@@ -606,13 +635,14 @@ function ProductModal({
         <FormInput
           label="New Family Name"
           value={form.productFamilyName}
-          onChange={(e) =>
+          onChange={(e) => {
+            if (e.target.value.trim()) setUseFamilyPrice(false);
             setForm((f) => ({
               ...f,
               productFamilyName: e.target.value,
               productFamilyId: e.target.value.trim() ? '' : f.productFamilyId,
-            }))
-          }
+            }));
+          }}
           placeholder="e.g. Coral Pro-Guard"
         />
         <FormInput
@@ -721,12 +751,10 @@ function ProductModal({
             disabled={!selectedFamily}
             onChange={(event) => {
               setUseFamilyPrice(event.target.checked);
-              if (event.target.checked) {
+              if (event.target.checked && selectedFamily) {
                 setForm((f) => ({
                   ...f,
-                  defaultSellingPrice: '',
-                  wholesalePrice: '',
-                  retailPrice: '',
+                  ...familyPricePatch(selectedFamily),
                 }));
               }
             }}
@@ -1271,7 +1299,7 @@ export default function ProductsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums">
-                      {fmtTZS(p.defaultPurchasePrice)}
+                      {fmtTZS(p.effectivePurchasePrice ?? p.defaultPurchasePrice)}
                     </td>
                     <td className="px-4 py-3">
                       <span
