@@ -13,6 +13,7 @@ import {
   FormSelect,
   FormTextarea,
   ConfirmDialog,
+  showToast,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import {
@@ -572,6 +573,7 @@ export default function ProductCategoriesPage() {
   const [familyExceptions, setFamilyExceptions] = useState<ProductPriceException[]>([]);
   const [exceptionsLoading, setExceptionsLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [statusUpdatingId, setStatusUpdatingId] = useState('');
 
   const canView = hasPermission('product_categories.view');
   const canCreate = hasPermission('product_categories.manage');
@@ -702,6 +704,28 @@ export default function ProductCategoriesPage() {
       setError(err instanceof Error ? err.message : 'Failed to delete product category');
     } finally {
       setDeleteLoading(false);
+    }
+  };
+
+  const handleToggleStatus = async (category: ProductCategory) => {
+    setStatusUpdatingId(category.id);
+    setError(null);
+    const nextActive = !category.isActive;
+    try {
+      await backendPatch(`/product-categories/${category.id}`, { isActive: nextActive });
+      showToast(
+        'success',
+        nextActive ? 'Category activated' : 'Category deactivated',
+        category.name,
+      );
+      await load();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to update product category status';
+      setError(message);
+      showToast('error', 'Could not update category', message);
+    } finally {
+      setStatusUpdatingId('');
     }
   };
 
@@ -984,6 +1008,14 @@ export default function ProductCategoriesPage() {
                         <div className="flex justify-end gap-1">
                           <Btn variant="ghost" size="xs" onClick={() => setCreatingFamilyFor(cat)}>
                             + Family
+                          </Btn>
+                          <Btn
+                            variant={cat.isActive ? 'warning' : 'success'}
+                            size="xs"
+                            loading={statusUpdatingId === cat.id}
+                            onClick={() => void handleToggleStatus(cat)}
+                          >
+                            {cat.isActive ? 'Deactivate' : 'Activate'}
                           </Btn>
                           <Btn variant="ghost" size="xs" onClick={() => setEditing(cat)}>
                             Edit
