@@ -103,6 +103,11 @@ interface Product {
   baseUnit?: { name: string; symbol: string } | null;
 }
 
+type ProductCreateResponse = Product & {
+  generatedFamilyProducts?: Product[];
+  skippedFamilyProducts?: Array<{ productFamilyId: string; familyName: string; reason: string }>;
+};
+
 interface ProductForm {
   companyId: string;
   divisionId: string;
@@ -235,6 +240,13 @@ function familySellingPriceValue(family?: ProductFamily | null) {
   );
 }
 
+function familyVariantLabel(familyName: string) {
+  const trimmed = familyName.trim();
+  const match = trimmed.match(/^(\d+(?:[.,]\d+)?)\s*(l|ltr|litre|liter|litres|liters)$/i);
+  if (!match) return trimmed;
+  return `${match[1].replace(',', '.')} LTR`;
+}
+
 function productRequiresCost(productType: string, trackInventory: boolean) {
   if (!trackInventory) return false;
   return !['SERVICE', 'NON_STOCK_ITEM'].includes(String(productType).toUpperCase());
@@ -300,10 +312,16 @@ function ProductModal({
         initial.retailPrice == null,
     ),
   );
+  const [createFamilyVariants, setCreateFamilyVariants] = useState(mode === 'create');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const requiresCost = productRequiresCost(form.productType, form.trackInventory);
   const selectedFamily = families.find((family) => family.id === form.productFamilyId);
+  const siblingFamilies =
+    mode === 'create' && selectedFamily
+      ? families.filter((family) => family.id !== selectedFamily.id)
+      : [];
+  const canCreateFamilyVariants = Boolean(selectedFamily && siblingFamilies.length > 0);
   const familySellingPrice = familySellingPriceValue(selectedFamily);
   const hasFamilyPrice = Boolean(selectedFamily && familySellingPrice > 0);
   const purchaseCost = Number(form.defaultPurchasePrice || selectedFamily?.defaultPurchasePrice || 0);
@@ -466,6 +484,9 @@ function ProductModal({
       // populated => assign to that division; omit on create when blank.
       if (mode === 'edit') body.divisionId = form.divisionId || null;
       else if (form.divisionId) body.divisionId = form.divisionId;
+      if (mode === 'create' && createFamilyVariants && canCreateFamilyVariants) {
+        body.createFamilyVariants = true;
+      }
       const fields: (keyof ProductForm)[] = [
         'defaultSellingPrice',
         'defaultPurchasePrice',
@@ -484,11 +505,19 @@ function ProductModal({
         body.retailPrice = null;
       }
       if (mode === 'create') {
-        await backendPost('/products', body);
+        const created = await backendPost<ProductCreateResponse>('/products', body);
+        const generatedCount = created.generatedFamilyProducts?.length ?? 0;
+        showToast(
+          'success',
+          'Product created',
+          generatedCount > 0
+            ? `${form.name.trim()} plus ${generatedCount} family-size product${generatedCount === 1 ? '' : 's'}`
+            : form.name.trim(),
+        );
       } else {
         await backendPatch(`/products/${initial!.id}`, body);
+        showToast('success', 'Product updated', form.name.trim());
       }
-      showToast('success', mode === 'create' ? 'Product created' : 'Product updated', form.name.trim());
       onSaved();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed';
@@ -766,6 +795,52 @@ function ProductModal({
             </span>
           </span>
         </label>
+        {mode === 'create' && (
+          <label
+            className="col-span-2 flex items-start gap-3 rounded-lg border px-3 py-2 text-sm"
+            style={{
+              borderColor: canCreateFamilyVariants
+                ? 'var(--aurora-border)'
+                : 'rgba(148, 163, 184, 0.28)',
+              color: 'var(--aurora-text)',
+            }}
+          >
+            <input
+              type="checkbox"
+              className="mt-1 rounded"
+              checked={createFamilyVariants && canCreateFamilyVariants}
+              disabled={!canCreateFamilyVariants}
+              onChange={(event) => setCreateFamilyVariants(event.target.checked)}
+            />
+            <span>
+              <span className="block font-medium">Create all family sizes</span>
+              <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                Creates this product name across the other families in this category and applies each
+                family&apos;s default purchase, selling, wholesale, and retail prices.
+              </span>
+              {canCreateFamilyVariants ? (
+                <span
+                  className="mt-2 grid gap-1 text-xs"
+                  style={{ color: 'var(--aurora-text-secondary)' }}
+                >
+                  {siblingFamilies.slice(0, 6).map((family) => (
+                    <span key={family.id}>
+                      {form.name.trim() || 'Product'} {familyVariantLabel(family.name)} ·{' '}
+                      {fmtTZS(family.defaultSellingPrice ?? family.retailPrice ?? family.wholesalePrice)}
+                    </span>
+                  ))}
+                  {siblingFamilies.length > 6 && (
+                    <span>+ {siblingFamilies.length - 6} more family sizes</span>
+                  )}
+                </span>
+              ) : (
+                <span className="mt-1 block text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Select a category family that has other active families to enable this.
+                </span>
+              )}
+            </span>
+          </label>
+        )}
         <FormInput
           label="Wholesale Price"
           type="number"

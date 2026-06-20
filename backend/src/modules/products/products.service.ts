@@ -22,8 +22,22 @@ type ProductReferenceIds = {
   salesUnitId?: string | null;
 };
 
+type FamilyVariantProductPlan = {
+  family: {
+    id: string;
+    name: string;
+    defaultPurchasePrice: Prisma.Decimal | number | string | null;
+    defaultSellingPrice: Prisma.Decimal | number | string | null;
+    wholesalePrice: Prisma.Decimal | number | string | null;
+    retailPrice: Prisma.Decimal | number | string | null;
+  };
+  defaultPurchasePrice: Prisma.Decimal | number | string | null;
+};
+
 function generateProductCode(): string {
-  return `PRD-${Date.now().toString(36).toUpperCase()}`;
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `PRD-${timestamp}${suffix}`;
 }
 
 function normalizeProductCode(productCode?: string): string | undefined {
@@ -52,6 +66,25 @@ function pricesAreDifferent(a: unknown, b: unknown) {
   const right = positivePrice(b);
   if (left == null || right == null) return false;
   return Math.abs(left - right) > 0.0001;
+}
+
+function familyDefaultSellingPrice(family: {
+  defaultSellingPrice?: unknown;
+  retailPrice?: unknown;
+  wholesalePrice?: unknown;
+}) {
+  return (
+    positivePrice(family.defaultSellingPrice) ??
+    positivePrice(family.retailPrice) ??
+    positivePrice(family.wholesalePrice)
+  );
+}
+
+function familyVariantLabel(familyName: string) {
+  const trimmed = familyName.trim();
+  const match = trimmed.match(/^(\d+(?:[.,]\d+)?)\s*(l|ltr|litre|liter|litres|liters)$/i);
+  if (!match) return trimmed;
+  return `${match[1].replace(',', '.')} LTR`;
 }
 
 @Injectable()
@@ -587,6 +620,176 @@ export class ProductsService {
     });
   }
 
+  private async buildFamilyVariantProductPlan(
+    dto: CreateProductDto,
+    selectedProductFamilyId: string,
+  ): Promise<{
+    create: FamilyVariantProductPlan[];
+    skipped: Array<{ productFamilyId: string; familyName: string; reason: string }>;
+  }> {
+    const divisionId = optionalText(dto.divisionId) ?? null;
+    const families = await this.prisma.productFamily.findMany({
+      where: {
+        companyId: dto.companyId,
+        categoryId: dto.categoryId,
+        deletedAt: null,
+        isActive: true,
+        id: { not: selectedProductFamilyId },
+        ...(divisionId
+          ? { OR: [{ divisionId }, { divisionId: null }] }
+          : { divisionId: null }),
+      },
+      select: {
+        id: true,
+        name: true,
+        defaultPurchasePrice: true,
+        defaultSellingPrice: true,
+        wholesalePrice: true,
+        retailPrice: true,
+      },
+      orderBy: [{ name: 'asc' }],
+    });
+    if (!families.length) return { create: [], skipped: [] };
+
+    const existingProducts = await this.prisma.product.findMany({
+      where: {
+        companyId: dto.companyId,
+        categoryId: dto.categoryId,
+        productFamilyId: { in: families.map((family) => family.id) },
+        deletedAt: null,
+        name: { equals: dto.name.trim(), mode: 'insensitive' },
+        ...(divisionId ? { divisionId } : { divisionId: null }),
+        ...(optionalText(dto.variantColor)
+          ? { variantColor: { equals: optionalText(dto.variantColor), mode: 'insensitive' } }
+          : {}),
+        ...(optionalText(dto.variantFinish)
+          ? { variantFinish: { equals: optionalText(dto.variantFinish), mode: 'insensitive' } }
+          : {}),
+      },
+      select: { productFamilyId: true },
+    });
+    const existingFamilyIds = new Set(
+      existingProducts
+        .map((product) => product.productFamilyId)
+        .filter((id): id is string => Boolean(id)),
+    );
+
+    const create: FamilyVariantProductPlan[] = [];
+    const skipped: Array<{ productFamilyId: string; familyName: string; reason: string }> = [];
+    for (const family of families) {
+      if (existingFamilyIds.has(family.id)) {
+        skipped.push({
+          productFamilyId: family.id,
+          familyName: family.name,
+          reason: 'A product with this name already exists in this family.',
+        });
+        continue;
+      }
+
+      create.push({
+        family,
+        defaultPurchasePrice: family.defaultPurchasePrice ?? dto.defaultPurchasePrice ?? null,
+      });
+    }
+
+    return { create, skipped };
+  }
+
+  private async assertFamilyVariantProductPlanIsValid(
+    dto: CreateProductDto,
+    plan: {
+      create: FamilyVariantProductPlan[];
+    },
+  ) {
+    for (const item of plan.create) {
+      if (familyDefaultSellingPrice(item.family) == null) {
+        throw new BadRequestException(
+          `Product family ${item.family.name} must have a selling, retail, or wholesale price before auto-generating products`,
+        );
+      }
+      this.profit.assertProductMasterPricing({
+        name: `${dto.name} ${item.family.name}`,
+        productType: dto.productType,
+        trackInventory: dto.trackInventory ?? true,
+        defaultPurchasePrice: item.defaultPurchasePrice,
+      });
+      await this.assertInheritedFamilyPriceAboveProductCost({
+        productName: `${dto.name} ${item.family.name}`,
+        productType: dto.productType,
+        trackInventory: dto.trackInventory ?? true,
+        defaultPurchasePrice: item.defaultPurchasePrice,
+        defaultSellingPrice: null,
+        retailPrice: null,
+        wholesalePrice: null,
+        productFamilyId: item.family.id,
+      });
+    }
+  }
+
+  private async createFamilyVariantProducts(
+    dto: CreateProductDto,
+    userId: string,
+    plan: {
+      create: FamilyVariantProductPlan[];
+      skipped: Array<{ productFamilyId: string; familyName: string; reason: string }>;
+    },
+  ) {
+    const created = [];
+    for (const item of plan.create) {
+      const variantLabel = familyVariantLabel(item.family.name);
+      const record = await this.prisma.product.create({
+        data: {
+          productCode: generateProductCode(),
+          companyId: dto.companyId,
+          divisionId: dto.divisionId,
+          categoryId: dto.categoryId,
+          productFamilyId: item.family.id,
+          name: dto.name,
+          variantName: variantLabel,
+          variantColor: optionalText(dto.variantColor),
+          variantSize: variantLabel,
+          variantFinish: optionalText(dto.variantFinish),
+          description: dto.description,
+          productType: dto.productType,
+          baseUnitId: dto.baseUnitId,
+          purchaseUnitId: dto.purchaseUnitId,
+          salesUnitId: dto.salesUnitId,
+          defaultPurchasePrice: item.defaultPurchasePrice,
+          defaultSellingPrice: null,
+          wholesalePrice: null,
+          retailPrice: null,
+          minimumStockLevel: dto.minimumStockLevel,
+          maximumStockLevel: dto.maximumStockLevel,
+          reorderLevel: dto.reorderLevel,
+          trackInventory: dto.trackInventory ?? true,
+          trackBatch: dto.trackBatch ?? false,
+          trackExpiry: dto.trackExpiry ?? false,
+          isTaxable: dto.isTaxable ?? false,
+          taxRate: dto.taxRate,
+          status: dto.status ?? 'ACTIVE',
+        },
+      });
+
+      const meta = auditFor('Product', 'CREATE');
+      await this.auditLogs.log({
+        action: meta.action,
+        entityType: 'Product',
+        entityId: record.id,
+        userId,
+        companyId: record.companyId,
+        newValue: {
+          ...record,
+          generatedFromFamilyVariantCreate: true,
+        },
+        severity: meta.severity,
+      });
+
+      created.push(record);
+    }
+
+    return { created, skipped: plan.skipped };
+  }
+
   private assertFamilyPricing(prices: {
     defaultPurchasePrice?: number | string | Prisma.Decimal | null;
     defaultSellingPrice?: number | string | Prisma.Decimal | null;
@@ -684,6 +887,10 @@ export class ProductsService {
     const familyPricing = await this.findFamilyPricing(productFamilyId);
     const effectiveDefaultPurchasePrice =
       dto.defaultPurchasePrice ?? familyPricing?.defaultPurchasePrice ?? null;
+    const familyVariantPlan =
+      dto.createFamilyVariants && productFamilyId
+        ? await this.buildFamilyVariantProductPlan(dto, productFamilyId)
+        : { create: [], skipped: [] };
 
     const existing = await this.prisma.product.findFirst({
       where: { productCode, companyId: dto.companyId, deletedAt: null },
@@ -706,6 +913,7 @@ export class ProductsService {
       wholesalePrice: dto.wholesalePrice,
       productFamilyId,
     });
+    await this.assertFamilyVariantProductPlanIsValid(dto, familyVariantPlan);
 
     const record = await this.prisma.product.create({
       data: {
@@ -755,7 +963,17 @@ export class ProductsService {
       });
     }
 
-    return record;
+    const familyVariantProducts = await this.createFamilyVariantProducts(
+      dto,
+      userId,
+      familyVariantPlan,
+    );
+
+    return {
+      ...record,
+      generatedFamilyProducts: familyVariantProducts.created,
+      skippedFamilyProducts: familyVariantProducts.skipped,
+    };
   }
 
   async update(id: string, dto: UpdateProductDto, user: AuthUser) {

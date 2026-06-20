@@ -143,6 +143,10 @@ export class CreateProductDto {
   isTaxable?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  createFamilyVariants?: boolean;
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   taxRate?: number;
