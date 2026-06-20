@@ -58,7 +58,7 @@ interface Product {
   barcode?: string | null;
   baseUnitId?: string | null;
   baseUnit?: { name?: string | null; symbol?: string | null } | null;
-  category?: { name?: string | null } | null;
+  category?: { id?: string | null; name?: string | null } | null;
   defaultPurchasePrice?: number | string | null;
   defaultSellingPrice?: number | string | null;
   wholesalePrice?: number | string | null;
@@ -75,6 +75,12 @@ interface Product {
     availableQuantity?: number | string | null;
     quantityAvailable?: number | string | null;
   } | null;
+}
+interface ProductCategory {
+  id: string;
+  name: string;
+  categoryType?: string | null;
+  parentCategory?: { name?: string | null } | null;
 }
 interface Unit {
   id: string;
@@ -339,6 +345,7 @@ function SalesOrderModal({
   );
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [productSearchQuery, setProductSearchQuery] = useState('');
   const [productSearchLoading, setProductSearchLoading] = useState(false);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -448,6 +455,30 @@ function SalesOrderModal({
       cancelled = true;
     };
   }, [form.companyId, form.divisionId, form.branchId]);
+
+  useEffect(() => {
+    if (!form.companyId) {
+      setCategories([]);
+      return;
+    }
+    let cancelled = false;
+    backendList<ProductCategory>('/product-categories', {
+      query: {
+        companyId: form.companyId,
+        isActive: true,
+        limit: 500,
+      },
+    })
+      .then((rows) => {
+        if (!cancelled) setCategories(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCategories([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
 
   // Reload products when company, division, or branch changes; the backend
   // filters to the chosen division and adds stock for the sale branch.
@@ -895,6 +926,7 @@ function SalesOrderModal({
           variant="sales"
           lines={form.lines}
           products={products}
+          categories={categories}
           units={units}
           currency={form.currency}
           productSearchLoading={productSearchLoading}

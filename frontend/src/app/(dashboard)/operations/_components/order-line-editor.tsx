@@ -12,6 +12,7 @@ export interface OrderProductOption {
   baseUnitId?: string | null;
   baseUnit?: { name?: string | null; symbol?: string | null } | null;
   category?: {
+    id?: string | null;
     name?: string | null;
     supplierLinks?: Array<{
       supplier?: {
@@ -51,6 +52,13 @@ export interface OrderUnitOption {
   symbol: string;
 }
 
+export interface OrderProductCategoryOption {
+  id: string;
+  name: string;
+  categoryType?: string | null;
+  parentCategory?: { name?: string | null } | null;
+}
+
 export interface EditableOrderLine {
   productId: string;
   description: string;
@@ -76,6 +84,7 @@ interface OrderLineEditorProps<TLine extends EditableOrderLine> {
   variant: OrderVariant;
   lines: TLine[];
   products: OrderProductOption[];
+  categories?: OrderProductCategoryOption[];
   units: OrderUnitOption[];
   currency: string;
   productSearchLoading?: boolean;
@@ -149,6 +158,11 @@ function productSupplierLabel(product: OrderProductOption) {
   const names = Array.from(new Set(productSupplierTerms(product).map(String)));
   if (!names.length) return '';
   return names.slice(0, 2).join(', ') + (names.length > 2 ? ` +${names.length - 2}` : '');
+}
+
+function productMatchesCategory(product: OrderProductOption, categoryId: string) {
+  if (!categoryId) return true;
+  return product.category?.id === categoryId;
 }
 
 function defaultPriceForProduct(product: OrderProductOption, variant: OrderVariant) {
@@ -270,6 +284,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
   variant,
   lines,
   products,
+  categories = [],
   units,
   currency,
   productSearchLoading = false,
@@ -281,10 +296,24 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
   onValidationChange,
 }: OrderLineEditorProps<TLine>) {
   const [productSearch, setProductSearch] = useState<Record<number, string>>({});
+  const [productCategoryFilter, setProductCategoryFilter] = useState<Record<number, string>>({});
   const productById = useMemo(
     () => new Map(products.map((product) => [product.id, product])),
     [products],
   );
+  const categoryOptions = useMemo(() => {
+    const byId = new Map<string, OrderProductCategoryOption>();
+    for (const category of categories) {
+      if (category.id) byId.set(category.id, category);
+    }
+    for (const product of products) {
+      const category = product.category;
+      if (category?.id && !byId.has(category.id)) {
+        byId.set(category.id, { id: category.id, name: category.name ?? 'Unnamed category' });
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [categories, products]);
   const allocatedByProductId = useMemo(() => {
     const allocated = new Map<string, number>();
     for (const line of lines) {
@@ -389,6 +418,24 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
     onProductSearch?.(value);
   }
 
+  function handleCategoryFilter(index: number, categoryId: string) {
+    setProductCategoryFilter((current) => ({
+      ...current,
+      [index]: categoryId,
+    }));
+
+    const line = lines[index];
+    const selectedProduct = productById.get(line?.productId);
+    if (categoryId && selectedProduct && !productMatchesCategory(selectedProduct, categoryId)) {
+      patchLine(index, {
+        productId: '',
+        description: '',
+        unitId: '',
+        unitPrice: 0,
+      });
+    }
+  }
+
   function handleProductPick(index: number, productId: string) {
     handleProductSelect(index, productId);
     setProductSearch((current) => ({
@@ -427,9 +474,15 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
             const selectedProduct = productById.get(line.productId);
             const query = productSearch[index] ?? '';
             const trimmedQuery = query.trim();
-            const filteredProducts = products.filter((product) => productMatches(product, query));
+            const selectedCategoryId = productCategoryFilter[index] ?? '';
+            const filteredProducts = products.filter(
+              (product) =>
+                productMatchesCategory(product, selectedCategoryId) &&
+                productMatches(product, query),
+            );
             const productOptions =
               selectedProduct &&
+              productMatchesCategory(selectedProduct, selectedCategoryId) &&
               !filteredProducts.some((product) => product.id === selectedProduct.id)
                 ? [selectedProduct, ...filteredProducts]
                 : filteredProducts;
@@ -508,6 +561,28 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
 
                 <div className="grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
                   <div className="space-y-2">
+                    <label className="block">
+                      <span
+                        className="mb-1 block text-[12px] font-medium"
+                        style={{ color: 'var(--aurora-text-secondary)' }}
+                      >
+                        Category
+                      </span>
+                      <select
+                        value={selectedCategoryId}
+                        onChange={(event) => handleCategoryFilter(index, event.target.value)}
+                        className={fieldClass}
+                      >
+                        <option value="">All categories</option>
+                        {categoryOptions.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.parentCategory?.name
+                              ? `${category.parentCategory.name} / ${category.name}`
+                              : category.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <label className="block">
                       <span
                         className="mb-1 block text-[12px] font-medium"
@@ -607,7 +682,11 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         disabled={!products.length}
                       >
                         <option value="">
-                          {products.length ? 'Select product' : 'No products loaded'}
+                          {products.length
+                            ? productOptions.length
+                              ? 'Select product'
+                              : 'No products in selected category'
+                            : 'No products loaded'}
                         </option>
                         {productOptions.map((product) => (
                           <option key={product.id} value={product.id}>

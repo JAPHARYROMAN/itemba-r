@@ -57,11 +57,17 @@ interface Product {
   barcode?: string | null;
   baseUnitId?: string | null;
   baseUnit?: { name?: string | null; symbol?: string | null } | null;
-  category?: { name?: string | null; categoryType?: string | null } | null;
+  category?: { id?: string | null; name?: string | null; categoryType?: string | null } | null;
   defaultPurchasePrice?: number | string | null;
   defaultSellingPrice?: number | string | null;
   wholesalePrice?: number | string | null;
   retailPrice?: number | string | null;
+}
+interface ProductCategory {
+  id: string;
+  name: string;
+  categoryType?: string | null;
+  parentCategory?: { name?: string | null } | null;
 }
 interface Unit {
   id: string;
@@ -226,6 +232,7 @@ function PurchaseOrderModal({
   );
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [productSearchQuery, setProductSearchQuery] = useState('');
   const [productSearchLoading, setProductSearchLoading] = useState(false);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -299,6 +306,30 @@ function PurchaseOrderModal({
       cancelled = true;
     };
   }, [form.companyId, form.divisionId]);
+
+  useEffect(() => {
+    if (!form.companyId) {
+      setCategories([]);
+      return;
+    }
+    let cancelled = false;
+    backendList<ProductCategory>('/product-categories', {
+      query: {
+        companyId: form.companyId,
+        isActive: true,
+        limit: 500,
+      },
+    })
+      .then((rows) => {
+        if (!cancelled) setCategories(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCategories([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
 
   useEffect(() => {
     if (!form.companyId || !form.divisionId) {
@@ -600,6 +631,7 @@ function PurchaseOrderModal({
           variant="purchase"
           lines={form.lines}
           products={products}
+          categories={categories}
           units={units}
           currency={form.currency}
           productSearchLoading={productSearchLoading}
