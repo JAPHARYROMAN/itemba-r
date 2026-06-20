@@ -105,6 +105,7 @@ export class ProductsService {
       branchId,
       categoryId,
       productFamilyId,
+      supplierId,
       productType,
       status,
       search,
@@ -121,6 +122,28 @@ export class ProductsService {
     if (divisionId) where.OR = [{ divisionId }, { divisionId: null }];
     if (categoryId) where.categoryId = categoryId;
     if (productFamilyId) where.productFamilyId = productFamilyId;
+    if (supplierId) {
+      const supplier = await this.prisma.supplier.findFirst({
+        where: {
+          id: supplierId,
+          deletedAt: null,
+          ...(companyId ? { companyId } : {}),
+        },
+        select: {
+          companyId: true,
+          productCategories: { select: { productCategoryId: true } },
+        },
+      });
+      if (supplier) {
+        await this.companyScope.assertCanAccessCompany(user, supplier.companyId);
+        const supplierCategoryIds = supplier.productCategories.map((link) => link.productCategoryId);
+        if (supplierCategoryIds.length > 0) {
+          where.categoryId = categoryId
+            ? { in: supplierCategoryIds.filter((id) => id === categoryId) }
+            : { in: supplierCategoryIds };
+        }
+      }
+    }
     if (productType) where.productType = productType;
     if (status) where.status = status;
     if (search) {
@@ -132,7 +155,26 @@ export class ProductsService {
         { variantName: { contains: search, mode: 'insensitive' as const } },
         { variantColor: { contains: search, mode: 'insensitive' as const } },
         { variantSize: { contains: search, mode: 'insensitive' as const } },
+        { variantFinish: { contains: search, mode: 'insensitive' as const } },
+        { category: { name: { contains: search, mode: 'insensitive' as const } } },
         { productFamily: { name: { contains: search, mode: 'insensitive' as const } } },
+        { productFamily: { brand: { contains: search, mode: 'insensitive' as const } } },
+        {
+          category: {
+            supplierLinks: {
+              some: {
+                supplier: {
+                  deletedAt: null,
+                  OR: [
+                    { name: { contains: search, mode: 'insensitive' as const } },
+                    { legalName: { contains: search, mode: 'insensitive' as const } },
+                    { supplierCode: { contains: search, mode: 'insensitive' as const } },
+                  ],
+                },
+              },
+            },
+          },
+        },
       ];
       // If divisionId already populated `where.OR`, AND it together with the
       // search OR using nested `AND`. Otherwise the search wins as the OR.
@@ -148,7 +190,25 @@ export class ProductsService {
       this.prisma.product.findMany({
         where,
         include: {
-          category: { select: { id: true, name: true } },
+          category: {
+            select: {
+              id: true,
+              name: true,
+              supplierLinks: {
+                where: { supplier: { deletedAt: null } },
+                select: {
+                  supplier: {
+                    select: {
+                      id: true,
+                      name: true,
+                      legalName: true,
+                      supplierCode: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
           productFamily: {
             select: {
               id: true,

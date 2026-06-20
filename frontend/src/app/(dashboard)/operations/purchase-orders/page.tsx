@@ -318,6 +318,7 @@ function PurchaseOrderModal({
           query: {
             companyId: form.companyId,
             divisionId: form.divisionId,
+            supplierId: form.supplierId || undefined,
             limit: search ? 50 : 200,
             ...(search && { search }),
           },
@@ -341,7 +342,7 @@ function PurchaseOrderModal({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [form.companyId, form.divisionId, productSearchQuery, selectedProductIdKey]);
+  }, [form.companyId, form.divisionId, form.supplierId, productSearchQuery, selectedProductIdKey]);
 
   const setField = <K extends keyof PurchaseOrderForm>(k: K, v: PurchaseOrderForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));

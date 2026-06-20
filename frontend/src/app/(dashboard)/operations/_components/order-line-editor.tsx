@@ -11,7 +11,17 @@ export interface OrderProductOption {
   barcode?: string | null;
   baseUnitId?: string | null;
   baseUnit?: { name?: string | null; symbol?: string | null } | null;
-  category?: { name?: string | null } | null;
+  category?: {
+    name?: string | null;
+    supplierLinks?: Array<{
+      supplier?: {
+        name?: string | null;
+        legalName?: string | null;
+        supplierCode?: string | null;
+      } | null;
+    }>;
+  } | null;
+  productFamily?: { name?: string | null; brand?: string | null } | null;
   defaultPurchasePrice?: number | string | null;
   defaultSellingPrice?: number | string | null;
   wholesalePrice?: number | string | null;
@@ -108,17 +118,37 @@ function productLabel(product: OrderProductOption) {
 function productMatches(product: OrderProductOption, query: string) {
   const q = query.trim().toLowerCase();
   if (!q) return true;
+  const supplierTerms = productSupplierTerms(product);
   return [
     product.name,
     product.productCode,
     product.sku,
     product.barcode,
     product.category?.name,
+    product.productFamily?.name,
+    product.productFamily?.brand,
     product.baseUnit?.symbol,
     product.baseUnit?.name,
+    ...supplierTerms,
   ]
     .filter(Boolean)
     .some((value) => String(value).toLowerCase().includes(q));
+}
+
+function productSupplierTerms(product: OrderProductOption) {
+  return (
+    product.category?.supplierLinks?.flatMap((link) => [
+      link.supplier?.name,
+      link.supplier?.legalName,
+      link.supplier?.supplierCode,
+    ]) ?? []
+  ).filter(Boolean);
+}
+
+function productSupplierLabel(product: OrderProductOption) {
+  const names = Array.from(new Set(productSupplierTerms(product).map(String)));
+  if (!names.length) return '';
+  return names.slice(0, 2).join(', ') + (names.length > 2 ? ` +${names.length - 2}` : '');
 }
 
 function defaultPriceForProduct(product: OrderProductOption, variant: OrderVariant) {
@@ -186,6 +216,16 @@ function productSelectLabel(
   allocatedByProductId: Map<string, number>,
 ) {
   const pieces = [productLabel(product)];
+  if (product.category?.name) pieces.push(product.category.name);
+  if (product.productFamily?.name) {
+    pieces.push(
+      `Family: ${
+        product.productFamily.brand
+          ? `${product.productFamily.brand} ${product.productFamily.name}`
+          : product.productFamily.name
+      }`,
+    );
+  }
   const unit = product.baseUnit?.symbol ?? product.baseUnit?.name;
   if (unit) pieces.push(unit);
   const price = defaultPriceForProduct(product, variant);
@@ -479,7 +519,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         value={query}
                         onChange={(event) => handleProductSearch(index, event.target.value)}
                         className={fieldClass}
-                        placeholder="Search name, code, SKU, barcode"
+                        placeholder="Search name, category, family, supplier, code, SKU, barcode"
                       />
                     </label>
                     {trimmedQuery && (
@@ -512,6 +552,16 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                                 style={{ color: 'var(--aurora-text-muted)' }}
                               >
                                 {product.category?.name ?? 'Uncategorized'}
+                                {product.productFamily?.name
+                                  ? ` | Family: ${
+                                      product.productFamily.brand
+                                        ? `${product.productFamily.brand} ${product.productFamily.name}`
+                                        : product.productFamily.name
+                                    }`
+                                  : ''}
+                                {productSupplierLabel(product)
+                                  ? ` | Suppliers: ${productSupplierLabel(product)}`
+                                  : ''}
                                 {product.baseUnit?.symbol
                                   ? ` | Unit: ${product.baseUnit.symbol}`
                                   : ''}
@@ -579,6 +629,15 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                           Code: {selectedProduct.productCode ?? selectedProduct.sku ?? '-'}
                         </span>
                         <span>Category: {selectedProduct.category?.name ?? '-'}</span>
+                        <span>
+                          Family:{' '}
+                          {selectedProduct.productFamily?.name
+                            ? selectedProduct.productFamily.brand
+                              ? `${selectedProduct.productFamily.brand} ${selectedProduct.productFamily.name}`
+                              : selectedProduct.productFamily.name
+                            : '-'}
+                        </span>
+                        <span>Suppliers: {productSupplierLabel(selectedProduct) || '-'}</span>
                         <span>
                           Unit:{' '}
                           {selectedProduct.baseUnit?.symbol ??
