@@ -231,6 +231,10 @@ function payableOutstandingAmount(payable: Payable) {
   return moneyNumber(payable.outstandingAmount);
 }
 
+function payableSupplierName(payable: Payable) {
+  return payable.supplier?.name?.trim() || payable.supplierName || 'Unknown supplier';
+}
+
 function agingBucket(dueDate: string): string {
   const days = Math.floor((Date.now() - new Date(dueDate).getTime()) / 86400000);
   if (days <= 0) return 'Current';
@@ -301,7 +305,7 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
       open
       onClose={onClose}
       title={`Payable ${detail.payableNumber ?? detail.id.slice(0, 8)}`}
-      subtitle={`${detail.supplierName} · ${detail.status}`}
+      subtitle={`${payableSupplierName(detail)} · ${detail.status}`}
       size="3xl"
       footer={
         <Btn variant="secondary" onClick={onClose}>
@@ -1286,7 +1290,7 @@ export default function PayablesPage() {
                         </button>
                       </div>
                     </td>
-                    <td className="px-4 py-3 font-medium">{p.supplierName}</td>
+                    <td className="px-4 py-3 font-medium">{payableSupplierName(p)}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmtTZS(p.amount)}</td>
                     <td className="px-4 py-3 text-right font-mono text-green-700">
                       {fmtTZS(payablePaidAmount(p))}

@@ -268,6 +268,11 @@ export class PurchaseOrdersService {
   async create(dto: CreatePurchaseOrderDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     await this.assertReferencesBelongToCompany(dto.companyId, dto);
+    const supplierName = await this.resolveSupplierName(
+      dto.companyId,
+      dto.supplierId,
+      dto.supplierName,
+    );
     await this.profit.assertPurchaseLinesHaveCost(dto.companyId, dto.lines);
     const userId = user.id;
     let subtotal = 0;
@@ -309,7 +314,7 @@ export class PurchaseOrdersService {
           divisionId: dto.divisionId,
           branchId: dto.branchId,
           supplierId: dto.supplierId,
-          supplierName: dto.supplierName,
+          supplierName,
           purchaseType: dto.purchaseType,
           orderDate: new Date(dto.orderDate),
           expectedDate: dto.expectedDate ? new Date(dto.expectedDate) : undefined,
@@ -354,6 +359,12 @@ export class PurchaseOrdersService {
       supplierId: dto.supplierId ?? existing.supplierId,
       lines: dto.lines,
     });
+    const nextSupplierId =
+      dto.supplierId !== undefined ? (dto.supplierId || null) : existing.supplierId;
+    const supplierName =
+      dto.supplierId !== undefined || dto.supplierName !== undefined
+        ? await this.resolveSupplierName(existing.companyId, nextSupplierId, dto.supplierName)
+        : undefined;
 
     let subtotal: number | undefined;
     let totalDiscount: number | undefined;
@@ -404,7 +415,7 @@ export class PurchaseOrdersService {
         where: { id },
         data: {
           ...(dto.supplierId !== undefined && { supplierId: dto.supplierId }),
-          ...(dto.supplierName !== undefined && { supplierName: dto.supplierName }),
+          ...(supplierName !== undefined && { supplierName }),
           ...(dto.purchaseType && { purchaseType: dto.purchaseType }),
           ...(dto.orderDate && { orderDate: new Date(dto.orderDate) }),
           ...(dto.expectedDate !== undefined && {
@@ -493,6 +504,19 @@ export class PurchaseOrdersService {
       refs.divisionId,
       refs.branchId,
     );
+  }
+
+  private async resolveSupplierName(
+    companyId: string,
+    supplierId?: string | null,
+    fallbackName?: string | null,
+  ) {
+    if (!supplierId) return fallbackName?.trim() || undefined;
+    const supplier = await this.prisma.supplier.findFirst({
+      where: { id: supplierId, companyId, deletedAt: null },
+      select: { name: true },
+    });
+    return supplier?.name?.trim() || fallbackName?.trim() || undefined;
   }
 
   private async assertLineReferencesBelongToCompany(
@@ -726,6 +750,7 @@ export class PurchaseOrdersService {
 
       let payableId = existing.payableId ?? null;
       if (existing.purchaseType !== PurchaseType.CASH_PURCHASE && !payableId) {
+        const supplierName = existing.supplier?.name ?? existing.supplierName ?? 'Unknown supplier';
         const payableNumber = await this.codes.next({
           entityType: 'Payable',
           companyId: existing.companyId,
@@ -738,7 +763,7 @@ export class PurchaseOrdersService {
             divisionId: existing.divisionId ?? null,
             branchId: existing.branchId ?? null,
             supplierId: existing.supplierId ?? null,
-            supplierName: existing.supplierName ?? 'Unknown supplier',
+            supplierName,
             amount: existing.totalAmount,
             paidAmount: 0,
             outstandingAmount: existing.totalAmount,

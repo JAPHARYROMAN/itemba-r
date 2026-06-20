@@ -69,7 +69,7 @@ export class PayablesService {
     ]);
 
     return {
-      data,
+      data: data.map((record) => this.withResolvedSupplierName(record)),
       total,
       page: paging.page,
       limit: paging.limit,
@@ -108,7 +108,10 @@ export class PayablesService {
           },
         })
       : null;
-    return { ...record, supplier };
+    return this.withResolvedSupplierName({
+      ...record,
+      supplier: supplier ?? record.supplier,
+    });
   }
 
   async create(dto: CreatePayableDto, user: AuthUser) {
@@ -538,6 +541,16 @@ export class PayablesService {
         take: 10,
       },
     };
+  }
+
+  private withResolvedSupplierName<
+    TRecord extends {
+      supplierName: string;
+      supplier?: { name?: string | null } | null;
+    },
+  >(record: TRecord): TRecord {
+    const supplierName = record.supplier?.name?.trim() || record.supplierName;
+    return supplierName === record.supplierName ? record : { ...record, supplierName };
   }
 
   private async resolvePayableScope(input: {
