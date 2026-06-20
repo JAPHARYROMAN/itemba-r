@@ -347,6 +347,7 @@ function SalesOrderModal({
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [productSearchCategoryId, setProductSearchCategoryId] = useState('');
   const [productSearchLoading, setProductSearchLoading] = useState(false);
   const [units, setUnits] = useState<Unit[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -363,6 +364,13 @@ function SalesOrderModal({
     .map((line) => line.productId)
     .filter(Boolean)
     .join('|');
+  const handleProductSearch = useCallback(
+    (query: string, filters?: { categoryId?: string }) => {
+      setProductSearchQuery(query);
+      setProductSearchCategoryId(filters?.categoryId ?? '');
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -501,6 +509,7 @@ function SalesOrderModal({
             companyId: form.companyId,
             divisionId: form.divisionId || undefined,
             branchId: form.branchId,
+            categoryId: productSearchCategoryId || undefined,
             limit: search ? 50 : 200,
             ...(search && { search }),
           },
@@ -524,7 +533,14 @@ function SalesOrderModal({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [form.branchId, form.companyId, form.divisionId, productSearchQuery, selectedProductIdKey]);
+  }, [
+    form.branchId,
+    form.companyId,
+    form.divisionId,
+    productSearchCategoryId,
+    productSearchQuery,
+    selectedProductIdKey,
+  ]);
 
   const setField = <K extends keyof SalesOrderForm>(k: K, v: SalesOrderForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
@@ -686,6 +702,7 @@ function SalesOrderModal({
             value={form.companyId}
             onChange={(e) => {
               setProductSearchQuery('');
+              setProductSearchCategoryId('');
               setForm((f) => ({
                 ...f,
                 companyId: e.target.value,
@@ -743,6 +760,7 @@ function SalesOrderModal({
             onChange={(e) => {
               const divisionId = e.target.value;
               setProductSearchQuery('');
+              setProductSearchCategoryId('');
               setForm((f) => ({
                 ...f,
                 divisionId,
@@ -771,6 +789,7 @@ function SalesOrderModal({
             onChange={(e) => {
               const branchId = e.target.value;
               setProductSearchQuery('');
+              setProductSearchCategoryId('');
               setForm((f) => ({
                 ...f,
                 branchId,
@@ -934,7 +953,7 @@ function SalesOrderModal({
           onAddLine={addLine}
           onRemoveLine={removeLine}
           onLineChange={setLine}
-          onProductSearch={setProductSearchQuery}
+          onProductSearch={handleProductSearch}
           onValidationChange={setLineValidation}
         />
       </div>

@@ -92,7 +92,7 @@ interface OrderLineEditorProps<TLine extends EditableOrderLine> {
   onAddLine: () => void;
   onRemoveLine: (index: number) => void;
   onLineChange: (index: number, patch: Partial<TLine>) => void;
-  onProductSearch?: (query: string) => void;
+  onProductSearch?: (query: string, filters?: { categoryId?: string }) => void;
   onValidationChange?: (state: OrderLineValidationState) => void;
 }
 
@@ -391,6 +391,22 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
     onValidationChange?.(validationState);
   }, [onValidationChange, validationState]);
 
+  useEffect(() => {
+    const validCategoryIds = new Set(categoryOptions.map((category) => category.id));
+    setProductCategoryFilter((current) => {
+      let changed = false;
+      const next: Record<number, string> = {};
+      for (const [index, categoryId] of Object.entries(current)) {
+        if (!categoryId || validCategoryIds.has(categoryId)) {
+          next[Number(index)] = categoryId;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [categoryOptions]);
+
   function patchLine(index: number, patch: Partial<EditableOrderLine>) {
     onLineChange(index, patch as Partial<TLine>);
   }
@@ -415,7 +431,8 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
       ...current,
       [index]: value,
     }));
-    onProductSearch?.(value);
+    const categoryId = productCategoryFilter[index] ?? '';
+    onProductSearch?.(value, { categoryId: categoryId || undefined });
   }
 
   function handleCategoryFilter(index: number, categoryId: string) {
@@ -423,6 +440,9 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
       ...current,
       [index]: categoryId,
     }));
+    onProductSearch?.(productSearch[index] ?? '', {
+      categoryId: categoryId || undefined,
+    });
 
     const line = lines[index];
     const selectedProduct = productById.get(line?.productId);
@@ -442,7 +462,8 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
       ...current,
       [index]: '',
     }));
-    onProductSearch?.('');
+    const categoryId = productCategoryFilter[index] ?? '';
+    onProductSearch?.('', { categoryId: categoryId || undefined });
   }
 
   return (

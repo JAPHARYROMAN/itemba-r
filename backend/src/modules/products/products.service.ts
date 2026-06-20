@@ -137,10 +137,8 @@ export class ProductsService {
       if (supplier) {
         await this.companyScope.assertCanAccessCompany(user, supplier.companyId);
         const supplierCategoryIds = supplier.productCategories.map((link) => link.productCategoryId);
-        if (supplierCategoryIds.length > 0) {
-          where.categoryId = categoryId
-            ? { in: supplierCategoryIds.filter((id) => id === categoryId) }
-            : { in: supplierCategoryIds };
+        if (supplierCategoryIds.length > 0 && !categoryId) {
+          where.categoryId = { in: supplierCategoryIds };
         }
       }
     }

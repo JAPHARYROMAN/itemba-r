@@ -234,6 +234,7 @@ function PurchaseOrderModal({
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [productSearchCategoryId, setProductSearchCategoryId] = useState('');
   const [productSearchLoading, setProductSearchLoading] = useState(false);
   const [units, setUnits] = useState<Unit[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
@@ -244,6 +245,13 @@ function PurchaseOrderModal({
     .map((line) => line.productId)
     .filter(Boolean)
     .join('|');
+  const handleProductSearch = useCallback(
+    (query: string, filters?: { categoryId?: string }) => {
+      setProductSearchQuery(query);
+      setProductSearchCategoryId(filters?.categoryId ?? '');
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -350,6 +358,7 @@ function PurchaseOrderModal({
             companyId: form.companyId,
             divisionId: form.divisionId,
             supplierId: form.supplierId || undefined,
+            categoryId: productSearchCategoryId || undefined,
             limit: search ? 50 : 200,
             ...(search && { search }),
           },
@@ -373,7 +382,14 @@ function PurchaseOrderModal({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [form.companyId, form.divisionId, form.supplierId, productSearchQuery, selectedProductIdKey]);
+  }, [
+    form.companyId,
+    form.divisionId,
+    form.supplierId,
+    productSearchCategoryId,
+    productSearchQuery,
+    selectedProductIdKey,
+  ]);
 
   const setField = <K extends keyof PurchaseOrderForm>(k: K, v: PurchaseOrderForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
@@ -492,6 +508,7 @@ function PurchaseOrderModal({
             value={form.companyId}
             onChange={(e) => {
               setProductSearchQuery('');
+              setProductSearchCategoryId('');
               setForm((f) => ({
                 ...f,
                 companyId: e.target.value,
@@ -520,6 +537,7 @@ function PurchaseOrderModal({
             onChange={(e) => {
               const divisionId = e.target.value;
               setProductSearchQuery('');
+              setProductSearchCategoryId('');
               setForm((f) => ({
                 ...f,
                 divisionId,
@@ -638,7 +656,7 @@ function PurchaseOrderModal({
           onAddLine={addLine}
           onRemoveLine={removeLine}
           onLineChange={setLine}
-          onProductSearch={setProductSearchQuery}
+          onProductSearch={handleProductSearch}
         />
       </div>
     </Modal>
