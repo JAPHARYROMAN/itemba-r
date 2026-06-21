@@ -347,7 +347,7 @@ function ProductModal({
     async function loadLookups() {
       const [categoryResult, divisionResult] = await Promise.allSettled([
         backendList<Category>('/product-categories', {
-          query: { companyId: form.companyId, limit: 200 },
+          query: { companyId: form.companyId, limit: 5000 },
         }),
         backendList<Division>('/divisions', {
           query: { companyId: form.companyId, limit: 200 },
@@ -1032,7 +1032,7 @@ export default function ProductsPage() {
     async function loadCategories() {
       try {
         const records = await backendList<Category>('/product-categories', {
-          query: { limit: 200, companyId: companyId || undefined },
+          query: { limit: 5000, companyId: companyId || undefined },
         });
         if (!cancelled) setCategories(records);
       } catch {

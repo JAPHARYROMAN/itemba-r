@@ -324,8 +324,7 @@ function PurchaseOrderModal({
     backendList<ProductCategory>('/product-categories', {
       query: {
         companyId: form.companyId,
-        isActive: true,
-        limit: 500,
+        limit: 5000,
       },
     })
       .then((rows) => {

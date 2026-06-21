@@ -196,7 +196,7 @@ function SupplierModal({
     Promise.allSettled([
       backendList<Division>('/divisions', { query: { companyId: form.companyId, limit: 200 } }),
       backendList<ProductCategory>('/product-categories', {
-        query: { companyId: form.companyId, isActive: true, limit: 500 },
+        query: { companyId: form.companyId, limit: 5000 },
       }),
     ]).then(([divisionResult, categoryResult]) => {
       if (cancelled) return;

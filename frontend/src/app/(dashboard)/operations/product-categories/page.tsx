@@ -205,7 +205,7 @@ function CategoryModal({
 
       try {
         const payload = await backendGet<unknown>('/product-categories', {
-          query: { limit: 200, companyId: form.companyId },
+          query: { limit: 5000, companyId: form.companyId },
         });
         const categories = normalizePaginated<ProductCategory>(payload).data;
         if (!cancelled) {

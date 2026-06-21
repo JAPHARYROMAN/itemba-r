@@ -1,4 +1,4 @@
-import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ProductCategoryType } from '@prisma/client';
 
@@ -9,5 +9,5 @@ export class QueryProductCategoryDto {
   @IsOptional() @Type(() => Boolean) @IsBoolean() isActive?: boolean;
   @IsOptional() @IsString() search?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number = 1;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) limit?: number = 20;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5000) limit?: number = 1000;
 }

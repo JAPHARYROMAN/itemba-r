@@ -19,13 +19,14 @@ export class ProductCategoriesService {
   async findAll(query: QueryProductCategoryDto, user: AuthUser) {
     const {
       page = 1,
-      limit = 20,
+      limit: requestedLimit = 1000,
       companyId,
       categoryType,
       parentCategoryId,
       isActive,
       search,
     } = query;
+    const limit = Math.min(Math.max(requestedLimit, 1), 5000);
     const skip = (page - 1) * limit;
 
     const where: Prisma.ProductCategoryWhereInput = { deletedAt: null };
