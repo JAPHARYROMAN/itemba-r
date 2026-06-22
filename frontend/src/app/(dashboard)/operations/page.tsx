@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Card, PageHeader, StatCard, SkeletonCardGrid, showToast } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList } from '@/lib/api-client';
@@ -174,13 +175,13 @@ export default function OperationsDashboardPage() {
           subtitle="Overview of customers, products, inventory, sales, and purchases"
           actions={
             <div className="flex flex-wrap items-center gap-2">
-              <a
+              <Link
                 href="/operations/mobile-pos"
                 className="inline-flex min-h-9 items-center rounded-lg bg-brand-600 px-3 text-[12px] font-semibold text-white transition hover:bg-brand-700"
               >
                 Mobile POS
-              </a>
-              <a
+              </Link>
+              <Link
                 href="/operations/sales-orders"
                 className="inline-flex min-h-9 items-center rounded-lg border px-3 text-[12px] font-semibold transition"
                 style={{
@@ -189,7 +190,7 @@ export default function OperationsDashboardPage() {
                 }}
               >
                 Sales Orders
-              </a>
+              </Link>
             </div>
           }
         />

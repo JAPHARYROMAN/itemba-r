@@ -26,6 +26,7 @@ import {
   PaymentStatus,
   Prisma,
   SalesPaymentMethod,
+  SalesOrderStatus,
   SalesType,
 } from '@prisma/client';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
@@ -387,54 +388,87 @@ export class SalesOrdersService {
     return { customerId: created.id, customerName: created.name };
   }
 
-  async findAll(query: QuerySalesOrderDto, user: AuthUser) {
+  private async salesOrderWhere(query: QuerySalesOrderDto, user: AuthUser) {
     const {
-      page = 1,
-      limit = 20,
       companyId,
       divisionId,
       branchId,
       customerId,
+      salespersonId,
       salesType,
       status,
       paymentStatus,
+      paymentMethod,
       dateFrom,
       dateTo,
       search,
     } = query;
-    const skip = (page - 1) * limit;
 
     const where: any = {
       deletedAt: null,
       ...(await this.companyScope.companyWhereFor(user, companyId)),
     };
+
     if (divisionId) where.divisionId = divisionId;
     if (branchId) where.branchId = branchId;
     if (customerId) where.customerId = customerId;
+    if (salespersonId) where.salespersonId = salespersonId;
     if (salesType) where.salesType = salesType;
     if (status) where.status = status;
     if (paymentStatus) where.paymentStatus = paymentStatus;
+    if (paymentMethod) where.paymentMethod = paymentMethod;
     if (dateFrom || dateTo) {
       where.orderDate = {};
       if (dateFrom) where.orderDate.gte = dateRangeStart(dateFrom);
       if (dateTo) where.orderDate.lte = dateRangeEnd(dateTo);
     }
-    if (search) {
+    if (search?.trim()) {
+      const term = search.trim();
       where.OR = [
-        { salesOrderNumber: { contains: search, mode: 'insensitive' } },
-        { customerName: { contains: search, mode: 'insensitive' } },
+        { salesOrderNumber: { contains: term, mode: 'insensitive' } },
+        { customerName: { contains: term, mode: 'insensitive' } },
+        { customer: { is: { name: { contains: term, mode: 'insensitive' } } } },
+        { customer: { is: { customerCode: { contains: term, mode: 'insensitive' } } } },
+        { branch: { is: { name: { contains: term, mode: 'insensitive' } } } },
+        { division: { is: { name: { contains: term, mode: 'insensitive' } } } },
       ];
     }
+
+    return where;
+  }
+
+  async findAll(query: QuerySalesOrderDto, user: AuthUser) {
+    const { page = 1, limit = 20 } = query;
+    const skip = (page - 1) * limit;
+    const where = await this.salesOrderWhere(query, user);
 
     const [data, total] = await Promise.all([
       this.prisma.salesOrder.findMany({
         where,
         include: {
           company: { select: { id: true, name: true, code: true } },
-          customer: { select: { id: true, name: true } },
+          division: { select: { id: true, name: true, code: true } },
+          branch: { select: { id: true, name: true, code: true } },
+          customer: {
+            select: {
+              id: true,
+              name: true,
+              customerCode: true,
+              creditLimit: true,
+              currentBalance: true,
+              status: true,
+            },
+          },
+          salesperson: {
+            select: { id: true, employeeCode: true, firstName: true, lastName: true },
+          },
+          cashAccount: {
+            select: { id: true, accountName: true, accountType: true, currency: true },
+          },
           receivable: {
             select: {
               id: true,
+              receivableNumber: true,
               sourceId: true,
               paidAmount: true,
               outstandingAmount: true,
@@ -446,6 +480,12 @@ export class SalesOrdersService {
               product: { select: { id: true, name: true } },
               unit: { select: { id: true, name: true, symbol: true } },
             },
+          },
+          deliveryNotes: {
+            where: { deletedAt: null },
+            select: { id: true, deliveryNoteNumber: true, status: true },
+            orderBy: { createdAt: 'desc' },
+            take: 3,
           },
         },
         orderBy: { orderDate: 'desc' },
@@ -467,6 +507,438 @@ export class SalesOrdersService {
       page,
       limit,
       totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async workbenchSummary(query: QuerySalesOrderDto, user: AuthUser) {
+    const where = await this.salesOrderWhere(query, user);
+    const orders = await this.prisma.salesOrder.findMany({
+      where,
+      select: {
+        status: true,
+        paymentStatus: true,
+        paymentMethod: true,
+        totalAmount: true,
+        paidAmount: true,
+        outstandingAmount: true,
+        dueDate: true,
+      },
+    });
+
+    const liveOrders = orders.filter(
+      (order) =>
+        order.status !== SalesOrderStatus.CANCELLED && order.status !== SalesOrderStatus.VOIDED,
+    );
+    const today = new Date();
+
+    const confirmedStatuses: SalesOrderStatus[] = [
+      SalesOrderStatus.CONFIRMED,
+      SalesOrderStatus.PARTIALLY_PAID,
+      SalesOrderStatus.PAID,
+    ];
+
+    return {
+      totalOrders: orders.length,
+      draft: orders.filter((order) => order.status === SalesOrderStatus.DRAFT).length,
+      confirmed: orders.filter((order) => confirmedStatuses.includes(order.status)).length,
+      cancelled: orders.filter(
+        (order) =>
+          order.status === SalesOrderStatus.CANCELLED || order.status === SalesOrderStatus.VOIDED,
+      ).length,
+      revenue: roundMoney(liveOrders.reduce((sum, order) => sum + moneyValue(order.totalAmount), 0)),
+      outstanding: roundMoney(
+        liveOrders.reduce((sum, order) => sum + moneyValue(order.outstandingAmount), 0),
+      ),
+      paidAmount: roundMoney(
+        liveOrders.reduce((sum, order) => sum + moneyValue(order.paidAmount), 0),
+      ),
+      unpaidCount: liveOrders.filter((order) => order.paymentStatus !== PaymentStatus.PAID).length,
+      overdueCreditOrders: liveOrders.filter(
+        (order) =>
+          order.paymentMethod === SalesPaymentMethod.CREDIT &&
+          moneyValue(order.outstandingAmount) > 0 &&
+          order.dueDate &&
+          order.dueDate < today,
+      ).length,
+      blockedFailedActionCount: 0,
+    };
+  }
+
+  private async loadControlCenterOrder(
+    id: string,
+    user: AuthUser,
+    minimum: AccessLevel = AccessLevel.READ,
+  ) {
+    const record = await this.prisma.salesOrder.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        company: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            phone: true,
+            email: true,
+            website: true,
+            logoUrl: true,
+          },
+        },
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
+        customer: {
+          select: {
+            id: true,
+            name: true,
+            customerCode: true,
+            phone: true,
+            email: true,
+            address: true,
+            creditLimit: true,
+            currentBalance: true,
+            paymentTerms: true,
+            status: true,
+          },
+        },
+        salesperson: {
+          select: { id: true, employeeCode: true, firstName: true, lastName: true },
+        },
+        cashAccount: {
+          select: {
+            id: true,
+            accountName: true,
+            accountType: true,
+            currency: true,
+            currentBalance: true,
+          },
+        },
+        receivable: {
+          select: {
+            id: true,
+            receivableNumber: true,
+            sourceId: true,
+            amount: true,
+            paidAmount: true,
+            outstandingAmount: true,
+            status: true,
+            issueDate: true,
+            dueDate: true,
+            customer: { select: { id: true, name: true, customerCode: true } },
+          },
+        },
+        createdBy: { select: { id: true, fullName: true, email: true } },
+        confirmedBy: { select: { id: true, fullName: true, email: true } },
+        lines: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                productCode: true,
+                sku: true,
+                name: true,
+                productType: true,
+                trackInventory: true,
+                category: { select: { id: true, name: true, categoryType: true } },
+                productFamily: { select: { id: true, name: true, brand: true } },
+              },
+            },
+            unit: { select: { id: true, name: true, symbol: true } },
+            batch: true,
+          },
+        },
+        deliveryNotes: {
+          where: { deletedAt: null },
+          include: {
+            deliveredBy: { select: { id: true, fullName: true, email: true } },
+            lines: {
+              include: {
+                product: { select: { id: true, productCode: true, name: true } },
+                unit: { select: { id: true, name: true, symbol: true } },
+              },
+            },
+          },
+          orderBy: { deliveryDate: 'desc' },
+        },
+        commissions: {
+          where: { deletedAt: null },
+          include: {
+            employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        proformaInvoices: {
+          where: { deletedAt: null },
+          select: { id: true, proformaNumber: true, status: true, totalAmount: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+        },
+        quotations: {
+          where: { deletedAt: null },
+          select: { id: true, quotationNumber: true, status: true, totalAmount: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+    if (!record) throw new NotFoundException('Sales order not found');
+    await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
+
+    const sourceReceivable = record.receivable
+      ? null
+      : await this.prisma.receivable.findFirst({
+          where: { sourceType: 'SalesOrder', sourceId: id, deletedAt: null },
+          select: {
+            id: true,
+            receivableNumber: true,
+            sourceId: true,
+            amount: true,
+            paidAmount: true,
+            outstandingAmount: true,
+            status: true,
+            issueDate: true,
+            dueDate: true,
+            customer: { select: { id: true, name: true, customerCode: true } },
+          },
+          orderBy: { updatedAt: 'desc' },
+        });
+
+    return this.withReceivablePaymentSnapshot(record, sourceReceivable);
+  }
+
+  async controlCenter(id: string, user: AuthUser) {
+    const order = await this.loadControlCenterOrder(id, user);
+    const [ledger, fulfillment, profit] = await Promise.all([
+      this.ledger(id, user),
+      this.fulfillment(id, user),
+      this.salesOrderProfit(id, user),
+    ]);
+    const stockBalances = await this.prisma.inventoryBalance.findMany({
+      where: {
+        companyId: order.companyId,
+        branchId: order.branchId ?? null,
+        productId: { in: order.lines.map((line) => line.productId) },
+      },
+      select: {
+        productId: true,
+        quantityOnHand: true,
+        quantityReserved: true,
+        averageCost: true,
+        totalValue: true,
+      },
+    });
+    const stockByProduct = new Map(stockBalances.map((balance) => [balance.productId, balance]));
+    const orderWithStock = {
+      ...order,
+      lines: order.lines.map((line) => ({
+        ...line,
+        stockSnapshot: stockByProduct.get(line.productId) ?? null,
+      })),
+    };
+
+    const creditLimit = moneyValue(order.customer?.creditLimit);
+    const currentBalance = moneyValue(order.customer?.currentBalance);
+
+    return {
+      order: orderWithStock,
+      customerCredit: order.customer
+        ? {
+            customerId: order.customer.id,
+            status: order.customer.status,
+            creditLimit,
+            currentBalance,
+            availableCredit: Math.max(0, roundMoney(creditLimit - currentBalance)),
+          }
+        : null,
+      ledger,
+      fulfillment,
+      profit,
+      audit: {
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+        createdBy: order.createdBy,
+        confirmedAt: order.confirmedAt,
+        confirmedBy: order.confirmedBy,
+      },
+    };
+  }
+
+  async ledger(id: string, user: AuthUser) {
+    const order = await this.loadControlCenterOrder(id, user);
+    const [journalEntry, sourceReceivable] = await Promise.all([
+      order.journalEntryId
+        ? this.prisma.journalEntry.findFirst({
+            where: { id: order.journalEntryId, companyId: order.companyId, deletedAt: null },
+            include: {
+              lines: {
+                include: {
+                  account: { select: { id: true, accountCode: true, accountName: true, accountType: true } },
+                },
+              },
+              createdBy: { select: { id: true, fullName: true } },
+              postedBy: { select: { id: true, fullName: true } },
+            },
+          })
+        : this.prisma.journalEntry.findFirst({
+            where: {
+              companyId: order.companyId,
+              referenceType: 'SalesOrder',
+              referenceId: id,
+              deletedAt: null,
+            },
+            include: {
+              lines: {
+                include: {
+                  account: { select: { id: true, accountCode: true, accountName: true, accountType: true } },
+                },
+              },
+              createdBy: { select: { id: true, fullName: true } },
+              postedBy: { select: { id: true, fullName: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+          }),
+      order.receivableId
+        ? this.prisma.receivable.findFirst({
+            where: { id: order.receivableId, companyId: order.companyId, deletedAt: null },
+            include: {
+              customer: { select: { id: true, name: true, customerCode: true } },
+              journalEntry: {
+                include: {
+                  lines: {
+                    include: {
+                      account: {
+                        select: { id: true, accountCode: true, accountName: true, accountType: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          })
+        : this.prisma.receivable.findFirst({
+            where: {
+              companyId: order.companyId,
+              sourceType: 'SalesOrder',
+              sourceId: id,
+              deletedAt: null,
+            },
+            include: {
+              customer: { select: { id: true, name: true, customerCode: true } },
+              journalEntry: {
+                include: {
+                  lines: {
+                    include: {
+                      account: {
+                        select: { id: true, accountCode: true, accountName: true, accountType: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            orderBy: { updatedAt: 'desc' },
+          }),
+    ]);
+
+    return {
+      orderId: id,
+      companyId: order.companyId,
+      payment: {
+        method: order.paymentMethod,
+        reference: order.paymentReference,
+        status: order.paymentStatus,
+        paidAmount: order.paidAmount,
+        outstandingAmount: order.outstandingAmount,
+        cashAccount: order.cashAccount,
+      },
+      receivable: sourceReceivable,
+      journalEntry: journalEntry ?? sourceReceivable?.journalEntry ?? null,
+    };
+  }
+
+  async fulfillment(id: string, user: AuthUser) {
+    const order = await this.loadControlCenterOrder(id, user);
+    const inventoryMovements = await this.prisma.inventoryMovement.findMany({
+      where: {
+        companyId: order.companyId,
+        referenceType: 'SalesOrder',
+        referenceId: id,
+      },
+      include: {
+        branch: { select: { id: true, code: true, name: true } },
+        product: { select: { id: true, productCode: true, name: true } },
+        unit: { select: { id: true, name: true, symbol: true } },
+        createdBy: { select: { id: true, fullName: true } },
+      },
+      orderBy: { movementDate: 'desc' },
+    });
+
+    const statuses = order.deliveryNotes.map((note) => String(note.status));
+    const fulfillmentStatus =
+      order.status === SalesOrderStatus.DRAFT
+        ? 'DRAFT'
+        : statuses.length === 0
+          ? 'AWAITING_DELIVERY'
+          : statuses.some((status) => ['DELIVERED', 'CLOSED'].includes(status))
+            ? 'DELIVERED'
+            : statuses.some((status) =>
+                ['DISPATCHED', 'PARTIALLY_DELIVERED', 'IN_TRANSIT'].includes(status),
+              )
+              ? 'IN_PROGRESS'
+              : 'OPEN';
+
+    return {
+      orderId: id,
+      summary: {
+        status: fulfillmentStatus,
+        deliveryNoteCount: order.deliveryNotes.length,
+        inventoryMovementCount: inventoryMovements.length,
+        issuedQuantity: roundMoney(
+          inventoryMovements.reduce((sum, movement) => sum + Math.abs(moneyValue(movement.quantity)), 0),
+        ),
+      },
+      deliveryNotes: order.deliveryNotes,
+      inventoryMovements,
+    };
+  }
+
+  async salesOrderProfit(id: string, user: AuthUser) {
+    const order = await this.loadControlCenterOrder(id, user);
+    const lines = order.lines.map((line) => {
+      const revenueExTax = moneyValue(line.lineTotal) - moneyValue(line.taxAmount);
+      const cogs = moneyValue(line.cogsAmount);
+      const grossProfit = line.grossProfitAmount == null ? roundMoney(revenueExTax - cogs) : moneyValue(line.grossProfitAmount);
+      return {
+        id: line.id,
+        product: line.product,
+        quantity: line.quantity,
+        unit: line.unit,
+        unitPrice: line.unitPrice,
+        discountAmount: line.discountAmount,
+        taxAmount: line.taxAmount,
+        lineTotal: line.lineTotal,
+        unitCostAtSale: line.unitCostAtSale,
+        cogsAmount: line.cogsAmount,
+        grossProfitAmount: line.grossProfitAmount,
+        grossMarginPct: line.grossMarginPct,
+        profitCostSource: line.profitCostSource,
+        revenueExTax,
+        computedGrossProfit: grossProfit,
+      };
+    });
+    const revenueExTax = roundMoney(lines.reduce((sum, line) => sum + line.revenueExTax, 0));
+    const cogsAmount = roundMoney(lines.reduce((sum, line) => sum + moneyValue(line.cogsAmount), 0));
+    const grossProfitAmount = roundMoney(
+      lines.reduce((sum, line) => sum + line.computedGrossProfit, 0),
+    );
+
+    return {
+      orderId: id,
+      summary: {
+        revenueExTax,
+        cogsAmount,
+        grossProfitAmount,
+        grossMarginPct:
+          revenueExTax > 0 ? roundMoney((grossProfitAmount / revenueExTax) * 100) : 0,
+        lineCount: lines.length,
+      },
+      lines,
     };
   }
 

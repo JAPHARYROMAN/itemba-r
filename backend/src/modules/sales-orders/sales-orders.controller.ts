@@ -19,6 +19,12 @@ export class SalesOrdersController {
     return this.service.findAll(query, user);
   }
 
+  @Get('workbench-summary')
+  @RequirePermissions('sales.view')
+  workbenchSummary(@Query() query: QuerySalesOrderDto, @CurrentUser() user: AuthUser) {
+    return this.service.workbenchSummary(query, user);
+  }
+
   @Get('receipt-accounts')
   @RequireAnyPermissions('pos.create', 'sales.create')
   findReceiptAccounts(@Query() query: any, @CurrentUser() user: AuthUser) {
@@ -38,6 +44,30 @@ export class SalesOrdersController {
   @RequireAnyPermissions('pos.create', 'sales.create')
   mobilePosQuickSale(@Body() dto: CreateSalesOrderDto, @CurrentUser() user: AuthUser) {
     return this.service.mobilePosQuickSale(dto, user);
+  }
+
+  @Get(':id/control-center')
+  @RequirePermissions('sales.view')
+  controlCenter(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.controlCenter(id, user);
+  }
+
+  @Get(':id/ledger')
+  @RequirePermissions('sales.view')
+  ledger(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.ledger(id, user);
+  }
+
+  @Get(':id/fulfillment')
+  @RequirePermissions('sales.view')
+  fulfillment(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.fulfillment(id, user);
+  }
+
+  @Get(':id/profit')
+  @RequirePermissions('sales.view')
+  profit(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.salesOrderProfit(id, user);
   }
 
   @Get(':id')
