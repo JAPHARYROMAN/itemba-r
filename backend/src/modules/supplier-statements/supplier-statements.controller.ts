@@ -2,6 +2,8 @@ import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { SupplierStatementsService } from './supplier-statements.service';
+import { GenerateSupplierStatementDto } from './dto/generate-supplier-statement.dto';
+import { QuerySupplierStatementDto } from './dto/query-supplier-statement.dto';
 
 @Controller('supplier-statements')
 export class SupplierStatementsController {
@@ -9,7 +11,7 @@ export class SupplierStatementsController {
 
   @Get()
   @RequirePermissions('supplier_statements.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: QuerySupplierStatementDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
@@ -21,7 +23,7 @@ export class SupplierStatementsController {
 
   @Post('generate')
   @RequirePermissions('supplier_statements.generate')
-  generate(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  generate(@Body() dto: GenerateSupplierStatementDto, @CurrentUser() user: AuthUser) {
     return this.service.generate(dto, user);
   }
 }

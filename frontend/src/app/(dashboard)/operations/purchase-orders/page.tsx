@@ -301,6 +301,7 @@ function PurchaseOrderModal({
       query: {
         companyId: form.companyId,
         divisionId: form.divisionId,
+        status: 'ACTIVE',
         limit: 200,
       },
     })

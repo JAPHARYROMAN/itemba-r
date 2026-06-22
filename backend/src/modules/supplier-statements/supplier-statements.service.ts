@@ -1,9 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
+import { GenerateSupplierStatementDto } from './dto/generate-supplier-statement.dto';
+import { QuerySupplierStatementDto } from './dto/query-supplier-statement.dto';
 
 @Injectable()
 export class SupplierStatementsService {
@@ -13,34 +15,55 @@ export class SupplierStatementsService {
     private readonly companyScope: CompanyScopeService,
   ) {}
 
-  async findAll(query: any, user: AuthUser) {
+  async findAll(query: QuerySupplierStatementDto, user: AuthUser) {
     const { companyId, supplierId, page = 1, limit = 20 } = query;
-    const skip = (Number(page) - 1) * Number(limit);
-    const where: any = {
+    const take = Math.min(Math.max(Number(limit), 1), 100);
+    const skip = (Number(page) - 1) * take;
+    const where: Prisma.SupplierStatementRunWhereInput = {
       ...(await this.companyScope.companyWhereFor(user, companyId)),
     };
     if (supplierId) where.supplierId = supplierId;
-    const [items, total] = await Promise.all([
-      this.prisma.supplierStatementRun.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' } }),
+    const [data, total] = await Promise.all([
+      this.prisma.supplierStatementRun.findMany({
+        where,
+        include: {
+          company: { select: { id: true, name: true, code: true } },
+          generatedBy: { select: { id: true, fullName: true, email: true } },
+        },
+        skip,
+        take,
+        orderBy: { createdAt: 'desc' },
+      }),
       this.prisma.supplierStatementRun.count({ where }),
     ]);
-    return { items, total, page: Number(page), limit: Number(limit) };
+    return { data, total, page: Number(page), limit: take, totalPages: Math.ceil(total / take) };
   }
 
   async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
-    const item = await this.prisma.supplierStatementRun.findFirst({ where: { id } });
+    const item = await this.prisma.supplierStatementRun.findFirst({
+      where: { id },
+      include: {
+        company: { select: { id: true, name: true, code: true } },
+        generatedBy: { select: { id: true, fullName: true, email: true } },
+      },
+    });
     if (!item) throw new NotFoundException('Supplier statement run not found');
     await this.companyScope.assertCanAccessCompany(user, item.companyId, minimum);
     return item;
   }
 
-  async generate(dto: any, user: AuthUser) {
-    const { companyId, supplierId, periodStart, periodEnd } = dto;
-    await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.WRITE);
+  async generate(dto: GenerateSupplierStatementDto, user: AuthUser) {
+    const periodStart = new Date(dto.periodStart);
+    const periodEnd = new Date(dto.periodEnd);
+    if (periodStart > periodEnd) {
+      throw new BadRequestException('Statement start date cannot be after end date');
+    }
 
-    if (supplierId) {
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+
+    if (dto.supplierId) {
       const supplier = await this.prisma.supplier.findFirst({
-        where: { id: supplierId, companyId, deletedAt: null },
+        where: { id: dto.supplierId, companyId: dto.companyId, deletedAt: null },
         select: { id: true },
       });
       if (!supplier) {
@@ -48,28 +71,29 @@ export class SupplierStatementsService {
       }
     }
 
-    const payableWhere: any = { companyId };
-    if (supplierId) payableWhere.supplierId = supplierId;
-    if (periodStart) payableWhere.issueDate = { gte: new Date(periodStart) };
-    if (periodEnd) payableWhere.issueDate = { ...(payableWhere.issueDate ?? {}), lte: new Date(periodEnd) };
+    const payableWhere: Prisma.PayableWhereInput = {
+      companyId: dto.companyId,
+      deletedAt: null,
+      issueDate: { gte: periodStart, lte: periodEnd },
+    };
+    if (dto.supplierId) payableWhere.supplierId = dto.supplierId;
 
-    const payables = await this.prisma.payable.findMany({ where: payableWhere });
+    const summary = await this.prisma.payable.aggregate({
+      where: payableWhere,
+      _sum: { amount: true, paidAmount: true },
+    });
 
-    let totalDebits = 0;
-    let totalCredits = 0;
-    for (const p of payables) {
-      totalDebits += Number(p.amount ?? 0);
-      totalCredits += Number(p.paidAmount ?? 0);
-    }
-    const closingBalance = totalDebits - totalCredits;
+    const totalDebits = summary._sum.amount ?? new Prisma.Decimal(0);
+    const totalCredits = summary._sum.paidAmount ?? new Prisma.Decimal(0);
+    const closingBalance = totalDebits.minus(totalCredits);
 
     const run = await this.prisma.supplierStatementRun.create({
       data: {
         statementRunNumber: `SSTAT-${Date.now()}`,
-        companyId,
-        supplierId: supplierId ?? 'ALL',
-        periodStart: new Date(periodStart),
-        periodEnd: new Date(periodEnd),
+        companyId: dto.companyId,
+        supplierId: dto.supplierId ?? 'ALL',
+        periodStart,
+        periodEnd,
         totalDebits,
         totalCredits,
         closingBalance,
@@ -78,7 +102,14 @@ export class SupplierStatementsService {
       },
     });
 
-    await this.auditLogs.log({ action: 'GENERATE', entityType: 'SupplierStatementRun', entityId: run.id, userId: user.id, companyId });
+    await this.auditLogs.log({
+      action: 'SUPPLIER_STATEMENT_GENERATE',
+      entityType: 'SupplierStatementRun',
+      entityId: run.id,
+      userId: user.id,
+      companyId: dto.companyId,
+      newValue: run as any,
+    });
     return run;
   }
 }

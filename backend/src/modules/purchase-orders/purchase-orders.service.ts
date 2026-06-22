@@ -485,10 +485,13 @@ export class PurchaseOrdersService {
     if (refs.supplierId) {
       const supplier = await this.prisma.supplier.findFirst({
         where: { id: refs.supplierId, deletedAt: null },
-        select: { companyId: true, divisionId: true },
+        select: { companyId: true, divisionId: true, status: true },
       });
       if (!supplier || supplier.companyId !== companyId) {
         throw new BadRequestException('Supplier does not belong to this company');
+      }
+      if (supplier.status === 'BLOCKED') {
+        throw new BadRequestException('Blocked suppliers cannot be used on purchase orders');
       }
       if (supplier.divisionId && !refs.divisionId) {
         throw new BadRequestException('Purchase order division is required for this supplier');

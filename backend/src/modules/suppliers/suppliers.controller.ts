@@ -25,6 +25,36 @@ export class SuppliersController {
     return this.service.findAll(query, user);
   }
 
+  @Get('workbench-summary')
+  @RequirePermissions('suppliers.view')
+  workbenchSummary(@Query() query: QuerySupplierDto, @CurrentUser() user: AuthUser) {
+    return this.service.workbenchSummary(query, user);
+  }
+
+  @Get(':id/control-center')
+  @RequirePermissions('suppliers.view')
+  controlCenter(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.controlCenter(id, user);
+  }
+
+  @Get(':id/ledger')
+  @RequirePermissions('suppliers.view')
+  ledger(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.ledger(id, user);
+  }
+
+  @Get(':id/purchase-summary')
+  @RequirePermissions('suppliers.view')
+  purchaseSummary(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.purchaseSummary(id, user);
+  }
+
+  @Get(':id/payables-summary')
+  @RequirePermissions('suppliers.view')
+  payablesSummary(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.payablesSummary(id, user);
+  }
+
   @Get(':id')
   @RequirePermissions('suppliers.view')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {

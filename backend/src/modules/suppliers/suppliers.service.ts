@@ -6,7 +6,18 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { QuerySupplierDto } from './dto/query-supplier.dto';
-import { AccessLevel } from '@prisma/client';
+import { AccessLevel, PayableStatus, Prisma } from '@prisma/client';
+
+function toNumber(value: Prisma.Decimal | number | string | null | undefined) {
+  if (value === null || value === undefined) return 0;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function currentYearStart() {
+  const now = new Date();
+  return new Date(now.getFullYear(), 0, 1);
+}
 
 @Injectable()
 export class SuppliersService {
@@ -30,7 +41,7 @@ export class SuppliersService {
     } = query;
     const skip = (page - 1) * limit;
 
-    const where: any = {
+    const where: Prisma.SupplierWhereInput = {
       deletedAt: null,
       ...(await this.companyScope.companyWhereFor(user, companyId)),
     };
@@ -72,6 +83,86 @@ export class SuppliersService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
+  async workbenchSummary(query: QuerySupplierDto, user: AuthUser) {
+    const {
+      companyId,
+      divisionId,
+      branchId,
+      productCategoryId,
+      supplierType,
+      status,
+      search,
+    } = query;
+
+    const where: Prisma.SupplierWhereInput = {
+      deletedAt: null,
+      ...(await this.companyScope.companyWhereFor(user, companyId)),
+    };
+    if (divisionId) where.divisionId = divisionId;
+    if (branchId) where.branchId = branchId;
+    if (productCategoryId) {
+      where.productCategories = { some: { productCategoryId } };
+    }
+    if (supplierType) where.supplierType = supplierType;
+    if (status) where.status = status;
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { supplierCode: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+        { tin: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const suppliers = await this.prisma.supplier.findMany({
+      where,
+      select: { id: true, status: true, currentBalance: true },
+      take: 5000,
+    });
+    const supplierIds = suppliers.map((supplier) => supplier.id);
+    const openStatuses: PayableStatus[] = [
+      PayableStatus.OPEN,
+      PayableStatus.PARTIALLY_PAID,
+      PayableStatus.OVERDUE,
+    ];
+    const [openPayables, overduePayables] = supplierIds.length
+      ? await Promise.all([
+          this.prisma.payable.aggregate({
+            where: {
+              supplierId: { in: supplierIds },
+              deletedAt: null,
+              status: { in: openStatuses },
+            },
+            _sum: { outstandingAmount: true },
+          }),
+          this.prisma.payable.aggregate({
+            where: {
+              supplierId: { in: supplierIds },
+              deletedAt: null,
+              status: { in: openStatuses },
+              dueDate: { lt: new Date() },
+              outstandingAmount: { gt: 0 },
+            },
+            _sum: { outstandingAmount: true },
+          }),
+        ])
+      : [{ _sum: { outstandingAmount: 0 } }, { _sum: { outstandingAmount: 0 } }];
+
+    return {
+      total: suppliers.length,
+      active: suppliers.filter((supplier) => supplier.status === 'ACTIVE').length,
+      blocked: suppliers.filter((supplier) => supplier.status === 'BLOCKED').length,
+      inactive: suppliers.filter((supplier) => supplier.status === 'INACTIVE').length,
+      currentBalance: suppliers.reduce(
+        (sum, supplier) => sum + toNumber(supplier.currentBalance),
+        0,
+      ),
+      openPayableBalance: toNumber(openPayables._sum.outstandingAmount),
+      overduePayableBalance: toNumber(overduePayables._sum.outstandingAmount),
+    };
+  }
+
   async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const record = await this.prisma.supplier.findFirst({
       where: { id, deletedAt: null },
@@ -79,6 +170,8 @@ export class SuppliersService {
         company: { select: { id: true, name: true, code: true } },
         division: true,
         branch: true,
+        createdBy: { select: { id: true, fullName: true, email: true } },
+        updatedBy: { select: { id: true, fullName: true, email: true } },
         productCategories: {
           include: { productCategory: { select: { id: true, name: true, categoryType: true } } },
           orderBy: { productCategory: { name: 'asc' } },
@@ -101,6 +194,257 @@ export class SuppliersService {
     }
 
     return record;
+  }
+
+  async controlCenter(id: string, user: AuthUser) {
+    const supplier = await this.findOne(id, user);
+    const [purchaseSummary, payablesSummary, ledger, performance, statementRuns, productCoverage] =
+      await Promise.all([
+        this.purchaseSummary(id, user),
+        this.payablesSummary(id, user),
+        this.ledger(id, user),
+        this.prisma.supplierPerformanceProfile.findFirst({
+          where: { supplierId: id, companyId: supplier.companyId, deletedAt: null },
+          include: { reviewedBy: { select: { id: true, fullName: true, email: true } } },
+          orderBy: { updatedAt: 'desc' },
+        }),
+        this.prisma.supplierStatementRun.findMany({
+          where: { supplierId: id, companyId: supplier.companyId },
+          include: { generatedBy: { select: { id: true, fullName: true, email: true } } },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        }),
+        this.productCoverage(id, supplier.companyId),
+      ]);
+
+    return {
+      supplier,
+      summary: {
+        lifetimePurchaseTotal: purchaseSummary.totals.lifetimePurchaseTotal,
+        ytdPurchaseTotal: purchaseSummary.totals.ytdPurchaseTotal,
+        receivedPurchaseTotal: purchaseSummary.totals.receivedPurchaseTotal,
+        purchaseOrderCount: purchaseSummary.totals.purchaseOrderCount,
+        openPayableBalance: payablesSummary.totals.openPayableBalance,
+        overduePayableBalance: payablesSummary.totals.overduePayableBalance,
+        paidPayableTotal: payablesSummary.totals.paidPayableTotal,
+        payableCount: payablesSummary.totals.payableCount,
+      },
+      recentPurchaseOrders: purchaseSummary.recentPurchaseOrders,
+      openPayables: payablesSummary.openPayables,
+      recentPayables: payablesSummary.recentPayables,
+      latestStatements: statementRuns,
+      performance,
+      productCoverage,
+      ledger: ledger.events.slice(0, 12),
+      audit: {
+        createdAt: supplier.createdAt,
+        updatedAt: supplier.updatedAt,
+        createdBy: supplier.createdBy,
+        updatedBy: supplier.updatedBy,
+      },
+    };
+  }
+
+  async ledger(id: string, user: AuthUser) {
+    const supplier = await this.findOneScoped(id, user, AccessLevel.READ);
+    const [purchaseOrders, payables] = await Promise.all([
+      this.prisma.purchaseOrder.findMany({
+        where: { supplierId: id, companyId: supplier.companyId, deletedAt: null },
+        select: {
+          id: true,
+          purchaseOrderNumber: true,
+          orderDate: true,
+          status: true,
+          paymentStatus: true,
+          totalAmount: true,
+          paidAmount: true,
+          outstandingAmount: true,
+          currency: true,
+        },
+        orderBy: { orderDate: 'desc' },
+        take: 50,
+      }),
+      this.prisma.payable.findMany({
+        where: { supplierId: id, companyId: supplier.companyId, deletedAt: null },
+        select: {
+          id: true,
+          payableNumber: true,
+          issueDate: true,
+          dueDate: true,
+          status: true,
+          amount: true,
+          paidAmount: true,
+          outstandingAmount: true,
+          currency: true,
+          sourceType: true,
+          sourceId: true,
+          notes: true,
+        },
+        orderBy: { issueDate: 'desc' },
+        take: 50,
+      }),
+    ]);
+
+    const events = [
+      ...purchaseOrders.map((order) => ({
+        id: `po-${order.id}`,
+        type: 'PURCHASE_ORDER',
+        sourceId: order.id,
+        reference: order.purchaseOrderNumber,
+        date: order.orderDate,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        debit: toNumber(order.totalAmount),
+        credit: toNumber(order.paidAmount),
+        balanceImpact: toNumber(order.outstandingAmount),
+        currency: order.currency,
+      })),
+      ...payables.map((payable) => ({
+        id: `ap-${payable.id}`,
+        type: 'PAYABLE',
+        sourceId: payable.id,
+        reference: payable.payableNumber,
+        date: payable.issueDate,
+        dueDate: payable.dueDate,
+        status: payable.status,
+        debit: toNumber(payable.amount),
+        credit: toNumber(payable.paidAmount),
+        balanceImpact: toNumber(payable.outstandingAmount),
+        currency: payable.currency,
+        notes: payable.notes,
+      })),
+    ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    return { supplierId: id, companyId: supplier.companyId, events };
+  }
+
+  async purchaseSummary(id: string, user: AuthUser) {
+    const supplier = await this.findOneScoped(id, user, AccessLevel.READ);
+    const ytdStart = currentYearStart();
+    const where: Prisma.PurchaseOrderWhereInput = {
+      supplierId: id,
+      companyId: supplier.companyId,
+      deletedAt: null,
+    };
+    const [all, ytd, received, count, recentPurchaseOrders] = await Promise.all([
+      this.prisma.purchaseOrder.aggregate({ where, _sum: { totalAmount: true } }),
+      this.prisma.purchaseOrder.aggregate({
+        where: { ...where, orderDate: { gte: ytdStart } },
+        _sum: { totalAmount: true },
+      }),
+      this.prisma.purchaseOrder.aggregate({
+        where: { ...where, status: 'RECEIVED' },
+        _sum: { totalAmount: true },
+      }),
+      this.prisma.purchaseOrder.count({ where }),
+      this.prisma.purchaseOrder.findMany({
+        where,
+        include: {
+          branch: { select: { id: true, name: true, code: true } },
+          division: { select: { id: true, name: true, code: true } },
+          lines: {
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  productCode: true,
+                  sku: true,
+                  name: true,
+                  category: { select: { id: true, name: true, categoryType: true } },
+                },
+              },
+              unit: { select: { id: true, name: true, symbol: true } },
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+        orderBy: { orderDate: 'desc' },
+        take: 10,
+      }),
+    ]);
+
+    return {
+      supplierId: id,
+      companyId: supplier.companyId,
+      totals: {
+        lifetimePurchaseTotal: toNumber(all._sum.totalAmount),
+        ytdPurchaseTotal: toNumber(ytd._sum.totalAmount),
+        receivedPurchaseTotal: toNumber(received._sum.totalAmount),
+        purchaseOrderCount: count,
+      },
+      recentPurchaseOrders,
+    };
+  }
+
+  async payablesSummary(id: string, user: AuthUser) {
+    const supplier = await this.findOneScoped(id, user, AccessLevel.READ);
+    const today = new Date();
+    const where: Prisma.PayableWhereInput = {
+      supplierId: id,
+      companyId: supplier.companyId,
+      deletedAt: null,
+    };
+    const openStatuses: PayableStatus[] = [
+      PayableStatus.OPEN,
+      PayableStatus.PARTIALLY_PAID,
+      PayableStatus.OVERDUE,
+    ];
+    const [open, overdue, paid, count, openPayables, recentPayables] = await Promise.all([
+      this.prisma.payable.aggregate({
+        where: { ...where, status: { in: openStatuses } },
+        _sum: { outstandingAmount: true },
+      }),
+      this.prisma.payable.aggregate({
+        where: {
+          ...where,
+          status: { in: openStatuses },
+          dueDate: { lt: today },
+          outstandingAmount: { gt: 0 },
+        },
+        _sum: { outstandingAmount: true },
+      }),
+      this.prisma.payable.aggregate({
+        where,
+        _sum: { paidAmount: true },
+      }),
+      this.prisma.payable.count({ where }),
+      this.prisma.payable.findMany({
+        where: { ...where, status: { in: openStatuses } },
+        include: {
+          branch: { select: { id: true, name: true, code: true } },
+          division: { select: { id: true, name: true, code: true } },
+          purchaseOrders: {
+            where: { deletedAt: null },
+            select: { id: true, purchaseOrderNumber: true, status: true, totalAmount: true },
+            take: 5,
+          },
+        },
+        orderBy: { issueDate: 'desc' },
+        take: 10,
+      }),
+      this.prisma.payable.findMany({
+        where,
+        include: {
+          branch: { select: { id: true, name: true, code: true } },
+          division: { select: { id: true, name: true, code: true } },
+        },
+        orderBy: { issueDate: 'desc' },
+        take: 10,
+      }),
+    ]);
+
+    return {
+      supplierId: id,
+      companyId: supplier.companyId,
+      totals: {
+        openPayableBalance: toNumber(open._sum.outstandingAmount),
+        overduePayableBalance: toNumber(overdue._sum.outstandingAmount),
+        paidPayableTotal: toNumber(paid._sum.paidAmount),
+        payableCount: count,
+      },
+      openPayables,
+      recentPayables,
+    };
   }
 
   async create(dto: CreateSupplierDto, user: AuthUser) {
@@ -274,6 +618,66 @@ export class SuppliersService {
     if (!record) throw new NotFoundException('Supplier not found');
     await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
     return record;
+  }
+
+  private async productCoverage(id: string, companyId: string) {
+    const lines = await this.prisma.purchaseOrderLine.findMany({
+      where: {
+        purchaseOrder: {
+          supplierId: id,
+          companyId,
+          deletedAt: null,
+        },
+      },
+      include: {
+        product: {
+          select: {
+            id: true,
+            productCode: true,
+            sku: true,
+            name: true,
+            category: { select: { id: true, name: true, categoryType: true } },
+          },
+        },
+        unit: { select: { id: true, name: true, symbol: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 250,
+    });
+
+    const byProduct = new Map<
+      string,
+      {
+        product: (typeof lines)[number]['product'];
+        unit: (typeof lines)[number]['unit'];
+        quantity: number;
+        totalAmount: number;
+        lastPurchasedAt: Date;
+      }
+    >();
+
+    for (const line of lines) {
+      const current = byProduct.get(line.productId);
+      const quantity = toNumber(line.quantity);
+      const totalAmount = toNumber(line.lineTotal);
+      if (!current) {
+        byProduct.set(line.productId, {
+          product: line.product,
+          unit: line.unit,
+          quantity,
+          totalAmount,
+          lastPurchasedAt: line.createdAt,
+        });
+      } else {
+        current.quantity += quantity;
+        current.totalAmount += totalAmount;
+        if (line.createdAt > current.lastPurchasedAt) current.lastPurchasedAt = line.createdAt;
+      }
+    }
+
+    return Array.from(byProduct.values())
+      .sort((a, b) => b.totalAmount - a.totalAmount)
+      .slice(0, 25);
   }
 
   private async assertDivisionAndCategories(
