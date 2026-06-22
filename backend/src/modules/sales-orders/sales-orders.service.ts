@@ -325,9 +325,12 @@ export class SalesOrdersService {
     if (input.customerId) {
       const customer = await tx.customer.findFirst({
         where: { id: input.customerId, companyId: input.companyId, deletedAt: null },
-        select: { id: true, name: true },
+        select: { id: true, name: true, status: true },
       });
       if (!customer) throw new BadRequestException('Customer does not belong to this company');
+      if (customer.status === 'BLOCKED') {
+        throw new BadRequestException('Blocked customers cannot be used on sales orders');
+      }
       return { customerId: customer.id, customerName: customer.name };
     }
 
@@ -892,6 +895,12 @@ export class SalesOrdersService {
         customerName: dto.customerName,
         userId,
       });
+      await this.assertCustomerCreditAvailable(tx, {
+        companyId: dto.companyId,
+        customerId: customer.customerId,
+        paymentMethod,
+        totalAmount,
+      });
       const salesOrderNumber = await this.codes.next({
         entityType: 'SalesOrder',
         companyId: dto.companyId,
@@ -1043,6 +1052,12 @@ export class SalesOrdersService {
               userId,
             })
           : null;
+      await this.assertCustomerCreditAvailable(tx, {
+        companyId: existing.companyId,
+        customerId: customer ? customer.customerId : existing.customerId,
+        paymentMethod: nextPaymentMethod,
+        totalAmount,
+      });
 
       if (shouldRefreshLines) {
         await tx.salesOrderLine.deleteMany({ where: { salesOrderId: id } });
@@ -1141,10 +1156,13 @@ export class SalesOrdersService {
     if (refs.customerId) {
       const customer = await this.prisma.customer.findFirst({
         where: { id: refs.customerId, deletedAt: null },
-        select: { companyId: true, divisionId: true, branchId: true },
+        select: { companyId: true, divisionId: true, branchId: true, status: true },
       });
       if (!customer || customer.companyId !== companyId) {
         throw new BadRequestException('Customer does not belong to this company');
+      }
+      if (customer.status === 'BLOCKED') {
+        throw new BadRequestException('Blocked customers cannot be used on sales orders');
       }
       if (!refs.branchId) {
         throw new BadRequestException('Sales order branch is required for this customer');
@@ -1203,6 +1221,39 @@ export class SalesOrdersService {
     }
 
     await this.assertLineReferencesBelongToCompany(companyId, refs.lines, refs.branchId);
+  }
+
+  private async assertCustomerCreditAvailable(
+    tx: Prisma.TransactionClient,
+    input: {
+      companyId: string;
+      customerId?: string | null;
+      paymentMethod?: SalesPaymentMethod | null;
+      totalAmount: number;
+    },
+  ) {
+    if (input.paymentMethod !== SalesPaymentMethod.CREDIT || !input.customerId) return;
+
+    const customer = await tx.customer.findFirst({
+      where: { id: input.customerId, companyId: input.companyId, deletedAt: null },
+      select: { name: true, status: true, creditLimit: true, currentBalance: true },
+    });
+    if (!customer) throw new BadRequestException('Customer does not belong to this company');
+    if (customer.status === 'BLOCKED') {
+      throw new BadRequestException('Blocked customers cannot be used for credit sales');
+    }
+
+    const creditLimit = Number(customer.creditLimit ?? 0);
+    if (creditLimit <= 0) return;
+
+    const projectedBalance = Number(customer.currentBalance ?? 0) + input.totalAmount;
+    if (projectedBalance > creditLimit) {
+      throw new BadRequestException(
+        `Credit sale exceeds ${customer.name}'s credit limit. Limit: ${creditLimit.toFixed(
+          2,
+        )}, projected balance: ${projectedBalance.toFixed(2)}`,
+      );
+    }
   }
 
   private async assertLineReferencesBelongToCompany(
@@ -1350,6 +1401,12 @@ export class SalesOrdersService {
       let receivableId: string | null = null;
 
       if (paymentMethod === 'CREDIT') {
+        await this.assertCustomerCreditAvailable(tx, {
+          companyId: existing.companyId,
+          customerId: existing.customerId,
+          paymentMethod,
+          totalAmount: Number(existing.totalAmount),
+        });
         const receivableCustomerName = salesOrderReceivableCustomerName(existing);
         const recNumber = await this.codes.next({
           entityType: 'Receivable',

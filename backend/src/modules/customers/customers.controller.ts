@@ -25,10 +25,40 @@ export class CustomersController {
     return this.service.findAll(query, user);
   }
 
-  @Get(':id')
+  @Get('workbench-summary')
   @RequirePermissions('customers.view')
-  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.findOne(id, user);
+  workbenchSummary(@Query() query: QueryCustomerDto, @CurrentUser() user: AuthUser) {
+    return this.service.workbenchSummary(query, user);
+  }
+
+  @Get(':id/control-center')
+  @RequirePermissions('customers.view')
+  controlCenter(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.controlCenter(id, user);
+  }
+
+  @Get(':id/ledger')
+  @RequirePermissions('customers.view')
+  ledger(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.ledger(id, user);
+  }
+
+  @Get(':id/sales-summary')
+  @RequirePermissions('customers.view')
+  salesSummary(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.salesSummary(id, user);
+  }
+
+  @Get(':id/receivables-summary')
+  @RequirePermissions('customers.view')
+  receivablesSummary(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.receivablesSummary(id, user);
+  }
+
+  @Get(':id/product-history')
+  @RequirePermissions('customers.view')
+  productHistory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.productHistory(id, user);
   }
 
   /** Customer 360° aggregate — credit, recent orders, top SKUs, payments. */
@@ -36,6 +66,12 @@ export class CustomersController {
   @RequirePermissions('customers.view')
   profile(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.profile(id, user);
+  }
+
+  @Get(':id')
+  @RequirePermissions('customers.view')
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()

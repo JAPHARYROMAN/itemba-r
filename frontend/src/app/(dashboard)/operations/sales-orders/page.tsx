@@ -449,7 +449,7 @@ function SalesOrderModal({
     let cancelled = false;
     Promise.allSettled([
       backendList<Customer>('/customers', {
-        query: { companyId: form.companyId, branchId: form.branchId, limit: 200 },
+        query: { companyId: form.companyId, branchId: form.branchId, status: 'ACTIVE', limit: 200 },
       }),
       backendList<Employee>('/hr/employees', {
         query: { companyId: form.companyId, branchId: form.branchId, limit: 500 },
