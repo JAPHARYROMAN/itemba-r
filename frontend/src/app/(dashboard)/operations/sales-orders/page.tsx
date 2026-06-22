@@ -365,35 +365,6 @@ function employeeLabel(employee?: Employee | SalesOrder['salesperson'] | null) {
   return name || employee.employeeCode || employee.id;
 }
 
-function scopeLabel(order: SalesOrder) {
-  const branch = order.branch?.code
-    ? `${order.branch.code} - ${order.branch.name}`
-    : order.branch?.name;
-  const division = order.division?.code
-    ? `${order.division.code} - ${order.division.name}`
-    : order.division?.name;
-  return [division, branch].filter(Boolean).join(' / ') || 'Unscoped';
-}
-
-function fulfillmentHint(order: SalesOrder) {
-  if (order.status === 'DRAFT') return 'Draft';
-  const notes = order.deliveryNotes ?? [];
-  if (notes.length === 0) return 'Awaiting delivery';
-  if (notes.some((note) => ['DELIVERED', 'CLOSED'].includes(note.status))) return 'Delivered';
-  if (notes.some((note) => ['DISPATCHED', 'PARTIALLY_DELIVERED', 'IN_TRANSIT'].includes(note.status))) {
-    return 'In progress';
-  }
-  return `${notes.length} note${notes.length === 1 ? '' : 's'}`;
-}
-
-function nextAction(order: SalesOrder) {
-  if (order.status === 'DRAFT') return 'Confirm';
-  if (Number(order.outstandingAmount ?? 0) > 0) return 'Collect';
-  if (order.status === 'CONFIRMED') return 'Deliver / audit';
-  if (order.status === 'PAID') return 'Review';
-  return 'View';
-}
-
 function SalesOrderModal({
   mode,
   initial,
@@ -1161,20 +1132,11 @@ export default function SalesOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [filterSearch, setFilterSearch] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
-  const [filterDivision, setFilterDivision] = useState('');
-  const [filterBranch, setFilterBranch] = useState('');
-  const [filterCustomer, setFilterCustomer] = useState('');
-  const [filterSalesperson, setFilterSalesperson] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterPayment, setFilterPayment] = useState('');
-  const [filterPaymentMethod, setFilterPaymentMethod] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
-  const [filterDivisions, setFilterDivisions] = useState<Division[]>([]);
-  const [filterBranches, setFilterBranches] = useState<Branch[]>([]);
-  const [filterCustomers, setFilterCustomers] = useState<Customer[]>([]);
-  const [filterEmployees, setFilterEmployees] = useState<Employee[]>([]);
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<SalesOrder | null>(null);
@@ -1204,44 +1166,6 @@ export default function SalesOrdersPage() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!filterCompany) {
-      setFilterDivisions([]);
-      setFilterBranches([]);
-      setFilterCustomers([]);
-      setFilterEmployees([]);
-      setFilterDivision('');
-      setFilterBranch('');
-      setFilterCustomer('');
-      setFilterSalesperson('');
-      return;
-    }
-
-    let cancelled = false;
-    Promise.allSettled([
-      backendList<Division>('/divisions', { query: { companyId: filterCompany, limit: 500 } }),
-      backendList<Branch>('/branches', {
-        query: { companyId: filterCompany, activeOnly: true, limit: 1000 },
-      }),
-      backendList<Customer>('/customers', {
-        query: { companyId: filterCompany, status: 'ACTIVE', limit: 1000 },
-      }),
-      backendList<Employee>('/hr/employees', {
-        query: { companyId: filterCompany, limit: 1000 },
-      }),
-    ]).then(([divisionResult, branchResult, customerResult, employeeResult]) => {
-      if (cancelled) return;
-      setFilterDivisions(divisionResult.status === 'fulfilled' ? divisionResult.value : []);
-      setFilterBranches(branchResult.status === 'fulfilled' ? branchResult.value : []);
-      setFilterCustomers(customerResult.status === 'fulfilled' ? customerResult.value : []);
-      setFilterEmployees(employeeResult.status === 'fulfilled' ? employeeResult.value : []);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [filterCompany]);
-
   const load = useCallback(async () => {
     if (!canView) return;
     setLoading(true);
@@ -1250,14 +1174,9 @@ export default function SalesOrdersPage() {
       const query: Record<string, string | number> = {};
       if (filterSearch.trim()) query.search = filterSearch.trim();
       if (filterCompany) query.companyId = filterCompany;
-      if (filterDivision) query.divisionId = filterDivision;
-      if (filterBranch) query.branchId = filterBranch;
-      if (filterCustomer) query.customerId = filterCustomer;
-      if (filterSalesperson) query.salespersonId = filterSalesperson;
       if (filterType) query.salesType = filterType;
       if (filterStatus) query.status = filterStatus;
       if (filterPayment) query.paymentStatus = filterPayment;
-      if (filterPaymentMethod) query.paymentMethod = filterPaymentMethod;
       if (filterDateFrom) query.dateFrom = filterDateFrom;
       if (filterDateTo) query.dateTo = filterDateTo;
       const [pageResult, summaryResult] = await Promise.all([
@@ -1278,14 +1197,9 @@ export default function SalesOrdersPage() {
     page,
     filterSearch,
     filterCompany,
-    filterDivision,
-    filterBranch,
-    filterCustomer,
-    filterSalesperson,
     filterType,
     filterStatus,
     filterPayment,
-    filterPaymentMethod,
     filterDateFrom,
     filterDateTo,
   ]);
@@ -1351,10 +1265,6 @@ export default function SalesOrdersPage() {
     color: 'var(--aurora-text)',
   } as const;
 
-  const workbenchBranchOptions = filterDivision
-    ? filterBranches.filter((branch) => branch.divisionId === filterDivision)
-    : filterBranches;
-
   return (
     <div className="p-6 space-y-6">
       {creating && (
@@ -1393,16 +1303,14 @@ export default function SalesOrdersPage() {
 
       <PageHeader
         title="Sales Orders"
-        subtitle="Customer orders, fulfillment, receivables, stock, and margin control"
+        subtitle="Customer orders, payments, and revenue"
       />
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-6 aurora-stagger">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4 aurora-stagger">
         <StatCard label="Total Orders" value={summary.totalOrders} />
-        <StatCard label="Draft" value={summary.draft} />
         <StatCard label="Confirmed" value={summary.confirmed} />
+        <StatCard label="Unpaid" value={summary.unpaidCount} />
         <StatCard label="Revenue" value={fmtMoney(summary.revenue)} />
-        <StatCard label="Outstanding" value={fmtMoney(summary.outstanding)} />
-        <StatCard label="Overdue Credit" value={summary.overdueCreditOrders} />
       </div>
 
       {loadError && (
@@ -1435,10 +1343,6 @@ export default function SalesOrdersPage() {
               value={filterCompany}
               onChange={(e) => {
                 setFilterCompany(e.target.value);
-                setFilterDivision('');
-                setFilterBranch('');
-                setFilterCustomer('');
-                setFilterSalesperson('');
                 setPage(1);
               }}
               className={filterSelectCls}
@@ -1448,76 +1352,6 @@ export default function SalesOrdersPage() {
               {companies.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
-                </option>
-              ))}
-            </select>
-            <select
-              value={filterDivision}
-              onChange={(e) => {
-                setFilterDivision(e.target.value);
-                setFilterBranch('');
-                setPage(1);
-              }}
-              className={filterSelectCls}
-              style={filterStyle}
-              disabled={!filterCompany}
-            >
-              <option value="">All Divisions</option>
-              {filterDivisions.map((division) => (
-                <option key={division.id} value={division.id}>
-                  {division.code ? `${division.code} - ${division.name}` : division.name}
-                </option>
-              ))}
-            </select>
-            <select
-              value={filterBranch}
-              onChange={(e) => {
-                setFilterBranch(e.target.value);
-                setPage(1);
-              }}
-              className={filterSelectCls}
-              style={filterStyle}
-              disabled={!filterCompany}
-            >
-              <option value="">All Branches</option>
-              {workbenchBranchOptions.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.code ? `${branch.code} - ${branch.name}` : branch.name}
-                </option>
-              ))}
-            </select>
-            <select
-              value={filterCustomer}
-              onChange={(e) => {
-                setFilterCustomer(e.target.value);
-                setPage(1);
-              }}
-              className={filterSelectCls}
-              style={filterStyle}
-              disabled={!filterCompany}
-            >
-              <option value="">All Customers</option>
-              {filterCustomers.map((customer) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.name}
-                  {customer.customerCode ? ` (${customer.customerCode})` : ''}
-                </option>
-              ))}
-            </select>
-            <select
-              value={filterSalesperson}
-              onChange={(e) => {
-                setFilterSalesperson(e.target.value);
-                setPage(1);
-              }}
-              className={filterSelectCls}
-              style={filterStyle}
-              disabled={!filterCompany}
-            >
-              <option value="">All Salespeople</option>
-              {filterEmployees.map((employee) => (
-                <option key={employee.id} value={employee.id}>
-                  {employeeLabel(employee)}
                 </option>
               ))}
             </select>
@@ -1569,22 +1403,6 @@ export default function SalesOrdersPage() {
                 </option>
               ))}
             </select>
-            <select
-              value={filterPaymentMethod}
-              onChange={(e) => {
-                setFilterPaymentMethod(e.target.value);
-                setPage(1);
-              }}
-              className={filterSelectCls}
-              style={filterStyle}
-            >
-              <option value="">All Methods</option>
-              {PAYMENT_METHODS.map((method) => (
-                <option key={method.value} value={method.value}>
-                  {method.label}
-                </option>
-              ))}
-            </select>
             <input
               type="date"
               value={filterDateFrom}
@@ -1618,7 +1436,7 @@ export default function SalesOrdersPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1400px]">
+          <table className="w-full text-sm min-w-[1100px]">
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
@@ -1627,28 +1445,25 @@ export default function SalesOrdersPage() {
                 <th className="px-4 py-3">Number</th>
                 <th className="px-4 py-3">Date</th>
                 <th className="px-4 py-3">Customer</th>
-                <th className="px-4 py-3">Scope</th>
                 <th className="px-4 py-3">Type</th>
                 <th className="px-4 py-3 text-right">Total</th>
                 <th className="px-4 py-3 text-right">Outstanding</th>
-                <th className="px-4 py-3">Fulfillment</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Payment</th>
-                <th className="px-4 py-3">Next Action</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={12}>
-                    <SkeletonTable rows={6} cols={12} />
+                  <td colSpan={9}>
+                    <SkeletonTable rows={6} cols={9} />
                   </td>
                 </tr>
               ) : !data?.data.length ? (
                 <tr>
                   <td
-                    colSpan={12}
+                    colSpan={9}
                     className="px-4 py-10 text-center text-sm"
                     style={{ color: 'var(--aurora-text-muted)' }}
                   >
@@ -1671,9 +1486,6 @@ export default function SalesOrdersPage() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                      {scopeLabel(o)}
-                    </td>
                     <td className="px-4 py-3 text-xs">{o.salesType.replace(/_/g, ' ')}</td>
                     <td className="px-4 py-3 text-right tabular-nums">
                       {fmtMoney(o.totalAmount, o.currency)}
@@ -1681,14 +1493,12 @@ export default function SalesOrdersPage() {
                     <td className="px-4 py-3 text-right tabular-nums">
                       {fmtMoney(o.outstandingAmount, o.currency)}
                     </td>
-                    <td className="px-4 py-3 text-xs">{fulfillmentHint(o)}</td>
                     <td className="px-4 py-3">
                       <StatusBadge value={o.status} />
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge value={o.paymentStatus} />
                     </td>
-                    <td className="px-4 py-3 text-xs font-semibold">{nextAction(o)}</td>
                     <td className="px-4 py-3 text-right space-x-1">
                       <Btn
                         variant="secondary"
