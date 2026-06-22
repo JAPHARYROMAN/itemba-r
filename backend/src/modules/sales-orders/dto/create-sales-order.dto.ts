@@ -39,6 +39,7 @@ export class SalesOrderLineDto {
   @IsOptional()
   @IsNumber()
   @Min(0)
+  /** Per-unit discount entered by the operator; service stores the computed line discount total. */
   discountAmount?: number;
 
   @IsOptional()

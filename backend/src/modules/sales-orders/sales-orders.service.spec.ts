@@ -206,6 +206,62 @@ describe('SalesOrdersService payment normalization', () => {
   });
 });
 
+describe('SalesOrdersService per-unit discounts', () => {
+  it('expands sales order line discounts per quantity before storing totals', async () => {
+    const { service, prisma } = makeService();
+    prisma.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-account-1',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      accountType: 'CASH_ON_HAND',
+    });
+    prisma.customer.findFirst.mockResolvedValue(null);
+
+    await service.create(
+      createDto({
+        salesType: 'CASH_SALE',
+        paymentMethod: 'CASH',
+        cashAccountId: 'cash-account-1',
+        lines: [
+          {
+            productId: 'product-1',
+            description: 'Item',
+            quantity: 2,
+            unitId: 'unit-1',
+            unitPrice: 100,
+            discountAmount: 10,
+            taxAmount: 0,
+          },
+        ],
+      }),
+      user,
+    );
+
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal: 200,
+          discountAmount: 20,
+          totalAmount: 180,
+        }),
+      }),
+    );
+    expect(prisma.salesOrderLine.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            quantity: 2,
+            unitPrice: 100,
+            discountAmount: 20,
+            lineTotal: 180,
+          }),
+        ],
+      }),
+    );
+  });
+});
+
 describe('SalesOrdersService walk-in customer mastering', () => {
   it('creates and links a customer master for a named walk-in sales order customer', async () => {
     const { service, prisma } = makeService();
@@ -269,6 +325,12 @@ describe('SalesOrdersService receivable customer names', () => {
         outstandingAmount: 418000,
       }),
     );
+    prisma.customer.findFirst.mockResolvedValue({
+      name: 'Aaron Town',
+      status: 'ACTIVE',
+      creditLimit: 0,
+      currentBalance: 0,
+    });
 
     await service.confirm('so-1', user);
 

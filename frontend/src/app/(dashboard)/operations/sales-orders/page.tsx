@@ -404,7 +404,11 @@ function SalesOrderModal({
                 qty: Number(line.qty ?? line.quantity ?? 1),
                 unitId: line.unitId ?? '',
                 unitPrice: Number(line.unitPrice ?? 0),
-                discount: Number(line.discount ?? line.discountAmount ?? 0),
+                discount:
+                  line.discount != null
+                    ? Number(line.discount)
+                    : Number(line.discountAmount ?? 0) /
+                      Math.max(1, Number(line.qty ?? line.quantity ?? 1)),
                 tax: Number(line.tax ?? line.taxAmount ?? 0),
                 batchId: line.batchId ?? '',
               }))

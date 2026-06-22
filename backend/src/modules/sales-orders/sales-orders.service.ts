@@ -122,7 +122,7 @@ function calculateLineTotals(
   const computed = lines.map((line) => {
     const qty = Number(line.quantity);
     const price = Number(line.unitPrice);
-    const discount = Number(line.discountAmount ?? 0);
+    const unitDiscount = Number(line.discountAmount ?? 0);
     const tax = Number(line.taxAmount ?? 0);
     // Defensive server-side validation (ITMB-003/ITMB-041): reject quantities,
     // prices, discounts or taxes that would corrupt totals or inventory. The
@@ -134,23 +134,24 @@ function calculateLineTotals(
     if (!Number.isFinite(price) || price <= 0) {
       throw new BadRequestException('Sales order line unit price must be greater than zero');
     }
-    if (!Number.isFinite(discount) || discount < 0) {
-      throw new BadRequestException('Sales order line discount cannot be negative');
+    if (!Number.isFinite(unitDiscount) || unitDiscount < 0) {
+      throw new BadRequestException('Sales order line discount per unit cannot be negative');
     }
     if (!Number.isFinite(tax) || tax < 0) {
       throw new BadRequestException('Sales order line tax cannot be negative');
     }
     const extended = qty * price;
-    if (discount > extended) {
+    if (unitDiscount > price) {
       throw new BadRequestException(
-        'Sales order line discount cannot exceed the line amount (quantity x unit price)',
+        'Sales order line discount per unit cannot exceed the unit price',
       );
     }
+    const discount = qty * unitDiscount;
     const lineTotal = extended - discount + tax;
     subtotal += extended;
     totalDiscount += discount;
     totalTax += tax;
-    return { ...line, lineTotal };
+    return { ...line, discountAmount: discount, lineTotal };
   });
 
   const totalAmount = subtotal - totalDiscount + totalTax;
@@ -1488,7 +1489,19 @@ export class SalesOrdersService {
       lines: dto.lines,
     });
 
-    const linesToProcess = dto.lines ?? (existing.lines as any[]);
+    const linesToProcess =
+      dto.lines ??
+      (existing.lines as any[]).map((line) => {
+        const quantity = Number(line.quantity ?? 0);
+        return {
+          ...line,
+          quantity,
+          unitPrice: Number(line.unitPrice ?? 0),
+          discountAmount:
+            quantity > 0 ? Number(line.discountAmount ?? 0) / quantity : Number(line.discountAmount ?? 0),
+          taxAmount: Number(line.taxAmount ?? 0),
+        };
+      });
     const { computed, subtotal, totalDiscount, totalTax, totalAmount } =
       calculateLineTotals(linesToProcess);
     const shouldRefreshLines = Boolean(dto.lines || dto.branchId !== undefined);

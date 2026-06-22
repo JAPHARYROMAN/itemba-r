@@ -210,8 +210,7 @@ function effectiveCostForProduct(product: OrderProductOption | undefined) {
 function netUnitSalePrice(line: EditableOrderLine) {
   const qty = numberOrZero(line.qty);
   if (qty <= 0) return null;
-  const netSalesAmount = qty * numberOrZero(line.unitPrice) - numberOrZero(line.discount);
-  return netSalesAmount / qty;
+  return numberOrZero(line.unitPrice) - numberOrZero(line.discount);
 }
 
 function availableAfterLocalAllocation(
@@ -267,9 +266,15 @@ export function mergeOrderProductOptions<TProduct extends OrderProductOption>(
   return Array.from(byId.values());
 }
 
-function lineTotal(line: EditableOrderLine) {
+function lineDiscountTotal(line: EditableOrderLine, variant: OrderVariant) {
+  const discount = numberOrZero(line.discount);
+  if (variant === 'sales') return numberOrZero(line.qty) * discount;
+  return discount;
+}
+
+function lineTotal(line: EditableOrderLine, variant: OrderVariant) {
   const subtotal = numberOrZero(line.qty) * numberOrZero(line.unitPrice);
-  return subtotal - numberOrZero(line.discount) + numberOrZero(line.tax);
+  return subtotal - lineDiscountTotal(line, variant) + numberOrZero(line.tax);
 }
 
 function missingFields(line: EditableOrderLine) {
@@ -341,7 +346,11 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
   const profitWarnings = useMemo(() => {
     if (variant !== 'sales') return [];
     const warnings: string[] = [];
-    for (const line of lines) {
+    for (const [index, line] of lines.entries()) {
+      if (numberOrZero(line.discount) > numberOrZero(line.unitPrice)) {
+        warnings.push(`Line ${index + 1} discount per unit cannot exceed the unit price.`);
+        continue;
+      }
       const product = productById.get(line.productId);
       if (!product || !productTracksInventory(product)) continue;
       const cost = effectiveCostForProduct(product);
@@ -373,13 +382,13 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
           const subtotal = numberOrZero(line.qty) * numberOrZero(line.unitPrice);
           return {
             subtotal: acc.subtotal + subtotal,
-            discount: acc.discount + numberOrZero(line.discount),
+            discount: acc.discount + lineDiscountTotal(line, variant),
             tax: acc.tax + numberOrZero(line.tax),
           };
         },
         { subtotal: 0, discount: 0, tax: 0 },
       ),
-    [lines],
+    [lines, variant],
   );
   const total = totals.subtotal - totals.discount + totals.tax;
   const invalidCount = lines.filter((line) => missingFields(line).length > 0).length;
@@ -570,7 +579,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         background: 'var(--aurora-card)',
                       }}
                     >
-                      {money(lineTotal(line), currency)}
+                      {money(lineTotal(line, variant), currency)}
                     </span>
                     {lines.length > 1 && (
                       <Btn variant="ghost" size="xs" onClick={() => onRemoveLine(index)}>
@@ -871,7 +880,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         className="mb-1 block text-[12px] font-medium"
                         style={{ color: 'var(--aurora-text-secondary)' }}
                       >
-                        Discount
+                        {variant === 'sales' ? 'Discount / Unit' : 'Discount'}
                       </span>
                       <input
                         type="number"
