@@ -87,6 +87,9 @@ const PERMS = [
   'journal_entries.view',
   'cash_accounts.view',
   'units.view',
+  'reports.view',
+  'finance.reports.view',
+  'operations.reports.view',
 ];
 
 async function createFixture() {
@@ -448,6 +451,122 @@ async function main() {
       'cash account: balance credited 10,000 by CASH sale',
       Number(updatedAccount?.currentBalance) === 10000,
       `balance ${updatedAccount?.currentBalance}`,
+    );
+
+    // ── Reports enhancement (R1/R2/O2) ──────────────────────────────────────
+
+    // 13. Catalog lists only the live sectors and includes the new reports
+    const catalog = await api('GET', '/reports/catalog', { token });
+    const sectors = catalog.data?.sectors ?? [];
+    const catalogIds = (catalog.data?.entries ?? []).map((e) => e.id);
+    const liveSectors = ['FINANCE', 'OPERATIONS', 'WESTSIDES', 'HR', 'COMPLIANCE'];
+    step(
+      'reports catalog: only live sectors (no petroleum/itemba/construction/BI)',
+      sectors.length > 0 && sectors.every((s) => liveSectors.includes(s)),
+      `sectors ${sectors.join(',') || '(none)'}`,
+    );
+    step(
+      'reports catalog: the 5 new money reports are discoverable',
+      [
+        'finance.customer-aging',
+        'finance.supplier-aging',
+        'ops.low-stock',
+        'ops.stock-ageing',
+        'ops.branch-profitability',
+      ].every((id) => catalogIds.includes(id)),
+      `${catalogIds.length} entries`,
+    );
+
+    // 14. A removed enterprise-BI route is actually gone
+    const deadRoute = await api('GET', '/reports/command-center', { token });
+    step(
+      'reports: removed BI route (command-center) no longer exists',
+      deadRoute.status === 404,
+      `status ${deadRoute.status}`,
+    );
+
+    // 15. Customer credit aging reflects the CREDIT sale's receivable
+    const customerAging = await api('GET', `/financial-reports/customer-aging/${f.company.id}`, {
+      token,
+    });
+    const caTotal = Number(customerAging.data?.totals?.total ?? 0);
+    step(
+      'report customer-aging: CREDIT sale shows 10,000 outstanding for the customer',
+      customerAging.status === 200 &&
+        caTotal === 10000 &&
+        (customerAging.data?.rows ?? []).some((r) => String(r.customer).includes('Mkandarasi')),
+      `total ${caTotal}, rows ${(customerAging.data?.rows ?? []).length}`,
+    );
+
+    // 16. Supplier aging is zero (the fixture creates no payables)
+    const supplierAging = await api('GET', `/financial-reports/supplier-aging/${f.company.id}`, {
+      token,
+    });
+    step(
+      'report supplier-aging: no payables -> zero total',
+      supplierAging.status === 200 && Number(supplierAging.data?.totals?.total ?? 0) === 0,
+      `status ${supplierAging.status}`,
+    );
+
+    // 17. sales-by-product (groupBy) sums both sales of the same product
+    const salesByProduct = await api(
+      'GET',
+      `/operations-reports/sales-by-product?companyId=${f.company.id}&limit=200`,
+      { token },
+    );
+    const sbpRows = Array.isArray(salesByProduct.data)
+      ? salesByProduct.data
+      : (salesByProduct.data?.data ?? []);
+    const productRow = sbpRows.find((r) => String(r.product ?? '').includes('Cement'));
+    step(
+      'report sales-by-product: groupBy totals 4 units / 20,000 across both sales',
+      Boolean(productRow) &&
+        Number(productRow.quantity) === 4 &&
+        Number(productRow.totalAmount) === 20000,
+      productRow ? `qty ${productRow.quantity}, total ${productRow.totalAmount}` : `rows ${sbpRows.length}`,
+    );
+
+    // 18. sales-by-customer (groupBy) sums both orders for the fixture customer
+    const salesByCustomer = await api(
+      'GET',
+      `/operations-reports/sales-by-customer?companyId=${f.company.id}&limit=200`,
+      { token },
+    );
+    const sbcRows = Array.isArray(salesByCustomer.data)
+      ? salesByCustomer.data
+      : (salesByCustomer.data?.data ?? []);
+    const customerRow = sbcRows.find((r) => String(r.customer ?? '').includes('Mkandarasi'));
+    step(
+      'report sales-by-customer: groupBy totals 2 orders / 20,000 for the customer',
+      Boolean(customerRow) &&
+        Number(customerRow.orderCount) === 2 &&
+        Number(customerRow.totalAmount) === 20000,
+      customerRow
+        ? `orders ${customerRow.orderCount}, total ${customerRow.totalAmount}`
+        : `rows ${sbcRows.length}`,
+    );
+
+    // 19. New operations analytics endpoints are reachable and return tables
+    const branchProfit = await api(
+      'GET',
+      `/operations-reports/branch-profitability?companyId=${f.company.id}`,
+      { token },
+    );
+    step(
+      'report branch-profitability: endpoint returns 200 + array',
+      branchProfit.status === 200 &&
+        Array.isArray(Array.isArray(branchProfit.data) ? branchProfit.data : branchProfit.data?.data ?? []),
+      `status ${branchProfit.status}`,
+    );
+    const stockAgeing = await api(
+      'GET',
+      `/operations-reports/stock-ageing?companyId=${f.company.id}`,
+      { token },
+    );
+    step(
+      'report stock-ageing: endpoint returns 200',
+      stockAgeing.status === 200,
+      `status ${stockAgeing.status}`,
     );
   } finally {
     console.log('\nCleaning up fixture…');
