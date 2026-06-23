@@ -321,24 +321,30 @@ export default function OperationsDashboardPage() {
               value={fmtNum(data.products.total)}
               hint={`${data.products.outOfStock} out of stock`}
             />
-            <StatCard label="Out of Stock" value={fmtNum(data.products.outOfStock)} />
+            <Link href="/operations/inventory-balances?lowStock=1" className="block">
+              <StatCard label="Out of Stock" value={fmtNum(data.products.outOfStock)} />
+            </Link>
           </div>
 
           {/* Row 2 — Financial values */}
           <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 aurora-stagger">
             <StatCard label="Total Sales Value (TZS)" value={fmtTZS(data.salesOrders.totalValue)} />
-            <StatCard
-              label="Outstanding Sales (TZS)"
-              value={fmtTZS(data.salesOrders.outstandingValue)}
-            />
+            <Link href="/operations/sales-orders?paymentStatus=UNPAID" className="block">
+              <StatCard
+                label="Outstanding Sales (TZS)"
+                value={fmtTZS(data.salesOrders.outstandingValue)}
+              />
+            </Link>
             <StatCard
               label="Total Purchase Value (TZS)"
               value={fmtTZS(data.purchaseOrders.totalValue)}
             />
-            <StatCard
-              label="Outstanding Purchases (TZS)"
-              value={fmtTZS(data.purchaseOrders.outstandingValue)}
-            />
+            <Link href="/operations/purchase-orders?paymentStatus=UNPAID" className="block">
+              <StatCard
+                label="Outstanding Purchases (TZS)"
+                value={fmtTZS(data.purchaseOrders.outstandingValue)}
+              />
+            </Link>
           </div>
 
           {/* Row 3 — Order status cards */}
@@ -348,30 +354,39 @@ export default function OperationsDashboardPage() {
                 Sales Orders
               </div>
               <div className="flex flex-wrap gap-3">
-                <div className="flex items-center gap-2">
+                <Link
+                  href="/operations/sales-orders?status=DRAFT"
+                  className="flex items-center gap-2 rounded-lg -mx-1 px-1 transition hover:bg-slate-50"
+                >
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
                     Draft
                   </span>
                   <span className="text-sm font-bold text-slate-800">
                     {fmtNum(data.salesOrders.draft)}
                   </span>
-                </div>
-                <div className="flex items-center gap-2">
+                </Link>
+                <Link
+                  href="/operations/sales-orders?status=CONFIRMED"
+                  className="flex items-center gap-2 rounded-lg -mx-1 px-1 transition hover:bg-slate-50"
+                >
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
                     Confirmed
                   </span>
                   <span className="text-sm font-bold text-slate-800">
                     {fmtNum(data.salesOrders.confirmed)}
                   </span>
-                </div>
-                <div className="flex items-center gap-2">
+                </Link>
+                <Link
+                  href="/operations/sales-orders?status=CANCELLED"
+                  className="flex items-center gap-2 rounded-lg -mx-1 px-1 transition hover:bg-slate-50"
+                >
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
                     Cancelled
                   </span>
                   <span className="text-sm font-bold text-slate-800">
                     {fmtNum(data.salesOrders.cancelled)}
                   </span>
-                </div>
+                </Link>
               </div>
               <div className="mt-4 pt-3 border-t border-slate-100 text-xs text-slate-400">
                 Total: {fmtNum(data.salesOrders.total)} orders
@@ -383,30 +398,39 @@ export default function OperationsDashboardPage() {
                 Purchase Orders
               </div>
               <div className="flex flex-wrap gap-3">
-                <div className="flex items-center gap-2">
+                <Link
+                  href="/operations/purchase-orders?status=DRAFT"
+                  className="flex items-center gap-2 rounded-lg -mx-1 px-1 transition hover:bg-slate-50"
+                >
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
                     Draft
                   </span>
                   <span className="text-sm font-bold text-slate-800">
                     {fmtNum(data.purchaseOrders.draft)}
                   </span>
-                </div>
-                <div className="flex items-center gap-2">
+                </Link>
+                <Link
+                  href="/operations/purchase-orders?status=CONFIRMED"
+                  className="flex items-center gap-2 rounded-lg -mx-1 px-1 transition hover:bg-slate-50"
+                >
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
                     Confirmed
                   </span>
                   <span className="text-sm font-bold text-slate-800">
                     {fmtNum(data.purchaseOrders.confirmed)}
                   </span>
-                </div>
-                <div className="flex items-center gap-2">
+                </Link>
+                <Link
+                  href="/operations/purchase-orders?status=RECEIVED"
+                  className="flex items-center gap-2 rounded-lg -mx-1 px-1 transition hover:bg-slate-50"
+                >
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
                     Received
                   </span>
                   <span className="text-sm font-bold text-slate-800">
                     {fmtNum(data.purchaseOrders.received)}
                   </span>
-                </div>
+                </Link>
               </div>
               <div className="mt-4 pt-3 border-t border-slate-100 text-xs text-slate-400">
                 Total: {fmtNum(data.purchaseOrders.total)} orders

@@ -153,6 +153,13 @@ export default function InventoryBalancesPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    // Drill-through from the operations dashboard "Out of Stock" / "Low Stock"
+    // cards (e.g. ?lowStock=1).
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('lowStock') === '1' || params.get('stock') === 'low') setLowStock(true);
+  }, []);
+
   const reset = (setter: (v: string) => void) => (v: string) => {
     setter(v);
     setPage(1);

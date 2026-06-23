@@ -863,6 +863,18 @@ export default function PurchaseOrdersPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    // Seed filters from drill-through URLs (operations dashboard links here with
+    // ?status=DRAFT / ?status=RECEIVED / ?paymentStatus=UNPAID).
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('status');
+    if (status && PURCHASE_STATUSES.includes(status)) setFilterStatus(status);
+    const paymentStatus = params.get('paymentStatus');
+    if (paymentStatus && PAYMENT_STATUSES.includes(paymentStatus)) setFilterPayment(paymentStatus);
+    const purchaseType = params.get('purchaseType');
+    if (purchaseType) setFilterType(purchaseType);
+  }, []);
+
   const doAction = async (id: string, action: 'confirm' | 'cancel') => {
     setActionLoading(`${id}:${action}`);
     setActionError('');

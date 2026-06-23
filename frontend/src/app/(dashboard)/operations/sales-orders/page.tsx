@@ -1213,7 +1213,16 @@ export default function SalesOrdersPage() {
   }, [load]);
 
   useEffect(() => {
-    setRequestedEditId(new URLSearchParams(window.location.search).get('editId') ?? '');
+    // Seed the workbench from drill-through URLs (e.g. the operations dashboard
+    // links to ?status=CONFIRMED or ?paymentStatus=UNPAID) plus the edit deep-link.
+    const params = new URLSearchParams(window.location.search);
+    setRequestedEditId(params.get('editId') ?? '');
+    const status = params.get('status');
+    if (status && SALES_STATUSES.includes(status)) setFilterStatus(status);
+    const paymentStatus = params.get('paymentStatus');
+    if (paymentStatus && PAYMENT_STATUSES.includes(paymentStatus)) setFilterPayment(paymentStatus);
+    const salesType = params.get('salesType');
+    if (salesType) setFilterType(salesType);
   }, []);
 
   useEffect(() => {
