@@ -437,6 +437,53 @@ export class OperationsReportsService {
       }));
   }
 
+  /**
+   * Stock ageing / slow-moving — for every product-in-stock, how long since its
+   * last movement, bucketed into age bands, with the capital tied up in slow
+   * stock flagged as "value at risk". Helps clear dead inventory.
+   */
+  async getStockAgeing(query: OperationsReportQuery, user: AuthUser) {
+    const rows = await this.getStockValuationRows(query, user);
+    const now = Date.now();
+    return rows
+      .filter((row) => this.toNumber(row.quantityOnHand) > 0)
+      .map((row) => {
+        const last = row.lastMovementAt ? row.lastMovementAt.getTime() : null;
+        const daysSinceLastMovement =
+          last === null ? null : Math.max(0, Math.floor((now - last) / (1000 * 60 * 60 * 24)));
+        const ageBand =
+          daysSinceLastMovement === null
+            ? 'No movement recorded'
+            : daysSinceLastMovement <= 30
+              ? '0-30 days'
+              : daysSinceLastMovement <= 60
+                ? '31-60 days'
+                : daysSinceLastMovement <= 90
+                  ? '61-90 days'
+                  : daysSinceLastMovement <= 180
+                    ? '91-180 days'
+                    : 'Over 180 days';
+        const slowMoving = daysSinceLastMovement === null || daysSinceLastMovement > 90;
+        return {
+          productCode: row.productCode,
+          sku: row.sku,
+          product: row.product,
+          category: row.category,
+          branch: row.branch,
+          quantityOnHand: row.quantityOnHand,
+          unit: row.unit,
+          averageCost: row.averageCost,
+          totalValue: row.totalValue,
+          lastMovementAt: row.lastMovementAt,
+          daysSinceLastMovement,
+          ageBand,
+          slowMoving,
+          valueAtRisk: slowMoving ? row.totalValue : 0,
+        };
+      })
+      .sort((a, b) => (b.daysSinceLastMovement ?? 99999) - (a.daysSinceLastMovement ?? 99999));
+  }
+
   async getStockAdjustments(query: OperationsReportQuery, user: AuthUser) {
     const stockAdjustment = await this.stockAdjustmentWhere(query, user);
     const rows = await this.prisma.stockAdjustmentLine.findMany({
@@ -477,6 +524,73 @@ export class OperationsReportsService {
       headerReason: line.stockAdjustment.reason,
       lineReason: line.reason,
     }));
+  }
+
+  /**
+   * Branch profitability — revenue, COGS, gross profit and margin% per branch,
+   * from confirmed sales order lines (where COGS has been computed by the
+   * posting/profit engine). Filter by ?productId to see a single product's
+   * profitability across branches. The biggest "where do we actually make
+   * money" question for a multi-branch hardware business.
+   */
+  async getBranchProfitability(query: OperationsReportQuery, user: AuthUser) {
+    const salesOrder = await this.salesOrderWhere(query, user);
+    const where: Record<string, unknown> = {
+      cogsAmount: { not: null },
+      salesOrder,
+      ...(query.productId ? { productId: query.productId } : {}),
+    };
+
+    const lines = await this.prisma.salesOrderLine.findMany({
+      where,
+      select: {
+        quantity: true,
+        lineTotal: true,
+        cogsAmount: true,
+        grossProfitAmount: true,
+        salesOrder: {
+          select: { branchId: true, branch: { select: { code: true, name: true } } },
+        },
+      },
+      take: this.limit(query),
+    });
+
+    type Row = {
+      branch: string;
+      lineCount: number;
+      unitsSold: number;
+      revenue: number;
+      cogs: number;
+      grossProfit: number;
+      grossMarginPct: number;
+    };
+    const grouped = new Map<string, Row>();
+    for (const line of lines) {
+      const key = line.salesOrder.branchId ?? 'unassigned';
+      const row: Row = grouped.get(key) ?? {
+        branch: this.branchLabel(line.salesOrder.branch) ?? 'Unassigned branch',
+        lineCount: 0,
+        unitsSold: 0,
+        revenue: 0,
+        cogs: 0,
+        grossProfit: 0,
+        grossMarginPct: 0,
+      };
+      row.lineCount += 1;
+      row.unitsSold += this.toNumber(line.quantity);
+      row.revenue += this.toNumber(line.lineTotal);
+      row.cogs += this.toNumber(line.cogsAmount);
+      row.grossProfit += this.toNumber(line.grossProfitAmount);
+      grouped.set(key, row);
+    }
+
+    return [...grouped.values()]
+      .map((row) => ({
+        ...row,
+        grossMarginPct:
+          row.revenue > 0 ? Number(((row.grossProfit / row.revenue) * 100).toFixed(2)) : 0,
+      }))
+      .sort((a, b) => b.grossProfit - a.grossProfit);
   }
 
   private async getStockValuationRows(query: OperationsReportQuery, user: AuthUser) {

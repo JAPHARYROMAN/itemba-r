@@ -172,4 +172,16 @@ export class OperationsReportsController {
   getStockAdjustments(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.getStockAdjustments(q as Record<string, string | undefined>, user);
   }
+
+  @Get('stock-ageing')
+  @RequirePermissions('operations.reports.view')
+  getStockAgeing(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getStockAgeing(q as Record<string, string | undefined>, user);
+  }
+
+  @Get('branch-profitability')
+  @RequirePermissions('operations.reports.view')
+  getBranchProfitability(@Query() q: OperationsReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.getBranchProfitability(q as Record<string, string | undefined>, user);
+  }
 }

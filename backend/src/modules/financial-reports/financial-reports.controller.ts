@@ -136,6 +136,18 @@ export class FinancialReportsController {
     return this.service.getPayablesAging(companyId, user);
   }
 
+  @Get('customer-aging/:companyId')
+  @RequirePermissions('finance.reports.view')
+  getCustomerAging(@Param('companyId') companyId: string, @CurrentUser() user: AuthUser) {
+    return this.service.getCustomerAging(companyId, user);
+  }
+
+  @Get('supplier-aging/:companyId')
+  @RequirePermissions('finance.reports.view')
+  getSupplierAging(@Param('companyId') companyId: string, @CurrentUser() user: AuthUser) {
+    return this.service.getSupplierAging(companyId, user);
+  }
+
   @Get('intercompany-balances')
   @RequirePermissions('finance.reports.view')
   getIntercompanyBalances(@CurrentUser() user: AuthUser) {

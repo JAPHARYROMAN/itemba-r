@@ -405,6 +405,142 @@ export class FinancialReportsService {
   }
 
   /**
+   * Customer credit aging — open AR per customer bucketed by days past due,
+   * plus each customer's oldest overdue age. Answers "who owes us and how late".
+   * Returns { rows, totals } so the report runner renders a per-customer table
+   * with a totals summary.
+   */
+  async getCustomerAging(companyId: string, user?: AuthUser) {
+    if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
+    const now = new Date();
+    const receivables = await this.prisma.receivable.findMany({
+      where: {
+        companyId,
+        deletedAt: null,
+        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+      },
+      select: { customerId: true, customerName: true, outstandingAmount: true, dueDate: true },
+    });
+
+    type Row = {
+      customer: string;
+      current: number;
+      days1_30: number;
+      days31_60: number;
+      days61_90: number;
+      over90: number;
+      total: number;
+      oldestDaysOverdue: number;
+    };
+    const map = new Map<string, Row>();
+    for (const r of receivables) {
+      const key = r.customerId ?? `name:${r.customerName}`;
+      const row: Row = map.get(key) ?? {
+        customer: r.customerName,
+        current: 0,
+        days1_30: 0,
+        days31_60: 0,
+        days61_90: 0,
+        over90: 0,
+        total: 0,
+        oldestDaysOverdue: 0,
+      };
+      const amount = Number(r.outstandingAmount);
+      const days = r.dueDate
+        ? Math.floor((now.getTime() - r.dueDate.getTime()) / (1000 * 60 * 60 * 24))
+        : 0;
+      if (days <= 0) row.current += amount;
+      else if (days <= 30) row.days1_30 += amount;
+      else if (days <= 60) row.days31_60 += amount;
+      else if (days <= 90) row.days61_90 += amount;
+      else row.over90 += amount;
+      row.total += amount;
+      row.oldestDaysOverdue = Math.max(row.oldestDaysOverdue, Math.max(0, days));
+      map.set(key, row);
+    }
+    const rows = [...map.values()].sort((a, b) => b.total - a.total);
+    return { companyId, rows, totals: this.sumAgingRows(rows) };
+  }
+
+  /**
+   * Supplier aging — open AP per supplier bucketed by days past due.
+   */
+  async getSupplierAging(companyId: string, user?: AuthUser) {
+    if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
+    const now = new Date();
+    const payables = await this.prisma.payable.findMany({
+      where: {
+        companyId,
+        deletedAt: null,
+        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+      },
+      select: { supplierId: true, supplierName: true, outstandingAmount: true, dueDate: true },
+    });
+
+    type Row = {
+      supplier: string;
+      current: number;
+      days1_30: number;
+      days31_60: number;
+      days61_90: number;
+      over90: number;
+      total: number;
+      oldestDaysOverdue: number;
+    };
+    const map = new Map<string, Row>();
+    for (const p of payables) {
+      const key = p.supplierId ?? `name:${p.supplierName}`;
+      const row: Row = map.get(key) ?? {
+        supplier: p.supplierName,
+        current: 0,
+        days1_30: 0,
+        days31_60: 0,
+        days61_90: 0,
+        over90: 0,
+        total: 0,
+        oldestDaysOverdue: 0,
+      };
+      const amount = Number(p.outstandingAmount);
+      const days = p.dueDate
+        ? Math.floor((now.getTime() - p.dueDate.getTime()) / (1000 * 60 * 60 * 24))
+        : 0;
+      if (days <= 0) row.current += amount;
+      else if (days <= 30) row.days1_30 += amount;
+      else if (days <= 60) row.days31_60 += amount;
+      else if (days <= 90) row.days61_90 += amount;
+      else row.over90 += amount;
+      row.total += amount;
+      row.oldestDaysOverdue = Math.max(row.oldestDaysOverdue, Math.max(0, days));
+      map.set(key, row);
+    }
+    const rows = [...map.values()].sort((a, b) => b.total - a.total);
+    return { companyId, rows, totals: this.sumAgingRows(rows) };
+  }
+
+  private sumAgingRows(
+    rows: Array<{
+      current: number;
+      days1_30: number;
+      days31_60: number;
+      days61_90: number;
+      over90: number;
+      total: number;
+    }>,
+  ) {
+    return rows.reduce(
+      (acc, r) => ({
+        current: acc.current + r.current,
+        days1_30: acc.days1_30 + r.days1_30,
+        days31_60: acc.days31_60 + r.days31_60,
+        days61_90: acc.days61_90 + r.days61_90,
+        over90: acc.over90 + r.over90,
+        total: acc.total + r.total,
+      }),
+      { current: 0, days1_30: 0, days31_60: 0, days61_90: 0, over90: 0, total: 0 },
+    );
+  }
+
+  /**
    * Cash Flow Statement — INDIRECT METHOD.
    *
    * Standard layout:
