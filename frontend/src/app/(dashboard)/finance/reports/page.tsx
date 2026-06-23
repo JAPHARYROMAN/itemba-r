@@ -1,8 +1,18 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Btn, Card, FormInput, FormSelect, PageHeader, PageSpinner, StatCard } from '@/components/ui';
+import {
+  Btn,
+  Card,
+  FormInput,
+  FormSelect,
+  PageHeader,
+  PageSpinner,
+  StatCard,
+  showToast,
+} from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { downloadReportCsv } from '@/lib/report-export';
 
 interface Company { id: string; name: string; code?: string | null }
 interface Division { id: string; name: string; code?: string | null }
@@ -169,6 +179,14 @@ export default function FinanceReportsPage() {
 
   const reportRows = useMemo(() => report?.rows ?? report?.statementLines ?? [], [report]);
 
+  const exportCsv = useCallback(() => {
+    if (!report) return;
+    const exported = downloadReportCsv(report, `finance-${activeTab}`);
+    if (!exported) {
+      showToast('info', 'Nothing to export', 'This report has no tabular rows to write to CSV.');
+    }
+  }, [report, activeTab]);
+
   if (!canView) {
     return (
       <div className="p-6">
@@ -254,6 +272,10 @@ export default function FinanceReportsPage() {
         <Card className="p-12 text-center text-sm text-slate-500">Load a report to view results.</Card>
       ) : (
         <Card className="p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <span className="text-sm font-semibold text-slate-700">{currentTab.label}</span>
+            <Btn variant="secondary" onClick={exportCsv} disabled={!report}>Export CSV</Btn>
+          </div>
           {activeTab === 'trial-balance' && <TrialBalanceView rows={report.rows ?? []} totalDebit={report.totalDebit} totalCredit={report.totalCredit} />}
           {(activeTab === 'pnl' || activeTab === 'consolidated-pnl') && <StatementView title={currentTab.label} rows={report.statementLines ?? []} totals={[['Gross Profit', report.grossProfit], ['Net Income', report.netIncome]]} />}
           {(activeTab === 'balance-sheet' || activeTab === 'consolidated-balance-sheet') && <StatementView title={currentTab.label} rows={report.statementLines ?? []} totals={[['Assets', report.assets], ['Liabilities', report.liabilities], ['Equity', report.equity]]} />}

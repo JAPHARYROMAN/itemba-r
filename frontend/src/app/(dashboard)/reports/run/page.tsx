@@ -3,6 +3,13 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Card, PageHeader, SkeletonCardGrid, showToast } from '@/components/ui';
+import {
+  flattenForCsv,
+  isFlatObject,
+  isPrimitiveOrDate,
+  pickPrimaryTable,
+  toCsv,
+} from '@/lib/report-export';
 
 interface CatalogEntry {
   id: string;
@@ -174,93 +181,6 @@ const fmtNumber = (v: unknown): string => {
   }
   return String(v);
 };
-
-const isPrimitive = (v: unknown): v is string | number | boolean =>
-  v === null ||
-  v === undefined ||
-  typeof v === 'string' ||
-  typeof v === 'number' ||
-  typeof v === 'boolean';
-
-const isPrimitiveOrDate = (v: unknown): boolean => {
-  if (isPrimitive(v)) return true;
-  if (v instanceof Date) return true;
-  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return true;
-  return false;
-};
-
-const isFlatObject = (obj: unknown): obj is Record<string, unknown> => {
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
-  return Object.values(obj).every(
-    (v) =>
-      isPrimitiveOrDate(v) ||
-      (typeof v === 'object' &&
-        v !== null &&
-        !Array.isArray(v) &&
-        Object.values(v as Record<string, unknown>).every(isPrimitiveOrDate)),
-  );
-};
-
-/**
- * Walk a response and pick the most informative table to render: the
- * top-level array field with the most rows whose elements are flat objects.
- * Falls back to the response itself if it's already an array.
- */
-function pickPrimaryTable(data: unknown): { key: string | null; rows: Record<string, unknown>[] } {
-  if (Array.isArray(data) && data.length > 0 && isFlatObject(data[0])) {
-    return { key: null, rows: data as Record<string, unknown>[] };
-  }
-  if (data && typeof data === 'object') {
-    let best: { key: string; rows: Record<string, unknown>[] } | null = null;
-    for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
-      if (Array.isArray(v) && v.length > 0 && isFlatObject(v[0])) {
-        if (!best || v.length > best.rows.length)
-          best = { key: k, rows: v as Record<string, unknown>[] };
-      }
-    }
-    if (best) return best;
-  }
-  return { key: null, rows: [] };
-}
-
-function flattenForCsv(rows: Record<string, unknown>[]): { columns: string[]; data: string[][] } {
-  const columnSet = new Set<string>();
-  for (const r of rows) {
-    for (const [k, v] of Object.entries(r)) {
-      if (isPrimitiveOrDate(v)) {
-        columnSet.add(k);
-      } else if (v && typeof v === 'object' && !Array.isArray(v)) {
-        for (const sk of Object.keys(v as Record<string, unknown>)) {
-          columnSet.add(`${k}.${sk}`);
-        }
-      }
-    }
-  }
-  const columns = Array.from(columnSet);
-  const data = rows.map((r) =>
-    columns.map((c) => {
-      const dot = c.indexOf('.');
-      let val: unknown;
-      if (dot === -1) {
-        val = r[c];
-      } else {
-        const head = c.slice(0, dot);
-        const tail = c.slice(dot + 1);
-        const parent = r[head] as Record<string, unknown> | undefined;
-        val = parent?.[tail];
-      }
-      if (val === null || val === undefined) return '';
-      if (val instanceof Date) return val.toISOString();
-      return String(val);
-    }),
-  );
-  return { columns, data };
-}
-
-function toCsv(columns: string[], rows: string[][]): string {
-  const escape = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-  return [columns, ...rows].map((row) => row.map(escape).join(',')).join('\n');
-}
 
 function formatDateTime(value?: string | null) {
   if (!value) return 'Not recorded';
