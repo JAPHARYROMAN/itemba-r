@@ -587,73 +587,6 @@ export const REPORTS_CATALOG: CatalogEntry[] = [
   },
 
   // ── PETROLEUM ────────────────────────────────────────────────────────────
-  {
-    id: 'petroleum.fuel-stock',
-    sector: 'PETROLEUM',
-    category: 'Fuel',
-    name: 'Fuel Stock',
-    description: 'Tank levels + valuations.',
-    scopes: ['COMPANY'],
-    permission: 'petroleum.reports.view',
-    apiPath: '/petroleum/reports/fuel-stock',
-    frontendPath: '/petroleum/reports',
-  },
-  {
-    id: 'petroleum.shift-summary',
-    sector: 'PETROLEUM',
-    category: 'Fuel',
-    name: 'Shift Summary',
-    description: 'Sales + cash by shift.',
-    scopes: ['COMPANY'],
-    permission: 'petroleum.reports.view',
-    apiPath: '/petroleum/reports/shift-summary',
-    frontendPath: '/petroleum/reports',
-  },
-  {
-    id: 'petroleum.deliveries-summary',
-    sector: 'PETROLEUM',
-    category: 'Fuel',
-    name: 'Deliveries Summary',
-    description: 'Tanker deliveries by date / supplier.',
-    scopes: ['COMPANY'],
-    permission: 'petroleum.reports.view',
-    apiPath: '/petroleum/reports/deliveries-summary',
-    frontendPath: '/petroleum/reports',
-  },
-  {
-    id: 'petroleum.credit-sales',
-    sector: 'PETROLEUM',
-    category: 'Fuel',
-    name: 'Fuel Credit Sales',
-    description: 'Credit sales + outstanding balances.',
-    scopes: ['COMPANY'],
-    permission: 'petroleum.reports.view',
-    apiPath: '/petroleum/reports/credit-sales',
-    frontendPath: '/petroleum/reports',
-  },
-  {
-    id: 'petroleum.tank-dips',
-    sector: 'PETROLEUM',
-    category: 'Fuel',
-    name: 'Tank Dips',
-    description: 'Daily tank dip readings.',
-    scopes: ['COMPANY'],
-    permission: 'petroleum.reports.view',
-    apiPath: '/petroleum/reports/tank-dips',
-    frontendPath: '/petroleum/reports',
-  },
-  {
-    id: 'petroleum.reconciliation-history',
-    sector: 'PETROLEUM',
-    category: 'Fuel',
-    name: 'Reconciliation History',
-    description: 'Past stock reconciliations + variances.',
-    scopes: ['COMPANY'],
-    permission: 'petroleum.reports.view',
-    apiPath: '/petroleum/reports/reconciliation-history',
-    frontendPath: '/petroleum/reports',
-  },
-
   // ── WESTSIDES ────────────────────────────────────────────────────────────
   {
     id: 'westsides.daily-close',
@@ -890,41 +823,6 @@ export const REPORTS_CATALOG: CatalogEntry[] = [
   },
 
   // ── ITEMBA — capstone cockpit + per sub-division ─────────────────────────
-  {
-    id: 'itemba.cockpit',
-    sector: 'ITEMBA',
-    category: 'Capstone',
-    name: 'Itemba Cockpit',
-    description: 'Cross-sub-division KPIs, P&L, AR/AP, activity feed.',
-    scopes: ['COMPANY', 'DIVISION'],
-    permission: 'itemba.dashboard.view',
-    apiPath: '/itemba/dashboard/cockpit',
-    frontendPath: '/itemba',
-  },
-
   // ── CONSTRUCTION (Itemba sub-division) ──────────────────────────────────
-  {
-    id: 'construction.project-profitability',
-    sector: 'CONSTRUCTION',
-    category: 'Projects',
-    name: 'Project Profitability',
-    description: 'Per-project billed vs cost vs profit.',
-    scopes: ['COMPANY'],
-    permission: 'construction.reports.view',
-    apiPath: '/construction/projects/{id}/profitability',
-    frontendPath: '/construction',
-  },
-
   // ── BI / advanced ────────────────────────────────────────────────────────
-  {
-    id: 'bi.report-definitions',
-    sector: 'BI',
-    category: 'BI',
-    name: 'Report Definitions',
-    description: 'User-authored report definitions.',
-    scopes: ['GROUP', 'COMPANY'],
-    permission: 'advanced_reports.view',
-    apiPath: '/bi/report-definitions',
-    frontendPath: '/bi/reports',
-  },
 ];

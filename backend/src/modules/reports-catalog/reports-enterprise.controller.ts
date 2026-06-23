@@ -1,62 +1,21 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ReportsCatalogService } from './reports-catalog.service';
 
 /**
- * Enterprise reporting layer endpoints. These endpoints aggregate the report
- * catalog, BI assets, governance signals, packs, metrics, and viewer metadata
- * into the surfaces consumed by the rebuilt Reports module.
+ * Per-report metadata endpoints consumed by the report runner (/reports/run):
+ * viewer manifest, lineage, data-quality warnings, explain, and export-audit.
+ *
+ * The aspirational "enterprise BI" surface (command-center, governance,
+ * semantic query, self-service builder, report-packs, data-catalog) was removed
+ * in the Westsides tone-down — it was never called by the UI and depended on
+ * deleted modules. Keep this controller scoped to what the runner actually uses.
  */
 @Controller('reports')
 @UseGuards(JwtAuthGuard)
 export class ReportsEnterpriseController {
   constructor(private readonly service: ReportsCatalogService) {}
-
-  @Get('command-center')
-  commandCenter(@CurrentUser() user: AuthUser) {
-    return this.service.commandCenter(user);
-  }
-
-  @Get('data-catalog')
-  dataCatalog() {
-    return this.service.dataCatalog();
-  }
-
-  @Get('data-quality-surface')
-  dataQualitySurface(@Query() query: Record<string, unknown>, @CurrentUser() user: AuthUser) {
-    return this.service.dataQualitySurface(user, undefined, query ?? {});
-  }
-
-  @Get('integration-readiness')
-  integrationReadiness() {
-    return this.service.integrationReadiness();
-  }
-
-  @Get('advanced-readiness')
-  advancedReadiness() {
-    return this.service.advancedReportingReadiness();
-  }
-
-  @Get('report-packs')
-  reportPacks() {
-    return this.service.reportPacks();
-  }
-
-  @Get('report-packs/approval-requests')
-  reportPackApprovalRequests(@Query() query: Record<string, unknown>, @CurrentUser() user: AuthUser) {
-    return this.service.reportPackApprovalRequests(user, query ?? {});
-  }
-
-  @Get('governance')
-  governance() {
-    return this.service.governance();
-  }
-
-  @Get('admin')
-  admin() {
-    return this.service.admin();
-  }
 
   @Get('viewer/:reportId')
   viewerMetadata(@Param('reportId') reportId: string) {
@@ -70,57 +29,6 @@ export class ReportsEnterpriseController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.recordViewerRun(reportId, body ?? {}, user);
-  }
-
-  @Post('semantic/query')
-  semanticQuery(@Body() body: Record<string, unknown>, @CurrentUser() user: AuthUser) {
-    return this.service.semanticQuery(body ?? {}, user);
-  }
-
-  @Post('builder/preview')
-  builderPreview(@Body() body: Record<string, unknown>, @CurrentUser() user: AuthUser) {
-    return this.service.builderPreview(body ?? {}, user);
-  }
-
-  @Post('builder/save')
-  saveBuilderReport(@Body() body: Record<string, unknown>, @CurrentUser() user: AuthUser) {
-    return this.service.saveBuilderReport(body ?? {}, user);
-  }
-
-  @Post('report-packs/:packKey/generate')
-  generateReportPack(
-    @Param('packKey') packKey: string,
-    @Body() body: Record<string, unknown>,
-    @CurrentUser() user: AuthUser,
-  ) {
-    return this.service.generateReportPack(packKey, body ?? {}, user);
-  }
-
-  @Post('report-packs/:packKey/render')
-  renderReportPack(
-    @Param('packKey') packKey: string,
-    @Body() body: Record<string, unknown>,
-    @CurrentUser() user: AuthUser,
-  ) {
-    return this.service.renderReportPack(packKey, body ?? {}, user);
-  }
-
-  @Post('report-packs/:packKey/approval-requests')
-  submitReportPackApproval(
-    @Param('packKey') packKey: string,
-    @Body() body: Record<string, unknown>,
-    @CurrentUser() user: AuthUser,
-  ) {
-    return this.service.submitReportPackApproval(packKey, body ?? {}, user);
-  }
-
-  @Patch('report-packs/approval-requests/:requestId')
-  actOnReportPackApproval(
-    @Param('requestId') requestId: string,
-    @Body() body: Record<string, unknown>,
-    @CurrentUser() user: AuthUser,
-  ) {
-    return this.service.actOnReportPackApproval(requestId, body ?? {}, user);
   }
 
   @Get('lineage/:reportId')
@@ -162,14 +70,5 @@ export class ReportsEnterpriseController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.exportAuditHistory(reportId, user, query ?? {});
-  }
-
-  @Patch('governance/:reportId/lifecycle')
-  updateLifecycle(
-    @Param('reportId') reportId: string,
-    @Body() body: Record<string, unknown>,
-    @CurrentUser() user: AuthUser,
-  ) {
-    return this.service.updateLifecycle(reportId, body ?? {}, user);
   }
 }
