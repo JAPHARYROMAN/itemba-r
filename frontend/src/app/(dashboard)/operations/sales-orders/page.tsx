@@ -25,6 +25,7 @@ import {
   backendPatch,
   backendPost,
 } from '@/lib/api-client';
+import { downloadTextFile, formatDateOnly, rowsToCsv } from '@/lib/report-export';
 import { useAuth } from '@/hooks/use-auth';
 import {
   SALES_TYPES,
@@ -1150,6 +1151,7 @@ export default function SalesOrdersPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
   const [loadError, setLoadError] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   const canView = hasPermission('sales.view');
   const canCreate = hasPermission('sales.create');
@@ -1211,6 +1213,88 @@ export default function SalesOrdersPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Export the FULL filtered register (not just the visible page) to CSV.
+  const exportCsv = useCallback(async () => {
+    if (!canView) return;
+    setExporting(true);
+    try {
+      const query: Record<string, string | number> = {};
+      if (filterSearch.trim()) query.search = filterSearch.trim();
+      if (filterCompany) query.companyId = filterCompany;
+      if (filterType) query.salesType = filterType;
+      if (filterStatus) query.status = filterStatus;
+      if (filterPayment) query.paymentStatus = filterPayment;
+      if (filterDateFrom) query.dateFrom = filterDateFrom;
+      if (filterDateTo) query.dateTo = filterDateTo;
+
+      const CAP = 5000;
+      const result = await backendPage<SalesOrder>('/sales-orders', {
+        query: { ...query, page: 1, limit: CAP },
+      });
+      const orders = (result.data ?? []).slice(0, CAP);
+      if (!orders.length) {
+        showToast('info', 'Nothing to export', 'No sales orders match the current filters.');
+        return;
+      }
+
+      const rows = orders.map((o) => ({
+        'Order #': o.salesOrderNumber ?? o.orderNumber ?? o.id,
+        Date: formatDateOnly(o.orderDate),
+        Customer: o.customer?.name ?? o.customerName ?? 'Walk-in customer',
+        Branch: o.branch?.name ?? '',
+        'Sales Type': o.salesType,
+        Status: o.status,
+        Payment: o.paymentStatus,
+        'Payment Method': o.paymentMethod ?? '',
+        Currency: o.currency,
+        Total: o.totalAmount,
+        Outstanding: o.outstandingAmount,
+      }));
+      const columns = [
+        'Order #',
+        'Date',
+        'Customer',
+        'Branch',
+        'Sales Type',
+        'Status',
+        'Payment',
+        'Payment Method',
+        'Currency',
+        'Total',
+        'Outstanding',
+      ];
+      downloadTextFile(
+        `sales-orders-${new Date().toISOString().slice(0, 10)}.csv`,
+        'text/csv;charset=utf-8',
+        rowsToCsv(rows, columns),
+      );
+      if (result.total > orders.length) {
+        showToast(
+          'warning',
+          'Export truncated',
+          `Exported the first ${orders.length} of ${result.total} matching orders.`,
+        );
+      }
+    } catch (err) {
+      showToast(
+        'error',
+        'Export failed',
+        err instanceof Error ? err.message : 'Could not export sales orders.',
+      );
+    } finally {
+      setExporting(false);
+    }
+  }, [
+    canView,
+    filterSearch,
+    filterCompany,
+    filterType,
+    filterStatus,
+    filterPayment,
+    filterDateFrom,
+    filterDateTo,
+  ]);
 
   useEffect(() => {
     // Seed the workbench from drill-through URLs (e.g. the operations dashboard
@@ -1439,11 +1523,16 @@ export default function SalesOrdersPage() {
           </>
         }
         actions={
-          canCreate ? (
-            <Btn variant="primary" onClick={() => setCreating(true)}>
-              + New Order
+          <>
+            <Btn variant="secondary" onClick={exportCsv} loading={exporting}>
+              Export CSV
             </Btn>
-          ) : null
+            {canCreate ? (
+              <Btn variant="primary" onClick={() => setCreating(true)}>
+                + New Order
+              </Btn>
+            ) : null}
+          </>
         }
       />
 

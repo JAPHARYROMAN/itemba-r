@@ -59,6 +59,21 @@ export function pickPrimaryTable(data: unknown): {
   return { key: null, rows: [] };
 }
 
+/** Convert a single cell value to a CSV-safe string: finite numbers only, valid dates as ISO. */
+function cellToString(val: unknown): string {
+  if (val === null || val === undefined) return '';
+  if (val instanceof Date) return Number.isNaN(val.getTime()) ? '' : val.toISOString();
+  if (typeof val === 'number') return Number.isFinite(val) ? String(val) : '';
+  return String(val);
+}
+
+/** Format a date-ish value as YYYY-MM-DD, or '' when missing/invalid (never throws). */
+export function formatDateOnly(value: unknown): string {
+  if (!value) return '';
+  const d = new Date(value as string | number | Date);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+}
+
 /** Flatten rows (including one level of nested objects as `parent.child`) into a column matrix. */
 export function flattenForCsv(rows: Record<string, unknown>[]): {
   columns: string[];
@@ -89,9 +104,7 @@ export function flattenForCsv(rows: Record<string, unknown>[]): {
         const parent = r[head] as Record<string, unknown> | undefined;
         val = parent?.[tail];
       }
-      if (val === null || val === undefined) return '';
-      if (val instanceof Date) return val.toISOString();
-      return String(val);
+      return cellToString(val);
     }),
   );
   return { columns, data };
@@ -128,14 +141,7 @@ export function reportToCsv(data: unknown): string {
 export function rowsToCsv(rows: Record<string, unknown>[], columns?: string[]): string {
   if (!rows.length) return '';
   if (columns && columns.length) {
-    const matrix = rows.map((r) =>
-      columns.map((c) => {
-        const val = r[c];
-        if (val === null || val === undefined) return '';
-        if (val instanceof Date) return val.toISOString();
-        return String(val);
-      }),
-    );
+    const matrix = rows.map((r) => columns.map((c) => cellToString(r[c])));
     return toCsv(columns, matrix);
   }
   const flat = flattenForCsv(rows);

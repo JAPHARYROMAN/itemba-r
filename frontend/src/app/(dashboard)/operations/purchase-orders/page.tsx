@@ -23,6 +23,7 @@ import {
   backendPatch,
   backendPost,
 } from '@/lib/api-client';
+import { downloadTextFile, formatDateOnly, rowsToCsv } from '@/lib/report-export';
 import { useAuth } from '@/hooks/use-auth';
 import { OrderLineEditor, mergeOrderProductOptions } from '../_components/order-line-editor';
 
@@ -804,6 +805,7 @@ export default function PurchaseOrdersPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
   const [loadError, setLoadError] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   const canView = hasPermission('purchases.view');
   const canCreate = hasPermission('purchases.create');
@@ -862,6 +864,86 @@ export default function PurchaseOrdersPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Export the FULL filtered register (not just the visible page) to CSV.
+  const exportCsv = useCallback(async () => {
+    if (!canView) return;
+    setExporting(true);
+    try {
+      const query: Record<string, string | number> = {};
+      if (filterSearch.trim()) query.search = filterSearch.trim();
+      if (filterCompany) query.companyId = filterCompany;
+      if (filterType) query.purchaseType = filterType;
+      if (filterStatus) query.status = filterStatus;
+      if (filterPayment) query.paymentStatus = filterPayment;
+      if (filterDateFrom) query.dateFrom = filterDateFrom;
+      if (filterDateTo) query.dateTo = filterDateTo;
+
+      const CAP = 5000;
+      const result = await backendPage<PurchaseOrder>('/purchase-orders', {
+        query: { ...query, page: 1, limit: CAP },
+      });
+      const orders = (result.data ?? []).slice(0, CAP);
+      if (!orders.length) {
+        showToast('info', 'Nothing to export', 'No purchase orders match the current filters.');
+        return;
+      }
+
+      const rows = orders.map((o) => ({
+        'PO #': o.purchaseOrderNumber ?? o.id,
+        Date: formatDateOnly(o.orderDate),
+        Expected: formatDateOnly(o.expectedDate),
+        Supplier: o.supplier?.name ?? o.supplierName ?? 'Supplier',
+        Type: o.purchaseType,
+        Status: o.status,
+        Payment: o.paymentStatus,
+        Currency: o.currency,
+        Total: o.totalAmount,
+        Outstanding: o.outstandingAmount,
+      }));
+      const columns = [
+        'PO #',
+        'Date',
+        'Expected',
+        'Supplier',
+        'Type',
+        'Status',
+        'Payment',
+        'Currency',
+        'Total',
+        'Outstanding',
+      ];
+      downloadTextFile(
+        `purchase-orders-${new Date().toISOString().slice(0, 10)}.csv`,
+        'text/csv;charset=utf-8',
+        rowsToCsv(rows, columns),
+      );
+      if (result.total > orders.length) {
+        showToast(
+          'warning',
+          'Export truncated',
+          `Exported the first ${orders.length} of ${result.total} matching orders.`,
+        );
+      }
+    } catch (err) {
+      showToast(
+        'error',
+        'Export failed',
+        err instanceof Error ? err.message : 'Could not export purchase orders.',
+      );
+    } finally {
+      setExporting(false);
+    }
+  }, [
+    canView,
+    filterSearch,
+    filterCompany,
+    filterType,
+    filterStatus,
+    filterPayment,
+    filterDateFrom,
+    filterDateTo,
+  ]);
 
   useEffect(() => {
     // Seed filters from drill-through URLs (operations dashboard links here with
@@ -1092,11 +1174,16 @@ export default function PurchaseOrdersPage() {
           </>
         }
         actions={
-          canCreate ? (
-            <Btn variant="primary" onClick={() => setCreating(true)}>
-              + New Order
+          <>
+            <Btn variant="secondary" onClick={exportCsv} loading={exporting}>
+              Export CSV
             </Btn>
-          ) : null
+            {canCreate ? (
+              <Btn variant="primary" onClick={() => setCreating(true)}>
+                + New Order
+              </Btn>
+            ) : null}
+          </>
         }
       />
 
