@@ -259,49 +259,78 @@ export class OperationsReportsService {
   }
 
   async getSalesByCustomer(query: OperationsReportQuery, user: AuthUser) {
+    // DB-side aggregation: groups EVERY matching order (the previous in-memory
+    // version silently capped totals at the `take` limit). Walk-in orders
+    // (null customerId) collapse into a single row.
     const where = await this.salesOrderWhere(query, user);
-    const orders = await this.prisma.salesOrder.findMany({
+    const grouped = await this.prisma.salesOrder.groupBy({
+      by: ['customerId'],
       where,
-      include: {
-        customer: { select: { customerCode: true, name: true } },
-        branch: { select: { code: true, name: true } },
-      },
-      orderBy: { orderDate: 'desc' },
-      take: this.limit(query),
+      _count: { _all: true },
+      _sum: { totalAmount: true, paidAmount: true, outstandingAmount: true },
     });
+    if (!grouped.length) return [];
 
-    const grouped = new Map<string, Record<string, unknown>>();
-    for (const order of orders) {
-      const customerCode = order.customer?.customerCode ?? 'WALK-IN';
-      const customer = order.customer?.name ?? order.customerName ?? 'Walk-in customer';
-      const key = order.customerId ?? customer;
-      const current = grouped.get(key) ?? {
-        customerCode,
-        customer,
-        orderCount: 0,
-        totalAmount: 0,
-        paidAmount: 0,
-        outstandingAmount: 0,
-      };
-      current.orderCount = this.toNumber(current.orderCount) + 1;
-      current.totalAmount = this.toNumber(current.totalAmount) + this.toNumber(order.totalAmount);
-      current.paidAmount = this.toNumber(current.paidAmount) + this.toNumber(order.paidAmount);
-      current.outstandingAmount =
-        this.toNumber(current.outstandingAmount) + this.toNumber(order.outstandingAmount);
-      grouped.set(key, current);
-    }
+    const ids = grouped.map((g) => g.customerId).filter((id): id is string => Boolean(id));
+    const customers = ids.length
+      ? await this.prisma.customer.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, customerCode: true, name: true },
+        })
+      : [];
+    const byId = new Map(customers.map((c) => [c.id, c]));
 
-    return Array.from(grouped.values()).sort(
-      (a, b) => this.toNumber(b.totalAmount) - this.toNumber(a.totalAmount),
-    );
+    return grouped
+      .map((g) => {
+        const customer = g.customerId ? byId.get(g.customerId) : undefined;
+        return {
+          customerCode: customer?.customerCode ?? 'WALK-IN',
+          customer: customer?.name ?? 'Walk-in customer',
+          orderCount: g._count._all,
+          totalAmount: this.toNumber(g._sum.totalAmount),
+          paidAmount: this.toNumber(g._sum.paidAmount),
+          outstandingAmount: this.toNumber(g._sum.outstandingAmount),
+        };
+      })
+      .sort((a, b) => b.totalAmount - a.totalAmount);
   }
 
   async getSalesByProduct(query: OperationsReportQuery, user: AuthUser) {
-    return this.groupLineRows(await this.getSalesReport(query, user), 'productCode', [
-      'productCode',
-      'sku',
-      'product',
-    ]);
+    // DB-side aggregation over all matching lines (was capped by the report
+    // line `take` before). Output shape matches the old groupLineRows result.
+    const salesOrder = await this.salesOrderWhere(query, user);
+    const where: Record<string, unknown> = { salesOrder };
+    if (query.productId) where.productId = query.productId;
+
+    const grouped = await this.prisma.salesOrderLine.groupBy({
+      by: ['productId'],
+      where,
+      _count: { _all: true },
+      _sum: { quantity: true, lineTotal: true, discountAmount: true, taxAmount: true },
+    });
+    if (!grouped.length) return [];
+
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: grouped.map((g) => g.productId) } },
+      select: { id: true, productCode: true, sku: true, name: true },
+    });
+    const byId = new Map(products.map((p) => [p.id, p]));
+
+    return grouped
+      .map((g) => {
+        const product = byId.get(g.productId);
+        return {
+          productCode: product?.productCode ?? null,
+          sku: product?.sku ?? null,
+          product: product?.name ?? 'Unknown product',
+          lineCount: g._count._all,
+          quantity: this.toNumber(g._sum.quantity),
+          totalAmount: this.toNumber(g._sum.lineTotal),
+          discountAmount: this.toNumber(g._sum.discountAmount),
+          taxAmount: this.toNumber(g._sum.taxAmount),
+        };
+      })
+      .sort((a, b) => b.totalAmount - a.totalAmount);
   }
 
   async getCustomerProductSales(query: OperationsReportQuery, user: AuthUser) {
