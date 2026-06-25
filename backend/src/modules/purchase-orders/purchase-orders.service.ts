@@ -572,10 +572,19 @@ export class PurchaseOrdersService {
     await this.profit.assertPurchaseLinesHaveCost(existing.companyId, existing.lines as any[]);
 
     const record = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.purchaseOrder.update({
-        where: { id },
+      // Atomically claim DRAFT -> CONFIRMED. The status check above is outside the
+      // transaction, so two concurrent confirms could both pass it; this guarded
+      // updateMany takes the row lock and a second confirm matches 0 rows ->
+      // throws and rolls back instead of double-running tax auto-apply. Mirrors
+      // the guarded claim already used in receive().
+      const claim = await tx.purchaseOrder.updateMany({
+        where: { id, status: 'DRAFT' },
         data: { status: 'CONFIRMED', confirmedById: userId, confirmedAt: new Date() },
       });
+      if (claim.count === 0) {
+        throw new BadRequestException('Purchase order is no longer DRAFT (already confirmed).');
+      }
+      const updated = await tx.purchaseOrder.findUniqueOrThrow({ where: { id } });
 
       // ── Tax auto-apply (Sprint C2) ─────────────────────────────────────
       // Capture per-line input VAT into the TaxTransaction ledger so VAT

@@ -1809,6 +1809,20 @@ export class SalesOrdersService {
     const issuingBranchId = existing.branchId;
 
     const record = await this.prisma.$transaction(async (tx) => {
+      // Atomically claim the order: flip DRAFT -> CONFIRMED in one guarded write
+      // BEFORE doing any of the posting work. The status check above happened
+      // outside the transaction, so two concurrent confirms could both pass it;
+      // this updateMany takes the row lock and a second confirm matches 0 rows
+      // (status already CONFIRMED) -> it throws and rolls back instead of
+      // double-issuing stock, double-creating the receivable, and double-posting.
+      const claim = await tx.salesOrder.updateMany({
+        where: { id, status: 'DRAFT' },
+        data: { status: 'CONFIRMED' },
+      });
+      if (claim.count === 0) {
+        throw new BadRequestException('Sales order is no longer DRAFT (already confirmed).');
+      }
+
       let cogsAmount = 0;
       const profitSnapshots = await this.profit.assertSaleLinesProfitable(
         {

@@ -50,6 +50,7 @@ function makeService() {
     salesOrder: {
       create: jest.fn(async ({ data }: any) => ({ id: 'so-1', ...data })),
       update: jest.fn(async ({ data }: any) => ({ id: 'so-1', companyId: 'company-1', ...data })),
+      updateMany: jest.fn(async () => ({ count: 1 })),
       findFirst: jest.fn(async () => persistedOrder()),
       findUnique: jest.fn(async () => null),
     },
@@ -342,6 +343,19 @@ describe('SalesOrdersService receivable customer names', () => {
         }),
       }),
     );
+  });
+
+  it('rejects a concurrent confirm whose atomic DRAFT->CONFIRMED claim loses the race', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(persistedOrder({ status: 'DRAFT' }));
+    // A competing confirm already flipped the row to CONFIRMED, so our guarded
+    // claim matches 0 rows and must abort before any posting side effects.
+    prisma.salesOrder.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(service.confirm('so-1', user)).rejects.toThrow('no longer DRAFT');
+
+    expect(prisma.receivable.create).not.toHaveBeenCalled();
+    expect(prisma.salesOrder.update).not.toHaveBeenCalled();
   });
 });
 
