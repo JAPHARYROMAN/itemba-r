@@ -294,15 +294,6 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     keywords: ['employee discipline'],
   },
   {
-    id: 'route:hr-petroleum-commissions',
-    label: 'Petroleum Commissions',
-    href: '/hr/petroleum-commissions',
-    group: 'HR & Payroll',
-    icon: <AppIcon name="commission" size={16} />,
-    permission: 'hr.payroll.view',
-    keywords: ['fuel commission', 'sales commission'],
-  },
-  {
     id: 'route:hr-statutory-reports',
     label: 'HR Statutory Reports',
     href: '/hr/reports/statutory',
