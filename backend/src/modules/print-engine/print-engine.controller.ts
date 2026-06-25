@@ -3,6 +3,7 @@ import type { Response } from 'express';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { PrintEngineService } from './print-engine.service';
+import { RenderDocumentDto } from './dto/render-document.dto';
 
 @Controller('print-engine')
 export class PrintEngineController {
@@ -10,13 +11,13 @@ export class PrintEngineController {
 
   @Post('render')
   @RequirePermissions('print_engine.render')
-  render(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  render(@Body() dto: RenderDocumentDto, @CurrentUser() user: AuthUser) {
     return this.service.render(dto, user);
   }
 
   @Post('render-pdf')
   @RequirePermissions('print_engine.render')
-  async renderPdf(@Body() dto: any, @CurrentUser() user: AuthUser, @Res() res: Response) {
+  async renderPdf(@Body() dto: RenderDocumentDto, @CurrentUser() user: AuthUser, @Res() res: Response) {
     const result = await this.service.renderPdf(dto, user);
     res.setHeader('Content-Type', result.mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
@@ -26,7 +27,7 @@ export class PrintEngineController {
 
   @Post('render-excel')
   @RequirePermissions('print_engine.render')
-  async renderExcel(@Body() dto: any, @CurrentUser() user: AuthUser, @Res() res: Response) {
+  async renderExcel(@Body() dto: RenderDocumentDto, @CurrentUser() user: AuthUser, @Res() res: Response) {
     const result = await this.service.renderExcel(dto, user);
     res.setHeader('Content-Type', result.mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);

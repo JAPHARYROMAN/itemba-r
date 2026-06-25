@@ -54,7 +54,11 @@ export class AlertEventsService {
   }
 
   async findOne(id: string, user: any) {
-    const record = await this.prisma.alertEvent.findFirst({ where: { id } });
+    // Scope the single-record fetch to the caller's company (findAll already
+    // does); group-scoped users get no restriction, company-scoped users can't
+    // read another company's alert events by guessing an id.
+    const where = applyCompanyScopeWhere({ id }, user, null);
+    const record = await this.prisma.alertEvent.findFirst({ where });
     if (!record) throw new NotFoundException('Alert event not found');
     return record;
   }

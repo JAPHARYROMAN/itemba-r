@@ -29,7 +29,8 @@ export class ComplianceDocumentStatusService {
   }
 
   async findOne(id: string, user: any) {
-    const record = await this.prisma.complianceDocumentStatus.findFirst({ where: { id } });
+    const where = applyCompanyScopeWhere({ id }, user, null);
+    const record = await this.prisma.complianceDocumentStatus.findFirst({ where });
     if (!record) throw new NotFoundException('Compliance document status not found');
     return record;
   }
