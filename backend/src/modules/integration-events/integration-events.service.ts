@@ -56,7 +56,7 @@ export class IntegrationEventsService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findOne(id: string, includeSensitive: boolean) {
+  async findOne(id: string, includeSensitive: boolean, user?: any) {
     const select: any = {
       id: true,
       eventNumber: true,
@@ -80,7 +80,9 @@ export class IntegrationEventsService {
       select.responsePayload = true;
     }
 
-    const record = await this.prisma.integrationEvent.findFirst({ where: { id }, select });
+    const where: Record<string, unknown> = { id };
+    if (user) applyCompanyScopeWhere(where, user, null);
+    const record = await this.prisma.integrationEvent.findFirst({ where, select });
     if (!record) throw new NotFoundException('Integration event not found');
     return record;
   }

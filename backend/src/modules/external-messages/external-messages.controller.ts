@@ -17,8 +17,8 @@ export class ExternalMessagesController {
 
   @Get(':id')
   @RequirePermissions('external_messages.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()

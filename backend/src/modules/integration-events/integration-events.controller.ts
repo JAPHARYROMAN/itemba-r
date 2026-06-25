@@ -17,8 +17,8 @@ export class IntegrationEventsController {
 
   @Get(':id')
   @RequirePermissions('integration_events.view')
-  findOne(@Param('id') id: string, @Request() req: any) {
+  findOne(@Param('id') id: string, @Request() req: any, @CurrentUser() user: AuthUser) {
     const hasSensitive = (req.user?.permissions ?? []).includes('integration_events.sensitive.view');
-    return this.service.findOne(id, hasSensitive);
+    return this.service.findOne(id, hasSensitive, user);
   }
 }

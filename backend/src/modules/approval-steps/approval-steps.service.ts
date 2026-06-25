@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { applyCompanyScopeWhere } from '../../common/services';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateApprovalStepDto } from './dto/create-approval-step.dto';
 import { UpdateApprovalStepDto } from './dto/update-approval-step.dto';
@@ -17,7 +18,9 @@ export class ApprovalStepsService {
   }
 
   async findOne(id: string, user: any) {
-    const record = await this.prisma.approvalStep.findFirst({ where: { id } });
+    const where: Record<string, unknown> = { id };
+    if (user) applyCompanyScopeWhere(where, user, null);
+    const record = await this.prisma.approvalStep.findFirst({ where });
     if (!record) throw new NotFoundException('Approval step not found');
     return record;
   }

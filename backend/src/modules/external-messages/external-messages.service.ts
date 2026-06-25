@@ -34,8 +34,10 @@ export class ExternalMessagesService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findOne(id: string) {
-    const record = await this.prisma.externalMessage.findFirst({ where: { id } });
+  async findOne(id: string, user?: any) {
+    const where: Record<string, unknown> = { id };
+    if (user) applyCompanyScopeWhere(where, user, null);
+    const record = await this.prisma.externalMessage.findFirst({ where });
     if (!record) throw new NotFoundException('External message not found');
     return record;
   }

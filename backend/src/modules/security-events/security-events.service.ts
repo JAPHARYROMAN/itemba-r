@@ -33,8 +33,10 @@ export class SecurityEventsService {
     return { data, total, page: Number(page), limit: Number(limit) };
   }
 
-  async findOne(id: string) {
-    const record = await this.prisma.securityEvent.findFirst({ where: { id } });
+  async findOne(id: string, user?: any) {
+    const where: Record<string, unknown> = { id };
+    if (user) applyCompanyScopeWhere(where, user, null);
+    const record = await this.prisma.securityEvent.findFirst({ where });
     if (!record) throw new NotFoundException('Security event not found');
     return record;
   }

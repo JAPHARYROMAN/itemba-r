@@ -15,8 +15,8 @@ export class SecurityEventsController {
 
   @Get(':id')
   @RequirePermissions('security_events.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()
