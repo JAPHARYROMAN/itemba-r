@@ -43,4 +43,42 @@ describe('CsrfFetchProvider', () => {
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toEqual({});
   });
+
+  it('dispatches session-expired on an unrecoverable backend 401 (raw fetch)', async () => {
+    const fetchMock = renderWithFetch(new Response('', { status: 401 }));
+    const onExpired = vi.fn();
+    window.addEventListener('itemba:session-expired', onExpired);
+
+    await waitFor(() => expect(window.fetch).not.toBe(fetchMock));
+    await window.fetch('/api/backend/sales-orders');
+
+    expect(onExpired).toHaveBeenCalledTimes(1);
+    window.removeEventListener('itemba:session-expired', onExpired);
+  });
+
+  it('does NOT dispatch session-expired for api-client-managed 401s', async () => {
+    const fetchMock = renderWithFetch(new Response('', { status: 401 }));
+    const onExpired = vi.fn();
+    window.addEventListener('itemba:session-expired', onExpired);
+
+    await waitFor(() => expect(window.fetch).not.toBe(fetchMock));
+    await window.fetch('/api/backend/sales-orders', {
+      headers: { 'x-itemba-managed-401': '1' },
+    });
+
+    expect(onExpired).not.toHaveBeenCalled();
+    window.removeEventListener('itemba:session-expired', onExpired);
+  });
+
+  it('ignores 401s from non-backend (e.g. /api/auth) requests', async () => {
+    const fetchMock = renderWithFetch(new Response('', { status: 401 }));
+    const onExpired = vi.fn();
+    window.addEventListener('itemba:session-expired', onExpired);
+
+    await waitFor(() => expect(window.fetch).not.toBe(fetchMock));
+    await window.fetch('/api/auth/login', { method: 'POST' });
+
+    expect(onExpired).not.toHaveBeenCalled();
+    window.removeEventListener('itemba:session-expired', onExpired);
+  });
 });

@@ -4,6 +4,14 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? BACKEND_PROXY_URL;
 /** Dispatched on the window when a backend 401 cannot be recovered by a refresh. */
 export const SESSION_EXPIRED_EVENT = 'itemba:session-expired';
 
+/**
+ * Marks a backend request as "api-client manages its own 401" (it does a refresh
+ * + retry and dispatches SESSION_EXPIRED_EVENT itself). The global fetch wrapper
+ * (CsrfFetchProvider) skips its own session-expired dispatch for these so it
+ * can't redirect before api-client's retry has a chance to recover.
+ */
+export const MANAGED_401_HEADER = 'x-itemba-managed-401';
+
 export interface ApiEnvelope<T> {
   success: boolean;
   data: T;
@@ -164,6 +172,7 @@ async function requestJson<T>(url: string, opts: FetchOpts = {}): Promise<T> {
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+        ...(url.startsWith(BACKEND_PROXY_URL) ? { [MANAGED_401_HEADER]: '1' } : {}),
         ...headers,
       },
       body: serializedBody,
@@ -202,6 +211,7 @@ async function requestFormData<T>(
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+        ...(url.startsWith(BACKEND_PROXY_URL) ? { [MANAGED_401_HEADER]: '1' } : {}),
         ...headers,
       },
       body: formData,

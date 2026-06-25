@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { MANAGED_401_HEADER, SESSION_EXPIRED_EVENT } from '@/lib/api-client';
 
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -12,6 +13,10 @@ function readCookie(name: string): string | null {
     .find((part) => part.startsWith(encoded));
 
   return match ? decodeURIComponent(match.slice(encoded.length)) : null;
+}
+
+function requestHeaders(input: RequestInfo | URL, init?: RequestInit): Headers {
+  return new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
 }
 
 function shouldAttachCsrf(input: RequestInfo | URL, init?: RequestInit): boolean {
@@ -44,24 +49,33 @@ export function CsrfFetchProvider({ children }: { children: React.ReactNode }) {
     const originalFetch = window.fetch.bind(window);
 
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (!shouldAttachCsrf(input, init)) {
-        const response = await originalFetch(input, init);
-        return isBackendProxyRequest(input) ? withEmptyBodySafeJson(response) : response;
+      const backend = isBackendProxyRequest(input);
+
+      let response: Response;
+      if (shouldAttachCsrf(input, init)) {
+        const csrfToken = readCookie('itemba_csrf');
+        if (csrfToken) {
+          const headers = requestHeaders(input, init);
+          headers.set('x-csrf-token', csrfToken);
+          response = await originalFetch(input, { ...init, headers });
+        } else {
+          response = await originalFetch(input, init);
+        }
+      } else {
+        response = await originalFetch(input, init);
       }
 
-      const csrfToken = readCookie('itemba_csrf');
-      let nextInit = init;
-      if (!csrfToken) {
-        const response = await originalFetch(input, init);
-        return withEmptyBodySafeJson(response);
-      }
+      if (!backend) return response;
 
-      const headers = new Headers(
-        init?.headers ?? (input instanceof Request ? input.headers : undefined),
-      );
-      headers.set('x-csrf-token', csrfToken);
-      nextInit = { ...init, headers };
-      return withEmptyBodySafeJson(await originalFetch(input, nextInit));
+      // An unrecoverable backend 401 (the proxy already tried to refresh) ->
+      // bounce to login even for pages that use raw fetch, so they no longer
+      // surface a stale "Unauthorized". Requests api-client makes carry
+      // MANAGED_401_HEADER and run their own refresh + retry + dispatch, so we
+      // must not preempt their recovery here.
+      if (response.status === 401 && !requestHeaders(input, init).has(MANAGED_401_HEADER)) {
+        window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+      }
+      return withEmptyBodySafeJson(response);
     };
 
     return () => {
