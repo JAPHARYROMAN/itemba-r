@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getBackendInternalUrl } from '@/lib/backend-url';
 import { SESSION_COOKIE_MAX_AGE_SECONDS } from '@/lib/auth-cookie-config';
+import { coordinatedRefresh } from '@/lib/server/refresh-coordinator';
 
-const BACKEND = getBackendInternalUrl();
 const COOKIE_OPTS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
@@ -14,11 +13,6 @@ const BACKEND_REFRESH_COOKIE = 'itemba_backend_refresh';
 const AUTH_REFRESH_PATH = '/';
 const LEGACY_AUTH_REFRESH_PATH = '/api/auth/refresh';
 const BACKEND_REFRESH_PATH = '/api/backend';
-
-const refreshInFlight = new Map<
-  string,
-  Promise<{ ok: boolean; status: number; data: Record<string, unknown> }>
->();
 
 function setRefreshCookies(res: NextResponse, refreshToken: string) {
   res.cookies.set(REFRESH_COOKIE, refreshToken, {
@@ -58,38 +52,6 @@ function getForwardedFor(req: NextRequest) {
   return req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '';
 }
 
-function backendUnavailableResponse() {
-  return NextResponse.json({ message: 'Backend service unavailable' }, { status: 502 });
-}
-
-async function rotateRefreshToken(
-  req: NextRequest,
-  refreshToken: string,
-): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
-  const existing = refreshInFlight.get(refreshToken);
-  if (existing) return existing;
-
-  const promise = (async () => {
-    const upstream = await fetch(`${BACKEND}/auth/refresh`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${refreshToken}`,
-        'x-forwarded-for': getForwardedFor(req),
-        'user-agent': req.headers.get('user-agent') ?? '',
-      },
-    });
-    const data = await upstream
-      .json()
-      .catch(() => ({ message: 'Backend returned an empty response' }));
-    return { ok: upstream.ok, status: upstream.status, data };
-  })().finally(() => {
-    refreshInFlight.delete(refreshToken);
-  });
-
-  refreshInFlight.set(refreshToken, promise);
-  return promise;
-}
-
 export async function POST(req: NextRequest) {
   const refreshToken = req.cookies.get(REFRESH_COOKIE)?.value;
 
@@ -97,28 +59,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: 'No refresh token' }, { status: 401 });
   }
 
-  let result: { ok: boolean; status: number; data: Record<string, unknown> };
-  try {
-    result = await rotateRefreshToken(req, refreshToken);
-  } catch {
-    return backendUnavailableResponse();
+  // Shared with the /api/backend proxy: concurrent proactive + reactive
+  // refreshes for the same token coalesce onto one rotation (see
+  // refresh-coordinator).
+  const outcome = await coordinatedRefresh(refreshToken, {
+    forwardedFor: getForwardedFor(req),
+    userAgent: req.headers.get('user-agent') ?? undefined,
+  });
+
+  if (!outcome.ok) {
+    return NextResponse.json(outcome.data, { status: outcome.status });
   }
 
-  if (!result.ok) {
-    return NextResponse.json(result.data, { status: result.status });
-  }
-
-  const { accessToken, refreshToken: newRefreshToken } = result.data.data as {
-    accessToken: string;
-    refreshToken: string;
-  };
   const res = NextResponse.json({ success: true });
-
-  res.cookies.set('itemba_access', accessToken, {
+  res.cookies.set('itemba_access', outcome.accessToken, {
     ...COOKIE_OPTS,
     maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
   });
-  setRefreshCookies(res, newRefreshToken);
+  setRefreshCookies(res, outcome.refreshToken);
   setSessionCookies(res, req);
 
   return res;

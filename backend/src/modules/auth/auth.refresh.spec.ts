@@ -100,11 +100,41 @@ describe('AuthService.refresh rotation race handling', () => {
     );
   });
 
+  it('tolerates a concurrent rotation minutes old (widened grace) without reuse detection', async () => {
+    // The web client drives several uncoordinated refresh paths around an
+    // access-token expiry; a rotation a few minutes old is a benign concurrent
+    // refresh, not theft, and must NOT revoke the family (was the "Unauthorized
+    // after idle" bug under the old 60s window).
+    const { service, prisma } = makeService();
+    prisma.refreshToken.findFirst.mockResolvedValue(
+      refreshRecord({
+        revokedAt: new Date(Date.now() - 5 * 60_000),
+        revokedReason: 'ROTATION',
+      }),
+    );
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+      status: 'ACTIVE',
+    });
+
+    const result = await service.refresh('user-1', 'raw-refresh-token', undefined, 'session-1');
+
+    expect(result).toEqual({
+      accessToken: 'new-access-token',
+      refreshToken: 'new-refresh-token',
+      tokenType: 'Bearer',
+    });
+    expect(prisma.refreshToken.updateMany).not.toHaveBeenCalled();
+  });
+
   it('still treats stale revoked refresh tokens as reuse and revokes the family', async () => {
     const { service, prisma } = makeService();
     prisma.refreshToken.findFirst.mockResolvedValue(
       refreshRecord({
-        revokedAt: new Date(Date.now() - 61_000),
+        // Older than the rotation grace window (10 min) — a genuine replay, not a
+        // benign concurrent refresh, so reuse detection must still fire.
+        revokedAt: new Date(Date.now() - 11 * 60_000),
         revokedReason: 'ROTATION',
       }),
     );

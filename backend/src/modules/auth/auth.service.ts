@@ -69,7 +69,16 @@ const EMAIL_LOGIN_MAX_FAILURES = 5;
 // password failures so MFA cannot be worn down by distributed OTP brute force.
 const TWO_FACTOR_MAX_FAILURES = 5;
 const TWO_FACTOR_LOCK_MS = 15 * 60_000;
-const REFRESH_TOKEN_ROTATION_GRACE_MS = 60_000;
+// Grace window during which a just-rotated refresh token may be presented again
+// without being treated as theft. The web client legitimately drives several
+// uncoordinated refresh paths (proactive on tab focus/visibility/timer, the
+// reactive 401 retry, and the /api/backend proxy's own refresh) plus possible
+// multi-instance replicas, so the same token can be presented to /auth/refresh
+// more than once around an access-token expiry. A tight 60s window turned those
+// benign concurrent refreshes into REUSE_DETECTED events that revoked the whole
+// family and logged the user out ("Unauthorized"). 10 minutes tolerates the
+// races while keeping a stolen token's replay window short.
+const REFRESH_TOKEN_ROTATION_GRACE_MS = 10 * 60_000;
 const DEFAULT_REFRESH_EXPIRES_IN = 'never';
 const PERSISTENT_SESSION_EXPIRES_AT = new Date('9999-12-31T23:59:59.999Z');
 

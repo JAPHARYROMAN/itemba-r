@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getBackendInternalUrl } from '@/lib/backend-url';
 import { SESSION_COOKIE_MAX_AGE_SECONDS } from '@/lib/auth-cookie-config';
 import { backendProxyRequestOriginAllowed } from '@/lib/backend-proxy-origin';
+import { coordinatedRefresh } from '@/lib/server/refresh-coordinator';
 
 const BACKEND = getBackendInternalUrl();
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -56,16 +57,6 @@ function backendUnavailableResponse() {
   return NextResponse.json({ message: 'Backend service unavailable' }, { status: 502 });
 }
 
-// In-memory single-flight refresh map keyed by refresh token. When two
-// requests in the same Next runtime see a 401 simultaneously, the second one
-// waits on the first's refresh promise instead of issuing a parallel /refresh
-// call. Without this, parallel refreshes consume each other's tokens and
-// trigger refresh-token reuse detection on the backend.
-const refreshInFlight = new Map<
-  string,
-  Promise<{ accessToken: string; refreshToken: string } | null>
->();
-
 function requestOriginAllowed(req: NextRequest): boolean {
   return backendProxyRequestOriginAllowed({
     origin: req.headers.get('origin'),
@@ -83,41 +74,6 @@ function csrfTokenValid(req: NextRequest): boolean {
   const cookieToken = req.cookies.get('itemba_csrf')?.value;
   const headerToken = req.headers.get('x-csrf-token');
   return Boolean(cookieToken && headerToken && cookieToken === headerToken);
-}
-
-async function refreshAccessTokenSingleFlight(
-  req: NextRequest,
-  refreshToken: string,
-): Promise<{ accessToken: string; refreshToken: string } | null> {
-  // Coalesce concurrent refresh attempts for the same token.
-  const existing = refreshInFlight.get(refreshToken);
-  if (existing) return existing;
-
-  const promise = (async () => {
-    try {
-      const upstream = await fetch(`${BACKEND}/auth/refresh`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${refreshToken}`,
-          'x-forwarded-for': getForwardedFor(req),
-          'user-agent': req.headers.get('user-agent') ?? '',
-        },
-      });
-      if (!upstream.ok) return null;
-      const data = await upstream.json();
-      const { accessToken, refreshToken: newRefreshToken } = data.data ?? {};
-      if (!accessToken || !newRefreshToken) return null;
-      return { accessToken, refreshToken: newRefreshToken };
-    } catch {
-      return null;
-    } finally {
-      // Always release the slot so a later 401 can refresh again.
-      refreshInFlight.delete(refreshToken);
-    }
-  })();
-
-  refreshInFlight.set(refreshToken, promise);
-  return promise;
 }
 
 async function forwardToBackend(
@@ -192,11 +148,18 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
     refreshToken && (backendRes === null || backendRes.status === 401) && refreshToken.length > 0;
 
   if (shouldRetry && refreshToken) {
-    rotated = await refreshAccessTokenSingleFlight(req, refreshToken);
-    if (rotated) {
-      accessToken = rotated.accessToken;
+    // Shared with /api/auth/refresh so a reactive (401) refresh and a proactive
+    // refresh for the same token coalesce onto one rotation (see
+    // refresh-coordinator) instead of double-rotating and tripping reuse detection.
+    const outcome = await coordinatedRefresh(refreshToken, {
+      forwardedFor: getForwardedFor(req),
+      userAgent: req.headers.get('user-agent') ?? undefined,
+    });
+    if (outcome.ok) {
+      rotated = { accessToken: outcome.accessToken, refreshToken: outcome.refreshToken };
+      accessToken = outcome.accessToken;
       try {
-        backendRes = await forwardToBackend(path, req, body, rotated.accessToken);
+        backendRes = await forwardToBackend(path, req, body, outcome.accessToken);
       } catch {
         return backendUnavailableResponse();
       }
