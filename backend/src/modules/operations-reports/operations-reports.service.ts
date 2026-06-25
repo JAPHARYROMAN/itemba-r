@@ -394,41 +394,41 @@ export class OperationsReportsService {
   }
 
   async getPurchasesBySupplier(query: OperationsReportQuery, user: AuthUser) {
+    // DB-side aggregation: groups EVERY matching order. The previous in-memory
+    // version applied a `take` limit before aggregating, so suppliers beyond the
+    // limit were silently dropped and totals were understated. Orders with no
+    // supplier collapse into a single row.
     const where = await this.purchaseOrderWhere(query, user);
-    const orders = await this.prisma.purchaseOrder.findMany({
+    const grouped = await this.prisma.purchaseOrder.groupBy({
+      by: ['supplierId'],
       where,
-      include: {
-        supplier: { select: { supplierCode: true, name: true } },
-        branch: { select: { code: true, name: true } },
-      },
-      orderBy: { orderDate: 'desc' },
-      take: this.limit(query),
+      _count: { _all: true },
+      _sum: { totalAmount: true, paidAmount: true, outstandingAmount: true },
     });
+    if (!grouped.length) return [];
 
-    const grouped = new Map<string, Record<string, unknown>>();
-    for (const order of orders) {
-      const supplierCode = order.supplier?.supplierCode ?? 'UNASSIGNED';
-      const supplier = order.supplier?.name ?? order.supplierName ?? 'Supplier';
-      const key = order.supplierId ?? supplier;
-      const current = grouped.get(key) ?? {
-        supplierCode,
-        supplier,
-        purchaseOrderCount: 0,
-        totalAmount: 0,
-        paidAmount: 0,
-        outstandingAmount: 0,
-      };
-      current.purchaseOrderCount = this.toNumber(current.purchaseOrderCount) + 1;
-      current.totalAmount = this.toNumber(current.totalAmount) + this.toNumber(order.totalAmount);
-      current.paidAmount = this.toNumber(current.paidAmount) + this.toNumber(order.paidAmount);
-      current.outstandingAmount =
-        this.toNumber(current.outstandingAmount) + this.toNumber(order.outstandingAmount);
-      grouped.set(key, current);
-    }
+    const ids = grouped.map((g) => g.supplierId).filter((id): id is string => Boolean(id));
+    const suppliers = ids.length
+      ? await this.prisma.supplier.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, supplierCode: true, name: true },
+        })
+      : [];
+    const byId = new Map(suppliers.map((s) => [s.id, s]));
 
-    return Array.from(grouped.values()).sort(
-      (a, b) => this.toNumber(b.totalAmount) - this.toNumber(a.totalAmount),
-    );
+    return grouped
+      .map((g) => {
+        const supplier = g.supplierId ? byId.get(g.supplierId) : undefined;
+        return {
+          supplierCode: supplier?.supplierCode ?? 'UNASSIGNED',
+          supplier: supplier?.name ?? 'Supplier',
+          purchaseOrderCount: g._count._all,
+          totalAmount: this.toNumber(g._sum.totalAmount),
+          paidAmount: this.toNumber(g._sum.paidAmount),
+          outstandingAmount: this.toNumber(g._sum.outstandingAmount),
+        };
+      })
+      .sort((a, b) => b.totalAmount - a.totalAmount);
   }
 
   async getPurchasesByProduct(query: OperationsReportQuery, user: AuthUser) {

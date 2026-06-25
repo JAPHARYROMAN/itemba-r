@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -344,64 +345,65 @@ export class FinancialReportsService {
 
   async getReceivablesAging(companyId: string, user?: AuthUser) {
     if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
-    const now = new Date();
-    const receivables = await this.prisma.receivable.findMany({
-      where: {
-        companyId,
-        deletedAt: null,
-        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
-      },
-    });
-
-    const buckets = { current: 0, days1_30: 0, days31_60: 0, days61_90: 0, over90: 0, total: 0 };
-
-    for (const r of receivables) {
-      const amount = Number(r.outstandingAmount);
-      if (!r.dueDate) {
-        buckets.current += amount;
-      } else {
-        const days = Math.floor((now.getTime() - r.dueDate.getTime()) / (1000 * 60 * 60 * 24));
-        if (days <= 0) buckets.current += amount;
-        else if (days <= 30) buckets.days1_30 += amount;
-        else if (days <= 60) buckets.days31_60 += amount;
-        else if (days <= 90) buckets.days61_90 += amount;
-        else buckets.over90 += amount;
-      }
-      buckets.total += amount;
-    }
-
+    const buckets = await this.agingBuckets((extra) =>
+      this.prisma.receivable
+        .aggregate({
+          where: {
+            companyId,
+            deletedAt: null,
+            status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+            ...extra,
+          } as Prisma.ReceivableWhereInput,
+          _sum: { outstandingAmount: true },
+        })
+        .then((agg) => Number(agg._sum.outstandingAmount ?? 0)),
+    );
     return { companyId, ...buckets };
   }
 
   async getPayablesAging(companyId: string, user?: AuthUser) {
     if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
-    const now = new Date();
-    const payables = await this.prisma.payable.findMany({
-      where: {
-        companyId,
-        deletedAt: null,
-        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
-      },
-    });
-
-    const buckets = { current: 0, days1_30: 0, days31_60: 0, days61_90: 0, over90: 0, total: 0 };
-
-    for (const p of payables) {
-      const amount = Number(p.outstandingAmount);
-      if (!p.dueDate) {
-        buckets.current += amount;
-      } else {
-        const days = Math.floor((now.getTime() - p.dueDate.getTime()) / (1000 * 60 * 60 * 24));
-        if (days <= 0) buckets.current += amount;
-        else if (days <= 30) buckets.days1_30 += amount;
-        else if (days <= 60) buckets.days31_60 += amount;
-        else if (days <= 90) buckets.days61_90 += amount;
-        else buckets.over90 += amount;
-      }
-      buckets.total += amount;
-    }
-
+    const buckets = await this.agingBuckets((extra) =>
+      this.prisma.payable
+        .aggregate({
+          where: {
+            companyId,
+            deletedAt: null,
+            status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+            ...extra,
+          } as Prisma.PayableWhereInput,
+          _sum: { outstandingAmount: true },
+        })
+        .then((agg) => Number(agg._sum.outstandingAmount ?? 0)),
+    );
     return { companyId, ...buckets };
+  }
+
+  /**
+   * Bucket open AR/AP into days-overdue bands using DB-side SUMs (5 parallel
+   * aggregates) instead of fetching every open row and summing in JS. The date
+   * cutoffs reproduce the old floor((now - dueDate) / day) boundaries exactly:
+   *   current  = no due date OR < 1 day overdue (old days <= 0)
+   *   days1_30 = 1..30 days overdue, days31_60 = 31..60, etc.
+   * The bands are disjoint and exhaustive, so total is their sum. `runSum`
+   * returns the summed outstanding for one band's extra where-clause.
+   */
+  private async agingBuckets(runSum: (extraWhere: Record<string, unknown>) => Promise<number>) {
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const c0 = new Date(now - day);
+    const c30 = new Date(now - 31 * day);
+    const c60 = new Date(now - 61 * day);
+    const c90 = new Date(now - 91 * day);
+    const [current, days1_30, days31_60, days61_90, over90] = await Promise.all([
+      runSum({ OR: [{ dueDate: null }, { dueDate: { gt: c0 } }] }),
+      runSum({ dueDate: { gt: c30, lte: c0 } }),
+      runSum({ dueDate: { gt: c60, lte: c30 } }),
+      runSum({ dueDate: { gt: c90, lte: c60 } }),
+      runSum({ dueDate: { lte: c90 } }),
+    ]);
+    const total = current + days1_30 + days31_60 + days61_90 + over90;
+    return { current, days1_30, days31_60, days61_90, over90, total };
   }
 
   /**
