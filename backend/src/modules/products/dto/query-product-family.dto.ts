@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QueryProductFamilyDto {
@@ -8,5 +8,5 @@ export class QueryProductFamilyDto {
   @IsOptional() @IsString() search?: string;
   @IsOptional() @Type(() => Boolean) @IsBoolean() isActive?: boolean;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number = 1;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) limit?: number = 50;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5000) limit?: number = 50;
 }
