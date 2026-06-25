@@ -1,6 +1,9 @@
 const BACKEND_PROXY_URL = '/api/backend';
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? BACKEND_PROXY_URL;
 
+/** Dispatched on the window when a backend 401 cannot be recovered by a refresh. */
+export const SESSION_EXPIRED_EVENT = 'itemba:session-expired';
+
 export interface ApiEnvelope<T> {
   success: boolean;
   data: T;
@@ -122,6 +125,27 @@ async function refreshSessionForBackendRetry(): Promise<boolean> {
   }
 }
 
+/**
+ * On a backend 401: try one silent refresh + retry. If it is STILL 401, the
+ * session can't be recovered — broadcast a session-expired event so the auth
+ * context redirects to /login, instead of every page surfacing a raw
+ * "Unauthorized" on a half-filled form.
+ */
+async function retryOrExpire(
+  res: Response,
+  url: string,
+  fetchOnce: () => Promise<Response>,
+): Promise<Response> {
+  if (res.status !== 401 || !url.startsWith(BACKEND_PROXY_URL)) return res;
+  if (await refreshSessionForBackendRetry()) {
+    res = await fetchOnce();
+  }
+  if (res.status === 401 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+  }
+  return res;
+}
+
 async function requestJson<T>(url: string, opts: FetchOpts = {}): Promise<T> {
   const { body, token, headers, query: _query, ...rest } = opts;
   const method = (rest.method ?? 'GET').toUpperCase();
@@ -148,13 +172,7 @@ async function requestJson<T>(url: string, opts: FetchOpts = {}): Promise<T> {
   };
 
   let res = await fetchOnce();
-  if (
-    res.status === 401 &&
-    url.startsWith(BACKEND_PROXY_URL) &&
-    (await refreshSessionForBackendRetry())
-  ) {
-    res = await fetchOnce();
-  }
+  res = await retryOrExpire(res, url, fetchOnce);
 
   const json = await parseJson(res);
   if (!res.ok) {
@@ -192,13 +210,7 @@ async function requestFormData<T>(
   };
 
   let res = await fetchOnce();
-  if (
-    res.status === 401 &&
-    url.startsWith(BACKEND_PROXY_URL) &&
-    (await refreshSessionForBackendRetry())
-  ) {
-    res = await fetchOnce();
-  }
+  res = await retryOrExpire(res, url, fetchOnce);
 
   const json = await parseJson(res);
   if (!res.ok) {

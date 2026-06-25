@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import type { AuthUser } from '@/lib/auth-types';
+import { SESSION_EXPIRED_EVENT } from '@/lib/api-client';
 
 // Pages that are reachable without a valid session — never redirect from these.
 const PUBLIC_PATHS = new Set<string>(['/login', '/forgot-password', '/reset-password']);
@@ -130,6 +131,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       document.removeEventListener('visibilitychange', refreshOnVisibility);
     };
   }, [pathname, silentRefresh]);
+
+  // An unrecoverable backend 401 (a refresh could not restore the session) ->
+  // clear the user and bounce to login with a notice, instead of letting pages
+  // surface a raw "Unauthorized" on a half-filled form.
+  useEffect(() => {
+    const onExpired = () => {
+      if (PUBLIC_PATHS.has(pathname ?? '')) return;
+      setUser(null);
+      router.replace('/login?expired=1');
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, [pathname, router]);
 
   const refreshUser = useCallback(async () => {
     await fetchUser();

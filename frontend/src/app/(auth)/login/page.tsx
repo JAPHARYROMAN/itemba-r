@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AuthShell } from '@/components/auth/AuthShell';
 
@@ -15,6 +15,12 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   // Set when auth succeeds: a short "Karibu" beat before the redirect lands.
   const [welcomeName, setWelcomeName] = useState<string | null>(null);
+  // Shown when the user was bounced here by an expired session (?expired=1).
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  useEffect(() => {
+    setSessionExpired(new URLSearchParams(window.location.search).get('expired') === '1');
+  }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -88,6 +94,12 @@ export default function LoginPage() {
           Use the email and password assigned to your Itemba Group user profile.
         </p>
       </div>
+
+      {sessionExpired && !error && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Your session expired for security. Please sign in again to continue.
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
