@@ -51,25 +51,6 @@ const partnershipsJsonLd = {
   },
 };
 
-const partnershipHeroImages = [
-  {
-    src: '/images/beverages/westsides-customer-order-truck.webp',
-    alt: 'Westsides wholesale customer order ready for distribution',
-  },
-  {
-    src: '/images/fuel-stations/itemba-mpemba-truck-canopy.webp',
-    alt: 'Truck refuelling under an ITEMBA filling station canopy',
-  },
-  {
-    src: '/images/logistics/itemba-logistics-truck-front.webp',
-    alt: 'Itemba Logistics truck for regional movement',
-  },
-  {
-    src: '/images/hardware/itemba-hardware-storefront.webp',
-    alt: 'ITEMBA-HARDWARE storefront and construction supply stock',
-  },
-] as const;
-
 function getCompanyName(slug: string) {
   return companyProfiles.find((company) => company.slug === slug)?.name ?? slug;
 }
@@ -80,7 +61,7 @@ function getServiceTitle(slug: string) {
 
 export default function PartnershipsPage() {
   return (
-    <>
+    <div className="bg-ink-950">
       <JsonLd
         data={[
           partnershipsJsonLd,
@@ -92,80 +73,65 @@ export default function PartnershipsPage() {
         ]}
       />
 
-      <section className="relative overflow-hidden bg-ink-900 px-5 pb-24 pt-40 sm:px-8">
+      {/* ── Hero ──────────────────────────────────────────────────── */}
+      <section className="relative overflow-hidden bg-ink-950 px-5 pb-24 pt-44 sm:px-8">
         <div className="hero-ambient">
           <div className="hero-orb hero-orb-gold" style={{ opacity: 0.55 }} />
           <div className="hero-orb hero-orb-blue" style={{ opacity: 0.28 }} />
           <div className="grid-overlay" />
         </div>
-        <div className="relative z-10 mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
+        <div className="relative z-10 mx-auto max-w-7xl">
           <AnimatedSection>
-            <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
-              Business Development
-            </p>
-            <h1
-              className="mb-6 font-tight font-black leading-none tracking-tightest text-white"
-              style={{ fontSize: 'clamp(2.8rem, 6vw, 5.5rem)' }}
-            >
-              Partner with<br />
-              <span className="gradient-text">Itemba Group.</span>
-            </h1>
-            <p className="max-w-2xl text-lg leading-relaxed text-slate-300">
-              A clear route for suppliers, commercial buyers, contractors, transport
-              operators, hospitality customers, property stakeholders, and regional
-              business partners.
-            </p>
-          </AnimatedSection>
-          <AnimatedSection direction="left">
-            <div className="grid h-80 grid-cols-2 gap-3 overflow-hidden rounded-3xl bg-ink-950 p-3 shadow-2xl ring-1 ring-white/10">
-              {partnershipHeroImages.map((image) => (
-                <div key={image.src} className="relative overflow-hidden rounded-2xl bg-ink-900">
-                  <img
-                    src={image.src}
-                    alt={image.alt}
-                    className="h-full w-full object-contain"
-                    loading="eager"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-ink-950/45 via-transparent to-transparent" />
-                </div>
-              ))}
+            <div className="mb-5 flex items-center gap-3">
+              <span className="h-px w-10 bg-gold-400" />
+              <span className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
+                Business development
+              </span>
             </div>
+            <h1 className="font-tight text-5xl font-black leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
+              Partner with <span className="gradient-text">Itemba Group.</span>
+            </h1>
+            <p className="mt-7 max-w-2xl text-lg leading-relaxed text-slate-300">
+              A clear route for suppliers, commercial buyers, contractors, transport operators,
+              hospitality customers, property stakeholders and regional business partners.
+            </p>
           </AnimatedSection>
         </div>
       </section>
 
-      <section className="overflow-hidden bg-white px-5 py-24 sm:px-8">
+      {/* ── Partnership routes ────────────────────────────────────── */}
+      <section className="overflow-hidden bg-ink-950 px-5 py-24 sm:px-8">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[1.2fr_0.8fr]">
           <div>
             <AnimatedSection className="mb-10">
               <div className="gold-line mb-6" />
-              <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-600">
-                Partnership Routes
+              <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
+                Partnership routes
               </p>
-              <h2 className="font-tight text-4xl font-black leading-tight tracking-tighter text-ink-900 sm:text-5xl">
-                Start with the Right Operating Team
+              <h2 className="font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
+                Start with the right operating team
               </h2>
             </AnimatedSection>
 
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
               {partnershipAreas.map((area, index) => (
                 <AnimatedSection key={area.id} delay={index * 0.05}>
-                  <div className="h-full rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-gold-400 hover:shadow-md">
-                    <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
+                  <div className="h-full rounded-2xl border border-white/10 bg-white/[0.03] p-6 transition hover:border-gold-400/50 hover:bg-white/[0.06]">
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-400">
                       Routed to {area.routeTo}
                     </p>
-                    <h3 className="mb-3 font-tight text-2xl font-black leading-tight tracking-tighter text-ink-900">
+                    <h3 className="mb-3 font-tight text-2xl font-black leading-tight tracking-tight text-white">
                       {area.title}
                     </h3>
-                    <p className="mb-5 text-sm leading-relaxed text-slate-600">{area.summary}</p>
+                    <p className="mb-5 text-sm leading-relaxed text-slate-400">{area.summary}</p>
 
                     <div className="mb-5">
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">
                         Good fit for
                       </p>
                       <div className="flex flex-wrap gap-2">
                         {area.goodFit.map((fit) => (
-                          <span key={fit} className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-medium text-slate-600">
+                          <span key={fit} className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] font-medium text-white/80">
                             {fit}
                           </span>
                         ))}
@@ -174,20 +140,20 @@ export default function PartnershipsPage() {
 
                     <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
                       <div>
-                        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">Companies</p>
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">Companies</p>
                         <div className="space-y-1.5">
                           {area.companySlugs.map((slug) => (
-                            <Link key={slug} href={companyUrl(slug)} className="block text-gold-600 hover:text-gold-500">
+                            <Link key={slug} href={companyUrl(slug)} className="block text-gold-300 hover:text-gold-200">
                               {getCompanyName(slug)}
                             </Link>
                           ))}
                         </div>
                       </div>
                       <div>
-                        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">Services</p>
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">Services</p>
                         <div className="space-y-1.5">
                           {area.serviceSlugs.map((slug) => (
-                            <Link key={slug} href={serviceUrl(slug)} className="block text-gold-600 hover:text-gold-500">
+                            <Link key={slug} href={serviceUrl(slug)} className="block text-gold-300 hover:text-gold-200">
                               {getServiceTitle(slug)}
                             </Link>
                           ))}
@@ -209,9 +175,9 @@ export default function PartnershipsPage() {
             </AnimatedSection>
 
             <AnimatedSection direction="left" delay={0.08}>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
-                <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-400">
-                  How Enquiries Move
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+                <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
+                  How enquiries move
                 </p>
                 <div className="space-y-4">
                   {[
@@ -220,7 +186,7 @@ export default function PartnershipsPage() {
                     ['3', 'The group office routes the enquiry internally'],
                     ['4', 'The relevant company or division follows up'],
                   ].map(([step, label]) => (
-                    <div key={step} className="flex gap-3 text-sm text-slate-600">
+                    <div key={step} className="flex gap-3 text-sm text-slate-300">
                       <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gold-500 text-xs font-bold text-white">
                         {step}
                       </span>
@@ -234,16 +200,17 @@ export default function PartnershipsPage() {
         </div>
       </section>
 
-      <section className="overflow-hidden bg-slate-50 px-5 py-20 sm:px-8">
+      {/* ── Partnership questions ─────────────────────────────────── */}
+      <section className="overflow-hidden bg-ink-950 px-5 py-20 sm:px-8">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-10 lg:grid-cols-[0.75fr_1.25fr]">
           <AnimatedSection>
             <div className="gold-line mb-6" />
-            <h2 className="mb-4 font-tight text-3xl font-black leading-tight tracking-tighter text-ink-900">
-              Partnership Questions
+            <h2 className="mb-4 font-tight text-3xl font-black leading-tight tracking-tight text-white">
+              Partnership questions
             </h2>
-            <p className="text-sm leading-relaxed text-slate-600">
-              Practical answers for suppliers, buyers, logistics customers, and partners
-              preparing to contact Itemba Group.
+            <p className="text-sm leading-relaxed text-slate-400">
+              Practical answers for suppliers, buyers, logistics customers and partners preparing to
+              contact Itemba Group.
             </p>
           </AnimatedSection>
           <AnimatedSection direction="left">
@@ -251,6 +218,6 @@ export default function PartnershipsPage() {
           </AnimatedSection>
         </div>
       </section>
-    </>
+    </div>
   );
 }

@@ -53,7 +53,7 @@ export default function InsightsPage() {
   const remaining = insightArticles.slice(1);
 
   return (
-    <>
+    <div className="bg-ink-950">
       <JsonLd
         data={[
           insightsJsonLd,
@@ -64,72 +64,71 @@ export default function InsightsPage() {
         ]}
       />
 
-      <section className="relative overflow-hidden bg-ink-900 px-5 pb-24 pt-40 sm:px-8">
+      {/* ── Hero ──────────────────────────────────────────────────── */}
+      <section className="relative overflow-hidden bg-ink-950 px-5 pb-24 pt-44 sm:px-8">
         <div className="hero-ambient">
           <div className="hero-orb hero-orb-gold" style={{ opacity: 0.5 }} />
           <div className="hero-orb hero-orb-blue" style={{ opacity: 0.3 }} />
           <div className="grid-overlay" />
         </div>
-        <div className="relative z-10 mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+        <div className="relative z-10 mx-auto max-w-7xl">
           <AnimatedSection>
-            <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
-              Insights
-            </p>
-            <h1
-              className="mb-6 font-tight font-black leading-none tracking-tightest text-white"
-              style={{ fontSize: 'clamp(2.8rem, 6vw, 5.5rem)' }}
-            >
-              Practical Guides for<br />
-              <span className="gradient-text">Business Enquiries.</span>
-            </h1>
-            <p className="max-w-2xl text-lg leading-relaxed text-slate-300">
-              Focused articles for customers, suppliers, contractors, transport operators,
-              and partners who need to choose the right Itemba Group service route.
-            </p>
-          </AnimatedSection>
-          <AnimatedSection direction="left">
-            <div className="relative h-80 overflow-hidden rounded-3xl shadow-2xl">
-              <BrandVisual variant="operations" label="Itemba Group insight guides" className="absolute inset-0" />
-              <div className="absolute inset-0 bg-gradient-to-br from-ink-950/35 to-transparent" />
+            <div className="mb-5 flex items-center gap-3">
+              <span className="h-px w-10 bg-gold-400" />
+              <span className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
+                Insights
+              </span>
             </div>
+            <h1 className="font-tight text-5xl font-black leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
+              Practical guides for <span className="gradient-text">business enquiries.</span>
+            </h1>
+            <p className="mt-7 max-w-2xl text-lg leading-relaxed text-slate-300">
+              Focused articles for customers, suppliers, contractors, transport operators and
+              partners who need to choose the right Itemba Group service route.
+            </p>
           </AnimatedSection>
         </div>
       </section>
 
-      <section className="bg-white px-5 py-24 sm:px-8">
+      {/* ── Featured ──────────────────────────────────────────────── */}
+      <section className="bg-ink-950 px-5 py-20 sm:px-8">
         <div className="mx-auto max-w-7xl">
           <AnimatedSection className="mb-10">
             <div className="gold-line mb-6" />
-            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-600">
-              Featured Guide
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
+              Featured guide
             </p>
           </AnimatedSection>
 
           <AnimatedSection>
             <Link
               href={insightUrl(featured.slug)}
-              className="group grid overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 shadow-sm transition hover:border-gold-400 hover:shadow-xl lg:grid-cols-[0.92fr_1.08fr]"
+              className="group grid overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] transition hover:border-gold-400/50 hover:bg-white/[0.06] lg:grid-cols-[0.92fr_1.08fr]"
             >
               <div className="relative min-h-72 overflow-hidden">
-                <BrandVisual variant="corridor" label={featured.title} className="absolute inset-0 transition-transform duration-700 group-hover:scale-105" />
+                <BrandVisual
+                  variant="corridor"
+                  label={featured.title}
+                  className="absolute inset-0 transition-transform duration-700 group-hover:scale-105"
+                />
                 <div className="absolute inset-0 bg-gradient-to-r from-ink-950/65 to-transparent" />
               </div>
               <div className="p-8 sm:p-10">
-                <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-600">
-                  {featured.eyebrow} - {featured.readingTime}
+                <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
+                  {featured.eyebrow} · {featured.readingTime}
                 </p>
-                <h2 className="mb-5 font-tight text-3xl font-black leading-tight tracking-tighter text-ink-900 sm:text-4xl">
+                <h2 className="mb-5 font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
                   {featured.title}
                 </h2>
-                <p className="mb-6 text-sm leading-relaxed text-slate-600">{featured.summary}</p>
+                <p className="mb-6 text-sm leading-relaxed text-slate-400">{featured.summary}</p>
                 <div className="mb-7 flex flex-wrap gap-2">
                   {featured.audience.map((audience) => (
-                    <span key={audience} className="rounded-full bg-white px-3 py-1 text-[11px] font-medium text-slate-600 ring-1 ring-slate-200">
+                    <span key={audience} className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] font-medium text-white/80">
                       {audience}
                     </span>
                   ))}
                 </div>
-                <span className="inline-flex items-center gap-2 text-sm font-semibold text-gold-600 transition group-hover:text-gold-500">
+                <span className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition group-hover:text-gold-200">
                   Read guide
                   <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
@@ -141,15 +140,16 @@ export default function InsightsPage() {
         </div>
       </section>
 
-      <section className="bg-slate-50 px-5 py-24 sm:px-8">
+      {/* ── More articles ─────────────────────────────────────────── */}
+      <section className="bg-ink-950 px-5 py-20 sm:px-8">
         <div className="mx-auto max-w-7xl">
           <AnimatedSection className="mb-12">
             <div className="gold-line mb-6" />
-            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-600">
-              More Articles
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
+              More articles
             </p>
-            <h2 className="font-tight text-4xl font-black leading-tight tracking-tighter text-ink-900 sm:text-5xl">
-              Guides by Need
+            <h2 className="font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
+              Guides by need
             </h2>
           </AnimatedSection>
 
@@ -158,25 +158,27 @@ export default function InsightsPage() {
               <AnimatedSection key={article.slug} delay={index * 0.06}>
                 <Link
                   href={insightUrl(article.slug)}
-                  className="group flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-gold-400 hover:shadow-lg"
+                  className="group flex h-full flex-col rounded-2xl border border-white/10 bg-white/[0.03] p-6 transition hover:-translate-y-1 hover:border-gold-400/50 hover:bg-white/[0.06]"
                 >
-                  <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-600">
+                  <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
                     {article.eyebrow}
                   </p>
-                  <h3 className="mb-4 font-tight text-2xl font-black leading-tight text-ink-900">
+                  <h3 className="mb-4 font-tight text-2xl font-black leading-tight text-white">
                     {article.title}
                   </h3>
-                  <p className="mb-6 flex-1 text-sm leading-relaxed text-slate-600">{article.summary}</p>
+                  <p className="mb-6 flex-1 text-sm leading-relaxed text-slate-400">
+                    {article.summary}
+                  </p>
                   <div className="mb-6 flex flex-wrap gap-2">
                     {relatedServices(article)
                       .slice(0, 2)
                       .map((service) => (
-                        <span key={service.slug} className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-medium text-slate-600">
+                        <span key={service.slug} className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] font-medium text-white/80">
                           {service.shortTitle}
                         </span>
                       ))}
                   </div>
-                  <span className="inline-flex items-center gap-2 text-sm font-semibold text-gold-600 transition group-hover:text-gold-500">
+                  <span className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition group-hover:text-gold-200">
                     Read article
                     <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
@@ -189,29 +191,30 @@ export default function InsightsPage() {
         </div>
       </section>
 
-      <section className="bg-white px-5 py-20 sm:px-8">
+      {/* ── Direct route CTA ──────────────────────────────────────── */}
+      <section className="bg-ink-950 px-5 py-20 sm:px-8">
         <AnimatedSection className="mx-auto max-w-3xl text-center">
           <div className="gold-line mx-auto mb-8" />
-          <h2 className="mb-5 font-tight text-4xl font-black leading-tight tracking-tighter text-ink-900 sm:text-5xl">
-            Need a Direct Route?
+          <h2 className="mb-5 font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
+            Need a direct route?
           </h2>
-          <p className="mb-8 text-sm leading-relaxed text-slate-600">
-            Use the capability map or partnerships page when your enquiry spans more than
-            one company, service, or operating division.
+          <p className="mb-8 text-sm leading-relaxed text-slate-400">
+            Use the capability map or partnerships page when your enquiry spans more than one
+            company, service or operating division.
           </p>
           <div className="flex flex-wrap justify-center gap-3">
-            <Link href="/capabilities" className="btn-primary rounded-full bg-ink-900 px-6 py-3 text-sm font-semibold text-white hover:bg-ink-700">
+            <Link href="/capabilities" className="btn-primary rounded-full bg-gold-500 px-6 py-3 text-sm font-semibold text-white hover:bg-gold-400">
               Capability map
             </Link>
-            <Link href="/partnerships" className="btn-primary rounded-full border border-slate-300 px-6 py-3 text-sm font-semibold text-ink-900 hover:border-gold-400 hover:text-gold-600">
+            <Link href="/partnerships" className="btn-primary rounded-full border border-white/25 px-6 py-3 text-sm font-semibold text-white hover:border-gold-400 hover:text-gold-300">
               Partnerships
             </Link>
-            <Link href={serviceUrl('logistics-and-cross-border-transit')} className="btn-primary rounded-full border border-slate-300 px-6 py-3 text-sm font-semibold text-ink-900 hover:border-gold-400 hover:text-gold-600">
+            <Link href={serviceUrl('logistics-and-cross-border-transit')} className="btn-primary rounded-full border border-white/25 px-6 py-3 text-sm font-semibold text-white hover:border-gold-400 hover:text-gold-300">
               Logistics guide
             </Link>
           </div>
         </AnimatedSection>
       </section>
-    </>
+    </div>
   );
 }
