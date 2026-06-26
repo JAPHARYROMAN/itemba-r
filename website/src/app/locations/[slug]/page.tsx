@@ -64,8 +64,12 @@ export default async function LocationPage({ params }: PageProps) {
     notFound();
   }
 
-  const relatedServices = serviceAreas.filter((service) => location.serviceSlugs.includes(service.slug));
-  const relatedCompanies = companyProfiles.filter((company) => location.companySlugs.includes(company.slug));
+  const relatedServices = serviceAreas.filter((service) =>
+    location.serviceSlugs.includes(service.slug),
+  );
+  const relatedCompanies = companyProfiles.filter((company) =>
+    location.companySlugs.includes(company.slug),
+  );
   const pageUrl = absoluteUrl(locationUrl(location.slug));
   const locationImage = location.image;
   const locationJsonLd = {
@@ -114,7 +118,7 @@ export default async function LocationPage({ params }: PageProps) {
   };
 
   return (
-    <>
+    <div className="bg-ink-950">
       <JsonLd
         data={[
           locationJsonLd,
@@ -128,96 +132,95 @@ export default async function LocationPage({ params }: PageProps) {
         ]}
       />
 
-      <section className="relative overflow-hidden bg-ink-900 px-5 pb-20 pt-40 sm:px-8">
-        <div className="hero-ambient">
-          <div className="hero-orb hero-orb-gold" style={{ opacity: 0.55 }} />
-          <div className="grid-overlay" />
-        </div>
-        <div className="relative z-10 mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+      {/* ── CINEMATIC HERO ════════════════════════════════════════════ */}
+      <section className="relative flex min-h-[78vh] items-end overflow-hidden bg-ink-950">
+        {locationImage ? (
+          <img
+            src={locationImage.src}
+            alt=""
+            aria-hidden="true"
+            className="animate-kenburns absolute inset-0 h-full w-full object-cover"
+          />
+        ) : (
+          <BrandVisual variant={location.visual} label={location.title} className="absolute inset-0" />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-r from-ink-950 via-ink-950/70 to-ink-950/30" />
+        <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-transparent to-ink-950/70" />
+        <div className="grain-overlay" />
+        <div className="relative z-10 mx-auto w-full max-w-7xl px-5 pb-16 pt-40 sm:px-8">
           <AnimatedSection>
-            <Link href="/locations" className="text-sm font-semibold text-gold-400 hover:text-gold-300">
-              All locations
+            <Link
+              href="/locations"
+              className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition hover:text-gold-200"
+            >
+              <span aria-hidden="true">←</span> All locations
             </Link>
-            <p className="mb-4 mt-8 text-xs font-semibold uppercase tracking-widest text-gold-400">
+            <p className="mt-8 text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
               {location.eyebrow}
             </p>
             <h1
-              className="mb-6 font-tight font-black leading-none tracking-tightest text-white"
-              style={{ fontSize: 'clamp(2.8rem, 6vw, 5.5rem)' }}
+              className="cine-shadow mt-4 font-tight font-black leading-[0.92] tracking-tight text-white"
+              style={{ fontSize: 'clamp(2.6rem, 6.5vw, 5.5rem)' }}
             >
               {location.title}
             </h1>
-            <p className="max-w-2xl text-lg leading-relaxed text-slate-300">{location.summary}</p>
-          </AnimatedSection>
-          <AnimatedSection direction="left">
-            <figure className="relative h-80 overflow-hidden rounded-3xl bg-ink-950 shadow-2xl ring-1 ring-white/10">
-              {locationImage ? (
-                <img
-                  src={locationImage.src}
-                  alt={locationImage.alt}
-                  className="h-full w-full object-cover"
-                  loading="eager"
-                />
-              ) : (
-                <BrandVisual variant={location.visual} label={`${location.title} operations`} className="absolute inset-0" />
-              )}
-              <div className="absolute inset-0 bg-gradient-to-br from-ink-950/55 via-ink-950/10 to-transparent" />
-              {locationImage?.caption ? (
-                <figcaption className="absolute bottom-3 right-3 max-w-[80%] rounded bg-ink-950/75 px-3 py-1.5 text-[10px] font-medium leading-relaxed text-slate-200 backdrop-blur">
-                  {locationImage.caption}
-                </figcaption>
-              ) : null}
-            </figure>
+            <p className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-200/90 sm:text-xl">
+              {location.summary}
+            </p>
           </AnimatedSection>
         </div>
       </section>
 
-      <section className="overflow-hidden bg-white px-5 py-24 sm:px-8">
+      {/* ── BODY ══════════════════════════════════════════════════════ */}
+      <section className="overflow-hidden bg-ink-950 px-5 py-24 sm:px-8">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <AnimatedSection>
-              <div className="gold-line mb-6" />
-              <h2 className="mb-5 font-tight text-3xl font-black leading-tight tracking-tighter text-ink-900 sm:text-4xl">
-                Why This Location Matters
-              </h2>
-              <p className="mb-8 text-lg leading-relaxed text-slate-600">{location.detail}</p>
-            </AnimatedSection>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              {location.advantages.map((advantage, index) => (
-                <AnimatedSection key={advantage.title} delay={index * 0.06}>
-                  <div className="h-full rounded-2xl border border-slate-200 bg-slate-50 p-6">
-                    <h3 className="mb-3 font-tight text-lg font-bold text-ink-900">{advantage.title}</h3>
-                    <p className="text-sm leading-relaxed text-slate-600">{advantage.summary}</p>
-                  </div>
-                </AnimatedSection>
-              ))}
+          <div className="space-y-14 lg:col-span-2">
+            <div>
+              <AnimatedSection>
+                <div className="gold-line mb-6" />
+                <h2 className="mb-5 font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
+                  Why this location matters
+                </h2>
+                <p className="mb-8 text-lg leading-relaxed text-slate-300">{location.detail}</p>
+              </AnimatedSection>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                {location.advantages.map((advantage, index) => (
+                  <AnimatedSection key={advantage.title} delay={index * 0.06}>
+                    <div className="h-full rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+                      <h3 className="mb-3 font-tight text-lg font-bold text-white">{advantage.title}</h3>
+                      <p className="text-sm leading-relaxed text-slate-400">{advantage.summary}</p>
+                    </div>
+                  </AnimatedSection>
+                ))}
+              </div>
             </div>
 
-            <AnimatedSection className="mt-14">
+            <AnimatedSection>
               <div className="gold-line mb-6" />
-              <h2 className="mb-5 font-tight text-3xl font-black leading-tight tracking-tighter text-ink-900 sm:text-4xl">
-                Services Available Through This Location
+              <h2 className="mb-6 font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
+                Services available through this location
               </h2>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {relatedServices.map((service) => (
                   <Link
                     key={service.slug}
                     href={serviceUrl(service.slug)}
-                    className="rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-gold-400 hover:shadow-md"
+                    className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 transition hover:border-gold-400/50 hover:bg-white/[0.06]"
                   >
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">{service.eyebrow}</p>
-                    <h3 className="mb-2 font-tight text-lg font-bold text-ink-900">{service.title}</h3>
-                    <p className="text-sm leading-relaxed text-slate-600">{service.summary}</p>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gold-400">
+                      {service.eyebrow}
+                    </p>
+                    <h3 className="mb-2 font-tight text-lg font-bold text-white">{service.title}</h3>
+                    <p className="text-sm leading-relaxed text-slate-400">{service.summary}</p>
                   </Link>
                 ))}
               </div>
             </AnimatedSection>
 
-            <AnimatedSection className="mt-14">
+            <AnimatedSection>
               <div className="gold-line mb-6" />
-              <h2 className="mb-5 font-tight text-3xl font-black leading-tight tracking-tighter text-ink-900 sm:text-4xl">
-                Location Questions
+              <h2 className="mb-6 font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
+                Location questions
               </h2>
               <FaqList faqs={location.faqs} />
             </AnimatedSection>
@@ -225,7 +228,7 @@ export default async function LocationPage({ params }: PageProps) {
 
           <aside className="space-y-6">
             <AnimatedSection direction="left" delay={0.08}>
-              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
                 <iframe
                   title="Itemba Group Songwe-Tunduma location map"
                   src={`https://www.google.com/maps?q=${encodeURIComponent(contact.mapQuery)}&output=embed`}
@@ -234,8 +237,10 @@ export default async function LocationPage({ params }: PageProps) {
                   referrerPolicy="no-referrer-when-downgrade"
                 />
                 <div className="p-6">
-                  <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-400">Address</p>
-                  <address className="not-italic text-sm leading-relaxed text-slate-600">
+                  <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
+                    Address
+                  </p>
+                  <address className="text-sm not-italic leading-relaxed text-slate-400">
                     {location.addressLines.map((line) => (
                       <span key={line} className="block">
                         {line}
@@ -247,18 +252,18 @@ export default async function LocationPage({ params }: PageProps) {
             </AnimatedSection>
 
             <AnimatedSection direction="left" delay={0.14}>
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-400">
-                  Operating Companies
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+                <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
+                  Operating companies
                 </p>
                 <div className="space-y-3">
                   {relatedCompanies.map((company) => (
                     <Link
                       key={company.slug}
                       href={companyUrl(company.slug)}
-                      className="block rounded-xl bg-slate-50 p-4 transition hover:bg-slate-100"
+                      className="block rounded-xl bg-white/[0.04] p-4 transition hover:bg-white/[0.08]"
                     >
-                      <div className="font-tight text-sm font-bold text-ink-900">{company.name}</div>
+                      <div className="font-tight text-sm font-bold text-white">{company.name}</div>
                       <div className="mt-1 text-xs text-slate-500">{company.sector}</div>
                     </Link>
                   ))}
@@ -276,6 +281,6 @@ export default async function LocationPage({ params }: PageProps) {
           </aside>
         </div>
       </section>
-    </>
+    </div>
   );
 }
