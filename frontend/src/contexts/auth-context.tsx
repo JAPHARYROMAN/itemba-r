@@ -7,7 +7,7 @@ import { SESSION_EXPIRED_EVENT } from '@/lib/api-client';
 
 // Pages that are reachable without a valid session — never redirect from these.
 const PUBLIC_PATHS = new Set<string>(['/login', '/forgot-password', '/reset-password']);
-const SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const SESSION_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 const SESSION_REFRESH_RETRY_MS = 30 * 1000;
 
 interface AuthContextValue {

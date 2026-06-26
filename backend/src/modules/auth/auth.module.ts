@@ -27,8 +27,14 @@ const isNonExpiringJwtDuration = (value: string): boolean =>
  * non-expiring (e.g. 'never'), fall back to a finite default instead of issuing
  * an eternal token. This narrows token lifetime; refresh-token behaviour is
  * unchanged.
+ *
+ * The fallback is 12h (not minutes): the session itself is kept alive by the
+ * refresh token (persistent when JWT_REFRESH_EXPIRES_IN=never), so the access
+ * token only needs to be short enough to bound a stolen-token window while
+ * being long enough that the silent refresh rarely has to run. A leaked access
+ * token still expires on its own within 12h.
  */
-const ACCESS_TOKEN_FALLBACK_TTL = '15m';
+const ACCESS_TOKEN_FALLBACK_TTL = '12h';
 
 /**
  * AuthModule is intentionally @Global so the PermissionCacheService and
