@@ -2,6 +2,57 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Cinematic rebuild utilities (Tesla × Apple direction) ───────────── */
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .cine-shadow {
+    text-shadow: 0 2px 40px rgba(0, 0, 0, 0.55);
+  }
+  /* Unified film grain so the mixed photo set reads as one graded film. */
+  .grain-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.07;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+}
+
+@keyframes cineKenburns {
+  from {
+    transform: scale(1.04);
+  }
+  to {
+    transform: scale(1.16);
+  }
+}
+.animate-kenburns {
+  animation: cineKenburns 22s ease-out forwards;
+}
+.cine-scroll-cue {
+  animation: cineScrollCue 2.2s ease-in-out infinite;
+}
+@keyframes cineScrollCue {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translateY(7px);
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-kenburns,
+  .cine-scroll-cue {
+    animation: none;
+  }
+}
+
 /* ─── Base ─────────────────────────────────────────────────────────────── */
 html {
   scroll-behavior: smooth;
