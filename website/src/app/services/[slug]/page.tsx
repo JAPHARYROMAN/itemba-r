@@ -57,64 +57,46 @@ const fuelPositioning = [
   },
 ] as const;
 
-function PhotoFrame({
-  src,
-  alt,
-  caption,
-  className = '',
-}: {
-  src: string;
-  alt: string;
-  caption?: string;
-  className?: string;
-}) {
-  return (
-    <div className={`overflow-hidden rounded-2xl bg-ink-950 shadow-2xl ring-1 ring-white/10 ${className}`}>
-      <div className="flex aspect-[4/3] items-center justify-center bg-ink-950 p-2 sm:p-3">
-        <img
-          src={src}
-          alt={alt}
-          className="h-full w-full rounded-xl object-contain shadow-2xl ring-1 ring-white/15"
-        />
-      </div>
-      {caption ? (
-        <div className="border-t border-white/10 bg-ink-950/95 px-5 py-4 text-sm font-semibold leading-relaxed text-white">
-          {caption}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function FuelBusinessShowcase() {
   return (
     <section className="bg-ink-950 px-5 py-20 text-white sm:px-8">
       <div className="mx-auto max-w-7xl">
         <AnimatedSection>
           <div className="max-w-3xl">
-            <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
-              Fuel Business Presence
+            <p className="mb-4 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
+              Fuel business presence
             </p>
-            <h2 className="font-tight text-3xl font-black leading-tight tracking-tighter sm:text-4xl">
+            <h2 className="font-tight text-3xl font-black leading-tight tracking-tight sm:text-4xl">
               ITEMBA stations built for corridor movement
             </h2>
             <p className="mt-5 text-base leading-relaxed text-slate-300">
-              The fuel business is presented around visible station brands, practical access, and
-              high-traffic route positioning. ITEMBA-MPEMBA and ITEMBA-UZUNGUNI trade publicly under
-              the ITEMBA location brand while remaining managed by Mwanjalisi Oil Company Ltd.
+              ITEMBA-MPEMBA and ITEMBA-UZUNGUNI trade publicly under the ITEMBA location brand while
+              remaining managed by Mwanjalisi Oil Company Ltd — visible station brands, practical
+              access, and high-traffic route positioning.
             </p>
           </div>
         </AnimatedSection>
 
-        <div className="mt-10 grid grid-cols-1 items-start gap-5 md:grid-cols-3">
+        <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-3">
           {fuelShowcaseImages.map((image, index) => (
             <AnimatedSection key={image.src} direction="fade" delay={0.08 + index * 0.04}>
-              <PhotoFrame src={image.src} alt={image.alt} caption={image.caption} />
+              <figure className="group relative h-64 overflow-hidden rounded-2xl ring-1 ring-white/10">
+                <img
+                  src={image.src}
+                  alt={image.alt}
+                  loading="lazy"
+                  className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/30 to-transparent" />
+                <figcaption className="absolute inset-x-0 bottom-0 p-4 text-xs font-medium leading-relaxed text-white/90">
+                  {image.caption}
+                </figcaption>
+              </figure>
             </AnimatedSection>
           ))}
         </div>
 
-        <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
           {fuelPositioning.map((item, index) => (
             <AnimatedSection key={item.label} delay={0.12 + index * 0.04}>
               <div className="h-full rounded-2xl border border-white/10 bg-white/[0.04] p-5">
@@ -199,7 +181,7 @@ export default async function ServicePage({ params }: PageProps) {
   };
 
   return (
-    <>
+    <div className="bg-ink-950">
       <JsonLd
         data={[
           serviceJsonLd,
@@ -212,107 +194,108 @@ export default async function ServicePage({ params }: PageProps) {
         ]}
       />
 
-      <section className="relative overflow-hidden bg-ink-900 px-5 pb-20 pt-40 sm:px-8">
-        <div className="hero-ambient">
-          <div className="hero-orb hero-orb-gold" style={{ opacity: 0.5 }} />
-          <div className="grid-overlay" />
-        </div>
-        <div className="relative z-10 mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+      {/* ══ CINEMATIC HERO ════════════════════════════════════════════ */}
+      <section className="relative flex min-h-[78vh] items-end overflow-hidden bg-ink-950">
+        {service.image ? (
+          <img
+            src={service.image.src}
+            alt=""
+            aria-hidden="true"
+            className="animate-kenburns absolute inset-0 h-full w-full object-cover"
+          />
+        ) : (
+          <BrandVisual variant={service.visual} label={service.title} className="absolute inset-0" />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-r from-ink-950 via-ink-950/70 to-ink-950/30" />
+        <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-transparent to-ink-950/70" />
+        <div className="grain-overlay" />
+
+        <div className="relative z-10 mx-auto w-full max-w-7xl px-5 pb-16 pt-40 sm:px-8">
           <AnimatedSection>
-            <Link href="/services" className="text-sm font-semibold text-gold-400 hover:text-gold-300">
-              All services
+            <Link
+              href="/services"
+              className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition hover:text-gold-200"
+            >
+              <span aria-hidden="true">←</span> All services
             </Link>
-            <p className="mb-4 mt-8 text-xs font-semibold uppercase tracking-widest text-gold-400">
+            <p className="mt-8 text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
               {service.eyebrow}
             </p>
             <h1
-              className="mb-6 font-tight font-black leading-none tracking-tightest text-white"
-              style={{ fontSize: 'clamp(2.8rem, 6vw, 5.5rem)' }}
+              className="cine-shadow mt-4 font-tight font-black leading-[0.92] tracking-tight text-white"
+              style={{ fontSize: 'clamp(2.6rem, 6.5vw, 5.5rem)' }}
             >
               {service.title}
             </h1>
-            <p className="max-w-2xl text-lg leading-relaxed text-slate-300">{service.summary}</p>
-          </AnimatedSection>
-          <AnimatedSection direction="fade">
-            <div className="relative overflow-hidden rounded-2xl bg-ink-950 shadow-2xl ring-1 ring-white/10">
-              {service.image ? (
-                <>
-                  <img
-                    src={service.image.src}
-                    alt=""
-                    aria-hidden="true"
-                    className="absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-2xl"
-                  />
-                  <div className="relative flex min-h-[20rem] items-center justify-center p-3 sm:min-h-[24rem] sm:p-4">
-                    <img
-                      src={service.image.src}
-                      alt={service.image.alt}
-                      className="max-h-[28rem] w-full rounded-xl object-contain shadow-2xl ring-1 ring-white/15"
-                    />
-                  </div>
-                </>
-              ) : (
-                <div className="relative h-80">
-                  <BrandVisual variant={service.visual} label={`${service.title} operations`} className="absolute inset-0" />
-                </div>
-              )}
-              {service.image?.caption ? (
-                <div className="relative border-t border-white/10 bg-ink-950/95 p-4 text-sm font-semibold leading-relaxed text-white">
-                  {service.image.caption}
-                </div>
-              ) : null}
-            </div>
+            <p className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-200/90 sm:text-xl">
+              {service.summary}
+            </p>
           </AnimatedSection>
         </div>
       </section>
 
       {service.slug === 'fuel-and-lubricants' ? <FuelBusinessShowcase /> : null}
 
-      <section className="bg-white px-5 py-24 sm:px-8">
+      {/* ══ BODY ══════════════════════════════════════════════════════ */}
+      <section className="bg-ink-950 px-5 py-24 sm:px-8">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-3">
-          <div className="lg:col-span-2">
+          <div className="space-y-16 lg:col-span-2">
             <AnimatedSection>
               <div className="gold-line mb-6" />
-              <h2 className="mb-5 font-tight text-3xl font-black leading-tight tracking-tighter text-ink-900 sm:text-4xl">
-                What This Covers
+              <h2 className="font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
+                What this covers
               </h2>
-              <p className="mb-8 text-lg leading-relaxed text-slate-600">{service.detail}</p>
-            </AnimatedSection>
-
-            <AnimatedSection delay={0.08}>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <p className="mt-5 text-lg leading-relaxed text-slate-300">{service.detail}</p>
+              <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {service.offerings.map((offering) => (
-                  <div key={offering} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                    <div className="text-sm font-semibold text-ink-900">{offering}</div>
+                  <div
+                    key={offering}
+                    className="rounded-xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm font-semibold text-white"
+                  >
+                    {offering}
                   </div>
                 ))}
               </div>
             </AnimatedSection>
 
             {serviceGallery.length > 0 ? (
-              <AnimatedSection delay={0.12} className="mt-14">
+              <AnimatedSection delay={0.06}>
                 <div className="gold-line mb-6" />
-                <h2 className="mb-5 font-tight text-3xl font-black leading-tight tracking-tighter text-ink-900 sm:text-4xl">
-                  Operations Gallery
+                <h2 className="mb-6 font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
+                  Operations gallery
                 </h2>
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   {serviceGallery.map((image) => (
-                    <PhotoFrame key={image.src} src={image.src} alt={image.alt} caption={image.caption} />
+                    <figure
+                      key={image.src}
+                      className="group relative h-60 overflow-hidden rounded-2xl ring-1 ring-white/10"
+                    >
+                      <img
+                        src={image.src}
+                        alt={image.alt}
+                        loading="lazy"
+                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/30 to-transparent" />
+                      <figcaption className="absolute inset-x-0 bottom-0 p-4 text-xs font-medium leading-relaxed text-white/90">
+                        {image.caption}
+                      </figcaption>
+                    </figure>
                   ))}
                 </div>
               </AnimatedSection>
             ) : null}
 
-            <AnimatedSection delay={0.14} className="mt-14">
+            <AnimatedSection delay={0.08}>
               <div className="gold-line mb-6" />
-              <h2 className="mb-5 font-tight text-3xl font-black leading-tight tracking-tighter text-ink-900 sm:text-4xl">
-                Who It Serves
+              <h2 className="mb-6 font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
+                Who it serves
               </h2>
               <div className="flex flex-wrap gap-2">
                 {service.audience.map((audience) => (
                   <span
                     key={audience}
-                    className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600"
+                    className="rounded-full border border-white/15 bg-white/[0.06] px-4 py-2 text-sm font-medium text-white/85 backdrop-blur"
                   >
                     {audience}
                   </span>
@@ -320,10 +303,10 @@ export default async function ServicePage({ params }: PageProps) {
               </div>
             </AnimatedSection>
 
-            <AnimatedSection delay={0.18} className="mt-14">
+            <AnimatedSection delay={0.1}>
               <div className="gold-line mb-6" />
-              <h2 className="mb-5 font-tight text-3xl font-black leading-tight tracking-tighter text-ink-900 sm:text-4xl">
-                Frequently Asked Questions
+              <h2 className="mb-6 font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
+                Frequently asked questions
               </h2>
               <FaqList faqs={service.faqs} />
             </AnimatedSection>
@@ -331,20 +314,21 @@ export default async function ServicePage({ params }: PageProps) {
 
           <aside className="space-y-6">
             <AnimatedSection direction="fade" delay={0.08}>
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-400">
-                  Operating Company
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+                <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
+                  Operating company
                 </p>
-                <h2 className="mb-3 font-tight text-xl font-bold text-ink-900">{service.companyName}</h2>
-                <p className="mb-5 text-sm leading-relaxed text-slate-600">
-                  This service area is handled through the relevant operating team under {service.companyName}.
+                <h2 className="mb-3 font-tight text-xl font-bold text-white">{service.companyName}</h2>
+                <p className="mb-5 text-sm leading-relaxed text-slate-400">
+                  This service area is handled through the relevant operating team under{' '}
+                  {service.companyName}.
                 </p>
                 <Link
                   href={companyUrl(service.companySlug)}
-                  className="inline-flex items-center gap-2 text-sm font-semibold text-gold-600 hover:text-gold-500"
+                  className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition hover:text-gold-200"
                 >
                   View company profile
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                   </svg>
                 </Link>
@@ -362,6 +346,6 @@ export default async function ServicePage({ params }: PageProps) {
           </aside>
         </div>
       </section>
-    </>
+    </div>
   );
 }
