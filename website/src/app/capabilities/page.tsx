@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import AnimatedSection from '@/components/AnimatedSection';
-import BrandVisual from '@/components/BrandVisual';
 import EnquiryRouter from '@/components/EnquiryRouter';
 import JsonLd from '@/components/JsonLd';
 import {
@@ -86,7 +85,7 @@ function getCompany(slug: string) {
 
 export default function CapabilitiesPage() {
   return (
-    <>
+    <div className="bg-ink-950">
       <JsonLd
         data={[
           capabilityJsonLd,
@@ -97,61 +96,56 @@ export default function CapabilitiesPage() {
         ]}
       />
 
-      <section className="relative overflow-hidden bg-ink-900 px-5 pb-24 pt-40 sm:px-8">
+      {/* ── Hero ──────────────────────────────────────────────────── */}
+      <section className="relative overflow-hidden bg-ink-950 px-5 pb-24 pt-44 sm:px-8">
         <div className="hero-ambient">
           <div className="hero-orb hero-orb-gold" style={{ opacity: 0.5 }} />
           <div className="hero-orb hero-orb-blue" style={{ opacity: 0.3 }} />
           <div className="grid-overlay" />
         </div>
-        <div className="relative z-10 mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+        <div className="relative z-10 mx-auto max-w-7xl">
           <AnimatedSection>
-            <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
-              Capability Proof
-            </p>
-            <h1
-              className="mb-6 font-tight font-black leading-none tracking-tightest text-white"
-              style={{ fontSize: 'clamp(2.8rem, 6vw, 5.5rem)' }}
-            >
-              Verify the Fit.<br />
-              <span className="gradient-text">Contact the Right Team.</span>
-            </h1>
-            <p className="max-w-2xl text-lg leading-relaxed text-slate-300">
-              A practical guide for customers, suppliers, contractors, transport operators,
-              and partners who need to understand Itemba Group&apos;s operating coverage before
-              sending a business enquiry.
-            </p>
-          </AnimatedSection>
-          <AnimatedSection direction="left">
-            <div className="relative h-80 overflow-hidden rounded-3xl shadow-2xl">
-              <BrandVisual variant="operations" label="Itemba Group capability map" className="absolute inset-0" />
-              <div className="absolute inset-0 bg-gradient-to-br from-ink-950/30 to-transparent" />
+            <div className="mb-5 flex items-center gap-3">
+              <span className="h-px w-10 bg-gold-400" />
+              <span className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
+                Capability proof
+              </span>
             </div>
+            <h1 className="font-tight text-5xl font-black leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
+              Verify the fit. <span className="gradient-text">Contact the right team.</span>
+            </h1>
+            <p className="mt-7 max-w-2xl text-lg leading-relaxed text-slate-300">
+              A practical guide for customers, suppliers, contractors, transport operators and
+              partners who need to understand Itemba Group&apos;s operating coverage before sending a
+              business enquiry.
+            </p>
           </AnimatedSection>
         </div>
       </section>
 
-      <section className="bg-white px-5 py-24 sm:px-8">
+      {/* ── Verification signals ──────────────────────────────────── */}
+      <section className="bg-ink-950 px-5 py-24 sm:px-8">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[0.78fr_1.22fr]">
           <AnimatedSection>
             <div className="gold-line mb-6" />
-            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-600">
-              Verification Signals
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
+              Verification signals
             </p>
-            <h2 className="font-tight text-4xl font-black leading-tight tracking-tighter text-ink-900 sm:text-5xl">
-              What a Visitor Can Confirm Quickly
+            <h2 className="font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
+              What a visitor can confirm quickly
             </h2>
           </AnimatedSection>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {verificationSignals.map((signal, index) => (
               <AnimatedSection key={signal.title} delay={index * 0.06}>
-                <div className="h-full rounded-2xl border border-slate-200 bg-slate-50 p-6">
-                  <span className="mb-5 flex h-9 w-9 items-center justify-center rounded-full bg-ink-900 text-sm font-black text-white">
+                <div className="h-full rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+                  <span className="mb-5 flex h-9 w-9 items-center justify-center rounded-full bg-gold-500 text-sm font-black text-white">
                     {index + 1}
                   </span>
-                  <h3 className="mb-3 font-tight text-xl font-black leading-tight text-ink-900">
+                  <h3 className="mb-3 font-tight text-xl font-black leading-tight text-white">
                     {signal.title}
                   </h3>
-                  <p className="text-sm leading-relaxed text-slate-600">{signal.summary}</p>
+                  <p className="text-sm leading-relaxed text-slate-400">{signal.summary}</p>
                 </div>
               </AnimatedSection>
             ))}
@@ -159,19 +153,20 @@ export default function CapabilitiesPage() {
         </div>
       </section>
 
-      <section className="bg-slate-50 px-5 py-24 sm:px-8">
+      {/* ── Capability map ────────────────────────────────────────── */}
+      <section className="bg-ink-950 px-5 py-24 sm:px-8">
         <div className="mx-auto max-w-7xl">
           <AnimatedSection className="mb-12">
             <div className="gold-line mb-6" />
-            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-600">
-              Capability Map
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
+              Capability map
             </p>
-            <h2 className="font-tight text-4xl font-black leading-tight tracking-tighter text-ink-900 sm:text-5xl">
-              Services, Owners, and Best-Fit Enquiries
+            <h2 className="font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
+              Services, owners, and best-fit enquiries
             </h2>
           </AnimatedSection>
 
-          <div className="divide-y divide-slate-200 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div className="divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
             {serviceAreas.map((service, index) => {
               const company = getCompany(service.companySlug);
 
@@ -179,22 +174,22 @@ export default function CapabilitiesPage() {
                 <AnimatedSection key={service.slug} delay={index * 0.04}>
                   <div className="grid grid-cols-1 gap-6 p-6 md:grid-cols-[1fr_0.9fr_0.8fr] md:p-8">
                     <div>
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gold-600">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gold-400">
                         {service.eyebrow}
                       </p>
-                      <h3 className="mb-3 font-tight text-2xl font-black leading-tight text-ink-900">
+                      <h3 className="mb-3 font-tight text-2xl font-black leading-tight text-white">
                         {service.title}
                       </h3>
-                      <p className="text-sm leading-relaxed text-slate-600">{service.summary}</p>
+                      <p className="text-sm leading-relaxed text-slate-400">{service.summary}</p>
                     </div>
 
                     <div>
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
-                        Operating Company
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">
+                        Operating company
                       </p>
                       <Link
                         href={companyUrl(service.companySlug)}
-                        className="font-semibold text-ink-900 transition hover:text-gold-600"
+                        className="font-semibold text-white transition hover:text-gold-300"
                       >
                         {company?.name ?? service.companyName}
                       </Link>
@@ -204,14 +199,14 @@ export default function CapabilitiesPage() {
                     </div>
 
                     <div>
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
-                        Common Enquiries
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">
+                        Common enquiries
                       </p>
                       <div className="mb-5 flex flex-wrap gap-2">
                         {service.audience.slice(0, 3).map((audience) => (
                           <span
                             key={audience}
-                            className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-medium text-slate-600"
+                            className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] font-medium text-white/80"
                           >
                             {audience}
                           </span>
@@ -219,7 +214,7 @@ export default function CapabilitiesPage() {
                       </div>
                       <Link
                         href={serviceUrl(service.slug)}
-                        className="inline-flex items-center gap-2 text-sm font-semibold text-gold-600 transition hover:text-gold-500"
+                        className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition hover:text-gold-200"
                       >
                         Open service page
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -235,24 +230,25 @@ export default function CapabilitiesPage() {
         </div>
       </section>
 
-      <section className="bg-ink-900 px-5 py-24 sm:px-8">
+      {/* ── Due-diligence path ────────────────────────────────────── */}
+      <section className="bg-ink-950 px-5 py-24 sm:px-8">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
           <AnimatedSection>
             <div className="gold-line mb-6" />
-            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-400">
-              Due Diligence Path
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
+              Due-diligence path
             </p>
-            <h2 className="mb-5 font-tight text-4xl font-black leading-tight tracking-tighter text-white sm:text-5xl">
-              Prepare a Stronger Business Enquiry
+            <h2 className="mb-5 font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
+              Prepare a stronger business enquiry
             </h2>
-            <p className="text-sm leading-relaxed text-slate-300">
-              Before contacting Itemba Group, a partner can use this site to confirm the
-              correct operating area, location context, company profile, and contact route.
+            <p className="text-sm leading-relaxed text-slate-400">
+              Before contacting Itemba Group, a partner can use this site to confirm the correct
+              operating area, location context, company profile and contact route.
             </p>
           </AnimatedSection>
 
           <AnimatedSection direction="left">
-            <div className="rounded-2xl border border-ink-600 bg-ink-800 p-6 sm:p-8">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 sm:p-8">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {partnerChecklist.map((item, index) => (
                   <div key={item} className="flex gap-3 text-sm leading-relaxed text-slate-300">
@@ -272,7 +268,7 @@ export default function CapabilitiesPage() {
                 </Link>
                 <Link
                   href={locationUrl('songwe-tunduma')}
-                  className="btn-primary rounded-full border border-slate-600 px-5 py-3 text-sm font-semibold text-slate-200 hover:border-gold-400 hover:text-gold-300"
+                  className="btn-primary rounded-full border border-white/25 px-5 py-3 text-sm font-semibold text-slate-200 hover:border-gold-400 hover:text-gold-300"
                 >
                   View location profile
                 </Link>
@@ -282,23 +278,24 @@ export default function CapabilitiesPage() {
         </div>
       </section>
 
-      <section className="bg-white px-5 py-24 sm:px-8">
+      {/* ── Route an enquiry ──────────────────────────────────────── */}
+      <section className="bg-ink-950 px-5 py-24 sm:px-8">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
           <AnimatedSection>
             <div className="gold-line mb-6" />
-            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-600">
-              Route an Enquiry
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
+              Route an enquiry
             </p>
-            <h2 className="mb-5 font-tight text-4xl font-black leading-tight tracking-tighter text-ink-900 sm:text-5xl">
-              Ready to Contact the Group?
+            <h2 className="mb-5 font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
+              Ready to contact the group?
             </h2>
-            <p className="text-sm leading-relaxed text-slate-600">
-              Use the enquiry router to send the request to the closest business area, or
-              continue through the partnerships page for supplier and commercial routes.
+            <p className="text-sm leading-relaxed text-slate-400">
+              Use the enquiry router to send the request to the closest business area, or continue
+              through the partnerships page for supplier and commercial routes.
             </p>
             <Link
               href="/partnerships"
-              className="mt-7 inline-flex text-sm font-semibold text-gold-600 transition hover:text-gold-500"
+              className="mt-7 inline-flex text-sm font-semibold text-gold-300 transition hover:text-gold-200"
             >
               View partnership routes
             </Link>
@@ -311,6 +308,6 @@ export default function CapabilitiesPage() {
           </AnimatedSection>
         </div>
       </section>
-    </>
+    </div>
   );
 }
