@@ -19,6 +19,13 @@ type PageProps = {
   params: Promise<{ slug: string }>;
 };
 
+/* Per-company accent wash for the cinematic hero grade. */
+const CHAPTER_WASH: Record<string, string> = {
+  mwanjalisi: 'rgba(245,158,11,0.34)',
+  westsides: 'rgba(59,130,246,0.34)',
+  enterprises: 'rgba(16,185,129,0.34)',
+};
+
 function getCompany(slug: string) {
   return companyProfiles.find((company) => company.slug === slug);
 }
@@ -60,6 +67,7 @@ export default async function CompanyProfilePage({ params }: PageProps) {
 
   const pageUrl = absoluteUrl(`/companies/${company.slug}`);
   const companyImage = 'image' in company ? company.image : undefined;
+  const wash = CHAPTER_WASH[company.id] ?? 'rgba(200,134,10,0.30)';
   const businessJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'LocalBusiness',
@@ -93,7 +101,7 @@ export default async function CompanyProfilePage({ params }: PageProps) {
   };
 
   return (
-    <>
+    <div className="bg-ink-950">
       <JsonLd
         data={[
           businessJsonLd,
@@ -105,72 +113,91 @@ export default async function CompanyProfilePage({ params }: PageProps) {
           faqJsonLd(company.faqs),
         ]}
       />
-      <section className="relative bg-ink-900 pt-40 pb-20 px-5 sm:px-8 overflow-hidden">
-        <div className="hero-ambient">
-          <div className="hero-orb hero-orb-gold" style={{ opacity: 0.55 }} />
-          <div className="grid-overlay" />
-        </div>
-        <div className="relative z-10 max-w-7xl mx-auto">
-          <AnimatedSection delay={0}>
-            <Link href="/companies" className="text-sm font-semibold text-gold-400 hover:text-gold-300">
-              All companies
+
+      {/* ══ CINEMATIC HERO ════════════════════════════════════════════ */}
+      <section className="relative flex min-h-[80vh] items-end overflow-hidden bg-ink-950">
+        {companyImage ? (
+          <img
+            src={companyImage.src}
+            alt=""
+            aria-hidden="true"
+            className="animate-kenburns absolute inset-0 h-full w-full object-cover"
+          />
+        ) : (
+          <BrandVisual variant={company.visual} label={company.name} className="absolute inset-0" />
+        )}
+        <div
+          className="absolute inset-0"
+          style={{
+            background: `linear-gradient(90deg, ${wash} 0%, rgba(5,8,15,0.6) 45%, rgba(5,8,15,0.97) 100%)`,
+          }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-transparent to-ink-950/70" />
+        <div className="grain-overlay" />
+
+        <div className="relative z-10 mx-auto w-full max-w-7xl px-5 pb-16 pt-40 sm:px-8">
+          <AnimatedSection>
+            <Link
+              href="/companies"
+              className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition hover:text-gold-200"
+            >
+              <span aria-hidden="true">←</span> All companies
             </Link>
-          </AnimatedSection>
-          <AnimatedSection delay={0.08}>
-            <p className="mt-8 text-gold-400 text-xs font-semibold uppercase tracking-widest mb-4">{company.eyebrow}</p>
+            <p
+              className={`mt-8 text-xs font-semibold uppercase tracking-[0.25em] ${company.accentClass}`}
+            >
+              {company.eyebrow}
+            </p>
             <h1
-              className="font-tight font-black text-white leading-none tracking-tightest mb-6"
-              style={{ fontSize: 'clamp(2.8rem, 6vw, 5.5rem)' }}
+              className="cine-shadow mt-4 font-tight font-black leading-[0.92] tracking-tight text-white"
+              style={{ fontSize: 'clamp(2.8rem, 7vw, 6rem)' }}
             >
               {company.name}
             </h1>
-            <p className="text-slate-300 text-lg max-w-2xl leading-relaxed">{company.summary}</p>
+            <p className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-200/90 sm:text-xl">
+              {company.summary}
+            </p>
           </AnimatedSection>
         </div>
       </section>
 
-      <section className="bg-white px-5 py-24 sm:px-8">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-12">
-          <div className="lg:col-span-2">
+      {/* ══ BODY ══════════════════════════════════════════════════════ */}
+      <section className="bg-ink-950 px-5 py-24 sm:px-8">
+        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-3">
+          <div className="space-y-16 lg:col-span-2">
             <AnimatedSection>
-              <div className="relative mb-12 overflow-hidden rounded-2xl bg-ink-950 shadow-2xl ring-1 ring-slate-900/10">
-                {companyImage ? (
-                  <>
-                    <img
-                      src={companyImage.src}
-                      alt=""
-                      aria-hidden="true"
-                      className="absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-2xl"
-                    />
-                    <div className="relative flex min-h-[18rem] items-center justify-center p-3 sm:min-h-[25rem] sm:p-4">
-                      <img
-                        src={companyImage.src}
-                        alt={companyImage.alt}
-                        className="max-h-[28rem] w-full rounded-xl object-contain shadow-2xl ring-1 ring-white/15"
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <div className="relative h-72 sm:h-96">
-                    <BrandVisual variant={company.visual} label={`${company.name} operations`} className="absolute inset-0 img-inner" />
+              <div className="gold-line mb-6" />
+              <h2 className="font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
+                Services &amp; market focus
+              </h2>
+              <p className="mt-5 text-lg leading-relaxed text-slate-300">{company.detail}</p>
+              <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {company.services.map((service) => (
+                  <div
+                    key={service}
+                    className="rounded-xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm font-semibold text-white"
+                  >
+                    {service}
                   </div>
-                )}
+                ))}
               </div>
             </AnimatedSection>
 
             <AnimatedSection delay={0.06}>
-              <div className="mb-12 grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 {company.gallery.map((image) => (
-                  <figure key={image.src} className="overflow-hidden rounded-2xl bg-ink-950 shadow-lg ring-1 ring-slate-900/10">
-                    <div className="flex aspect-[4/3] items-center justify-center bg-ink-950 p-2">
-                      <img
-                        src={image.src}
-                        alt={image.alt}
-                        className="h-full w-full rounded-xl object-contain"
-                        loading="lazy"
-                      />
-                    </div>
-                    <figcaption className="border-t border-white/10 bg-ink-950 px-4 py-3 text-xs font-semibold leading-relaxed text-white">
+                  <figure
+                    key={image.src}
+                    className="group relative h-56 overflow-hidden rounded-2xl ring-1 ring-white/10"
+                  >
+                    <img
+                      src={image.src}
+                      alt={image.alt}
+                      loading="lazy"
+                      className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/30 to-transparent" />
+                    <figcaption className="absolute inset-x-0 bottom-0 p-4 text-xs font-medium leading-relaxed text-white/90">
                       {image.caption}
                     </figcaption>
                   </figure>
@@ -180,58 +207,44 @@ export default async function CompanyProfilePage({ params }: PageProps) {
 
             <AnimatedSection delay={0.08}>
               <div className="gold-line mb-6" />
-              <h2 className="font-tight font-black text-ink-900 text-3xl sm:text-4xl leading-tight tracking-tighter mb-5">
-                Services and Market Focus
+              <h2 className="mb-6 font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
+                Frequently asked questions
               </h2>
-              <p className="text-slate-600 text-lg leading-relaxed mb-5">{company.detail}</p>
-            </AnimatedSection>
-
-            <AnimatedSection delay={0.14}>
-              <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {company.services.map((service) => (
-                  <div key={service} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                    <div className="text-sm font-semibold text-ink-900">{service}</div>
-                  </div>
-                ))}
-              </div>
-            </AnimatedSection>
-
-            <AnimatedSection delay={0.18}>
-              <div className="mt-14">
-                <div className="gold-line mb-6" />
-                <h2 className="font-tight font-black text-ink-900 text-3xl sm:text-4xl leading-tight tracking-tighter mb-5">
-                  Frequently Asked Questions
-                </h2>
-                <FaqList faqs={company.faqs} />
-              </div>
+              <FaqList faqs={company.faqs} />
             </AnimatedSection>
           </div>
 
           <aside className="space-y-6">
             <AnimatedSection direction="fade" delay={0.08}>
-              <div className={`border-l-2 ${company.accentBorder} pl-5 space-y-5`}>
+              <div className={`space-y-5 border-l-2 ${company.accentBorder} pl-5`}>
                 <div>
-                  <div className="text-xs text-slate-400 mb-1">Sector</div>
-                  <div className={`font-semibold text-sm ${company.accentClass}`}>{company.sector}</div>
+                  <div className="mb-1 text-xs text-slate-500">Sector</div>
+                  <div className={`text-sm font-semibold ${company.accentClass}`}>
+                    {company.sector}
+                  </div>
                 </div>
                 <div>
-                  <div className="text-xs text-slate-400 mb-1">Structure</div>
-                  <div className="font-semibold text-sm text-ink-900">Subsidiary of Itemba Group</div>
+                  <div className="mb-1 text-xs text-slate-500">Structure</div>
+                  <div className="text-sm font-semibold text-white">Subsidiary of Itemba Group</div>
                 </div>
                 <div>
-                  <div className="text-xs text-slate-400 mb-1">Location</div>
-                  <div className="font-semibold text-sm text-ink-900">Songwe Region, Tanzania</div>
+                  <div className="mb-1 text-xs text-slate-500">Location</div>
+                  <div className="text-sm font-semibold text-white">Songwe Region, Tanzania</div>
                 </div>
               </div>
             </AnimatedSection>
 
-            <AnimatedSection direction="fade" delay={0.14}>
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4">Key strengths</p>
+            <AnimatedSection direction="fade" delay={0.12}>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+                <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
+                  Key strengths
+                </p>
                 <div className="space-y-3">
                   {company.highlights.map((highlight) => (
-                    <div key={highlight} className="flex gap-3 text-sm text-slate-600">
-                      <span className={`mt-1.5 h-2 w-2 rounded-full ${company.accentBg} flex-shrink-0`} />
+                    <div key={highlight} className="flex gap-3 text-sm text-slate-300">
+                      <span
+                        className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full ${company.accentBg}`}
+                      />
                       <span>{highlight}</span>
                     </div>
                   ))}
@@ -239,7 +252,7 @@ export default async function CompanyProfilePage({ params }: PageProps) {
               </div>
             </AnimatedSection>
 
-            <AnimatedSection direction="fade" delay={0.2}>
+            <AnimatedSection direction="fade" delay={0.16}>
               <EnquiryRouter
                 compact
                 defaultIntentId={company.id}
@@ -250,6 +263,6 @@ export default async function CompanyProfilePage({ params }: PageProps) {
           </aside>
         </div>
       </section>
-    </>
+    </div>
   );
 }
