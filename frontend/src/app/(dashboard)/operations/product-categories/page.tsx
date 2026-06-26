@@ -473,7 +473,6 @@ function FamilyModal({
 
     const numberOrNull = (value: string) => (value.trim() ? Number(value) : null);
     const body = {
-      companyId: form.companyId,
       categoryId: form.categoryId,
       divisionId: form.divisionId || null,
       name: form.name.trim(),
@@ -490,7 +489,7 @@ function FamilyModal({
     setError('');
     try {
       if (mode === 'create') {
-        await backendPost('/products/families', body);
+        await backendPost('/products/families', { ...body, companyId: form.companyId });
       } else {
         await backendPatch(`/products/families/${initial!.id}`, body);
       }
