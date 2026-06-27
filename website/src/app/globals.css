@@ -251,6 +251,16 @@ html {
     size: A4;
   }
 
+  /* Force backgrounds and accent colors to render on paper (and in headless
+     PDF generation) even when the browser's "Background graphics" is off —
+     otherwise the dark cover panel, gold kickers and table fills drop to white. */
+  *,
+  *::before,
+  *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
   html,
   body {
     background: #ffffff !important;
@@ -312,6 +322,29 @@ html {
   body[data-print-profile='westsides'] .print-profile-document[data-profile='westsides'],
   body[data-print-profile='mwanjalisi'] .print-profile-document[data-profile='mwanjalisi'],
   body[data-print-profile='enterprises'] .print-profile-document[data-profile='enterprises'] {
+    display: block !important;
+  }
+
+  /* Print-scope fallback: while the company-profile page is mounted, ANY print
+     (the picker OR a direct Ctrl+P) hides the dark cinematic web view and shows
+     the light print layouts, defaulting to the full group profile when the
+     picker hasn't set a specific profile. */
+  body[data-print-scope='company-profile'] #main-content > div > :not(.print-document-root),
+  body[data-print-scope='company-profile'] #main-content > :not(div):not(.print-document-root) {
+    display: none !important;
+  }
+
+  body[data-print-scope='company-profile'] .print-document-root {
+    display: block !important;
+    max-width: none !important;
+    width: 100% !important;
+  }
+
+  body[data-print-scope='company-profile'] .print-profile-document {
+    display: none !important;
+  }
+
+  body[data-print-scope='company-profile']:not([data-print-profile]) .print-profile-document[data-profile='group'] {
     display: block !important;
   }
 
@@ -507,6 +540,8 @@ html {
     letter-spacing: 0.06em;
     margin: 0 0 3.5mm;
     text-transform: uppercase;
+    break-after: avoid;
+    page-break-after: avoid;
   }
 
   .print-section h3 {
@@ -514,6 +549,8 @@ html {
     font-size: 10pt;
     font-weight: 800;
     margin: 0 0 1.5mm;
+    break-after: avoid;
+    page-break-after: avoid;
   }
 
   .print-section p,
@@ -523,6 +560,8 @@ html {
   .print-section th {
     font-size: 9.5pt;
     line-height: 1.5;
+    orphans: 3;
+    widows: 3;
   }
 
   .print-fact-grid {

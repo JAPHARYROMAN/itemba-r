@@ -6,6 +6,13 @@ import EnquiryRouter from '@/components/EnquiryRouter';
 import FaqList from '@/components/FaqList';
 import JsonLd from '@/components/JsonLd';
 import PrintProfileButton from '@/components/PrintProfileButton';
+import CompanyProfilePrintScope from '@/components/CompanyProfilePrintScope';
+import CinematicImage from '@/components/cine/CinematicImage';
+import ProfileNav from '@/components/cine/ProfileNav';
+import Timeline from '@/components/cine/Timeline';
+import OrgChart from '@/components/cine/OrgChart';
+import LeadershipCard from '@/components/cine/LeadershipCard';
+import SectorIcon from '@/components/SectorIcon';
 import {
   absoluteUrl,
   breadcrumbJsonLd,
@@ -445,6 +452,9 @@ const assetCapacity = [
       'Lodging, restaurant, and bar services through UZUNGUNI INN at Mpemba-Tunduma under Westsides Company Ltd, alongside group logistics and emerging business capacity.',
   },
 ];
+
+// Sector icon per asset-capacity card (index-aligned with assetCapacity above).
+const assetIcons = ['realestate', 'energy', 'trade', 'construction', 'logistics', 'hospitality'] as const;
 
 const complianceItems = [
   'Tanzanian legal entity structure with operating companies managed as separate businesses.',
@@ -958,14 +968,14 @@ function ProfileSection({
 }) {
   return (
     <AnimatedSection>
-      <section id={id} className="scroll-mt-28 border-t border-slate-200 py-12 print:break-inside-avoid">
+      <section id={id} className="scroll-mt-28 border-t border-white/10 py-12 print:break-inside-avoid">
         <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-start">
-          <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-ink-900 text-sm font-black text-white">
+          <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-gold-500/30 bg-gold-500/10 text-sm font-black text-gold-300">
             {index}
           </span>
           <div>
-            <h2 className="font-tight text-3xl font-black leading-tight text-ink-900">{title}</h2>
-            {lead ? <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-600">{lead}</p> : null}
+            <h2 className="font-tight text-3xl font-black leading-tight tracking-tight text-white">{title}</h2>
+            {lead ? <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-300">{lead}</p> : null}
           </div>
         </div>
         {children}
@@ -978,8 +988,8 @@ function BulletList({ items }: { items: readonly string[] }) {
   return (
     <div className="space-y-3">
       {items.map((item) => (
-        <div key={item} className="flex gap-3 text-sm leading-relaxed text-slate-600">
-          <span className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-gold-500" />
+        <div key={item} className="flex gap-3 text-sm leading-relaxed text-slate-300">
+          <span className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-gold-400" />
           <span>{item}</span>
         </div>
       ))}
@@ -1149,18 +1159,26 @@ export default function CompanyProfilePage() {
         ]}
       />
 
+      <CompanyProfilePrintScope />
+
       <section
         id="cover-page"
-        className="relative overflow-hidden bg-ink-900 px-5 pb-20 pt-40 sm:px-8 print:bg-white print:pb-8 print:pt-8"
+        className="relative overflow-hidden bg-ink-950 px-5 pb-20 pt-40 sm:px-8 print:bg-white print:pb-8 print:pt-8"
       >
         <div className="hero-ambient print:hidden">
+          <div className="hero-orb hero-orb-gold" style={{ opacity: 0.4 }} />
+          <div className="hero-orb hero-orb-blue" style={{ opacity: 0.28 }} />
           <div className="grid-overlay" />
         </div>
+        <div className="grain-overlay print:hidden" />
         <div className="relative z-10 mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
           <AnimatedSection>
-            <p className="mb-4 text-xs font-semibold uppercase text-gold-400 print:text-ink-900">
-              Company Profile and Capability Statement
-            </p>
+            <div className="mb-4 flex items-center gap-3">
+              <span className="h-px w-10 bg-gold-400 print:hidden" />
+              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-300 print:text-ink-900">
+                Company Profile and Capability Statement
+              </p>
+            </div>
             <h1
               className="mb-6 font-tight font-black leading-none text-white print:text-ink-900"
               style={{ fontSize: 'clamp(2.7rem, 6vw, 5.4rem)' }}
@@ -1182,19 +1200,39 @@ export default function CompanyProfilePage() {
                 Send enquiry
               </Link>
             </div>
+
+            <div className="print-hidden mt-6">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gold-400">Download PDF</p>
+              <div className="flex flex-wrap gap-2">
+                {printProfileOptions.map((option) => (
+                  <a
+                    key={option.id}
+                    href={`/downloads/itemba-${option.id}-profile.pdf`}
+                    download
+                    className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-gold-400/60 hover:text-white"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-3.5 w-3.5" aria-hidden="true">
+                      <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    {option.label}
+                  </a>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-slate-400">
+                Ready-made snapshots — use Print above for the live, current page.
+              </p>
+            </div>
           </AnimatedSection>
 
           <AnimatedSection direction="fade" className="print:hidden">
-            <div className="relative overflow-hidden rounded-lg border border-ink-600 shadow-2xl">
-              <div className="h-80">
-                <img
-                  src="/images/fuel-stations/itemba-filling-station-wide.webp"
-                  alt="ITEMBA-MPEMBA filling station forecourt representing Itemba Group operations"
-                  className="absolute inset-0 h-full w-full object-cover"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-ink-950/55 via-transparent to-transparent" />
-              </div>
-              <div className="absolute inset-x-0 bottom-0 bg-ink-950/80 p-5 backdrop-blur-sm">
+            <div className="relative h-80 overflow-hidden rounded-2xl ring-1 ring-white/10 cine-shadow">
+              <CinematicImage
+                src="/images/fuel-stations/itemba-filling-station-wide.webp"
+                alt="ITEMBA-MPEMBA filling station forecourt representing Itemba Group operations"
+                priority
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/20 to-transparent" />
+              <div className="absolute inset-x-0 bottom-0 p-5">
                 <p className="text-sm font-semibold text-white">Prepared for customers, suppliers, partners, and banking review.</p>
                 <p className="mt-1 text-xs text-slate-400">{site.domain}</p>
               </div>
@@ -1204,32 +1242,18 @@ export default function CompanyProfilePage() {
 
         <div className="relative z-10 mx-auto mt-14 grid max-w-7xl grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {coverFacts.map((fact) => (
-            <div key={fact.label} className="rounded-lg border border-ink-600 bg-ink-800/80 p-5 print:border-slate-200 print:bg-white">
-              <p className="text-xs font-semibold uppercase text-gold-400 print:text-slate-500">{fact.label}</p>
+            <div key={fact.label} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 print:border-slate-200 print:bg-white">
+              <p className="text-xs font-semibold uppercase tracking-widest text-gold-400 print:text-slate-500">{fact.label}</p>
               <p className="mt-2 text-sm font-semibold leading-relaxed text-white print:text-ink-900">{fact.value}</p>
             </div>
           ))}
         </div>
       </section>
 
-      <section className="bg-white px-5 py-16 sm:px-8 print:px-0 print:py-8">
+      <section className="bg-ink-950 px-5 py-16 sm:px-8 print:px-0 print:py-8">
         <div className="print-sheet mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[18rem_1fr]">
           <aside className="print-hidden lg:sticky lg:top-28 lg:self-start">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-5">
-              <p className="mb-4 text-xs font-semibold uppercase text-slate-500">Profile Outline</p>
-              <nav aria-label="Company profile sections" className="space-y-1">
-                {outline.map((item, index) => (
-                  <a
-                    key={item.id}
-                    href={`#${item.id}`}
-                    className="flex gap-3 rounded-md px-3 py-2 text-sm text-slate-600 transition hover:bg-white hover:text-ink-900"
-                  >
-                    <span className="w-5 flex-shrink-0 text-xs font-black text-gold-600">{index + 1}</span>
-                    <span>{item.title}</span>
-                  </a>
-                ))}
-              </nav>
-            </div>
+            <ProfileNav outline={outline} />
           </aside>
 
           <div>
@@ -1240,7 +1264,7 @@ export default function CompanyProfilePage() {
               lead="Itemba Group is presented as a practical multi-industry business group with separate operating companies and a shared parent structure."
             >
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_0.85fr]">
-                <div className="space-y-4 text-sm leading-relaxed text-slate-600">
+                <div className="space-y-4 text-sm leading-relaxed text-slate-300">
                   <p>
                     Itemba Group is a Tanzanian holding group headquartered at {contact.headOffice}.
                     The group operates through three independently positioned companies: Mwanjalisi
@@ -1253,19 +1277,19 @@ export default function CompanyProfilePage() {
                     Group.
                   </p>
                 </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-5">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
                   <dl className="space-y-4 text-sm">
                     <div>
-                      <dt className="font-semibold text-ink-900">Business type</dt>
-                      <dd className="mt-1 text-slate-600">Multi-industry holding group</dd>
+                      <dt className="font-semibold text-white">Business type</dt>
+                      <dd className="mt-1 text-slate-300">Multi-industry holding group</dd>
                     </div>
                     <div>
-                      <dt className="font-semibold text-ink-900">Primary location</dt>
-                      <dd className="mt-1 text-slate-600">Mpemba-Tunduma, Songwe Region, Tanzania</dd>
+                      <dt className="font-semibold text-white">Primary location</dt>
+                      <dd className="mt-1 text-slate-300">Mpemba-Tunduma, Songwe Region, Tanzania</dd>
                     </div>
                     <div>
-                      <dt className="font-semibold text-ink-900">Public contact</dt>
-                      <dd className="mt-1 break-all text-slate-600">{contact.email}</dd>
+                      <dt className="font-semibold text-white">Public contact</dt>
+                      <dd className="mt-1 break-all text-slate-300">{contact.email}</dd>
                     </div>
                   </dl>
                 </div>
@@ -1275,9 +1299,9 @@ export default function CompanyProfilePage() {
             <ProfileSection id="vision-mission" index={3} title="Vision and Mission">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {visionMission.map((item) => (
-                  <div key={item.title} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm print:shadow-none">
-                    <h3 className="font-tight text-xl font-black text-ink-900">{item.title}</h3>
-                    <p className="mt-3 text-sm leading-relaxed text-slate-600">{item.body}</p>
+                  <div key={item.title} className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-sm print:shadow-none">
+                    <h3 className="font-tight text-xl font-black text-white">{item.title}</h3>
+                    <p className="mt-3 text-sm leading-relaxed text-slate-300">{item.body}</p>
                   </div>
                 ))}
               </div>
@@ -1293,22 +1317,22 @@ export default function CompanyProfilePage() {
                 {businessActivities.map((activity) => (
                   <div
                     key={activity.title}
-                    className="rounded-lg border border-slate-200 bg-slate-50 p-5"
+                    className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"
                   >
-                    <p className="text-xs font-semibold uppercase text-slate-500">{activity.company}</p>
-                    <h3 className="mt-3 font-tight text-xl font-black text-ink-900">{activity.title}</h3>
-                    <p className="mt-3 text-sm leading-relaxed text-slate-600">{activity.summary}</p>
+                    <p className="text-xs font-semibold uppercase text-slate-400">{activity.company}</p>
+                    <h3 className="mt-3 font-tight text-xl font-black text-white">{activity.title}</h3>
+                    <p className="mt-3 text-sm leading-relaxed text-slate-300">{activity.summary}</p>
                     {'divisions' in activity ? (
                       <div className="mt-5 space-y-4">
                         {activity.divisions.map((division, index) => (
-                          <div key={division.name} className="rounded-md bg-white p-4">
-                            <p className="text-xs font-black uppercase text-gold-600">
+                          <div key={division.name} className="rounded-md bg-white/[0.04] p-4">
+                            <p className="text-xs font-black uppercase text-gold-400">
                               Division {index + 1}
                             </p>
-                            <h4 className="mt-1 font-tight text-base font-black text-ink-900">
+                            <h4 className="mt-1 font-tight text-base font-black text-white">
                               {division.name}
                             </h4>
-                            <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                            <p className="mt-2 text-sm leading-relaxed text-slate-300">
                               {division.detail}
                             </p>
                           </div>
@@ -1317,8 +1341,8 @@ export default function CompanyProfilePage() {
                     ) : (
                       <div className="mt-5 space-y-2">
                         {activity.points.map((point) => (
-                          <div key={point} className="flex gap-2 text-sm text-slate-600">
-                            <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-gold-500" />
+                          <div key={point} className="flex gap-2 text-sm text-slate-300">
+                            <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-gold-400" />
                             <span>{point}</span>
                           </div>
                         ))}
@@ -1335,19 +1359,19 @@ export default function CompanyProfilePage() {
               title="Products and Services"
               lead="Visitors can identify the right product or service category before contacting the group."
             >
-              <div className="divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200">
+              <div className="divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10">
                 {profileProductsServices.map((service) => (
                   <div key={service.title} className="grid grid-cols-1 gap-5 p-5 md:grid-cols-[0.8fr_1.2fr]">
                     <div>
-                      <p className="text-xs font-semibold uppercase text-gold-600">{service.eyebrow}</p>
-                      <h3 className="mt-2 font-tight text-xl font-black text-ink-900">{service.title}</h3>
-                      <p className="mt-2 text-sm text-slate-500">{service.eyebrow}</p>
+                      <p className="text-xs font-semibold uppercase text-gold-400">{service.eyebrow}</p>
+                      <h3 className="mt-2 font-tight text-xl font-black text-white">{service.title}</h3>
+                      <p className="mt-2 text-sm text-slate-400">{service.eyebrow}</p>
                     </div>
                     <div>
-                      <p className="text-sm leading-relaxed text-slate-600">{service.summary}</p>
+                      <p className="text-sm leading-relaxed text-slate-300">{service.summary}</p>
                       <div className="mt-4 flex flex-wrap gap-2">
                         {service.offerings.map((offering) => (
-                          <span key={offering} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                          <span key={offering} className="rounded-full bg-white/[0.06] px-3 py-1 text-xs font-medium text-slate-300">
                             {offering}
                           </span>
                         ))}
@@ -1361,20 +1385,20 @@ export default function CompanyProfilePage() {
             <ProfileSection id="target-market" index={6} title="Target Market">
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 {targetMarketGroups.map((market) => (
-                  <div key={market.company} className="rounded-lg border border-slate-200 bg-slate-50 p-5">
-                    <p className="text-xs font-semibold uppercase text-gold-600">{market.company}</p>
-                    <h3 className="mt-2 font-tight text-xl font-black text-ink-900">{market.title}</h3>
+                  <div key={market.company} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+                    <p className="text-xs font-semibold uppercase text-gold-400">{market.company}</p>
+                    <h3 className="mt-2 font-tight text-xl font-black text-white">{market.title}</h3>
                     <div className="mt-4">
                       <BulletList items={market.points} />
                     </div>
                   </div>
                 ))}
               </div>
-              <div className="mt-6 rounded-lg border border-gold-200 bg-gold-50 p-5">
-                <p className="text-sm font-semibold uppercase text-gold-700">
+              <div className="mt-6 rounded-2xl border border-gold-500/30 bg-gold-500/[0.08] p-5">
+                <p className="text-sm font-semibold uppercase text-gold-300">
                   Corridor Fuel and Parking Opportunity
                 </p>
-                <p className="mt-3 text-sm leading-relaxed text-slate-700">
+                <p className="mt-3 text-sm leading-relaxed text-slate-300">
                   A key commercial target is the transit market moving through Mpemba-Tunduma:
                   motorists, transporters, and logistics companies heading to or from Zambia,
                   Zimbabwe, DRC, and Malawi. This audience creates direct demand for fuel sales,
@@ -1397,30 +1421,30 @@ export default function CompanyProfilePage() {
                   <Link
                     key={company.slug}
                     href={`/companies/${company.slug}`}
-                    className="rounded-lg border border-slate-200 bg-white p-5 transition hover:border-gold-400 hover:bg-slate-50"
+                    className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 transition hover:border-gold-400 hover:bg-white/[0.06]"
                   >
                     <div className={`mb-4 h-2 w-12 rounded-full ${company.accentBg}`} />
-                    <h3 className="font-tight text-lg font-black text-ink-900">{company.name}</h3>
-                    <p className="mt-2 text-xs font-semibold uppercase text-slate-500">{company.sector}</p>
-                    <p className="mt-3 text-sm leading-relaxed text-slate-600">{company.detail}</p>
+                    <h3 className="font-tight text-lg font-black text-white">{company.name}</h3>
+                    <p className="mt-2 text-xs font-semibold uppercase text-slate-400">{company.sector}</p>
+                    <p className="mt-3 text-sm leading-relaxed text-slate-300">{company.detail}</p>
                   </Link>
                 ))}
               </div>
-              <p className="mt-5 text-sm leading-relaxed text-slate-600">
+              <p className="mt-5 text-sm leading-relaxed text-slate-300">
                 Branch, site, and division-level details are managed by the relevant operating company.
                 Formal branch schedules can be provided for authorized due diligence where required.
               </p>
 
               <div className="mt-8 space-y-6">
                 {branchOperations.map((operation) => (
-                  <div key={operation.company} className="rounded-lg border border-slate-200 bg-slate-50 p-5">
-                    <h3 className="font-tight text-xl font-black text-ink-900">{operation.company}</h3>
-                    <p className="mt-2 text-sm leading-relaxed text-slate-600">{operation.summary}</p>
+                  <div key={operation.company} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+                    <h3 className="font-tight text-xl font-black text-white">{operation.company}</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-300">{operation.summary}</p>
                     <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
                       {operation.branches.map((branch) => (
-                        <div key={branch.name} className="rounded-lg border border-slate-200 bg-white p-5">
+                        <div key={branch.name} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
                           {'image' in branch ? (
-                            <div className="relative mb-4 overflow-hidden rounded-lg bg-ink-950">
+                            <div className="relative mb-4 overflow-hidden rounded-2xl bg-ink-950">
                               <img
                                 src={branch.image}
                                 alt=""
@@ -1438,9 +1462,9 @@ export default function CompanyProfilePage() {
                               </div>
                             </div>
                           ) : null}
-                          <h4 className="font-tight text-lg font-black text-ink-900">{branch.name}</h4>
-                          <p className="mt-2 text-sm font-semibold text-gold-700">{branch.focus}</p>
-                          <p className="mt-2 text-sm leading-relaxed text-slate-600">{branch.coverage}</p>
+                          <h4 className="font-tight text-lg font-black text-white">{branch.name}</h4>
+                          <p className="mt-2 text-sm font-semibold text-gold-300">{branch.focus}</p>
+                          <p className="mt-2 text-sm leading-relaxed text-slate-300">{branch.coverage}</p>
                         </div>
                       ))}
                     </div>
@@ -1450,49 +1474,44 @@ export default function CompanyProfilePage() {
             </ProfileSection>
 
             <ProfileSection id="management-ownership" index={8} title="Management and Ownership">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-6">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
                 <BulletList items={ownershipSummary} />
               </div>
-              <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
-                {leadershipTeam.map((leader) => (
-                  <div key={leader.name} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm print:shadow-none">
-                    <h3 className="font-tight text-xl font-black text-ink-900">{leader.name}</h3>
-                    <dl className="mt-4 space-y-3 text-sm">
-                      <div>
-                        <dt className="font-semibold uppercase text-slate-500">Group Role</dt>
-                        <dd className="mt-1 leading-relaxed text-slate-700">{leader.groupRole}</dd>
-                      </div>
-                      <div>
-                        <dt className="font-semibold uppercase text-slate-500">Company Responsibility</dt>
-                        <dd className="mt-1 leading-relaxed text-slate-700">{leader.companyRole}</dd>
-                      </div>
-                    </dl>
-                  </div>
-                ))}
+              <div className="mt-6">
+                <OrgChart companies={legalCompanyProfiles} />
               </div>
 
-              <div className="mt-8 rounded-lg border border-slate-200 bg-white p-6 shadow-sm print:shadow-none">
-                <p className="text-xs font-semibold uppercase text-gold-600">
+              <div className="mt-8">
+                <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">Leadership team</p>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {leadershipTeam.map((leader) => (
+                    <LeadershipCard key={leader.name} leader={leader} />
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-sm print:shadow-none">
+                <p className="text-xs font-semibold uppercase text-gold-400">
                   Legal Company Directors and TINs
                 </p>
                 <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
                   {legalCompanyProfiles.map((company) => (
-                    <div key={company.id} className="rounded-lg border border-slate-200 bg-slate-50 p-5">
-                      <h3 className="font-tight text-lg font-black text-ink-900">{company.name}</h3>
+                    <div key={company.id} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+                      <h3 className="font-tight text-lg font-black text-white">{company.name}</h3>
                       <dl className="mt-4 space-y-3 text-sm">
                         <div>
-                          <dt className="font-semibold uppercase text-slate-500">TIN</dt>
-                          <dd className="mt-1 text-slate-700">{company.tin}</dd>
+                          <dt className="font-semibold uppercase text-slate-400">TIN</dt>
+                          <dd className="mt-1 text-slate-300">{company.tin}</dd>
                         </div>
                         <div>
-                          <dt className="font-semibold uppercase text-slate-500">Incorporation</dt>
-                          <dd className="mt-1 text-slate-700">
+                          <dt className="font-semibold uppercase text-slate-400">Incorporation</dt>
+                          <dd className="mt-1 text-slate-300">
                             {company.incorporationDate}; No. {company.incorporationNumber}
                           </dd>
                         </div>
                         <div>
-                          <dt className="font-semibold uppercase text-slate-500">Directors</dt>
-                          <dd className="mt-1 text-slate-700">{company.directors.join('; ')}</dd>
+                          <dt className="font-semibold uppercase text-slate-400">Directors</dt>
+                          <dd className="mt-1 text-slate-300">{company.directors.join('; ')}</dd>
                         </div>
                       </dl>
                     </div>
@@ -1502,32 +1521,22 @@ export default function CompanyProfilePage() {
             </ProfileSection>
 
             <ProfileSection id="company-history" index={9} title="Company History">
-              <div className="space-y-4">
-                {history.map((item, index) => (
-                  <div key={item.title} className="grid grid-cols-[2.5rem_1fr] gap-4">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-sm font-black text-gold-600">
-                      {index + 1}
-                    </span>
-                    <div>
-                      <p className="text-xs font-black uppercase text-gold-600">{item.date}</p>
-                      <h3 className="font-tight text-lg font-black text-ink-900">{item.title}</h3>
-                      <p className="mt-1 text-sm leading-relaxed text-slate-600">{item.body}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <Timeline items={history} />
             </ProfileSection>
 
             <ProfileSection id="assets-capacity" index={10} title="Assets and Capacity">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {assetCapacity.map((item) => (
-                  <div key={item.title} className="rounded-lg border border-slate-200 bg-slate-50 p-5">
-                    <h3 className="font-tight text-lg font-black text-ink-900">{item.title}</h3>
-                    <p className="mt-3 text-sm leading-relaxed text-slate-600">{item.body}</p>
+                {assetCapacity.map((item, index) => (
+                  <div key={item.title} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+                    <span className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gold-500/20 bg-gold-500/10 text-gold-300">
+                      <SectorIcon name={assetIcons[index] ?? 'trade'} className="h-5 w-5" />
+                    </span>
+                    <h3 className="font-tight text-lg font-black text-white">{item.title}</h3>
+                    <p className="mt-3 text-sm leading-relaxed text-slate-300">{item.body}</p>
                   </div>
                 ))}
               </div>
-              <p className="mt-5 text-sm leading-relaxed text-slate-600">
+              <p className="mt-5 text-sm leading-relaxed text-slate-300">
                 Exact capacities, asset values, fleet details, inventory levels, and property schedules
                 are not published on the public website. They can be shared directly with authorized
                 reviewers when needed.
@@ -1535,15 +1544,15 @@ export default function CompanyProfilePage() {
             </ProfileSection>
 
             <ProfileSection id="financial-overview" index={11} title="Financial Overview">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-6">
-                <p className="text-sm leading-relaxed text-slate-600">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+                <p className="text-sm leading-relaxed text-slate-300">
                   Itemba Group operates revenue-generating companies across fuel retail, trade
                   distribution, wholesale beverages, hardware supply, logistics, lodging, restaurant,
                   bar, property, and related services. Public-facing financial figures are not
                   displayed on the website because detailed financial statements, bank records, tax
                   filings, and asset schedules are sensitive business documents.
                 </p>
-                <p className="mt-4 text-sm leading-relaxed text-slate-600">
+                <p className="mt-4 text-sm leading-relaxed text-slate-300">
                   For banking, supplier, investor, or partner due diligence, management accounts,
                   audited financial statements, bank statements, and supporting schedules can be
                   provided directly through the appropriate authorized channel.
@@ -1563,9 +1572,13 @@ export default function CompanyProfilePage() {
             >
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {strengths.map((strength) => (
-                  <div key={strength} className="rounded-lg border border-slate-200 bg-slate-50 p-5">
-                    <div className="mb-4 h-2 w-12 rounded-full bg-gold-500" />
-                    <p className="text-sm leading-relaxed text-slate-700">{strength}</p>
+                  <div key={strength} className="flex gap-4 rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+                    <span className="mt-0.5 inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border border-gold-500/20 bg-gold-500/10 text-gold-300">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5" aria-hidden="true">
+                        <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                    <p className="text-sm leading-relaxed text-slate-300">{strength}</p>
                   </div>
                 ))}
               </div>
@@ -1586,7 +1599,7 @@ export default function CompanyProfilePage() {
 
             <ProfileSection id="contact-information" index={16} title="Contact Information">
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-[0.85fr_1.15fr]">
-                <div className="rounded-lg bg-ink-900 p-6 text-white print:border print:border-slate-200 print:bg-white print:text-ink-900">
+                <div className="rounded-2xl bg-ink-900 p-6 text-white print:border print:border-slate-200 print:bg-white print:text-ink-900">
                   <p className="mb-5 text-xs font-semibold uppercase text-gold-400 print:text-slate-500">Group Contact</p>
                   <div className="space-y-4 text-sm leading-relaxed">
                     <div>
@@ -1623,9 +1636,9 @@ export default function CompanyProfilePage() {
               title="Attachments"
               lead="The website can list supporting documents without publishing sensitive files publicly."
             >
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-6">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
                 <BulletList items={attachments} />
-                <p className="mt-6 text-sm leading-relaxed text-slate-600">
+                <p className="mt-6 text-sm leading-relaxed text-slate-300">
                   Attachments should be shared directly with the requesting bank, supplier, partner,
                   or authorized reviewer. They are not attached to the public web page unless the
                   company chooses to publish a non-sensitive PDF profile.
@@ -1634,13 +1647,13 @@ export default function CompanyProfilePage() {
             </ProfileSection>
 
             <AnimatedSection className="pt-10">
-              <div className="grid grid-cols-1 gap-8 border-t border-slate-200 pt-12 lg:grid-cols-[0.8fr_1.2fr]">
+              <div className="grid grid-cols-1 gap-8 border-t border-white/10 pt-12 lg:grid-cols-[0.8fr_1.2fr]">
                 <div>
                   <div className="gold-line mb-6" />
-                  <h2 className="mb-4 font-tight text-3xl font-black leading-tight text-ink-900">
+                  <h2 className="mb-4 font-tight text-3xl font-black leading-tight text-white">
                     Common Questions
                   </h2>
-                  <p className="text-sm leading-relaxed text-slate-600">
+                  <p className="text-sm leading-relaxed text-slate-300">
                     Quick answers for customers, suppliers, and partners reviewing the group profile.
                   </p>
                 </div>
