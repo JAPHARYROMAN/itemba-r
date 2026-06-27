@@ -7,6 +7,7 @@ import CountUp from '@/components/CountUp';
 import SectorIcon from '@/components/SectorIcon';
 import CompanyChapter, { type ChapterAccent } from '@/components/cine/CompanyChapter';
 import CinematicImage from '@/components/cine/CinematicImage';
+import CorridorMap from '@/components/cine/CorridorMap';
 import { companyUrl, insightArticles, insightUrl, locationUrl, serviceUrl } from '@/lib/site';
 
 /* ── Motion ─────────────────────────────────────────────────────────── */
@@ -343,6 +344,31 @@ export default function HomePage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
               </svg>
             </Link>
+          </AnimatedSection>
+        </div>
+      </section>
+
+      {/* ══ INTERACTIVE CORRIDOR MAP ══════════════════════════════════ */}
+      <section className="relative overflow-hidden bg-ink-950 px-5 py-28 sm:px-8">
+        <div className="hero-ambient">
+          <div className="hero-orb hero-orb-gold" style={{ opacity: 0.25 }} />
+        </div>
+        <div className="relative z-10 mx-auto max-w-7xl">
+          <AnimatedSection className="mb-12 max-w-2xl">
+            <div className="gold-line mb-6" />
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
+              The corridor, mapped
+            </p>
+            <h2 className="font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
+              One hub. Every business on the line.
+            </h2>
+            <p className="mt-5 text-lg leading-relaxed text-slate-300">
+              Stations, parking, hardware, hospitality and the group office all sit where Dar es Salaam&apos;s
+              supply line meets the Tanzania-Zambia border. Explore the cluster.
+            </p>
+          </AnimatedSection>
+          <AnimatedSection>
+            <CorridorMap />
           </AnimatedSection>
         </div>
       </section>

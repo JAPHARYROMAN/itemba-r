@@ -53,6 +53,15 @@
   }
 }
 
+/* Interactive corridor-map pins */
+.cine-pin { cursor: pointer; }
+.cine-pin:focus { outline: none; }
+.cine-pin:focus-visible {
+  outline: 2px solid #e8b52e;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 /* ─── Base ─────────────────────────────────────────────────────────────── */
 html {
   scroll-behavior: smooth;
