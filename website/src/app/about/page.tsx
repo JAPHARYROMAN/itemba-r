@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import AnimatedSection from '@/components/AnimatedSection';
+import CinematicImage from '@/components/cine/CinematicImage';
 import { absoluteUrl } from '@/lib/site';
 
 export const metadata: Metadata = {
@@ -40,11 +41,11 @@ export default function AboutPage() {
     <div className="bg-ink-950">
       {/* ── Hero ──────────────────────────────────────────────────── */}
       <section className="relative flex min-h-[72vh] items-end overflow-hidden bg-ink-950">
-        <img
+        <CinematicImage
           src="/images/fuel-stations/itemba-filling-station-wide.webp"
           alt=""
-          aria-hidden="true"
-          className="animate-kenburns absolute inset-0 h-full w-full object-cover"
+          priority
+          className="animate-kenburns"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-ink-950 via-ink-950/70 to-ink-950/30" />
         <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-transparent to-ink-950/70" />

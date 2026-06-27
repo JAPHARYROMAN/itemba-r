@@ -3,6 +3,7 @@
 import { useRef } from 'react';
 import Link from 'next/link';
 import { motion, useReducedMotion, useScroll, useTransform } from 'framer-motion';
+import CinematicImage from './CinematicImage';
 
 export interface ChapterAccent {
   /** e.g. 'text-amber-300' */
@@ -63,12 +64,7 @@ export default function CompanyChapter({
     >
       {/* Full-bleed graded photo with parallax */}
       <motion.div style={{ y }} className="absolute inset-0 -top-[8%] -bottom-[8%]">
-        <img
-          src={image.src}
-          alt={image.alt}
-          className="h-full w-full object-cover"
-          loading="lazy"
-        />
+        <CinematicImage src={image.src} alt={image.alt} />
       </motion.div>
 
       {/* Cinematic grade: accent wash + directional darkness for legibility */}

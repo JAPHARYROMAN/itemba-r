@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import AnimatedSection from '@/components/AnimatedSection';
 import BrandVisual from '@/components/BrandVisual';
+import CinematicImage from '@/components/cine/CinematicImage';
 import EnquiryRouter from '@/components/EnquiryRouter';
 import FaqList from '@/components/FaqList';
 import JsonLd from '@/components/JsonLd';
@@ -117,12 +118,7 @@ export default async function CompanyProfilePage({ params }: PageProps) {
       {/* ══ CINEMATIC HERO ════════════════════════════════════════════ */}
       <section className="relative flex min-h-[80vh] items-end overflow-hidden bg-ink-950">
         {companyImage ? (
-          <img
-            src={companyImage.src}
-            alt=""
-            aria-hidden="true"
-            className="animate-kenburns absolute inset-0 h-full w-full object-cover"
-          />
+          <CinematicImage src={companyImage.src} alt="" priority className="animate-kenburns" />
         ) : (
           <BrandVisual variant={company.visual} label={company.name} className="absolute inset-0" />
         )}
@@ -190,11 +186,11 @@ export default async function CompanyProfilePage({ params }: PageProps) {
                     key={image.src}
                     className="group relative h-56 overflow-hidden rounded-2xl ring-1 ring-white/10"
                   >
-                    <img
+                    <CinematicImage
                       src={image.src}
                       alt={image.alt}
-                      loading="lazy"
-                      className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                      sizes="(min-width:640px) 33vw, 100vw"
+                      className="transition-transform duration-700 group-hover:scale-105"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/30 to-transparent" />
                     <figcaption className="absolute inset-x-0 bottom-0 p-4 text-xs font-medium leading-relaxed text-white/90">

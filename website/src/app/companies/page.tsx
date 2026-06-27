@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import AnimatedSection from '@/components/AnimatedSection';
+import CinematicImage from '@/components/cine/CinematicImage';
 import { absoluteUrl, companyUrl, mailtoWithSubject } from '@/lib/site';
 
 export const metadata: Metadata = {
@@ -106,13 +107,7 @@ export default function CompaniesPage() {
             id={co.id}
             className="relative flex min-h-[82vh] scroll-mt-20 items-center overflow-hidden bg-ink-950"
           >
-            <img
-              src={co.heroImage.src}
-              alt=""
-              aria-hidden="true"
-              className="absolute inset-0 h-full w-full object-cover"
-              loading="lazy"
-            />
+            <CinematicImage src={co.heroImage.src} alt="" />
             <div
               className="absolute inset-0"
               style={{

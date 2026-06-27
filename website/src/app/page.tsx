@@ -6,6 +6,7 @@ import AnimatedSection from '@/components/AnimatedSection';
 import CountUp from '@/components/CountUp';
 import SectorIcon from '@/components/SectorIcon';
 import CompanyChapter, { type ChapterAccent } from '@/components/cine/CompanyChapter';
+import CinematicImage from '@/components/cine/CinematicImage';
 import { companyUrl, insightArticles, insightUrl, locationUrl, serviceUrl } from '@/lib/site';
 
 /* ── Motion ─────────────────────────────────────────────────────────── */
@@ -145,11 +146,11 @@ export default function HomePage() {
     <div className="bg-ink-950">
       {/* ══ HERO — full-bleed corridor ════════════════════════════════ */}
       <section className="relative flex min-h-screen items-end overflow-hidden bg-ink-950">
-        <img
+        <CinematicImage
           src="/images/fuel-stations/itemba-filling-station-wide.webp"
           alt=""
-          aria-hidden="true"
-          className="animate-kenburns absolute inset-0 h-full w-full object-cover"
+          priority
+          className="animate-kenburns"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-ink-950 via-ink-950/75 to-ink-950/30" />
         <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/10 to-ink-950/80" />
@@ -268,12 +269,11 @@ export default function HomePage() {
                   href={cap.href}
                   className="group relative flex h-72 flex-col justify-end overflow-hidden rounded-2xl ring-1 ring-white/10 transition hover:ring-gold-400/50"
                 >
-                  <img
+                  <CinematicImage
                     src={cap.image}
                     alt=""
-                    aria-hidden="true"
-                    className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
-                    loading="lazy"
+                    sizes="(min-width:1024px) 33vw, (min-width:640px) 50vw, 100vw"
+                    className="transition-transform duration-700 group-hover:scale-105"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/55 to-ink-950/10" />
                   <div className="relative p-6">
@@ -298,11 +298,9 @@ export default function HomePage() {
 
       {/* ══ THE CORRIDOR / LOCATION ═══════════════════════════════════ */}
       <section className="relative flex min-h-[80vh] items-center overflow-hidden bg-ink-950 py-24">
-        <img
+        <CinematicImage
           src="/images/fuel-stations/itemba-station-wide-yard.webp"
           alt="Itemba station yard on the Songwe Region corridor"
-          className="absolute inset-0 h-full w-full object-cover"
-          loading="lazy"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-ink-950 via-ink-950/80 to-ink-950/40" />
         <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-transparent to-ink-950/60" />

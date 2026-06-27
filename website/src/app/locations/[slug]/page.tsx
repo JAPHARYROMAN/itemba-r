@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import AnimatedSection from '@/components/AnimatedSection';
 import BrandVisual from '@/components/BrandVisual';
+import CinematicImage from '@/components/cine/CinematicImage';
 import EnquiryRouter from '@/components/EnquiryRouter';
 import FaqList from '@/components/FaqList';
 import JsonLd from '@/components/JsonLd';
@@ -135,12 +136,7 @@ export default async function LocationPage({ params }: PageProps) {
       {/* ── CINEMATIC HERO ════════════════════════════════════════════ */}
       <section className="relative flex min-h-[78vh] items-end overflow-hidden bg-ink-950">
         {locationImage ? (
-          <img
-            src={locationImage.src}
-            alt=""
-            aria-hidden="true"
-            className="animate-kenburns absolute inset-0 h-full w-full object-cover"
-          />
+          <CinematicImage src={locationImage.src} alt="" priority className="animate-kenburns" />
         ) : (
           <BrandVisual variant={location.visual} label={location.title} className="absolute inset-0" />
         )}
