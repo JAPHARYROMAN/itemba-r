@@ -1,6 +1,7 @@
 import type { NextConfig } from 'next';
 
 const config: NextConfig = {
+  output: 'standalone',
   outputFileTracingRoot: __dirname,
   images: {
     formats: ['image/avif', 'image/webp'],

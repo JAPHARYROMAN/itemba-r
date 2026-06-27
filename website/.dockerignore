@@ -1,0 +1,25 @@
+# Build artifacts and host deps (host node_modules would clobber the clean
+# `npm ci` layer and ship wrong-platform binaries; .next is rebuilt in-image)
+node_modules
+.next
+out
+
+# Secrets — never bake into the image
+.env
+.env.*
+!.env.example
+
+# VCS / tooling / docs
+.git
+.gitignore
+Dockerfile
+.dockerignore
+*.md
+.vscode
+.idea
+
+# Logs and OS cruft
+npm-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
