@@ -145,11 +145,11 @@ export default function AboutPage() {
                 ITEMBA GROUP <span className="text-gold-400">(Parent Holding)</span>
               </p>
               <p className="ml-4 text-slate-300">├── Mwanjalisi Oil Co Ltd → <span className="text-amber-400">Fuel, parking &amp; energy distribution</span></p>
-              <p className="ml-8 text-slate-500">├── ITEMBA-MPEMBA / ITEMBA-UZUNGUNI → Fuel station brands</p>
-              <p className="ml-8 text-slate-500">├── UZUNGUNI PARKING YARD → Parking facilities</p>
+              <p className="ml-8 text-slate-400">├── ITEMBA-MPEMBA / ITEMBA-UZUNGUNI → Fuel station brands</p>
+              <p className="ml-8 text-slate-400">├── UZUNGUNI PARKING YARD → Parking facilities</p>
               <p className="ml-4 text-slate-300">├── Westsides Company Ltd → <span className="text-blue-400">Beverages, hardware &amp; hospitality</span></p>
-              <p className="ml-8 text-slate-500">├── ITEMBA-HARDWARE → Hardware &amp; construction equipment</p>
-              <p className="ml-8 text-slate-500">├── UZUNGUNI INN → Lodging, restaurant &amp; bar</p>
+              <p className="ml-8 text-slate-400">├── ITEMBA-HARDWARE → Hardware &amp; construction equipment</p>
+              <p className="ml-8 text-slate-400">├── UZUNGUNI INN → Lodging, restaurant &amp; bar</p>
               <p className="ml-4 text-slate-300">└── Itemba Enterprises Co Ltd → <span className="text-emerald-400">Logistics &amp; emerging businesses</span></p>
               <p className="ml-8 text-gold-400">└── Itemba Logistics → Local &amp; cross-border transit <span className="text-gold-500">★ flagship</span></p>
             </div>

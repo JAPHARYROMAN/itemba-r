@@ -220,7 +220,7 @@ export default async function InsightArticlePage({ params }: PageProps) {
                         className="block rounded-xl bg-white/[0.04] p-4 transition hover:bg-white/[0.08]"
                       >
                         <span className="block text-sm font-semibold text-white">{company.name}</span>
-                        <span className="mt-1 block text-xs text-slate-500">{company.sector}</span>
+                        <span className="mt-1 block text-xs text-slate-400">{company.sector}</span>
                       </Link>
                     ))}
                   </div>
@@ -242,7 +242,7 @@ export default async function InsightArticlePage({ params }: PageProps) {
                         className="block rounded-xl bg-white/[0.04] p-4 transition hover:bg-white/[0.08]"
                       >
                         <span className="block text-sm font-semibold text-white">{location.shortTitle}</span>
-                        <span className="mt-1 block text-xs text-slate-500">{location.eyebrow}</span>
+                        <span className="mt-1 block text-xs text-slate-400">{location.eyebrow}</span>
                       </Link>
                     ))}
                   </div>

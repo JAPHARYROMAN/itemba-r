@@ -260,7 +260,7 @@ export default async function LocationPage({ params }: PageProps) {
                       className="block rounded-xl bg-white/[0.04] p-4 transition hover:bg-white/[0.08]"
                     >
                       <div className="font-tight text-sm font-bold text-white">{company.name}</div>
-                      <div className="mt-1 text-xs text-slate-500">{company.sector}</div>
+                      <div className="mt-1 text-xs text-slate-400">{company.sector}</div>
                     </Link>
                   ))}
                 </div>

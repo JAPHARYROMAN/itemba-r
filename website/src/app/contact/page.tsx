@@ -258,7 +258,7 @@ export default function ContactPage() {
                     <div className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${co.dot}`} />
                     <div>
                       <div className="font-tight text-sm font-semibold text-white">{co.name}</div>
-                      <div className="mt-0.5 text-xs text-slate-500">{co.sector}</div>
+                      <div className="mt-0.5 text-xs text-slate-400">{co.sector}</div>
                     </div>
                   </div>
                 ))}

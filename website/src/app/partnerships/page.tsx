@@ -126,7 +126,7 @@ export default function PartnershipsPage() {
                     <p className="mb-5 text-sm leading-relaxed text-slate-400">{area.summary}</p>
 
                     <div className="mb-5">
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
                         Good fit for
                       </p>
                       <div className="flex flex-wrap gap-2">
@@ -140,7 +140,7 @@ export default function PartnershipsPage() {
 
                     <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
                       <div>
-                        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">Companies</p>
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">Companies</p>
                         <div className="space-y-1.5">
                           {area.companySlugs.map((slug) => (
                             <Link key={slug} href={companyUrl(slug)} className="block text-gold-300 hover:text-gold-200">
@@ -150,7 +150,7 @@ export default function PartnershipsPage() {
                         </div>
                       </div>
                       <div>
-                        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">Services</p>
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">Services</p>
                         <div className="space-y-1.5">
                           {area.serviceSlugs.map((slug) => (
                             <Link key={slug} href={serviceUrl(slug)} className="block text-gold-300 hover:text-gold-200">

@@ -229,7 +229,7 @@ export default function HomePage() {
           <div className="gold-line mx-auto mb-10" />
           <h2 className="text-balance font-tight text-4xl font-black leading-[1.05] tracking-tight text-white sm:text-5xl lg:text-6xl">
             One group. Three companies.
-            <span className="text-slate-500"> The corridor that moves the south.</span>
+            <span className="text-slate-400"> The corridor that moves the south.</span>
           </h2>
           <p className="mx-auto mt-8 max-w-2xl text-lg leading-relaxed text-slate-400">
             Each company operates independently, with full responsibility for its market — unified

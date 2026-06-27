@@ -184,7 +184,7 @@ export default function CapabilitiesPage() {
                     </div>
 
                     <div>
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
                         Operating company
                       </p>
                       <Link
@@ -193,13 +193,13 @@ export default function CapabilitiesPage() {
                       >
                         {company?.name ?? service.companyName}
                       </Link>
-                      <p className="mt-3 text-sm leading-relaxed text-slate-500">
+                      <p className="mt-3 text-sm leading-relaxed text-slate-400">
                         {company?.summary ?? service.detail}
                       </p>
                     </div>
 
                     <div>
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
                         Common enquiries
                       </p>
                       <div className="mb-5 flex flex-wrap gap-2">

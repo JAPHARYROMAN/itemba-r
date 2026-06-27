@@ -214,17 +214,17 @@ export default async function CompanyProfilePage({ params }: PageProps) {
             <AnimatedSection direction="fade" delay={0.08}>
               <div className={`space-y-5 border-l-2 ${company.accentBorder} pl-5`}>
                 <div>
-                  <div className="mb-1 text-xs text-slate-500">Sector</div>
+                  <div className="mb-1 text-xs text-slate-400">Sector</div>
                   <div className={`text-sm font-semibold ${company.accentClass}`}>
                     {company.sector}
                   </div>
                 </div>
                 <div>
-                  <div className="mb-1 text-xs text-slate-500">Structure</div>
+                  <div className="mb-1 text-xs text-slate-400">Structure</div>
                   <div className="text-sm font-semibold text-white">Subsidiary of Itemba Group</div>
                 </div>
                 <div>
-                  <div className="mb-1 text-xs text-slate-500">Location</div>
+                  <div className="mb-1 text-xs text-slate-400">Location</div>
                   <div className="text-sm font-semibold text-white">Songwe Region, Tanzania</div>
                 </div>
               </div>
