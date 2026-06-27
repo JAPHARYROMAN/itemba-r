@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 import AnimatedSection from '@/components/AnimatedSection';
 import BrandVisual from '@/components/BrandVisual';
 import CinematicImage from '@/components/cine/CinematicImage';
+import SectorIcon from '@/components/SectorIcon';
 import EnquiryRouter from '@/components/EnquiryRouter';
 import FaqList from '@/components/FaqList';
 import JsonLd from '@/components/JsonLd';
@@ -16,6 +17,7 @@ import {
   serviceUrl,
   site,
 } from '@/lib/site';
+import { getCompanyAccent, getServiceIcon } from '@/lib/company-accent';
 
 type PageProps = {
   params: Promise<{ slug: string }>;
@@ -150,6 +152,7 @@ export default async function ServicePage({ params }: PageProps) {
 
   const pageUrl = absoluteUrl(serviceUrl(service.slug));
   const serviceGallery = service.gallery ?? [];
+  const accent = getCompanyAccent(service.companySlug);
   const serviceJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'Service',
@@ -202,8 +205,13 @@ export default async function ServicePage({ params }: PageProps) {
         ) : (
           <BrandVisual variant={service.visual} label={service.title} className="absolute inset-0" />
         )}
-        <div className="absolute inset-0 bg-gradient-to-r from-ink-950 via-ink-950/70 to-ink-950/30" />
-        <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-transparent to-ink-950/70" />
+        <div
+          className="absolute inset-0"
+          style={{
+            background: `linear-gradient(90deg, ${accent.wash} 0%, rgba(5,8,15,0.62) 48%, rgba(5,8,15,0.97) 100%)`,
+          }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-transparent to-ink-950/65" />
         <div className="grain-overlay" />
 
         <div className="relative z-10 mx-auto w-full max-w-7xl px-5 pb-16 pt-40 sm:px-8">
@@ -214,9 +222,12 @@ export default async function ServicePage({ params }: PageProps) {
             >
               <span aria-hidden="true">←</span> All services
             </Link>
-            <p className="mt-8 text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
-              {service.eyebrow}
-            </p>
+            <div className="mt-8 flex items-center gap-2.5">
+              <SectorIcon name={getServiceIcon(service.visual)} className={`h-5 w-5 ${accent.text}`} />
+              <p className={`text-xs font-semibold uppercase tracking-[0.25em] ${accent.text}`}>
+                {service.eyebrow}
+              </p>
+            </div>
             <h1
               className="cine-shadow mt-4 font-tight font-black leading-[0.92] tracking-tight text-white"
               style={{ fontSize: 'clamp(2.6rem, 6.5vw, 5.5rem)' }}
@@ -246,7 +257,7 @@ export default async function ServicePage({ params }: PageProps) {
                 {service.offerings.map((offering) => (
                   <div
                     key={offering}
-                    className="rounded-xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm font-semibold text-white"
+                    className={`rounded-xl border ${accent.border} bg-white/[0.04] px-5 py-4 text-sm font-semibold text-white`}
                   >
                     {offering}
                   </div>
@@ -266,11 +277,11 @@ export default async function ServicePage({ params }: PageProps) {
                       key={image.src}
                       className="group relative h-60 overflow-hidden rounded-2xl ring-1 ring-white/10"
                     >
-                      <img
+                      <CinematicImage
                         src={image.src}
                         alt={image.alt}
-                        loading="lazy"
-                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                        sizes="(min-width:640px) 50vw, 100vw"
+                        className="transition-transform duration-700 group-hover:scale-105"
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/30 to-transparent" />
                       <figcaption className="absolute inset-x-0 bottom-0 p-4 text-xs font-medium leading-relaxed text-white/90">
@@ -310,8 +321,8 @@ export default async function ServicePage({ params }: PageProps) {
 
           <aside className="space-y-6">
             <AnimatedSection direction="fade" delay={0.08}>
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
-                <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
+              <div className={`rounded-2xl border ${accent.border} bg-white/[0.03] p-6`}>
+                <p className={`mb-4 text-xs font-semibold uppercase tracking-widest ${accent.text}`}>
                   Operating company
                 </p>
                 <h2 className="mb-3 font-tight text-xl font-bold text-white">{service.companyName}</h2>
@@ -321,7 +332,7 @@ export default async function ServicePage({ params }: PageProps) {
                 </p>
                 <Link
                   href={companyUrl(service.companySlug)}
-                  className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition hover:text-gold-200"
+                  className={`inline-flex items-center gap-2 text-sm font-semibold ${accent.text} transition hover:opacity-80`}
                 >
                   View company profile
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">

@@ -2,7 +2,10 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import AnimatedSection from '@/components/AnimatedSection';
 import BrandVisual from '@/components/BrandVisual';
+import CinematicImage from '@/components/cine/CinematicImage';
+import SectorIcon from '@/components/SectorIcon';
 import JsonLd from '@/components/JsonLd';
+import { getCompanyAccent, getServiceIcon } from '@/lib/company-accent';
 import {
   absoluteUrl,
   breadcrumbJsonLd,
@@ -74,12 +77,19 @@ export default function ServicesPage() {
               </span>
             </div>
             <h1 className="font-tight text-5xl font-black leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
-              Search by need. <span className="gradient-text">Find the right team.</span>
+              Find the service. <span className="gradient-text">Meet the team behind it.</span>
             </h1>
             <p className="mt-7 max-w-2xl text-lg leading-relaxed text-slate-300">
-              Itemba Group operates through specialised companies and divisions. These service pages
-              help customers, suppliers and partners find the right route into the group.
+              Fuel and energy, trade and distribution, logistics, hospitality, real estate and
+              construction supply — each handled by the operating company that runs it.
             </p>
+            <div className="mt-7 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
+              <span>6 service areas</span>
+              <span aria-hidden="true" className="text-gold-400">·</span>
+              <span>3 operating companies</span>
+              <span aria-hidden="true" className="text-gold-400">·</span>
+              <span>Songwe · Tunduma corridor</span>
+            </div>
           </AnimatedSection>
         </div>
       </section>
@@ -97,20 +107,24 @@ export default function ServicesPage() {
             </h2>
           </AnimatedSection>
 
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
-            {serviceAreas.map((service, index) => (
-              <AnimatedSection key={service.slug} delay={index * 0.05}>
-                <Link
-                  href={serviceUrl(service.slug)}
-                  className="group flex h-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] transition hover:-translate-y-1 hover:border-gold-400/50 hover:bg-white/[0.06]"
-                >
-                  <div className="relative h-48 overflow-hidden">
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+            {serviceAreas.map((service, index) => {
+              const accent = getCompanyAccent(service.companySlug);
+              const shortCompany = service.companyName
+                .replace(/\s+(Co|Company)\s+Ltd$/i, '')
+                .replace(/\s+Ltd$/i, '');
+              return (
+                <AnimatedSection key={service.slug} delay={index * 0.05}>
+                  <Link
+                    href={serviceUrl(service.slug)}
+                    className={`group relative flex h-96 flex-col justify-end overflow-hidden rounded-3xl ring-1 ring-white/10 transition ${accent.ring}`}
+                  >
                     {service.image ? (
-                      <img
+                      <CinematicImage
                         src={service.image.src}
-                        alt={service.image.alt}
-                        loading="lazy"
-                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                        alt=""
+                        sizes="(min-width:1024px) 50vw, 100vw"
+                        className="transition-transform duration-700 group-hover:scale-105"
                       />
                     ) : (
                       <BrandVisual
@@ -119,40 +133,43 @@ export default function ServicesPage() {
                         className="absolute inset-0 transition-transform duration-700 group-hover:scale-105"
                       />
                     )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/40 to-transparent" />
-                    <div className="absolute inset-x-4 bottom-4">
-                      <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-gold-300">
-                        {service.eyebrow}
-                      </p>
-                      <h3 className="font-tight text-xl font-black leading-tight text-white">
+                    <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/60 to-ink-950/10" />
+                    <div className="relative p-7 sm:p-8">
+                      <div className="mb-5 flex items-center justify-between gap-3">
+                        <span className={`inline-flex h-11 w-11 items-center justify-center rounded-xl border ${accent.chip}`}>
+                          <SectorIcon name={getServiceIcon(service.visual)} className="h-6 w-6" />
+                        </span>
+                        <span className={`rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-widest ${accent.chip}`}>
+                          {shortCompany}
+                        </span>
+                      </div>
+                      <h3 className="font-tight text-2xl font-black leading-tight tracking-tight text-white sm:text-3xl">
                         {service.title}
                       </h3>
+                      <p className="mt-3 line-clamp-2 max-w-xl text-base leading-relaxed text-slate-200">
+                        {service.summary}
+                      </p>
+                      <div className="mt-5 flex flex-wrap gap-2">
+                        {service.offerings.slice(0, 3).map((offering) => (
+                          <span
+                            key={offering}
+                            className="rounded-full border border-white/15 bg-white/[0.06] px-3 py-1 text-xs font-medium text-white/85 backdrop-blur"
+                          >
+                            {offering}
+                          </span>
+                        ))}
+                      </div>
+                      <span className="mt-6 inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-white">
+                        View service
+                        <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                        </svg>
+                      </span>
                     </div>
-                  </div>
-                  <div className="flex flex-1 flex-col p-6">
-                    <p className="mb-5 flex-1 text-sm leading-relaxed text-slate-400">
-                      {service.summary}
-                    </p>
-                    <div className="mb-5 flex flex-wrap gap-2">
-                      {service.offerings.slice(0, 3).map((offering) => (
-                        <span
-                          key={offering}
-                          className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] font-medium text-white/80"
-                        >
-                          {offering}
-                        </span>
-                      ))}
-                    </div>
-                    <span className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition group-hover:text-gold-200">
-                      View service
-                      <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                      </svg>
-                    </span>
-                  </div>
-                </Link>
-              </AnimatedSection>
-            ))}
+                  </Link>
+                </AnimatedSection>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -174,20 +191,22 @@ export default function ServicesPage() {
             {['mwanjalisi-oil', 'westsides-company', 'itemba-enterprises'].map((slug) => {
               const relatedServices = serviceAreas.filter((service) => service.companySlug === slug);
               const companyName = relatedServices[0]?.companyName;
+              const accent = getCompanyAccent(slug);
 
               return (
                 <AnimatedSection key={slug}>
                   <Link
                     href={companyUrl(slug)}
-                    className="block h-full rounded-2xl border border-white/10 bg-white/[0.03] p-6 transition hover:border-gold-400/50 hover:bg-white/[0.06]"
+                    className={`block h-full rounded-2xl border ${accent.border} bg-white/[0.03] p-6 transition hover:bg-white/[0.06]`}
                   >
                     <h3 className="mb-3 font-tight text-lg font-bold text-white">{companyName}</h3>
-                    <p className="mb-5 text-xs font-semibold uppercase tracking-widest text-gold-400">
+                    <p className={`mb-5 text-xs font-semibold uppercase tracking-widest ${accent.text}`}>
                       {relatedServices.length} service area{relatedServices.length === 1 ? '' : 's'}
                     </p>
                     <div className="space-y-2">
                       {relatedServices.map((service) => (
-                        <div key={service.slug} className="text-sm text-slate-400">
+                        <div key={service.slug} className="flex items-center gap-2 text-sm text-slate-300">
+                          <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${accent.dot}`} />
                           {service.shortTitle}
                         </div>
                       ))}
