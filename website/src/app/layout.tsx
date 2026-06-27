@@ -72,7 +72,9 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: site.title,
     description: site.shortDescription,
-    images: ['/opengraph-image'],
+    // images intentionally omitted: Next falls twitter:image back to the
+    // resolved openGraph image, so per-route opengraph-image.tsx cards apply
+    // to X/Twitter too (and static pages keep the generic root card).
   },
   verification: process.env.GOOGLE_SITE_VERIFICATION
     ? {
