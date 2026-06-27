@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 
 interface OutlineItem {
@@ -19,6 +19,23 @@ export default function ProfileNav({ outline }: { outline: readonly OutlineItem[
   const [activeId, setActiveId] = useState(outline[0]?.id ?? '');
   const [open, setOpen] = useState(false);
   const reduceMotion = useReducedMotion();
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+
+  // While the mobile sheet is open: close on Escape, move focus into the sheet,
+  // and return focus to the trigger when it closes.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    sheetRef.current?.focus();
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      buttonRef.current?.focus();
+    };
+  }, [open]);
 
   useEffect(() => {
     const sections = outline
@@ -81,6 +98,7 @@ export default function ProfileNav({ outline }: { outline: readonly OutlineItem[
       {/* Mobile: fixed "Contents" pill + bottom sheet */}
       <div className="lg:hidden">
         <button
+          ref={buttonRef}
           type="button"
           onClick={() => setOpen((value) => !value)}
           aria-expanded={open}
@@ -103,7 +121,12 @@ export default function ProfileNav({ outline }: { outline: readonly OutlineItem[
               />
               <motion.div
                 key="profilenav-sheet"
-                className="fixed inset-x-3 bottom-3 z-50 max-h-[70vh] overflow-y-auto rounded-2xl border border-white/10 bg-ink-900 p-5"
+                ref={sheetRef}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Profile contents"
+                tabIndex={-1}
+                className="fixed inset-x-3 bottom-3 z-50 max-h-[70vh] overflow-y-auto rounded-2xl border border-white/10 bg-ink-900 p-5 outline-none"
                 initial={reduceMotion ? false : { opacity: 0, y: 24 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={reduceMotion ? undefined : { opacity: 0, y: 24 }}

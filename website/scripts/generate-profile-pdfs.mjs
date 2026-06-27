@@ -107,16 +107,22 @@ async function main() {
         }
       }, id);
 
-      // Let the now-visible article's images finish loading before printing.
+      // Let the now-visible article's images finish loading, then fail loudly
+      // if any broke — img.complete is true for a 404 too, so check naturalWidth
+      // and abort rather than silently committing a PDF with blank figures.
       await page.waitForLoadState('networkidle');
-      await page.evaluate(async (profileId) => {
+      const broken = await page.evaluate(async (profileId) => {
         const root = document.querySelector(`.print-profile-document[data-profile="${profileId}"]`);
-        if (!root) return;
+        if (!root) return 0;
         const imgs = Array.from(root.querySelectorAll('img'));
         await Promise.all(
           imgs.map((img) => (img.complete ? Promise.resolve() : img.decode().catch(() => {}))),
         );
+        return imgs.filter((img) => img.complete && img.naturalWidth === 0).length;
       }, id);
+      if (broken > 0) {
+        throw new Error(`Profile "${id}": ${broken} image(s) failed to load — aborting (refusing to write a broken PDF).`);
+      }
 
       const file = path.join(OUT_DIR, `itemba-${id}-profile.pdf`);
       await page.pdf({
