@@ -114,3 +114,34 @@ curl -fsS http://localhost:3001/api/health
 
 The image already declares a Docker `HEALTHCHECK` against this endpoint, so
 `docker ps` / orchestrators report health automatically.
+
+## 7. Regenerating the downloadable PDFs
+
+The company-profile page offers ready-made PDF downloads at
+`/downloads/itemba-<profile>-profile.pdf` (group + the three companies). These
+are **pre-generated, committed binaries** under `website/public/downloads/` —
+the runtime image serves them as static files (no Chromium in the container).
+
+They are produced from the same `@media print` layouts the in-browser "Print"
+button uses, via Chromium's print engine, so they stay in sync with the print
+output. **Regenerate them whenever the profile content changes** — i.e. after
+editing `src/app/company-profile/page.tsx` or the `contact`/`site` data in
+`src/lib/site.ts`:
+
+```bash
+# one-time, downloads the headless browser into the Playwright cache (not the image)
+npx playwright install chromium      # CI/Linux: npx playwright install --with-deps chromium
+
+# build, generate the 4 PDFs, then commit them
+npm run pdf
+git add public/downloads && git commit -m "Website: regenerate profile PDFs"
+```
+
+`npm run pdf` builds the site, starts the production server on a temporary port,
+prints each profile to `public/downloads/`, and shuts the server down. To render
+against an already-running server instead of building, use
+`PDF_BASE_URL=http://127.0.0.1:3001 npm run pdf:generate`.
+
+> Keep `public/downloads/` tracked in git and **not** excluded in
+> `.dockerignore` — that's how the PDFs reach the image. Playwright is a
+> `devDependency` only; it is never traced into the standalone runtime.

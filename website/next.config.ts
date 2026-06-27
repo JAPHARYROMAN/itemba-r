@@ -39,6 +39,17 @@ const config: NextConfig = {
           },
         ],
       },
+      {
+        // Pre-generated profile PDFs change in place on regen, so cache short
+        // with SWR rather than immutable.
+        source: '/downloads/:file*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=3600, stale-while-revalidate=86400',
+          },
+        ],
+      },
     ];
   },
   async redirects() {
