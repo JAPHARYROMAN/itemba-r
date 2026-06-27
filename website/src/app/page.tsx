@@ -146,7 +146,7 @@ export default function HomePage() {
   return (
     <div className="bg-ink-950">
       {/* ══ HERO — full-bleed corridor ════════════════════════════════ */}
-      <section className="relative flex min-h-screen items-end overflow-hidden bg-ink-950">
+      <section className="relative flex min-h-screen items-center overflow-hidden bg-ink-950">
         <CinematicImage
           src="/images/fuel-stations/itemba-filling-station-wide.webp"
           alt=""
@@ -161,7 +161,7 @@ export default function HomePage() {
           variants={stagger}
           initial="hidden"
           animate="visible"
-          className="relative z-10 mx-auto w-full max-w-7xl px-5 pb-20 pt-32 sm:px-8"
+          className="relative z-10 mx-auto w-full max-w-7xl px-5 py-24 sm:px-8"
         >
           <motion.div variants={fadeUp} className="mb-6 flex items-center gap-3">
             <span className="h-px w-10 bg-gold-400" />
@@ -172,20 +172,22 @@ export default function HomePage() {
 
           <motion.h1
             variants={fadeUp}
-            className="cine-shadow max-w-5xl font-tight text-6xl font-black leading-[0.92] tracking-tight text-white sm:text-7xl lg:text-8xl xl:text-9xl"
+            className="cine-shadow max-w-4xl font-tight text-3xl font-black leading-[1.05] tracking-tight text-white sm:text-5xl lg:text-6xl"
           >
-            Powering Tanzania&apos;s southern corridor.
+            Fuel, trade &amp; logistics on the{' '}
+            <span className="gradient-text">Tanzania&ndash;Zambia corridor.</span>
           </motion.h1>
 
           <motion.p
             variants={fadeUp}
-            className="mt-7 max-w-2xl text-lg leading-relaxed text-slate-200/90 sm:text-xl"
+            className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-200/90 sm:text-xl"
           >
-            Itemba Group is one structure, three companies and six sectors — fuel, trade and
-            logistics moving through Mpemba-Tunduma, where Tanzania meets Zambia.
+            Itemba Group is a diversified Tanzanian holding company based in Mpemba-Tunduma, Songwe
+            Region — spanning fuel and energy, trade and distribution, logistics, hospitality, real
+            estate and construction supply.
           </motion.p>
 
-          <motion.div variants={fadeUp} className="mt-10 flex flex-wrap gap-3">
+          <motion.div variants={fadeUp} className="mt-8 flex flex-wrap gap-3">
             <Link
               href="/companies"
               className="btn-primary bg-gold-500 px-8 py-4 text-sm font-semibold text-white hover:bg-gold-400 hover:shadow-lg hover:shadow-gold-500/30"
@@ -202,7 +204,7 @@ export default function HomePage() {
 
           <motion.div
             variants={fadeUp}
-            className="mt-14 grid max-w-4xl grid-cols-2 gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 lg:grid-cols-4"
+            className="mt-12 grid max-w-4xl grid-cols-2 gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 lg:grid-cols-4"
           >
             {heroStats.map((s) => (
               <div key={s.label} className="bg-ink-950/70 p-5 backdrop-blur">
