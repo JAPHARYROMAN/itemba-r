@@ -31,10 +31,16 @@ If neither analytics ID is set, the `<Analytics />` component renders nothing
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `RESEND_API_KEY` | for email | Sends enquiry emails via Resend. Without it, enquiries are saved but not emailed. |
+| `RESEND_API_KEY` | for email | Sends enquiry emails via Resend. Without it, enquiries can only rely on durable file storage in Docker/self-hosted deployments. |
 | `ENQUIRY_EMAIL_TO` | for email | Destination inbox for enquiry submissions. |
 | `ENQUIRY_EMAIL_FROM` | for email | Verified sender address for Resend. |
 | `ENQUIRY_STORAGE_DIR` | optional | Where each enquiry is appended (`enquiries.jsonl`). Defaults to **`/app/data`** in the container (pre-created and writable by the runtime user; declared as a `VOLUME`). Every `POST /api/enquiries` writes here — even when email is configured — so the dir must stay writable. Mount a volume at `/app/data`, or point this at a mounted path, to persist enquiries across deploys. |
+
+> **Vercel note:** Vercel/serverless filesystem writes are temporary, so the app
+> does not use file storage there as a trustworthy fallback. On Vercel, configure
+> `RESEND_API_KEY`, `ENQUIRY_EMAIL_TO`, and `ENQUIRY_EMAIL_FROM`; if email is not
+> configured or fails, the enquiry API returns an error and the visitor is told to
+> use WhatsApp, email, or phone instead of seeing a false "saved" confirmation.
 
 ---
 

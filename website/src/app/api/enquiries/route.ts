@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { appendFile, mkdir } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
 import { contact, enquiryIntents } from '@/lib/site';
@@ -8,6 +7,7 @@ import { contact, enquiryIntents } from '@/lib/site';
 export const runtime = 'nodejs';
 
 type EmailStatus = 'sent' | 'failed' | 'not_configured';
+type StorageStatus = 'stored' | 'skipped_ephemeral' | 'failed';
 
 type LeadRecord = {
   id: string;
@@ -50,15 +50,20 @@ function inferTags(intentId: string, sourcePath: string) {
 }
 
 function getStoragePath() {
-  const defaultStorageDir = process.env.VERCEL
-    ? path.join(os.tmpdir(), 'itemba-enquiries')
-    : path.join(process.cwd(), 'data');
+  const defaultStorageDir = path.join(process.cwd(), 'data');
   const storageDir = process.env.ENQUIRY_STORAGE_DIR?.trim() || defaultStorageDir;
 
   return {
     storageDir,
     filePath: path.join(storageDir, 'enquiries.jsonl'),
   };
+}
+
+function canUseFileStorage() {
+  // Vercel/serverless filesystems are temporary, so file writes there are not a
+  // trustworthy fallback for live enquiries. Docker/self-hosted deployments can
+  // use the mounted volume described in DEPLOY.md.
+  return !process.env.VERCEL;
 }
 
 async function storeLead(lead: LeadRecord) {
@@ -146,7 +151,12 @@ export async function POST(request: NextRequest) {
 
   const body = payload as Record<string, unknown>;
   if (cleanText(body.website, 120)) {
-    return NextResponse.json({ ok: true, id: null, emailStatus: 'not_configured' });
+    return NextResponse.json({
+      ok: true,
+      id: null,
+      emailStatus: 'not_configured',
+      storageStatus: 'skipped_ephemeral',
+    });
   }
 
   const intentId = cleanText(body.intentId, 80) || 'general';
@@ -181,12 +191,26 @@ export async function POST(request: NextRequest) {
 
   lead.emailStatus = await sendLeadEmail(lead);
 
-  try {
-    await storeLead(lead);
-  } catch {
+  let storageStatus: StorageStatus = 'skipped_ephemeral';
+  if (canUseFileStorage()) {
+    try {
+      await storeLead(lead);
+      storageStatus = 'stored';
+    } catch {
+      storageStatus = 'failed';
+    }
+  }
+
+  if (lead.emailStatus !== 'sent' && storageStatus !== 'stored') {
     return NextResponse.json(
-      { ok: false, error: 'The enquiry could not be stored. Please use WhatsApp, email, or phone.' },
-      { status: 500 },
+      {
+        ok: false,
+        error:
+          'The enquiry could not be safely saved or emailed. Please use WhatsApp, email, or phone for this enquiry.',
+        emailStatus: lead.emailStatus,
+        storageStatus,
+      },
+      { status: 503 },
     );
   }
 
@@ -194,5 +218,6 @@ export async function POST(request: NextRequest) {
     ok: true,
     id: lead.id,
     emailStatus: lead.emailStatus,
+    storageStatus,
   });
 }

@@ -145,7 +145,13 @@ export default function EnquiryRouter({
           website,
         }),
       });
-      const result = (await response.json()) as { ok?: boolean; id?: string | null; error?: string; emailStatus?: string };
+      const result = (await response.json()) as {
+        ok?: boolean;
+        id?: string | null;
+        error?: string;
+        emailStatus?: string;
+        storageStatus?: string;
+      };
 
       if (!response.ok || !result.ok) {
         throw new Error(result.error || 'The enquiry could not be submitted.');
@@ -155,7 +161,9 @@ export default function EnquiryRouter({
       setSubmitMessage(
         result.emailStatus === 'sent'
           ? 'Enquiry submitted and emailed to the team.'
-          : 'Enquiry submitted and saved. Use WhatsApp for urgent follow-up.',
+          : result.storageStatus === 'stored'
+            ? 'Enquiry submitted and saved. Use WhatsApp for urgent follow-up.'
+            : 'Enquiry submitted. Use WhatsApp for urgent follow-up.',
       );
       trackConversion('enquiry_submit', {
         enquiry_id: result.id,
