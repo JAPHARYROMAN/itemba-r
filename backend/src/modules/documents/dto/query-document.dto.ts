@@ -9,7 +9,8 @@ export class QueryDocumentDto {
   @IsOptional() @IsEnum(DocumentCategory) category?: DocumentCategory;
   @IsOptional() @IsEnum(DocumentOwnerType) ownerType?: DocumentOwnerType;
   @IsOptional() @IsEnum(DocumentStatus) status?: DocumentStatus;
-  @IsOptional() @Transform(({ value }) => value === 'true') @IsBoolean() isConfidential?: boolean;
+  // @Type(() => String) keeps the value a string under enableImplicitConversion (see query-bank-account.dto.ts).
+  @IsOptional() @Type(() => String) @Transform(({ value }) => value === 'true') @IsBoolean() isConfidential?: boolean;
   /** Filter docs expiring on or before this ISO date */
   @IsOptional() @IsDateString() expiringBefore?: string;
   /** Linked entity id (any) */

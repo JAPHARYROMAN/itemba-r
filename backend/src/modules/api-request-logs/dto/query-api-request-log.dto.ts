@@ -16,7 +16,11 @@ export class QueryApiRequestLogDto {
   statusCode?: number;
 
   @IsOptional()
-  @Transform(({ value }) => value === 'true' || value === true)
+  // @Type(() => String) keeps the value a string under the global pipe's
+  // enableImplicitConversion, which would otherwise coerce any non-empty string
+  // (incl. 'false') to boolean `true` before @Transform runs.
+  @Type(() => String)
+  @Transform(({ value }) => value === 'true')
   @IsBoolean()
   rateLimited?: boolean;
 
