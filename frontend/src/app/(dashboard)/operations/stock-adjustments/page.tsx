@@ -10,6 +10,7 @@ import {
   StatusBadge,
   Modal,
   DetailDrawer,
+  ProductPicker,
   Btn,
   PageSpinner,
   FormSelect,
@@ -34,11 +35,6 @@ interface Branch {
   id: string;
   name: string;
   code?: string | null;
-}
-interface Product {
-  id: string;
-  name: string;
-  productCode: string;
 }
 interface Unit {
   id: string;
@@ -142,7 +138,6 @@ function CreateAdjustmentModal({
   onSaved: () => void;
 }) {
   const [form, setForm] = useState<AdjustmentForm>({ ...BLANK_FORM });
-  const [products, setProducts] = useState<Product[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [saving, setSaving] = useState(false);
@@ -150,14 +145,13 @@ function CreateAdjustmentModal({
 
   useEffect(() => {
     let cancelled = false;
-    Promise.allSettled([
-      backendList<Unit>('/units', { query: { limit: 100 } }),
-      backendList<Product>('/products', { query: { limit: 300 } }),
-    ]).then(([unitResult, productResult]) => {
-      if (cancelled) return;
-      setUnits(unitResult.status === 'fulfilled' ? unitResult.value : []);
-      setProducts(productResult.status === 'fulfilled' ? productResult.value : []);
-    });
+    backendList<Unit>('/units', { query: { limit: 100 } })
+      .then((rows) => {
+        if (!cancelled) setUnits(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setUnits([]);
+      });
     return () => {
       cancelled = true;
     };
@@ -381,28 +375,16 @@ function CreateAdjustmentModal({
                         : 'text-slate-500';
                   return (
                     <tr key={i}>
-                      <td className="px-2 py-1">
-                        <select
+                      <td className="px-2 py-1 min-w-[200px]">
+                        <ProductPicker
                           value={line.productId}
-                          onChange={(e) => {
-                            const pid = e.target.value;
+                          onChange={(pid) => {
                             setLine(i, { productId: pid });
                             void prefillSystemQty(i, pid);
                           }}
-                          className="w-full text-xs border rounded px-2 py-1"
-                          style={{
-                            borderColor: 'var(--aurora-border)',
-                            background: 'var(--aurora-card)',
-                            color: 'var(--aurora-text)',
-                          }}
-                        >
-                          <option value="">Select…</option>
-                          {products.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name}
-                            </option>
-                          ))}
-                        </select>
+                          companyId={form.companyId}
+                          placeholder="Search product…"
+                        />
                       </td>
                       <td className="px-2 py-1">
                         <input
