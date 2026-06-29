@@ -1021,6 +1021,7 @@ export default function ProductsPage() {
   const [productFamilyId, setProductFamilyId] = useState('');
   const [productType, setProductType] = useState('');
   const [status, setStatus] = useState('');
+  const [priceSource, setPriceSource] = useState('');
   const [branchId, setBranchId] = useState('');
   const [branches, setBranches] = useState<Branch[]>([]);
   const [page, setPage] = useState(1);
@@ -1137,6 +1138,7 @@ export default function ProductsPage() {
           productFamilyId: productFamilyId || undefined,
           productType: productType || undefined,
           status: status || undefined,
+          priceSource: priceSource || undefined,
           branchId: branchId || undefined,
         },
       });
@@ -1149,7 +1151,18 @@ export default function ProductsPage() {
     } finally {
       setLoading(false);
     }
-  }, [canView, page, search, companyId, categoryId, productFamilyId, productType, status, branchId]);
+  }, [
+    canView,
+    page,
+    search,
+    companyId,
+    categoryId,
+    productFamilyId,
+    productType,
+    status,
+    priceSource,
+    branchId,
+  ]);
 
   useEffect(() => {
     load();
@@ -1322,6 +1335,21 @@ export default function ProductsPage() {
                   {s}
                 </option>
               ))}
+            </select>
+            <select
+              value={priceSource}
+              onChange={(e) => {
+                setPriceSource(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+              title="Filter by pricing source"
+            >
+              <option value="">All Pricing</option>
+              <option value="PRODUCT_OVERRIDE">{priceSourceLabel('PRODUCT_OVERRIDE')}</option>
+              <option value="FAMILY_DEFAULT">{priceSourceLabel('FAMILY_DEFAULT')}</option>
+              <option value="MISSING">{priceSourceLabel('MISSING')}</option>
             </select>
             {companyId && (
               <select

@@ -8,6 +8,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductDto } from './dto/query-product.dto';
 import { QueryProductFamilyDto } from './dto/query-product-family.dto';
 import { CreateProductFamilyDto, UpdateProductFamilyDto } from './dto/manage-product-family.dto';
+import { priceSourceWhere } from './price-source-where';
 import { ProfitService } from '../profit/profit.service';
 import { AccessLevel, AuditSeverity, Prisma } from '@prisma/client';
 
@@ -108,6 +109,7 @@ export class ProductsService {
       supplierId,
       productType,
       status,
+      priceSource,
       search,
     } = query;
     const skip = (page - 1) * limit;
@@ -182,6 +184,14 @@ export class ProductsService {
       } else {
         where.OR = searchTerms;
       }
+    }
+    // Pricing-hygiene filter: combine with everything else via AND (top-level OR,
+    // if present from the division filter, is still ANDed against this).
+    if (priceSource) {
+      const clause = priceSourceWhere(priceSource);
+      where.AND = where.AND
+        ? [...(Array.isArray(where.AND) ? where.AND : [where.AND]), clause]
+        : [clause];
     }
 
     const [data, total] = await Promise.all([
