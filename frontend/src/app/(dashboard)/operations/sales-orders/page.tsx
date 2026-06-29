@@ -1625,19 +1625,16 @@ export default function SalesOrdersPage() {
                           Confirm
                         </Btn>
                       )}
-                      {(o.status === 'CONFIRMED' ||
-                        o.status === 'PARTIALLY_PAID' ||
-                        o.status === 'PAID') &&
-                        canCancel && (
-                          <Btn
-                            variant="danger"
-                            size="xs"
-                            loading={actionLoading === `${o.id}:cancel`}
-                            onClick={() => doAction(o.id, 'cancel')}
-                          >
-                            Cancel
-                          </Btn>
-                        )}
+                      {o.status === 'CONFIRMED' && canCancel && (
+                        <Btn
+                          variant="danger"
+                          size="xs"
+                          loading={actionLoading === `${o.id}:cancel`}
+                          onClick={() => doAction(o.id, 'cancel')}
+                        >
+                          Cancel
+                        </Btn>
+                      )}
                       {o.status === 'DRAFT' && canCreate && (
                         <Btn variant="ghost" size="xs" onClick={() => setDeleting(o)}>
                           Delete

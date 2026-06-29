@@ -1275,7 +1275,7 @@ export default function PurchaseOrdersPage() {
                             Receive
                           </Btn>
                         )}
-                      {(o.status === 'CONFIRMED' || o.status === 'RECEIVED') && canCancel && (
+                      {o.status === 'CONFIRMED' && canCancel && (
                         <Btn
                           variant="danger"
                           size="xs"
