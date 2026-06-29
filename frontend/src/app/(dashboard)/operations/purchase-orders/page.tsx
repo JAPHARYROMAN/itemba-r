@@ -9,6 +9,7 @@ import {
   StatCard,
   StatusBadge,
   Modal,
+  ConfirmDialog,
   Btn,
   SkeletonTable,
   FormInput,
@@ -957,6 +958,11 @@ export default function PurchaseOrdersPage() {
     if (purchaseType) setFilterType(purchaseType);
   }, []);
 
+  const [pendingAction, setPendingAction] = useState<{
+    id: string;
+    action: 'confirm' | 'cancel';
+  } | null>(null);
+
   const doAction = async (id: string, action: 'confirm' | 'cancel') => {
     setActionLoading(`${id}:${action}`);
     setActionError('');
@@ -974,6 +980,12 @@ export default function PurchaseOrdersPage() {
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const runPendingAction = async () => {
+    if (!pendingAction) return;
+    await doAction(pendingAction.id, pendingAction.action);
+    setPendingAction(null);
   };
 
   if (!canView) {
@@ -1046,6 +1058,27 @@ export default function PurchaseOrdersPage() {
             setReceiving(null);
             load();
           }}
+        />
+      )}
+      {pendingAction && (
+        <ConfirmDialog
+          open
+          variant={pendingAction.action === 'cancel' ? 'danger' : 'default'}
+          title={
+            pendingAction.action === 'confirm'
+              ? 'Confirm purchase order'
+              : 'Cancel purchase order'
+          }
+          message={
+            pendingAction.action === 'confirm'
+              ? 'This applies tax and confirms the purchase order.'
+              : 'This cancels the purchase order and reverses any linked payable. This cannot be undone.'
+          }
+          confirmLabel={pendingAction.action === 'confirm' ? 'Confirm order' : 'Cancel order'}
+          cancelLabel="Back"
+          loading={actionLoading === `${pendingAction.id}:${pendingAction.action}`}
+          onConfirm={runPendingAction}
+          onClose={() => setPendingAction(null)}
         />
       )}
 
@@ -1264,7 +1297,7 @@ export default function PurchaseOrdersPage() {
                           variant="primary"
                           size="xs"
                           loading={actionLoading === `${o.id}:confirm`}
-                          onClick={() => doAction(o.id, 'confirm')}
+                          onClick={() => setPendingAction({ id: o.id, action: 'confirm' })}
                         >
                           Confirm
                         </Btn>
@@ -1280,7 +1313,7 @@ export default function PurchaseOrdersPage() {
                           variant="danger"
                           size="xs"
                           loading={actionLoading === `${o.id}:cancel`}
-                          onClick={() => doAction(o.id, 'cancel')}
+                          onClick={() => setPendingAction({ id: o.id, action: 'cancel' })}
                         >
                           Cancel
                         </Btn>
