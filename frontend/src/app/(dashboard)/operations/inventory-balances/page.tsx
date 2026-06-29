@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, StatCard, PageSpinner } from '@/components/ui';
+import { Card, PageHeader, ProductPicker, StatCard, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList, backendPage } from '@/lib/api-client';
 import { toFiniteNumber } from '@/lib/design-system/formatters';
@@ -13,11 +13,6 @@ interface Company {
   id: string;
   name: string;
   code: string;
-}
-interface Product {
-  id: string;
-  name: string;
-  productCode: string;
 }
 interface InventoryBalance {
   id: string;
@@ -118,7 +113,6 @@ interface LiveTotals {
 export default function InventoryBalancesPage() {
   const { hasPermission } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
   const [data, setData] = useState<Paginated<InventoryBalance> | null>(null);
   const [liveTotals, setLiveTotals] = useState<LiveTotals | null>(null);
   const [loading, setLoading] = useState(false);
@@ -135,13 +129,11 @@ export default function InventoryBalancesPage() {
     let cancelled = false;
 
     async function loadLookups() {
-      const [companyResult, productResult] = await Promise.allSettled([
-        backendList<Company>('/companies', { query: { limit: 100 } }),
-        backendList<Product>('/products', { query: { limit: 300 } }),
-      ]);
+      const companyResult = await backendList<Company>('/companies', {
+        query: { limit: 100 },
+      }).catch(() => [] as Company[]);
       if (cancelled) return;
-      setCompanies(companyResult.status === 'fulfilled' ? companyResult.value : []);
-      setProducts(productResult.status === 'fulfilled' ? productResult.value : []);
+      setCompanies(companyResult);
     }
 
     void loadLookups();
@@ -274,18 +266,13 @@ export default function InventoryBalancesPage() {
                 </option>
               ))}
             </select>
-            <select
+            <ProductPicker
               value={productId}
-              onChange={(e) => reset(setProductId)(e.target.value)}
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
-            >
-              <option value="">All Products</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.productCode} – {p.name}
-                </option>
-              ))}
-            </select>
+              onChange={(id) => reset(setProductId)(id)}
+              companyId={companyId}
+              placeholder="All products"
+              className="w-64"
+            />
             <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
               <input
                 type="checkbox"
