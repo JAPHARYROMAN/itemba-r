@@ -40,7 +40,18 @@ export class GoodsReceivedNotesService {
       }),
       this.prisma.goodsReceivedNote.count({ where }),
     ]);
-    return { items, total, page: Number(page), limit: Number(limit) };
+    const limitN = Number(limit);
+    // `data` mirrors the paginated shape the rest of the app (and the frontend
+    // `backendPage`/`normalizePaginated` helper) expects; `items` is kept for
+    // backwards compatibility with any existing consumer.
+    return {
+      data: items,
+      items,
+      total,
+      page: Number(page),
+      limit: limitN,
+      totalPages: Math.ceil(total / limitN) || 1,
+    };
   }
 
   async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
