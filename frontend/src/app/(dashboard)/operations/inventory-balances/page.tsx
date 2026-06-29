@@ -27,8 +27,13 @@ interface InventoryBalance {
   quantityReserved: number;
   averageCost: number;
   totalValue: number;
-  lastMovementDate?: string | null;
-  product?: { name: string; productCode: string; reorderLevel?: number | null } | null;
+  lastMovementAt?: string | null;
+  product?: {
+    name: string;
+    productCode: string;
+    reorderLevel?: number | null;
+    minimumStockLevel?: number | null;
+  } | null;
   branch?: { name: string; code?: string | null } | null;
   company?: { name: string; code: string } | null;
 }
@@ -71,10 +76,18 @@ function fmtDate(d?: string | null) {
 
 function StockBadge({ balance }: { balance: InventoryBalance }) {
   const quantityOnHand = toFiniteNumber(balance.quantityOnHand);
+  const available = quantityOnHand - toFiniteNumber(balance.quantityReserved);
   if (quantityOnHand <= 0) {
     return (
       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
         Out of Stock
+      </span>
+    );
+  }
+  if (available < 0) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+        Oversold
       </span>
     );
   }
@@ -271,6 +284,7 @@ export default function InventoryBalancesPage() {
                 <th className={thCls}>Company</th>
                 <th className={`${thCls} text-right`}>Qty On Hand</th>
                 <th className={`${thCls} text-right`}>Qty Reserved</th>
+                <th className={`${thCls} text-right`}>Qty Available</th>
                 <th className={`${thCls} text-right`}>Avg Cost</th>
                 <th className={`${thCls} text-right`}>Total Value</th>
                 <th className={thCls}>Last Movement</th>
@@ -279,19 +293,19 @@ export default function InventoryBalancesPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={10}>
                     <PageSpinner />
                   </td>
                 </tr>
               ) : !companyId ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-sm text-slate-400">
+                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-400">
                     Select a company to view balances.
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-sm text-slate-400">
+                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-400">
                     No inventory balances found.
                   </td>
                 </tr>
@@ -319,9 +333,20 @@ export default function InventoryBalancesPage() {
                     <td className={`${tdCls} text-right font-mono`}>
                       {fmtNum(bal.quantityReserved)}
                     </td>
+                    <td
+                      className={`${tdCls} text-right font-mono ${
+                        toFiniteNumber(bal.quantityOnHand) - toFiniteNumber(bal.quantityReserved) <= 0
+                          ? 'text-red-600 font-semibold'
+                          : ''
+                      }`}
+                    >
+                      {fmtNum(
+                        toFiniteNumber(bal.quantityOnHand) - toFiniteNumber(bal.quantityReserved),
+                      )}
+                    </td>
                     <td className={`${tdCls} text-right font-mono`}>{fmtTZS(bal.averageCost)}</td>
                     <td className={`${tdCls} text-right font-mono`}>{fmtTZS(bal.totalValue)}</td>
-                    <td className={tdCls}>{fmtDate(bal.lastMovementDate)}</td>
+                    <td className={tdCls}>{fmtDate(bal.lastMovementAt)}</td>
                   </tr>
                 ))
               )}

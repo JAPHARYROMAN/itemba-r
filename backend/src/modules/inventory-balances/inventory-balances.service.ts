@@ -48,7 +48,16 @@ export class InventoryBalancesService {
       where: { id },
       include: {
         company: { select: { id: true, name: true, code: true } },
-        product: { select: { id: true, name: true, sku: true } },
+        product: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            productCode: true,
+            reorderLevel: true,
+            minimumStockLevel: true,
+          },
+        },
         branch: { select: { id: true, name: true, code: true } },
       },
     });

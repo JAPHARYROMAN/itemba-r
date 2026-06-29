@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Card,
   PageHeader,
   StatCard,
   Modal,
+  ConfirmDialog,
   Btn,
   PageSpinner,
   FormInput,
@@ -13,7 +14,13 @@ import {
   FormTextarea,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
-import { backendList, backendPage, backendPatch, backendPost } from '@/lib/api-client';
+import {
+  backendDelete,
+  backendList,
+  backendPage,
+  backendPatch,
+  backendPost,
+} from '@/lib/api-client';
 
 interface Company {
   id: string;
@@ -85,6 +92,7 @@ interface UnitForm {
   unitType: string;
   companyId: string;
   isBaseUnit: boolean;
+  status: string;
 }
 const BLANK_UNIT: UnitForm = {
   name: '',
@@ -92,6 +100,7 @@ const BLANK_UNIT: UnitForm = {
   unitType: 'PIECE',
   companyId: '',
   isBaseUnit: false,
+  status: 'ACTIVE',
 };
 
 function UnitModal({
@@ -115,6 +124,7 @@ function UnitModal({
           unitType: initial.unitType,
           companyId: initial.companyId ?? '',
           isBaseUnit: initial.isBaseUnit,
+          status: initial.status ?? 'ACTIVE',
         }
       : { ...BLANK_UNIT },
   );
@@ -141,9 +151,11 @@ function UnitModal({
         symbol: form.symbol,
         unitType: form.unitType,
         isBaseUnit: form.isBaseUnit,
+        status: form.status,
       };
-      if (form.companyId) body.companyId = form.companyId;
       if (mode === 'create') {
+        // Company (scope) is only assignable at creation; UpdateUnitDto ignores it.
+        if (form.companyId) body.companyId = form.companyId;
         await backendPost('/units', body);
       } else {
         await backendPatch(`/units/${initial!.id}`, body);
@@ -205,17 +217,28 @@ function UnitModal({
             </option>
           ))}
         </FormSelect>
+        {mode === 'create' && (
+          <FormSelect
+            label="Company (optional)"
+            value={form.companyId}
+            onChange={(e) => set('companyId', e.target.value)}
+            placeholder="System unit (no company)"
+          >
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </FormSelect>
+        )}
         <FormSelect
-          label="Company (optional)"
-          value={form.companyId}
-          onChange={(e) => set('companyId', e.target.value)}
-          placeholder="System unit (no company)"
+          label="Status"
+          required
+          value={form.status}
+          onChange={(e) => set('status', e.target.value)}
         >
-          {companies.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
+          <option value="ACTIVE">Active</option>
+          <option value="INACTIVE">Inactive</option>
         </FormSelect>
         <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--aurora-text)' }}>
           <input
@@ -275,6 +298,22 @@ function ConversionModal({
 
   const set = <K extends keyof ConversionForm>(k: K, v: ConversionForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
+
+  // Only ACTIVE units can be picked; in edit mode keep the already-selected
+  // units even if they have since been deactivated, so the form stays valid.
+  const selectableUnits = useMemo(() => {
+    const active = allUnits.filter((u) => u.status === 'ACTIVE');
+    if (mode === 'edit' && initial) {
+      const ids = new Set(active.map((u) => u.id));
+      for (const id of [initial.fromUnitId, initial.toUnitId]) {
+        if (!ids.has(id)) {
+          const u = allUnits.find((x) => x.id === id);
+          if (u) active.push(u);
+        }
+      }
+    }
+    return active;
+  }, [allUnits, mode, initial]);
 
   const handleSubmit = async () => {
     if (!form.fromUnitId || !form.toUnitId) {
@@ -343,7 +382,7 @@ function ConversionModal({
           onChange={(e) => set('fromUnitId', e.target.value)}
           placeholder="Select unit"
         >
-          {allUnits.map((u) => (
+          {selectableUnits.map((u) => (
             <option key={u.id} value={u.id}>
               {u.name} ({u.symbol})
             </option>
@@ -356,7 +395,7 @@ function ConversionModal({
           onChange={(e) => set('toUnitId', e.target.value)}
           placeholder="Select unit"
         >
-          {allUnits.map((u) => (
+          {selectableUnits.map((u) => (
             <option key={u.id} value={u.id}>
               {u.name} ({u.symbol})
             </option>
@@ -406,9 +445,17 @@ export default function UnitsPage() {
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
   const [creatingConv, setCreatingConv] = useState(false);
   const [editingConv, setEditingConv] = useState<UnitConversion | null>(null);
+  const [deletingUnit, setDeletingUnit] = useState<Unit | null>(null);
+  const [deletingConv, setDeletingConv] = useState<UnitConversion | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const canView = hasPermission('units.view');
   const canCreate = hasPermission('units.manage');
+
+  const companyNameById = useMemo(
+    () => new Map(companies.map((c) => [c.id, c.name])),
+    [companies],
+  );
 
   useEffect(() => {
     if (!canView) return;
@@ -478,6 +525,36 @@ export default function UnitsPage() {
       .catch(() => setAllUnits([]));
   };
 
+  const handleDeleteUnit = async () => {
+    if (!deletingUnit) return;
+    setDeleteBusy(true);
+    setError('');
+    try {
+      await backendDelete(`/units/${deletingUnit.id}`);
+      setDeletingUnit(null);
+      refreshAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete unit');
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
+  const handleDeleteConv = async () => {
+    if (!deletingConv) return;
+    setDeleteBusy(true);
+    setError('');
+    try {
+      await backendDelete(`/unit-conversions/${deletingConv.id}`);
+      setDeletingConv(null);
+      loadConversions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete conversion');
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   if (!canView) {
     return (
       <div className="p-6">
@@ -537,6 +614,30 @@ export default function UnitsPage() {
             setEditingConv(null);
             loadConversions();
           }}
+        />
+      )}
+      {deletingUnit && (
+        <ConfirmDialog
+          open
+          variant="danger"
+          title="Delete unit"
+          message={`Delete "${deletingUnit.name}"? This cannot be undone.`}
+          confirmLabel="Delete"
+          loading={deleteBusy}
+          onConfirm={handleDeleteUnit}
+          onClose={() => setDeletingUnit(null)}
+        />
+      )}
+      {deletingConv && (
+        <ConfirmDialog
+          open
+          variant="danger"
+          title="Delete conversion"
+          message={`Delete the conversion ${deletingConv.fromUnit?.symbol ?? ''} → ${deletingConv.toUnit?.symbol ?? ''}? This cannot be undone.`}
+          confirmLabel="Delete"
+          loading={deleteBusy}
+          onConfirm={handleDeleteConv}
+          onClose={() => setDeletingConv(null)}
         />
       )}
 
@@ -620,15 +721,24 @@ export default function UnitsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                      {u.isSystemUnit ? 'System' : (u.company?.name ?? '—')}
+                      {u.isSystemUnit
+                        ? 'System'
+                        : u.companyId
+                          ? (companyNameById.get(u.companyId) ?? '—')
+                          : '—'}
                     </td>
                     <td className="px-4 py-3 text-xs">{u.isBaseUnit ? 'Yes' : '—'}</td>
                     {canCreate && (
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
                         {!u.isSystemUnit && (
-                          <Btn variant="ghost" size="xs" onClick={() => setEditingUnit(u)}>
-                            Edit
-                          </Btn>
+                          <>
+                            <Btn variant="ghost" size="xs" onClick={() => setEditingUnit(u)}>
+                              Edit
+                            </Btn>
+                            <Btn variant="ghost" size="xs" onClick={() => setDeletingUnit(u)}>
+                              Delete
+                            </Btn>
+                          </>
                         )}
                       </td>
                     )}
@@ -748,9 +858,12 @@ export default function UnitsPage() {
                       </span>
                     </td>
                     {canCreate && (
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
                         <Btn variant="ghost" size="xs" onClick={() => setEditingConv(c)}>
                           Edit
+                        </Btn>
+                        <Btn variant="ghost" size="xs" onClick={() => setDeletingConv(c)}>
+                          Delete
                         </Btn>
                       </td>
                     )}

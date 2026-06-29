@@ -10,6 +10,7 @@ import {
   StockAdjustmentLineDto,
 } from './dto/create-stock-adjustment.dto';
 import { QueryStockAdjustmentDto } from './dto/query-stock-adjustment.dto';
+import { RejectStockAdjustmentDto } from './dto/reject-stock-adjustment.dto';
 import { UpdateStockAdjustmentDto } from './dto/update-stock-adjustment.dto';
 
 type StockAdjustmentReferenceIds = {
@@ -264,16 +265,26 @@ export class StockAdjustmentsService {
     return record;
   }
 
-  async reject(id: string, user: AuthUser) {
+  async reject(id: string, dto: RejectStockAdjustmentDto, user: AuthUser) {
     const userId = user.id;
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== 'PENDING_APPROVAL') {
       throw new BadRequestException('Only PENDING_APPROVAL adjustments can be rejected');
     }
 
+    const reason = dto.reason?.trim();
+    if (!reason) {
+      throw new BadRequestException('Rejection reason is required');
+    }
+
     const record = await this.prisma.stockAdjustment.update({
       where: { id },
-      data: { status: 'REJECTED' },
+      data: {
+        status: 'REJECTED',
+        // Preserve any existing notes; surface the rejection reason on the record
+        // (the schema has no dedicated rejectionReason column).
+        notes: existing.notes ? `${existing.notes}\n[Rejected] ${reason}` : `[Rejected] ${reason}`,
+      },
     });
 
     await this.auditLogs.log({
@@ -283,7 +294,7 @@ export class StockAdjustmentsService {
       userId,
       companyId: record.companyId,
       oldValue: { status: 'PENDING_APPROVAL' } as any,
-      newValue: { status: 'REJECTED' } as any,
+      newValue: { status: 'REJECTED', rejectionReason: reason } as any,
     });
 
     return record;

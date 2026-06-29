@@ -1002,6 +1002,7 @@ export default function ProductsPage() {
 
   const canView = hasPermission('products.view');
   const canCreate = hasPermission('products.create');
+  const canUpdate = hasPermission('products.update');
   const canDelete = hasPermission('products.delete');
 
   useEffect(() => {
@@ -1309,20 +1310,20 @@ export default function ProductsPage() {
                 <th className="px-4 py-3 text-right">Selling</th>
                 <th className="px-4 py-3 text-right">Purchase</th>
                 <th className="px-4 py-3">Status</th>
-                {(canCreate || canDelete) && <th className="px-4 py-3 text-right">Actions</th>}
+                {(canUpdate || canDelete) && <th className="px-4 py-3 text-right">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={canCreate || canDelete ? 12 : 11}>
-                    <SkeletonTable rows={6} cols={canCreate || canDelete ? 12 : 11} />
+                  <td colSpan={canUpdate || canDelete ? 12 : 11}>
+                    <SkeletonTable rows={6} cols={canUpdate || canDelete ? 12 : 11} />
                   </td>
                 </tr>
               ) : !data?.data.length ? (
                 <tr>
                   <td
-                    colSpan={canCreate || canDelete ? 12 : 11}
+                    colSpan={canUpdate || canDelete ? 12 : 11}
                     className="px-4 py-10 text-center text-sm"
                     style={{ color: 'var(--aurora-text-muted)' }}
                   >
@@ -1383,9 +1384,9 @@ export default function ProductsPage() {
                         {p.status}
                       </span>
                     </td>
-                    {(canCreate || canDelete) && (
+                    {(canUpdate || canDelete) && (
                       <td className="px-4 py-3 text-right whitespace-nowrap">
-                        {canCreate && (
+                        {canUpdate && (
                           <Btn variant="ghost" size="xs" onClick={() => setEditing(p)}>
                             Edit
                           </Btn>
