@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, PageHeader, StatCard, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
-import { backendList, backendPage } from '@/lib/api-client';
+import { backendGet, backendList, backendPage } from '@/lib/api-client';
 import { toFiniteNumber } from '@/lib/design-system/formatters';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -103,6 +103,16 @@ function StockBadge({ balance }: { balance: InventoryBalance }) {
   return null;
 }
 
+// Company-wide totals from /inventory-balances/live (computed with per-product
+// reorder thresholds), used to drive the KPI tiles instead of the 20-row page.
+interface LiveTotals {
+  totalSkus: number;
+  out: number;
+  low: number;
+  negative: number;
+  totalValue: number;
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function InventoryBalancesPage() {
@@ -110,6 +120,7 @@ export default function InventoryBalancesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [data, setData] = useState<Paginated<InventoryBalance> | null>(null);
+  const [liveTotals, setLiveTotals] = useState<LiveTotals | null>(null);
   const [loading, setLoading] = useState(false);
   const [companyId, setCompanyId] = useState('');
   const [productId, setProductId] = useState('');
@@ -167,6 +178,26 @@ export default function InventoryBalancesPage() {
     load();
   }, [load]);
 
+  // Company-wide KPI totals (per-product low-stock threshold) — independent of the
+  // page filters so the tiles reflect the whole company, not the visible page.
+  useEffect(() => {
+    if (!canView || !companyId) {
+      setLiveTotals(null);
+      return;
+    }
+    let cancelled = false;
+    backendGet<{ totals: LiveTotals }>('/inventory-balances/live', { query: { companyId } })
+      .then((res) => {
+        if (!cancelled) setLiveTotals(res?.totals ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setLiveTotals(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canView, companyId]);
+
   useEffect(() => {
     // Drill-through from the operations dashboard "Out of Stock" / "Low Stock"
     // cards (e.g. ?lowStock=1).
@@ -216,10 +247,13 @@ export default function InventoryBalancesPage() {
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Total Lines" value={data?.total ?? 0} />
-        <StatCard label="Out of Stock" value={outOfStock} />
-        <StatCard label="Low Stock" value={lowStockCount} />
-        <StatCard label="Total Value (page)" value={'TZS ' + fmtNum(totalValue)} />
+        <StatCard label="Total Lines" value={liveTotals?.totalSkus ?? data?.total ?? 0} />
+        <StatCard label="Out of Stock" value={liveTotals?.out ?? outOfStock} />
+        <StatCard label="Low Stock" value={liveTotals?.low ?? lowStockCount} />
+        <StatCard
+          label={liveTotals ? 'Total Value' : 'Total Value (page)'}
+          value={'TZS ' + fmtNum(liveTotals?.totalValue ?? totalValue)}
+        />
       </div>
 
       <Card>
