@@ -9,6 +9,7 @@ import {
   StatCard,
   StatusBadge,
   Modal,
+  DetailDrawer,
   Btn,
   PageSpinner,
   FormSelect,
@@ -16,6 +17,7 @@ import {
 } from '@/components/ui';
 import {
   backendDelete,
+  backendGet,
   backendList,
   backendPage,
   backendPatch,
@@ -51,6 +53,8 @@ interface AdjustmentLine {
   countedQty: number;
   unitId: string;
   reason: string;
+  // UI-only: system qty was prefilled from the live balance, so it is read-only.
+  systemQtyLocked?: boolean;
 }
 
 interface StockAdjustment {
@@ -67,6 +71,33 @@ interface StockAdjustment {
   branch?: { name: string; code?: string | null } | null;
   lines?: AdjustmentLine[];
   _count?: { lines?: number } | null;
+}
+
+interface AdjustmentDetailLine {
+  id: string;
+  productId: string;
+  systemQuantity: number | string;
+  countedQuantity: number | string;
+  varianceQuantity: number | string;
+  reason?: string | null;
+  product?: { id: string; name: string; sku?: string | null } | null;
+  unit?: { id: string; name: string; symbol: string } | null;
+}
+interface AdjustmentDetail {
+  id: string;
+  adjustmentNumber?: string;
+  status: string;
+  reason: string;
+  notes?: string | null;
+  createdAt?: string;
+  approvedAt?: string | null;
+  postedAt?: string | null;
+  company?: { name: string } | null;
+  branch?: { name: string; code?: string | null } | null;
+  createdBy?: { fullName: string } | null;
+  approvedBy?: { fullName: string } | null;
+  postedBy?: { fullName: string } | null;
+  lines?: AdjustmentDetailLine[];
 }
 
 interface Paginated<T> {
@@ -162,6 +193,38 @@ function CreateAdjustmentModal({
   const addLine = () => setForm((f) => ({ ...f, lines: [...f.lines, BLANK_LINE()] }));
   const removeLine = (i: number) =>
     setForm((f) => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }));
+
+  // Prefill (and lock) System Qty from the live on-hand balance for the chosen
+  // product at the chosen branch, so variance = counted − actual stock. Falls back
+  // to an editable 0 when there is no balance row yet.
+  const prefillSystemQty = async (i: number, productId: string) => {
+    if (!productId || !form.companyId || !form.branchId) {
+      setLine(i, { systemQty: 0, systemQtyLocked: false });
+      return;
+    }
+    try {
+      const res = await backendPage<{ quantityOnHand: number | string }>('/inventory-balances', {
+        query: { companyId: form.companyId, productId, locationId: form.branchId, limit: 1 },
+      });
+      const row = res.data[0];
+      const onHand = row ? Number(row.quantityOnHand) : 0;
+      setLine(i, {
+        systemQty: Number.isFinite(onHand) ? onHand : 0,
+        systemQtyLocked: Boolean(row),
+      });
+    } catch {
+      setLine(i, { systemQtyLocked: false });
+    }
+  };
+
+  // Stock differs per branch — re-prefill every product line when the branch changes.
+  useEffect(() => {
+    if (!form.companyId || !form.branchId) return;
+    form.lines.forEach((l, i) => {
+      if (l.productId) void prefillSystemQty(i, l.productId);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.branchId]);
 
   const handleSubmit = async () => {
     if (!form.companyId) {
@@ -321,7 +384,11 @@ function CreateAdjustmentModal({
                       <td className="px-2 py-1">
                         <select
                           value={line.productId}
-                          onChange={(e) => setLine(i, { productId: e.target.value })}
+                          onChange={(e) => {
+                            const pid = e.target.value;
+                            setLine(i, { productId: pid });
+                            void prefillSystemQty(i, pid);
+                          }}
                           className="w-full text-xs border rounded px-2 py-1"
                           style={{
                             borderColor: 'var(--aurora-border)',
@@ -342,10 +409,20 @@ function CreateAdjustmentModal({
                           type="number"
                           value={line.systemQty}
                           onChange={(e) => setLine(i, { systemQty: Number(e.target.value) })}
-                          className="w-24 text-xs border rounded px-2 py-1"
+                          readOnly={line.systemQtyLocked}
+                          title={
+                            line.systemQtyLocked
+                              ? 'Prefilled from live stock on hand at this branch'
+                              : undefined
+                          }
+                          className={`w-24 text-xs border rounded px-2 py-1 ${
+                            line.systemQtyLocked ? 'opacity-70 cursor-not-allowed' : ''
+                          }`}
                           style={{
                             borderColor: 'var(--aurora-border)',
-                            background: 'var(--aurora-card)',
+                            background: line.systemQtyLocked
+                              ? 'var(--aurora-bg-subtle)'
+                              : 'var(--aurora-card)',
                             color: 'var(--aurora-text)',
                           }}
                         />
@@ -545,6 +622,9 @@ export default function StockAdjustmentsPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
   const [loadError, setLoadError] = useState('');
+  const [viewingId, setViewingId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<AdjustmentDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const canView = hasPermission('inventory.view');
   const canCreate = hasPermission('inventory.adjustments.create');
@@ -564,6 +644,29 @@ export default function StockAdjustmentsPage() {
       cancelled = true;
     };
   }, []);
+
+  // Detail drawer: fetch the full adjustment (lines + approval trail) on open.
+  useEffect(() => {
+    if (!viewingId) {
+      setDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setDetailLoading(true);
+    backendGet<AdjustmentDetail>(`/stock-adjustments/${viewingId}`)
+      .then((res) => {
+        if (!cancelled) setDetail(res);
+      })
+      .catch(() => {
+        if (!cancelled) setDetail(null);
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewingId]);
 
   const load = useCallback(async () => {
     if (!canView) return;
@@ -663,6 +766,107 @@ export default function StockAdjustmentsPage() {
           }}
         />
       )}
+
+      <DetailDrawer
+        open={Boolean(viewingId)}
+        title={detail?.adjustmentNumber ? `Adjustment ${detail.adjustmentNumber}` : 'Stock Adjustment'}
+        subtitle={detail?.company?.name ?? undefined}
+        width="lg"
+        onClose={() => setViewingId(null)}
+      >
+        {detailLoading || !detail ? (
+          <PageSpinner />
+        ) : (
+          <div className="space-y-5 text-sm">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <div>
+                <div className="text-xs uppercase text-slate-400">Status</div>
+                <div className="mt-1">
+                  <StatusBadge value={detail.status} />
+                </div>
+              </div>
+              <div>
+                <div className="text-xs uppercase text-slate-400">Branch / Location</div>
+                <div className="mt-1">{detail.branch?.name ?? '—'}</div>
+              </div>
+              <div className="col-span-2">
+                <div className="text-xs uppercase text-slate-400">Reason</div>
+                <div className="mt-1">{detail.reason || '—'}</div>
+              </div>
+              <div>
+                <div className="text-xs uppercase text-slate-400">Created by</div>
+                <div className="mt-1">{detail.createdBy?.fullName ?? '—'}</div>
+              </div>
+              {detail.approvedBy && (
+                <div>
+                  <div className="text-xs uppercase text-slate-400">Approved by</div>
+                  <div className="mt-1">{detail.approvedBy.fullName}</div>
+                </div>
+              )}
+              {detail.postedBy && (
+                <div>
+                  <div className="text-xs uppercase text-slate-400">Posted by</div>
+                  <div className="mt-1">{detail.postedBy.fullName}</div>
+                </div>
+              )}
+            </div>
+
+            {detail.notes && (
+              <div>
+                <div className="text-xs uppercase text-slate-400">Notes</div>
+                <div className="mt-1 whitespace-pre-wrap">{detail.notes}</div>
+              </div>
+            )}
+
+            <div>
+              <div className="text-xs uppercase text-slate-400 mb-2">Lines</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-slate-400 border-b" style={{ borderColor: 'var(--aurora-border)' }}>
+                      <th className="py-1.5 pr-2">Product</th>
+                      <th className="py-1.5 px-2 text-right">System</th>
+                      <th className="py-1.5 px-2 text-right">Counted</th>
+                      <th className="py-1.5 px-2 text-right">Variance</th>
+                      <th className="py-1.5 px-2">Unit</th>
+                      <th className="py-1.5 pl-2">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y" style={{ borderColor: 'var(--aurora-border)' }}>
+                    {(detail.lines ?? []).map((l) => {
+                      const variance = Number(l.varianceQuantity ?? 0);
+                      const fmt = (x: number | string) =>
+                        Number(x ?? 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
+                      return (
+                        <tr key={l.id}>
+                          <td className="py-1.5 pr-2">
+                            {l.product?.name ?? l.productId}
+                            {l.product?.sku ? (
+                              <span className="text-slate-400"> ({l.product.sku})</span>
+                            ) : null}
+                          </td>
+                          <td className="py-1.5 px-2 text-right tabular-nums">{fmt(l.systemQuantity)}</td>
+                          <td className="py-1.5 px-2 text-right tabular-nums">{fmt(l.countedQuantity)}</td>
+                          <td
+                            className={`py-1.5 px-2 text-right tabular-nums ${
+                              variance < 0 ? 'text-red-600' : variance > 0 ? 'text-emerald-600' : ''
+                            }`}
+                          >
+                            {variance > 0 ? '+' : ''}
+                            {fmt(l.varianceQuantity)}
+                          </td>
+                          <td className="py-1.5 px-2">{l.unit?.symbol ?? l.unit?.name ?? '—'}</td>
+                          <td className="py-1.5 pl-2">{l.reason ?? '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
 
       <PageHeader title="Stock Adjustments" subtitle="Reconcile inventory counts and corrections" />
 
@@ -776,7 +980,14 @@ export default function StockAdjustmentsPage() {
                 data.data.map((a) => (
                   <tr key={a.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono text-xs">
-                      {a.adjustmentNumber ?? a.id.slice(0, 8)}
+                      <button
+                        type="button"
+                        onClick={() => setViewingId(a.id)}
+                        className="text-blue-600 hover:underline"
+                        title="View adjustment details"
+                      >
+                        {a.adjustmentNumber ?? a.id.slice(0, 8)}
+                      </button>
                     </td>
                     <td className="px-4 py-3 text-xs">{a.company?.name ?? '—'}</td>
                     <td className="px-4 py-3 text-xs">
