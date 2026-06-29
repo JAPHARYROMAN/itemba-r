@@ -106,6 +106,9 @@ export class ProductCategoriesService {
   async update(id: string, dto: UpdateProductCategoryDto, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     await this.assertParentCategoryBelongsToCompany(dto.parentCategoryId, existing.companyId);
+    if (dto.parentCategoryId) {
+      await this.assertNoParentCycle(id, dto.parentCategoryId);
+    }
 
     const record = await this.prisma.productCategory.update({
       where: { id },
@@ -131,6 +134,34 @@ export class ProductCategoriesService {
     });
 
     return record;
+  }
+
+  /**
+   * Reject a parent assignment that would create a cycle in the category tree
+   * (self-parenting, or pointing at one of the category's own descendants) —
+   * which would otherwise break tree rendering and recursive walks.
+   */
+  private async assertNoParentCycle(categoryId: string, parentCategoryId: string) {
+    if (parentCategoryId === categoryId) {
+      throw new BadRequestException('A category cannot be its own parent');
+    }
+    const visited = new Set<string>();
+    let cursor: string | null = parentCategoryId;
+    while (cursor) {
+      if (cursor === categoryId) {
+        throw new BadRequestException(
+          'That parent category is a descendant of this category, which would create a cycle',
+        );
+      }
+      if (visited.has(cursor)) break; // pre-existing cycle upstream; stop walking
+      visited.add(cursor);
+      const parent: { parentCategoryId: string | null } | null =
+        await this.prisma.productCategory.findFirst({
+          where: { id: cursor, deletedAt: null },
+          select: { parentCategoryId: true },
+        });
+      cursor = parent?.parentCategoryId ?? null;
+    }
   }
 
   async remove(id: string, user: AuthUser) {
