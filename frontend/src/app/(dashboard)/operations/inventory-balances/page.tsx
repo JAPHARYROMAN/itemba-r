@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Card, PageHeader, StatCard, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendList, backendPage } from '@/lib/api-client';
@@ -315,7 +316,13 @@ export default function InventoryBalancesPage() {
                     <td className={`${tdCls} font-mono`}>{bal.product?.productCode ?? '—'}</td>
                     <td className={tdCls}>
                       <div className="flex items-center gap-2">
-                        {bal.product?.name ?? '—'}
+                        <Link
+                          href={`/operations/inventory-movements?companyId=${encodeURIComponent(bal.companyId)}&productId=${encodeURIComponent(bal.productId)}`}
+                          className="text-blue-600 hover:underline"
+                          title="View this product's stock movements"
+                        >
+                          {bal.product?.name ?? '—'}
+                        </Link>
                         <StockBadge balance={bal} />
                       </div>
                     </td>

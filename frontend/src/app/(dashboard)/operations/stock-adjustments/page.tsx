@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   Card,
   PageHeader,
@@ -842,6 +843,15 @@ export default function StockAdjustmentsPage() {
                             </Btn>
                           )}
                         </>
+                      )}
+                      {a.status === 'POSTED' && (
+                        <Link
+                          href={`/operations/inventory-movements?companyId=${encodeURIComponent(a.companyId)}&referenceType=StockAdjustment&referenceId=${encodeURIComponent(a.id)}`}
+                          className="text-xs text-blue-600 hover:underline"
+                          title="View the stock movements this adjustment posted"
+                        >
+                          Movements
+                        </Link>
                       )}
                       {(a.status === 'REJECTED' || a.status === 'CANCELLED') && canCreate && (
                         <Btn variant="ghost" size="xs" onClick={() => setDeleting(a)}>

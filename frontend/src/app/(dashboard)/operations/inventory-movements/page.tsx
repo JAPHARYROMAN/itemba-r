@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Card, PageHeader, StatCard, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendList, backendPage } from '@/lib/api-client';
@@ -63,6 +64,8 @@ interface InventoryMovement {
   unitCost: number;
   totalCost: number;
   referenceNumber?: string | null;
+  referenceType?: string | null;
+  referenceId?: string | null;
   notes?: string | null;
   productId: string;
   companyId: string;
@@ -155,6 +158,34 @@ function fmtDate(d?: string | null) {
   });
 }
 
+// Source documents that have a per-id detail route today. Others (StockAdjustment,
+// PurchaseOrder, GoodsReceivedNote) are shown as a readable label until their
+// detail routes land in later tickets.
+const REFERENCE_ROUTES: Record<string, (id: string) => string> = {
+  SalesOrder: (id) => `/operations/sales-orders/${id}`,
+};
+
+function ReferenceCell({ mov }: { mov: InventoryMovement }) {
+  if (!mov.referenceType || !mov.referenceId) {
+    return <span className="text-slate-400">—</span>;
+  }
+  const label = mov.referenceType.replace(/([a-z])([A-Z])/g, '$1 $2');
+  const short = mov.referenceId.slice(0, 8);
+  const href = REFERENCE_ROUTES[mov.referenceType]?.(mov.referenceId);
+  if (href) {
+    return (
+      <Link href={href} className="text-blue-600 hover:underline">
+        {label} · {short}
+      </Link>
+    );
+  }
+  return (
+    <span title={`${mov.referenceType} ${mov.referenceId}`}>
+      {label} · <span className="text-slate-500">{short}</span>
+    </span>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function InventoryMovementsPage() {
@@ -166,12 +197,26 @@ export default function InventoryMovementsPage() {
   const [companyId, setCompanyId] = useState('');
   const [productId, setProductId] = useState('');
   const [movementType, setMovementType] = useState('');
+  const [referenceType, setReferenceType] = useState('');
+  const [referenceId, setReferenceId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
   const [error, setError] = useState('');
 
   const canView = hasPermission('inventory.movements.view');
+
+  useEffect(() => {
+    // Drill-through: hydrate filters from the URL — e.g. a balance row links here
+    // with ?companyId&productId, and a source document with ?referenceType&referenceId.
+    const params = new URLSearchParams(window.location.search);
+    const get = (k: string) => params.get(k) ?? '';
+    if (get('companyId')) setCompanyId(get('companyId'));
+    if (get('productId')) setProductId(get('productId'));
+    if (get('movementType')) setMovementType(get('movementType'));
+    if (get('referenceType')) setReferenceType(get('referenceType'));
+    if (get('referenceId')) setReferenceId(get('referenceId'));
+  }, []);
 
   useEffect(() => {
     if (!canView) return;
@@ -206,6 +251,8 @@ export default function InventoryMovementsPage() {
           companyId: companyId || undefined,
           productId: productId || undefined,
           movementType: movementType || undefined,
+          referenceType: referenceType || undefined,
+          referenceId: referenceId || undefined,
           dateFrom: dateFrom || undefined,
           dateTo: dateTo || undefined,
         },
@@ -217,7 +264,7 @@ export default function InventoryMovementsPage() {
     } finally {
       setLoading(false);
     }
-  }, [canView, page, companyId, productId, movementType, dateFrom, dateTo]);
+  }, [canView, page, companyId, productId, movementType, referenceType, referenceId, dateFrom, dateTo]);
 
   useEffect(() => {
     load();
@@ -402,7 +449,9 @@ export default function InventoryMovementsPage() {
                     </td>
                     <td className={`${tdCls} text-right font-mono`}>{fmtTZS(mov.unitCost)}</td>
                     <td className={`${tdCls} text-right font-mono`}>{fmtTZS(mov.totalCost)}</td>
-                    <td className={`${tdCls} font-mono text-xs`}>{mov.referenceNumber ?? '—'}</td>
+                    <td className={`${tdCls} font-mono text-xs`}>
+                      <ReferenceCell mov={mov} />
+                    </td>
                     <td className={tdCls}>{mov.createdBy?.fullName ?? '—'}</td>
                     <td
                       className={`${tdCls} max-w-[160px] truncate`}
