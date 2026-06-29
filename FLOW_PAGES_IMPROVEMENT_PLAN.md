@@ -225,14 +225,16 @@ These are the moves that matter most, money/lifecycle bugs first:
 ### Phase 1 — Correctness blockers + quick wins (P0 + P1-low-effort)
 Ship the money/lifecycle holes and the cheap structural fixes first. Several P0s share a backend pass.
 
-- **Ticket 1.1 — Supplier-invoice approve hardening (backend pass).** Status CAS, partial unique `Payable(companyId,sourceType,sourceId)`, pass `tx` into `createThreeWayMatch:748`, soft-delete stale matches on edit-to-DRAFT, `sum(lineTotal)==totalAmount` re-check. *(P0/P1; supplier-invoices §3.8)*
-- **Ticket 1.2 — Three-way-matching trust + gating.** Extract shared computed matcher, make variance fields read-only, server recompute-and-verify, dedup unique index, flip invoice status in-tx, enforce PO link, add permission gates, server-side matchNumber. *(P0/P1; §3.9)* **Depends on 1.1** (shared matcher + unique-index migration land together).
-- **Ticket 1.3 — Sales-order cancel money guard.** Block/refund cancel of paid orders; post reversing journal + reverse cash on cash-sale cancel. *(P0; §3.2/3.3)*
-- **Ticket 1.4 — Profit NULL-COGS flagging + cascade fix.** `linesMissingCost`/`revenueMissingCost`, badge cards, fix empty-state copy, fix Division→Branch filter, Fix-Cost confirm-dialog (interim). *(P0/P1; §3.5)*
-- **Ticket 1.5 — Confirm-dialogs for all ledger-posting actions** (SO/PO Confirm/Cancel; GRN Post) + truthful toasts. *(P1; cross-cutting)*
-- **Ticket 1.6 — Cancel-gate alignment** (PO + SO UI gates match backend allow-lists). *(P1/P2 low-effort; §3.1/3.3)*
-- **Ticket 1.7 — POS tender-type fix.** Stop deriving `paymentMethod` from account type so the recorded tender, GL reference, and receipt match the operator's choice. *(P1; §3.4; standalone, no deps)*
-- **Ticket 1.8 — GRN list resurrection.** Fix the backend `findAll` response shape (`{data:items,…}`) so the register stops rendering empty — a prerequisite for the Phase-2 GRN rebuild. *(P0; §3.7)*
+> **Status: Phase 1 implemented** on branch `inventory-pages-phase1` (backend+frontend typecheck clean; affected specs pass). Remaining deferrals called out per ticket below.
+
+- ✅ **Ticket 1.1 — Supplier-invoice atomic approve.** Done: guarded status claim via `updateMany` (count===1 or `ConflictException`); final update only sets `payableId`. **Deferred:** the partial unique index on `Payable(companyId,sourceType,sourceId) WHERE deletedAt IS NULL` (needs a data dedup pass — would fail `migrate deploy` on existing duplicates), plus the `tx`-into-`createThreeWayMatch`/soft-delete-stale-match/`sum(lineTotal)==totalAmount` sub-items. *(P0/P1; §3.8)*
+- ✅ **Ticket 1.2 — Three-way-match computed variance.** Done: shared Decimal `three-way-match-calculator.ts` recomputes variances in `create()` + `approve()`; JE posts against the recomputed amount; `create()` now requires a supplier invoice. **Deferred:** migrate supplier-invoices.service onto the same calculator (full dedupe); server-generate `matchNumber`; permission gating + raw-`fetch`→client migration on the FE. *(P0/P1; §3.9)*
+- ✅ **Ticket 1.3 — Sales-order cancel money guard.** Done: cancel is blocked once payment is collected (`paidAmount>0` or `paymentStatus!=UNPAID`), directing to a refund/credit note. (Auto-refund + reversing journal remains a larger follow-up.) *(P0; §3.2/3.3)*
+- ✅ **Ticket 1.4 — Profit NULL-COGS flagging.** Done: `linesMissingCost`/`revenueMissingCost` (stock-only), banner + card hints + per-row tag, fixed empty-state copy. **Deferred:** Division→Branch filter fix and Fix-Cost confirm-dialog (separate items in §3.5). *(P0/P1; §3.5)*
+- ✅ **Ticket 1.5 — Confirm-dialogs** on SO/PO Confirm & Cancel (GRN Post lands with the §2.2 rebuild). *(P1)*
+- ✅ **Ticket 1.6 — Cancel-gate alignment** (SO→CONFIRMED only; PO drops RECEIVED). *(P1/P2; §3.1/3.3)*
+- ✅ **Ticket 1.7 — POS tender-type fix.** Done: checkout sends the operator's `settings.paymentMethod`; account selectors only nudge when genuinely incompatible (`reconcilePaymentMethod`). *(P1; §3.4)*
+- ✅ **Ticket 1.8 — GRN list resurrection.** Done: backend `findAll` returns `data`+`totalPages` (keeps `items`); page moved to `backendPage` with a permission gate + error state. *(P0; §3.7)*
 
 ### Phase 2 — High-value structural (chains, valuation, lifecycle)
 - **Ticket 2.1 — Landed-cost reconciliation** (add GRN line `unitCost`, re-value WAC on invoice approve / three-way match). *(P0 valuation; §2, §3.7, §3.8)* **Depends on 1.1/1.2** (revaluation hooks into the hardened approve/match path). **[INV]**
