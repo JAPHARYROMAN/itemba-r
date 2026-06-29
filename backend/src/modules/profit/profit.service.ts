@@ -319,7 +319,15 @@ export class ProfitService {
         ...(query.productId ? { productId: query.productId } : {}),
       },
       include: {
-        product: { select: { id: true, productCode: true, name: true } },
+        product: {
+          select: {
+            id: true,
+            productCode: true,
+            name: true,
+            productType: true,
+            trackInventory: true,
+          },
+        },
         salesOrder: {
           select: {
             id: true,
@@ -338,12 +346,22 @@ export class ProfitService {
     const byProduct = new Map<string, any>();
     let revenue = 0;
     let cogs = 0;
+    let linesMissingCost = 0;
+    let revenueMissingCost = 0;
     for (const line of lines) {
       const quantity = Number(line.quantity);
       const netSalesAmount = roundMoney(
         quantity * Number(line.unitPrice) - Number(line.discountAmount ?? 0),
       );
       const lineCogs = Number(line.cogsAmount ?? 0);
+      // A stock line with no snapshotted cost contributes full revenue and 0 cost,
+      // overstating gross profit. Flag it (don't drop it). Non-stock/service lines
+      // legitimately carry no COGS and are not flagged.
+      const cogsMissing = line.cogsAmount == null && this.isStockProduct(line.product);
+      if (cogsMissing) {
+        linesMissingCost += 1;
+        revenueMissingCost += netSalesAmount;
+      }
       revenue += netSalesAmount;
       cogs += lineCogs;
       const key = line.productId;
@@ -359,6 +377,7 @@ export class ProfitService {
           grossProfit: 0,
           grossMarginPct: 0,
           salesCount: 0,
+          hasMissingCost: false,
         };
       row.quantity += quantity;
       row.revenue += netSalesAmount;
@@ -366,6 +385,7 @@ export class ProfitService {
       row.grossProfit = row.revenue - row.cogs;
       row.grossMarginPct = row.revenue > 0 ? roundPercent((row.grossProfit / row.revenue) * 100) : 0;
       row.salesCount += 1;
+      if (cogsMissing) row.hasMissingCost = true;
       byProduct.set(key, row);
     }
 
@@ -378,6 +398,8 @@ export class ProfitService {
         grossProfit,
         grossMarginPct: revenue > 0 ? roundPercent((grossProfit / revenue) * 100) : 0,
         costGaps: gaps.total,
+        linesMissingCost,
+        revenueMissingCost: roundMoney(revenueMissingCost),
       },
       products: Array.from(byProduct.values()).map((row) => ({
         ...row,

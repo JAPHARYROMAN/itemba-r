@@ -12,6 +12,8 @@ interface ProfitSummary {
   grossProfit: number;
   grossMarginPct: number;
   costGaps: number;
+  linesMissingCost?: number;
+  revenueMissingCost?: number;
 }
 
 interface ProductProfitRow {
@@ -24,6 +26,7 @@ interface ProductProfitRow {
   grossProfit: number;
   grossMarginPct: number;
   salesCount: number;
+  hasMissingCost?: boolean;
 }
 
 interface CostGapRow {
@@ -483,13 +486,35 @@ export default function OperationsProfitPage() {
         <PageSpinner />
       ) : (
         <>
+          {(summary?.linesMissingCost ?? 0) > 0 && (
+            <div
+              role="status"
+              className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+            >
+              <strong>Gross profit may be overstated.</strong>{' '}
+              {summary?.linesMissingCost} sales line
+              {(summary?.linesMissingCost ?? 0) === 1 ? '' : 's'} ({fmtMoney(summary?.revenueMissingCost)}{' '}
+              revenue) have no recorded cost, so their cost is counted as zero. Resolve the cost gaps
+              below for an accurate figure.
+            </div>
+          )}
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <StatCard label="Revenue" value={fmtMoney(summary?.revenue)} countUp={false} />
+            <StatCard
+              label="Revenue"
+              value={fmtMoney(summary?.revenue)}
+              hint={
+                (summary?.linesMissingCost ?? 0) > 0
+                  ? `${summary?.linesMissingCost} line(s) without cost`
+                  : undefined
+              }
+              countUp={false}
+            />
             <StatCard label="COGS" value={fmtMoney(summary?.cogs)} countUp={false} />
             <StatCard
               label="Gross Profit"
               value={fmtMoney(summary?.grossProfit)}
               variant={(summary?.grossProfit ?? 0) >= 0 ? 'green' : 'red'}
+              hint={(summary?.linesMissingCost ?? 0) > 0 ? 'May be overstated' : undefined}
               countUp={false}
             />
             <StatCard
@@ -526,7 +551,7 @@ export default function OperationsProfitPage() {
                   {products.length === 0 ? (
                     <tr>
                       <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={7}>
-                        No confirmed sales with profit snapshots in this filter.
+                        No confirmed sales in this filter.
                       </td>
                     </tr>
                   ) : (
@@ -535,6 +560,11 @@ export default function OperationsProfitPage() {
                         <td className="px-4 py-3">
                           <div className="font-medium">{row.productName}</div>
                           <div className="text-xs text-slate-500">{row.productCode ?? '-'}</div>
+                          {row.hasMissingCost && (
+                            <span className="mt-0.5 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                              cost missing
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums">{fmtNumber(row.quantity, 4)}</td>
                         <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(row.revenue)}</td>

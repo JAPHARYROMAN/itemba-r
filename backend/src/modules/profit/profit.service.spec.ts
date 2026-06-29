@@ -92,3 +92,44 @@ describe('ProfitService no-loss rules', () => {
     );
   });
 });
+
+describe('ProfitService productSummary missing-cost flagging', () => {
+  it('flags only stock lines that have no recorded cost', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrderLine = {
+      findMany: jest.fn(async () => [
+        {
+          productId: 'p1',
+          quantity: 2,
+          unitPrice: 100,
+          discountAmount: 0,
+          cogsAmount: null, // stock line, no snapshot → flagged
+          product: { id: 'p1', productCode: 'P1', name: 'Steel', productType: 'STOCK_ITEM', trackInventory: true },
+        },
+        {
+          productId: 'p2',
+          quantity: 1,
+          unitPrice: 50,
+          discountAmount: 0,
+          cogsAmount: 30, // costed → not flagged
+          product: { id: 'p2', productCode: 'P2', name: 'Pipe', productType: 'STOCK_ITEM', trackInventory: true },
+        },
+        {
+          productId: 'p3',
+          quantity: 1,
+          unitPrice: 40,
+          discountAmount: 0,
+          cogsAmount: null, // service, no COGS by design → not flagged
+          product: { id: 'p3', productCode: 'P3', name: 'Install', productType: 'SERVICE', trackInventory: false },
+        },
+      ]),
+    };
+    jest.spyOn(service as any, 'salesOrderWhere').mockResolvedValue({});
+    jest.spyOn(service as any, 'costGaps').mockResolvedValue({ total: 0 });
+
+    const result = await service.productSummary({}, { id: 'u1' } as any);
+
+    expect(result.summary.linesMissingCost).toBe(1);
+    expect(result.summary.revenueMissingCost).toBe(200);
+  });
+});
