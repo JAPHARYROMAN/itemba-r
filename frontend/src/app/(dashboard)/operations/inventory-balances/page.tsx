@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, ProductPicker, StatCard, PageSpinner } from '@/components/ui';
+import { Btn, Card, PageHeader, PageToolbar, ProductPicker, StatCard, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList, backendPage } from '@/lib/api-client';
 import { toFiniteNumber } from '@/lib/design-system/formatters';
@@ -47,8 +47,15 @@ function emptyPaginated<T>(page = 1): Paginated<T> {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const tdCls = 'px-4 py-2 text-sm text-slate-700';
-const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';
+const tdCls = 'px-4 py-3 text-sm';
+const thCls = 'px-4 py-3';
+const filterSelectCls =
+  'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
+const filterStyle = {
+  borderColor: 'var(--aurora-border)',
+  background: 'var(--aurora-card)',
+  color: 'var(--aurora-text)',
+} as const;
 
 function fmtNum(n: number | string | null | undefined, decimals = 2) {
   return new Intl.NumberFormat('en-US', {
@@ -248,16 +255,22 @@ export default function InventoryBalancesPage() {
         />
       </div>
 
-      <Card>
-        <div className="px-5 py-4 border-b border-slate-100">
-          <div className="flex items-center gap-3 flex-wrap">
+      <PageToolbar
+        actions={
+          <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+            {data?.total ?? 0} records
+          </span>
+        }
+        filters={
+          <>
             <select
               value={companyId}
               onChange={(e) => {
                 reset(setCompanyId)(e.target.value);
                 setPage(1);
               }}
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
+              className={filterSelectCls}
+              style={filterStyle}
             >
               <option value="">Select Company (required)…</option>
               {companies.map((c) => (
@@ -271,9 +284,12 @@ export default function InventoryBalancesPage() {
               onChange={(id) => reset(setProductId)(id)}
               companyId={companyId}
               placeholder="All products"
-              className="w-64"
+              className="w-56"
             />
-            <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+            <label
+              className="flex items-center gap-1.5 text-sm cursor-pointer"
+              style={{ color: 'var(--aurora-text-secondary)' }}
+            >
               <input
                 type="checkbox"
                 checked={lowStock}
@@ -285,21 +301,24 @@ export default function InventoryBalancesPage() {
               />
               Low stock only
             </label>
-            <div className="ml-auto">
-              <span className="text-xs text-slate-400">{data?.total ?? 0} records</span>
-            </div>
-          </div>
-          {!companyId && (
-            <p className="mt-2 text-xs text-amber-600">
-              Please select a company to load inventory balances.
-            </p>
-          )}
-        </div>
+          </>
+        }
+      />
 
+      {!companyId && (
+        <p className="-mt-2 text-xs text-amber-600">
+          Please select a company to load inventory balances.
+        </p>
+      )}
+
+      <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px]">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
+          <table className="w-full text-sm min-w-[900px]">
+            <thead>
+              <tr
+                className="text-left text-xs uppercase bg-gray-50"
+                style={{ color: 'var(--aurora-text-muted)' }}
+              >
                 <th className={thCls}>Product Code</th>
                 <th className={thCls}>Product Name</th>
                 <th className={thCls}>Branch / Location</th>
@@ -383,25 +402,30 @@ export default function InventoryBalancesPage() {
         </div>
 
         {data && data.totalPages > 1 && (
-          <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between">
-            <span className="text-xs text-slate-400">
-              Page {page} of {data.totalPages}
+          <div
+            className="px-5 py-3 border-t flex items-center justify-between"
+            style={{ borderColor: 'var(--aurora-border)' }}
+          >
+            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              Page {page} of {data.totalPages} · {data.total} total
             </span>
             <div className="flex gap-2">
-              <button
+              <Btn
+                variant="secondary"
+                size="xs"
                 disabled={page <= 1}
                 onClick={() => setPage((p) => p - 1)}
-                className="text-xs px-3 py-1.5 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
               >
                 Previous
-              </button>
-              <button
+              </Btn>
+              <Btn
+                variant="secondary"
+                size="xs"
                 disabled={page >= data.totalPages}
                 onClick={() => setPage((p) => p + 1)}
-                className="text-xs px-3 py-1.5 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
               >
                 Next
-              </button>
+              </Btn>
             </div>
           </div>
         )}

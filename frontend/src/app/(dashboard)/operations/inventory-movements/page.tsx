@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, ProductPicker, StatCard, PageSpinner } from '@/components/ui';
+import { Btn, Card, PageHeader, PageToolbar, ProductPicker, StatCard, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendList, backendPage } from '@/lib/api-client';
 
@@ -88,8 +88,15 @@ function emptyPaginated<T>(page = 1): Paginated<T> {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const tdCls = 'px-4 py-2 text-sm text-slate-700';
-const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';
+const tdCls = 'px-4 py-3 text-sm';
+const thCls = 'px-4 py-3';
+const filterSelectCls =
+  'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
+const filterStyle = {
+  borderColor: 'var(--aurora-border)',
+  background: 'var(--aurora-card)',
+  color: 'var(--aurora-text)',
+} as const;
 
 const MOVEMENT_TYPE_STYLES: Record<string, string> = {
   OPENING_STOCK: 'bg-purple-100 text-purple-700',
@@ -348,16 +355,22 @@ export default function InventoryMovementsPage() {
         <StatCard label="Total Cost (page)" value={'TZS ' + fmtNum(totalCost)} />
       </div>
 
-      <Card>
-        <div className="px-5 py-4 border-b border-slate-100">
-          <div className="flex items-center gap-3 flex-wrap">
+      <PageToolbar
+        actions={
+          <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+            {data?.total ?? 0} movements
+          </span>
+        }
+        filters={
+          <>
             <select
               value={companyId}
               onChange={(e) => {
                 setLocationId('');
                 reset(setCompanyId)(e.target.value);
               }}
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
+              className={filterSelectCls}
+              style={filterStyle}
             >
               <option value="">All Companies</option>
               {companies.map((c) => (
@@ -371,7 +384,8 @@ export default function InventoryMovementsPage() {
               onChange={(e) => reset(setLocationId)(e.target.value)}
               disabled={!companyId}
               title="Branch / location"
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none disabled:opacity-50"
+              className={`${filterSelectCls} disabled:opacity-50`}
+              style={filterStyle}
             >
               <option value="">All Branches</option>
               {branches.map((b) => (
@@ -385,12 +399,13 @@ export default function InventoryMovementsPage() {
               onChange={(id) => reset(setProductId)(id)}
               companyId={companyId}
               placeholder="All products"
-              className="w-64"
+              className="w-56"
             />
             <select
               value={movementType}
               onChange={(e) => reset(setMovementType)(e.target.value)}
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
+              className={filterSelectCls}
+              style={filterStyle}
             >
               <option value="">All Types</option>
               {MOVEMENT_TYPES.map((t) => (
@@ -403,26 +418,32 @@ export default function InventoryMovementsPage() {
               type="date"
               value={dateFrom}
               onChange={(e) => reset(setDateFrom)(e.target.value)}
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
+              className={filterSelectCls}
+              style={filterStyle}
               title="Date from"
+              aria-label="Date from"
             />
             <input
               type="date"
               value={dateTo}
               onChange={(e) => reset(setDateTo)(e.target.value)}
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
+              className={filterSelectCls}
+              style={filterStyle}
               title="Date to"
+              aria-label="Date to"
             />
-            <div className="ml-auto">
-              <span className="text-xs text-slate-400">{data?.total ?? 0} movements</span>
-            </div>
-          </div>
-        </div>
+          </>
+        }
+      />
 
+      <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1000px]">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
+          <table className="w-full text-sm min-w-[1000px]">
+            <thead>
+              <tr
+                className="text-left text-xs uppercase bg-gray-50"
+                style={{ color: 'var(--aurora-text-muted)' }}
+              >
                 <th className={thCls}>Movement #</th>
                 <th className={thCls}>Date</th>
                 <th className={thCls}>Product</th>
@@ -512,25 +533,30 @@ export default function InventoryMovementsPage() {
         </div>
 
         {data && data.totalPages > 1 && (
-          <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between">
-            <span className="text-xs text-slate-400">
-              Page {page} of {data.totalPages}
+          <div
+            className="px-5 py-3 border-t flex items-center justify-between"
+            style={{ borderColor: 'var(--aurora-border)' }}
+          >
+            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              Page {page} of {data.totalPages} · {data.total} total
             </span>
             <div className="flex gap-2">
-              <button
+              <Btn
+                variant="secondary"
+                size="xs"
                 disabled={page <= 1}
                 onClick={() => setPage((p) => p - 1)}
-                className="text-xs px-3 py-1.5 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
               >
                 Previous
-              </button>
-              <button
+              </Btn>
+              <Btn
+                variant="secondary"
+                size="xs"
                 disabled={page >= data.totalPages}
                 onClick={() => setPage((p) => p + 1)}
-                className="text-xs px-3 py-1.5 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
               >
                 Next
-              </button>
+              </Btn>
             </div>
           </div>
         )}
