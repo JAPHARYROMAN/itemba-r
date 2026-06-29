@@ -336,6 +336,19 @@ function accountMatchesPaymentMethod(account: CashAccount, paymentMethod: string
   }
 }
 
+/**
+ * Keep the operator's chosen payment method when the picked account can carry it
+ * (e.g. BANK_CARD on a BANK account); only fall back to the account's default
+ * method when the two are genuinely incompatible. Never silently rewrite a
+ * compatible choice — that corrupts the recorded tender, the GL reference, and
+ * the receipt.
+ */
+function reconcilePaymentMethod(currentMethod: string, account?: CashAccount | null) {
+  if (!account) return currentMethod;
+  if (accountMatchesPaymentMethod(account, currentMethod)) return currentMethod;
+  return paymentMethodForAccount(account) ?? currentMethod;
+}
+
 function emptyReceiptAccountHint(method: string) {
   switch (method) {
     case 'CASH':
@@ -1207,7 +1220,7 @@ export function MobilePosSaleEntry() {
         salesType: settings.salesType || 'CASH_SALE',
         orderDate: settings.orderDate || todayIsoDate(),
         currency: settings.currency || 'TZS',
-        paymentMethod: paymentMethodForAccount(selectedAccount) ?? settings.paymentMethod,
+        paymentMethod: settings.paymentMethod,
         cashAccountId: settings.cashAccountId,
         idempotencyKey: idempotencyKeyRef.current,
         lines: cart.map((line) => ({
@@ -1692,7 +1705,7 @@ export function MobilePosSaleEntry() {
                   setSettings((current) => ({
                     ...current,
                     cashAccountId: event.target.value,
-                    paymentMethod: paymentMethodForAccount(account) ?? current.paymentMethod,
+                    paymentMethod: reconcilePaymentMethod(current.paymentMethod, account),
                   }));
                 }}
                 disabled={!settings.branchId || cashAccountsLoading || Boolean(confirmed)}
@@ -2605,7 +2618,7 @@ function SettingsModal({
                 );
                 onChange({
                   cashAccountId: event.target.value,
-                  paymentMethod: paymentMethodForAccount(account) ?? settings.paymentMethod,
+                  paymentMethod: reconcilePaymentMethod(settings.paymentMethod, account),
                 });
               }}
               placeholder={cashAccountsLoading ? 'Loading accounts' : 'Select account'}
