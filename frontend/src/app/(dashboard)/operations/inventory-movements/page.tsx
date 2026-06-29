@@ -13,6 +13,11 @@ interface Company {
   name: string;
   code: string;
 }
+interface Branch {
+  id: string;
+  name: string;
+  code?: string | null;
+}
 type MovementType =
   | 'OPENING_STOCK'
   | 'PURCHASE_RECEIPT'
@@ -186,9 +191,11 @@ function ReferenceCell({ mov }: { mov: InventoryMovement }) {
 export default function InventoryMovementsPage() {
   const { hasPermission } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [data, setData] = useState<Paginated<InventoryMovement> | null>(null);
   const [loading, setLoading] = useState(true);
   const [companyId, setCompanyId] = useState('');
+  const [locationId, setLocationId] = useState('');
   const [productId, setProductId] = useState('');
   const [movementType, setMovementType] = useState('');
   const [referenceType, setReferenceType] = useState('');
@@ -210,6 +217,7 @@ export default function InventoryMovementsPage() {
     if (get('movementType')) setMovementType(get('movementType'));
     if (get('referenceType')) setReferenceType(get('referenceType'));
     if (get('referenceId')) setReferenceId(get('referenceId'));
+    if (get('locationId')) setLocationId(get('locationId'));
   }, []);
 
   useEffect(() => {
@@ -231,6 +239,27 @@ export default function InventoryMovementsPage() {
     };
   }, [canView]);
 
+  // Branches for the selected company (the branch/location filter).
+  useEffect(() => {
+    if (!canView || !companyId) {
+      setBranches([]);
+      return;
+    }
+    let cancelled = false;
+    backendList<Branch>('/branches', {
+      query: { companyId, activeOnly: true, limit: 200 },
+    })
+      .then((rows) => {
+        if (!cancelled) setBranches(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setBranches([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canView, companyId]);
+
   const load = useCallback(async () => {
     if (!canView) return;
     setLoading(true);
@@ -241,6 +270,7 @@ export default function InventoryMovementsPage() {
           page,
           limit: 20,
           companyId: companyId || undefined,
+          locationId: locationId || undefined,
           productId: productId || undefined,
           movementType: movementType || undefined,
           referenceType: referenceType || undefined,
@@ -256,7 +286,18 @@ export default function InventoryMovementsPage() {
     } finally {
       setLoading(false);
     }
-  }, [canView, page, companyId, productId, movementType, referenceType, referenceId, dateFrom, dateTo]);
+  }, [
+    canView,
+    page,
+    companyId,
+    locationId,
+    productId,
+    movementType,
+    referenceType,
+    referenceId,
+    dateFrom,
+    dateTo,
+  ]);
 
   useEffect(() => {
     load();
@@ -312,13 +353,30 @@ export default function InventoryMovementsPage() {
           <div className="flex items-center gap-3 flex-wrap">
             <select
               value={companyId}
-              onChange={(e) => reset(setCompanyId)(e.target.value)}
+              onChange={(e) => {
+                setLocationId('');
+                reset(setCompanyId)(e.target.value);
+              }}
               className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
             >
               <option value="">All Companies</option>
               {companies.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={locationId}
+              onChange={(e) => reset(setLocationId)(e.target.value)}
+              disabled={!companyId}
+              title="Branch / location"
+              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none disabled:opacity-50"
+            >
+              <option value="">All Branches</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.code ? `${b.code} - ${b.name}` : b.name}
                 </option>
               ))}
             </select>

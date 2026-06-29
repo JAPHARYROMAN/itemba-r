@@ -597,6 +597,8 @@ export default function StockAdjustmentsPage() {
   const [loading, setLoading] = useState(true);
   const [companyId, setCompanyId] = useState('');
   const [status, setStatus] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [rejecting, setRejecting] = useState<string | null>(null);
@@ -662,6 +664,8 @@ export default function StockAdjustmentsPage() {
             limit: 20,
             companyId: companyId || undefined,
             status: status || undefined,
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
           },
         }),
       );
@@ -671,7 +675,7 @@ export default function StockAdjustmentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [canView, page, companyId, status]);
+  }, [canView, page, companyId, status, dateFrom, dateTo]);
 
   useEffect(() => {
     load();
@@ -913,6 +917,30 @@ export default function StockAdjustmentsPage() {
               <option value="POSTED">Posted</option>
               <option value="CANCELLED">Cancelled</option>
             </select>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => {
+                setDateFrom(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+              title="From date"
+              aria-label="From date"
+            />
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => {
+                setDateTo(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+              title="To date"
+              aria-label="To date"
+            />
           </>
         }
         actions={
