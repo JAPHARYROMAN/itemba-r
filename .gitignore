@@ -26,6 +26,9 @@ out/
 logs/
 *.log
 npm-debug.log*
+# ...but not Next.js app routes that happen to be named "logs" (e.g. api-gateway/logs)
+!frontend/src/app/**/logs/
+!frontend/src/app/**/logs/**
 
 # Local agent/app state
 .claude/
