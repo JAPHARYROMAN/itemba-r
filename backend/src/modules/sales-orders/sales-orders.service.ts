@@ -2189,6 +2189,91 @@ export class SalesOrdersService {
   }
 
   /**
+   * Post a balanced reversing journal entry that exactly unwinds the
+   * confirmation entry for a sales order being cancelled (DECISION 2).
+   *
+   * Looks up the original POSTED journal (preferring the stored
+   * `journalEntryId`, falling back to the SalesOrder reference) and posts a new
+   * entry that swaps debit and credit on EVERY original line. Swapping each line
+   * always balances (the original balanced) and exactly offsets the original's
+   * AR/Cash, Revenue, VAT and COGS/Inventory impact. Runs inside the caller's
+   * cancellation transaction so the GL reversal commits atomically with the
+   * receivable cancellation and stock return.
+   *
+   * No-op (returns null) when the order has no traceable confirmation journal —
+   * e.g. a DRAFT that never posted — so cancelling such an order is safe.
+   */
+  private async reverseSalesOrderJournal(
+    tx: Prisma.TransactionClient,
+    order: { id: string; companyId: string; salesOrderNumber: string; journalEntryId?: string | null; orderDate: Date },
+    userId: string,
+  ): Promise<{ id: string; journalNumber: string } | null> {
+    const original = order.journalEntryId
+      ? await tx.journalEntry.findFirst({
+          where: { id: order.journalEntryId, companyId: order.companyId, deletedAt: null },
+          include: { lines: true },
+        })
+      : await tx.journalEntry.findFirst({
+          where: {
+            companyId: order.companyId,
+            referenceType: 'SalesOrder',
+            referenceId: order.id,
+            deletedAt: null,
+          },
+          include: { lines: true },
+          orderBy: { createdAt: 'desc' },
+        });
+
+    if (!original || original.lines.length === 0) return null;
+    // Already reversed: don't post a second reversal that would double the swing.
+    if (original.status === 'REVERSED') return null;
+
+    const reversedLines = original.lines.map((line) => ({
+      accountId: line.accountId,
+      // Swap each side: a debit becomes a credit of the same magnitude and
+      // vice-versa. A zero stays zero.
+      debit: roundMoney(Number(line.credit ?? 0)),
+      credit: roundMoney(Number(line.debit ?? 0)),
+      description: `Reversal: ${line.description ?? ''}`.trim(),
+      divisionId: line.divisionId ?? undefined,
+      branchId: line.branchId ?? undefined,
+    }));
+
+    const reversal = await this.postingEngine.postLines(
+      {
+        companyId: original.companyId,
+        divisionId: original.divisionId,
+        branchId: original.branchId,
+        transactionDate: new Date(),
+        description: `Reversal of sales order ${order.salesOrderNumber}`,
+        referenceType: 'SalesOrder',
+        referenceId: order.id,
+        moduleName: 'sales-orders',
+        userId,
+        lines: reversedLines,
+      },
+      tx,
+    );
+
+    // Link the two entries the same way journal-entries.reverse() does: the
+    // REVERSAL entry carries reversalOfId -> original, and the ORIGINAL is
+    // flipped to REVERSED (with reversedAt) so reconciliation can pair them and
+    // a re-cancel can't double-reverse it.
+    await Promise.all([
+      tx.journalEntry.update({
+        where: { id: reversal.id },
+        data: { reversalOfId: original.id },
+      }),
+      tx.journalEntry.update({
+        where: { id: original.id },
+        data: { status: 'REVERSED', reversedAt: new Date(), reversedById: userId },
+      }),
+    ]);
+
+    return reversal;
+  }
+
+  /**
    * One-shot create + confirm in a single operator action — the heart of the
    * Quick Sale flow (Westsides W2). Internally still creates the SalesOrder
    * first (its own transaction) then confirms (a second transaction that
@@ -2266,8 +2351,16 @@ export class SalesOrdersService {
     dto: CreateSalesOrderDto,
     user: AuthUser,
   ) {
+    // IMPORTANT (#32): do NOT filter by deletedAt here. The unique index backing
+    // idempotencyKey is @@unique([companyId, idempotencyKey]) with no deletedAt
+    // component, so a soft-deleted order still occupies the key in the index. If
+    // we hid soft-deleted rows, a retry whose original was soft-deleted would
+    // (a) miss the pre-check replay, (b) run create(), (c) hit P2002, and (d)
+    // miss the post-create replay too — wedging the client into a 500 loop that
+    // can never succeed. By surfacing the soft-deleted row we can return a
+    // deterministic ConflictException instead.
     const existing = await this.prisma.salesOrder.findFirst({
-      where: { companyId, idempotencyKey, deletedAt: null },
+      where: { companyId, idempotencyKey },
       select: {
         id: true,
         companyId: true,
@@ -2286,6 +2379,7 @@ export class SalesOrdersService {
         taxAmount: true,
         totalAmount: true,
         status: true,
+        deletedAt: true,
         lines: {
           select: {
             productId: true,
@@ -2301,6 +2395,16 @@ export class SalesOrdersService {
       },
     });
     if (!existing) return null;
+
+    // The original order behind this key was soft-deleted. The key value is
+    // still occupied in the unique index, so we can't create a fresh order with
+    // it. Fail deterministically instead of letting create() throw a raw P2002
+    // that surfaces as a 500 the client retries forever.
+    if (existing.deletedAt) {
+      throw new ConflictException(
+        'This checkout retry key belongs to a deleted sales order and can no longer be reused. Start a new sale with a fresh key.',
+      );
+    }
 
     if (!idempotentSalesOrderMatchesDto(existing, dto)) {
       throw new ConflictException(
@@ -2337,6 +2441,16 @@ export class SalesOrdersService {
 
     const record = await this.prisma.$transaction(async (tx) => {
       if (existing.status === 'CONFIRMED') {
+        // GL reversal (DECISION 2): a CONFIRMED order posted a balanced
+        // confirmation journal (DR AR/Cash, CR Revenue/VAT, plus DR COGS / CR
+        // Inventory). The SALES_RETURN movement below unwinds the inventory
+        // subledger, but the GL still carries the confirmation entry. Post a
+        // balanced reversing journal that swaps debit/credit on every line of
+        // the original entry, inside this transaction, so AR/Revenue/VAT/COGS
+        // unwind together with the receivable and stock. Without this, every
+        // cancelled confirmed order permanently drifts the trial balance.
+        await this.reverseSalesOrderJournal(tx, existing as any, userId);
+
         for (const line of existing.lines as any[]) {
           const product = await tx.product.findUnique({ where: { id: line.productId } });
           if (!product || !this.profit.isStockProduct(product)) continue;

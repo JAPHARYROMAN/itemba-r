@@ -47,21 +47,41 @@ export function amountVarianceAgainstPurchaseOrder(
   invoice: { lines: LineLike[]; totalAmount: Prisma.Decimal | number | string },
   purchaseOrderLines: LineLike[],
 ): Prisma.Decimal {
-  const poLinesByProduct = new Map<string, LineLike>();
+  // Aggregate ALL PO lines per product. A product can be split across several PO
+  // lines (e.g. qty 5 @ 4 and qty 5 @ 6); keeping only the last line (Map.set
+  // overwrite) discards the others and mis-values the expected amount. We sum
+  // quantity and lineTotal per product and derive a quantity-weighted average
+  // unitCost, consistent with the quantity-variance path which also sums all PO
+  // lines for a product.
+  const poByProduct = new Map<string, { quantity: Prisma.Decimal; lineTotal: Prisma.Decimal }>();
   let purchaseOrderTotal = new Prisma.Decimal(0);
   for (const line of purchaseOrderLines ?? []) {
     purchaseOrderTotal = purchaseOrderTotal.plus(line.lineTotal ?? 0);
-    if (line.productId) poLinesByProduct.set(line.productId, line);
+    if (!line.productId) continue;
+    const agg = poByProduct.get(line.productId) ?? {
+      quantity: new Prisma.Decimal(0),
+      lineTotal: new Prisma.Decimal(0),
+    };
+    agg.quantity = agg.quantity.plus(line.quantity ?? 0);
+    agg.lineTotal = agg.lineTotal.plus(
+      line.lineTotal ?? new Prisma.Decimal(line.quantity ?? 0).mul(line.unitCost ?? 0),
+    );
+    poByProduct.set(line.productId, agg);
   }
 
   let expectedAmount = new Prisma.Decimal(0);
   let hasLineMatch = false;
   for (const line of invoice.lines ?? []) {
-    const poLine = line.productId ? poLinesByProduct.get(line.productId) : null;
-    if (!poLine) continue;
+    const agg = line.productId ? poByProduct.get(line.productId) : null;
+    if (!agg) continue;
     hasLineMatch = true;
+    // Quantity-weighted average PO unit cost for this product across all its split
+    // PO lines: total PO value for the product / total PO quantity ordered.
+    const avgUnitCost = agg.quantity.isZero()
+      ? new Prisma.Decimal(0)
+      : agg.lineTotal.div(agg.quantity);
     expectedAmount = expectedAmount
-      .plus(new Prisma.Decimal(line.quantity).mul(poLine.unitCost))
+      .plus(new Prisma.Decimal(line.quantity).mul(avgUnitCost))
       .minus(line.discountAmount ?? 0)
       .plus(line.taxAmount ?? 0);
   }

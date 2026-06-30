@@ -1,11 +1,27 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { AccessLevel, Prisma } from '@prisma/client';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { UpdateGoodsReceivedNoteDto } from './dto/update-goods-received-note.dto';
+import { CreateGoodsReceivedNoteDto } from './dto/create-goods-received-note.dto';
+
+// Product types that do NOT carry stock value, mirroring profit.isStockProduct().
+// A product of one of these types must never post a cost-less inventory receipt,
+// even if it is (mis)flagged trackInventory:true.
+const STOCK_EXEMPT_PRODUCT_TYPES = new Set(['SERVICE', 'NON_STOCK_ITEM']);
+
+function isStockProduct(product: {
+  productType?: string | null;
+  trackInventory?: boolean | null;
+}): boolean {
+  if (product.trackInventory === false) return false;
+  return !STOCK_EXEMPT_PRODUCT_TYPES.has(String(product.productType ?? '').toUpperCase());
+}
 
 // Quantities are Decimal(18,4) but compared here as JS numbers; this tolerance
 // absorbs binary-float rounding (e.g. 0.1 + 0.2 = 0.30000000000000004) so an exact
@@ -76,6 +92,28 @@ export class GoodsReceivedNotesService {
   }
 
   async create(dto: any, user: AuthUser) {
+    // The controller types the body as `any`, so the global ValidationPipe never
+    // runs against a typed DTO here. Validate explicitly so crafted negative line
+    // quantities (which the posting loop would skip while still reducing the PO
+    // received-to-date accumulation) are rejected at the boundary. Mirrors the
+    // global pipe: transform + whitelist.
+    const candidate = plainToInstance(CreateGoodsReceivedNoteDto, dto, {
+      enableImplicitConversion: true,
+    });
+    const errors = validateSync(candidate as object, {
+      whitelist: true,
+      forbidNonWhitelisted: false,
+    });
+    if (errors.length > 0) {
+      const messages = errors.flatMap((error) => Object.values(error.constraints ?? {}));
+      const nested = errors.flatMap((error) =>
+        (error.children ?? []).flatMap((child) =>
+          (child.children ?? []).flatMap((leaf) => Object.values(leaf.constraints ?? {})),
+        ),
+      );
+      throw new BadRequestException([...messages, ...nested].join('; ') || 'Invalid GRN payload');
+    }
+
     if (dto.companyId) {
       await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     }
@@ -220,6 +258,23 @@ export class GoodsReceivedNotesService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (existing.purchaseOrderId) {
+        // Serialize concurrent GRN posts against the same PO. Without this lock,
+        // two GRNs posted at the same instant each read prior-received under
+        // Read Committed isolation (the other's POSTED row not yet committed) and
+        // both pass the over-receipt ceiling, silently over-receiving. Taking a
+        // row lock on the PO forces the second poster to wait until the first
+        // commits, so it sees the committed received-to-date before evaluating
+        // the ceiling below.
+        const lockedPo = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT "id" FROM "purchase_orders"
+          WHERE "id" = ${existing.purchaseOrderId}
+            AND "companyId" = ${existing.companyId}
+            AND "deletedAt" IS NULL
+          FOR UPDATE`);
+        if (lockedPo.length === 0) {
+          throw new BadRequestException('Linked purchase order not found');
+        }
+
         await this.assertLinkedPurchaseOrderCanReceiveStock({
           purchaseOrderId: existing.purchaseOrderId,
           companyId: existing.companyId,
@@ -242,6 +297,7 @@ export class GoodsReceivedNotesService {
         select: {
           id: true,
           name: true,
+          productType: true,
           trackInventory: true,
           baseUnitId: true,
           defaultPurchasePrice: true,
@@ -300,7 +356,8 @@ export class GoodsReceivedNotesService {
           const key = `${priorLine.productId}:${priorLine.unitId}`;
           priorReceivedByProductUnit.set(
             key,
-            (priorReceivedByProductUnit.get(key) ?? 0) + Number(priorLine.acceptedQuantity),
+            (priorReceivedByProductUnit.get(key) ?? 0) +
+              Math.max(0, Number(priorLine.acceptedQuantity)),
           );
         }
       }
@@ -308,12 +365,25 @@ export class GoodsReceivedNotesService {
       // Over-receipt guard: the running received-to-date (prior POSTED GRNs + this
       // GRN) must never exceed the ordered quantity for any PO line.
       if (existing.purchaseOrderId) {
+        // A PO-linked GRN against a PO that carries no lines has no ordered
+        // ceiling at all: every received key would fall into the "not on the PO"
+        // branch below and pass unbounded, and fullyReceived would vacuously mark
+        // the PO RECEIVED. Reject so an empty PO cannot receive arbitrary stock.
+        if (orderedByProductUnit.size === 0) {
+          throw new BadRequestException(
+            'Linked purchase order has no order lines to receive against',
+          );
+        }
         const thisReceiptByProductUnit = new Map<string, number>();
         for (const line of existing.lines) {
           const key = `${line.productId}:${line.unitId}`;
+          // Clamp negatives to 0 so a crafted negative line cannot net-down the
+          // over-receipt total and let a positive line slip past the ceiling
+          // (the movement loop skips non-positive lines, so they post no stock).
+          const accepted = Math.max(0, Number(line.acceptedQuantity));
           thisReceiptByProductUnit.set(
             key,
-            (thisReceiptByProductUnit.get(key) ?? 0) + Number(line.acceptedQuantity),
+            (thisReceiptByProductUnit.get(key) ?? 0) + accepted,
           );
         }
         for (const [key, accepted] of thisReceiptByProductUnit) {
@@ -344,7 +414,15 @@ export class GoodsReceivedNotesService {
 
       for (const line of existing.lines) {
         const product = productById.get(line.productId);
-        if (!product?.trackInventory) continue;
+        if (!product) continue;
+        // Gate on the SAME stock-product predicate the valuation/cost layer uses,
+        // not just trackInventory. A SERVICE / NON_STOCK_ITEM typed product is
+        // exempt from assertInventoryMovementHasCost, so posting a movement for it
+        // would inflate quantityOnHand with a held (zero-added) totalValue and a
+        // stuck average. Such a product never carries stock value, so skip the
+        // receipt rather than corrupt its balance. (PO received-to-date tracking
+        // below still counts the line so PO closure is unaffected.)
+        if (!isStockProduct(product)) continue;
         const acceptedQuantity = Number(line.acceptedQuantity);
         if (acceptedQuantity <= 0) continue;
         const poLine = poLineByProductUnit.get(`${line.productId}:${line.unitId}`);
@@ -412,7 +490,7 @@ export class GoodsReceivedNotesService {
           const key = `${line.productId}:${line.unitId}`;
           receivedByProductUnit.set(
             key,
-            (receivedByProductUnit.get(key) ?? 0) + Number(line.acceptedQuantity),
+            (receivedByProductUnit.get(key) ?? 0) + Math.max(0, Number(line.acceptedQuantity)),
           );
         }
         const fullyReceived = [...orderedByProductUnit.entries()].every(

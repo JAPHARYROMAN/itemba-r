@@ -64,6 +64,10 @@ function makeService() {
       deleteMany: jest.fn(),
       update: jest.fn(),
     },
+    journalEntry: {
+      findFirst: jest.fn(async () => null),
+      update: jest.fn(async ({ data }: any) => ({ id: 'je-1', ...data })),
+    },
     receivable: {
       create: jest.fn(async ({ data }: any) => ({ id: 'receivable-1', ...data })),
       update: jest.fn(async ({ data }: any) => ({
@@ -442,15 +446,15 @@ describe('SalesOrdersService quick-sale idempotency', () => {
     expect(prisma.salesOrder.create).not.toHaveBeenCalled();
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({ id: 'so-1' }));
-    expect(prisma.salesOrder.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          companyId: 'company-1',
-          idempotencyKey: 'idem-1',
-          deletedAt: null,
-        }),
-      }),
+    const replayCall = prisma.salesOrder.findFirst.mock.calls.find(
+      (call: any[]) => call[0]?.where?.idempotencyKey === 'idem-1',
     );
+    expect(replayCall).toBeDefined();
+    expect(replayCall[0].where).toEqual(
+      expect.objectContaining({ companyId: 'company-1', idempotencyKey: 'idem-1' }),
+    );
+    // #32: the replay lookup must NOT filter deletedAt (the unique index ignores it).
+    expect(replayCall[0].where).not.toHaveProperty('deletedAt');
   });
 
   it('does not replay a matching draft order as a successful receipt', async () => {
@@ -473,6 +477,36 @@ describe('SalesOrdersService quick-sale idempotency', () => {
     await expect(
       service.mobilePosQuickSale(cashSaleDto({ customerName: 'Walk-in B' }), user),
     ).rejects.toThrow('checkout retry key is already attached to a different sales order');
+    expect(prisma.salesOrder.create).not.toHaveBeenCalled();
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it('queries the idempotency key WITHOUT a deletedAt filter so soft-deleted keys surface (#32)', async () => {
+    const { service, prisma } = makeService();
+    jest.spyOn(service, 'confirm').mockResolvedValue({ id: 'so-1' } as any);
+
+    await service.mobilePosQuickSale(cashSaleDto(), user);
+
+    const replayCall = prisma.salesOrder.findFirst.mock.calls.find(
+      (call: any[]) => call[0]?.where?.idempotencyKey === 'idem-1',
+    );
+    expect(replayCall).toBeDefined();
+    // The unique index ignores deletedAt, so the replay lookup must too —
+    // otherwise a soft-deleted key wedges retries into a P2002 error loop.
+    expect(replayCall[0].where).not.toHaveProperty('deletedAt');
+  });
+
+  it('returns a deterministic Conflict (not a 500 loop) when the key belongs to a soft-deleted order (#32)', async () => {
+    const { service, prisma } = makeService();
+    const confirmSpy = jest.spyOn(service, 'confirm');
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      persistedOrder({ deletedAt: new Date('2026-05-30T00:00:00.000Z') }),
+    );
+
+    await expect(service.mobilePosQuickSale(cashSaleDto(), user)).rejects.toThrow(
+      'belongs to a deleted sales order',
+    );
+    // Never reaches create()/confirm() — so it can't hit the P2002 500 loop.
     expect(prisma.salesOrder.create).not.toHaveBeenCalled();
     expect(confirmSpy).not.toHaveBeenCalled();
   });
@@ -531,6 +565,122 @@ describe('SalesOrdersService cancel money guard', () => {
 
     await service.cancel('so-1', user);
 
+    expect(prisma.salesOrder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'CANCELLED' }) }),
+    );
+  });
+});
+
+describe('SalesOrdersService cancel GL reversal (#2)', () => {
+  function confirmedOrderWithJournal(overrides: Record<string, unknown> = {}) {
+    return persistedOrder({
+      status: 'CONFIRMED',
+      salesType: 'CREDIT_SALE',
+      paymentMethod: 'CREDIT',
+      cashAccountId: null,
+      paidAmount: 0,
+      outstandingAmount: 118,
+      paymentStatus: 'UNPAID',
+      receivableId: null,
+      journalEntryId: 'je-confirm-1',
+      lines: [],
+      ...overrides,
+    });
+  }
+
+  // The original confirmation entry: DR AR 118 / CR Revenue 100 / CR VAT 18,
+  // plus DR COGS 60 / CR Inventory 60.
+  const originalEntry = {
+    id: 'je-confirm-1',
+    companyId: 'company-1',
+    divisionId: 'division-1',
+    branchId: 'branch-1',
+    status: 'POSTED',
+    lines: [
+      { accountId: 'acct-ar', debit: 118, credit: 0, description: 'Customer receivable' },
+      { accountId: 'acct-rev', debit: 0, credit: 100, description: 'Sales revenue' },
+      { accountId: 'acct-vat', debit: 0, credit: 18, description: 'Output tax' },
+      { accountId: 'acct-cogs', debit: 60, credit: 0, description: 'Cost of goods sold' },
+      { accountId: 'acct-inv', debit: 0, credit: 60, description: 'Inventory issued' },
+    ],
+  };
+
+  it('posts a balanced reversing journal that swaps debit/credit on every line', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(confirmedOrderWithJournal());
+    prisma.journalEntry.findFirst.mockResolvedValue(originalEntry);
+
+    await service.cancel('so-1', user);
+
+    expect(prisma.journalEntry.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 'je-confirm-1', companyId: 'company-1' }),
+      }),
+    );
+
+    const reversalCall = (service as any).postingEngine.postLines.mock.calls[0][0];
+    // Every original line is swapped: a debit becomes a credit of equal size.
+    expect(reversalCall.lines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ accountId: 'acct-ar', debit: 0, credit: 118 }),
+        expect.objectContaining({ accountId: 'acct-rev', debit: 100, credit: 0 }),
+        expect.objectContaining({ accountId: 'acct-vat', debit: 18, credit: 0 }),
+        expect.objectContaining({ accountId: 'acct-cogs', debit: 0, credit: 60 }),
+        expect.objectContaining({ accountId: 'acct-inv', debit: 60, credit: 0 }),
+      ]),
+    );
+    // The reversal balances (sum debit === sum credit).
+    const sumDebit = reversalCall.lines.reduce((s: number, l: any) => s + l.debit, 0);
+    const sumCredit = reversalCall.lines.reduce((s: number, l: any) => s + l.credit, 0);
+    expect(sumDebit).toBe(sumCredit);
+    expect(reversalCall.referenceType).toBe('SalesOrder');
+    expect(reversalCall.referenceId).toBe('so-1');
+  });
+
+  it('marks the original entry REVERSED and links the reversal', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(confirmedOrderWithJournal());
+    prisma.journalEntry.findFirst.mockResolvedValue(originalEntry);
+
+    await service.cancel('so-1', user);
+
+    expect(prisma.journalEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'je-confirm-1' },
+        data: expect.objectContaining({ status: 'REVERSED' }),
+      }),
+    );
+    expect(prisma.journalEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'je-1' },
+        data: expect.objectContaining({ reversalOfId: 'je-confirm-1' }),
+      }),
+    );
+  });
+
+  it('does not re-reverse an already-REVERSED confirmation entry', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(confirmedOrderWithJournal());
+    prisma.journalEntry.findFirst.mockResolvedValue({ ...originalEntry, status: 'REVERSED' });
+
+    await service.cancel('so-1', user);
+
+    expect((service as any).postingEngine.postLines).not.toHaveBeenCalled();
+    expect(prisma.salesOrder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'CANCELLED' }) }),
+    );
+  });
+
+  it('cancels cleanly when there is no traceable confirmation journal', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      confirmedOrderWithJournal({ journalEntryId: null }),
+    );
+    prisma.journalEntry.findFirst.mockResolvedValue(null);
+
+    await service.cancel('so-1', user);
+
+    expect((service as any).postingEngine.postLines).not.toHaveBeenCalled();
     expect(prisma.salesOrder.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'CANCELLED' }) }),
     );

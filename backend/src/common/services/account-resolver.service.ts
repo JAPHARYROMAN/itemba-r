@@ -111,6 +111,24 @@ export class AccountResolverService {
       }
       return [role, account] as const;
     });
+
+    // Two distinct roles must never resolve to the SAME ledger account: a JE that
+    // debits and credits one account is a silent no-op that still "balances". On a
+    // mis-seeded chart (e.g. one account carrying the subtype/code for two roles)
+    // fail loudly instead of collapsing two ledger roles into one.
+    const accountIdToRole = new Map<string, AccountRole>();
+    for (const [role, account] of entries) {
+      const clashing = accountIdToRole.get(account.id);
+      if (clashing && clashing !== role) {
+        throw new BadRequestException(
+          `Chart-of-accounts misconfiguration on company ${companyId}: roles "${clashing}" and "${role}" ` +
+            `both resolve to account ${account.accountCode} (${account.id}). ` +
+            `Each posting role must map to a distinct account; set a unique accountSubType/accountCode per role.`,
+        );
+      }
+      accountIdToRole.set(account.id, role);
+    }
+
     return Object.fromEntries(entries) as Record<AccountRole, ChartOfAccount>;
   }
 }
@@ -147,18 +165,22 @@ export type AccountRole =
  * Each role can list multiple codes; the first match wins.
  */
 export const CONVENTIONAL_CODES: Record<AccountRole, string[]> = {
+  // Cash family — kept disjoint from BANK and from AR so a JE that moves
+  // between two of these roles never collapses onto one account.
   CASH_ON_HAND: ['1000', '1010'],
-  BANK: ['1010', '1020', '1021', '1100'], // 1100 also used for AR in some legacy charts
-  AR_CONTROL: ['1100', '1110', '1200'],
+  BANK: ['1020', '1021', '1030'],
+  AR_CONTROL: ['1100', '1110'],
   AP_CONTROL: ['2000', '2010', '2100'],
-  INVENTORY_ASSET: ['1200'],
+  INVENTORY_ASSET: ['1200', '1210'],
   SALES_REVENUE: ['4000', '4100', '4900'],
   COST_OF_GOODS_SOLD: ['5000', '5100', '5200', '5300'],
   FIXED_ASSET: ['1500'],
-  INTERCOMPANY_RECEIVABLE: ['1300', '1390', '1100'],
-  INTERCOMPANY_PAYABLE: ['2300', '2390', '2000'],
-  GENERAL_EXPENSE: ['6900', '6500', '6400', '6200', '6100', '6000'],
-  PURCHASE_VARIANCE: ['6900', '5000'],
+  INTERCOMPANY_RECEIVABLE: ['1300', '1390'],
+  INTERCOMPANY_PAYABLE: ['2300', '2390'],
+  // Expense roles — disjoint from each other so an inventory/expense + variance
+  // posting cannot resolve two lines to the same account.
+  GENERAL_EXPENSE: ['6900', '6400', '6200', '6100', '6000'],
+  PURCHASE_VARIANCE: ['6950', '5400'],
   DEPRECIATION_EXPENSE: ['5500', '6500'],
   ACCUMULATED_DEPRECIATION: ['1599', '1690'], // contra-asset, near fixed-asset block
   LOAN_PRINCIPAL_PAYABLE: ['2400', '2500'],
@@ -167,5 +189,5 @@ export const CONVENTIONAL_CODES: Record<AccountRole, string[]> = {
   TAX_VAT_RECEIVABLE: ['1400', '1410'],
   TAX_WITHHOLDING_PAYABLE: ['2220', '2230'],
   RETAINED_EARNINGS: ['3100', '3000'],
-  INCOME_SUMMARY: ['3900', '4900', '4100', '4000'],
+  INCOME_SUMMARY: ['3900'],
 };

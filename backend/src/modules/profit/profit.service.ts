@@ -641,53 +641,76 @@ export class ProfitService {
     if (!product) throw new BadRequestException('Product was not found');
     await this.companyScope.assertCanAccessCompany(user, product.companyId, AccessLevel.WRITE);
 
-    const changes: Record<string, unknown> = {};
+    // Validate inputs up-front so a bad request never commits a partial change.
+    let defaultPurchasePrice: Prisma.Decimal | null = null;
     if (body.defaultPurchasePrice !== undefined && body.defaultPurchasePrice !== null) {
-      const defaultPurchasePrice = Number(body.defaultPurchasePrice);
-      if (!Number.isFinite(defaultPurchasePrice) || defaultPurchasePrice <= 0) {
+      const value = Number(body.defaultPurchasePrice);
+      if (!Number.isFinite(value) || value <= 0) {
         throw new BadRequestException('Default purchase cost must be greater than zero');
       }
-      await this.prisma.product.update({
-        where: { id: productId },
-        data: { defaultPurchasePrice },
-      });
-      changes.defaultPurchasePrice = defaultPurchasePrice;
+      defaultPurchasePrice = new Prisma.Decimal(body.defaultPurchasePrice);
     }
 
+    let averageCost: Prisma.Decimal | null = null;
     if (body.branchId && body.averageCost !== undefined && body.averageCost !== null) {
-      const averageCost = Number(body.averageCost);
-      if (!Number.isFinite(averageCost) || averageCost <= 0) {
+      const value = Number(body.averageCost);
+      if (!Number.isFinite(value) || value <= 0) {
         throw new BadRequestException('Branch average cost must be greater than zero');
       }
-      const balance = await this.prisma.inventoryBalance.findFirst({
-        where: {
-          companyId: product.companyId,
-          productId,
-          branchId: body.branchId,
-        },
-        select: { id: true, quantityOnHand: true },
-      });
-      if (!balance) {
-        throw new BadRequestException('No branch inventory balance exists for this product');
-      }
-      const quantityOnHand = Number(balance.quantityOnHand ?? 0);
-      await this.prisma.inventoryBalance.update({
-        where: { id: balance.id },
-        data: {
-          averageCost,
-          totalValue: roundMoney(quantityOnHand * averageCost),
-        },
-      });
-      changes.branchId = body.branchId;
-      changes.averageCost = averageCost;
-      changes.totalValue = roundMoney(quantityOnHand * averageCost);
+      averageCost = new Prisma.Decimal(body.averageCost);
     }
 
-    if (!Object.keys(changes).length) {
+    if (!defaultPurchasePrice && !averageCost) {
       throw new BadRequestException(
         'Provide a default purchase cost or branch average cost to update',
       );
     }
+
+    // ITMB-AUDIT-28: both money writes (product cost + inventory balance) must commit
+    // atomically, otherwise a failing branch-balance lookup leaves the product price
+    // mutated with no inventory update and no audit trail. Do the money math with
+    // Prisma.Decimal and write Decimal into the Decimal columns (totalValue is additive-
+    // free here: a manual fix recomputes value = onHand * averageCost for the corrected
+    // average), then only log PROFIT_COST_FIX once the transaction has committed.
+    const changes = await this.prisma.$transaction(async (tx) => {
+      const txChanges: Record<string, unknown> = {};
+
+      if (defaultPurchasePrice) {
+        await tx.product.update({
+          where: { id: productId },
+          data: { defaultPurchasePrice },
+        });
+        txChanges.defaultPurchasePrice = defaultPurchasePrice.toNumber();
+      }
+
+      if (averageCost && body.branchId) {
+        const balance = await tx.inventoryBalance.findFirst({
+          where: {
+            companyId: product.companyId,
+            productId,
+            branchId: body.branchId,
+          },
+          select: { id: true, quantityOnHand: true },
+        });
+        if (!balance) {
+          throw new BadRequestException('No branch inventory balance exists for this product');
+        }
+        const quantityOnHand = new Prisma.Decimal(balance.quantityOnHand ?? 0);
+        const totalValue = quantityOnHand.mul(averageCost);
+        await tx.inventoryBalance.update({
+          where: { id: balance.id },
+          data: {
+            averageCost,
+            totalValue,
+          },
+        });
+        txChanges.branchId = body.branchId;
+        txChanges.averageCost = averageCost.toNumber();
+        txChanges.totalValue = totalValue.toNumber();
+      }
+
+      return txChanges;
+    });
 
     await this.auditLogs.log({
       action: 'PROFIT_COST_FIX',

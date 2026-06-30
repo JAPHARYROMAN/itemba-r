@@ -5,6 +5,25 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { QueryInventoryBalanceDto } from './dto/query-inventory-balance.dto';
 import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
 
+/**
+ * Drop the internal Decimal / classification fields used only for accurate
+ * aggregation so the per-item JSON keeps its original public shape (Number
+ * money fields, no Prisma.Decimal objects leaking into the response).
+ */
+function stripDecimalInternals<
+  T extends {
+    totalValueDecimal?: unknown;
+    riskValueDecimal?: unknown;
+    negativeOnHand?: unknown;
+    oversold?: unknown;
+    isCritical?: unknown;
+  },
+>(item: T) {
+  const { totalValueDecimal, riskValueDecimal, negativeOnHand, oversold, isCritical, ...rest } =
+    item;
+  return rest;
+}
+
 @Injectable()
 export class InventoryBalancesService {
   constructor(
@@ -206,6 +225,16 @@ export class InventoryBalancesService {
             : reserved > 0 && available <= effectiveLowThreshold * 1.5
               ? 35
               : 0;
+      // Critical = anything not OK, or a row whose physical on-hand has gone
+      // negative (genuine ledger corruption). Computed once here so the count and
+      // the criticalItems list below share one predicate and cannot disagree.
+      const negativeOnHand = onHand < 0;
+      const oversold = available < 0;
+      const isCritical = status !== 'OK' || negativeOnHand;
+      // Keep the Decimal columns at full precision for the money reduce; the
+      // Number copies below are only for the per-item JSON response.
+      const totalValueDecimal = new Prisma.Decimal(b.totalValue ?? 0);
+      const riskValueDecimal = status === 'OK' ? new Prisma.Decimal(0) : totalValueDecimal;
       return {
         id: b.id,
         productId: b.productId,
@@ -216,11 +245,16 @@ export class InventoryBalancesService {
         quantityAvailable: available,
         averageCost: Number(b.averageCost),
         totalValue: Number(b.totalValue),
+        totalValueDecimal,
+        riskValueDecimal,
         lastMovementAt: b.lastMovementAt,
         daysSinceMovement,
         lowThreshold: effectiveLowThreshold,
         riskScore,
         riskValue: status === 'OK' ? 0 : Number(b.totalValue),
+        negativeOnHand,
+        oversold,
+        isCritical,
         status,
       };
     });
@@ -239,8 +273,8 @@ export class InventoryBalancesService {
         ok: number;
         reserved: number;
         available: number;
-        riskValue: number;
-        totalValue: number;
+        riskValue: Prisma.Decimal;
+        totalValue: Prisma.Decimal;
         items: typeof annotated;
       }
     >();
@@ -257,15 +291,15 @@ export class InventoryBalancesService {
         ok: 0,
         reserved: 0,
         available: 0,
-        riskValue: 0,
-        totalValue: 0,
+        riskValue: new Prisma.Decimal(0),
+        totalValue: new Prisma.Decimal(0),
         items: [],
       };
       entry.itemCount++;
-      entry.totalValue += item.totalValue;
+      entry.totalValue = entry.totalValue.plus(item.totalValueDecimal);
       entry.reserved += item.quantityReserved;
       entry.available += item.quantityAvailable;
-      entry.riskValue += item.riskValue;
+      entry.riskValue = entry.riskValue.plus(item.riskValueDecimal);
       if (item.status === 'OUT') entry.out++;
       else if (item.status === 'LOW') entry.low++;
       else entry.ok++;
@@ -273,56 +307,88 @@ export class InventoryBalancesService {
       locationMap.set(lid, entry);
     }
 
+    // Money totals are summed as Prisma.Decimal over the Decimal(18,2) columns so
+    // the headline KPIs reconcile exactly to a SQL SUM, instead of drifting via
+    // IEEE-754 float accumulation; they are converted to Number only for the JSON.
     const totals = annotated.reduce(
-      (acc, it) => ({
-        ...acc,
-        totalSkus: acc.totalSkus + 1,
-        out: acc.out + (it.status === 'OUT' ? 1 : 0),
-        low: acc.low + (it.status === 'LOW' ? 1 : 0),
-        ok: acc.ok + (it.status === 'OK' ? 1 : 0),
-        negative: acc.negative + (it.quantityAvailable < 0 ? 1 : 0),
-        reservedSkus: acc.reservedSkus + (it.quantityReserved > 0 ? 1 : 0),
-        totalOnHand: acc.totalOnHand + it.quantityOnHand,
-        totalReserved: acc.totalReserved + it.quantityReserved,
-        totalAvailable: acc.totalAvailable + it.quantityAvailable,
-        riskValue: acc.riskValue + it.riskValue,
-        totalValue: acc.totalValue + it.totalValue,
-      }),
+      (acc, it) => {
+        acc.totalSkus += 1;
+        if (it.status === 'OUT') acc.out += 1;
+        if (it.status === 'LOW') acc.low += 1;
+        if (it.status === 'OK') acc.ok += 1;
+        // Genuine ledger corruption: physical on-hand below zero.
+        if (it.negativeOnHand) acc.negative += 1;
+        // Normal heavy-reservation oversell, surfaced separately (finding #21).
+        if (it.oversold) acc.oversold += 1;
+        // Distinct critical-row count so it matches the criticalItems list and
+        // never double-counts a row across OUT/LOW/negative (finding #8).
+        if (it.isCritical) acc.criticalCount += 1;
+        if (it.quantityReserved > 0) acc.reservedSkus += 1;
+        acc.totalOnHand += it.quantityOnHand;
+        acc.totalReserved += it.quantityReserved;
+        acc.totalAvailable += it.quantityAvailable;
+        acc.riskValueDecimal = acc.riskValueDecimal.plus(it.riskValueDecimal);
+        acc.totalValueDecimal = acc.totalValueDecimal.plus(it.totalValueDecimal);
+        return acc;
+      },
       {
         totalSkus: 0,
         out: 0,
         low: 0,
         ok: 0,
         negative: 0,
+        oversold: 0,
+        criticalCount: 0,
         reservedSkus: 0,
         totalOnHand: 0,
         totalReserved: 0,
         totalAvailable: 0,
-        riskValue: 0,
-        totalValue: 0,
+        riskValueDecimal: new Prisma.Decimal(0),
+        totalValueDecimal: new Prisma.Decimal(0),
       },
     );
 
+    const {
+      riskValueDecimal: totalsRiskValueDecimal,
+      totalValueDecimal: totalsTotalValueDecimal,
+      ...totalsCounts
+    } = totals;
+    const totalsOut = {
+      ...totalsCounts,
+      riskValue: totalsRiskValueDecimal.toNumber(),
+      totalValue: totalsTotalValueDecimal.toNumber(),
+    };
+
     return {
       lowThreshold,
-      totals,
+      totals: totalsOut,
       risk: {
-        criticalCount: totals.out + totals.low + totals.negative,
-        criticalValue: totals.riskValue,
+        // One distinct count per critical row — see the isCritical predicate above.
+        criticalCount: totals.criticalCount,
+        criticalValue: totalsRiskValueDecimal.toNumber(),
         reservationPressure:
           totals.totalOnHand > 0 ? (totals.totalReserved / totals.totalOnHand) * 100 : 0,
         criticalItems: annotated
-          .filter((item) => item.status !== 'OK' || item.quantityAvailable < 0)
+          .filter((item) => item.isCritical)
           .sort((a, b) => b.riskScore - a.riskScore || b.riskValue - a.riskValue)
-          .slice(0, 12),
+          .slice(0, 12)
+          .map(stripDecimalInternals),
         staleItems: annotated
           .filter((item) => (item.daysSinceMovement ?? 0) >= 30 && item.quantityOnHand > 0)
           .sort((a, b) => (b.daysSinceMovement ?? 0) - (a.daysSinceMovement ?? 0))
-          .slice(0, 12),
+          .slice(0, 12)
+          .map(stripDecimalInternals),
       },
-      locations: Array.from(locationMap.values()).sort(
-        (a, b) => b.out + b.low - (a.out + a.low) || a.locationName.localeCompare(b.locationName),
-      ),
+      locations: Array.from(locationMap.values())
+        .sort(
+          (a, b) => b.out + b.low - (a.out + a.low) || a.locationName.localeCompare(b.locationName),
+        )
+        .map((loc) => ({
+          ...loc,
+          riskValue: loc.riskValue.toNumber(),
+          totalValue: loc.totalValue.toNumber(),
+          items: loc.items.map(stripDecimalInternals),
+        })),
     };
   }
 }

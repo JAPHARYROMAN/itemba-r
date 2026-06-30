@@ -720,9 +720,17 @@ export class PurchaseOrdersService {
   async receive(id: string, user: AuthUser, dto: ReceivePurchaseOrderDto = {}) {
     const userId = user.id;
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
-    if (!['CONFIRMED', 'PARTIALLY_RECEIVED'].includes(existing.status as string)) {
+    // Audit finding #20: this Operations receive path has no per-line received
+    // quantity input — it posts a PURCHASE_RECEIPT for the FULL ordered quantity
+    // of every line and flips the PO straight to RECEIVED. It is therefore a
+    // full-receipt-only path. Partial / multi-shipment receipts must go through
+    // the GRN flow (goods-received-notes), which tracks received-to-date per
+    // product/unit and only marks the PO RECEIVED once every line is satisfied.
+    // Accepting PARTIALLY_RECEIVED here would let this path post the full
+    // quantity again on top of an earlier partial GRN, overstating inventory.
+    if (existing.status !== 'CONFIRMED') {
       throw new BadRequestException(
-        'Only CONFIRMED or PARTIALLY_RECEIVED purchase orders can be received',
+        'Only CONFIRMED purchase orders can be received here; record partial receipts through the goods-received-note (GRN) flow',
       );
     }
     if (!existing.branchId) {
@@ -742,7 +750,7 @@ export class PurchaseOrdersService {
         where: {
           id,
           deletedAt: null,
-          status: { in: ['CONFIRMED', 'PARTIALLY_RECEIVED'] as any },
+          status: 'CONFIRMED',
         },
         data: {
           status: 'RECEIVED',
@@ -859,50 +867,23 @@ export class PurchaseOrdersService {
         tx,
       });
 
-      let payableId = existing.payableId ?? null;
-      if (existing.purchaseType !== PurchaseType.CASH_PURCHASE && !payableId) {
-        const supplierName = existing.supplier?.name ?? existing.supplierName ?? 'Unknown supplier';
-        const payableNumber = await this.codes.next({
-          entityType: 'Payable',
-          companyId: existing.companyId,
+      // AP OWNERSHIP (audit findings #1 + #7): this goods-received path posts the
+      // INVENTORY side only. Accounts Payable is owned exclusively by the
+      // supplier-invoice approve flow, which independently creates the Payable and
+      // credits AP_CONTROL at the full invoice amount. receive() must NOT create a
+      // Payable nor credit AP_CONTROL on a credit purchase, otherwise the liability
+      // (and inventory) is double-counted once the matching supplier invoice is
+      // approved. For a CASH purchase there is a genuine cash settlement at receipt
+      // that no supplier-invoice flow ever posts, so the inventory/cash ledger is
+      // PO-owned and still posted here.
+      let journalEntry: { id: string } | null = null;
+      if (existing.purchaseType === PurchaseType.CASH_PURCHASE) {
+        journalEntry = await this.postPurchaseOrderCashReceiptLedger({
+          order: existing as any,
+          transactionDate: receivedAt,
+          userId,
           tx,
         });
-        const payable = await tx.payable.create({
-          data: {
-            payableNumber,
-            companyId: existing.companyId,
-            divisionId: existing.divisionId ?? null,
-            branchId: existing.branchId ?? null,
-            supplierId: existing.supplierId ?? null,
-            supplierName,
-            amount: existing.totalAmount,
-            paidAmount: 0,
-            outstandingAmount: existing.totalAmount,
-            currency: existing.currency,
-            issueDate: receivedAt,
-            dueDate: existing.expectedDate ?? new Date(Date.now() + 30 * 24 * 3600 * 1000),
-            status: 'OPEN' as any,
-            sourceType: 'PurchaseOrder',
-            sourceId: id,
-            notes: `Purchase Order ${existing.purchaseOrderNumber}`,
-          },
-        });
-        payableId = payable.id;
-      }
-
-      const journalEntry = await this.postPurchaseOrderLedger({
-        order: existing as any,
-        transactionDate: receivedAt,
-        userId,
-        tx,
-      });
-
-      if (payableId) {
-        const linkedPayable = await tx.payable.update({
-          where: { id: payableId },
-          data: { journalEntryId: journalEntry.id },
-        });
-        await this.syncSupplierBalance(tx, linkedPayable.companyId, linkedPayable.supplierId);
       }
 
       return tx.purchaseOrder.update({
@@ -911,8 +892,7 @@ export class PurchaseOrdersService {
           status: 'RECEIVED',
           receivedById: userId,
           receivedAt,
-          journalEntryId: journalEntry.id,
-          ...(payableId ? { payableId } : {}),
+          ...(journalEntry ? { journalEntryId: journalEntry.id } : {}),
           ...(existing.purchaseType === PurchaseType.CASH_PURCHASE && {
             paidAmount: existing.totalAmount,
             outstandingAmount: 0,
@@ -1167,7 +1147,15 @@ export class PurchaseOrdersService {
     }
   }
 
-  private async postPurchaseOrderLedger(input: {
+  /**
+   * Cash-purchase receipt ledger: DR Inventory/Asset/Expense, CR Cash-on-hand for
+   * the full order total. Only ever called for CASH_PURCHASE — a cash purchase
+   * settles at receipt and is never carried through the supplier-invoice/AP flow,
+   * so this posting is owned solely by the PO. Credit purchases post NO ledger here
+   * (AP and the matching inventory debit are owned by the supplier-invoice approve
+   * flow); see the AP-ownership note in receive() and audit findings #1/#7.
+   */
+  private async postPurchaseOrderCashReceiptLedger(input: {
     order: {
       id: string;
       purchaseOrderNumber: string;
@@ -1187,8 +1175,7 @@ export class PurchaseOrdersService {
     }
 
     const debitRole = purchaseDebitRole(input.order.purchaseType);
-    const creditRole: AccountRole =
-      input.order.purchaseType === PurchaseType.CASH_PURCHASE ? 'CASH_ON_HAND' : 'AP_CONTROL';
+    const creditRole: AccountRole = 'CASH_ON_HAND';
     const accounts = await this.accountResolver.resolveMany(
       input.order.companyId,
       [debitRole, creditRole],
@@ -1221,10 +1208,7 @@ export class PurchaseOrdersService {
           },
           {
             accountId: accounts[creditRole].id,
-            description:
-              input.order.purchaseType === PurchaseType.CASH_PURCHASE
-                ? 'Cash paid'
-                : 'Accounts payable',
+            description: 'Cash paid',
             debit: 0,
             credit: amount,
           },
@@ -1253,9 +1237,15 @@ export class PurchaseOrdersService {
         await this.syncSupplierBalance(tx, cancelledPayable.companyId, cancelledPayable.supplierId);
       }
 
+      // Audit finding #19: reset the PO row's outstanding so the cancelled order
+      // no longer feeds summary()'s outstandingAmount roll-up. cancel() already
+      // zeroes the linked Payable's outstanding above; the PO row must move with
+      // it or the purchasing workbench keeps reporting exposure that no longer
+      // exists. (PaymentStatus has no CANCELLED member — status='CANCELLED' on the
+      // order already signals the lifecycle state — so we only zero the money.)
       return tx.purchaseOrder.update({
         where: { id },
-        data: { status: 'CANCELLED' },
+        data: { status: 'CANCELLED', outstandingAmount: 0 },
       });
     });
 

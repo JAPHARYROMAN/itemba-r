@@ -329,35 +329,54 @@ export class InventoryMovementsService {
         `Insufficient stock at branch/location ${movement.branchId}: requested ${quantity}, available ${currentQty}`,
       );
     }
-    if (isOutbound && currentQty - reservedQty < quantity) {
+    // Reserved-availability guard applies ONLY to sales issues. quantityReserved
+    // earmarks stock for open sales orders, so a SALE_ISSUE must not draw against
+    // it. Non-sale relief movements (DAMAGE, WASTAGE, INTERNAL_USE,
+    // ADJUSTMENT_OUT, TRANSFER_OUT, PRODUCTION_OUT, PURCHASE_RETURN) represent
+    // real physical depletion and may draw against on-hand even when reserved —
+    // they are only bounded by the negative-stock guard above.
+    if (
+      movement.movementType === 'SALE_ISSUE' &&
+      currentQty - reservedQty < quantity
+    ) {
       throw new BadRequestException(
         `Insufficient available stock at branch/location ${movement.branchId}: requested ${quantity}, available ${Math.max(0, currentQty - reservedQty)} after reservations`,
       );
     }
 
-    // WAC valuation policy:
+    // WAC valuation policy (all money math in Prisma.Decimal — never JS floats —
+    // so values written into the Decimal(18,2)/(18,4) columns do not accumulate
+    // IEEE-754 drift across successive movements):
     //  - Cost-bearing inbound (unitCost provided): roll the new units into the
-    //    running average and recompute totalValue = newQty * newAvgCost.
-    //  - Cost-less inbound (unitCost == null) and all outbound: do NOT value the
-    //    added/removed units at the existing average via a blanket
-    //    newQty * newAvgCost recompute — that would silently inflate (or, on
-    //    outbound, distort) totalValue. Instead carry the prior averageCost and
-    //    derive totalValue additively (existing total +/- removed-at-average),
-    //    so cost-less inbound leaves totalValue unchanged.
-    let newAvgCost = Number(existing.averageCost);
-    let newTotalValue: number;
+    //    running average; totalValue grows ADDITIVELY by quantity * unitCost and
+    //    averageCost is re-derived from the running total.
+    //  - Cost-less inbound (unitCost == null): added units carry no cost, so the
+    //    stored value of existing stock is unchanged. averageCost/totalValue held.
+    //  - Outbound: relieve value ADDITIVELY at the current average
+    //    (existing total - quantity * averageCost), NOT a multiplicative
+    //    newQty * averageCost recompute (which can INCREASE value once the
+    //    qty*avg invariant is broken by a cost-less inbound). Floor at zero, and
+    //    when the line reaches zero quantity force totalValue to zero.
+    const qtyDec = new Prisma.Decimal(quantity);
+    const newQtyDec = new Prisma.Decimal(newQty);
+    const existingTotalValue = new Prisma.Decimal(existing.totalValue);
+    let newAvgCostDec = new Prisma.Decimal(existing.averageCost);
+    let newTotalValueDec: Prisma.Decimal;
     if (isInbound && movement.unitCost != null) {
-      const totalCost = Number(existing.totalValue) + quantity * Number(movement.unitCost);
-      newAvgCost = newQty > 0 ? totalCost / newQty : 0;
-      newTotalValue = newQty * newAvgCost;
+      const totalCost = existingTotalValue.plus(qtyDec.times(movement.unitCost));
+      newAvgCostDec = newQtyDec.gt(0) ? totalCost.dividedBy(newQtyDec) : new Prisma.Decimal(0);
+      newTotalValueDec = totalCost;
     } else if (isInbound) {
-      // Cost-less inbound: added units carry no cost, so the stored value of the
-      // existing stock is unchanged. averageCost stays as-is; totalValue is held.
-      newTotalValue = Number(existing.totalValue);
+      // Cost-less inbound: averageCost stays as-is; totalValue is held.
+      newTotalValueDec = existingTotalValue;
     } else {
-      // Outbound: relieve value at the current average cost; if the line goes to
-      // (or below) zero, the value is fully relieved.
-      newTotalValue = newQty > 0 ? newQty * newAvgCost : 0;
+      // Outbound: relieve at the current average, additively.
+      if (newQtyDec.gt(0)) {
+        const relieved = existingTotalValue.minus(qtyDec.times(newAvgCostDec));
+        newTotalValueDec = relieved.gt(0) ? relieved : new Prisma.Decimal(0);
+      } else {
+        newTotalValueDec = new Prisma.Decimal(0);
+      }
     }
 
     await db.inventoryBalance.update({
@@ -365,8 +384,8 @@ export class InventoryMovementsService {
       data: {
         divisionId: movement.divisionId,
         quantityOnHand: newQty,
-        averageCost: newAvgCost,
-        totalValue: newTotalValue,
+        averageCost: newAvgCostDec,
+        totalValue: newTotalValueDec,
         lastMovementAt: movement.movementDate,
       },
     });

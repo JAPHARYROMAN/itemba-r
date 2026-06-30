@@ -24,6 +24,10 @@ function makeService() {
 
   const prisma = {
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
+    // FOR UPDATE row-lock on the linked PO (over-receipt serialization). Default
+    // to a single locked row so PO-linked posts proceed; tests that exercise the
+    // missing-PO path override this.
+    $queryRaw: jest.fn().mockResolvedValue([{ id: 'po-1' }]),
     goodsReceivedNote: {
       findFirst: jest.fn().mockResolvedValue(approvedGrn),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -231,5 +235,129 @@ describe('GoodsReceivedNotesService cost-by-unit guard', () => {
       expect.objectContaining({ unitId: 'unit-2', unitCost: undefined }),
     );
     expect(prisma.goodsReceivedNoteLine.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('GoodsReceivedNotesService create DTO validation (finding #14)', () => {
+  it('rejects a create payload with a negative acceptedQuantity', async () => {
+    const { service, prisma } = makeService();
+
+    await expect(
+      service.create(
+        {
+          companyId: 'company-1',
+          branchId: 'branch-1',
+          lines: [
+            { productId: 'product-1', unitId: 'unit-1', acceptedQuantity: 10 },
+            { productId: 'product-1', unitId: 'unit-1', acceptedQuantity: -10 },
+          ],
+        },
+        user,
+      ),
+    ).rejects.toThrow(/must not be less than 0|acceptedQuantity/i);
+    // The GRN was never written: validation fails before any persistence.
+    expect(prisma.goodsReceivedNote.create).toBeUndefined();
+  });
+
+  it('accepts a well-formed create payload (non-negative quantities)', async () => {
+    const { service } = makeService();
+    const created = { id: 'grn-new', companyId: 'company-1', lines: [] };
+    const prismaCreate = jest.fn().mockResolvedValue(created);
+    // Wire create + the scope lookups the happy path needs.
+    (service as any).prisma.goodsReceivedNote.create = prismaCreate;
+    (service as any).prisma.branch = {
+      findFirst: jest
+        .fn()
+        .mockResolvedValue({ divisionId: 'division-1', division: { companyId: 'company-1' } }),
+    };
+
+    const result = await service.create(
+      {
+        companyId: 'company-1',
+        branchId: 'branch-1',
+        lines: [{ productId: 'product-1', unitId: 'unit-1', acceptedQuantity: 10 }],
+      },
+      user,
+    );
+
+    expect(prismaCreate).toHaveBeenCalled();
+    expect(result).toBe(created);
+  });
+});
+
+describe('GoodsReceivedNotesService empty-PO ceiling (finding #26)', () => {
+  it('rejects a PO-linked GRN when the purchase order has no order lines', async () => {
+    const { service, prisma, inventoryMovements, approvedGrn } = makeService();
+    prisma.goodsReceivedNote.findFirst.mockResolvedValue({
+      ...approvedGrn,
+      purchaseOrderId: 'po-1',
+      lines: [{ id: 'grn-line-1', productId: 'product-1', unitId: 'unit-1', acceptedQuantity: 10 }],
+    });
+    // PO exists and is receivable, but carries ZERO order lines.
+    prisma.purchaseOrderLine.findMany.mockResolvedValue([]);
+
+    await expect(service.post('grn-1', user)).rejects.toThrow(
+      'Linked purchase order has no order lines to receive against',
+    );
+    expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+  });
+
+  it('takes a FOR UPDATE row lock on the linked PO before evaluating the ceiling (finding #4)', async () => {
+    const { service, prisma, approvedGrn } = makeService();
+    prisma.goodsReceivedNote.findFirst.mockResolvedValue({
+      ...approvedGrn,
+      purchaseOrderId: 'po-1',
+    });
+    prisma.purchaseOrderLine.findMany.mockResolvedValue([
+      { productId: 'product-1', unitId: 'unit-1', quantity: 20, unitCost: 3 },
+    ]);
+
+    await service.post('grn-1', user);
+
+    expect(prisma.$queryRaw).toHaveBeenCalled();
+  });
+
+  it('aborts when the FOR UPDATE lock finds no matching PO row', async () => {
+    const { service, prisma, inventoryMovements, approvedGrn } = makeService();
+    prisma.goodsReceivedNote.findFirst.mockResolvedValue({
+      ...approvedGrn,
+      purchaseOrderId: 'po-1',
+    });
+    prisma.$queryRaw.mockResolvedValueOnce([]);
+
+    await expect(service.post('grn-1', user)).rejects.toThrow('Linked purchase order not found');
+    expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+  });
+});
+
+describe('GoodsReceivedNotesService non-stock product guard (finding #15)', () => {
+  it('does not post a cost-less receipt for a trackInventory:true SERVICE product', async () => {
+    const { service, prisma, inventoryMovements } = makeService();
+    // Product is flagged trackInventory:true but typed SERVICE — the valuation
+    // layer treats it as non-stock, so it must not receive a cost-less movement.
+    prisma.product.findMany.mockResolvedValue([
+      {
+        id: 'product-1',
+        name: 'Service item',
+        productType: 'SERVICE',
+        trackInventory: true,
+        baseUnitId: 'unit-1',
+        defaultPurchasePrice: 7,
+      },
+    ]);
+
+    await service.post('grn-1', user);
+
+    expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+  });
+
+  it('still posts a receipt for a normal stock product (no productType)', async () => {
+    const { service, inventoryMovements } = makeService();
+
+    await service.post('grn-1', user);
+
+    expect(inventoryMovements.createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({ movementType: 'PURCHASE_RECEIPT', quantity: 20 }),
+    );
   });
 });

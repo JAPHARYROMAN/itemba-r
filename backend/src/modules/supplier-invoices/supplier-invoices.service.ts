@@ -322,7 +322,7 @@ export class SupplierInvoicesService {
       const oldPayable = existing.payableId
         ? await tx.payable.findUnique({
             where: { id: existing.payableId },
-            select: { companyId: true, supplierId: true },
+            select: { companyId: true, supplierId: true, paidAmount: true },
           })
         : null;
 
@@ -335,8 +335,12 @@ export class SupplierInvoicesService {
               divisionId: existing.divisionId,
               branchId: existing.branchId,
               amount: new Prisma.Decimal(existing.totalAmount).toDecimalPlaces(2),
+              // Derive outstanding from the PAYABLE's own paidAmount, never the
+              // invoice's. The payable tracks payments applied directly against it
+              // (recordPayment), which the invoice row does not see. Recomputing
+              // outstanding from the invoice would resurrect already-paid amounts.
               outstandingAmount: new Prisma.Decimal(existing.totalAmount)
-                .minus(existing.paidAmount ?? 0)
+                .minus(oldPayable?.paidAmount ?? 0)
                 .toDecimalPlaces(2),
               currency: existing.currency as CurrencyCode,
               issueDate: existing.invoiceDate,
@@ -833,6 +837,12 @@ export class SupplierInvoicesService {
     }
 
     let expectedAmount = new Prisma.Decimal(0);
+    // Accumulate the ACTUAL invoiced amount over the SAME line set used to build
+    // expectedAmount (matched lines only). Comparing a matched-lines expected
+    // against the all-lines invoice total mixes two bases: a perfectly-matched
+    // invoice carrying an extra freight/service line would always report a bogus
+    // variance, and an unmatched overcharge would hide inside the whole-invoice gap.
+    let actualMatchedAmount = new Prisma.Decimal(0);
     let hasLineMatch = false;
     for (const line of invoice.lines ?? []) {
       const poLine = line.productId ? poLinesByProduct.get(line.productId) : null;
@@ -842,13 +852,20 @@ export class SupplierInvoicesService {
         .plus(new Prisma.Decimal(line.quantity).mul(poLine.unitCost))
         .minus(line.discountAmount ?? 0)
         .plus(line.taxAmount ?? 0);
+      actualMatchedAmount = actualMatchedAmount.plus(
+        line.lineTotal ??
+          new Prisma.Decimal(line.quantity)
+            .mul(line.unitPrice ?? 0)
+            .minus(line.discountAmount ?? 0)
+            .plus(line.taxAmount ?? 0),
+      );
     }
 
     if (!hasLineMatch) {
       return new Prisma.Decimal(invoice.totalAmount).minus(purchaseOrderTotal).abs();
     }
 
-    return new Prisma.Decimal(invoice.totalAmount).minus(expectedAmount).abs();
+    return actualMatchedAmount.minus(expectedAmount).abs();
   }
 
   private withinTolerance(

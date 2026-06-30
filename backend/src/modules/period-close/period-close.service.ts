@@ -76,8 +76,14 @@ export class PeriodCloseService {
   async close(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status === PeriodCloseStatus.CLOSED) throw new BadRequestException('Period already closed');
-    await this.assertNoDraftJournals(existing.companyId, existing.accountingPeriodId);
+    // Fast-fail outside the transaction for a clearer error path, but the
+    // authoritative check is re-run inside the transaction below to close the
+    // TOCTOU window (finding #24): a DRAFT journal created in the gap between this
+    // check and the period being marked CLOSED would otherwise be orphaned in a
+    // closed period.
+    await this.assertNoDraftJournals(this.prisma, existing.companyId, existing.accountingPeriodId);
     const updated = await this.prisma.$transaction(async (tx) => {
+      await this.assertNoDraftJournals(tx, existing.companyId, existing.accountingPeriodId);
       const close = await tx.accountingPeriodClose.update({
         where: { id },
         data: { status: PeriodCloseStatus.CLOSED, closedAt: new Date(), closedById: user.id },
@@ -147,8 +153,12 @@ export class PeriodCloseService {
     }
   }
 
-  private async assertNoDraftJournals(companyId: string, accountingPeriodId: string) {
-    const draftCount = await this.prisma.journalEntry.count({
+  private async assertNoDraftJournals(
+    client: Prisma.TransactionClient | PrismaService,
+    companyId: string,
+    accountingPeriodId: string,
+  ) {
+    const draftCount = await client.journalEntry.count({
       where: { companyId, accountingPeriodId, status: 'DRAFT', deletedAt: null },
     });
     if (draftCount > 0) {

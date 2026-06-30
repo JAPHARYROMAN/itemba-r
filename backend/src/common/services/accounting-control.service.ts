@@ -84,7 +84,13 @@ export class AccountingControlService {
       scopeOr.push({ accountingPeriodId: input.accountingPeriodId });
     }
     if (input.fiscalYearId) {
-      scopeOr.push({ fiscalYearId: input.fiscalYearId });
+      // ITMB-048 (finding #11): a PERIOD_LOCK created by closing a single period
+      // carries BOTH accountingPeriodId AND fiscalYearId. It must only freeze its
+      // own period (handled by the exact-period branch above), never every other
+      // OPEN period in the same fiscal year. So only treat a lock as fiscal-year
+      // scoped when it is NOT also period-scoped (accountingPeriodId IS NULL).
+      // A genuine year-wide lock (no period) still blocks the whole fiscal year.
+      scopeOr.push({ accountingPeriodId: null, fiscalYearId: input.fiscalYearId });
     }
 
     // ITMB-048: a date-window lock should only act company-wide when it is NOT

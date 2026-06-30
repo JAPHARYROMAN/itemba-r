@@ -65,6 +65,44 @@ function makeService(prisma: any) {
   return { service, accountingControl, auditLogs, codes };
 }
 
+function makePostedOriginal() {
+  return {
+    id: 'je-original',
+    journalNumber: 'JE-ORIG',
+    companyId: 'company-1',
+    divisionId: null,
+    branchId: null,
+    status: 'POSTED',
+    createdById: 'creator-user',
+    accountingPeriodId: 'old-period',
+    transactionDate: new Date('2026-03-15'),
+    description: 'Original',
+    referenceType: null,
+    referenceId: null,
+    totalDebit: 100,
+    totalCredit: 100,
+    reversalOfId: null,
+    lines: [
+      {
+        accountId: 'expense',
+        debit: 100,
+        credit: 0,
+        companyId: 'company-1',
+        divisionId: null,
+        branchId: null,
+      },
+      {
+        accountId: 'ap',
+        debit: 0,
+        credit: 100,
+        companyId: 'company-1',
+        divisionId: null,
+        branchId: null,
+      },
+    ],
+  };
+}
+
 describe('JournalEntriesService GL controls', () => {
   beforeEach(() => jest.clearAllMocks());
 
@@ -257,5 +295,51 @@ describe('JournalEntriesService GL controls', () => {
         }),
       }),
     );
+  });
+
+  it('claims the original entry atomically before posting a reversal (#12)', async () => {
+    const prisma = makePrisma();
+    const original = makePostedOriginal();
+    prisma.journalEntry.findFirst.mockResolvedValue(original);
+    const { service } = makeService(prisma);
+
+    await service.reverse(
+      'je-original',
+      { reversalReason: 'Correction' },
+      authUser({ id: 'poster-user' }),
+    );
+
+    // The original POSTED->REVERSED transition is a guarded updateMany, not a
+    // blind update, so a concurrent second reversal cannot also claim it.
+    expect(prisma.journalEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'je-original',
+          status: 'POSTED',
+          reversedAt: null,
+          reversalOfId: null,
+          deletedAt: null,
+        }),
+        data: expect.objectContaining({ status: 'REVERSED' }),
+      }),
+    );
+    expect(prisma.journalEntry.update).not.toHaveBeenCalled();
+  });
+
+  it('aborts the reversal when the original was already claimed by a concurrent reverse (#12)', async () => {
+    const prisma = makePrisma();
+    const original = makePostedOriginal();
+    prisma.journalEntry.findFirst.mockResolvedValue(original);
+    // The competing reversal already flipped the original, so our guarded claim
+    // matches no rows.
+    prisma.journalEntry.updateMany.mockResolvedValue({ count: 0 });
+    const { service } = makeService(prisma);
+
+    await expect(
+      service.reverse('je-original', { reversalReason: 'Correction' }, authUser({ id: 'poster-user' })),
+    ).rejects.toThrow('Journal entry could not be reversed because its status changed');
+
+    // No reversal entry must be created when the claim loses the race.
+    expect(prisma.journalEntry.create).not.toHaveBeenCalled();
   });
 });

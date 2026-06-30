@@ -105,6 +105,30 @@ describe('PeriodCloseService GL controls', () => {
     expect(prisma.accountingPeriod.update).not.toHaveBeenCalled();
   });
 
+  it('re-checks for draft journals inside the close transaction to close the TOCTOU window (finding #24)', async () => {
+    const prisma = makePrisma();
+    prisma.accountingPeriodClose.findFirst.mockResolvedValue({
+      id: 'close-1',
+      companyId: 'company-1',
+      fiscalYearId: 'fy-1',
+      accountingPeriodId: 'period-1',
+      status: 'REVIEWING',
+    });
+    // Simulate a DRAFT journal appearing AFTER the pre-transaction check passes:
+    // first count (outside tx) returns 0, second count (inside tx) returns 1.
+    prisma.journalEntry.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1);
+    const service = makeService(prisma);
+
+    await expect(service.close('close-1', authUser())).rejects.toBeInstanceOf(BadRequestException);
+    // The check ran twice (once outside, once inside the transaction).
+    expect(prisma.journalEntry.count).toHaveBeenCalledTimes(2);
+    // The period must NOT have been closed because the in-transaction check aborted.
+    expect(prisma.accountingPeriod.update).not.toHaveBeenCalled();
+    expect(prisma.accountingLock.create).not.toHaveBeenCalled();
+  });
+
   it('validates that close records match the requested company, fiscal year and period', async () => {
     const prisma = makePrisma();
     prisma.accountingPeriod.findFirst.mockResolvedValue({

@@ -204,5 +204,73 @@ describe('PostingEngineService', () => {
         }),
       );
     });
+
+    // #30: the period-lock check must run inside the caller-supplied transaction,
+    // gating the JournalEntry insert. When the lock check rejects, nothing is
+    // written, and the check must happen before any create on the tx client.
+    it('validates the period lock inside the caller transaction before inserting', async () => {
+      const callOrder: string[] = [];
+      const tx: any = {
+        journalEntry: {
+          create: jest.fn(async (args: any) => {
+            callOrder.push('create');
+            return { id: 'je-tx', journalNumber: args.data.journalNumber };
+          }),
+        },
+        journalEntryLine: { createMany: jest.fn(async () => ({ count: 0 })) },
+        chartOfAccount: { count: jest.fn(async (args: any) => args.where.id.in.length) },
+      };
+      fakeAccountingControl.assertPostingAllowed.mockImplementationOnce(async () => {
+        callOrder.push('assertPostingAllowed');
+        return { id: 'period-1' };
+      });
+
+      await engine.postLines(
+        {
+          companyId: 'co-1',
+          transactionDate: new Date('2026-04-29'),
+          description: 'Direct posting',
+          moduleName: 'expenses',
+          userId: 'u-1',
+          lines: [
+            { accountId: 'expense', debit: 100, credit: 0 },
+            { accountId: 'cash', debit: 0, credit: 100 },
+          ],
+        },
+        tx,
+      );
+
+      // The lock validation ran, and ran before the JE insert on the same tx.
+      expect(callOrder).toEqual(['assertPostingAllowed', 'create']);
+      expect(tx.journalEntry.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not insert a journal entry when the period lock check rejects', async () => {
+      const tx: any = {
+        journalEntry: { create: jest.fn() },
+        journalEntryLine: { createMany: jest.fn() },
+        chartOfAccount: { count: jest.fn(async (args: any) => args.where.id.in.length) },
+      };
+      fakeAccountingControl.assertPostingAllowed.mockRejectedValueOnce(
+        new BadRequestException('Accounting period is locked'),
+      );
+
+      await expect(
+        engine.postLines(
+          {
+            companyId: 'co-1',
+            transactionDate: new Date('2026-04-29'),
+            description: 'Direct posting',
+            userId: 'u-1',
+            lines: [
+              { accountId: 'expense', debit: 100, credit: 0 },
+              { accountId: 'cash', debit: 0, credit: 100 },
+            ],
+          },
+          tx,
+        ),
+      ).rejects.toThrow('Accounting period is locked');
+      expect(tx.journalEntry.create).not.toHaveBeenCalled();
+    });
   });
 });

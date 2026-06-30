@@ -479,6 +479,34 @@ export class JournalEntriesService {
     });
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // Atomically claim the original POSTED entry before doing any work. Two
+      // concurrent reverse() calls both pass the pre-transaction findOne status
+      // check (read outside the tx), so the transition itself must be the guard:
+      // a guarded updateMany that only matches a still-reversible row. The loser
+      // gets count===0, throws, and rolls back its reversal entry. This mirrors
+      // post()'s atomic DRAFT->POSTED claim and prevents a duplicated ledger
+      // reversal. (#12)
+      const claim = await tx.journalEntry.updateMany({
+        where: {
+          id: original.id,
+          status: 'POSTED',
+          reversedAt: null,
+          reversalOfId: null,
+          deletedAt: null,
+        },
+        data: {
+          status: 'REVERSED',
+          reversedById: user.id,
+          reversedAt: new Date(),
+          reversalReason: dto.reversalReason,
+        },
+      });
+      if (claim.count !== 1) {
+        throw new BadRequestException(
+          'Journal entry could not be reversed because its status changed',
+        );
+      }
+
       const journalNumber = await this.codes.next({
         entityType: 'JournalEntry',
         companyId: original.companyId,
@@ -519,16 +547,7 @@ export class JournalEntriesService {
         })),
       });
 
-      await tx.journalEntry.update({
-        where: { id: original.id },
-        data: {
-          status: 'REVERSED',
-          reversedById: user.id,
-          reversedAt: new Date(),
-          reversalReason: dto.reversalReason,
-        },
-      });
-
+      // The original was already flipped to REVERSED by the atomic claim above.
       return reversalEntry;
     });
 

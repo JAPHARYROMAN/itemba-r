@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel, AuditSeverity, ExternalPaymentStatus } from '@prisma/client';
+import { AccessLevel, AuditSeverity, ExternalPaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateExternalPaymentDto } from './dto/create-external-payment.dto';
@@ -106,21 +106,61 @@ export class ExternalPaymentsService {
     userId: string | null,
     metadata?: Record<string, unknown>,
   ) {
+    // ITMB-AUDIT-31: the idempotency guard must survive concurrent retries carrying the
+    // same key. A bare findFirst-then-create races: two simultaneous requests both miss
+    // the replay lookup and both create(), so the second hits the
+    // @@unique([companyId, idempotencyKey]) index and 500s instead of replaying. The single
+    // create is itself atomic, and the unique index is the source of truth; on the
+    // unique-violation (P2002) we re-run the replay lookup and return the winning row
+    // instead of rethrowing — mirroring the sales-order createAndConfirm pattern.
     if (dto.idempotencyKey) {
-      const replay = await this.prisma.externalPayment.findFirst({
-        where: {
-          companyId: dto.companyId,
-          idempotencyKey: dto.idempotencyKey,
-          deletedAt: null,
-        },
-        select: this.buildSelect(false),
-      });
+      const replay = await this.replayByIdempotencyKey(dto.companyId, dto.idempotencyKey);
       if (replay) return replay;
     }
 
-    const paymentNumber = `PAY-${Date.now().toString(36).toUpperCase()}`;
+    let record: Awaited<ReturnType<typeof this.insertPayment>>;
+    try {
+      record = await this.insertPayment(dto, userId);
+    } catch (error) {
+      if (
+        dto.idempotencyKey &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const replay = await this.replayByIdempotencyKey(dto.companyId, dto.idempotencyKey);
+        if (replay) return replay;
+      }
+      throw error;
+    }
 
-    const record = await this.prisma.externalPayment.create({
+    await this.auditLogs.log({
+      action: 'EXTERNAL_PAYMENT_CREATED',
+      entityType: 'ExternalPayment',
+      entityId: record.id,
+      userId: userId ?? undefined,
+      companyId: record.companyId,
+      newValue: record as any,
+      metadata,
+      severity: AuditSeverity.MEDIUM,
+    });
+
+    return record;
+  }
+
+  private async replayByIdempotencyKey(companyId: string, idempotencyKey: string) {
+    return this.prisma.externalPayment.findFirst({
+      where: {
+        companyId,
+        idempotencyKey,
+        deletedAt: null,
+      },
+      select: this.buildSelect(false),
+    });
+  }
+
+  private async insertPayment(dto: CreateExternalPaymentDto, userId: string | null) {
+    const paymentNumber = `PAY-${Date.now().toString(36).toUpperCase()}`;
+    return this.prisma.externalPayment.create({
       data: {
         paymentNumber,
         companyId: dto.companyId,
@@ -140,19 +180,6 @@ export class ExternalPaymentsService {
       },
       select: this.buildSelect(false),
     });
-
-    await this.auditLogs.log({
-      action: 'EXTERNAL_PAYMENT_CREATED',
-      entityType: 'ExternalPayment',
-      entityId: record.id,
-      userId: userId ?? undefined,
-      companyId: record.companyId,
-      newValue: record as any,
-      metadata,
-      severity: AuditSeverity.MEDIUM,
-    });
-
-    return record;
   }
 
   async confirm(id: string, user: AuthUser) {

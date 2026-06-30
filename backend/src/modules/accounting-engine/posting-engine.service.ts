@@ -124,14 +124,20 @@ export class PostingEngineService {
     input: DirectPostingInput,
     tx?: Prisma.TransactionClient,
   ): Promise<{ id: string; journalNumber: string }> {
-    const period = await this.accountingControl.assertPostingAllowed({
-      companyId: input.companyId,
-      accountingPeriodId: input.accountingPeriodId,
-      transactionDate: input.transactionDate,
-      moduleName: input.moduleName,
-    });
-
     const run = async (db: Prisma.TransactionClient) => {
+      // #30: validate the period lock INSIDE the (caller-supplied or engine-owned)
+      // transaction, immediately before the JournalEntry insert, rather than on a
+      // separate this.prisma call before entering run(tx). Doing it here removes the
+      // window where a concurrent period close could be straddled between the check
+      // and the write — the resolved period is now read and consumed in the same
+      // transactional flow that creates the entry.
+      const period = await this.accountingControl.assertPostingAllowed({
+        companyId: input.companyId,
+        accountingPeriodId: input.accountingPeriodId,
+        transactionDate: input.transactionDate,
+        moduleName: input.moduleName,
+      });
+
       const totals = await this.validatePostingLines(db, input.companyId, input.lines);
       const journalNumber =
         input.journalNumber ??
