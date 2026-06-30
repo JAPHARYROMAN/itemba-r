@@ -255,6 +255,15 @@ export class SupplierInvoicesService {
 
   async runMatch(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    // createThreeWayMatch writes the invoice status to MATCHED/DISPUTED, so without
+    // this guard re-matching an already-APPROVED (or paid/cancelled) invoice would
+    // silently revert it out of APPROVED. Only the pre-approval statuses — the same
+    // set the approve() atomic claim accepts — may be (re)matched.
+    if (!['DRAFT', 'RECEIVED', 'MATCHED', 'DISPUTED'].includes(existing.status as string)) {
+      throw new BadRequestException(
+        `A ${existing.status} supplier invoice cannot be re-matched`,
+      );
+    }
     const match = await this.createThreeWayMatch(existing, user.id);
     await this.auditLogs.log({
       action: 'SUPPLIER_INVOICE_MATCH',

@@ -242,3 +242,14 @@ describe('SupplierInvoicesService currency lock', () => {
     expect(prisma.supplierInvoice.update).toHaveBeenCalled();
   });
 });
+
+describe('SupplierInvoicesService runMatch guard', () => {
+  it('rejects re-matching an already-approved invoice (would revert it out of APPROVED)', async () => {
+    const { service } = makeService();
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(approvableInvoice({ status: 'APPROVED' }) as any);
+
+    await expect(service.runMatch('si-1', user)).rejects.toBeInstanceOf(BadRequestException);
+  });
+});

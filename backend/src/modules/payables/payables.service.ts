@@ -277,6 +277,16 @@ export class PayablesService {
         if (!locked) throw new NotFoundException('Payable not found');
         await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);
 
+        // A WRITTEN_OFF (or already-PAID) payable is settled: it must not accept a
+        // payment that would post a spurious cash settlement journal. (WRITTEN_OFF
+        // can still carry a non-zero outstandingAmount, so the amount check below
+        // does not catch this on its own.)
+        if (!['OPEN', 'PARTIALLY_PAID'].includes(locked.status)) {
+          throw new BadRequestException(
+            `Cannot record a payment against a ${locked.status} payable`,
+          );
+        }
+
         const outstanding = new Prisma.Decimal(locked.outstandingAmount);
         if (paymentAmount.gt(outstanding)) {
           throw new BadRequestException(
