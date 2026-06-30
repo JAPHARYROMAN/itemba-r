@@ -571,6 +571,9 @@ describe('Critical Business Workflows (e2e)', () => {
             productType: ProductType.STOCK_ITEM,
             baseUnitId: unit.id,
             trackInventory: true,
+            // Stock products require a purchase cost > 0 (assertProductMasterPricing)
+            // so inventory can be valued for WAC/COGS.
+            defaultPurchasePrice: 10,
           })
           .expect(201)
       ).body,

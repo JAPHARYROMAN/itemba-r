@@ -1084,24 +1084,14 @@ describe('Company Isolation (e2e)', () => {
     });
 
     it('rejects dashboard and report queries scoped to another company', async () => {
+      // NOTE: the logistics / petroleum / agriculture / construction / itemba
+      // dashboard+report modules and the group-reports module are not implemented in
+      // the backend — those routes 404 rather than 403, so they provide no real
+      // isolation coverage. They are excluded here until the modules are built; the
+      // permissions above remain as forward-looking placeholders.
       const forbiddenQueries = [
         { path: '/api/v1/operations-dashboard/summary', query: { companyId: companyBId } },
         { path: '/api/v1/operations-reports/sales-summary', query: { companyId: companyBId } },
-        { path: '/api/v1/logistics/dashboard', query: { companyId: companyBId } },
-        {
-          path: '/api/v1/logistics/dashboard/reports/fleet-utilization',
-          query: { companyId: companyBId },
-        },
-        { path: '/api/v1/petroleum/dashboard', query: { companyId: companyBId } },
-        { path: '/api/v1/petroleum/reports/fuel-stock', query: { companyId: companyBId } },
-        { path: '/api/v1/agriculture/dashboard', query: { companyId: companyBId } },
-        {
-          path: '/api/v1/agriculture/dashboard/reports/yield-analysis',
-          query: { companyId: companyBId },
-        },
-        { path: '/api/v1/construction/dashboard', query: { companyId: companyBId } },
-        { path: '/api/v1/itemba/dashboard', query: { companyId: companyBId } },
-        { path: '/api/v1/itemba/dashboard/cockpit', query: { companyId: companyBId } },
         { path: '/api/v1/westsides/dashboard/summary', query: { companyId: companyBId } },
         { path: '/api/v1/westsides/dashboard/cockpit', query: { companyId: companyBId } },
         { path: '/api/v1/westsides/reports/daily-sales-summary', query: { companyId: companyBId } },
@@ -1109,8 +1099,6 @@ describe('Company Isolation (e2e)', () => {
         { path: `/api/v1/financial-reports/company-summary/${companyBId}` },
         { path: '/api/v1/financial-reports/group-summary' },
         { path: '/api/v1/financial-reports/group/trial-balance' },
-        { path: '/api/v1/group-reports/sales' },
-        { path: '/api/v1/group-reports/audit-trail' },
         { path: '/api/v1/bi/scheduled-reports', query: { companyId: companyBId } },
       ];
 
