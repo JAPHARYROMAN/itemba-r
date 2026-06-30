@@ -38,6 +38,14 @@ export class UpdateGoodsReceivedNoteLineDto {
   @Min(0)
   rejectedQuantity?: number;
 
+  // Optional per-line captured landed/unit cost. When set, post() treats this as
+  // the authoritative cost for the receipt (priority over the PO line cost and the
+  // product default purchase price) and values the inventory movement at it.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  unitCost?: number;
+
   @IsOptional()
   @IsString()
   condition?: string;

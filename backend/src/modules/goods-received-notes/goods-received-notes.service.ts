@@ -233,7 +233,14 @@ export class GoodsReceivedNotesService {
       const productIds = Array.from(new Set(existing.lines.map((line) => line.productId)));
       const products = await tx.product.findMany({
         where: { id: { in: productIds }, companyId: existing.companyId, deletedAt: null },
-        select: { id: true, name: true, trackInventory: true },
+        select: {
+          id: true,
+          name: true,
+          trackInventory: true,
+          baseUnitId: true,
+          defaultPurchasePrice: true,
+          productFamily: { select: { defaultPurchasePrice: true } },
+        },
       });
       const productById = new Map(products.map((product) => [product.id, product]));
       if (productById.size !== productIds.length) {
@@ -335,6 +342,37 @@ export class GoodsReceivedNotesService {
         const acceptedQuantity = Number(line.acceptedQuantity);
         if (acceptedQuantity <= 0) continue;
         const poLine = poLineByProductUnit.get(`${line.productId}:${line.unitId}`);
+        // Resolve a real per-unit cost for this receipt, in priority order:
+        //   1. the GRN line's own captured unitCost (an explicit landed cost),
+        //   2. the matching PO line's unitCost (keyed by product:unit, so unit-safe),
+        //   3. the product (then family) default purchase price.
+        // The product/family defaults are denominated in the product's BASE unit and
+        // there is no UoM conversion in this path, so they are only valid when the
+        // received unit IS the base unit. When nothing applies the cost is left
+        // undefined so the receipt fails loudly via assertInventoryMovementHasCost
+        // rather than valuing at a wrong-unit cost (which would corrupt WAC).
+        const baseUnitDefaultCost =
+          line.unitId === product.baseUnitId
+            ? product.defaultPurchasePrice != null
+              ? Number(product.defaultPurchasePrice)
+              : product.productFamily?.defaultPurchasePrice != null
+                ? Number(product.productFamily.defaultPurchasePrice)
+                : undefined
+            : undefined;
+        const resolvedUnitCost =
+          line.unitCost != null
+            ? Number(line.unitCost)
+            : poLine
+              ? Number(poLine.unitCost)
+              : baseUnitDefaultCost;
+        // Persist the resolved cost back onto the GRN line so the posted receipt
+        // carries the cost it was valued at (lines without their own unitCost yet).
+        if (line.unitCost == null && resolvedUnitCost != null) {
+          await tx.goodsReceivedNoteLine.update({
+            where: { id: line.id },
+            data: { unitCost: resolvedUnitCost },
+          });
+        }
         await this.inventoryMovements.createMovement({
           companyId: existing.companyId,
           divisionId: existing.divisionId ?? undefined,
@@ -343,7 +381,7 @@ export class GoodsReceivedNotesService {
           movementType: 'PURCHASE_RECEIPT',
           quantity: acceptedQuantity,
           unitId: line.unitId,
-          unitCost: poLine ? Number(poLine.unitCost) : undefined,
+          unitCost: resolvedUnitCost,
           movementDate: existing.receivedDate,
           createdById: user.id,
           referenceType: 'GoodsReceivedNote',
