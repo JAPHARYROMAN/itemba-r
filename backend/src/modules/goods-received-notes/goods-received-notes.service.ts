@@ -7,6 +7,12 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { UpdateGoodsReceivedNoteDto } from './dto/update-goods-received-note.dto';
 
+// Quantities are Decimal(18,4) but compared here as JS numbers; this tolerance
+// absorbs binary-float rounding (e.g. 0.1 + 0.2 = 0.30000000000000004) so an exact
+// receipt isn't falsely rejected as over-receipt or mis-classified as partial. It
+// is far below the 4-decimal storage precision, so it never masks a real overage.
+const QTY_EPSILON = 1e-6;
+
 @Injectable()
 export class GoodsReceivedNotesService {
   constructor(
@@ -328,7 +334,7 @@ export class GoodsReceivedNotesService {
           }
           const ordered = orderedByProductUnit.get(key) ?? 0;
           const prior = priorReceivedByProductUnit.get(key) ?? 0;
-          if (prior + accepted > ordered) {
+          if (prior + accepted - ordered > QTY_EPSILON) {
             throw new BadRequestException(
               'Accepted quantity exceeds the outstanding ordered quantity on the purchase order',
             );
@@ -359,10 +365,14 @@ export class GoodsReceivedNotesService {
                 ? Number(product.productFamily.defaultPurchasePrice)
                 : undefined
             : undefined;
+        // Guard on poLine.unitCost being non-null (not just poLine existing): a PO
+        // line with a NULL unitCost must fall through to the base-unit default,
+        // otherwise Number(null)=0 would value the receipt at 0 and corrupt WAC. An
+        // explicit 0 (genuinely free goods) is honoured.
         const resolvedUnitCost =
           line.unitCost != null
             ? Number(line.unitCost)
-            : poLine
+            : poLine?.unitCost != null
               ? Number(poLine.unitCost)
               : baseUnitDefaultCost;
         // Persist the resolved cost back onto the GRN line so the posted receipt
@@ -406,7 +416,7 @@ export class GoodsReceivedNotesService {
           );
         }
         const fullyReceived = [...orderedByProductUnit.entries()].every(
-          ([key, ordered]) => (receivedByProductUnit.get(key) ?? 0) >= ordered,
+          ([key, ordered]) => (receivedByProductUnit.get(key) ?? 0) >= ordered - QTY_EPSILON,
         );
         const nextStatus = fullyReceived ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
         await tx.purchaseOrder.updateMany({

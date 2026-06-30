@@ -81,6 +81,37 @@ describe('SupplierInvoicesService approve atomic claim', () => {
     // ...and losing the claim short-circuits before any payable is created/posted.
     expect(prisma.supplierInvoice.update).not.toHaveBeenCalled();
   });
+
+  it('leaves a PO-linked invoice APPROVED after a successful approval, not MATCHED/DISPUTED', async () => {
+    const { service, prisma } = makeService({
+      payable: {
+        findUnique: jest.fn(),
+        create: jest.fn(async () => ({
+          id: 'pay-1',
+          companyId: 'company-1',
+          supplierId: 'supplier-1',
+          journalEntryId: null,
+        })),
+        update: jest.fn(async () => ({ id: 'pay-1' })),
+      },
+      purchaseOrder: { updateMany: jest.fn(async () => ({ count: 1 })) },
+    });
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(approvableInvoice({ purchaseOrderId: 'po-1', payableId: null }) as any);
+    // createThreeWayMatch() writes status MATCHED/DISPUTED inside the same tx; the
+    // final update must override it back to APPROVED. Stub the heavy collaborators.
+    jest.spyOn(service as any, 'createThreeWayMatch').mockResolvedValue({ matchStatus: 'MATCHED' });
+    jest.spyOn(service as any, 'postSupplierInvoicePayable').mockResolvedValue({ id: 'je-1' });
+    jest.spyOn(service as any, 'syncSupplierBalance').mockResolvedValue(undefined);
+
+    await service.approve('si-1', undefined, user);
+
+    const finalUpdate = prisma.supplierInvoice.update.mock.calls.at(-1)?.[0];
+    expect(finalUpdate.data).toEqual(
+      expect.objectContaining({ status: 'APPROVED', payableId: 'pay-1' }),
+    );
+  });
 });
 
 function makeUpdateService(prismaOverrides: Record<string, any> = {}) {

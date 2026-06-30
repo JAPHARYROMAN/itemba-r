@@ -384,10 +384,15 @@ export class SupplierInvoicesService {
       );
       await this.syncSupplierBalance(tx, payable.companyId, payable.supplierId);
 
-      // Status/approvedAt/approvedById were already set by the atomic claim above.
+      // Re-assert APPROVED as the FINAL write. For a PO-linked invoice,
+      // createThreeWayMatch() above set status to MATCHED/DISPUTED; without this
+      // re-assert a successfully-approved invoice would (a) read as un-approved and
+      // (b) stay inside the atomic claim's re-claimable set, so a second approve()
+      // would create duplicate three-way-match rows. approvedAt/approvedById were
+      // set by the claim and are intentionally left intact.
       return tx.supplierInvoice.update({
         where: { id },
-        data: { payableId: payable.id },
+        data: { status: 'APPROVED', payableId: payable.id },
         include: { lines: true },
       });
     });

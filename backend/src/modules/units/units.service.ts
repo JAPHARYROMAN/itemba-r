@@ -376,7 +376,20 @@ export class UnitsService {
   }
 
   private assertConversionFactorPrecision(conversionFactor: number) {
-    const decimals = (String(conversionFactor).split('.')[1] ?? '').length;
+    // Count decimal places robustly. A naive String(x).split('.') misses scientific
+    // notation: String(0.0000005) === '5e-7', whose split has no '.', yielding 0 and
+    // letting an over-precise factor slip past the guard.
+    const text = conversionFactor.toString().toLowerCase();
+    const eIndex = text.indexOf('e');
+    let decimals: number;
+    if (eIndex !== -1) {
+      const mantissa = text.slice(0, eIndex);
+      const exponent = parseInt(text.slice(eIndex + 1), 10) || 0;
+      const mantissaDecimals = (mantissa.split('.')[1] ?? '').length;
+      decimals = mantissaDecimals + (exponent < 0 ? -exponent : 0);
+    } else {
+      decimals = (text.split('.')[1] ?? '').length;
+    }
     if (decimals > 6) {
       throw new BadRequestException(
         'conversionFactor must have at most 6 decimal places',
