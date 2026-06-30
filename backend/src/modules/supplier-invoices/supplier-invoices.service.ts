@@ -633,11 +633,27 @@ export class SupplierInvoicesService {
     if (refs.purchaseOrderId) {
       const po = await this.prisma.purchaseOrder.findFirst({
         where: { id: refs.purchaseOrderId, companyId: refs.companyId, deletedAt: null },
-        select: { id: true, supplierId: true, divisionId: true, branchId: true, currency: true },
+        select: {
+          id: true,
+          supplierId: true,
+          divisionId: true,
+          branchId: true,
+          currency: true,
+          purchaseType: true,
+        },
       });
       if (!po) throw new BadRequestException('Purchase order does not belong to this company');
       if (po.supplierId && po.supplierId !== refs.supplierId) {
         throw new BadRequestException('Purchase order supplier does not match invoice supplier');
+      }
+      // A cash purchase settles in full at receipt (DR Inventory / CR Cash) and has
+      // no accounts-payable leg. Linking a supplier invoice to it would make the
+      // invoice approve flow post a second inventory debit + a phantom AP credit,
+      // double-counting the goods. Cash purchases never flow through AP.
+      if (po.purchaseType === 'CASH_PURCHASE') {
+        throw new BadRequestException(
+          'Cannot link a supplier invoice to a cash-purchase order; it settles at receipt and carries no accounts payable',
+        );
       }
       // Currency lock: the invoice must be denominated in the same currency as its
       // linked purchase order, otherwise the matched amounts are not comparable.

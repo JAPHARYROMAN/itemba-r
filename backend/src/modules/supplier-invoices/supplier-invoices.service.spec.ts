@@ -254,6 +254,32 @@ describe('SupplierInvoicesService runMatch guard', () => {
   });
 });
 
+describe('SupplierInvoicesService cash-purchase PO guard', () => {
+  it('rejects linking an invoice to a CASH_PURCHASE order (settles at receipt, no AP)', async () => {
+    const { service } = makeUpdateService({
+      purchaseOrder: {
+        findFirst: jest.fn(async () => ({
+          id: 'po-1',
+          supplierId: 'supplier-1',
+          divisionId: 'division-1',
+          branchId: 'branch-1',
+          currency: 'TZS',
+          purchaseType: 'CASH_PURCHASE',
+        })),
+      },
+    });
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(
+        approvableInvoice({ status: 'DRAFT', purchaseOrderId: 'po-1', currency: 'TZS' }) as any,
+      );
+
+    await expect(service.update('si-1', { currency: 'TZS' } as any, user)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+});
+
 describe('SupplierInvoicesService re-approval preserves payable payments (#6)', () => {
   it('derives outstanding from the payable paidAmount, not the invoice, on the update branch', async () => {
     const payableUpdate = jest.fn(async ({ data }: any) => ({
@@ -276,17 +302,15 @@ describe('SupplierInvoicesService re-approval preserves payable payments (#6)', 
         create: jest.fn(),
       },
     });
-    jest
-      .spyOn(service, 'findOne')
-      .mockResolvedValue(
-        approvableInvoice({
-          status: 'DISPUTED',
-          payableId: 'pay-1',
-          totalAmount: 100,
-          paidAmount: 0,
-          purchaseOrderId: null,
-        }) as any,
-      );
+    jest.spyOn(service, 'findOne').mockResolvedValue(
+      approvableInvoice({
+        status: 'DISPUTED',
+        payableId: 'pay-1',
+        totalAmount: 100,
+        paidAmount: 0,
+        purchaseOrderId: null,
+      }) as any,
+    );
     jest.spyOn(service as any, 'syncSupplierBalance').mockResolvedValue(undefined);
 
     await service.approve('si-1', undefined, user);

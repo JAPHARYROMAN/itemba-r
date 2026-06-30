@@ -419,9 +419,7 @@ describe('PurchaseOrdersService.receive AP ownership (findings #1, #7)', () => {
     // No GL journal is posted on a credit receipt (no AP_CONTROL credit here).
     expect(postingEngine.postLines).not.toHaveBeenCalled();
     // No Payable code is requested for this PO.
-    expect(codes.next).not.toHaveBeenCalledWith(
-      expect.objectContaining({ entityType: 'Payable' }),
-    );
+    expect(codes.next).not.toHaveBeenCalledWith(expect.objectContaining({ entityType: 'Payable' }));
     // The PO row carries no journalEntryId from a credit receipt.
     const updateArg = prisma.purchaseOrder.update.mock.calls.at(-1)?.[0];
     expect(updateArg.data.status).toBe('RECEIVED');
@@ -432,7 +430,9 @@ describe('PurchaseOrdersService.receive AP ownership (findings #1, #7)', () => {
   it('does not re-post AP or touch the linked payable when the PO already has one', async () => {
     const { service, prisma, postingEngine } = makeService();
     prisma.product.findUnique.mockResolvedValue({ id: 'product-1', trackInventory: true });
-    prisma.purchaseOrder.findFirst.mockResolvedValue(creditOrder({ payableId: 'payable-existing' }));
+    prisma.purchaseOrder.findFirst.mockResolvedValue(
+      creditOrder({ payableId: 'payable-existing' }),
+    );
 
     await service.receive('po-1', user);
 

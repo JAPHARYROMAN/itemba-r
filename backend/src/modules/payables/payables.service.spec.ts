@@ -135,10 +135,9 @@ describe('PayablesService.writeOff reversing journal (#9)', () => {
   });
 
   it('posts no journal when there is nothing outstanding', async () => {
-    const { service, postingEngine, tx } = makeService(
-      lockedPayable({ outstandingAmount: '0' }),
-      { originalJe: originalTwoLine },
-    );
+    const { service, postingEngine, tx } = makeService(lockedPayable({ outstandingAmount: '0' }), {
+      originalJe: originalTwoLine,
+    });
 
     await service.writeOff('pay-1', { reason: 'already settled' } as any, user);
 
@@ -149,9 +148,9 @@ describe('PayablesService.writeOff reversing journal (#9)', () => {
   it('rejects writing off an already-PAID payable', async () => {
     const { service, postingEngine, tx } = makeService(lockedPayable({ status: 'PAID' }));
 
-    await expect(
-      service.writeOff('pay-1', { reason: 'x' } as any, user),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.writeOff('pay-1', { reason: 'x' } as any, user)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
     expect(postingEngine.postLines).not.toHaveBeenCalled();
     expect(tx.payable.update).not.toHaveBeenCalled();
   });

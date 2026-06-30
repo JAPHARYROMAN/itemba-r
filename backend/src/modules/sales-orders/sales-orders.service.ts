@@ -2225,8 +2225,16 @@ export class SalesOrdersService {
         });
 
     if (!original || original.lines.length === 0) return null;
-    // Already reversed: don't post a second reversal that would double the swing.
-    if (original.status === 'REVERSED') return null;
+
+    // Atomic claim: flip the original entry to REVERSED, guarded on it not already
+    // being reversed, BEFORE posting anything. Two concurrent cancels race here; the
+    // loser sees count 0 and skips, so the reversal swing is posted exactly once. A
+    // failure further down rolls this claim back with the transaction.
+    const claim = await tx.journalEntry.updateMany({
+      where: { id: original.id, status: { not: 'REVERSED' }, deletedAt: null },
+      data: { status: 'REVERSED', reversedAt: new Date(), reversedById: userId },
+    });
+    if (claim.count !== 1) return null;
 
     const reversedLines = original.lines.map((line) => ({
       accountId: line.accountId,
@@ -2255,20 +2263,12 @@ export class SalesOrdersService {
       tx,
     );
 
-    // Link the two entries the same way journal-entries.reverse() does: the
-    // REVERSAL entry carries reversalOfId -> original, and the ORIGINAL is
-    // flipped to REVERSED (with reversedAt) so reconciliation can pair them and
-    // a re-cancel can't double-reverse it.
-    await Promise.all([
-      tx.journalEntry.update({
-        where: { id: reversal.id },
-        data: { reversalOfId: original.id },
-      }),
-      tx.journalEntry.update({
-        where: { id: original.id },
-        data: { status: 'REVERSED', reversedAt: new Date(), reversedById: userId },
-      }),
-    ]);
+    // Link the reversal to the original (already flipped to REVERSED by the atomic
+    // claim above) so reconciliation can pair them.
+    await tx.journalEntry.update({
+      where: { id: reversal.id },
+      data: { reversalOfId: original.id },
+    });
 
     return reversal;
   }

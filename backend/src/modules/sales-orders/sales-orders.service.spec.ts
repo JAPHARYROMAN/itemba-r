@@ -67,6 +67,7 @@ function makeService() {
     journalEntry: {
       findFirst: jest.fn(async () => null),
       update: jest.fn(async ({ data }: any) => ({ id: 'je-1', ...data })),
+      updateMany: jest.fn(async () => ({ count: 1 })),
     },
     receivable: {
       create: jest.fn(async ({ data }: any) => ({ id: 'receivable-1', ...data })),
@@ -644,9 +645,11 @@ describe('SalesOrdersService cancel GL reversal (#2)', () => {
 
     await service.cancel('so-1', user);
 
-    expect(prisma.journalEntry.update).toHaveBeenCalledWith(
+    // The original is flipped via an ATOMIC claim guarded on not-already-REVERSED,
+    // so two concurrent cancels can't both post a reversal.
+    expect(prisma.journalEntry.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'je-confirm-1' },
+        where: expect.objectContaining({ id: 'je-confirm-1', status: { not: 'REVERSED' } }),
         data: expect.objectContaining({ status: 'REVERSED' }),
       }),
     );
@@ -658,10 +661,12 @@ describe('SalesOrdersService cancel GL reversal (#2)', () => {
     );
   });
 
-  it('does not re-reverse an already-REVERSED confirmation entry', async () => {
+  it('does not re-reverse an already-REVERSED confirmation entry (atomic claim loses)', async () => {
     const { service, prisma } = makeService();
     prisma.salesOrder.findFirst.mockResolvedValue(confirmedOrderWithJournal());
     prisma.journalEntry.findFirst.mockResolvedValue({ ...originalEntry, status: 'REVERSED' });
+    // The atomic claim matches no row (already reversed / lost the race).
+    prisma.journalEntry.updateMany.mockResolvedValue({ count: 0 });
 
     await service.cancel('so-1', user);
 

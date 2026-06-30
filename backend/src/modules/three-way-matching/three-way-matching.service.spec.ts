@@ -1,9 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { ThreeWayMatchingService } from './three-way-matching.service';
 
-function makeService(
-  overrides: { existingMatch?: any; purchaseOrder?: any; grn?: any } = {},
-) {
+function makeService(overrides: { existingMatch?: any; purchaseOrder?: any; grn?: any } = {}) {
   const purchaseOrder = {
     id: 'po-1',
     companyId: 'company-1',
@@ -26,7 +24,9 @@ function makeService(
       findFirst: jest.fn().mockResolvedValue(overrides.existingMatch ?? null),
       create: jest.fn().mockImplementation(async ({ data }: any) => ({ id: 'twm-1', ...data })),
     },
-    purchaseOrder: { findFirst: jest.fn().mockResolvedValue(overrides.purchaseOrder ?? purchaseOrder) },
+    purchaseOrder: {
+      findFirst: jest.fn().mockResolvedValue(overrides.purchaseOrder ?? purchaseOrder),
+    },
     supplierInvoice: { findFirst: jest.fn().mockResolvedValue(supplierInvoice) },
     goodsReceivedNote: { findFirst: jest.fn().mockResolvedValue(overrides.grn ?? null) },
   } as any;

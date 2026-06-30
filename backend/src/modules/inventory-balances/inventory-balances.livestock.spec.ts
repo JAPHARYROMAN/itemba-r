@@ -54,9 +54,21 @@ describe('InventoryBalancesService.liveStock risk KPIs', () => {
     // out+low+negative sum) plus one healthy OK row.
     const { service } = makeService([
       // onHand 5, reserved 8, threshold 10 -> available -3 -> status LOW, oversold.
-      makeBalance({ id: 'b1', quantityOnHand: 5, quantityReserved: 8, reorderLevel: 10, totalValue: 50 }),
+      makeBalance({
+        id: 'b1',
+        quantityOnHand: 5,
+        quantityReserved: 8,
+        reorderLevel: 10,
+        totalValue: 50,
+      }),
       // healthy
-      makeBalance({ id: 'b2', quantityOnHand: 100, quantityReserved: 0, reorderLevel: 10, totalValue: 999 }),
+      makeBalance({
+        id: 'b2',
+        quantityOnHand: 100,
+        quantityReserved: 0,
+        reorderLevel: 10,
+        totalValue: 999,
+      }),
     ]);
 
     const res = await service.liveStock({}, user);
@@ -87,7 +99,13 @@ describe('InventoryBalancesService.liveStock risk KPIs', () => {
 
   it('#21: a single corrupt OUT+negative row is not double counted in criticalCount', async () => {
     const { service } = makeService([
-      makeBalance({ id: 'b', quantityOnHand: -4, quantityReserved: 0, reorderLevel: 5, totalValue: 0 }),
+      makeBalance({
+        id: 'b',
+        quantityOnHand: -4,
+        quantityReserved: 0,
+        reorderLevel: 5,
+        totalValue: 0,
+      }),
     ]);
 
     const res = await service.liveStock({}, user);
@@ -117,8 +135,20 @@ describe('InventoryBalancesService.liveStock risk KPIs', () => {
   it('#29: criticalValue equals the Decimal sum of risk values and matches totals.riskValue', async () => {
     const { service } = makeService([
       // LOW row contributes its totalValue to riskValue.
-      makeBalance({ id: 'b1', quantityOnHand: 1, quantityReserved: 0, reorderLevel: 10, totalValue: 0.1 }),
-      makeBalance({ id: 'b2', quantityOnHand: 1, quantityReserved: 0, reorderLevel: 10, totalValue: 0.2 }),
+      makeBalance({
+        id: 'b1',
+        quantityOnHand: 1,
+        quantityReserved: 0,
+        reorderLevel: 10,
+        totalValue: 0.1,
+      }),
+      makeBalance({
+        id: 'b2',
+        quantityOnHand: 1,
+        quantityReserved: 0,
+        reorderLevel: 10,
+        totalValue: 0.2,
+      }),
     ]);
 
     const res = await service.liveStock({}, user);

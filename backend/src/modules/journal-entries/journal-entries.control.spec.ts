@@ -336,7 +336,11 @@ describe('JournalEntriesService GL controls', () => {
     const { service } = makeService(prisma);
 
     await expect(
-      service.reverse('je-original', { reversalReason: 'Correction' }, authUser({ id: 'poster-user' })),
+      service.reverse(
+        'je-original',
+        { reversalReason: 'Correction' },
+        authUser({ id: 'poster-user' }),
+      ),
     ).rejects.toThrow('Journal entry could not be reversed because its status changed');
 
     // No reversal entry must be created when the claim loses the race.

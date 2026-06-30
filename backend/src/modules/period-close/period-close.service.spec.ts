@@ -116,9 +116,7 @@ describe('PeriodCloseService GL controls', () => {
     });
     // Simulate a DRAFT journal appearing AFTER the pre-transaction check passes:
     // first count (outside tx) returns 0, second count (inside tx) returns 1.
-    prisma.journalEntry.count
-      .mockResolvedValueOnce(0)
-      .mockResolvedValueOnce(1);
+    prisma.journalEntry.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
     const service = makeService(prisma);
 
     await expect(service.close('close-1', authUser())).rejects.toBeInstanceOf(BadRequestException);

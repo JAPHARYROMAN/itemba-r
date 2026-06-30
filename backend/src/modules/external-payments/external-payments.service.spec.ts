@@ -46,9 +46,7 @@ describe('ExternalPaymentsService idempotency (ITMB-AUDIT-31)', () => {
     const winner = { id: 'pay-winner', companyId: 'company-1' };
     // 1st replay: nothing committed yet → null. create() then throws P2002.
     // 2nd replay (post-P2002): the winner row is now visible.
-    prisma.externalPayment.findFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(winner);
+    prisma.externalPayment.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(winner);
     prisma.externalPayment.create.mockRejectedValueOnce(p2002());
 
     const result = await service.createForCompany(baseDto, 'actor-1', 'company-1');
@@ -63,9 +61,9 @@ describe('ExternalPaymentsService idempotency (ITMB-AUDIT-31)', () => {
     prisma.externalPayment.findFirst.mockResolvedValue(null);
     prisma.externalPayment.create.mockRejectedValueOnce(p2002());
 
-    await expect(
-      service.createForCompany(baseDto, 'actor-1', 'company-1'),
-    ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+    await expect(service.createForCompany(baseDto, 'actor-1', 'company-1')).rejects.toBeInstanceOf(
+      Prisma.PrismaClientKnownRequestError,
+    );
   });
 
   it('does not run the P2002 replay when no idempotency key was supplied', async () => {
@@ -73,7 +71,11 @@ describe('ExternalPaymentsService idempotency (ITMB-AUDIT-31)', () => {
     prisma.externalPayment.create.mockRejectedValueOnce(p2002());
 
     await expect(
-      service.createForCompany({ companyId: 'company-1', amount: 5 } as any, 'actor-1', 'company-1'),
+      service.createForCompany(
+        { companyId: 'company-1', amount: 5 } as any,
+        'actor-1',
+        'company-1',
+      ),
     ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
     // no idempotencyKey → no pre-check and no post-failure replay lookups
     expect(prisma.externalPayment.findFirst).not.toHaveBeenCalled();
