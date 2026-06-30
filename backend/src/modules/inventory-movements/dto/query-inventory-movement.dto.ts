@@ -7,6 +7,10 @@ export class QueryInventoryMovementDto {
   @IsOptional() @IsString() productId?: string;
   @IsOptional() @IsString() locationId?: string;
   @IsOptional() @IsEnum(InventoryMovementType) movementType?: InventoryMovementType;
+  // Reverse drill-through: list the movements a source document produced,
+  // e.g. ?referenceType=StockAdjustment&referenceId=<id>.
+  @IsOptional() @IsString() referenceType?: string;
+  @IsOptional() @IsString() referenceId?: string;
   @IsOptional() @IsString() dateFrom?: string;
   @IsOptional() @IsString() dateTo?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number = 1;

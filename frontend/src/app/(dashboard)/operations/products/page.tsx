@@ -57,6 +57,11 @@ interface Division {
   name: string;
   code: string;
 }
+interface Branch {
+  id: string;
+  name: string;
+  code?: string | null;
+}
 
 interface Product {
   id: string;
@@ -75,6 +80,10 @@ interface Product {
   priceSource?: 'PRODUCT_OVERRIDE' | 'FAMILY_DEFAULT' | 'MISSING';
   minimumStockLevel?: number | null;
   reorderLevel?: number | null;
+  // Per-branch stock, populated by the backend only when the list query carries a
+  // branchId. `availableQuantity` is exposed at top level; on-hand is nested.
+  availableQuantity?: number | null;
+  inventoryBalance?: { quantityOnHand?: number | null; availableQuantity?: number | null } | null;
   trackInventory: boolean;
   trackBatch: boolean;
   trackExpiry: boolean;
@@ -212,6 +221,23 @@ function fmtTZS(n?: number | string | null) {
       Number.isFinite(value) ? value : 0,
     )
   );
+}
+
+function fmtQty(n?: number | string | null) {
+  if (n == null) return '—';
+  const value = Number(n);
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(
+    Number.isFinite(value) ? value : 0,
+  );
+}
+
+function belowReorder(p: {
+  trackInventory?: boolean;
+  availableQuantity?: number | null;
+  reorderLevel?: number | null;
+}) {
+  if (!p.trackInventory || p.reorderLevel == null) return false;
+  return Number(p.availableQuantity ?? 0) <= Number(p.reorderLevel);
 }
 
 function priceInputValue(value?: number | string | null) {
@@ -995,6 +1021,9 @@ export default function ProductsPage() {
   const [productFamilyId, setProductFamilyId] = useState('');
   const [productType, setProductType] = useState('');
   const [status, setStatus] = useState('');
+  const [priceSource, setPriceSource] = useState('');
+  const [branchId, setBranchId] = useState('');
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -1075,6 +1104,25 @@ export default function ProductsPage() {
     };
   }, [canView, companyId, categoryId]);
 
+  // Branches power the per-branch stock columns; only relevant once a company is chosen.
+  useEffect(() => {
+    if (!canView || !companyId) {
+      setBranches([]);
+      return;
+    }
+    let cancelled = false;
+    backendList<Branch>('/branches', { query: { companyId, activeOnly: true, limit: 500 } })
+      .then((records) => {
+        if (!cancelled) setBranches(records);
+      })
+      .catch(() => {
+        if (!cancelled) setBranches([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canView, companyId]);
+
   const load = useCallback(async () => {
     if (!canView) return;
     setLoading(true);
@@ -1090,6 +1138,8 @@ export default function ProductsPage() {
           productFamilyId: productFamilyId || undefined,
           productType: productType || undefined,
           status: status || undefined,
+          priceSource: priceSource || undefined,
+          branchId: branchId || undefined,
         },
       });
       setData(result);
@@ -1101,7 +1151,18 @@ export default function ProductsPage() {
     } finally {
       setLoading(false);
     }
-  }, [canView, page, search, companyId, categoryId, productFamilyId, productType, status]);
+  }, [
+    canView,
+    page,
+    search,
+    companyId,
+    categoryId,
+    productFamilyId,
+    productType,
+    status,
+    priceSource,
+    branchId,
+  ]);
 
   useEffect(() => {
     load();
@@ -1125,6 +1186,9 @@ export default function ProductsPage() {
     background: 'var(--aurora-card)',
     color: 'var(--aurora-text)',
   } as const;
+
+  // Base columns (11) + the two per-branch stock columns (when a branch is picked) + Actions.
+  const colCount = 11 + (branchId ? 2 : 0) + (canUpdate || canDelete ? 1 : 0);
 
   const counts = {
     active: data?.data.filter((p) => p.status === 'ACTIVE').length ?? 0,
@@ -1194,6 +1258,7 @@ export default function ProductsPage() {
                 setCompanyId(e.target.value);
                 setCategoryId('');
                 setProductFamilyId('');
+                setBranchId('');
                 setPage(1);
               }}
               className={filterSelectCls}
@@ -1271,6 +1336,40 @@ export default function ProductsPage() {
                 </option>
               ))}
             </select>
+            <select
+              value={priceSource}
+              onChange={(e) => {
+                setPriceSource(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+              title="Filter by pricing source"
+            >
+              <option value="">All Pricing</option>
+              <option value="PRODUCT_OVERRIDE">{priceSourceLabel('PRODUCT_OVERRIDE')}</option>
+              <option value="FAMILY_DEFAULT">{priceSourceLabel('FAMILY_DEFAULT')}</option>
+              <option value="MISSING">{priceSourceLabel('MISSING')}</option>
+            </select>
+            {companyId && (
+              <select
+                value={branchId}
+                onChange={(e) => {
+                  setBranchId(e.target.value);
+                  setPage(1);
+                }}
+                className={filterSelectCls}
+                style={filterStyle}
+                title="Show stock on hand / available for a branch"
+              >
+                <option value="">Stock: select branch…</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.code ? `${b.code} - ${b.name}` : b.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </>
         }
         actions={
@@ -1309,6 +1408,8 @@ export default function ProductsPage() {
                 <th className="px-4 py-3">Unit</th>
                 <th className="px-4 py-3 text-right">Selling</th>
                 <th className="px-4 py-3 text-right">Purchase</th>
+                {branchId && <th className="px-4 py-3 text-right">On hand</th>}
+                {branchId && <th className="px-4 py-3 text-right">Available</th>}
                 <th className="px-4 py-3">Status</th>
                 {(canUpdate || canDelete) && <th className="px-4 py-3 text-right">Actions</th>}
               </tr>
@@ -1316,14 +1417,14 @@ export default function ProductsPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={canUpdate || canDelete ? 12 : 11}>
-                    <SkeletonTable rows={6} cols={canUpdate || canDelete ? 12 : 11} />
+                  <td colSpan={colCount}>
+                    <SkeletonTable rows={6} cols={colCount} />
                   </td>
                 </tr>
               ) : !data?.data.length ? (
                 <tr>
                   <td
-                    colSpan={canUpdate || canDelete ? 12 : 11}
+                    colSpan={colCount}
                     className="px-4 py-10 text-center text-sm"
                     style={{ color: 'var(--aurora-text-muted)' }}
                   >
@@ -1377,6 +1478,21 @@ export default function ProductsPage() {
                     <td className="px-4 py-3 text-right tabular-nums">
                       {fmtTZS(p.effectivePurchasePrice ?? p.defaultPurchasePrice)}
                     </td>
+                    {branchId && (
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {p.trackInventory ? fmtQty(p.inventoryBalance?.quantityOnHand) : '—'}
+                      </td>
+                    )}
+                    {branchId && (
+                      <td
+                        className={`px-4 py-3 text-right tabular-nums ${
+                          belowReorder(p) ? 'text-red-600 font-semibold' : ''
+                        }`}
+                        title={belowReorder(p) ? 'At or below reorder level' : undefined}
+                      >
+                        {p.trackInventory ? fmtQty(p.availableQuantity) : '—'}
+                      </td>
+                    )}
                     <td className="px-4 py-3">
                       <span
                         className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${STATUS_BADGE[p.status] ?? 'bg-zinc-50 text-zinc-700 border-zinc-200'}`}

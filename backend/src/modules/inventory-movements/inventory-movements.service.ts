@@ -60,6 +60,8 @@ export class InventoryMovementsService {
       productId,
       locationId,
       movementType,
+      referenceType,
+      referenceId,
       dateFrom,
       dateTo,
     } = query;
@@ -71,6 +73,8 @@ export class InventoryMovementsService {
     if (productId) where.productId = productId;
     if (locationId) where.branchId = locationId;
     if (movementType) where.movementType = movementType;
+    if (referenceType) where.referenceType = referenceType;
+    if (referenceId) where.referenceId = referenceId;
     if (dateFrom || dateTo) {
       where.movementDate = {};
       if (dateFrom) where.movementDate.gte = dateRangeStart(dateFrom);

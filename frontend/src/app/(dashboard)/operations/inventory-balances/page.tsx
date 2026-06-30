@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, StatCard, PageSpinner } from '@/components/ui';
+import Link from 'next/link';
+import { Btn, Card, PageHeader, PageToolbar, ProductPicker, StatCard, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
-import { backendList, backendPage } from '@/lib/api-client';
+import { backendGet, backendList, backendPage } from '@/lib/api-client';
 import { toFiniteNumber } from '@/lib/design-system/formatters';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -12,11 +13,6 @@ interface Company {
   id: string;
   name: string;
   code: string;
-}
-interface Product {
-  id: string;
-  name: string;
-  productCode: string;
 }
 interface InventoryBalance {
   id: string;
@@ -51,8 +47,15 @@ function emptyPaginated<T>(page = 1): Paginated<T> {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const tdCls = 'px-4 py-2 text-sm text-slate-700';
-const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';
+const tdCls = 'px-4 py-3 text-sm';
+const thCls = 'px-4 py-3';
+const filterSelectCls =
+  'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
+const filterStyle = {
+  borderColor: 'var(--aurora-border)',
+  background: 'var(--aurora-card)',
+  color: 'var(--aurora-text)',
+} as const;
 
 function fmtNum(n: number | string | null | undefined, decimals = 2) {
   return new Intl.NumberFormat('en-US', {
@@ -102,13 +105,23 @@ function StockBadge({ balance }: { balance: InventoryBalance }) {
   return null;
 }
 
+// Company-wide totals from /inventory-balances/live (computed with per-product
+// reorder thresholds), used to drive the KPI tiles instead of the 20-row page.
+interface LiveTotals {
+  totalSkus: number;
+  out: number;
+  low: number;
+  negative: number;
+  totalValue: number;
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function InventoryBalancesPage() {
   const { hasPermission } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
   const [data, setData] = useState<Paginated<InventoryBalance> | null>(null);
+  const [liveTotals, setLiveTotals] = useState<LiveTotals | null>(null);
   const [loading, setLoading] = useState(false);
   const [companyId, setCompanyId] = useState('');
   const [productId, setProductId] = useState('');
@@ -123,13 +136,11 @@ export default function InventoryBalancesPage() {
     let cancelled = false;
 
     async function loadLookups() {
-      const [companyResult, productResult] = await Promise.allSettled([
-        backendList<Company>('/companies', { query: { limit: 100 } }),
-        backendList<Product>('/products', { query: { limit: 300 } }),
-      ]);
+      const companyResult = await backendList<Company>('/companies', {
+        query: { limit: 100 },
+      }).catch(() => [] as Company[]);
       if (cancelled) return;
-      setCompanies(companyResult.status === 'fulfilled' ? companyResult.value : []);
-      setProducts(productResult.status === 'fulfilled' ? productResult.value : []);
+      setCompanies(companyResult);
     }
 
     void loadLookups();
@@ -165,6 +176,26 @@ export default function InventoryBalancesPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Company-wide KPI totals (per-product low-stock threshold) — independent of the
+  // page filters so the tiles reflect the whole company, not the visible page.
+  useEffect(() => {
+    if (!canView || !companyId) {
+      setLiveTotals(null);
+      return;
+    }
+    let cancelled = false;
+    backendGet<{ totals: LiveTotals }>('/inventory-balances/live', { query: { companyId } })
+      .then((res) => {
+        if (!cancelled) setLiveTotals(res?.totals ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setLiveTotals(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canView, companyId]);
 
   useEffect(() => {
     // Drill-through from the operations dashboard "Out of Stock" / "Low Stock"
@@ -215,22 +246,31 @@ export default function InventoryBalancesPage() {
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Total Lines" value={data?.total ?? 0} />
-        <StatCard label="Out of Stock" value={outOfStock} />
-        <StatCard label="Low Stock" value={lowStockCount} />
-        <StatCard label="Total Value (page)" value={'TZS ' + fmtNum(totalValue)} />
+        <StatCard label="Total Lines" value={liveTotals?.totalSkus ?? data?.total ?? 0} />
+        <StatCard label="Out of Stock" value={liveTotals?.out ?? outOfStock} />
+        <StatCard label="Low Stock" value={liveTotals?.low ?? lowStockCount} />
+        <StatCard
+          label={liveTotals ? 'Total Value' : 'Total Value (page)'}
+          value={'TZS ' + fmtNum(liveTotals?.totalValue ?? totalValue)}
+        />
       </div>
 
-      <Card>
-        <div className="px-5 py-4 border-b border-slate-100">
-          <div className="flex items-center gap-3 flex-wrap">
+      <PageToolbar
+        actions={
+          <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+            {data?.total ?? 0} records
+          </span>
+        }
+        filters={
+          <>
             <select
               value={companyId}
               onChange={(e) => {
                 reset(setCompanyId)(e.target.value);
                 setPage(1);
               }}
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
+              className={filterSelectCls}
+              style={filterStyle}
             >
               <option value="">Select Company (required)…</option>
               {companies.map((c) => (
@@ -239,19 +279,17 @@ export default function InventoryBalancesPage() {
                 </option>
               ))}
             </select>
-            <select
+            <ProductPicker
               value={productId}
-              onChange={(e) => reset(setProductId)(e.target.value)}
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
+              onChange={(id) => reset(setProductId)(id)}
+              companyId={companyId}
+              placeholder="All products"
+              className="w-56"
+            />
+            <label
+              className="flex items-center gap-1.5 text-sm cursor-pointer"
+              style={{ color: 'var(--aurora-text-secondary)' }}
             >
-              <option value="">All Products</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.productCode} – {p.name}
-                </option>
-              ))}
-            </select>
-            <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
               <input
                 type="checkbox"
                 checked={lowStock}
@@ -263,21 +301,24 @@ export default function InventoryBalancesPage() {
               />
               Low stock only
             </label>
-            <div className="ml-auto">
-              <span className="text-xs text-slate-400">{data?.total ?? 0} records</span>
-            </div>
-          </div>
-          {!companyId && (
-            <p className="mt-2 text-xs text-amber-600">
-              Please select a company to load inventory balances.
-            </p>
-          )}
-        </div>
+          </>
+        }
+      />
 
+      {!companyId && (
+        <p className="-mt-2 text-xs text-amber-600">
+          Please select a company to load inventory balances.
+        </p>
+      )}
+
+      <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px]">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
+          <table className="w-full text-sm min-w-[900px]">
+            <thead>
+              <tr
+                className="text-left text-xs uppercase bg-gray-50"
+                style={{ color: 'var(--aurora-text-muted)' }}
+              >
                 <th className={thCls}>Product Code</th>
                 <th className={thCls}>Product Name</th>
                 <th className={thCls}>Branch / Location</th>
@@ -315,7 +356,13 @@ export default function InventoryBalancesPage() {
                     <td className={`${tdCls} font-mono`}>{bal.product?.productCode ?? '—'}</td>
                     <td className={tdCls}>
                       <div className="flex items-center gap-2">
-                        {bal.product?.name ?? '—'}
+                        <Link
+                          href={`/operations/inventory-movements?companyId=${encodeURIComponent(bal.companyId)}&productId=${encodeURIComponent(bal.productId)}`}
+                          className="text-blue-600 hover:underline"
+                          title="View this product's stock movements"
+                        >
+                          {bal.product?.name ?? '—'}
+                        </Link>
                         <StockBadge balance={bal} />
                       </div>
                     </td>
@@ -355,25 +402,30 @@ export default function InventoryBalancesPage() {
         </div>
 
         {data && data.totalPages > 1 && (
-          <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between">
-            <span className="text-xs text-slate-400">
-              Page {page} of {data.totalPages}
+          <div
+            className="px-5 py-3 border-t flex items-center justify-between"
+            style={{ borderColor: 'var(--aurora-border)' }}
+          >
+            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              Page {page} of {data.totalPages} · {data.total} total
             </span>
             <div className="flex gap-2">
-              <button
+              <Btn
+                variant="secondary"
+                size="xs"
                 disabled={page <= 1}
                 onClick={() => setPage((p) => p - 1)}
-                className="text-xs px-3 py-1.5 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
               >
                 Previous
-              </button>
-              <button
+              </Btn>
+              <Btn
+                variant="secondary"
+                size="xs"
                 disabled={page >= data.totalPages}
                 onClick={() => setPage((p) => p + 1)}
-                className="text-xs px-3 py-1.5 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
               >
                 Next
-              </button>
+              </Btn>
             </div>
           </div>
         )}

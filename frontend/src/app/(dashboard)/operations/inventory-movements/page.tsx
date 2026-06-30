@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, StatCard, PageSpinner } from '@/components/ui';
+import Link from 'next/link';
+import { Btn, Card, PageHeader, PageToolbar, ProductPicker, StatCard, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendList, backendPage } from '@/lib/api-client';
 
@@ -12,10 +13,10 @@ interface Company {
   name: string;
   code: string;
 }
-interface Product {
+interface Branch {
   id: string;
   name: string;
-  productCode: string;
+  code?: string | null;
 }
 type MovementType =
   | 'OPENING_STOCK'
@@ -63,6 +64,8 @@ interface InventoryMovement {
   unitCost: number;
   totalCost: number;
   referenceNumber?: string | null;
+  referenceType?: string | null;
+  referenceId?: string | null;
   notes?: string | null;
   productId: string;
   companyId: string;
@@ -85,8 +88,15 @@ function emptyPaginated<T>(page = 1): Paginated<T> {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const tdCls = 'px-4 py-2 text-sm text-slate-700';
-const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';
+const tdCls = 'px-4 py-3 text-sm';
+const thCls = 'px-4 py-3';
+const filterSelectCls =
+  'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
+const filterStyle = {
+  borderColor: 'var(--aurora-border)',
+  background: 'var(--aurora-card)',
+  color: 'var(--aurora-text)',
+} as const;
 
 const MOVEMENT_TYPE_STYLES: Record<string, string> = {
   OPENING_STOCK: 'bg-purple-100 text-purple-700',
@@ -155,17 +165,48 @@ function fmtDate(d?: string | null) {
   });
 }
 
+// Source documents that have a per-id detail route today. Others (StockAdjustment,
+// PurchaseOrder, GoodsReceivedNote) are shown as a readable label until their
+// detail routes land in later tickets.
+const REFERENCE_ROUTES: Record<string, (id: string) => string> = {
+  SalesOrder: (id) => `/operations/sales-orders/${id}`,
+};
+
+function ReferenceCell({ mov }: { mov: InventoryMovement }) {
+  if (!mov.referenceType || !mov.referenceId) {
+    return <span className="text-slate-400">—</span>;
+  }
+  const label = mov.referenceType.replace(/([a-z])([A-Z])/g, '$1 $2');
+  const short = mov.referenceId.slice(0, 8);
+  const href = REFERENCE_ROUTES[mov.referenceType]?.(mov.referenceId);
+  if (href) {
+    return (
+      <Link href={href} className="text-blue-600 hover:underline">
+        {label} · {short}
+      </Link>
+    );
+  }
+  return (
+    <span title={`${mov.referenceType} ${mov.referenceId}`}>
+      {label} · <span className="text-slate-500">{short}</span>
+    </span>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function InventoryMovementsPage() {
   const { hasPermission } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [data, setData] = useState<Paginated<InventoryMovement> | null>(null);
   const [loading, setLoading] = useState(true);
   const [companyId, setCompanyId] = useState('');
+  const [locationId, setLocationId] = useState('');
   const [productId, setProductId] = useState('');
   const [movementType, setMovementType] = useState('');
+  const [referenceType, setReferenceType] = useState('');
+  const [referenceId, setReferenceId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
@@ -174,17 +215,28 @@ export default function InventoryMovementsPage() {
   const canView = hasPermission('inventory.movements.view');
 
   useEffect(() => {
+    // Drill-through: hydrate filters from the URL — e.g. a balance row links here
+    // with ?companyId&productId, and a source document with ?referenceType&referenceId.
+    const params = new URLSearchParams(window.location.search);
+    const get = (k: string) => params.get(k) ?? '';
+    if (get('companyId')) setCompanyId(get('companyId'));
+    if (get('productId')) setProductId(get('productId'));
+    if (get('movementType')) setMovementType(get('movementType'));
+    if (get('referenceType')) setReferenceType(get('referenceType'));
+    if (get('referenceId')) setReferenceId(get('referenceId'));
+    if (get('locationId')) setLocationId(get('locationId'));
+  }, []);
+
+  useEffect(() => {
     if (!canView) return;
     let cancelled = false;
 
     async function loadLookups() {
-      const [companyResult, productResult] = await Promise.allSettled([
-        backendList<Company>('/companies', { query: { limit: 100 } }),
-        backendList<Product>('/products', { query: { limit: 300 } }),
-      ]);
+      const companyResult = await backendList<Company>('/companies', {
+        query: { limit: 100 },
+      }).catch(() => [] as Company[]);
       if (cancelled) return;
-      setCompanies(companyResult.status === 'fulfilled' ? companyResult.value : []);
-      setProducts(productResult.status === 'fulfilled' ? productResult.value : []);
+      setCompanies(companyResult);
     }
 
     void loadLookups();
@@ -193,6 +245,27 @@ export default function InventoryMovementsPage() {
       cancelled = true;
     };
   }, [canView]);
+
+  // Branches for the selected company (the branch/location filter).
+  useEffect(() => {
+    if (!canView || !companyId) {
+      setBranches([]);
+      return;
+    }
+    let cancelled = false;
+    backendList<Branch>('/branches', {
+      query: { companyId, activeOnly: true, limit: 200 },
+    })
+      .then((rows) => {
+        if (!cancelled) setBranches(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setBranches([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canView, companyId]);
 
   const load = useCallback(async () => {
     if (!canView) return;
@@ -204,8 +277,11 @@ export default function InventoryMovementsPage() {
           page,
           limit: 20,
           companyId: companyId || undefined,
+          locationId: locationId || undefined,
           productId: productId || undefined,
           movementType: movementType || undefined,
+          referenceType: referenceType || undefined,
+          referenceId: referenceId || undefined,
           dateFrom: dateFrom || undefined,
           dateTo: dateTo || undefined,
         },
@@ -217,7 +293,18 @@ export default function InventoryMovementsPage() {
     } finally {
       setLoading(false);
     }
-  }, [canView, page, companyId, productId, movementType, dateFrom, dateTo]);
+  }, [
+    canView,
+    page,
+    companyId,
+    locationId,
+    productId,
+    movementType,
+    referenceType,
+    referenceId,
+    dateFrom,
+    dateTo,
+  ]);
 
   useEffect(() => {
     load();
@@ -268,13 +355,22 @@ export default function InventoryMovementsPage() {
         <StatCard label="Total Cost (page)" value={'TZS ' + fmtNum(totalCost)} />
       </div>
 
-      <Card>
-        <div className="px-5 py-4 border-b border-slate-100">
-          <div className="flex items-center gap-3 flex-wrap">
+      <PageToolbar
+        actions={
+          <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+            {data?.total ?? 0} movements
+          </span>
+        }
+        filters={
+          <>
             <select
               value={companyId}
-              onChange={(e) => reset(setCompanyId)(e.target.value)}
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
+              onChange={(e) => {
+                setLocationId('');
+                reset(setCompanyId)(e.target.value);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
             >
               <option value="">All Companies</option>
               {companies.map((c) => (
@@ -284,21 +380,32 @@ export default function InventoryMovementsPage() {
               ))}
             </select>
             <select
-              value={productId}
-              onChange={(e) => reset(setProductId)(e.target.value)}
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
+              value={locationId}
+              onChange={(e) => reset(setLocationId)(e.target.value)}
+              disabled={!companyId}
+              title="Branch / location"
+              className={`${filterSelectCls} disabled:opacity-50`}
+              style={filterStyle}
             >
-              <option value="">All Products</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.productCode} – {p.name}
+              <option value="">All Branches</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.code ? `${b.code} - ${b.name}` : b.name}
                 </option>
               ))}
             </select>
+            <ProductPicker
+              value={productId}
+              onChange={(id) => reset(setProductId)(id)}
+              companyId={companyId}
+              placeholder="All products"
+              className="w-56"
+            />
             <select
               value={movementType}
               onChange={(e) => reset(setMovementType)(e.target.value)}
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
+              className={filterSelectCls}
+              style={filterStyle}
             >
               <option value="">All Types</option>
               {MOVEMENT_TYPES.map((t) => (
@@ -311,26 +418,32 @@ export default function InventoryMovementsPage() {
               type="date"
               value={dateFrom}
               onChange={(e) => reset(setDateFrom)(e.target.value)}
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
+              className={filterSelectCls}
+              style={filterStyle}
               title="Date from"
+              aria-label="Date from"
             />
             <input
               type="date"
               value={dateTo}
               onChange={(e) => reset(setDateTo)(e.target.value)}
-              className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none"
+              className={filterSelectCls}
+              style={filterStyle}
               title="Date to"
+              aria-label="Date to"
             />
-            <div className="ml-auto">
-              <span className="text-xs text-slate-400">{data?.total ?? 0} movements</span>
-            </div>
-          </div>
-        </div>
+          </>
+        }
+      />
 
+      <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1000px]">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
+          <table className="w-full text-sm min-w-[1000px]">
+            <thead>
+              <tr
+                className="text-left text-xs uppercase bg-gray-50"
+                style={{ color: 'var(--aurora-text-muted)' }}
+              >
                 <th className={thCls}>Movement #</th>
                 <th className={thCls}>Date</th>
                 <th className={thCls}>Product</th>
@@ -402,7 +515,9 @@ export default function InventoryMovementsPage() {
                     </td>
                     <td className={`${tdCls} text-right font-mono`}>{fmtTZS(mov.unitCost)}</td>
                     <td className={`${tdCls} text-right font-mono`}>{fmtTZS(mov.totalCost)}</td>
-                    <td className={`${tdCls} font-mono text-xs`}>{mov.referenceNumber ?? '—'}</td>
+                    <td className={`${tdCls} font-mono text-xs`}>
+                      <ReferenceCell mov={mov} />
+                    </td>
                     <td className={tdCls}>{mov.createdBy?.fullName ?? '—'}</td>
                     <td
                       className={`${tdCls} max-w-[160px] truncate`}
@@ -418,25 +533,30 @@ export default function InventoryMovementsPage() {
         </div>
 
         {data && data.totalPages > 1 && (
-          <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between">
-            <span className="text-xs text-slate-400">
-              Page {page} of {data.totalPages}
+          <div
+            className="px-5 py-3 border-t flex items-center justify-between"
+            style={{ borderColor: 'var(--aurora-border)' }}
+          >
+            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              Page {page} of {data.totalPages} · {data.total} total
             </span>
             <div className="flex gap-2">
-              <button
+              <Btn
+                variant="secondary"
+                size="xs"
                 disabled={page <= 1}
                 onClick={() => setPage((p) => p - 1)}
-                className="text-xs px-3 py-1.5 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
               >
                 Previous
-              </button>
-              <button
+              </Btn>
+              <Btn
+                variant="secondary"
+                size="xs"
                 disabled={page >= data.totalPages}
                 onClick={() => setPage((p) => p + 1)}
-                className="text-xs px-3 py-1.5 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
               >
                 Next
-              </button>
+              </Btn>
             </div>
           </div>
         )}

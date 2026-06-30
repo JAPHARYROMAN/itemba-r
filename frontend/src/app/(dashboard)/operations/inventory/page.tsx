@@ -1,0 +1,265 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { Card, PageHeader, StatCard, PageSpinner } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { backendGet, backendList, backendPage } from '@/lib/api-client';
+import { toFiniteNumber } from '@/lib/design-system/formatters';
+
+interface Company {
+  id: string;
+  name: string;
+  code: string;
+}
+interface LiveTotals {
+  totalSkus: number;
+  out: number;
+  low: number;
+  negative: number;
+  totalValue: number;
+}
+interface RecentMovement {
+  id: string;
+  movementNumber?: string;
+  movementDate: string;
+  movementType: string;
+  quantity: number;
+  product?: { name: string; productCode?: string | null } | null;
+}
+
+const INBOUND = new Set([
+  'OPENING_STOCK',
+  'PURCHASE_RECEIPT',
+  'SALES_RETURN',
+  'TRANSFER_IN',
+  'ADJUSTMENT_IN',
+  'PRODUCTION_IN',
+]);
+
+function fmtNum(n: number | string | null | undefined) {
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(toFiniteNumber(n));
+}
+function fmtDate(d?: string | null) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+const LINKS: Array<{ href: string; label: string; desc: string; perm: string }> = [
+  { href: '/operations/inventory-balances', label: 'Balances', desc: 'Stock on hand by product & branch', perm: 'inventory.view' },
+  { href: '/operations/inventory-movements', label: 'Movements', desc: 'The stock ledger', perm: 'inventory.movements.view' },
+  { href: '/operations/stock-adjustments', label: 'Stock Adjustments', desc: 'Counts & corrections', perm: 'inventory.adjustments.create' },
+  { href: '/operations/products', label: 'Products', desc: 'Item catalog', perm: 'products.view' },
+  { href: '/operations/product-categories', label: 'Categories', desc: 'Catalog taxonomy', perm: 'product_categories.view' },
+  { href: '/operations/units', label: 'Units of Measure', desc: 'Units & conversions', perm: 'units.view' },
+];
+
+export default function InventoryOverviewPage() {
+  const { hasPermission } = useAuth();
+  const canView = hasPermission('inventory.view');
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyId, setCompanyId] = useState('');
+  const [totals, setTotals] = useState<LiveTotals | null>(null);
+  const [pending, setPending] = useState(0);
+  const [recent, setRecent] = useState<RecentMovement[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!canView) return;
+    let cancelled = false;
+    backendList<Company>('/companies', { query: { limit: 100 } })
+      .then((rows) => {
+        if (cancelled) return;
+        setCompanies(rows);
+        if (rows.length === 1) setCompanyId(rows[0].id);
+      })
+      .catch(() => {
+        if (!cancelled) setCompanies([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canView]);
+
+  const load = useCallback(async () => {
+    if (!canView || !companyId) return;
+    setLoading(true);
+    const [live, adj, mov] = await Promise.allSettled([
+      backendGet<{ totals: LiveTotals }>('/inventory-balances/live', { query: { companyId } }),
+      backendPage<unknown>('/stock-adjustments', {
+        query: { companyId, status: 'PENDING_APPROVAL', limit: 1 },
+      }),
+      backendPage<RecentMovement>('/inventory-movements', { query: { companyId, limit: 6 } }),
+    ]);
+    setTotals(live.status === 'fulfilled' ? (live.value?.totals ?? null) : null);
+    setPending(adj.status === 'fulfilled' ? (adj.value?.total ?? 0) : 0);
+    setRecent(mov.status === 'fulfilled' ? (mov.value?.data ?? []) : []);
+    setLoading(false);
+  }, [canView, companyId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  if (!canView) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Inventory Overview" subtitle="At-a-glance stock health" />
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Access Restricted</p>
+        </div>
+      </div>
+    );
+  }
+
+  const scoped = companyId ? `?companyId=${encodeURIComponent(companyId)}` : '';
+
+  return (
+    <div className="p-6 space-y-6">
+      <PageHeader title="Inventory Overview" subtitle="At-a-glance stock health and recent activity" />
+
+      <select
+        value={companyId}
+        onChange={(e) => setCompanyId(e.target.value)}
+        className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
+        style={{
+          borderColor: 'var(--aurora-border)',
+          background: 'var(--aurora-card)',
+          color: 'var(--aurora-text)',
+        }}
+      >
+        <option value="">Select Company…</option>
+        {companies.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+
+      {!companyId ? (
+        <Card className="p-8 text-center text-sm" >
+          <span style={{ color: 'var(--aurora-text-muted)' }}>
+            Select a company to see its inventory health.
+          </span>
+        </Card>
+      ) : loading && !totals ? (
+        <PageSpinner />
+      ) : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Link href={`/operations/inventory-balances${scoped}`}>
+              <StatCard label="Stock Value" value={'TZS ' + fmtNum(totals?.totalValue ?? 0)} />
+            </Link>
+            <Link href={`/operations/inventory-balances?lowStock=1&companyId=${encodeURIComponent(companyId)}`}>
+              <StatCard
+                label="Low Stock"
+                value={totals?.low ?? 0}
+                variant={(totals?.low ?? 0) > 0 ? 'amber' : 'green'}
+              />
+            </Link>
+            <Link href={`/operations/inventory-balances${scoped}`}>
+              <StatCard
+                label="Out of Stock"
+                value={totals?.out ?? 0}
+                variant={(totals?.out ?? 0) > 0 ? 'red' : 'green'}
+              />
+            </Link>
+            <Link href="/operations/stock-adjustments">
+              <StatCard
+                label="Pending Adjustments"
+                value={pending}
+                variant={pending > 0 ? 'amber' : 'green'}
+              />
+            </Link>
+          </div>
+
+          <Card className="overflow-hidden">
+            <div
+              className="px-5 py-3 border-b flex items-center justify-between"
+              style={{ borderColor: 'var(--aurora-border)' }}
+            >
+              <h2 className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                Recent movements
+              </h2>
+              <Link
+                href={`/operations/inventory-movements${scoped}`}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                View all
+              </Link>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr
+                    className="text-left text-xs uppercase bg-gray-50"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Product</th>
+                    <th className="px-4 py-3">Type</th>
+                    <th className="px-4 py-3 text-right">Qty</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {recent.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-400">
+                        No recent movements.
+                      </td>
+                    </tr>
+                  ) : (
+                    recent.map((m) => {
+                      const inbound = INBOUND.has(m.movementType);
+                      return (
+                        <tr key={m.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3">{fmtDate(m.movementDate)}</td>
+                          <td className="px-4 py-3">
+                            {m.product ? (
+                              <>
+                                <span className="font-mono text-xs text-slate-500">
+                                  {m.product.productCode}
+                                </span>{' '}
+                                {m.product.name}
+                              </>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-xs">{m.movementType.replace(/_/g, ' ')}</td>
+                          <td
+                            className={`px-4 py-3 text-right font-mono ${
+                              inbound ? 'text-emerald-600' : 'text-red-600'
+                            }`}
+                          >
+                            {inbound ? '+' : '−'}
+                            {fmtNum(m.quantity)}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            {LINKS.filter((l) => hasPermission(l.perm)).map((l) => (
+              <Link key={l.href} href={l.href}>
+                <Card className="p-4 hover:shadow-md transition-shadow">
+                  <div className="font-medium text-sm" style={{ color: 'var(--aurora-text)' }}>
+                    {l.label}
+                  </div>
+                  <div className="text-xs mt-0.5" style={{ color: 'var(--aurora-text-muted)' }}>
+                    {l.desc}
+                  </div>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

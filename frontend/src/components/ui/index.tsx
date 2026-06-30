@@ -39,6 +39,8 @@ export type { ScopeValue } from './scope-selector';
 
 // Forms
 export { FormInput, FormSelect, FormTextarea, DateInput, FileUpload } from './forms';
+export { ProductPicker } from './product-picker';
+export type { ProductPickerOption } from './product-picker';
 
 // Buttons
 export { Btn, IconBtn } from './btn';

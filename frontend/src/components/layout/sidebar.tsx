@@ -231,6 +231,12 @@ export const NAV: NavItem[] = [
         permission: 'units.view',
       },
       {
+        href: '/operations/inventory',
+        label: 'Inventory Overview',
+        iconKey: 'box',
+        permission: 'inventory.view',
+      },
+      {
         href: '/operations/inventory-balances',
         label: 'Inventory Balances',
         iconKey: 'barChart',

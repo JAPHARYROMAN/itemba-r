@@ -109,6 +109,7 @@ export class StockAdjustmentsService {
         lines: {
           include: {
             product: { select: { id: true, name: true, sku: true } },
+            unit: { select: { id: true, name: true, symbol: true } },
           },
         },
       },
