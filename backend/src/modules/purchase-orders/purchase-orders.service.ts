@@ -15,7 +15,13 @@ import {
   ReceiveFuelTankAllocationDto,
   ReceivePurchaseOrderDto,
 } from './dto/receive-purchase-order.dto';
-import { AccessLevel, AuditSeverity, Prisma, PurchaseType } from '@prisma/client';
+import {
+  AccessLevel,
+  AuditSeverity,
+  CashAccountType,
+  Prisma,
+  PurchaseType,
+} from '@prisma/client';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 
 type PurchaseOrderReferenceIds = {
@@ -188,6 +194,63 @@ export class PurchaseOrdersService {
     ]);
 
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  /**
+   * Register-wide stat-card aggregate: counts and money totals grouped by
+   * status, plus a flat roll-up. Shares the same filter idiom as findAll
+   * (company scope + division/branch/supplier/type/date) so the workbench
+   * header cards line up with the list below them.
+   */
+  async summary(query: QueryPurchaseOrderDto, user: AuthUser) {
+    const { companyId, divisionId, branchId, supplierId, purchaseType, dateFrom, dateTo } = query;
+
+    const where: any = {
+      deletedAt: null,
+      ...(await this.companyScope.companyWhereFor(user, companyId)),
+    };
+    if (divisionId) where.divisionId = divisionId;
+    if (branchId) where.branchId = branchId;
+    if (supplierId) where.supplierId = supplierId;
+    if (purchaseType) where.purchaseType = purchaseType;
+    if (dateFrom || dateTo) {
+      where.orderDate = {};
+      if (dateFrom) where.orderDate.gte = dateRangeStart(dateFrom);
+      if (dateTo) where.orderDate.lte = dateRangeEnd(dateTo);
+    }
+
+    const grouped = await this.prisma.purchaseOrder.groupBy({
+      by: ['status'],
+      where,
+      _count: { _all: true },
+      _sum: { totalAmount: true, outstandingAmount: true },
+    });
+
+    const byStatus = grouped.map((row) => ({
+      status: row.status,
+      count: row._count._all,
+      totalAmount: Number(row._sum.totalAmount ?? 0),
+      outstandingAmount: Number(row._sum.outstandingAmount ?? 0),
+    }));
+
+    const totals = byStatus.reduce(
+      (acc, row) => {
+        acc.count += row.count;
+        acc.totalAmount += row.totalAmount;
+        acc.outstandingAmount += row.outstandingAmount;
+        return acc;
+      },
+      { count: 0, totalAmount: 0, outstandingAmount: 0 },
+    );
+
+    return {
+      totals: {
+        count: totals.count,
+        totalAmount: roundMoney(totals.totalAmount),
+        outstandingAmount: roundMoney(totals.outstandingAmount),
+      },
+      byStatus,
+    };
   }
 
   async findOne(id: string, user?: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
@@ -570,6 +633,7 @@ export class PurchaseOrdersService {
       throw new BadRequestException('Only DRAFT purchase orders can be confirmed');
     }
     await this.profit.assertPurchaseLinesHaveCost(existing.companyId, existing.lines as any[]);
+    await this.assertCashAccountCurrencyMatches(existing);
 
     const record = await this.prisma.$transaction(async (tx) => {
       // Atomically claim DRAFT -> CONFIRMED. The status check above is outside the
@@ -616,6 +680,41 @@ export class PurchaseOrdersService {
     });
 
     return record;
+  }
+
+  /**
+   * Guard a CASH_PURCHASE confirmation against a currency mismatch: the cash
+   * that settles the order is held in a CASH_ON_HAND cash account, so the
+   * order currency must be one this company actually holds cash in. Credit
+   * purchases skip this — they settle later through a Payable, not cash on
+   * confirm. If the company has not set up any active cash-on-hand account
+   * yet we stay out of the way (the receive-time posting resolves the GL
+   * CASH_ON_HAND role separately); we only block a definite mismatch.
+   */
+  private async assertCashAccountCurrencyMatches(order: {
+    companyId: string;
+    purchaseType: PurchaseType;
+    currency: string;
+  }) {
+    if (order.purchaseType !== PurchaseType.CASH_PURCHASE) return;
+
+    const cashAccounts = await this.prisma.cashAccount.findMany({
+      where: {
+        companyId: order.companyId,
+        accountType: CashAccountType.CASH_ON_HAND,
+        isActive: true,
+        deletedAt: null,
+      },
+      select: { currency: true },
+    });
+    if (cashAccounts.length === 0) return;
+
+    const hasMatch = cashAccounts.some((account) => account.currency === order.currency);
+    if (!hasMatch) {
+      throw new BadRequestException(
+        `No active cash account holds ${order.currency}; cash purchase currency must match a company cash account`,
+      );
+    }
   }
 
   async receive(id: string, user: AuthUser, dto: ReceivePurchaseOrderDto = {}) {

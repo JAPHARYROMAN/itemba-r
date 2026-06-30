@@ -52,10 +52,8 @@ export class InventoryMovementsService {
     private readonly profit: ProfitService,
   ) {}
 
-  async findAll(query: QueryInventoryMovementDto, user: AuthUser) {
+  private async buildMovementWhere(query: QueryInventoryMovementDto, user: AuthUser) {
     const {
-      page = 1,
-      limit = 20,
       companyId,
       productId,
       locationId,
@@ -65,7 +63,6 @@ export class InventoryMovementsService {
       dateFrom,
       dateTo,
     } = query;
-    const skip = (page - 1) * limit;
 
     const where: any = {
       ...(await this.companyScope.companyWhereFor(user, companyId)),
@@ -80,6 +77,14 @@ export class InventoryMovementsService {
       if (dateFrom) where.movementDate.gte = dateRangeStart(dateFrom);
       if (dateTo) where.movementDate.lte = dateRangeEnd(dateTo);
     }
+    return where;
+  }
+
+  async findAll(query: QueryInventoryMovementDto, user: AuthUser) {
+    const { page = 1, limit = 20 } = query;
+    const skip = (page - 1) * limit;
+
+    const where = await this.buildMovementWhere(query, user);
 
     const [data, total] = await Promise.all([
       this.prisma.inventoryMovement.findMany({
@@ -98,6 +103,72 @@ export class InventoryMovementsService {
     ]);
 
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  /**
+   * Register-wide aggregates for the movements list stat cards. Uses the SAME
+   * `where` as findAll (minus pagination) so the totals always describe the
+   * currently-filtered slice, then groups by movementType and sums quantity +
+   * totalCost. Direction-aware roll-ups (inbound vs outbound) let the UI show
+   * net stock flow without re-deriving the classification client-side.
+   */
+  async summary(query: QueryInventoryMovementDto, user: AuthUser) {
+    const where = await this.buildMovementWhere(query, user);
+
+    const [grouped, totals] = await Promise.all([
+      this.prisma.inventoryMovement.groupBy({
+        by: ['movementType'],
+        where,
+        _sum: { quantity: true, totalCost: true },
+        _count: { _all: true },
+      }),
+      this.prisma.inventoryMovement.aggregate({
+        where,
+        _sum: { quantity: true, totalCost: true },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const byType = grouped.map((row) => {
+      const quantity = Number(row._sum.quantity ?? 0);
+      const totalCost = Number(row._sum.totalCost ?? 0);
+      return {
+        movementType: row.movementType,
+        direction: INBOUND_TYPES.includes(row.movementType)
+          ? 'INBOUND'
+          : OUTBOUND_TYPES.includes(row.movementType)
+            ? 'OUTBOUND'
+            : 'UNKNOWN',
+        count: row._count._all,
+        quantity,
+        totalCost,
+      };
+    });
+
+    const inboundQuantity = byType
+      .filter((r) => r.direction === 'INBOUND')
+      .reduce((sum, r) => sum + r.quantity, 0);
+    const outboundQuantity = byType
+      .filter((r) => r.direction === 'OUTBOUND')
+      .reduce((sum, r) => sum + r.quantity, 0);
+    const inboundCost = byType
+      .filter((r) => r.direction === 'INBOUND')
+      .reduce((sum, r) => sum + r.totalCost, 0);
+    const outboundCost = byType
+      .filter((r) => r.direction === 'OUTBOUND')
+      .reduce((sum, r) => sum + r.totalCost, 0);
+
+    return {
+      totalMovements: totals._count._all,
+      totalQuantity: Number(totals._sum.quantity ?? 0),
+      totalCost: Number(totals._sum.totalCost ?? 0),
+      inboundQuantity,
+      outboundQuantity,
+      netQuantity: inboundQuantity - outboundQuantity,
+      inboundCost,
+      outboundCost,
+      byType,
+    };
   }
 
   async findOne(id: string, user: AuthUser) {

@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { GoodsReceivedNotesService } from './goods-received-notes.service';
+import { UpdateGoodsReceivedNoteDto } from './dto/update-goods-received-note.dto';
 
 @Controller('goods-received-notes')
 export class GoodsReceivedNotesController {
@@ -27,7 +28,11 @@ export class GoodsReceivedNotesController {
 
   @Put(':id')
   @RequirePermissions('grn.update')
-  update(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateGoodsReceivedNoteDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 

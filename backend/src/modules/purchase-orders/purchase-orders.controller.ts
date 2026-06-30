@@ -17,6 +17,12 @@ export class PurchaseOrdersController {
     return this.service.findAll(query, user);
   }
 
+  @Get('summary')
+  @RequirePermissions('purchases.view')
+  summary(@Query() query: QueryPurchaseOrderDto, @CurrentUser() user: AuthUser) {
+    return this.service.summary(query, user);
+  }
+
   @Get(':id')
   @RequirePermissions('purchases.view')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {

@@ -113,3 +113,23 @@ describe('GoodsReceivedNotesService stock posting idempotency', () => {
     expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
   });
 });
+
+describe('GoodsReceivedNotesService over-receipt unit guard', () => {
+  it('rejects a GRN line for an ordered product received in a different unit than ordered', async () => {
+    const { service, prisma, inventoryMovements, approvedGrn } = makeService();
+    prisma.goodsReceivedNote.findFirst.mockResolvedValue({
+      ...approvedGrn,
+      purchaseOrderId: 'po-1',
+      lines: [{ productId: 'product-1', unitId: 'unit-2', acceptedQuantity: 5 }],
+    });
+    // PO ordered product-1 in unit-1 — a different unit than the GRN received,
+    // which (without unit conversion) must be rejected rather than bypass the ceiling.
+    prisma.purchaseOrderLine.findMany.mockResolvedValue([
+      { productId: 'product-1', unitId: 'unit-1', quantity: 10, unitCost: 3 },
+    ]);
+    prisma.goodsReceivedNoteLine = { findMany: jest.fn().mockResolvedValue([]) };
+
+    await expect(service.post('grn-1', user)).rejects.toThrow('Received unit does not match');
+    expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+  });
+});

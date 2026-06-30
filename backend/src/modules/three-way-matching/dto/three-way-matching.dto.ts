@@ -10,8 +10,11 @@ export class QueryThreeWayMatchDto extends CompanyPagedQueryDto {
 }
 
 export class CreateThreeWayMatchDto {
+  // matchNumber is server-generated via the entity-code generator; any client
+  // value is ignored. Kept optional so older clients posting it still validate.
+  @IsOptional()
   @IsString()
-  matchNumber!: string;
+  matchNumber?: string;
 
   @IsString()
   companyId!: string;

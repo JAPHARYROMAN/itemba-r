@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueryInventoryBalanceDto } from './dto/query-inventory-balance.dto';
@@ -19,20 +20,36 @@ export class InventoryBalancesService {
     applyCompanyScopeWhere(where, user, companyId);
     if (productId) where.productId = productId;
     if (locationId) where.branchId = locationId;
-    // Low-stock = positive-but-low band (consistent with liveStock()'s default
-    // lowThreshold of 10). A row is "low" only when it still has stock on hand
-    // (> 0) but is at or below the reorder threshold, so reorder alerts fire
-    // before a SKU is fully depleted.
-    if (lowStock) where.quantityOnHand = { gt: 0, lte: 10 };
+
+    const include = {
+      company: { select: { id: true, name: true, code: true } },
+      product: { select: { id: true, name: true, sku: true } },
+      branch: { select: { id: true, name: true, code: true } },
+    };
+
+    // Low-stock = a row that still has stock on hand (> 0) but is at or below its
+    // per-product reorder threshold (reorderLevel ?? minimumStockLevel ?? 10), so
+    // reorder alerts fire before a SKU is fully depleted. Prisma cannot compare a
+    // column to a related column in `where`, so we resolve matching balance IDs
+    // via a raw join against products and then findMany by those ids.
+    if (lowStock) {
+      const ids = await this.lowStockBalanceIds(where);
+      const total = ids.length;
+      const pageIds = ids.slice(skip, skip + limit);
+      const rows = pageIds.length
+        ? await this.prisma.inventoryBalance.findMany({ where: { id: { in: pageIds } }, include })
+        : [];
+      // findMany does not honour the order of an `id in` list, so re-sort the
+      // page back into the raw query's updatedAt-desc order.
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      const data = pageIds.map((id) => byId.get(id)).filter((r): r is (typeof rows)[number] => !!r);
+      return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.inventoryBalance.findMany({
         where,
-        include: {
-          company: { select: { id: true, name: true, code: true } },
-          product: { select: { id: true, name: true, sku: true } },
-          branch: { select: { id: true, name: true, code: true } },
-        },
+        include,
         orderBy: { updatedAt: 'desc' },
         skip,
         take: limit,
@@ -41,6 +58,60 @@ export class InventoryBalancesService {
     ]);
 
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  /**
+   * Resolve the IDs of low-stock balances under the SAME company scope `findAll`
+   * already applied. The company-scope clause is read straight off the Prisma
+   * `where` that `applyCompanyScopeWhere` produced — `{ companyId: string }`,
+   * `{ companyId: { in: [...] } }`, or the empty-deny sentinel `{ id: { in: [] } }`
+   * — so SQL can never widen the scope beyond what Prisma would have allowed. Any
+   * other shape is treated as deny rather than risk a cross-company leak.
+   *
+   * Returned in updatedAt-desc order to match the non-low-stock branch.
+   */
+  private async lowStockBalanceIds(where: any): Promise<string[]> {
+    const scope = this.companyScopeSql(where);
+    if (scope === null) return [];
+
+    const conditions: Prisma.Sql[] = [scope];
+    if (typeof where.productId === 'string') {
+      conditions.push(Prisma.sql`b."productId" = ${where.productId}`);
+    }
+    if (typeof where.branchId === 'string') {
+      conditions.push(Prisma.sql`b."branchId" = ${where.branchId}`);
+    }
+
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT b.id
+      FROM "inventory_balances" b
+      JOIN "products" p ON p.id = b."productId"
+      WHERE ${Prisma.join(conditions, ' AND ')}
+        AND b."quantityOnHand" > 0
+        AND b."quantityOnHand" <= COALESCE(p."reorderLevel", p."minimumStockLevel", 10)
+      ORDER BY b."updatedAt" DESC
+    `);
+    return rows.map((r) => r.id);
+  }
+
+  /**
+   * Translate the company-scope portion of a Prisma `where` into a SQL clause.
+   * Returns `null` when the scope can only match nothing (empty-deny sentinel or
+   * an unrecognised shape), so the caller short-circuits to an empty result
+   * instead of emitting an unscoped query.
+   */
+  private companyScopeSql(where: any): Prisma.Sql | null {
+    const companyId = where?.companyId;
+    if (typeof companyId === 'string') {
+      return Prisma.sql`b."companyId" = ${companyId}`;
+    }
+    if (companyId && Array.isArray(companyId.in)) {
+      if (companyId.in.length === 0) return null;
+      return Prisma.sql`b."companyId" IN (${Prisma.join(companyId.in)})`;
+    }
+    // The empty-deny sentinel ({ id: { in: [] } }) and any unexpected shape fall
+    // through to deny — never run the low-stock query without a company filter.
+    return null;
   }
 
   async findOne(id: string, user: AuthUser) {

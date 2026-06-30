@@ -53,6 +53,11 @@ function makeService() {
       updateMany: jest.fn(async () => ({ count: 1 })),
       findFirst: jest.fn(async () => persistedOrder()),
       findUnique: jest.fn(async () => null),
+      groupBy: jest.fn(async () => []),
+      aggregate: jest.fn(async () => ({
+        _sum: { totalAmount: null, outstandingAmount: null, paidAmount: null },
+      })),
+      count: jest.fn(async () => 0),
     },
     salesOrderLine: {
       createMany: jest.fn(),
@@ -528,6 +533,116 @@ describe('SalesOrdersService cancel money guard', () => {
 
     expect(prisma.salesOrder.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'CANCELLED' }) }),
+    );
+  });
+});
+
+describe('SalesOrdersService workbench summary aggregation', () => {
+  it('derives counts and money rollups from groupBy/_sum instead of loading rows', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.groupBy.mockResolvedValue([
+      { status: 'DRAFT', _count: { _all: 3 } },
+      { status: 'CONFIRMED', _count: { _all: 4 } },
+      { status: 'PARTIALLY_PAID', _count: { _all: 1 } },
+      { status: 'PAID', _count: { _all: 2 } },
+      { status: 'CANCELLED', _count: { _all: 1 } },
+      { status: 'VOIDED', _count: { _all: 1 } },
+    ]);
+    prisma.salesOrder.aggregate.mockResolvedValue({
+      _sum: { totalAmount: 1000, outstandingAmount: 250, paidAmount: 750 },
+    });
+    prisma.salesOrder.count
+      .mockResolvedValueOnce(5) // unpaidCount
+      .mockResolvedValueOnce(2); // overdueCreditOrders
+
+    const summary = await service.workbenchSummary({} as any, user);
+
+    expect(summary).toEqual({
+      totalOrders: 12,
+      draft: 3,
+      confirmed: 7,
+      cancelled: 2,
+      revenue: 1000,
+      outstanding: 250,
+      paidAmount: 750,
+      unpaidCount: 5,
+      overdueCreditOrders: 2,
+      blockedFailedActionCount: 0,
+    });
+  });
+
+  it('excludes CANCELLED/VOIDED orders from every money rollup and count', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.groupBy.mockResolvedValue([]);
+
+    await service.workbenchSummary({} as any, user);
+
+    const deadExcluded = { status: { notIn: ['CANCELLED', 'VOIDED'] } };
+    expect(prisma.salesOrder.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining(deadExcluded) }),
+    );
+    for (const call of prisma.salesOrder.count.mock.calls) {
+      expect(call[0].where).toEqual(expect.objectContaining(deadExcluded));
+    }
+  });
+});
+
+describe('SalesOrdersService confirm currency guard', () => {
+  function confirmableCashOrder(overrides: Record<string, unknown> = {}) {
+    return persistedOrder({
+      status: 'DRAFT',
+      salesType: 'CASH_SALE',
+      paymentMethod: 'CASH',
+      cashAccountId: 'cash-account-1',
+      paidAmount: 0,
+      outstandingAmount: 200,
+      paymentStatus: 'UNPAID',
+      cashAccount: {
+        id: 'cash-account-1',
+        accountName: 'Main Till',
+        accountType: 'CASH_ON_HAND',
+        currency: 'TZS',
+      },
+      ...overrides,
+    });
+  }
+
+  it('rejects a non-credit confirm when the cash account currency differs from the order currency', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      confirmableCashOrder({
+        currency: 'USD',
+        cashAccount: {
+          id: 'cash-account-1',
+          accountName: 'Main Till',
+          accountType: 'CASH_ON_HAND',
+          currency: 'TZS',
+        },
+      }),
+    );
+
+    await expect(service.confirm('so-1', user)).rejects.toThrow(
+      'does not match the sales order currency',
+    );
+    expect(prisma.cashAccount.update).not.toHaveBeenCalled();
+    expect(prisma.salesOrder.update).not.toHaveBeenCalled();
+  });
+
+  it('confirms a non-credit sale when the cash account currency matches', async () => {
+    const { service, prisma } = makeService();
+    jest.spyOn(service as any, 'postSalesOrderLedger').mockResolvedValue({ id: 'journal-entry-1' });
+    prisma.salesOrder.findFirst.mockResolvedValue(confirmableCashOrder());
+
+    await service.confirm('so-1', user);
+
+    expect(prisma.cashAccount.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'cash-account-1' },
+        data: { currentBalance: { increment: 200 } },
+      }),
+    );
+    expect(prisma.salesOrder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ paymentStatus: 'PAID' }) }),
     );
   });
 });

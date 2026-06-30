@@ -29,6 +29,14 @@ const COST_REQUIRED_INBOUND_TYPES: InventoryMovementType[] = [
   'PRODUCTION_IN',
 ];
 
+// Relation filter mirroring isStockProduct(): a product tracks stock unless it opts
+// out via trackInventory:false or is a SERVICE / NON_STOCK_ITEM type. Used to scope
+// the missing-cost groupBy so service/non-stock lines are never flagged.
+const STOCK_PRODUCT_WHERE: Prisma.ProductWhereInput = {
+  trackInventory: { not: false },
+  productType: { notIn: [...STOCK_EXEMPT_TYPES] as any },
+};
+
 type DbClient = PrismaService | Prisma.TransactionClient;
 
 type ProductForProfit = {
@@ -313,100 +321,97 @@ export class ProfitService {
 
   async productSummary(query: Record<string, string | undefined>, user: AuthUser) {
     const salesOrderWhere = await this.salesOrderWhere(query, user);
-    const lines = await this.prisma.salesOrderLine.findMany({
-      where: {
-        salesOrder: salesOrderWhere,
-        ...(query.productId ? { productId: query.productId } : {}),
-      },
-      include: {
-        product: {
-          select: {
-            id: true,
-            productCode: true,
-            name: true,
-            productType: true,
-            trackInventory: true,
-          },
-        },
-        salesOrder: {
-          select: {
-            id: true,
-            salesOrderNumber: true,
-            orderDate: true,
-            companyId: true,
-            divisionId: true,
-            branchId: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 1000,
-    });
+    const lineWhere: Prisma.SalesOrderLineWhereInput = {
+      salesOrder: salesOrderWhere,
+      ...(query.productId ? { productId: query.productId } : {}),
+    };
 
-    const byProduct = new Map<string, any>();
+    // Aggregate in the database (groupBy productId / _sum) rather than pulling up to
+    // 1000 rows into JS. The old take:1000 silently truncated both the summary totals
+    // and the per-product table once a filter matched more than 1000 lines.
+    // Revenue (net, ex-tax) per line is `quantity*unitPrice - discountAmount`, which is
+    // exactly the stored `lineTotal - taxAmount` (see SalesOrder line-total derivation),
+    // so it sums cleanly via two column _sums.
+    const [grouped, missingGrouped] = await Promise.all([
+      this.prisma.salesOrderLine.groupBy({
+        by: ['productId'],
+        where: lineWhere,
+        _sum: { quantity: true, lineTotal: true, taxAmount: true, cogsAmount: true },
+        _count: { _all: true },
+      }),
+      // A stock line with no snapshotted cost contributes full revenue and 0 cost,
+      // overstating gross profit. Count/sum those (don't drop them). Non-stock/service
+      // lines legitimately carry no COGS and are not flagged.
+      this.prisma.salesOrderLine.groupBy({
+        by: ['productId'],
+        where: { ...lineWhere, cogsAmount: null, product: STOCK_PRODUCT_WHERE },
+        _sum: { lineTotal: true, taxAmount: true },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const productIds = grouped.map((group) => group.productId);
+    const products = productIds.length
+      ? await this.prisma.product.findMany({
+          where: { id: { in: productIds } },
+          select: { id: true, productCode: true, name: true },
+        })
+      : [];
+    const productById = new Map(products.map((product) => [product.id, product]));
+
+    const missingByProduct = new Map(missingGrouped.map((group) => [group.productId, group]));
+
     let revenue = 0;
     let cogs = 0;
     let linesMissingCost = 0;
     let revenueMissingCost = 0;
-    for (const line of lines) {
-      const quantity = Number(line.quantity);
-      const netSalesAmount = roundMoney(
-        quantity * Number(line.unitPrice) - Number(line.discountAmount ?? 0),
-      );
-      const lineCogs = Number(line.cogsAmount ?? 0);
-      // A stock line with no snapshotted cost contributes full revenue and 0 cost,
-      // overstating gross profit. Flag it (don't drop it). Non-stock/service lines
-      // legitimately carry no COGS and are not flagged.
-      const cogsMissing = line.cogsAmount == null && this.isStockProduct(line.product);
-      if (cogsMissing) {
-        linesMissingCost += 1;
-        revenueMissingCost += netSalesAmount;
-      }
-      revenue += netSalesAmount;
-      cogs += lineCogs;
-      const key = line.productId;
-      const row =
-        byProduct.get(key) ??
-        {
-          productId: key,
-          productCode: line.product.productCode,
-          productName: line.product.name,
-          quantity: 0,
-          revenue: 0,
-          cogs: 0,
-          grossProfit: 0,
-          grossMarginPct: 0,
-          salesCount: 0,
-          hasMissingCost: false,
-        };
-      row.quantity += quantity;
-      row.revenue += netSalesAmount;
-      row.cogs += lineCogs;
-      row.grossProfit = row.revenue - row.cogs;
-      row.grossMarginPct = row.revenue > 0 ? roundPercent((row.grossProfit / row.revenue) * 100) : 0;
-      row.salesCount += 1;
-      if (cogsMissing) row.hasMissingCost = true;
-      byProduct.set(key, row);
-    }
 
+    const rows = grouped.map((group) => {
+      const rowRevenue = roundMoney(
+        Number(group._sum.lineTotal ?? 0) - Number(group._sum.taxAmount ?? 0),
+      );
+      const rowCogs = roundMoney(Number(group._sum.cogsAmount ?? 0));
+      const rowGrossProfit = roundMoney(rowRevenue - rowCogs);
+      const missing = missingByProduct.get(group.productId);
+      const product = productById.get(group.productId);
+
+      revenue += rowRevenue;
+      cogs += rowCogs;
+      if (missing) {
+        linesMissingCost += missing._count._all;
+        revenueMissingCost += Number(missing._sum.lineTotal ?? 0) - Number(missing._sum.taxAmount ?? 0);
+      }
+
+      return {
+        productId: group.productId,
+        productCode: product?.productCode ?? null,
+        productName: product?.name ?? null,
+        quantity: Number(group._sum.quantity ?? 0),
+        revenue: rowRevenue,
+        cogs: rowCogs,
+        grossProfit: rowGrossProfit,
+        grossMarginPct: rowRevenue > 0 ? roundPercent((rowGrossProfit / rowRevenue) * 100) : 0,
+        salesCount: group._count._all,
+        hasMissingCost: Boolean(missing),
+      };
+    });
+    rows.sort((a, b) => b.revenue - a.revenue);
+
+    revenue = roundMoney(revenue);
+    cogs = roundMoney(cogs);
     const grossProfit = roundMoney(revenue - cogs);
     const gaps = await this.costGaps(query, user);
     return {
       summary: {
-        revenue: roundMoney(revenue),
-        cogs: roundMoney(cogs),
+        revenue,
+        cogs,
         grossProfit,
         grossMarginPct: revenue > 0 ? roundPercent((grossProfit / revenue) * 100) : 0,
         costGaps: gaps.total,
         linesMissingCost,
         revenueMissingCost: roundMoney(revenueMissingCost),
       },
-      products: Array.from(byProduct.values()).map((row) => ({
-        ...row,
-        revenue: roundMoney(row.revenue),
-        cogs: roundMoney(row.cogs),
-        grossProfit: roundMoney(row.grossProfit),
-      })),
+      products: rows,
     };
   }
 
@@ -910,7 +915,13 @@ export class ProfitService {
       deletedAt: null,
       status: { in: PROFIT_SALES_STATUSES },
       ...(await this.companyScope.companyWhereFor(user, query.companyId)),
-      ...(query.divisionId ? { divisionId: query.divisionId } : {}),
+      // A division filter must scope by the branch's division too: SalesOrder.divisionId
+      // is nullable and legacy orders can carry a branch with a null divisionId, so a bare
+      // `divisionId` equality silently drops in-division orders. Match either the order's own
+      // division or the division of its branch.
+      ...(query.divisionId
+        ? { OR: [{ divisionId: query.divisionId }, { branch: { divisionId: query.divisionId } }] }
+        : {}),
       ...(query.branchId ? { branchId: query.branchId } : {}),
       ...(query.dateFrom || query.dateTo
         ? {

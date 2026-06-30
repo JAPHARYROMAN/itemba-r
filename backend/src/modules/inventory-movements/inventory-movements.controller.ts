@@ -14,6 +14,12 @@ export class InventoryMovementsController {
     return this.service.findAll(query, user);
   }
 
+  @Get('summary')
+  @RequirePermissions('inventory.movements.view')
+  summary(@Query() query: QueryInventoryMovementDto, @CurrentUser() user: AuthUser) {
+    return this.service.summary(query, user);
+  }
+
   @Get(':id')
   @RequirePermissions('inventory.movements.view')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {

@@ -122,6 +122,7 @@ export class SupplierInvoicesService {
       branchId: dto.branchId || null,
       purchaseOrderId: dto.purchaseOrderId,
       goodsReceivedNoteId: dto.goodsReceivedNoteId,
+      currency: dto.currency ?? CurrencyCode.TZS,
     });
     const totals = this.buildInvoiceLines(dto.lines, dto.totalAmount);
 
@@ -188,12 +189,20 @@ export class SupplierInvoicesService {
       branchId: dto.branchId !== undefined ? dto.branchId || null : existing.branchId || null,
       purchaseOrderId: dto.purchaseOrderId ?? existing.purchaseOrderId ?? undefined,
       goodsReceivedNoteId: dto.goodsReceivedNoteId ?? existing.goodsReceivedNoteId ?? undefined,
+      currency: dto.currency ?? existing.currency,
     });
     const totals = dto.lines ? this.buildInvoiceLines(dto.lines, dto.totalAmount) : undefined;
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (totals) {
         await tx.supplierInvoiceLine.deleteMany({ where: { supplierInvoiceId: id } });
+        // Rewriting the lines resets the invoice to DRAFT (below), which invalidates
+        // any prior three-way match computed against the old lines. Soft-delete those
+        // matches so a stale MATCHED/VARIANCE result can't survive an edit-back-to-draft.
+        await tx.threeWayMatch.updateMany({
+          where: { supplierInvoiceId: id, deletedAt: null },
+          data: { deletedAt: new Date() },
+        });
       }
       return tx.supplierInvoice.update({
         where: { id },
@@ -585,6 +594,7 @@ export class SupplierInvoicesService {
     branchId?: string | null;
     purchaseOrderId?: string;
     goodsReceivedNoteId?: string;
+    currency?: string;
   }) {
     const supplier = await this.prisma.supplier.findFirst({
       where: { id: refs.supplierId, companyId: refs.companyId, deletedAt: null },
@@ -605,11 +615,17 @@ export class SupplierInvoicesService {
     if (refs.purchaseOrderId) {
       const po = await this.prisma.purchaseOrder.findFirst({
         where: { id: refs.purchaseOrderId, companyId: refs.companyId, deletedAt: null },
-        select: { id: true, supplierId: true, divisionId: true, branchId: true },
+        select: { id: true, supplierId: true, divisionId: true, branchId: true, currency: true },
       });
       if (!po) throw new BadRequestException('Purchase order does not belong to this company');
       if (po.supplierId && po.supplierId !== refs.supplierId) {
         throw new BadRequestException('Purchase order supplier does not match invoice supplier');
+      }
+      // Currency lock: the invoice must be denominated in the same currency as its
+      // linked purchase order, otherwise the matched amounts are not comparable.
+      // (GRNs carry no currency of their own, so the PO is the currency authority.)
+      if (refs.currency && po.currency && refs.currency !== po.currency) {
+        throw new BadRequestException('Supplier invoice currency must match the purchase order currency');
       }
       if (supplier.divisionId && po.divisionId && supplier.divisionId !== po.divisionId) {
         throw new BadRequestException('Purchase order is outside the supplier division');
@@ -758,7 +774,7 @@ export class SupplierInvoicesService {
       },
     });
 
-    await this.prisma.supplierInvoice.update({
+    await db.supplierInvoice.update({
       where: { id: invoice.id },
       data: { status: matchStatus === 'MATCHED' ? 'MATCHED' : 'DISPUTED' },
     });

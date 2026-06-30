@@ -513,23 +513,6 @@ export class SalesOrdersService {
 
   async workbenchSummary(query: QuerySalesOrderDto, user: AuthUser) {
     const where = await this.salesOrderWhere(query, user);
-    const orders = await this.prisma.salesOrder.findMany({
-      where,
-      select: {
-        status: true,
-        paymentStatus: true,
-        paymentMethod: true,
-        totalAmount: true,
-        paidAmount: true,
-        outstandingAmount: true,
-        dueDate: true,
-      },
-    });
-
-    const liveOrders = orders.filter(
-      (order) =>
-        order.status !== SalesOrderStatus.CANCELLED && order.status !== SalesOrderStatus.VOIDED,
-    );
     const today = new Date();
 
     const confirmedStatuses: SalesOrderStatus[] = [
@@ -537,30 +520,58 @@ export class SalesOrdersService {
       SalesOrderStatus.PARTIALLY_PAID,
       SalesOrderStatus.PAID,
     ];
+    const deadStatuses: SalesOrderStatus[] = [
+      SalesOrderStatus.CANCELLED,
+      SalesOrderStatus.VOIDED,
+    ];
+    // Live = everything except CANCELLED/VOIDED. Reused for every money rollup
+    // and the count predicates below so the exclusion stays consistent.
+    const liveWhere = { ...where, status: { notIn: deadStatuses } };
+
+    // Push the per-status counts and the money rollups into the database
+    // instead of loading every row and reducing in JS. groupBy gives us the
+    // status histogram (totalOrders/draft/confirmed/cancelled) in one query;
+    // _sum over the live subset gives revenue/outstanding/paidAmount.
+    const [statusGroups, liveTotals, unpaidCount, overdueCreditOrders] = await Promise.all([
+      this.prisma.salesOrder.groupBy({
+        by: ['status'],
+        where,
+        _count: { _all: true },
+      }),
+      this.prisma.salesOrder.aggregate({
+        where: liveWhere,
+        _sum: { totalAmount: true, outstandingAmount: true, paidAmount: true },
+      }),
+      this.prisma.salesOrder.count({
+        where: { ...liveWhere, paymentStatus: { not: PaymentStatus.PAID } },
+      }),
+      this.prisma.salesOrder.count({
+        where: {
+          ...liveWhere,
+          paymentMethod: SalesPaymentMethod.CREDIT,
+          outstandingAmount: { gt: 0 },
+          dueDate: { not: null, lt: today },
+        },
+      }),
+    ]);
+
+    const countByStatus = new Map(
+      statusGroups.map((group) => [group.status, group._count._all]),
+    );
+    const sumStatuses = (statuses: SalesOrderStatus[]) =>
+      statuses.reduce((sum, status) => sum + (countByStatus.get(status) ?? 0), 0);
+    const totalOrders = statusGroups.reduce((sum, group) => sum + group._count._all, 0);
 
     return {
-      totalOrders: orders.length,
-      draft: orders.filter((order) => order.status === SalesOrderStatus.DRAFT).length,
-      confirmed: orders.filter((order) => confirmedStatuses.includes(order.status)).length,
-      cancelled: orders.filter(
-        (order) =>
-          order.status === SalesOrderStatus.CANCELLED || order.status === SalesOrderStatus.VOIDED,
-      ).length,
-      revenue: roundMoney(liveOrders.reduce((sum, order) => sum + moneyValue(order.totalAmount), 0)),
-      outstanding: roundMoney(
-        liveOrders.reduce((sum, order) => sum + moneyValue(order.outstandingAmount), 0),
-      ),
-      paidAmount: roundMoney(
-        liveOrders.reduce((sum, order) => sum + moneyValue(order.paidAmount), 0),
-      ),
-      unpaidCount: liveOrders.filter((order) => order.paymentStatus !== PaymentStatus.PAID).length,
-      overdueCreditOrders: liveOrders.filter(
-        (order) =>
-          order.paymentMethod === SalesPaymentMethod.CREDIT &&
-          moneyValue(order.outstandingAmount) > 0 &&
-          order.dueDate &&
-          order.dueDate < today,
-      ).length,
+      totalOrders,
+      draft: countByStatus.get(SalesOrderStatus.DRAFT) ?? 0,
+      confirmed: sumStatuses(confirmedStatuses),
+      cancelled: sumStatuses(deadStatuses),
+      revenue: roundMoney(moneyValue(liveTotals._sum.totalAmount)),
+      outstanding: roundMoney(moneyValue(liveTotals._sum.outstandingAmount)),
+      paidAmount: roundMoney(moneyValue(liveTotals._sum.paidAmount)),
+      unpaidCount,
+      overdueCreditOrders,
       blockedFailedActionCount: 0,
     };
   }
@@ -993,7 +1004,7 @@ export class SalesOrdersService {
         },
         createdBy: { select: { id: true, fullName: true } },
         confirmedBy: { select: { id: true, fullName: true } },
-        cashAccount: { select: { id: true, accountName: true, accountType: true } },
+        cashAccount: { select: { id: true, accountName: true, accountType: true, currency: true } },
         lines: {
           include: {
             product: { select: { id: true, name: true, sku: true } },
@@ -1934,6 +1945,16 @@ export class SalesOrdersService {
         });
         receivableId = receivable.id;
       } else if ((existing as any).cashAccountId) {
+        // Guard against posting a receipt into a cash account denominated in a
+        // different currency than the sale: incrementing its balance with the
+        // order total would silently mix currencies on the cash ledger. We only
+        // reach here for non-credit sales (CREDIT raises a Receivable above).
+        const cashAccountCurrency = existing.cashAccount?.currency;
+        if (cashAccountCurrency && cashAccountCurrency !== existing.currency) {
+          throw new BadRequestException(
+            `Receipt account currency (${cashAccountCurrency}) does not match the sales order currency (${existing.currency}). Choose a ${existing.currency} receipt account.`,
+          );
+        }
         // Credit the cash account balance.
         await tx.cashAccount.update({
           where: { id: (existing as any).cashAccountId },

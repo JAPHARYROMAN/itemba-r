@@ -19,6 +19,64 @@ function makeService() {
 
 const user = { id: 'u1' } as any;
 
+describe('ProductCategoriesService findAll status counts', () => {
+  function makeListService() {
+    const prisma: any = {
+      productCategory: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+        groupBy: jest.fn(),
+      },
+    };
+    const companyScope = {
+      assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
+      accessibleCompanyIds: jest.fn().mockResolvedValue(null),
+    } as any;
+    const service = new ProductCategoriesService(prisma, {} as any, companyScope);
+    return { service, prisma };
+  }
+
+  it('collapses groupBy rows into flat active/inactive/total counts', async () => {
+    const { service, prisma } = makeListService();
+    prisma.productCategory.groupBy.mockResolvedValue([
+      { isActive: true, _count: { _all: 7 } },
+      { isActive: false, _count: { _all: 3 } },
+    ]);
+
+    const result = await service.findAll({} as any, user);
+
+    expect(result.counts).toEqual({ active: 7, inactive: 3, total: 10 });
+  });
+
+  it('aggregates over the unfiltered-by-isActive scope, ignoring the isActive filter', async () => {
+    const { service, prisma } = makeListService();
+    prisma.productCategory.groupBy.mockResolvedValue([{ isActive: true, _count: { _all: 4 } }]);
+
+    await service.findAll({ isActive: true, companyId: 'c1', search: 'box' } as any, user);
+
+    // The list query carries the isActive filter; the count aggregate does not.
+    expect(prisma.productCategory.count).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ isActive: true }) }),
+    );
+    const groupByArgs = prisma.productCategory.groupBy.mock.calls[0][0];
+    expect(groupByArgs.by).toEqual(['isActive']);
+    expect(groupByArgs.where).not.toHaveProperty('isActive');
+    // ...but it keeps the other filters (company scope + search).
+    expect(groupByArgs.where).toEqual(
+      expect.objectContaining({ companyId: 'c1', deletedAt: null }),
+    );
+  });
+
+  it('defaults missing status buckets to zero', async () => {
+    const { service, prisma } = makeListService();
+    prisma.productCategory.groupBy.mockResolvedValue([{ isActive: true, _count: { _all: 2 } }]);
+
+    const result = await service.findAll({} as any, user);
+
+    expect(result.counts).toEqual({ active: 2, inactive: 0, total: 2 });
+  });
+});
+
 describe('ProductCategoriesService parent-cycle guard', () => {
   it('rejects making a category its own parent', async () => {
     const { service } = makeService();
