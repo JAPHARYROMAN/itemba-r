@@ -242,3 +242,141 @@ describe('SupplierInvoicesService currency lock', () => {
     expect(prisma.supplierInvoice.update).toHaveBeenCalled();
   });
 });
+
+describe('SupplierInvoicesService runMatch guard', () => {
+  it('rejects re-matching an already-approved invoice (would revert it out of APPROVED)', async () => {
+    const { service } = makeService();
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(approvableInvoice({ status: 'APPROVED' }) as any);
+
+    await expect(service.runMatch('si-1', user)).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('SupplierInvoicesService cash-purchase PO guard', () => {
+  it('rejects linking an invoice to a CASH_PURCHASE order (settles at receipt, no AP)', async () => {
+    const { service } = makeUpdateService({
+      purchaseOrder: {
+        findFirst: jest.fn(async () => ({
+          id: 'po-1',
+          supplierId: 'supplier-1',
+          divisionId: 'division-1',
+          branchId: 'branch-1',
+          currency: 'TZS',
+          purchaseType: 'CASH_PURCHASE',
+        })),
+      },
+    });
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(
+        approvableInvoice({ status: 'DRAFT', purchaseOrderId: 'po-1', currency: 'TZS' }) as any,
+      );
+
+    await expect(service.update('si-1', { currency: 'TZS' } as any, user)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+});
+
+describe('SupplierInvoicesService re-approval preserves payable payments (#6)', () => {
+  it('derives outstanding from the payable paidAmount, not the invoice, on the update branch', async () => {
+    const payableUpdate = jest.fn(async ({ data }: any) => ({
+      id: 'pay-1',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      journalEntryId: 'je-1',
+      ...data,
+    }));
+    const { service, prisma } = makeService({
+      payable: {
+        // The payable already received a 60 payment booked directly against it;
+        // the invoice row still reports paidAmount 0 (stale).
+        findUnique: jest.fn(async () => ({
+          companyId: 'company-1',
+          supplierId: 'supplier-1',
+          paidAmount: 60,
+        })),
+        update: payableUpdate,
+        create: jest.fn(),
+      },
+    });
+    jest.spyOn(service, 'findOne').mockResolvedValue(
+      approvableInvoice({
+        status: 'DISPUTED',
+        payableId: 'pay-1',
+        totalAmount: 100,
+        paidAmount: 0,
+        purchaseOrderId: null,
+      }) as any,
+    );
+    jest.spyOn(service as any, 'syncSupplierBalance').mockResolvedValue(undefined);
+
+    await service.approve('si-1', undefined, user);
+
+    expect(payableUpdate).toHaveBeenCalledTimes(1);
+    const data = payableUpdate.mock.calls[0][0].data;
+    // amount re-asserted to the invoice total (100), but outstanding keeps the
+    // 60 already paid against the payable: 100 - 60 = 40 (NOT 100 - invoice.paidAmount).
+    expect(Number(data.amount)).toBe(100);
+    expect(Number(data.outstandingAmount)).toBe(40);
+    // paidAmount is left untouched on the payable so applied payments survive.
+    expect(data.paidAmount).toBeUndefined();
+    // No second journal is posted when one already exists.
+    expect(prisma.supplierInvoice.update).toHaveBeenCalled();
+  });
+});
+
+describe('SupplierInvoicesService amountVarianceAgainstPurchaseOrder (#16)', () => {
+  function poLine(overrides: Record<string, unknown> = {}) {
+    return { productId: 'p-a', unitCost: 100, lineTotal: 1000, ...overrides };
+  }
+  function invLine(overrides: Record<string, unknown> = {}) {
+    return {
+      productId: 'p-a',
+      quantity: 10,
+      unitPrice: 100,
+      lineTotal: 1000,
+      taxAmount: 0,
+      discountAmount: 0,
+      ...overrides,
+    };
+  }
+
+  it('does not flag a matched line just because the invoice carries an extra non-PO line', () => {
+    const { service } = makeService();
+    const invoice = {
+      totalAmount: 2000,
+      lines: [
+        invLine(), // matches PO product p-a exactly: 1000
+        invLine({ productId: null, lineTotal: 1000, quantity: 1, unitPrice: 1000 }), // freight 1000
+      ],
+    };
+    const variance = (service as any).amountVarianceAgainstPurchaseOrder(invoice, [poLine()]);
+    // Old (buggy) code compared expected 1000 against invoice.totalAmount 2000 => 1000.
+    // Like-for-like over matched lines only => 0.
+    expect(Number(variance)).toBe(0);
+  });
+
+  it('still detects a genuine overcharge on a matched line', () => {
+    const { service } = makeService();
+    const invoice = {
+      totalAmount: 1200,
+      lines: [invLine({ unitPrice: 120, lineTotal: 1200 })], // billed 1200 vs expected 1000
+    };
+    const variance = (service as any).amountVarianceAgainstPurchaseOrder(invoice, [poLine()]);
+    expect(Number(variance)).toBe(200);
+  });
+
+  it('falls back to whole-invoice vs PO total when no line matches', () => {
+    const { service } = makeService();
+    const invoice = {
+      totalAmount: 1500,
+      lines: [invLine({ productId: 'p-other', lineTotal: 1500, unitPrice: 150 })],
+    };
+    const variance = (service as any).amountVarianceAgainstPurchaseOrder(invoice, [poLine()]);
+    // No matched line => whole-invoice fallback: |1500 - 1000| = 500.
+    expect(Number(variance)).toBe(500);
+  });
+});

@@ -166,6 +166,66 @@ describe('AccountingControlService', () => {
     ).rejects.toThrow('Fiscal year is not OPEN');
   });
 
+  it('scopes the fiscal-year lock branch to year-wide locks only, not period-scoped locks (finding #11)', async () => {
+    // Posting into an OPEN period whose fiscal year also contains a separately
+    // closed period. The PERIOD_LOCK on the closed period carries fiscalYearId,
+    // and it must NOT match this posting via the bare fiscalYearId branch.
+    prisma.accountingPeriod.findFirst.mockResolvedValue({
+      id: 'feb-period',
+      fiscalYearId: 'fy-2026',
+      companyId: 'company-1',
+      status: 'OPEN',
+      startDate: new Date('2026-02-01'),
+      endDate: new Date('2026-02-28'),
+      fiscalYear: { id: 'fy-2026', status: 'OPEN' },
+    });
+    prisma.accountingLock.findFirst.mockResolvedValue(null);
+
+    await service.assertPostingAllowed({
+      companyId: 'company-1',
+      transactionDate: new Date('2026-02-15'),
+      moduleName: 'journal_entries',
+    });
+
+    const whereArg = prisma.accountingLock.findFirst.mock.calls[0][0].where;
+    const scopeOr = whereArg.AND[0].OR;
+    // The fiscal-year branch must require accountingPeriodId IS NULL so a
+    // period-scoped PERIOD_LOCK cannot over-match every period in the year.
+    expect(scopeOr).toContainEqual({ accountingPeriodId: null, fiscalYearId: 'fy-2026' });
+    // And it must NOT push a bare { fiscalYearId } that would match any
+    // (period-scoped) lock in the fiscal year.
+    expect(scopeOr).not.toContainEqual({ fiscalYearId: 'fy-2026' });
+    // The exact-period branch is still present for the resolved period.
+    expect(scopeOr).toContainEqual({ accountingPeriodId: 'feb-period' });
+  });
+
+  it('still blocks a genuine year-wide lock (no accountingPeriodId) for the fiscal year', async () => {
+    prisma.accountingPeriod.findFirst.mockResolvedValue({
+      id: 'feb-period',
+      fiscalYearId: 'fy-2026',
+      companyId: 'company-1',
+      status: 'OPEN',
+      startDate: new Date('2026-02-01'),
+      endDate: new Date('2026-02-28'),
+      fiscalYear: { id: 'fy-2026', status: 'OPEN' },
+    });
+    // A year-wide lock has accountingPeriodId null but fiscalYearId set; it must
+    // match the { accountingPeriodId: null, fiscalYearId } branch.
+    prisma.accountingLock.findFirst.mockResolvedValue({
+      id: 'year-lock',
+      accountingPeriodId: null,
+      moduleName: null,
+    });
+
+    await expect(
+      service.assertPostingAllowed({
+        companyId: 'company-1',
+        transactionDate: new Date('2026-02-15'),
+        moduleName: 'journal_entries',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('does not let a journal-only module lock block unrelated modules', async () => {
     prisma.accountingPeriod.findFirst.mockResolvedValue({
       id: 'period-3',

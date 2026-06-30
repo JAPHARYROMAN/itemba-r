@@ -56,51 +56,61 @@ export class ThreeWayMatchingService {
       throw new BadRequestException('A supplier invoice is required for three-way matching');
     }
 
-    // One active match per supplier invoice — reject a second register entry for
-    // an invoice that already has a live (non-deleted) match in this company.
-    const duplicate = await this.prisma.threeWayMatch.findFirst({
-      where: {
-        companyId: dto.companyId,
-        supplierInvoiceId: dto.supplierInvoiceId,
-        deletedAt: null,
-      },
-      select: { id: true },
+    // The duplicate guard and the insert run inside ONE transaction so the
+    // "one active match per supplier invoice" rule is an atomic check-then-create
+    // rather than two calls on separate connections. ThreeWayMatch has no DB-level
+    // unique constraint on supplierInvoiceId (schema.prisma:12915), so the
+    // transaction boundary is what keeps two concurrent creates from both passing
+    // the guard. The variance compute runs against the same tx client so it sees a
+    // consistent snapshot of the PO / GRN / invoice.
+    const item = await this.prisma.$transaction(async (tx) => {
+      // One active match per supplier invoice — reject a second register entry for
+      // an invoice that already has a live (non-deleted) match in this company.
+      const duplicate = await tx.threeWayMatch.findFirst({
+        where: {
+          companyId: dto.companyId,
+          supplierInvoiceId: dto.supplierInvoiceId,
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      if (duplicate) {
+        throw new BadRequestException('An active three-way match already exists for this supplier invoice');
+      }
+
+      // Variances and match status are computed server-side from the live PO / GRN /
+      // invoice — never taken from the client (the form fields are advisory only).
+      const computed = await this.computeMatch(
+        {
+          companyId: dto.companyId,
+          purchaseOrderId: dto.purchaseOrderId,
+          goodsReceivedNoteId: dto.goodsReceivedNoteId,
+          supplierInvoiceId: dto.supplierInvoiceId,
+        },
+        tx,
+      );
+
+      // matchNumber is minted server-side from the central code generator — the
+      // client field is advisory only and never trusted.
+      const matchNumber = await this.codes.next({ entityType: 'ThreeWayMatch', companyId: dto.companyId, tx });
+
+      return tx.threeWayMatch.create({
+        data: {
+          matchNumber,
+          companyId: dto.companyId,
+          purchaseOrderId: dto.purchaseOrderId,
+          goodsReceivedNoteId: dto.goodsReceivedNoteId,
+          supplierInvoiceId: dto.supplierInvoiceId,
+          matchDate: dto.matchDate ? new Date(dto.matchDate) : undefined,
+          notes: dto.notes,
+          quantityVariance: computed.quantityVariance,
+          amountVariance: computed.amountVariance,
+          matchStatus: computed.matchStatus,
+          matchedById: user.id,
+        },
+      });
     });
-    if (duplicate) {
-      throw new BadRequestException('An active three-way match already exists for this supplier invoice');
-    }
 
-    // Variances and match status are computed server-side from the live PO / GRN /
-    // invoice — never taken from the client (the form fields are advisory only).
-    const computed = await this.computeMatch(
-      {
-        companyId: dto.companyId,
-        purchaseOrderId: dto.purchaseOrderId,
-        goodsReceivedNoteId: dto.goodsReceivedNoteId,
-        supplierInvoiceId: dto.supplierInvoiceId,
-      },
-      this.prisma,
-    );
-
-    // matchNumber is minted server-side from the central code generator — the
-    // client field is advisory only and never trusted.
-    const matchNumber = await this.codes.next({ entityType: 'ThreeWayMatch', companyId: dto.companyId });
-
-    const item = await this.prisma.threeWayMatch.create({
-      data: {
-        matchNumber,
-        companyId: dto.companyId,
-        purchaseOrderId: dto.purchaseOrderId,
-        goodsReceivedNoteId: dto.goodsReceivedNoteId,
-        supplierInvoiceId: dto.supplierInvoiceId,
-        matchDate: dto.matchDate ? new Date(dto.matchDate) : undefined,
-        notes: dto.notes,
-        quantityVariance: computed.quantityVariance,
-        amountVariance: computed.amountVariance,
-        matchStatus: computed.matchStatus,
-        matchedById: user.id,
-      },
-    });
     await this.auditLogs.log({ action: 'CREATE', entityType: 'ThreeWayMatch', entityId: item.id, userId: user.id, companyId: item.companyId });
     return item;
   }
@@ -119,12 +129,6 @@ export class ThreeWayMatchingService {
     },
     db: Prisma.TransactionClient | PrismaService,
   ): Promise<ComputedThreeWayMatch> {
-    const purchaseOrder = await db.purchaseOrder.findFirst({
-      where: { id: refs.purchaseOrderId, companyId: refs.companyId, deletedAt: null },
-      include: { lines: true },
-    });
-    if (!purchaseOrder) throw new BadRequestException('Purchase order not found for this company');
-
     if (!refs.supplierInvoiceId) {
       throw new BadRequestException('A supplier invoice is required for three-way matching');
     }
@@ -134,14 +138,34 @@ export class ThreeWayMatchingService {
     });
     if (!invoice) throw new BadRequestException('Supplier invoice not found for this company');
 
+    const purchaseOrder = await db.purchaseOrder.findFirst({
+      where: { id: refs.purchaseOrderId, companyId: refs.companyId, deletedAt: null },
+      include: { lines: true },
+    });
+    if (!purchaseOrder) throw new BadRequestException('Purchase order not found for this company');
+    // The PO must belong to the invoice's supplier — mirrors the authoritative
+    // matcher in supplier-invoices.service.ts so a foreign-supplier PO cannot drive
+    // the variance.
+    if (purchaseOrder.supplierId && purchaseOrder.supplierId !== invoice.supplierId) {
+      throw new BadRequestException('Purchase order supplier does not match invoice supplier');
+    }
+
+    // Scope the GRN by the invoice's supplier (not companyId alone) so a GRN
+    // belonging to another supplier in the same company can never be attached and
+    // drive a bogus variance. Mirrors the authoritative matcher.
     const grn = refs.goodsReceivedNoteId
       ? await db.goodsReceivedNote.findFirst({
-          where: { id: refs.goodsReceivedNoteId, companyId: refs.companyId, deletedAt: null },
+          where: {
+            id: refs.goodsReceivedNoteId,
+            companyId: refs.companyId,
+            supplierId: invoice.supplierId,
+            deletedAt: null,
+          },
           include: { lines: true },
         })
       : null;
     if (refs.goodsReceivedNoteId && !grn) {
-      throw new BadRequestException('GRN not found for this company');
+      throw new BadRequestException('GRN not found for this supplier');
     }
 
     return computeThreeWayMatch({

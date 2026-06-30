@@ -87,7 +87,7 @@ function makeService() {
     profit,
   );
 
-  return { service, prisma, postingEngine, accountResolver, inventoryMovements, codes };
+  return { service, prisma, postingEngine, accountResolver, inventoryMovements, codes, auditLogs };
 }
 
 const user = { id: 'user-1', permissions: ['purchases.create'] } as any;
@@ -364,6 +364,196 @@ describe('PurchaseOrdersService payment state', () => {
       'has no active tank at the purchase order receiving branch',
     );
     expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+  });
+});
+
+describe('PurchaseOrdersService.receive AP ownership (findings #1, #7)', () => {
+  function creditOrder(extra: Record<string, unknown> = {}) {
+    return {
+      id: 'po-1',
+      purchaseOrderNumber: 'PO-2026-000001',
+      companyId: 'company-1',
+      branchId: 'branch-1',
+      divisionId: 'division-1',
+      supplierId: 'supplier-1',
+      supplierName: 'Supplier Ltd',
+      purchaseType: 'CREDIT_PURCHASE',
+      totalAmount: 1000000,
+      expectedDate: null,
+      currency: 'TZS',
+      status: 'CONFIRMED',
+      payableId: null,
+      lines: [
+        {
+          productId: 'product-1',
+          quantity: 10,
+          unitId: 'unit-1',
+          unitCost: 100000,
+          lineTotal: 1000000,
+          batchNumber: null,
+          expiryDate: null,
+        },
+      ],
+      ...extra,
+    };
+  }
+
+  it('receives a credit purchase as inventory-only: no payable, no AP ledger', async () => {
+    const { service, prisma, postingEngine, inventoryMovements, codes } = makeService();
+    prisma.product.findUnique.mockResolvedValue({ id: 'product-1', trackInventory: true });
+    prisma.purchaseOrder.findFirst.mockResolvedValue(creditOrder());
+
+    await service.receive('po-1', user);
+
+    // Inventory side is still posted via the movements service (WAC subledger).
+    expect(inventoryMovements.createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        movementType: 'PURCHASE_RECEIPT',
+        quantity: 10,
+        referenceType: 'PurchaseOrder',
+        referenceId: 'po-1',
+      }),
+    );
+    // No Payable is created — AP is owned by the supplier-invoice approve flow.
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+    // No GL journal is posted on a credit receipt (no AP_CONTROL credit here).
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    // No Payable code is requested for this PO.
+    expect(codes.next).not.toHaveBeenCalledWith(expect.objectContaining({ entityType: 'Payable' }));
+    // The PO row carries no journalEntryId from a credit receipt.
+    const updateArg = prisma.purchaseOrder.update.mock.calls.at(-1)?.[0];
+    expect(updateArg.data.status).toBe('RECEIVED');
+    expect(updateArg.data).not.toHaveProperty('journalEntryId');
+    expect(updateArg.data).not.toHaveProperty('payableId');
+  });
+
+  it('does not re-post AP or touch the linked payable when the PO already has one', async () => {
+    const { service, prisma, postingEngine } = makeService();
+    prisma.product.findUnique.mockResolvedValue({ id: 'product-1', trackInventory: true });
+    prisma.purchaseOrder.findFirst.mockResolvedValue(
+      creditOrder({ payableId: 'payable-existing' }),
+    );
+
+    await service.receive('po-1', user);
+
+    // The pre-existing payable (created by the supplier-invoice flow) is left alone:
+    // no second AP_CONTROL credit, no journalEntryId overwrite.
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+    expect(prisma.payable.update).not.toHaveBeenCalled();
+  });
+
+  it('still posts the cash/inventory ledger for a CASH purchase receipt', async () => {
+    const { service, prisma, postingEngine, accountResolver } = makeService();
+    prisma.product.findUnique.mockResolvedValue({ id: 'product-1', trackInventory: true });
+    prisma.purchaseOrder.findFirst.mockResolvedValue(
+      creditOrder({ purchaseType: 'CASH_PURCHASE' }),
+    );
+
+    await service.receive('po-1', user);
+
+    expect(accountResolver.resolveMany).toHaveBeenCalledWith(
+      'company-1',
+      ['INVENTORY_ASSET', 'CASH_ON_HAND'],
+      prisma,
+    );
+    expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
+    // Never resolves AP_CONTROL on the cash path.
+    expect(accountResolver.resolveMany).not.toHaveBeenCalledWith(
+      'company-1',
+      expect.arrayContaining(['AP_CONTROL']),
+      prisma,
+    );
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('PurchaseOrdersService.receive full-receipt-only (finding #20)', () => {
+  it('rejects a PARTIALLY_RECEIVED order on the direct receive path', async () => {
+    const { service, prisma, inventoryMovements, postingEngine } = makeService();
+    prisma.purchaseOrder.findFirst.mockResolvedValue({
+      id: 'po-1',
+      companyId: 'company-1',
+      branchId: 'branch-1',
+      divisionId: 'division-1',
+      purchaseType: 'CASH_PURCHASE',
+      totalAmount: 200,
+      status: 'PARTIALLY_RECEIVED',
+      lines: [],
+    });
+
+    await expect(service.receive('po-1', user)).rejects.toThrow(
+      'Only CONFIRMED purchase orders can be received here',
+    );
+    // No movement, no claim, no ledger for the rejected partial path.
+    expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(prisma.purchaseOrder.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('claims only CONFIRMED orders inside the receive transaction', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findFirst.mockResolvedValue({
+      id: 'po-1',
+      companyId: 'company-1',
+      branchId: 'branch-1',
+      divisionId: 'division-1',
+      purchaseType: 'CASH_PURCHASE',
+      totalAmount: 200,
+      status: 'CONFIRMED',
+      lines: [],
+    });
+
+    await service.receive('po-1', user);
+
+    expect(prisma.purchaseOrder.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'po-1', deletedAt: null, status: 'CONFIRMED' },
+      }),
+    );
+  });
+});
+
+describe('PurchaseOrdersService.cancel outstanding reset (finding #19)', () => {
+  it('zeroes the PO row outstandingAmount so summary() stops counting it', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findFirst.mockResolvedValue({
+      id: 'po-1',
+      companyId: 'company-1',
+      status: 'CONFIRMED',
+      outstandingAmount: 1000000,
+      payableId: null,
+    });
+
+    await service.cancel('po-1', user);
+
+    const updateArg = prisma.purchaseOrder.update.mock.calls.at(-1)?.[0];
+    expect(updateArg).toEqual({
+      where: { id: 'po-1' },
+      data: { status: 'CANCELLED', outstandingAmount: 0 },
+    });
+  });
+
+  it('also zeroes the linked payable outstanding when one exists', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findFirst.mockResolvedValue({
+      id: 'po-1',
+      companyId: 'company-1',
+      status: 'CONFIRMED',
+      outstandingAmount: 1000000,
+      payableId: 'payable-1',
+    });
+    prisma.payable.aggregate = jest.fn().mockResolvedValue({ _sum: { outstandingAmount: 0 } });
+    prisma.supplier.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+
+    await service.cancel('po-1', user);
+
+    expect(prisma.payable.update).toHaveBeenCalledWith({
+      where: { id: 'payable-1' },
+      data: { status: 'CANCELLED', outstandingAmount: 0 },
+    });
+    const poUpdate = prisma.purchaseOrder.update.mock.calls.at(-1)?.[0];
+    expect(poUpdate.data).toEqual({ status: 'CANCELLED', outstandingAmount: 0 });
   });
 });
 

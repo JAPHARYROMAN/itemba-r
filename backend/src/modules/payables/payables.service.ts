@@ -277,6 +277,16 @@ export class PayablesService {
         if (!locked) throw new NotFoundException('Payable not found');
         await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);
 
+        // A WRITTEN_OFF (or already-PAID) payable is settled: it must not accept a
+        // payment that would post a spurious cash settlement journal. (WRITTEN_OFF
+        // can still carry a non-zero outstandingAmount, so the amount check below
+        // does not catch this on its own.)
+        if (!['OPEN', 'PARTIALLY_PAID'].includes(locked.status)) {
+          throw new BadRequestException(
+            `Cannot record a payment against a ${locked.status} payable`,
+          );
+        }
+
         const outstanding = new Prisma.Decimal(locked.outstandingAmount);
         if (paymentAmount.gt(outstanding)) {
           throw new BadRequestException(
@@ -366,9 +376,72 @@ export class PayablesService {
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
     const userId = user.id;
     const record = await this.prisma.$transaction(async (tx) => {
+      // Re-read under a row lock so a concurrent recordPayment / second writeOff
+      // cannot race us. We read the live status + outstandingAmount + the linked
+      // original journal entry so the derecognition reverses exactly what is left.
+      const [locked] = await tx.$queryRaw<
+        Array<{
+          id: string;
+          companyId: string;
+          divisionId: string | null;
+          branchId: string | null;
+          supplierId: string | null;
+          supplierName: string | null;
+          payableNumber: string;
+          outstandingAmount: Prisma.Decimal;
+          status: string;
+          journalEntryId: string | null;
+          issueDate: Date;
+        }>
+      >`SELECT "id", "companyId", "divisionId", "branchId", "supplierId", "supplierName", "payableNumber", "outstandingAmount", "status", "journalEntryId", "issueDate"
+        FROM "payables"
+        WHERE "id" = ${id} AND "deletedAt" IS NULL
+        FOR UPDATE`;
+
+      if (!locked) throw new NotFoundException('Payable not found');
+
+      // A payable that is already settled (PAID), already written off, or
+      // cancelled must not be written off again — doing so would post a second
+      // derecognition entry and double-relieve AP_CONTROL.
+      if (!['OPEN', 'PARTIALLY_PAID', 'OVERDUE'].includes(locked.status)) {
+        throw new BadRequestException(`Cannot write off a ${locked.status} payable`);
+      }
+
+      const outstanding = new Prisma.Decimal(locked.outstandingAmount);
+
+      // Derecognise the remaining liability in the GL so AP_CONTROL and the
+      // subledger move together. We post a BALANCED reversing entry that swaps
+      // debit and credit on every line of the original payable journal, scaled
+      // to the still-outstanding amount (per the GL audit decision: look up the
+      // stored original journalEntryId and reverse it). When the whole payable
+      // is unpaid this is a full reversal; when part was paid we only unwind the
+      // unpaid remainder, so payments already settled via recordPayment are left
+      // untouched. A payable with no remaining balance (outstanding == 0) needs
+      // no GL movement.
+      if (outstanding.gt(0) && locked.journalEntryId) {
+        await this.postWriteOffReversal(tx, {
+          companyId: locked.companyId,
+          divisionId: locked.divisionId,
+          branchId: locked.branchId,
+          payableId: locked.id,
+          payableNumber: locked.payableNumber,
+          originalJournalEntryId: locked.journalEntryId,
+          outstanding,
+          transactionDate: new Date(),
+          userId,
+        });
+      }
+
       const updated = await tx.payable.update({
         where: { id },
-        data: { status: 'WRITTEN_OFF', notes: dto.reason },
+        data: {
+          status: 'WRITTEN_OFF',
+          // Zero the outstanding so the amount can no longer be paid (closes the
+          // recordPayment hole) and so the subledger aggregate drops in step with
+          // the GL reversal above.
+          outstandingAmount: 0,
+          notes: dto.reason,
+        },
       });
       await this.syncSupplierBalance(tx, updated.companyId, updated.supplierId);
       return updated;
@@ -385,6 +458,129 @@ export class PayablesService {
     });
 
     return record;
+  }
+
+  /**
+   * Post a balanced reversing journal for a written-off payable. Reads the
+   * original payable journal entry's lines and swaps debit/credit on each,
+   * scaled to the remaining `outstanding` amount, so the entry both balances
+   * and exactly unwinds the unpaid portion of the original posting (e.g. the
+   * original DR Expense / CR AP_CONTROL becomes DR AP_CONTROL / CR Expense for
+   * the outstanding amount). Scaling is done in integer cents with the rounding
+   * residual absorbed by the last line so debits still equal credits to the
+   * cent.
+   */
+  private async postWriteOffReversal(
+    tx: Prisma.TransactionClient,
+    input: {
+      companyId: string;
+      divisionId: string | null;
+      branchId: string | null;
+      payableId: string;
+      payableNumber: string;
+      originalJournalEntryId: string;
+      outstanding: Prisma.Decimal;
+      transactionDate: Date;
+      userId: string;
+    },
+  ) {
+    const original = await tx.journalEntry.findFirst({
+      where: { id: input.originalJournalEntryId, companyId: input.companyId },
+      select: {
+        totalDebit: true,
+        lines: {
+          select: { accountId: true, debit: true, credit: true, description: true },
+          orderBy: { createdAt: 'asc' as const },
+        },
+      },
+    });
+
+    // If the original journal is missing or empty we cannot derive a faithful
+    // reversal; skip rather than post a fabricated entry.
+    if (!original || original.lines.length === 0) return;
+
+    const originalTotal = new Prisma.Decimal(original.totalDebit);
+    if (originalTotal.lte(0)) return;
+
+    // Scale factor (outstanding / original total). When the payable is fully
+    // unpaid this is 1 and the reversal mirrors the original exactly.
+    const outstandingCents = input.outstanding.times(100).round();
+    const totalCents = originalTotal.times(100).round();
+
+    // Swap debit<->credit per line, scaling each amount by outstanding/total in
+    // integer cents. The last line carries any rounding residual so the entry
+    // stays balanced.
+    const scaled = original.lines.map((line) => {
+      const debitCents = new Prisma.Decimal(line.debit).times(100).round();
+      const creditCents = new Prisma.Decimal(line.credit).times(100).round();
+      return {
+        accountId: line.accountId,
+        description: line.description ?? undefined,
+        // post-swap, pre-scale magnitudes in cents
+        newDebitCents: this.scaleCents(creditCents, outstandingCents, totalCents),
+        newCreditCents: this.scaleCents(debitCents, outstandingCents, totalCents),
+      };
+    });
+
+    const sumDebit = scaled.reduce((acc, l) => acc.plus(l.newDebitCents), new Prisma.Decimal(0));
+    const sumCredit = scaled.reduce((acc, l) => acc.plus(l.newCreditCents), new Prisma.Decimal(0));
+
+    // Absorb any rounding residual on the last debit and last credit lines so
+    // total debits == total credits == outstanding.
+    const lastDebitIdx = this.lastIndexWhere(scaled, (l) => l.newDebitCents.gt(0));
+    const lastCreditIdx = this.lastIndexWhere(scaled, (l) => l.newCreditCents.gt(0));
+    if (lastDebitIdx >= 0) {
+      scaled[lastDebitIdx].newDebitCents = scaled[lastDebitIdx].newDebitCents.plus(
+        outstandingCents.minus(sumDebit),
+      );
+    }
+    if (lastCreditIdx >= 0) {
+      scaled[lastCreditIdx].newCreditCents = scaled[lastCreditIdx].newCreditCents.plus(
+        outstandingCents.minus(sumCredit),
+      );
+    }
+
+    const lines = scaled
+      .map((l) => ({
+        accountId: l.accountId,
+        description: l.description,
+        debit: l.newDebitCents.dividedBy(100),
+        credit: l.newCreditCents.dividedBy(100),
+      }))
+      // Drop any zero-on-both-sides lines the posting engine would reject.
+      .filter((l) => l.debit.gt(0) || l.credit.gt(0));
+
+    await this.postingEngine.postLines(
+      {
+        companyId: input.companyId,
+        divisionId: input.divisionId,
+        branchId: input.branchId,
+        transactionDate: input.transactionDate,
+        description: `Payable write-off ${input.payableNumber}`,
+        referenceType: 'Payable',
+        referenceId: input.payableId,
+        moduleName: 'payables',
+        userId: input.userId,
+        lines,
+      },
+      tx,
+    );
+  }
+
+  private scaleCents(
+    amountCents: Prisma.Decimal,
+    numeratorCents: Prisma.Decimal,
+    denominatorCents: Prisma.Decimal,
+  ): Prisma.Decimal {
+    if (amountCents.isZero() || denominatorCents.isZero()) return new Prisma.Decimal(0);
+    return amountCents.times(numeratorCents).dividedBy(denominatorCents).round();
+  }
+
+  private lastIndexWhere<T>(arr: T[], pred: (item: T) => boolean): number {
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (pred(arr[i])) return i;
+    }
+    return -1;
   }
 
   async remove(id: string, user: AuthUser) {
@@ -622,7 +818,26 @@ export class PayablesService {
     supplierId?: string | null,
   ) {
     if (!supplierId) return;
-    const summary = await tx.payable.aggregate({
+
+    // Supplier.currentBalance is a single Decimal with no currency tag, so it
+    // can only meaningfully hold one currency. Aggregating outstandingAmount
+    // across payables of different currencies would produce a nonsense figure
+    // (e.g. 1,000 USD + 1,000,000 TZS = 1,001,000 of nothing) and corrupt any
+    // credit-limit/exposure check. We therefore group by currency and write the
+    // balance for the company's base currency only.
+    //
+    // The company's base currency lives on CompanyProfile.currency (defaults to
+    // TZS). For the common single-currency supplier this is identical to the
+    // old behaviour; it only changes the mixed-currency case, where the foreign
+    // payables are intentionally excluded rather than silently summed in.
+    const profile = await tx.companyProfile.findUnique({
+      where: { companyId },
+      select: { currency: true },
+    });
+    const baseCurrency = profile?.currency ?? 'TZS';
+
+    const grouped = await tx.payable.groupBy({
+      by: ['currency'],
       where: {
         companyId,
         supplierId,
@@ -631,9 +846,13 @@ export class PayablesService {
       },
       _sum: { outstandingAmount: true },
     });
+
+    const baseRow = grouped.find((g) => g.currency === baseCurrency);
+    const balance = baseRow?._sum.outstandingAmount ?? 0;
+
     await tx.supplier.updateMany({
       where: { id: supplierId, companyId, deletedAt: null },
-      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
+      data: { currentBalance: balance },
     });
   }
 }

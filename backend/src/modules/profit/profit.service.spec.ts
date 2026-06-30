@@ -145,6 +145,105 @@ describe('ProfitService productSummary db aggregation', () => {
   });
 });
 
+describe('ProfitService fixCostGap (ITMB-AUDIT-28)', () => {
+  function makeFixService({ balance = null }: { balance?: any } = {}) {
+    const productUpdate = jest.fn().mockResolvedValue(undefined);
+    const balanceUpdate = jest.fn().mockResolvedValue(undefined);
+    const balanceFindFirst = jest.fn().mockResolvedValue(balance);
+    const tx = {
+      product: { update: productUpdate },
+      inventoryBalance: { findFirst: balanceFindFirst, update: balanceUpdate },
+    };
+    const prisma = {
+      product: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'product-1',
+          companyId: 'company-1',
+          divisionId: null,
+          productCode: 'P1',
+          name: 'Steel Bar',
+          defaultPurchasePrice: null,
+        }),
+      },
+      $transaction: jest.fn(async (cb: any) => cb(tx)),
+    } as any;
+    const companyScope = {
+      assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
+    } as any;
+    const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
+    const service = new ProfitService(prisma, companyScope, auditLogs);
+    return { service, prisma, auditLogs, productUpdate, balanceUpdate, balanceFindFirst };
+  }
+
+  const user = { id: 'u1' } as any;
+
+  it('writes both money updates and the audit log inside one transaction', async () => {
+    const { service, prisma, auditLogs, productUpdate, balanceUpdate } = makeFixService({
+      balance: { id: 'bal-1', quantityOnHand: 4 },
+    });
+
+    const result = await service.fixCostGap(
+      'product-1',
+      { defaultPurchasePrice: 120, branchId: 'b9', averageCost: 90 },
+      user,
+    );
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(productUpdate).toHaveBeenCalledTimes(1);
+    expect(balanceUpdate).toHaveBeenCalledTimes(1);
+    // totalValue = onHand(4) * averageCost(90) = 360, written as a Decimal
+    const balanceData = balanceUpdate.mock.calls[0][0].data;
+    expect(Number(balanceData.totalValue)).toBe(360);
+    expect(Number(balanceData.averageCost)).toBe(90);
+    expect(result.changes).toEqual(
+      expect.objectContaining({
+        defaultPurchasePrice: 120,
+        averageCost: 90,
+        totalValue: 360,
+      }),
+    );
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'PROFIT_COST_FIX' }),
+    );
+  });
+
+  it('rolls back the price write when the branch balance is missing (no partial commit, no audit)', async () => {
+    const { service, prisma, auditLogs, productUpdate } = makeFixService({ balance: null });
+
+    await expect(
+      service.fixCostGap(
+        'product-1',
+        { defaultPurchasePrice: 120, branchId: 'b9', averageCost: 90 },
+        user,
+      ),
+    ).rejects.toThrow('No branch inventory balance exists for this product');
+
+    // The throw happens inside the $transaction callback, so the price update is
+    // enrolled in the same aborted transaction and the audit log never runs.
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(productUpdate).toHaveBeenCalledTimes(1);
+    expect(auditLogs.log).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-positive default purchase cost before opening any transaction', async () => {
+    const { service, prisma } = makeFixService();
+
+    await expect(
+      service.fixCostGap('product-1', { defaultPurchasePrice: 0 }, user),
+    ).rejects.toThrow('Default purchase cost must be greater than zero');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('requires at least one cost field to update', async () => {
+    const { service, prisma } = makeFixService();
+
+    await expect(service.fixCostGap('product-1', {}, user)).rejects.toThrow(
+      'Provide a default purchase cost or branch average cost to update',
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+});
+
 describe('ProfitService salesOrderWhere division filter', () => {
   it('scopes a divisionId filter by the order division OR its branch division', async () => {
     const { service } = makeService();

@@ -255,6 +255,15 @@ export class SupplierInvoicesService {
 
   async runMatch(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    // createThreeWayMatch writes the invoice status to MATCHED/DISPUTED, so without
+    // this guard re-matching an already-APPROVED (or paid/cancelled) invoice would
+    // silently revert it out of APPROVED. Only the pre-approval statuses — the same
+    // set the approve() atomic claim accepts — may be (re)matched.
+    if (!['DRAFT', 'RECEIVED', 'MATCHED', 'DISPUTED'].includes(existing.status as string)) {
+      throw new BadRequestException(
+        `A ${existing.status} supplier invoice cannot be re-matched`,
+      );
+    }
     const match = await this.createThreeWayMatch(existing, user.id);
     await this.auditLogs.log({
       action: 'SUPPLIER_INVOICE_MATCH',
@@ -313,7 +322,7 @@ export class SupplierInvoicesService {
       const oldPayable = existing.payableId
         ? await tx.payable.findUnique({
             where: { id: existing.payableId },
-            select: { companyId: true, supplierId: true },
+            select: { companyId: true, supplierId: true, paidAmount: true },
           })
         : null;
 
@@ -326,8 +335,12 @@ export class SupplierInvoicesService {
               divisionId: existing.divisionId,
               branchId: existing.branchId,
               amount: new Prisma.Decimal(existing.totalAmount).toDecimalPlaces(2),
+              // Derive outstanding from the PAYABLE's own paidAmount, never the
+              // invoice's. The payable tracks payments applied directly against it
+              // (recordPayment), which the invoice row does not see. Recomputing
+              // outstanding from the invoice would resurrect already-paid amounts.
               outstandingAmount: new Prisma.Decimal(existing.totalAmount)
-                .minus(existing.paidAmount ?? 0)
+                .minus(oldPayable?.paidAmount ?? 0)
                 .toDecimalPlaces(2),
               currency: existing.currency as CurrencyCode,
               issueDate: existing.invoiceDate,
@@ -620,11 +633,27 @@ export class SupplierInvoicesService {
     if (refs.purchaseOrderId) {
       const po = await this.prisma.purchaseOrder.findFirst({
         where: { id: refs.purchaseOrderId, companyId: refs.companyId, deletedAt: null },
-        select: { id: true, supplierId: true, divisionId: true, branchId: true, currency: true },
+        select: {
+          id: true,
+          supplierId: true,
+          divisionId: true,
+          branchId: true,
+          currency: true,
+          purchaseType: true,
+        },
       });
       if (!po) throw new BadRequestException('Purchase order does not belong to this company');
       if (po.supplierId && po.supplierId !== refs.supplierId) {
         throw new BadRequestException('Purchase order supplier does not match invoice supplier');
+      }
+      // A cash purchase settles in full at receipt (DR Inventory / CR Cash) and has
+      // no accounts-payable leg. Linking a supplier invoice to it would make the
+      // invoice approve flow post a second inventory debit + a phantom AP credit,
+      // double-counting the goods. Cash purchases never flow through AP.
+      if (po.purchaseType === 'CASH_PURCHASE') {
+        throw new BadRequestException(
+          'Cannot link a supplier invoice to a cash-purchase order; it settles at receipt and carries no accounts payable',
+        );
       }
       // Currency lock: the invoice must be denominated in the same currency as its
       // linked purchase order, otherwise the matched amounts are not comparable.
@@ -824,6 +853,12 @@ export class SupplierInvoicesService {
     }
 
     let expectedAmount = new Prisma.Decimal(0);
+    // Accumulate the ACTUAL invoiced amount over the SAME line set used to build
+    // expectedAmount (matched lines only). Comparing a matched-lines expected
+    // against the all-lines invoice total mixes two bases: a perfectly-matched
+    // invoice carrying an extra freight/service line would always report a bogus
+    // variance, and an unmatched overcharge would hide inside the whole-invoice gap.
+    let actualMatchedAmount = new Prisma.Decimal(0);
     let hasLineMatch = false;
     for (const line of invoice.lines ?? []) {
       const poLine = line.productId ? poLinesByProduct.get(line.productId) : null;
@@ -833,13 +868,20 @@ export class SupplierInvoicesService {
         .plus(new Prisma.Decimal(line.quantity).mul(poLine.unitCost))
         .minus(line.discountAmount ?? 0)
         .plus(line.taxAmount ?? 0);
+      actualMatchedAmount = actualMatchedAmount.plus(
+        line.lineTotal ??
+          new Prisma.Decimal(line.quantity)
+            .mul(line.unitPrice ?? 0)
+            .minus(line.discountAmount ?? 0)
+            .plus(line.taxAmount ?? 0),
+      );
     }
 
     if (!hasLineMatch) {
       return new Prisma.Decimal(invoice.totalAmount).minus(purchaseOrderTotal).abs();
     }
 
-    return new Prisma.Decimal(invoice.totalAmount).minus(expectedAmount).abs();
+    return actualMatchedAmount.minus(expectedAmount).abs();
   }
 
   private withinTolerance(

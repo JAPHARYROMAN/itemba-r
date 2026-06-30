@@ -1,10 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 import { ThreeWayMatchingService } from './three-way-matching.service';
 
-function makeService(overrides: { existingMatch?: any } = {}) {
+function makeService(overrides: { existingMatch?: any; purchaseOrder?: any; grn?: any } = {}) {
   const purchaseOrder = {
     id: 'po-1',
     companyId: 'company-1',
+    supplierId: 'supplier-1',
     divisionId: 'division-1',
     branchId: 'branch-1',
     lines: [{ productId: 'p1', quantity: 10, unitCost: 5, lineTotal: 50 }],
@@ -12,6 +13,7 @@ function makeService(overrides: { existingMatch?: any } = {}) {
   const supplierInvoice = {
     id: 'inv-1',
     companyId: 'company-1',
+    supplierId: 'supplier-1',
     totalAmount: 50,
     lines: [{ productId: 'p1', quantity: 10, discountAmount: 0, taxAmount: 0 }],
   };
@@ -22,10 +24,15 @@ function makeService(overrides: { existingMatch?: any } = {}) {
       findFirst: jest.fn().mockResolvedValue(overrides.existingMatch ?? null),
       create: jest.fn().mockImplementation(async ({ data }: any) => ({ id: 'twm-1', ...data })),
     },
-    purchaseOrder: { findFirst: jest.fn().mockResolvedValue(purchaseOrder) },
+    purchaseOrder: {
+      findFirst: jest.fn().mockResolvedValue(overrides.purchaseOrder ?? purchaseOrder),
+    },
     supplierInvoice: { findFirst: jest.fn().mockResolvedValue(supplierInvoice) },
-    goodsReceivedNote: { findFirst: jest.fn().mockResolvedValue(null) },
+    goodsReceivedNote: { findFirst: jest.fn().mockResolvedValue(overrides.grn ?? null) },
   } as any;
+  // create() now wraps the duplicate guard + compute + insert in one interactive
+  // transaction; run the callback against the same mock client.
+  prisma.$transaction = jest.fn().mockImplementation(async (fn: any) => fn(prisma));
 
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const companyScope = {
@@ -61,10 +68,12 @@ describe('ThreeWayMatchingService.create', () => {
 
     const result = await service.create(dto, user);
 
-    expect(codes.next).toHaveBeenCalledWith({
-      entityType: 'ThreeWayMatch',
-      companyId: 'company-1',
-    });
+    expect(codes.next).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityType: 'ThreeWayMatch',
+        companyId: 'company-1',
+      }),
+    );
     expect(prisma.threeWayMatch.create).toHaveBeenCalledTimes(1);
     const created = prisma.threeWayMatch.create.mock.calls[0][0].data;
     expect(created.matchNumber).toBe('TWM-2026-000007');
@@ -79,6 +88,66 @@ describe('ThreeWayMatchingService.create', () => {
     await expect(service.create(dto, user)).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.threeWayMatch.create).not.toHaveBeenCalled();
     expect(codes.next).not.toHaveBeenCalled();
+  });
+
+  it('runs the duplicate guard inside the create transaction (atomic check-then-create)', async () => {
+    const { service, prisma } = makeService();
+
+    await service.create(dto, user);
+
+    // The whole create path is wrapped in a single interactive transaction so the
+    // duplicate guard and the insert cannot be straddled by a concurrent create.
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    // Duplicate guard scopes by company + supplier invoice and ran before create.
+    expect(prisma.threeWayMatch.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          companyId: 'company-1',
+          supplierInvoiceId: 'inv-1',
+          deletedAt: null,
+        }),
+      }),
+    );
+    const findOrder = prisma.threeWayMatch.findFirst.mock.invocationCallOrder[0];
+    const createOrder = prisma.threeWayMatch.create.mock.invocationCallOrder[0];
+    expect(findOrder).toBeLessThan(createOrder);
+  });
+
+  it('scopes the GRN by the invoice supplier and rejects a foreign-supplier GRN (finding #18)', async () => {
+    // goodsReceivedNote.findFirst returns null when the GRN does not belong to the
+    // invoice's supplier — the service must surface that as a BadRequest, not value
+    // the match off an unrelated supplier's receipt.
+    const { service, prisma } = makeService({ grn: null });
+    const grnDto = { ...dto, goodsReceivedNoteId: 'grn-foreign' } as any;
+
+    await expect(service.create(grnDto, user)).rejects.toBeInstanceOf(BadRequestException);
+
+    // The GRN lookup must be scoped by supplierId (mirrors the authoritative matcher).
+    expect(prisma.goodsReceivedNote.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'grn-foreign',
+          companyId: 'company-1',
+          supplierId: 'supplier-1',
+          deletedAt: null,
+        }),
+      }),
+    );
+    expect(prisma.threeWayMatch.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the PO belongs to a different supplier than the invoice (finding #18)', async () => {
+    const { service, prisma } = makeService({
+      purchaseOrder: {
+        id: 'po-1',
+        companyId: 'company-1',
+        supplierId: 'supplier-OTHER',
+        lines: [{ productId: 'p1', quantity: 10, unitCost: 5, lineTotal: 50 }],
+      },
+    });
+
+    await expect(service.create(dto, user)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.threeWayMatch.create).not.toHaveBeenCalled();
   });
 
   it('keeps the computed variance intact (MATCHED with zero variance for an equal invoice)', async () => {
