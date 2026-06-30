@@ -44,7 +44,7 @@ function makeService(overrides: { existingMatch?: any } = {}) {
     codes,
   );
 
-  return { service, prisma, codes };
+  return { service, prisma, codes, postingEngine };
 }
 
 const user = { id: 'user-1' } as any;
@@ -90,5 +90,42 @@ describe('ThreeWayMatchingService.create', () => {
     expect(created.matchStatus).toBe('MATCHED');
     expect(Number(created.quantityVariance)).toBe(0);
     expect(Number(created.amountVariance)).toBe(0);
+  });
+});
+
+describe('ThreeWayMatchingService.approve', () => {
+  it('approves a variance match WITHOUT posting a journal entry (avoids AP double-count)', async () => {
+    const { service, prisma, postingEngine } = makeService();
+    jest.spyOn(service, 'findOne').mockResolvedValue({
+      id: 'twm-1',
+      companyId: 'company-1',
+      matchStatus: 'VARIANCE',
+      approvedAt: null,
+      supplierInvoiceId: 'inv-1',
+      purchaseOrderId: 'po-1',
+      goodsReceivedNoteId: null,
+      amountVariance: 100,
+      matchDate: new Date('2026-01-15T00:00:00.000Z'),
+    } as any);
+    const tx = {
+      threeWayMatch: {
+        update: jest.fn().mockResolvedValue({ id: 'twm-1', approvedAt: new Date() }),
+      },
+    };
+    prisma.$transaction = jest.fn().mockImplementation(async (fn: any) => fn(tx));
+
+    await service.approve('twm-1', user);
+
+    // The match is approved...
+    expect(tx.threeWayMatch.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'twm-1' },
+        data: expect.objectContaining({ approvedAt: expect.any(Date) }),
+      }),
+    );
+    // ...but the mis-modeled variance JE (which double-counted AP against the
+    // supplier-invoice payable JE, and posted the wrong direction for an
+    // under-charge) must NOT be posted.
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
   });
 });

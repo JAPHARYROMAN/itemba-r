@@ -164,91 +164,19 @@ export class ThreeWayMatchingService {
     if (existing.approvedAt) throw new BadRequestException('Three-way match is already approved');
     const updated = await this.prisma.$transaction(async (tx) => {
       const approved = await tx.threeWayMatch.update({ where: { id }, data: { approvedAt: new Date(), approvedById: user.id } });
-      // Recompute the variance from the live references and post the JE against
-      // the freshly-computed amount — never a stored / operator-supplied value.
-      if (existing.supplierInvoiceId) {
-        const computed = await this.computeMatch(
-          {
-            companyId: existing.companyId,
-            purchaseOrderId: existing.purchaseOrderId,
-            goodsReceivedNoteId: existing.goodsReceivedNoteId,
-            supplierInvoiceId: existing.supplierInvoiceId,
-          },
-          tx,
-        );
-        await this.postVarianceIfNeeded(
-          { ...existing, amountVariance: computed.amountVariance },
-          user.id,
-          tx,
-        );
-      }
+      // A purchase-price-variance journal entry is intentionally NOT posted on
+      // approval. The supplier-invoice payable JE (postSupplierInvoicePayable)
+      // already debits Inventory and credits AP_CONTROL at the FULL invoice cost,
+      // so a variance JE that also touched AP_CONTROL DOUBLE-COUNTED the AP
+      // liability — and, because amountVariance is stored as an absolute value, it
+      // posted the wrong direction for an under-charge. A correct PPV treatment
+      // requires booking inventory at PO/standard cost and netting the variance
+      // against Inventory/GRNI rather than AP, which is a deliberate accounting-model
+      // change tracked separately. The match's stored amountVariance remains
+      // available for control/reporting; the match still records the approval above.
       return approved;
     });
     await this.auditLogs.log({ action: 'APPROVE', entityType: 'ThreeWayMatch', entityId: id, userId: user.id, companyId: existing.companyId });
     return updated;
   }
-
-  private async postVarianceIfNeeded(
-    match: {
-      id: string;
-      matchNumber: string;
-      companyId: string;
-      purchaseOrderId: string;
-      amountVariance: Prisma.Decimal | number | string | null;
-      matchDate: Date;
-    },
-    userId: string,
-    tx: Prisma.TransactionClient,
-  ) {
-    const amount = Number(match.amountVariance ?? 0);
-    if (Math.abs(amount) < 0.01) return;
-
-    const existingJournal = await tx.journalEntry.findFirst({
-      where: {
-        companyId: match.companyId,
-        referenceType: 'ThreeWayMatchVariance',
-        referenceId: match.id,
-        status: 'POSTED',
-        deletedAt: null,
-      },
-      select: { id: true },
-    });
-    if (existingJournal) return;
-
-    const purchaseOrder = await tx.purchaseOrder.findFirst({
-      where: { id: match.purchaseOrderId, companyId: match.companyId, deletedAt: null },
-      select: { divisionId: true, branchId: true },
-    });
-    const varianceAccount = await this.accountResolver.resolve(match.companyId, 'PURCHASE_VARIANCE', tx);
-    const apAccount = await this.accountResolver.resolve(match.companyId, 'AP_CONTROL', tx);
-    const absAmount = Math.abs(amount);
-    const description = `Three-way match variance ${match.matchNumber}`;
-
-    await this.postingEngine.postLines(
-      {
-        journalNumber: `JE-TWM-${match.matchNumber}`,
-        companyId: match.companyId,
-        divisionId: purchaseOrder?.divisionId,
-        branchId: purchaseOrder?.branchId,
-        transactionDate: match.matchDate,
-        description,
-        referenceType: 'ThreeWayMatchVariance',
-        referenceId: match.id,
-        moduleName: 'three-way-matching',
-        userId,
-        lines:
-          amount > 0
-            ? [
-                { accountId: varianceAccount.id, description, debit: absAmount, credit: 0 },
-                { accountId: apAccount.id, description, debit: 0, credit: absAmount },
-              ]
-            : [
-                { accountId: apAccount.id, description, debit: absAmount, credit: 0 },
-                { accountId: varianceAccount.id, description, debit: 0, credit: absAmount },
-              ],
-      },
-      tx,
-    );
-  }
-
 }
