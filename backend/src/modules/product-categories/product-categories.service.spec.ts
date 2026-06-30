@@ -80,9 +80,9 @@ describe('ProductCategoriesService findAll status counts', () => {
 describe('ProductCategoriesService parent-cycle guard', () => {
   it('rejects making a category its own parent', async () => {
     const { service } = makeService();
-    await expect(service.update('A', { parentCategoryId: 'A' } as any, user)).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      service.update('A', { parentCategoryId: 'A' } as any, user),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects a parent that is a descendant (would create a cycle)', async () => {
@@ -92,9 +92,13 @@ describe('ProductCategoriesService parent-cycle guard', () => {
       C: { parentCategoryId: 'B' },
       B: { parentCategoryId: 'A' },
     };
-    prisma.productCategory.findFirst.mockImplementation(async ({ where }: any) => chain[where.id] ?? null);
+    prisma.productCategory.findFirst.mockImplementation(
+      async ({ where }: any) => chain[where.id] ?? null,
+    );
 
-    await expect(service.update('A', { parentCategoryId: 'C' } as any, user)).rejects.toThrow(/cycle/i);
+    await expect(service.update('A', { parentCategoryId: 'C' } as any, user)).rejects.toThrow(
+      /cycle/i,
+    );
     expect(prisma.productCategory.update).not.toHaveBeenCalled();
   });
 

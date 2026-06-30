@@ -17,13 +17,7 @@ export type { Column } from './data-table';
 // State
 export { EmptyState } from './empty-state';
 export { LoadingState, PageSpinner } from './loading-state';
-export {
-  Skeleton,
-  SkeletonText,
-  SkeletonCard,
-  SkeletonCardGrid,
-  SkeletonTable,
-} from './skeleton';
+export { Skeleton, SkeletonText, SkeletonCard, SkeletonCardGrid, SkeletonTable } from './skeleton';
 export { ErrorState } from './error-state';
 export { PermissionDeniedState } from './permission-denied-state';
 

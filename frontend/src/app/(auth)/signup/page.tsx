@@ -57,16 +57,17 @@ export default function SignupPage() {
       footer={
         <>
           Already registered?{' '}
-          <Link href="/login" className="font-semibold text-slate-800 underline-offset-4 hover:text-slate-950 hover:underline">
+          <Link
+            href="/login"
+            className="font-semibold text-slate-800 underline-offset-4 hover:text-slate-950 hover:underline"
+          >
             Sign in
           </Link>
         </>
       }
     >
       <div className="mb-7">
-        <div className="text-xs font-semibold uppercase text-slate-800">
-          New account
-        </div>
+        <div className="text-xs font-semibold uppercase text-slate-800">New account</div>
         <h2 className="mt-3 text-2xl font-semibold text-slate-950">Request workspace access</h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">
           Your profile is created first. Company permissions are controlled by an administrator.

@@ -13,7 +13,10 @@ const pipe = new ValidationPipe({
 });
 
 const run = (query: Record<string, unknown>) =>
-  pipe.transform(query, { type: 'query', metatype: QueryProductFamilyDto } as never) as Promise<QueryProductFamilyDto>;
+  pipe.transform(query, {
+    type: 'query',
+    metatype: QueryProductFamilyDto,
+  } as never) as Promise<QueryProductFamilyDto>;
 
 describe('QueryProductFamilyDto isActive coercion', () => {
   it('coerces "false" to boolean false (not true)', async () => {

@@ -297,7 +297,9 @@ function lineDiscountTotal(line: EditableOrderLine, variant: OrderVariant) {
 
 function lineTotal(line: EditableOrderLine, variant: OrderVariant) {
   const subtotal = roundMoney(numberOrZero(line.qty) * numberOrZero(line.unitPrice));
-  return roundMoney(subtotal - lineDiscountTotal(line, variant) + roundMoney(numberOrZero(line.tax)));
+  return roundMoney(
+    subtotal - lineDiscountTotal(line, variant) + roundMoney(numberOrZero(line.tax)),
+  );
 }
 
 function missingFields(line: EditableOrderLine) {
@@ -408,7 +410,9 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
       if (!product || !productTracksInventory(product)) continue;
       const cost = effectiveCostForProduct(product);
       if (cost == null) {
-        warnings.push(`${productLabel(product)} is missing purchase/average cost and cannot be sold.`);
+        warnings.push(
+          `${productLabel(product)} is missing purchase/average cost and cannot be sold.`,
+        );
         continue;
       }
       const netUnitPrice = netUnitSalePrice(line);
@@ -576,9 +580,9 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
               ? `, ${stockWarningCount} stock warning${stockWarningCount === 1 ? '' : 's'}`
               : profitWarningCount
                 ? `, ${profitWarningCount} profit warning${profitWarningCount === 1 ? '' : 's'}`
-              : invalidCount
-                ? `, ${invalidCount} incomplete`
-                : ', ready'}
+                : invalidCount
+                  ? `, ${invalidCount} incomplete`
+                  : ', ready'}
           </p>
         </div>
         <Btn variant="secondary" size="xs" onClick={onAddLine}>
@@ -619,8 +623,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
             const lineHasProfitError =
               variant === 'sales' &&
               productTracksInventory(selectedProduct) &&
-              (effectiveCost == null ||
-                (netUnitPrice != null && netUnitPrice <= effectiveCost));
+              (effectiveCost == null || (netUnitPrice != null && netUnitPrice <= effectiveCost));
             const marginPreview =
               variant === 'sales' &&
               effectiveCost != null &&
@@ -649,9 +652,9 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         ? 'Insufficient stock'
                         : lineHasProfitError
                           ? 'Below cost'
-                        : missing.length
-                          ? `Needs ${missing.join(', ')}`
-                          : 'Complete'}
+                          : missing.length
+                            ? `Needs ${missing.join(', ')}`
+                            : 'Complete'}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">

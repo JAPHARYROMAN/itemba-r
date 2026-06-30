@@ -28,9 +28,7 @@ async function bootstrap() {
 
   app.use(
     helmet({
-      hsts: isProd
-        ? { maxAge: 31536000, includeSubDomains: true, preload: true }
-        : false,
+      hsts: isProd ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
     }),
   );
   const corsOrigins = corsOrigin

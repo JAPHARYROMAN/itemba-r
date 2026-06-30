@@ -19,7 +19,13 @@ export function Skeleton({
   return <div className={`aurora-skeleton rounded-md ${className}`} style={style} aria-hidden />;
 }
 
-export function SkeletonText({ lines = 3, className = '' }: { lines?: number; className?: string }) {
+export function SkeletonText({
+  lines = 3,
+  className = '',
+}: {
+  lines?: number;
+  className?: string;
+}) {
   return (
     <div className={`space-y-2 ${className}`} aria-busy="true">
       {Array.from({ length: lines }).map((_, i) => (

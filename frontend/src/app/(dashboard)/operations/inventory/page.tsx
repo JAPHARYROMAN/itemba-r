@@ -43,16 +43,45 @@ function fmtNum(n: number | string | null | undefined) {
 }
 function fmtDate(d?: string | null) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return new Date(d).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
 const LINKS: Array<{ href: string; label: string; desc: string; perm: string }> = [
-  { href: '/operations/inventory-balances', label: 'Balances', desc: 'Stock on hand by product & branch', perm: 'inventory.view' },
-  { href: '/operations/inventory-movements', label: 'Movements', desc: 'The stock ledger', perm: 'inventory.movements.view' },
-  { href: '/operations/stock-adjustments', label: 'Stock Adjustments', desc: 'Counts & corrections', perm: 'inventory.adjustments.create' },
+  {
+    href: '/operations/inventory-balances',
+    label: 'Balances',
+    desc: 'Stock on hand by product & branch',
+    perm: 'inventory.view',
+  },
+  {
+    href: '/operations/inventory-movements',
+    label: 'Movements',
+    desc: 'The stock ledger',
+    perm: 'inventory.movements.view',
+  },
+  {
+    href: '/operations/stock-adjustments',
+    label: 'Stock Adjustments',
+    desc: 'Counts & corrections',
+    perm: 'inventory.adjustments.create',
+  },
   { href: '/operations/products', label: 'Products', desc: 'Item catalog', perm: 'products.view' },
-  { href: '/operations/product-categories', label: 'Categories', desc: 'Catalog taxonomy', perm: 'product_categories.view' },
-  { href: '/operations/units', label: 'Units of Measure', desc: 'Units & conversions', perm: 'units.view' },
+  {
+    href: '/operations/product-categories',
+    label: 'Categories',
+    desc: 'Catalog taxonomy',
+    perm: 'product_categories.view',
+  },
+  {
+    href: '/operations/units',
+    label: 'Units of Measure',
+    desc: 'Units & conversions',
+    perm: 'units.view',
+  },
 ];
 
 export default function InventoryOverviewPage() {
@@ -133,7 +162,10 @@ export default function InventoryOverviewPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <PageHeader title="Inventory Overview" subtitle="At-a-glance stock health and recent activity" />
+      <PageHeader
+        title="Inventory Overview"
+        subtitle="At-a-glance stock health and recent activity"
+      />
 
       <select
         value={companyId}
@@ -155,7 +187,7 @@ export default function InventoryOverviewPage() {
       </select>
 
       {!companyId ? (
-        <Card className="p-8 text-center text-sm" >
+        <Card className="p-8 text-center text-sm">
           <span style={{ color: 'var(--aurora-text-muted)' }}>
             Select a company to see its inventory health.
           </span>
@@ -168,7 +200,9 @@ export default function InventoryOverviewPage() {
             <Link href={`/operations/inventory-balances${scoped}`}>
               <StatCard label="Stock Value" value={'TZS ' + fmtNum(totals?.totalValue ?? 0)} />
             </Link>
-            <Link href={`/operations/inventory-balances?lowStock=1&companyId=${encodeURIComponent(companyId)}`}>
+            <Link
+              href={`/operations/inventory-balances?lowStock=1&companyId=${encodeURIComponent(companyId)}`}
+            >
               <StatCard
                 label="Low Stock"
                 value={totals?.low ?? 0}
@@ -224,10 +258,18 @@ export default function InventoryOverviewPage() {
                     className="text-left text-xs uppercase bg-gray-50"
                     style={{ color: 'var(--aurora-text-muted)' }}
                   >
-                    <th scope="col" className="px-4 py-3">Date</th>
-                    <th scope="col" className="px-4 py-3">Product</th>
-                    <th scope="col" className="px-4 py-3">Type</th>
-                    <th scope="col" className="px-4 py-3 text-right">Qty</th>
+                    <th scope="col" className="px-4 py-3">
+                      Date
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Product
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Type
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Qty
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">

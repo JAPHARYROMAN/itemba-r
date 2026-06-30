@@ -32,10 +32,10 @@ const cases: Array<[string, unknown, string]> = [
 describe('boolean query-param coercion under enableImplicitConversion', () => {
   it.each(cases)('%s coerces its boolean param both ways', async (_name, Dto, field) => {
     const run = (raw: string) =>
-      pipe.transform(
-        { [field]: raw },
-        { type: 'query', metatype: Dto as never } as never,
-      ) as Promise<Record<string, unknown>>;
+      pipe.transform({ [field]: raw }, {
+        type: 'query',
+        metatype: Dto as never,
+      } as never) as Promise<Record<string, unknown>>;
     expect((await run('true'))[field]).toBe(true);
     expect((await run('false'))[field]).toBe(false);
   });

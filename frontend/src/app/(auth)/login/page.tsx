@@ -51,16 +51,18 @@ export default function LoginPage() {
         return;
       }
       const from = new URLSearchParams(window.location.search).get('from');
-      const target =
-        from?.startsWith('/') && !from.startsWith('//') ? from : '/dashboard';
+      const target = from?.startsWith('/') && !from.startsWith('//') ? from : '/dashboard';
       const firstName =
         typeof data?.user?.fullName === 'string' ? data.user.fullName.split(' ')[0] : '';
       setWelcomeName(firstName || 'karibu');
       // Brief welcome beat, then redirect. Skipped for reduced-motion users.
       const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-      window.setTimeout(() => {
-        window.location.href = target;
-      }, reduce ? 0 : 750);
+      window.setTimeout(
+        () => {
+          window.location.href = target;
+        },
+        reduce ? 0 : 750,
+      );
     } catch {
       setError('Network error. Please try again.');
     } finally {

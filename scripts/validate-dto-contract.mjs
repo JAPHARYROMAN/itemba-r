@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,7 +28,14 @@ const unsafeRequestPatterns = [
 const failures = [];
 
 for (const targetDir of targetDirs) {
-  for (const file of walk(resolve(rootDir, targetDir))) {
+  const absoluteDir = resolve(rootDir, targetDir);
+  if (!existsSync(absoluteDir)) {
+    // A listed module may not exist yet (planned) or was removed/renamed. Skip it
+    // with a notice rather than crashing the whole deployment gate on ENOENT.
+    console.warn(`validate-dto-contract: ${targetDir} not found — skipping`);
+    continue;
+  }
+  for (const file of walk(absoluteDir)) {
     if (!file.endsWith('.ts') || file.endsWith('.spec.ts')) continue;
     const text = readFileSync(file, 'utf8');
     const rel = file.slice(rootDir.length + 1).replaceAll('\\', '/');

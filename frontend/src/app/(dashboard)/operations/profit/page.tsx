@@ -1,7 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Btn, Card, FormInput, FormSelect, PageHeader, PageSpinner, StatCard } from '@/components/ui';
+import {
+  Btn,
+  Card,
+  FormInput,
+  FormSelect,
+  PageHeader,
+  PageSpinner,
+  StatCard,
+} from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useOrgScope } from '@/hooks/use-org-scope';
 import { backendGet, backendPatch, backendPost } from '@/lib/api-client';
@@ -136,10 +144,12 @@ export default function OperationsProfitPage() {
   const [branchId, setBranchId] = useState('');
   const [dateFrom, setDateFrom] = useState(monthStartIso());
   const [dateTo, setDateTo] = useState(todayIso());
-  const { companyOptions, divisionOptions, branchOptions, loading: scopeLoading } = useOrgScope(
-    companyId,
-    { skipEmployees: true },
-  );
+  const {
+    companyOptions,
+    divisionOptions,
+    branchOptions,
+    loading: scopeLoading,
+  } = useOrgScope(companyId, { skipEmployees: true });
 
   const [summary, setSummary] = useState<ProfitSummary | null>(null);
   const [products, setProducts] = useState<ProductProfitRow[]>([]);
@@ -188,9 +198,14 @@ export default function OperationsProfitPage() {
             })
           : Promise.resolve({ rows: [], total: 0 }),
       ]);
-      const summaryResult = unwrapNested<{ summary?: ProfitSummary; products?: ProductProfitRow[] }>(summaryPayload);
+      const summaryResult = unwrapNested<{
+        summary?: ProfitSummary;
+        products?: ProductProfitRow[];
+      }>(summaryPayload);
       const gapsResult = unwrapNested<{ rows?: CostGapRow[]; total?: number }>(gapsPayload);
-      const attemptsResult = unwrapNested<{ rows?: BelowCostAttemptRow[]; total?: number }>(attemptsPayload);
+      const attemptsResult = unwrapNested<{ rows?: BelowCostAttemptRow[]; total?: number }>(
+        attemptsPayload,
+      );
       setSummary(summaryResult.summary ?? null);
       setProducts(safeRows(summaryResult.products));
       setGaps(safeRows(gapsResult.rows));
@@ -229,14 +244,18 @@ export default function OperationsProfitPage() {
     // query fields are intentionally expanded so ledger refreshes with filters.
   }, [query, selectedProduct]);
 
-  const downloadExport = async (report: 'product-summary' | 'cost-gaps' | 'below-cost-attempts') => {
+  const downloadExport = async (
+    report: 'product-summary' | 'cost-gaps' | 'below-cost-attempts',
+  ) => {
     setActionLoading(true);
     setError('');
     setNotice('');
     try {
-      const payload = unwrapNested<ExportPayload>(await backendGet<unknown>('/profit/export', {
-        query: { ...query, report, format: 'csv' },
-      }));
+      const payload = unwrapNested<ExportPayload>(
+        await backendGet<unknown>('/profit/export', {
+          query: { ...query, report, format: 'csv' },
+        }),
+      );
       const content = payload.content ?? '';
       const blob = new Blob([content], { type: payload.contentType ?? 'text/csv' });
       const url = URL.createObjectURL(blob);
@@ -280,7 +299,9 @@ export default function OperationsProfitPage() {
       productName: row.productName,
       branchId: row.branch?.id ?? '',
       defaultPurchasePrice:
-        row.defaultPurchasePrice && row.defaultPurchasePrice > 0 ? String(row.defaultPurchasePrice) : '',
+        row.defaultPurchasePrice && row.defaultPurchasePrice > 0
+          ? String(row.defaultPurchasePrice)
+          : '',
       averageCost: row.averageCost && row.averageCost > 0 ? String(row.averageCost) : '',
     });
     setNotice('');
@@ -382,7 +403,8 @@ export default function OperationsProfitPage() {
           <div>
             <h2 className="text-sm font-semibold">Profit controls</h2>
             <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-              Export profitability, backfill historical COGS snapshots, and resolve blocked cost gaps.
+              Export profitability, backfill historical COGS snapshots, and resolve blocked cost
+              gaps.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -445,7 +467,10 @@ export default function OperationsProfitPage() {
         <Card>
           <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr_1fr_auto] lg:items-end">
             <div>
-              <div className="mb-2 block text-xs font-semibold uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+              <div
+                className="mb-2 block text-xs font-semibold uppercase"
+                style={{ color: 'var(--aurora-text-muted)' }}
+              >
                 Fix Cost Gap
               </div>
               <div className="font-medium">{costFix.productName}</div>
@@ -500,11 +525,11 @@ export default function OperationsProfitPage() {
               aria-live="polite"
               className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
             >
-              <strong>Gross profit may be overstated.</strong>{' '}
-              {summary?.linesMissingCost} sales line
-              {(summary?.linesMissingCost ?? 0) === 1 ? '' : 's'} ({fmtMoney(summary?.revenueMissingCost)}{' '}
-              revenue) have no recorded cost, so their cost is counted as zero. Resolve the cost gaps
-              below for an accurate figure.
+              <strong>Gross profit may be overstated.</strong> {summary?.linesMissingCost} sales
+              line
+              {(summary?.linesMissingCost ?? 0) === 1 ? '' : 's'} (
+              {fmtMoney(summary?.revenueMissingCost)} revenue) have no recorded cost, so their cost
+              is counted as zero. Resolve the cost gaps below for an accurate figure.
             </div>
           )}
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-5">
@@ -547,14 +572,31 @@ export default function OperationsProfitPage() {
               <table className="w-full text-sm">
                 <caption className="sr-only">Product profitability</caption>
                 <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
-                  <tr className="text-left text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
-                    <th scope="col" className="px-4 py-3">Product</th>
-                    <th scope="col" className="px-4 py-3 text-right">Qty</th>
-                    <th scope="col" className="px-4 py-3 text-right">Revenue</th>
-                    <th scope="col" className="px-4 py-3 text-right">COGS</th>
-                    <th scope="col" className="px-4 py-3 text-right">Profit</th>
-                    <th scope="col" className="px-4 py-3 text-right">Margin</th>
-                    <th scope="col" className="px-4 py-3 text-right">Actions</th>
+                  <tr
+                    className="text-left text-xs uppercase"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
+                    <th scope="col" className="px-4 py-3">
+                      Product
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Qty
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Revenue
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      COGS
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Profit
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Margin
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -566,7 +608,11 @@ export default function OperationsProfitPage() {
                     </tr>
                   ) : (
                     products.map((row) => (
-                      <tr key={row.productId} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+                      <tr
+                        key={row.productId}
+                        className="border-t"
+                        style={{ borderColor: 'var(--aurora-border)' }}
+                      >
                         <td className="px-4 py-3">
                           <div className="font-medium">{row.productName}</div>
                           <div className="text-xs text-slate-500">{row.productCode ?? '-'}</div>
@@ -576,8 +622,12 @@ export default function OperationsProfitPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums">{fmtNumber(row.quantity, 4)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(row.revenue)}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {fmtNumber(row.quantity, 4)}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {fmtMoney(row.revenue)}
+                        </td>
                         <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(row.cogs)}</td>
                         <td
                           className={`px-4 py-3 text-right tabular-nums ${
@@ -611,60 +661,93 @@ export default function OperationsProfitPage() {
 
           {selectedProduct && (
             <div id="profit-product-ledger">
-            <Card padding="none" className="overflow-hidden">
-              <div
-                className="flex items-center justify-between border-b px-4 py-3"
-                style={{ borderColor: 'var(--aurora-border)' }}
-              >
-                <div>
-                  <h2 className="text-sm font-semibold">{selectedProduct.productName} ledger</h2>
-                  <p className="text-xs text-slate-500">Sales orders, cost source, COGS, and margin.</p>
+              <Card padding="none" className="overflow-hidden">
+                <div
+                  className="flex items-center justify-between border-b px-4 py-3"
+                  style={{ borderColor: 'var(--aurora-border)' }}
+                >
+                  <div>
+                    <h2 className="text-sm font-semibold">{selectedProduct.productName} ledger</h2>
+                    <p className="text-xs text-slate-500">
+                      Sales orders, cost source, COGS, and margin.
+                    </p>
+                  </div>
+                  <Btn variant="ghost" size="xs" onClick={() => setSelectedProduct(null)}>
+                    Close
+                  </Btn>
                 </div>
-                <Btn variant="ghost" size="xs" onClick={() => setSelectedProduct(null)}>
-                  Close
-                </Btn>
-              </div>
-              {ledgerLoading ? (
-                <div className="p-4">
-                  <PageSpinner />
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <caption className="sr-only">{`${selectedProduct.productName} sales ledger`}</caption>
-                    <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
-                      <tr className="text-left text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
-                        <th scope="col" className="px-4 py-3">Order</th>
-                        <th scope="col" className="px-4 py-3">Customer</th>
-                        <th scope="col" className="px-4 py-3 text-right">Qty</th>
-                        <th scope="col" className="px-4 py-3 text-right">Price</th>
-                        <th scope="col" className="px-4 py-3 text-right">Cost</th>
-                        <th scope="col" className="px-4 py-3 text-right">Profit</th>
-                        <th scope="col" className="px-4 py-3">Source</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ledger.map((row) => (
-                        <tr key={`${row.salesOrderId}-${row.orderDate}`} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
-                          <td className="px-4 py-3">
-                            <div className="font-medium">{row.salesOrderNumber}</div>
-                            <div className="text-xs text-slate-500">
-                              {new Date(row.orderDate).toLocaleDateString('en-GB')}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">{row.customerName ?? 'Walk-in'}</td>
-                          <td className="px-4 py-3 text-right tabular-nums">{fmtNumber(row.quantity, 4)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(row.unitPrice)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(row.unitCostAtSale)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(row.grossProfitAmount)}</td>
-                          <td className="px-4 py-3">{row.profitCostSource?.replace(/_/g, ' ') ?? '-'}</td>
+                {ledgerLoading ? (
+                  <div className="p-4">
+                    <PageSpinner />
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <caption className="sr-only">{`${selectedProduct.productName} sales ledger`}</caption>
+                      <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
+                        <tr
+                          className="text-left text-xs uppercase"
+                          style={{ color: 'var(--aurora-text-muted)' }}
+                        >
+                          <th scope="col" className="px-4 py-3">
+                            Order
+                          </th>
+                          <th scope="col" className="px-4 py-3">
+                            Customer
+                          </th>
+                          <th scope="col" className="px-4 py-3 text-right">
+                            Qty
+                          </th>
+                          <th scope="col" className="px-4 py-3 text-right">
+                            Price
+                          </th>
+                          <th scope="col" className="px-4 py-3 text-right">
+                            Cost
+                          </th>
+                          <th scope="col" className="px-4 py-3 text-right">
+                            Profit
+                          </th>
+                          <th scope="col" className="px-4 py-3">
+                            Source
+                          </th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Card>
+                      </thead>
+                      <tbody>
+                        {ledger.map((row) => (
+                          <tr
+                            key={`${row.salesOrderId}-${row.orderDate}`}
+                            className="border-t"
+                            style={{ borderColor: 'var(--aurora-border)' }}
+                          >
+                            <td className="px-4 py-3">
+                              <div className="font-medium">{row.salesOrderNumber}</div>
+                              <div className="text-xs text-slate-500">
+                                {new Date(row.orderDate).toLocaleDateString('en-GB')}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">{row.customerName ?? 'Walk-in'}</td>
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {fmtNumber(row.quantity, 4)}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {fmtMoney(row.unitPrice)}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {fmtMoney(row.unitCostAtSale)}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {fmtMoney(row.grossProfitAmount)}
+                            </td>
+                            <td className="px-4 py-3">
+                              {row.profitCostSource?.replace(/_/g, ' ') ?? '-'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </Card>
             </div>
           )}
 
@@ -676,14 +759,31 @@ export default function OperationsProfitPage() {
               <table className="w-full text-sm">
                 <caption className="sr-only">Cost gaps blocking sales</caption>
                 <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
-                  <tr className="text-left text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
-                    <th scope="col" className="px-4 py-3">Product</th>
-                    <th scope="col" className="px-4 py-3">Scope</th>
-                    <th scope="col" className="px-4 py-3 text-right">Qty</th>
-                    <th scope="col" className="px-4 py-3 text-right">Avg Cost</th>
-                    <th scope="col" className="px-4 py-3 text-right">Default Cost</th>
-                    <th scope="col" className="px-4 py-3">Issue</th>
-                    <th scope="col" className="px-4 py-3 text-right">Actions</th>
+                  <tr
+                    className="text-left text-xs uppercase"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
+                    <th scope="col" className="px-4 py-3">
+                      Product
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Scope
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Qty
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Avg Cost
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Default Cost
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Issue
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -695,7 +795,11 @@ export default function OperationsProfitPage() {
                     </tr>
                   ) : (
                     gaps.map((row, index) => (
-                      <tr key={`${row.productId}-${row.type}-${index}`} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+                      <tr
+                        key={`${row.productId}-${row.type}-${index}`}
+                        className="border-t"
+                        style={{ borderColor: 'var(--aurora-border)' }}
+                      >
                         <td className="px-4 py-3">
                           <div className="font-medium">{row.productName}</div>
                           <div className="text-xs text-slate-500">{row.productCode ?? '-'}</div>
@@ -705,9 +809,15 @@ export default function OperationsProfitPage() {
                           {row.division ? ` / ${row.division.code ?? row.division.name}` : ''}
                           {row.branch ? ` / ${row.branch.code ?? row.branch.name}` : ''}
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums">{fmtNumber(row.quantityOnHand, 4)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(row.averageCost)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(row.defaultPurchasePrice)}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {fmtNumber(row.quantityOnHand, 4)}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {fmtMoney(row.averageCost)}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {fmtMoney(row.defaultPurchasePrice)}
+                        </td>
                         <td className="px-4 py-3 text-red-600">{row.message}</td>
                         <td className="px-4 py-3 text-right">
                           {canManageCosts ? (
@@ -735,18 +845,33 @@ export default function OperationsProfitPage() {
             <Card padding="none" className="overflow-hidden">
               <div className="border-b px-4 py-3" style={{ borderColor: 'var(--aurora-border)' }}>
                 <h2 className="text-sm font-semibold">Below-cost attempt audit</h2>
-                <p className="text-xs text-slate-500">Recent blocked sales caused by missing cost or net price at/below cost.</p>
+                <p className="text-xs text-slate-500">
+                  Recent blocked sales caused by missing cost or net price at/below cost.
+                </p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <caption className="sr-only">Below-cost attempt audit</caption>
                   <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
-                    <tr className="text-left text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
-                      <th scope="col" className="px-4 py-3">Time</th>
-                      <th scope="col" className="px-4 py-3">User</th>
-                      <th scope="col" className="px-4 py-3">Source</th>
-                      <th scope="col" className="px-4 py-3">Company</th>
-                      <th scope="col" className="px-4 py-3">Reason</th>
+                    <tr
+                      className="text-left text-xs uppercase"
+                      style={{ color: 'var(--aurora-text-muted)' }}
+                    >
+                      <th scope="col" className="px-4 py-3">
+                        Time
+                      </th>
+                      <th scope="col" className="px-4 py-3">
+                        User
+                      </th>
+                      <th scope="col" className="px-4 py-3">
+                        Source
+                      </th>
+                      <th scope="col" className="px-4 py-3">
+                        Company
+                      </th>
+                      <th scope="col" className="px-4 py-3">
+                        Reason
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -758,13 +883,21 @@ export default function OperationsProfitPage() {
                       </tr>
                     ) : (
                       attempts.map((row) => (
-                        <tr key={row.id} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+                        <tr
+                          key={row.id}
+                          className="border-t"
+                          style={{ borderColor: 'var(--aurora-border)' }}
+                        >
                           <td className="px-4 py-3 text-xs text-slate-500">
                             {new Date(row.createdAt).toLocaleString('en-GB')}
                           </td>
-                          <td className="px-4 py-3">{row.user?.fullName ?? row.user?.email ?? '-'}</td>
+                          <td className="px-4 py-3">
+                            {row.user?.fullName ?? row.user?.email ?? '-'}
+                          </td>
                           <td className="px-4 py-3">{row.source ?? '-'}</td>
-                          <td className="px-4 py-3">{row.company?.code ?? row.company?.name ?? '-'}</td>
+                          <td className="px-4 py-3">
+                            {row.company?.code ?? row.company?.name ?? '-'}
+                          </td>
                           <td className="px-4 py-3 text-red-600">{row.message ?? '-'}</td>
                         </tr>
                       ))

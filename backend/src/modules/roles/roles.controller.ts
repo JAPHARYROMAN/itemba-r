@@ -32,11 +32,7 @@ export class RolesController {
 
   @Patch(':id')
   @RequirePermissions('roles.update')
-  update(
-    @Param('id') id: string,
-    @Body() dto: UpdateRoleDto,
-    @CurrentUser() user: AuthUser,
-  ) {
+  update(@Param('id') id: string, @Body() dto: UpdateRoleDto, @CurrentUser() user: AuthUser) {
     return this.roles.update(id, dto, user);
   }
 
