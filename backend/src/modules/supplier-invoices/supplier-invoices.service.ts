@@ -275,6 +275,23 @@ export class SupplierInvoicesService {
 
     let match: any = null;
     const updated = await this.prisma.$transaction(async (tx) => {
+      // Atomic claim: transition the invoice out of its pre-approval status under
+      // a row lock so two concurrent approvals can't both create a payable and
+      // post AP (the JS status check above is not race-safe on its own).
+      const claim = await tx.supplierInvoice.updateMany({
+        where: {
+          id,
+          deletedAt: null,
+          status: { in: ['DRAFT', 'RECEIVED', 'MATCHED', 'DISPUTED'] },
+        },
+        data: { status: 'APPROVED', approvedAt: new Date(), approvedById: user.id },
+      });
+      if (claim.count !== 1) {
+        throw new ConflictException(
+          'Supplier invoice was already approved or changed by another action',
+        );
+      }
+
       if (existing.purchaseOrderId) {
         match = await this.createThreeWayMatch(existing, user.id, tx);
         if (match.matchStatus === 'VARIANCE' && !dto?.allowVariance) {
@@ -358,14 +375,10 @@ export class SupplierInvoicesService {
       );
       await this.syncSupplierBalance(tx, payable.companyId, payable.supplierId);
 
+      // Status/approvedAt/approvedById were already set by the atomic claim above.
       return tx.supplierInvoice.update({
         where: { id },
-        data: {
-          status: 'APPROVED',
-          approvedAt: new Date(),
-          approvedById: user.id,
-          payableId: payable.id,
-        },
+        data: { payableId: payable.id },
         include: { lines: true },
       });
     });

@@ -2302,6 +2302,17 @@ export class SalesOrdersService {
     if (!['DRAFT', 'CONFIRMED'].includes(existing.status as string)) {
       throw new BadRequestException('Only DRAFT or CONFIRMED sales orders can be cancelled');
     }
+    // Money guard: a cash sale (paid at confirmation) or a partially/fully paid
+    // credit order has collected cash. Cancelling here only reverses stock and
+    // zeroes the receivable's outstanding — it posts NO reversing cash/journal
+    // entry and leaves paidAmount orphaned, drifting the ledger. Block it and
+    // require an explicit refund / credit note to reverse the payment first.
+    if (Number(existing.paidAmount ?? 0) > 0 || existing.paymentStatus !== 'UNPAID') {
+      throw new BadRequestException(
+        'This sales order has received payment and cannot be cancelled directly. ' +
+          'Record a refund or credit note to reverse the payment first.',
+      );
+    }
 
     const record = await this.prisma.$transaction(async (tx) => {
       if (existing.status === 'CONFIRMED') {

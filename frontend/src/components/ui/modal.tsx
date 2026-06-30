@@ -1,6 +1,9 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 interface ModalProps {
   open: boolean;
@@ -32,6 +35,9 @@ export function Modal({
 }: ModalProps) {
   const [rendered, setRendered] = useState(open);
   const closing = rendered && !open;
+  const titleId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -44,11 +50,51 @@ export function Modal({
     return () => window.clearTimeout(timer);
   }, [open, rendered]);
 
-  // ESC to close
+  // Focus management: remember the trigger, focus the first control on open, restore on close
+  useEffect(() => {
+    if (!open) return;
+    restoreFocusRef.current = (document.activeElement as HTMLElement) ?? null;
+    const frame = window.requestAnimationFrame(() => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusable = panel.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+      (focusable ?? panel).focus();
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      restoreFocusRef.current?.focus?.();
+    };
+  }, [open]);
+
+  // ESC to close + trap Tab focus within the dialog
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const nodes = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      if (nodes.length === 0) {
+        e.preventDefault();
+        panel.focus();
+        return;
+      }
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey) {
+        if (active === first || !panel.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !panel.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -73,10 +119,12 @@ export function Modal({
       onClick={dismissOnBackdrop ? onClose : undefined}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="aurora-modal-title"
+      aria-labelledby={titleId}
     >
       <div
-        className={`relative w-full ${SIZE_MAP[size]} rounded-2xl shadow-2xl flex flex-col max-h-[92vh] ${
+        ref={panelRef}
+        tabIndex={-1}
+        className={`relative w-full ${SIZE_MAP[size]} rounded-2xl shadow-2xl flex flex-col max-h-[92vh] outline-none ${
           closing ? 'animate-scale-out' : 'animate-scale-in'
         }`}
         style={{
@@ -90,7 +138,7 @@ export function Modal({
         {/* Header */}
         <div className="flex items-start justify-between gap-3 px-6 pt-5 pb-4 border-b" style={{ borderColor: 'var(--aurora-border)' }}>
           <div className="min-w-0">
-            <h2 id="aurora-modal-title" className="text-[16px] font-semibold leading-snug truncate" style={{ color: 'var(--aurora-text)' }}>
+            <h2 id={titleId} className="text-[16px] font-semibold leading-snug truncate" style={{ color: 'var(--aurora-text)' }}>
               {title}
             </h2>
             {subtitle && (

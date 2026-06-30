@@ -36,7 +36,7 @@ interface ProductCategory {
   name: string;
   categoryType: string;
   isActive: boolean;
-  companyId?: string | null;
+  companyId: string;
   parentCategoryId?: string | null;
   description?: string | null;
   company?: { name: string } | null;
@@ -578,7 +578,6 @@ export default function ProductCategoriesPage() {
   const canCreate = hasPermission('product_categories.manage');
 
   const loadFamiliesForCategory = useCallback(async (category: ProductCategory) => {
-    if (!category.companyId) return;
     setFamilyLoading((current) => ({ ...current, [category.id]: true }));
     try {
       const records = await backendList<ProductFamily>('/products/families', {
@@ -619,7 +618,7 @@ export default function ProductCategoriesPage() {
     try {
       const products = await backendList<ProductPriceException>('/products', {
         query: {
-          companyId: category.companyId || undefined,
+          companyId: category.companyId,
           categoryId: category.id,
           productFamilyId: family.id,
           limit: 500,

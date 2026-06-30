@@ -18,15 +18,41 @@ interface Product {
   productCode: string;
 }
 type MovementType =
+  | 'OPENING_STOCK'
   | 'PURCHASE_RECEIPT'
   | 'SALE_ISSUE'
+  | 'SALES_RETURN'
+  | 'PURCHASE_RETURN'
+  | 'TRANSFER_IN'
+  | 'TRANSFER_OUT'
   | 'ADJUSTMENT_IN'
   | 'ADJUSTMENT_OUT'
-  | 'OPENING_STOCK'
   | 'DAMAGE'
   | 'WASTAGE'
-  | 'TRANSFER_IN'
-  | 'TRANSFER_OUT';
+  | 'INTERNAL_USE'
+  | 'PRODUCTION_IN'
+  | 'PRODUCTION_OUT'
+  | 'OTHER';
+
+// Direction sets mirror the backend (inventory-movements.service.ts INBOUND/OUTBOUND_TYPES).
+const INBOUND_TYPES = new Set<MovementType>([
+  'OPENING_STOCK',
+  'PURCHASE_RECEIPT',
+  'SALES_RETURN',
+  'TRANSFER_IN',
+  'ADJUSTMENT_IN',
+  'PRODUCTION_IN',
+]);
+const OUTBOUND_TYPES = new Set<MovementType>([
+  'SALE_ISSUE',
+  'PURCHASE_RETURN',
+  'TRANSFER_OUT',
+  'ADJUSTMENT_OUT',
+  'DAMAGE',
+  'WASTAGE',
+  'INTERNAL_USE',
+  'PRODUCTION_OUT',
+]);
 
 interface InventoryMovement {
   id: string;
@@ -43,6 +69,7 @@ interface InventoryMovement {
   product?: { name: string; productCode: string } | null;
   branch?: { name: string; code?: string | null } | null;
   company?: { name: string; code: string } | null;
+  createdBy?: { fullName: string } | null;
 }
 
 interface Paginated<T> {
@@ -62,27 +89,39 @@ const tdCls = 'px-4 py-2 text-sm text-slate-700';
 const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';
 
 const MOVEMENT_TYPE_STYLES: Record<string, string> = {
+  OPENING_STOCK: 'bg-purple-100 text-purple-700',
   PURCHASE_RECEIPT: 'bg-green-100 text-green-700',
   SALE_ISSUE: 'bg-blue-100 text-blue-700',
-  ADJUSTMENT_IN: 'bg-teal-100 text-teal-700',
-  ADJUSTMENT_OUT: 'bg-orange-100 text-orange-700',
-  OPENING_STOCK: 'bg-purple-100 text-purple-700',
-  DAMAGE: 'bg-red-100 text-red-700',
-  WASTAGE: 'bg-red-100 text-red-700',
+  SALES_RETURN: 'bg-emerald-100 text-emerald-700',
+  PURCHASE_RETURN: 'bg-orange-100 text-orange-700',
   TRANSFER_IN: 'bg-cyan-100 text-cyan-700',
   TRANSFER_OUT: 'bg-yellow-100 text-yellow-700',
+  ADJUSTMENT_IN: 'bg-teal-100 text-teal-700',
+  ADJUSTMENT_OUT: 'bg-amber-100 text-amber-700',
+  DAMAGE: 'bg-red-100 text-red-700',
+  WASTAGE: 'bg-rose-100 text-rose-700',
+  INTERNAL_USE: 'bg-indigo-100 text-indigo-700',
+  PRODUCTION_IN: 'bg-lime-100 text-lime-700',
+  PRODUCTION_OUT: 'bg-fuchsia-100 text-fuchsia-700',
+  OTHER: 'bg-slate-100 text-slate-600',
 };
 
 const MOVEMENT_TYPES: MovementType[] = [
+  'OPENING_STOCK',
   'PURCHASE_RECEIPT',
   'SALE_ISSUE',
-  'ADJUSTMENT_IN',
-  'ADJUSTMENT_OUT',
-  'OPENING_STOCK',
-  'DAMAGE',
-  'WASTAGE',
+  'SALES_RETURN',
+  'PURCHASE_RETURN',
   'TRANSFER_IN',
   'TRANSFER_OUT',
+  'ADJUSTMENT_IN',
+  'ADJUSTMENT_OUT',
+  'DAMAGE',
+  'WASTAGE',
+  'INTERNAL_USE',
+  'PRODUCTION_IN',
+  'PRODUCTION_OUT',
+  'OTHER',
 ];
 
 function MovementBadge({ type }: { type: string }) {
@@ -301,19 +340,20 @@ export default function InventoryMovementsPage() {
                 <th className={`${thCls} text-right`}>Unit Cost</th>
                 <th className={`${thCls} text-right`}>Total Cost</th>
                 <th className={thCls}>Reference</th>
+                <th className={thCls}>By</th>
                 <th className={thCls}>Notes</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={11}>
                     <PageSpinner />
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-400">
+                  <td colSpan={11} className="px-4 py-8 text-center text-sm text-slate-400">
                     No movements found.
                   </td>
                 </tr>
@@ -344,10 +384,26 @@ export default function InventoryMovementsPage() {
                     <td className={tdCls}>
                       <MovementBadge type={mov.movementType} />
                     </td>
-                    <td className={`${tdCls} text-right font-mono`}>{fmtNum(mov.quantity)}</td>
+                    <td
+                      className={`${tdCls} text-right font-mono ${
+                        INBOUND_TYPES.has(mov.movementType)
+                          ? 'text-emerald-600'
+                          : OUTBOUND_TYPES.has(mov.movementType)
+                            ? 'text-red-600'
+                            : ''
+                      }`}
+                    >
+                      {INBOUND_TYPES.has(mov.movementType)
+                        ? '+'
+                        : OUTBOUND_TYPES.has(mov.movementType)
+                          ? '−'
+                          : ''}
+                      {fmtNum(mov.quantity)}
+                    </td>
                     <td className={`${tdCls} text-right font-mono`}>{fmtTZS(mov.unitCost)}</td>
                     <td className={`${tdCls} text-right font-mono`}>{fmtTZS(mov.totalCost)}</td>
                     <td className={`${tdCls} font-mono text-xs`}>{mov.referenceNumber ?? '—'}</td>
+                    <td className={tdCls}>{mov.createdBy?.fullName ?? '—'}</td>
                     <td
                       className={`${tdCls} max-w-[160px] truncate`}
                       title={mov.notes ?? undefined}

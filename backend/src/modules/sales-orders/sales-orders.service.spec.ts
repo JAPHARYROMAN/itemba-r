@@ -500,3 +500,34 @@ describe('SalesOrdersService quick-sale idempotency', () => {
     expect(result).toEqual(expect.objectContaining({ id: 'so-1' }));
   });
 });
+
+describe('SalesOrdersService cancel money guard', () => {
+  it('blocks cancelling an order that has received payment', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      persistedOrder({ status: 'CONFIRMED', paidAmount: 200, paymentStatus: 'PAID' }),
+    );
+
+    await expect(service.cancel('so-1', user)).rejects.toThrow('received payment');
+    expect(prisma.salesOrder.update).not.toHaveBeenCalled();
+  });
+
+  it('allows cancelling an unpaid CONFIRMED order', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      persistedOrder({
+        status: 'CONFIRMED',
+        paidAmount: 0,
+        outstandingAmount: 200,
+        paymentStatus: 'UNPAID',
+        receivableId: null,
+      }),
+    );
+
+    await service.cancel('so-1', user);
+
+    expect(prisma.salesOrder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'CANCELLED' }) }),
+    );
+  });
+});

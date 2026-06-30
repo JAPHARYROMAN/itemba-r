@@ -10,6 +10,7 @@ import {
   StatCard,
   StatusBadge,
   Modal,
+  ConfirmDialog,
   Btn,
   SkeletonTable,
   FormInput,
@@ -1323,6 +1324,11 @@ export default function SalesOrdersPage() {
     };
   }, [canCreate, canView, handledEditId, requestedEditId]);
 
+  const [pendingAction, setPendingAction] = useState<{
+    id: string;
+    action: 'confirm' | 'cancel';
+  } | null>(null);
+
   const doAction = async (id: string, action: 'confirm' | 'cancel') => {
     setActionLoading(`${id}:${action}`);
     setActionError('');
@@ -1341,6 +1347,12 @@ export default function SalesOrdersPage() {
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const runPendingAction = async () => {
+    if (!pendingAction) return;
+    await doAction(pendingAction.id, pendingAction.action);
+    setPendingAction(null);
   };
 
   if (!canView) {
@@ -1395,6 +1407,23 @@ export default function SalesOrdersPage() {
             setDeleting(null);
             load();
           }}
+        />
+      )}
+      {pendingAction && (
+        <ConfirmDialog
+          open
+          variant={pendingAction.action === 'cancel' ? 'danger' : 'default'}
+          title={pendingAction.action === 'confirm' ? 'Confirm sales order' : 'Cancel sales order'}
+          message={
+            pendingAction.action === 'confirm'
+              ? 'This issues inventory and posts the sale to the ledger.'
+              : 'This reverses any issued stock and cancels the linked receivable. This cannot be undone.'
+          }
+          confirmLabel={pendingAction.action === 'confirm' ? 'Confirm order' : 'Cancel order'}
+          cancelLabel="Back"
+          loading={actionLoading === `${pendingAction.id}:${pendingAction.action}`}
+          onConfirm={runPendingAction}
+          onClose={() => setPendingAction(null)}
         />
       )}
 
@@ -1620,24 +1649,21 @@ export default function SalesOrdersPage() {
                           variant="primary"
                           size="xs"
                           loading={actionLoading === `${o.id}:confirm`}
-                          onClick={() => doAction(o.id, 'confirm')}
+                          onClick={() => setPendingAction({ id: o.id, action: 'confirm' })}
                         >
                           Confirm
                         </Btn>
                       )}
-                      {(o.status === 'CONFIRMED' ||
-                        o.status === 'PARTIALLY_PAID' ||
-                        o.status === 'PAID') &&
-                        canCancel && (
-                          <Btn
-                            variant="danger"
-                            size="xs"
-                            loading={actionLoading === `${o.id}:cancel`}
-                            onClick={() => doAction(o.id, 'cancel')}
-                          >
-                            Cancel
-                          </Btn>
-                        )}
+                      {o.status === 'CONFIRMED' && canCancel && (
+                        <Btn
+                          variant="danger"
+                          size="xs"
+                          loading={actionLoading === `${o.id}:cancel`}
+                          onClick={() => setPendingAction({ id: o.id, action: 'cancel' })}
+                        >
+                          Cancel
+                        </Btn>
+                      )}
                       {o.status === 'DRAFT' && canCreate && (
                         <Btn variant="ghost" size="xs" onClick={() => setDeleting(o)}>
                           Delete
