@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Btn, Card, PageHeader, PageToolbar, ProductPicker, StatCard, PageSpinner } from '@/components/ui';
+import { Btn, Card, PageHeader, PageToolbar, ProductPicker, StatCard, SkeletonTable, EmptyState } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList, backendPage } from '@/lib/api-client';
 import { toFiniteNumber } from '@/lib/design-system/formatters';
@@ -385,19 +385,25 @@ export default function InventoryBalancesPage() {
               {loading ? (
                 <tr>
                   <td colSpan={10}>
-                    <PageSpinner />
+                    <SkeletonTable rows={6} cols={10} />
                   </td>
                 </tr>
               ) : !companyId ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-400">
-                    Select a company to view balances.
+                  <td colSpan={10}>
+                    <EmptyState
+                      title="Select a company"
+                      description="Choose a company to view inventory balances."
+                    />
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-400">
-                    No inventory balances found.
+                  <td colSpan={10}>
+                    <EmptyState
+                      title="No inventory balances"
+                      description="No inventory balances match the current filters."
+                    />
                   </td>
                 </tr>
               ) : (

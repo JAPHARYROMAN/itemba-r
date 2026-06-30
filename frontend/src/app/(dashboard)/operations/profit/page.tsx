@@ -594,6 +594,8 @@ export default function OperationsProfitPage() {
                             variant="secondary"
                             size="xs"
                             aria-label={`Drilldown into ${row.productName}`}
+                            aria-expanded={selectedProduct?.productId === row.productId}
+                            aria-controls="profit-product-ledger"
                             onClick={() => setSelectedProduct(row)}
                           >
                             Drilldown
@@ -608,6 +610,7 @@ export default function OperationsProfitPage() {
           </Card>
 
           {selectedProduct && (
+            <div id="profit-product-ledger">
             <Card padding="none" className="overflow-hidden">
               <div
                 className="flex items-center justify-between border-b px-4 py-3"
@@ -662,6 +665,7 @@ export default function OperationsProfitPage() {
                 </div>
               )}
             </Card>
+            </div>
           )}
 
           <Card padding="none" className="overflow-hidden">

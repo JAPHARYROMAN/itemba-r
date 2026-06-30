@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { useParams, useRouter } from 'next/navigation';
 import { Btn, Card, PageHeader, SkeletonTable, StatCard, StatusBadge } from '@/components/ui';
 import { backendGet, backendPage } from '@/lib/api-client';
+import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
 import { useAuth } from '@/hooks/use-auth';
 
 type AnyRecord = Record<string, any>;
@@ -139,6 +140,74 @@ export default function PurchaseOrderDetailPage() {
     return `/operations/inventory-movements?${params.toString()}`;
   }, [order?.companyId, id]);
 
+  // Export the rows behind the active data tab. Each tab maps to a flat row
+  // shape so the shared CSV builder produces stable, human-readable columns.
+  const exportCsv = useCallback(() => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    const base = order?.purchaseOrderNumber ?? id;
+    let rows: Record<string, unknown>[] = [];
+    let suffix = '';
+
+    if (activeTab === 'Line Items') {
+      suffix = 'line-items';
+      rows = (lines as AnyRecord[]).map((line) => ({
+        product: `${line.product?.productCode ? `${line.product.productCode} - ` : ''}${
+          line.product?.name ?? ''
+        }`,
+        description: line.description ?? '',
+        quantity: qty(line.quantity),
+        unit: line.unit?.symbol ?? line.unit?.name ?? '',
+        unitCost: money(line.unitCost, currency),
+        discount: money(line.discountAmount, currency),
+        tax: money(line.taxAmount, currency),
+        lineTotal: money(line.lineTotal, currency),
+      }));
+    } else if (activeTab === 'Goods Receipts') {
+      suffix = 'goods-receipts';
+      rows = grns.map((grn) => ({
+        grnNumber: grn.grnNumber ?? '',
+        receivedDate: date(grn.receivedDate),
+        lines: grn.lines?.length ?? 0,
+        status: grn.status ?? '',
+        postedAt: date(grn.postedAt),
+      }));
+    } else if (activeTab === 'Supplier Invoice') {
+      suffix = 'supplier-invoices';
+      rows = invoices.map((inv) => ({
+        invoiceNumber: inv.supplierInvoiceNumber ?? '',
+        reference: inv.invoiceReference ?? '',
+        invoiceDate: date(inv.invoiceDate),
+        dueDate: date(inv.dueDate),
+        total: money(inv.totalAmount, inv.currency ?? currency),
+        paid: money(inv.paidAmount, inv.currency ?? currency),
+        outstanding: money(inv.outstandingAmount, inv.currency ?? currency),
+        status: inv.status ?? '',
+      }));
+    } else if (activeTab === 'Three-Way Match') {
+      suffix = 'three-way-match';
+      rows = matches.map((match) => ({
+        matchNumber: match.matchNumber ?? '',
+        matchDate: date(match.matchDate),
+        quantityVariance: qty(match.quantityVariance),
+        amountVariance: money(match.amountVariance, currency),
+        status: match.matchStatus ?? '',
+      }));
+    }
+
+    if (!rows.length) return;
+    downloadTextFile(
+      `${base}-${suffix}-${stamp}.csv`,
+      'text/csv;charset=utf-8',
+      rowsToCsv(rows),
+    );
+  }, [activeTab, order?.purchaseOrderNumber, id, lines, grns, invoices, matches, currency]);
+
+  const canExportActiveTab =
+    (activeTab === 'Line Items' && lines.length > 0) ||
+    (activeTab === 'Goods Receipts' && grns.length > 0) ||
+    (activeTab === 'Supplier Invoice' && invoices.length > 0) ||
+    (activeTab === 'Three-Way Match' && matches.length > 0);
+
   if (!canView) {
     return (
       <div className="p-6 space-y-6">
@@ -196,6 +265,11 @@ export default function PurchaseOrderDetailPage() {
             <Btn variant="secondary" onClick={() => router.push('/operations/purchase-orders')}>
               Back
             </Btn>
+            {canExportActiveTab && (
+              <Btn variant="secondary" onClick={exportCsv}>
+                Export CSV
+              </Btn>
+            )}
             {order.supplier?.id && (
               <Btn
                 variant="secondary"
@@ -220,7 +294,7 @@ export default function PurchaseOrderDetailPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="Total" value={money(order.totalAmount, currency)} />
         <StatCard label="Paid" value={money(order.paidAmount, currency)} />
         <StatCard label="Outstanding" value={money(order.outstandingAmount, currency)} />
@@ -283,17 +357,17 @@ export default function PurchaseOrderDetailPage() {
       {activeTab === 'Line Items' && (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1000px] text-sm">
+            <table className="w-full min-w-[1000px] text-sm" aria-label="Purchase order line items">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Product</th>
-                  <th className="px-4 py-3">Description</th>
-                  <th className="px-4 py-3 text-right">Qty</th>
-                  <th className="px-4 py-3">Unit</th>
-                  <th className="px-4 py-3 text-right">Unit Cost</th>
-                  <th className="px-4 py-3 text-right">Discount</th>
-                  <th className="px-4 py-3 text-right">Tax</th>
-                  <th className="px-4 py-3 text-right">Line Total</th>
+                  <th scope="col" className="px-4 py-3">Product</th>
+                  <th scope="col" className="px-4 py-3">Description</th>
+                  <th scope="col" className="px-4 py-3 text-right">Qty</th>
+                  <th scope="col" className="px-4 py-3">Unit</th>
+                  <th scope="col" className="px-4 py-3 text-right">Unit Cost</th>
+                  <th scope="col" className="px-4 py-3 text-right">Discount</th>
+                  <th scope="col" className="px-4 py-3 text-right">Tax</th>
+                  <th scope="col" className="px-4 py-3 text-right">Line Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -336,14 +410,14 @@ export default function PurchaseOrderDetailPage() {
       {activeTab === 'Goods Receipts' && (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[800px] text-sm">
+            <table className="w-full min-w-[800px] text-sm" aria-label="Goods received notes">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">GRN #</th>
-                  <th className="px-4 py-3">Received Date</th>
-                  <th className="px-4 py-3 text-right">Lines</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Posted At</th>
+                  <th scope="col" className="px-4 py-3">GRN #</th>
+                  <th scope="col" className="px-4 py-3">Received Date</th>
+                  <th scope="col" className="px-4 py-3 text-right">Lines</th>
+                  <th scope="col" className="px-4 py-3">Status</th>
+                  <th scope="col" className="px-4 py-3">Posted At</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -374,17 +448,17 @@ export default function PurchaseOrderDetailPage() {
       {activeTab === 'Supplier Invoice' && (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1000px] text-sm">
+            <table className="w-full min-w-[1000px] text-sm" aria-label="Supplier invoices">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Invoice #</th>
-                  <th className="px-4 py-3">Reference</th>
-                  <th className="px-4 py-3">Invoice Date</th>
-                  <th className="px-4 py-3">Due Date</th>
-                  <th className="px-4 py-3 text-right">Total</th>
-                  <th className="px-4 py-3 text-right">Paid</th>
-                  <th className="px-4 py-3 text-right">Outstanding</th>
-                  <th className="px-4 py-3">Status</th>
+                  <th scope="col" className="px-4 py-3">Invoice #</th>
+                  <th scope="col" className="px-4 py-3">Reference</th>
+                  <th scope="col" className="px-4 py-3">Invoice Date</th>
+                  <th scope="col" className="px-4 py-3">Due Date</th>
+                  <th scope="col" className="px-4 py-3 text-right">Total</th>
+                  <th scope="col" className="px-4 py-3 text-right">Paid</th>
+                  <th scope="col" className="px-4 py-3 text-right">Outstanding</th>
+                  <th scope="col" className="px-4 py-3">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -424,14 +498,14 @@ export default function PurchaseOrderDetailPage() {
       {activeTab === 'Three-Way Match' && (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
+            <table className="w-full min-w-[900px] text-sm" aria-label="Three-way match results">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Match #</th>
-                  <th className="px-4 py-3">Match Date</th>
-                  <th className="px-4 py-3 text-right">Qty Variance</th>
-                  <th className="px-4 py-3 text-right">Amount Variance</th>
-                  <th className="px-4 py-3">Status</th>
+                  <th scope="col" className="px-4 py-3">Match #</th>
+                  <th scope="col" className="px-4 py-3">Match Date</th>
+                  <th scope="col" className="px-4 py-3 text-right">Qty Variance</th>
+                  <th scope="col" className="px-4 py-3 text-right">Amount Variance</th>
+                  <th scope="col" className="px-4 py-3">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">

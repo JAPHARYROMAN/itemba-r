@@ -462,6 +462,8 @@ export default function UnitsPage() {
   const [error, setError] = useState('');
   const [unitsPage, setUnitsPage] = useState(1);
   const [convPage, setConvPage] = useState(1);
+  const [unitSearch, setUnitSearch] = useState('');
+  const [debouncedUnitSearch, setDebouncedUnitSearch] = useState('');
 
   const [creatingUnit, setCreatingUnit] = useState(false);
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
@@ -500,12 +502,22 @@ export default function UnitsPage() {
     };
   }, [canView]);
 
+  useEffect(() => {
+    const id = setTimeout(() => {
+      setDebouncedUnitSearch(unitSearch);
+      setUnitsPage(1);
+    }, 300);
+    return () => clearTimeout(id);
+  }, [unitSearch]);
+
   const loadUnits = useCallback(async () => {
     if (!canView) return;
     setUnitsLoading(true);
     setError('');
     try {
-      const result = await backendPage<Unit>('/units', { query: { page: unitsPage, limit: 20 } });
+      const result = await backendPage<Unit>('/units', {
+        query: { page: unitsPage, limit: 20, search: debouncedUnitSearch.trim() || undefined },
+      });
       setUnits(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load units');
@@ -513,7 +525,7 @@ export default function UnitsPage() {
     } finally {
       setUnitsLoading(false);
     }
-  }, [canView, unitsPage]);
+  }, [canView, unitsPage, debouncedUnitSearch]);
 
   const loadConversions = useCallback(async () => {
     if (!canView) return;
@@ -720,6 +732,19 @@ export default function UnitsPage() {
             Units
           </div>
           <div className="flex items-center gap-2">
+            <input
+              type="search"
+              aria-label="Search units by name or symbol"
+              value={unitSearch}
+              onChange={(e) => setUnitSearch(e.target.value)}
+              placeholder="Search units…"
+              className="w-44 px-3 py-1.5 text-[13px] rounded-lg border transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+              style={{
+                color: 'var(--aurora-text)',
+                borderColor: 'var(--aurora-border)',
+                background: 'var(--aurora-card)',
+              }}
+            />
             <Btn
               variant="secondary"
               size="sm"
@@ -767,7 +792,11 @@ export default function UnitsPage() {
                   <td colSpan={6}>
                     <EmptyState
                       title="No units found"
-                      description="Create a unit of measure to get started."
+                      description={
+                        debouncedUnitSearch
+                          ? 'Try adjusting your search.'
+                          : 'Create a unit of measure to get started.'
+                      }
                     />
                   </td>
                 </tr>

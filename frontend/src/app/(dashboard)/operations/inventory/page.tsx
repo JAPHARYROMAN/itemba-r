@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, StatCard, PageSpinner } from '@/components/ui';
+import { Card, PageHeader, StatCard, SkeletonTable, EmptyState } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList, backendPage } from '@/lib/api-client';
 import { toFiniteNumber } from '@/lib/design-system/formatters';
+import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
 
 interface Company {
   id: string;
@@ -101,6 +102,22 @@ export default function InventoryOverviewPage() {
     load();
   }, [load]);
 
+  const exportRecent = useCallback(() => {
+    if (!recent.length) return;
+    const rows = recent.map((m) => ({
+      date: fmtDate(m.movementDate),
+      product: m.product ? `${m.product.productCode ?? ''} ${m.product.name}`.trim() : '',
+      type: m.movementType.replace(/_/g, ' '),
+      quantity: (INBOUND.has(m.movementType) ? 1 : -1) * toFiniteNumber(m.quantity),
+    }));
+    const csv = rowsToCsv(rows, ['date', 'product', 'type', 'quantity']);
+    downloadTextFile(
+      `recent-movements-${new Date().toISOString().slice(0, 10)}.csv`,
+      'text/csv;charset=utf-8',
+      csv,
+    );
+  }, [recent]);
+
   if (!canView) {
     return (
       <div className="p-6">
@@ -121,6 +138,7 @@ export default function InventoryOverviewPage() {
       <select
         value={companyId}
         onChange={(e) => setCompanyId(e.target.value)}
+        aria-label="Company"
         className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
         style={{
           borderColor: 'var(--aurora-border)',
@@ -143,10 +161,10 @@ export default function InventoryOverviewPage() {
           </span>
         </Card>
       ) : loading && !totals ? (
-        <PageSpinner />
+        <SkeletonTable rows={6} cols={4} />
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Link href={`/operations/inventory-balances${scoped}`}>
               <StatCard label="Stock Value" value={'TZS ' + fmtNum(totals?.totalValue ?? 0)} />
             </Link>
@@ -181,31 +199,45 @@ export default function InventoryOverviewPage() {
               <h2 className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
                 Recent movements
               </h2>
-              <Link
-                href={`/operations/inventory-movements${scoped}`}
-                className="text-xs text-blue-600 hover:underline"
-              >
-                View all
-              </Link>
+              <div className="flex items-center gap-4">
+                <button
+                  type="button"
+                  onClick={exportRecent}
+                  disabled={!recent.length}
+                  className="text-xs text-blue-600 hover:underline disabled:opacity-40 disabled:hover:no-underline"
+                >
+                  Export CSV
+                </button>
+                <Link
+                  href={`/operations/inventory-movements${scoped}`}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  View all
+                </Link>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
+                <caption className="sr-only">Recent inventory movements</caption>
                 <thead>
                   <tr
                     className="text-left text-xs uppercase bg-gray-50"
                     style={{ color: 'var(--aurora-text-muted)' }}
                   >
-                    <th className="px-4 py-3">Date</th>
-                    <th className="px-4 py-3">Product</th>
-                    <th className="px-4 py-3">Type</th>
-                    <th className="px-4 py-3 text-right">Qty</th>
+                    <th scope="col" className="px-4 py-3">Date</th>
+                    <th scope="col" className="px-4 py-3">Product</th>
+                    <th scope="col" className="px-4 py-3">Type</th>
+                    <th scope="col" className="px-4 py-3 text-right">Qty</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {recent.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-400">
-                        No recent movements.
+                      <td colSpan={4}>
+                        <EmptyState
+                          title="No recent movements"
+                          description="Stock movements for this company will appear here."
+                        />
                       </td>
                     </tr>
                   ) : (

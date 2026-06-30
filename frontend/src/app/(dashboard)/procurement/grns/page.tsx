@@ -8,13 +8,14 @@ import {
   EmptyState,
   ErrorState,
   PageHeader,
-  PageSpinner,
   PageToolbar,
+  SkeletonTable,
   StatCard,
   StatusBadge,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendList, backendPage, backendPost } from '@/lib/api-client';
+import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
 
 interface Company {
   id: string;
@@ -72,6 +73,8 @@ export default function GRNsPage() {
   const [error, setError] = useState<string | null>(null);
   const [companyId, setCompanyId] = useState('');
   const [status, setStatus] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pending, setPending] = useState<{ grn: Grn; action: 'approve' | 'post' } | null>(null);
@@ -97,6 +100,14 @@ export default function GRNsPage() {
     };
   }, [canView]);
 
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setSearch(searchInput);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
   const load = useCallback(async () => {
     if (!canView) {
       setLoading(false);
@@ -111,6 +122,7 @@ export default function GRNsPage() {
           limit: 20,
           companyId: companyId || undefined,
           status: status || undefined,
+          search: search.trim() || undefined,
         },
       });
       setData(result);
@@ -120,7 +132,7 @@ export default function GRNsPage() {
     } finally {
       setLoading(false);
     }
-  }, [canView, companyId, page, status]);
+  }, [canView, companyId, page, search, status]);
 
   useEffect(() => {
     void load();
@@ -167,6 +179,20 @@ export default function GRNsPage() {
   const approvedCount = grns.filter((grn) => grn.status === 'APPROVED').length;
   const postedCount = grns.filter((grn) => grn.status === 'POSTED').length;
 
+  const exportCsv = () => {
+    const rows = grns.map((grn) => ({
+      'GRN #': grn.grnNumber,
+      Company: grn.company?.name ?? companyNameById.get(grn.companyId) ?? grn.companyId,
+      Supplier: grn.supplier?.name ?? grn.supplierId ?? '',
+      'Branch / Location': grn.branch?.name ?? '',
+      'Received Date': formatDate(grn.receivedDate),
+      Status: grn.status,
+      'Posted At': formatDate(grn.postedAt),
+    }));
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadTextFile(`goods-received-notes-${stamp}.csv`, 'text/csv;charset=utf-8', rowsToCsv(rows));
+  };
+
   const filterSelectCls =
     'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
   const filterStyle = {
@@ -204,7 +230,7 @@ export default function GRNsPage() {
         subtitle="Record and track goods received from suppliers"
       />
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="Notes" value={data?.total ?? 0} />
         <StatCard label="Draft" value={draftCount} />
         <StatCard label="Approved" value={approvedCount} />
@@ -212,9 +238,13 @@ export default function GRNsPage() {
       </div>
 
       <PageToolbar
+        search={searchInput}
+        onSearch={setSearchInput}
+        searchPlaceholder="Search GRN number..."
         filters={
           <>
             <select
+              aria-label="Filter by company"
               value={companyId}
               onChange={(event) => {
                 setCompanyId(event.target.value);
@@ -231,6 +261,7 @@ export default function GRNsPage() {
               ))}
             </select>
             <select
+              aria-label="Filter by status"
               value={status}
               onChange={(event) => {
                 setStatus(event.target.value);
@@ -248,6 +279,11 @@ export default function GRNsPage() {
             </select>
           </>
         }
+        actions={
+          <Btn variant="secondary" onClick={exportCsv} disabled={!grns.length}>
+            Export CSV
+          </Btn>
+        }
       />
 
       {error && <ErrorState message={error} onRetry={() => void load()} />}
@@ -255,26 +291,43 @@ export default function GRNsPage() {
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1000px] text-sm">
+            <caption className="sr-only">Goods received notes</caption>
             <thead>
               <tr
                 className="text-left text-xs uppercase"
                 style={{ color: 'var(--aurora-text-muted)' }}
               >
-                <th className="px-4 py-3">GRN #</th>
-                <th className="px-4 py-3">Company</th>
-                <th className="px-4 py-3">Supplier</th>
-                <th className="px-4 py-3">Branch / Location</th>
-                <th className="px-4 py-3">Received Date</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Posted At</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+                <th scope="col" className="px-4 py-3">
+                  GRN #
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Company
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Supplier
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Branch / Location
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Received Date
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Status
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Posted At
+                </th>
+                <th scope="col" className="px-4 py-3 text-right">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={8}>
-                    <PageSpinner />
+                  <td colSpan={8} className="p-0">
+                    <SkeletonTable rows={6} cols={8} />
                   </td>
                 </tr>
               ) : !grns.length ? (

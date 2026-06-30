@@ -15,7 +15,10 @@ import {
   PageSpinner,
   FormSelect,
   FormTextarea,
+  SkeletonTable,
+  EmptyState,
 } from '@/components/ui';
+import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
 import {
   backendDelete,
   backendGet,
@@ -693,6 +696,33 @@ export default function StockAdjustmentsPage() {
     load();
   }, [load]);
 
+  const exportCsv = () => {
+    const rows = (data?.data ?? []).map((a) => ({
+      Number: a.adjustmentNumber ?? a.id,
+      Company: a.company?.name ?? '',
+      Branch: a.branch?.name ?? a.location?.name ?? '',
+      Reason: a.reason ?? '',
+      Lines: a._count?.lines ?? a.lines?.length ?? 0,
+      Status: a.status,
+      Created: a.createdAt,
+    }));
+    if (!rows.length) return;
+    const csv = rowsToCsv(rows, [
+      'Number',
+      'Company',
+      'Branch',
+      'Reason',
+      'Lines',
+      'Status',
+      'Created',
+    ]);
+    downloadTextFile(
+      `stock-adjustments-${new Date().toISOString().slice(0, 10)}.csv`,
+      'text/csv;charset=utf-8',
+      csv,
+    );
+  };
+
   const doAction = async (id: string, action: 'submit' | 'approve' | 'post' | 'revert') => {
     setActionLoading(`${id}:${action}`);
     setActionError('');
@@ -959,11 +989,20 @@ export default function StockAdjustmentsPage() {
           </>
         }
         actions={
-          canCreate ? (
-            <Btn variant="primary" onClick={() => setCreating(true)}>
-              + New Adjustment
+          <>
+            <Btn
+              variant="secondary"
+              onClick={exportCsv}
+              disabled={!data?.data.length}
+            >
+              Export CSV
             </Btn>
-          ) : null
+            {canCreate ? (
+              <Btn variant="primary" onClick={() => setCreating(true)}>
+                + New Adjustment
+              </Btn>
+            ) : null}
+          </>
         }
       />
 
@@ -988,18 +1027,17 @@ export default function StockAdjustmentsPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7}>
-                    <PageSpinner />
+                  <td colSpan={7} className="p-3">
+                    <SkeletonTable rows={6} cols={7} />
                   </td>
                 </tr>
               ) : !data?.data.length ? (
                 <tr>
-                  <td
-                    colSpan={7}
-                    className="px-4 py-10 text-center text-sm"
-                    style={{ color: 'var(--aurora-text-muted)' }}
-                  >
-                    No adjustments
+                  <td colSpan={7}>
+                    <EmptyState
+                      title="No adjustments"
+                      description="No stock adjustments match the current filters."
+                    />
                   </td>
                 </tr>
               ) : (

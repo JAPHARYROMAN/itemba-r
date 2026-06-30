@@ -2,7 +2,16 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Btn, Card, PageHeader, PageToolbar, ProductPicker, StatCard, PageSpinner } from '@/components/ui';
+import {
+  Btn,
+  Card,
+  PageHeader,
+  PageToolbar,
+  ProductPicker,
+  StatCard,
+  SkeletonTable,
+  EmptyState,
+} from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendList, backendPage } from '@/lib/api-client';
 import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
@@ -502,14 +511,17 @@ export default function InventoryMovementsPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={11}>
-                    <PageSpinner />
+                  <td colSpan={11} className="p-4">
+                    <SkeletonTable rows={6} cols={11} />
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-8 text-center text-sm text-slate-400">
-                    No movements found.
+                  <td colSpan={11}>
+                    <EmptyState
+                      title="No movements found"
+                      description="No stock movements match the current filters."
+                    />
                   </td>
                 </tr>
               ) : (
