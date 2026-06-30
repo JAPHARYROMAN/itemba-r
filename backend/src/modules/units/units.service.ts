@@ -7,7 +7,7 @@ import { UpdateUnitDto } from './dto/update-unit.dto';
 import { QueryUnitDto } from './dto/query-unit.dto';
 import { CreateUnitConversionDto } from './dto/create-unit-conversion.dto';
 import { UpdateUnitConversionDto } from './dto/update-unit-conversion.dto';
-import { AccessLevel, AuditSeverity, Prisma } from '@prisma/client';
+import { AccessLevel, AuditSeverity, Prisma, UnitType } from '@prisma/client';
 import { CompanyScopeService } from '../../common/services';
 
 @Injectable()
@@ -75,6 +75,10 @@ export class UnitsService {
       throw new BadRequestException('A unit with this name or symbol already exists');
     }
 
+    if (dto.isBaseUnit) {
+      await this.assertNoExistingBaseUnit(companyId, dto.unitType);
+    }
+
     const record = await this.prisma.unitOfMeasure.create({
       data: {
         companyId,
@@ -103,6 +107,11 @@ export class UnitsService {
     const existing = await this.findOneUnit(id, user, AccessLevel.WRITE);
     if (existing.isSystemUnit) {
       throw new BadRequestException('System units cannot be modified');
+    }
+
+    if (dto.isBaseUnit) {
+      const unitType = dto.unitType ?? existing.unitType;
+      await this.assertNoExistingBaseUnit(existing.companyId, unitType, id);
     }
 
     const record = await this.prisma.unitOfMeasure.update({
@@ -202,6 +211,7 @@ export class UnitsService {
     if (dto.fromUnitId === dto.toUnitId) {
       throw new BadRequestException('fromUnitId and toUnitId must be different');
     }
+    this.assertConversionFactorPrecision(dto.conversionFactor);
     const companyId = await this.resolveWriteCompanyId(user, dto.companyId);
     await this.assertUnitsUsableByCompany([dto.fromUnitId, dto.toUnitId], companyId);
 
@@ -242,6 +252,10 @@ export class UnitsService {
 
   async updateConversion(id: string, dto: UpdateUnitConversionDto, user: AuthUser) {
     const existing = await this.findOneConversion(id, user, AccessLevel.WRITE);
+
+    if (dto.conversionFactor !== undefined) {
+      this.assertConversionFactorPrecision(dto.conversionFactor);
+    }
 
     const record = await this.prisma.unitConversion.update({
       where: { id },
@@ -335,6 +349,52 @@ export class UnitsService {
     if (companyIds.length === 0) return { companyId: null };
 
     return { OR: [{ companyId: null }, { companyId: { in: companyIds } }] };
+  }
+
+  private async assertNoExistingBaseUnit(
+    companyId: string | null,
+    unitType: UnitType,
+    excludeUnitId?: string,
+  ) {
+    const existingBase = await this.prisma.unitOfMeasure.findFirst({
+      where: {
+        deletedAt: null,
+        companyId: companyId ?? null,
+        unitType,
+        isBaseUnit: true,
+        ...(excludeUnitId && { id: { not: excludeUnitId } }),
+      },
+      select: { id: true, name: true },
+    });
+
+    if (existingBase) {
+      throw new BadRequestException(
+        `A base unit already exists for ${unitType} ("${existingBase.name}"). ` +
+          'Clear it before assigning a new base unit.',
+      );
+    }
+  }
+
+  private assertConversionFactorPrecision(conversionFactor: number) {
+    // Count decimal places robustly. A naive String(x).split('.') misses scientific
+    // notation: String(0.0000005) === '5e-7', whose split has no '.', yielding 0 and
+    // letting an over-precise factor slip past the guard.
+    const text = conversionFactor.toString().toLowerCase();
+    const eIndex = text.indexOf('e');
+    let decimals: number;
+    if (eIndex !== -1) {
+      const mantissa = text.slice(0, eIndex);
+      const exponent = parseInt(text.slice(eIndex + 1), 10) || 0;
+      const mantissaDecimals = (mantissa.split('.')[1] ?? '').length;
+      decimals = mantissaDecimals + (exponent < 0 ? -exponent : 0);
+    } else {
+      decimals = (text.split('.')[1] ?? '').length;
+    }
+    if (decimals > 6) {
+      throw new BadRequestException(
+        'conversionFactor must have at most 6 decimal places',
+      );
+    }
   }
 
   private async assertUnitsUsableByCompany(unitIds: string[], companyId: string | null) {

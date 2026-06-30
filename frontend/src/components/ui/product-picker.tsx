@@ -59,15 +59,20 @@ export function ProductPicker({
   const [highlight, setHighlight] = useState(0);
   const [selectedLabel, setSelectedLabel] = useState(initialLabel ?? '');
   const rootRef = useRef<HTMLDivElement>(null);
+  // The product id that `selectedLabel` currently describes. We re-resolve the label
+  // when `value` is externally changed to a *different* id (e.g. an edit form swapping
+  // the selected product) instead of keeping the previous product's name on screen.
+  const resolvedForRef = useRef<string>(value && initialLabel ? value : '');
 
   // Resolve a label for an externally-set value we don't already know.
   useEffect(() => {
     if (!value) {
       setSelectedLabel('');
       setQuery('');
+      resolvedForRef.current = '';
       return;
     }
-    if (selectedLabel) return;
+    if (resolvedForRef.current === value) return;
     let cancelled = false;
     backendGet<ProductPickerOption>(`/products/${value}`)
       .then((p) => {
@@ -75,6 +80,7 @@ export function ProductPicker({
         const label = labelFor(p);
         setSelectedLabel(label);
         setQuery(label);
+        resolvedForRef.current = value;
       })
       .catch(() => {
         /* leave the field blank if the product can't be resolved */
@@ -82,7 +88,7 @@ export function ProductPicker({
     return () => {
       cancelled = true;
     };
-    // selectedLabel intentionally omitted: only resolve when value changes.
+    // resolvedForRef tracks which id the label is for; re-resolve on id change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
@@ -136,6 +142,7 @@ export function ProductPicker({
     setSelectedLabel(label);
     setQuery(label);
     setOpen(false);
+    resolvedForRef.current = p.id;
     onChange(p.id, p);
   };
 
@@ -143,6 +150,7 @@ export function ProductPicker({
     setSelectedLabel('');
     setQuery('');
     setResults([]);
+    resolvedForRef.current = '';
     onChange('');
   };
 

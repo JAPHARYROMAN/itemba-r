@@ -6,9 +6,12 @@ import {
   PageHeader,
   PageToolbar,
   StatCard,
+  StatusBadge,
   Modal,
   Btn,
   PageSpinner,
+  SkeletonTable,
+  EmptyState,
   FormInput,
   FormSelect,
   FormTextarea,
@@ -24,6 +27,7 @@ import {
   backendPost,
   normalizePaginated,
 } from '@/lib/api-client';
+import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
 
 interface Company {
   id: string;
@@ -556,6 +560,7 @@ export default function ProductCategoriesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [categoryType, setCategoryType] = useState('');
   const [activeFilter, setActiveFilter] = useState('');
@@ -566,6 +571,7 @@ export default function ProductCategoriesPage() {
   const [expandedCategoryId, setExpandedCategoryId] = useState('');
   const [familiesByCategory, setFamiliesByCategory] = useState<Record<string, ProductFamily[]>>({});
   const [familyLoading, setFamilyLoading] = useState<Record<string, boolean>>({});
+  const [familyError, setFamilyError] = useState<Record<string, string>>({});
   const [creatingFamilyFor, setCreatingFamilyFor] = useState<ProductCategory | null>(null);
   const [editingFamily, setEditingFamily] = useState<{ category: ProductCategory; family: ProductFamily } | null>(null);
   const [exceptionsFamily, setExceptionsFamily] = useState<{ category: ProductCategory; family: ProductFamily } | null>(null);
@@ -579,6 +585,7 @@ export default function ProductCategoriesPage() {
 
   const loadFamiliesForCategory = useCallback(async (category: ProductCategory) => {
     setFamilyLoading((current) => ({ ...current, [category.id]: true }));
+    setFamilyError((current) => ({ ...current, [category.id]: '' }));
     try {
       const records = await backendList<ProductFamily>('/products/families', {
         query: {
@@ -589,7 +596,10 @@ export default function ProductCategoriesPage() {
       });
       setFamiliesByCategory((current) => ({ ...current, [category.id]: records }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load product families');
+      setFamilyError((current) => ({
+        ...current,
+        [category.id]: err instanceof Error ? err.message : 'Failed to load product families',
+      }));
       setFamiliesByCategory((current) => ({ ...current, [category.id]: [] }));
     } finally {
       setFamilyLoading((current) => ({ ...current, [category.id]: false }));
@@ -661,6 +671,14 @@ export default function ProductCategoriesPage() {
     };
   }, [canView]);
 
+  useEffect(() => {
+    const id = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(id);
+  }, [search]);
+
   const load = useCallback(async () => {
     if (!canView) return;
     setLoading(true);
@@ -670,7 +688,7 @@ export default function ProductCategoriesPage() {
         query: {
           page,
           limit: 20,
-          search: search.trim() || undefined,
+          search: debouncedSearch.trim() || undefined,
           companyId: companyId || undefined,
           categoryType: categoryType || undefined,
           isActive: activeFilter || undefined,
@@ -683,11 +701,22 @@ export default function ProductCategoriesPage() {
     } finally {
       setLoading(false);
     }
-  }, [canView, page, search, companyId, categoryType, activeFilter]);
+  }, [canView, page, debouncedSearch, companyId, categoryType, activeFilter]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  const handleExportCsv = () => {
+    const rows = (data?.data ?? []).map((cat) => ({
+      Name: cat.name,
+      Type: cat.categoryType.replace(/_/g, ' '),
+      Parent: cat.parentCategory?.name ?? '',
+      Company: cat.company?.name ?? '',
+      Status: cat.isActive ? 'Active' : 'Inactive',
+    }));
+    downloadTextFile('product-categories.csv', 'text/csv', rowsToCsv(rows));
+  };
 
   const handleDelete = async () => {
     if (!deleting) return;
@@ -821,12 +850,13 @@ export default function ProductCategoriesPage() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
+                <caption className="sr-only">Price exceptions</caption>
                 <thead>
                   <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
-                    <th className="px-3 py-2">Product</th>
-                    <th className="px-3 py-2 text-right">Product Price</th>
-                    <th className="px-3 py-2 text-right">Effective Price</th>
-                    <th className="px-3 py-2">Source</th>
+                    <th scope="col" className="px-3 py-2">Product</th>
+                    <th scope="col" className="px-3 py-2 text-right">Product Price</th>
+                    <th scope="col" className="px-3 py-2 text-right">Effective Price</th>
+                    <th scope="col" className="px-3 py-2">Source</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -862,7 +892,7 @@ export default function ProductCategoriesPage() {
 
       <PageHeader title="Product Categories" subtitle="Organize products into categories" />
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <StatCard label="Total" value={data?.total ?? 0} />
         <StatCard label="Active" value={data?.data.filter((c) => c.isActive).length ?? 0} />
         <StatCard label="Inactive" value={data?.data.filter((c) => !c.isActive).length ?? 0} />
@@ -870,14 +900,12 @@ export default function ProductCategoriesPage() {
 
       <PageToolbar
         search={search}
-        onSearch={(v) => {
-          setSearch(v);
-          setPage(1);
-        }}
+        onSearch={(v) => setSearch(v)}
         searchPlaceholder="Search categories…"
         filters={
           <>
             <select
+              aria-label="Filter by company"
               value={companyId}
               onChange={(e) => {
                 setCompanyId(e.target.value);
@@ -894,6 +922,7 @@ export default function ProductCategoriesPage() {
               ))}
             </select>
             <select
+              aria-label="Filter by category type"
               value={categoryType}
               onChange={(e) => {
                 setCategoryType(e.target.value);
@@ -910,6 +939,7 @@ export default function ProductCategoriesPage() {
               ))}
             </select>
             <select
+              aria-label="Filter by status"
               value={activeFilter}
               onChange={(e) => {
                 setActiveFilter(e.target.value);
@@ -925,11 +955,20 @@ export default function ProductCategoriesPage() {
           </>
         }
         actions={
-          canCreate ? (
-            <Btn variant="primary" onClick={() => setCreating(true)}>
-              + New Category
+          <>
+            <Btn
+              variant="secondary"
+              onClick={handleExportCsv}
+              disabled={!data?.data.length}
+            >
+              Export CSV
             </Btn>
-          ) : null
+            {canCreate && (
+              <Btn variant="primary" onClick={() => setCreating(true)}>
+                + New Category
+              </Btn>
+            )}
+          </>
         }
       />
 
@@ -945,34 +984,34 @@ export default function ProductCategoriesPage() {
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[700px]">
+            <caption className="sr-only">Product categories</caption>
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
                 style={{ color: 'var(--aurora-text-muted)' }}
               >
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Parent</th>
-                <th className="px-4 py-3">Company</th>
-                <th className="px-4 py-3">Status</th>
-                {canCreate && <th className="px-4 py-3 text-right">Actions</th>}
+                <th scope="col" className="px-4 py-3">Name</th>
+                <th scope="col" className="px-4 py-3">Type</th>
+                <th scope="col" className="px-4 py-3">Parent</th>
+                <th scope="col" className="px-4 py-3">Company</th>
+                <th scope="col" className="px-4 py-3">Status</th>
+                {canCreate && <th scope="col" className="px-4 py-3 text-right">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
                   <td colSpan={6}>
-                    <PageSpinner />
+                    <SkeletonTable rows={6} cols={6} />
                   </td>
                 </tr>
               ) : !data?.data.length ? (
                 <tr>
-                  <td
-                    colSpan={6}
-                    className="px-4 py-10 text-center text-sm"
-                    style={{ color: 'var(--aurora-text-muted)' }}
-                  >
-                    No categories found
+                  <td colSpan={6}>
+                    <EmptyState
+                      title="No categories found"
+                      description="Try adjusting your search or filters, or create a new category."
+                    />
                   </td>
                 </tr>
               ) : (
@@ -984,6 +1023,13 @@ export default function ProductCategoriesPage() {
                       <button
                         type="button"
                         className="mt-1 text-xs font-semibold text-brand-600 hover:underline"
+                        aria-expanded={expandedCategoryId === cat.id}
+                        aria-controls={`families-${cat.id}`}
+                        aria-label={
+                          expandedCategoryId === cat.id
+                            ? `Hide families for ${cat.name}`
+                            : `View families for ${cat.name}`
+                        }
                         onClick={() => void toggleFamilies(cat)}
                       >
                         {expandedCategoryId === cat.id ? 'Hide families' : 'View families'}
@@ -995,30 +1041,42 @@ export default function ProductCategoriesPage() {
                     </td>
                     <td className="px-4 py-3">{cat.company?.name ?? '—'}</td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${cat.isActive ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-zinc-100 text-zinc-500 border-zinc-200'}`}
-                      >
-                        {cat.isActive ? 'Active' : 'Inactive'}
-                      </span>
+                      <StatusBadge status={cat.isActive ? 'ACTIVE' : 'INACTIVE'} />
                     </td>
                     {canCreate && (
                       <td className="px-4 py-3 text-right">
                         <div className="flex justify-end gap-1">
-                          <Btn variant="ghost" size="xs" onClick={() => setCreatingFamilyFor(cat)}>
+                          <Btn
+                            variant="ghost"
+                            size="xs"
+                            aria-label={`Add family to ${cat.name}`}
+                            onClick={() => setCreatingFamilyFor(cat)}
+                          >
                             + Family
                           </Btn>
                           <Btn
                             variant={cat.isActive ? 'warning' : 'success'}
                             size="xs"
                             loading={statusUpdatingId === cat.id}
+                            aria-label={`${cat.isActive ? 'Deactivate' : 'Activate'} ${cat.name}`}
                             onClick={() => void handleToggleStatus(cat)}
                           >
                             {cat.isActive ? 'Deactivate' : 'Activate'}
                           </Btn>
-                          <Btn variant="ghost" size="xs" onClick={() => setEditing(cat)}>
+                          <Btn
+                            variant="ghost"
+                            size="xs"
+                            aria-label={`Edit ${cat.name}`}
+                            onClick={() => setEditing(cat)}
+                          >
                             Edit
                           </Btn>
-                          <Btn variant="ghost" size="xs" onClick={() => setDeleting(cat)}>
+                          <Btn
+                            variant="ghost"
+                            size="xs"
+                            aria-label={`Delete ${cat.name}`}
+                            onClick={() => setDeleting(cat)}
+                          >
                             Delete
                           </Btn>
                         </div>
@@ -1026,11 +1084,19 @@ export default function ProductCategoriesPage() {
                     )}
                   </tr>
                   {expandedCategoryId === cat.id && (
-                    <tr key={`${cat.id}-families`}>
+                    <tr key={`${cat.id}-families`} id={`families-${cat.id}`}>
                       <td colSpan={6} className="bg-slate-50 px-4 py-4">
+                        {familyError[cat.id] && (
+                          <div
+                            role="alert"
+                            className="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                          >
+                            {familyError[cat.id]}
+                          </div>
+                        )}
                         {familyLoading[cat.id] ? (
                           <PageSpinner />
-                        ) : !(familiesByCategory[cat.id] ?? []).length ? (
+                        ) : familyError[cat.id] ? null : !(familiesByCategory[cat.id] ?? []).length ? (
                           <div className="rounded-lg border border-dashed px-4 py-6 text-center text-sm" style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}>
                             No families in this category yet.
                             {canCreate && (
@@ -1042,18 +1108,19 @@ export default function ProductCategoriesPage() {
                         ) : (
                           <div className="overflow-x-auto rounded-lg border bg-white" style={{ borderColor: 'var(--aurora-border)' }}>
                             <table className="w-full text-xs min-w-[900px]">
+                              <caption className="sr-only">Product families in {cat.name}</caption>
                               <thead>
                                 <tr className="text-left uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
-                                  <th className="px-3 py-2">Family</th>
-                                  <th className="px-3 py-2 text-right">Selling</th>
-                                  <th className="px-3 py-2 text-right">Wholesale</th>
-                                  <th className="px-3 py-2 text-right">Retail</th>
-                                  <th className="px-3 py-2 text-center">Products</th>
-                                  <th className="px-3 py-2 text-center">Inherited</th>
-                                  <th className="px-3 py-2 text-center">Overrides</th>
-                                  <th className="px-3 py-2 text-center">Missing</th>
-                                  <th className="px-3 py-2">Status</th>
-                                  <th className="px-3 py-2 text-right">Actions</th>
+                                  <th scope="col" className="px-3 py-2">Family</th>
+                                  <th scope="col" className="px-3 py-2 text-right">Selling</th>
+                                  <th scope="col" className="px-3 py-2 text-right">Wholesale</th>
+                                  <th scope="col" className="px-3 py-2 text-right">Retail</th>
+                                  <th scope="col" className="px-3 py-2 text-center">Products</th>
+                                  <th scope="col" className="px-3 py-2 text-center">Inherited</th>
+                                  <th scope="col" className="px-3 py-2 text-center">Overrides</th>
+                                  <th scope="col" className="px-3 py-2 text-center">Missing</th>
+                                  <th scope="col" className="px-3 py-2">Status</th>
+                                  <th scope="col" className="px-3 py-2 text-right">Actions</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-100">
@@ -1073,16 +1140,24 @@ export default function ProductCategoriesPage() {
                                     <td className="px-3 py-2 text-center text-blue-700">{family.overridePriceCount ?? 0}</td>
                                     <td className="px-3 py-2 text-center text-red-700">{family.missingPriceCount ?? 0}</td>
                                     <td className="px-3 py-2">
-                                      <span className={`inline-flex rounded border px-2 py-0.5 ${family.isActive ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-zinc-200 bg-zinc-100 text-zinc-500'}`}>
-                                        {family.isActive ? 'Active' : 'Inactive'}
-                                      </span>
+                                      <StatusBadge status={family.isActive ? 'ACTIVE' : 'INACTIVE'} />
                                     </td>
                                     <td className="px-3 py-2 text-right whitespace-nowrap">
-                                      <Btn variant="ghost" size="xs" onClick={() => void openExceptions(cat, family)}>
+                                      <Btn
+                                        variant="ghost"
+                                        size="xs"
+                                        aria-label={`View price exceptions for ${familyLabel(family)}`}
+                                        onClick={() => void openExceptions(cat, family)}
+                                      >
                                         Exceptions
                                       </Btn>
                                       {canCreate && (
-                                        <Btn variant="ghost" size="xs" onClick={() => setEditingFamily({ category: cat, family })}>
+                                        <Btn
+                                          variant="ghost"
+                                          size="xs"
+                                          aria-label={`Edit family ${familyLabel(family)}`}
+                                          onClick={() => setEditingFamily({ category: cat, family })}
+                                        >
                                           Edit
                                         </Btn>
                                       )}

@@ -6,6 +6,8 @@ import {
   PageHeader,
   PageToolbar,
   StatCard,
+  StatusBadge,
+  EmptyState,
   Modal,
   Btn,
   SkeletonTable,
@@ -15,6 +17,7 @@ import {
   showToast,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
 import {
   backendDelete,
   backendList,
@@ -164,12 +167,6 @@ const TYPE_BADGE: Record<string, string> = {
   SERVICE: 'bg-purple-50 text-purple-700 border-purple-200',
   NON_STOCK_ITEM: 'bg-zinc-50 text-zinc-700 border-zinc-200',
   ASSET_RELATED: 'bg-amber-50 text-amber-700 border-amber-200',
-};
-
-const STATUS_BADGE: Record<string, string> = {
-  ACTIVE: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  INACTIVE: 'bg-zinc-100 text-zinc-500 border-zinc-200',
-  DISCONTINUED: 'bg-red-50 text-red-700 border-red-200',
 };
 
 const PRICE_SOURCE_BADGE: Record<string, string> = {
@@ -1015,6 +1012,7 @@ export default function ProductsPage() {
   const [data, setData] = useState<Paginated<Product> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -1033,6 +1031,15 @@ export default function ProductsPage() {
   const canCreate = hasPermission('products.create');
   const canUpdate = hasPermission('products.update');
   const canDelete = hasPermission('products.delete');
+
+  // Debounce the search box (~300ms) so we only refetch once typing settles.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setSearch(searchInput);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
 
   useEffect(() => {
     if (!canView) return;
@@ -1168,6 +1175,43 @@ export default function ProductsPage() {
     load();
   }, [load]);
 
+  const handleExportCsv = () => {
+    const rows = data?.data ?? [];
+    if (!rows.length) {
+      showToast('error', 'Nothing to export', 'No products match the current filters');
+      return;
+    }
+    const csvRows = rows.map((p) => ({
+      Code: p.productCode ?? '',
+      Name: p.name,
+      Family: p.productFamily
+        ? p.productFamily.brand
+          ? `${p.productFamily.brand} — ${p.productFamily.name}`
+          : p.productFamily.name
+        : '',
+      Variant: [p.variantName, p.variantColor, p.variantSize, p.variantFinish]
+        .filter(Boolean)
+        .join(' · '),
+      Category: p.category?.name ?? '',
+      Division: p.division?.name ?? 'company-wide',
+      Type: p.productType.replace(/_/g, ' '),
+      Unit: p.baseUnit?.symbol ?? p.baseUnit?.name ?? '',
+      Selling: Number(p.effectiveSellingPrice ?? p.defaultSellingPrice ?? 0),
+      Purchase: Number(p.effectivePurchasePrice ?? p.defaultPurchasePrice ?? 0),
+      'Price source': priceSourceLabel(p.priceSource),
+      ...(branchId
+        ? {
+            'On hand': p.trackInventory ? Number(p.inventoryBalance?.quantityOnHand ?? 0) : '',
+            Available: p.trackInventory ? Number(p.availableQuantity ?? 0) : '',
+          }
+        : {}),
+      Status: p.status,
+    }));
+    const csv = rowsToCsv(csvRows as Record<string, unknown>[]);
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadTextFile(`products-${stamp}.csv`, 'text/csv;charset=utf-8', csv);
+  };
+
   if (!canView) {
     return (
       <div className="p-6">
@@ -1236,7 +1280,7 @@ export default function ProductsPage() {
 
       <PageHeader title="Products" subtitle="Master data for goods and services" />
 
-      <div className="grid grid-cols-4 gap-3 aurora-stagger">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 aurora-stagger">
         <StatCard label="Total" value={data?.total ?? 0} />
         <StatCard label="Active (page)" value={counts.active} />
         <StatCard label="Inactive (page)" value={counts.inactive} />
@@ -1244,16 +1288,14 @@ export default function ProductsPage() {
       </div>
 
       <PageToolbar
-        search={search}
-        onSearch={(v) => {
-          setSearch(v);
-          setPage(1);
-        }}
+        search={searchInput}
+        onSearch={(v) => setSearchInput(v)}
         searchPlaceholder="Search products…"
         filters={
           <>
             <select
               value={companyId}
+              aria-label="Filter by company"
               onChange={(e) => {
                 setCompanyId(e.target.value);
                 setCategoryId('');
@@ -1273,6 +1315,7 @@ export default function ProductsPage() {
             </select>
             <select
               value={categoryId}
+              aria-label="Filter by category"
               onChange={(e) => {
                 setCategoryId(e.target.value);
                 setProductFamilyId('');
@@ -1290,6 +1333,7 @@ export default function ProductsPage() {
             </select>
             <select
               value={productFamilyId}
+              aria-label="Filter by product family"
               onChange={(e) => {
                 setProductFamilyId(e.target.value);
                 setPage(1);
@@ -1306,6 +1350,7 @@ export default function ProductsPage() {
             </select>
             <select
               value={productType}
+              aria-label="Filter by product type"
               onChange={(e) => {
                 setProductType(e.target.value);
                 setPage(1);
@@ -1322,6 +1367,7 @@ export default function ProductsPage() {
             </select>
             <select
               value={status}
+              aria-label="Filter by status"
               onChange={(e) => {
                 setStatus(e.target.value);
                 setPage(1);
@@ -1338,6 +1384,7 @@ export default function ProductsPage() {
             </select>
             <select
               value={priceSource}
+              aria-label="Filter by pricing source"
               onChange={(e) => {
                 setPriceSource(e.target.value);
                 setPage(1);
@@ -1354,6 +1401,7 @@ export default function ProductsPage() {
             {companyId && (
               <select
                 value={branchId}
+                aria-label="Show stock on hand and available for a branch"
                 onChange={(e) => {
                   setBranchId(e.target.value);
                   setPage(1);
@@ -1373,11 +1421,20 @@ export default function ProductsPage() {
           </>
         }
         actions={
-          canCreate ? (
-            <Btn variant="primary" onClick={() => setCreating(true)}>
-              + New Product
+          <>
+            <Btn
+              variant="secondary"
+              onClick={handleExportCsv}
+              disabled={loading || !data?.data.length}
+            >
+              Export CSV
             </Btn>
-          ) : null
+            {canCreate && (
+              <Btn variant="primary" onClick={() => setCreating(true)}>
+                + New Product
+              </Btn>
+            )}
+          </>
         }
       />
 
@@ -1392,26 +1449,31 @@ export default function ProductsPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1200px]">
+          <table className="w-full text-sm min-w-[1200px]" aria-label="Products catalogue">
+            <caption className="sr-only">
+              Products catalogue with pricing, stock, and status for each item
+            </caption>
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
                 style={{ color: 'var(--aurora-text-muted)' }}
               >
-                <th className="px-4 py-3">Code</th>
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Family</th>
-                <th className="px-4 py-3">Variant</th>
-                <th className="px-4 py-3">Category</th>
-                <th className="px-4 py-3">Division</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Unit</th>
-                <th className="px-4 py-3 text-right">Selling</th>
-                <th className="px-4 py-3 text-right">Purchase</th>
-                {branchId && <th className="px-4 py-3 text-right">On hand</th>}
-                {branchId && <th className="px-4 py-3 text-right">Available</th>}
-                <th className="px-4 py-3">Status</th>
-                {(canUpdate || canDelete) && <th className="px-4 py-3 text-right">Actions</th>}
+                <th scope="col" className="px-4 py-3">Code</th>
+                <th scope="col" className="px-4 py-3">Name</th>
+                <th scope="col" className="px-4 py-3">Family</th>
+                <th scope="col" className="px-4 py-3">Variant</th>
+                <th scope="col" className="px-4 py-3">Category</th>
+                <th scope="col" className="px-4 py-3">Division</th>
+                <th scope="col" className="px-4 py-3">Type</th>
+                <th scope="col" className="px-4 py-3">Unit</th>
+                <th scope="col" className="px-4 py-3 text-right">Selling</th>
+                <th scope="col" className="px-4 py-3 text-right">Purchase</th>
+                {branchId && <th scope="col" className="px-4 py-3 text-right">On hand</th>}
+                {branchId && <th scope="col" className="px-4 py-3 text-right">Available</th>}
+                <th scope="col" className="px-4 py-3">Status</th>
+                {(canUpdate || canDelete) && (
+                  <th scope="col" className="px-4 py-3 text-right">Actions</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -1423,12 +1485,11 @@ export default function ProductsPage() {
                 </tr>
               ) : !data?.data.length ? (
                 <tr>
-                  <td
-                    colSpan={colCount}
-                    className="px-4 py-10 text-center text-sm"
-                    style={{ color: 'var(--aurora-text-muted)' }}
-                  >
-                    No products found
+                  <td colSpan={colCount}>
+                    <EmptyState
+                      title="No products found"
+                      description="Try adjusting your search or filters, or create a new product."
+                    />
                   </td>
                 </tr>
               ) : (
@@ -1494,21 +1555,27 @@ export default function ProductsPage() {
                       </td>
                     )}
                     <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${STATUS_BADGE[p.status] ?? 'bg-zinc-50 text-zinc-700 border-zinc-200'}`}
-                      >
-                        {p.status}
-                      </span>
+                      <StatusBadge status={p.status} />
                     </td>
                     {(canUpdate || canDelete) && (
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         {canUpdate && (
-                          <Btn variant="ghost" size="xs" onClick={() => setEditing(p)}>
+                          <Btn
+                            variant="ghost"
+                            size="xs"
+                            aria-label={`Edit ${p.name}`}
+                            onClick={() => setEditing(p)}
+                          >
                             Edit
                           </Btn>
                         )}
                         {canDelete && (
-                          <Btn variant="ghost" size="xs" onClick={() => setDeleting(p)}>
+                          <Btn
+                            variant="ghost"
+                            size="xs"
+                            aria-label={`Delete ${p.name}`}
+                            onClick={() => setDeleting(p)}
+                          >
                             Delete
                           </Btn>
                         )}

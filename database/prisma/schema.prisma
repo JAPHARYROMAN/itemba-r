@@ -12833,6 +12833,7 @@ model GoodsReceivedNoteLine {
   receivedQuantity    Decimal  @db.Decimal(18, 4)
   acceptedQuantity    Decimal  @db.Decimal(18, 4)
   rejectedQuantity    Decimal  @default(0) @db.Decimal(18, 4)
+  unitCost            Decimal? @db.Decimal(18, 4)
   unitId              String
   condition           String?
   notes               String?

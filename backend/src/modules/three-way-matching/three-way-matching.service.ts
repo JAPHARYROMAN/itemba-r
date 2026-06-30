@@ -6,6 +6,7 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { pagination } from '../../common/utils/pagination';
 import { paginatedResponse } from '../../common/utils/paginated-response';
 import { CreateThreeWayMatchDto, QueryThreeWayMatchDto } from './dto/three-way-matching.dto';
@@ -19,6 +20,7 @@ export class ThreeWayMatchingService {
     private readonly companyScope: CompanyScopeService,
     private readonly accountResolver: AccountResolverService,
     private readonly postingEngine: PostingEngineService,
+    private readonly codes: EntityCodeGeneratorService,
   ) {}
 
   async findAll(query: QueryThreeWayMatchDto, user: AuthUser) {
@@ -54,6 +56,20 @@ export class ThreeWayMatchingService {
       throw new BadRequestException('A supplier invoice is required for three-way matching');
     }
 
+    // One active match per supplier invoice — reject a second register entry for
+    // an invoice that already has a live (non-deleted) match in this company.
+    const duplicate = await this.prisma.threeWayMatch.findFirst({
+      where: {
+        companyId: dto.companyId,
+        supplierInvoiceId: dto.supplierInvoiceId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (duplicate) {
+      throw new BadRequestException('An active three-way match already exists for this supplier invoice');
+    }
+
     // Variances and match status are computed server-side from the live PO / GRN /
     // invoice — never taken from the client (the form fields are advisory only).
     const computed = await this.computeMatch(
@@ -66,9 +82,13 @@ export class ThreeWayMatchingService {
       this.prisma,
     );
 
+    // matchNumber is minted server-side from the central code generator — the
+    // client field is advisory only and never trusted.
+    const matchNumber = await this.codes.next({ entityType: 'ThreeWayMatch', companyId: dto.companyId });
+
     const item = await this.prisma.threeWayMatch.create({
       data: {
-        matchNumber: dto.matchNumber,
+        matchNumber,
         companyId: dto.companyId,
         purchaseOrderId: dto.purchaseOrderId,
         goodsReceivedNoteId: dto.goodsReceivedNoteId,

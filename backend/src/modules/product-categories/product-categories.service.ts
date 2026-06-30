@@ -29,24 +29,29 @@ export class ProductCategoriesService {
     const limit = Math.min(Math.max(requestedLimit, 1), 5000);
     const skip = (page - 1) * limit;
 
-    const where: Prisma.ProductCategoryWhereInput = { deletedAt: null };
+    // Base scope shared by the page query and the active/inactive tiles: company
+    // scope plus every filter EXCEPT isActive, so the tile counts stay stable as
+    // the user toggles the active/inactive view.
+    const baseWhere: Prisma.ProductCategoryWhereInput = { deletedAt: null };
     if (companyId) {
       await this.companyScope.assertCanAccessCompany(user, companyId);
-      where.companyId = companyId;
+      baseWhere.companyId = companyId;
     } else {
       const accessibleCompanyIds = await this.companyScope.accessibleCompanyIds(user);
       if (accessibleCompanyIds !== null) {
-        where.companyId = { in: accessibleCompanyIds };
+        baseWhere.companyId = { in: accessibleCompanyIds };
       }
     }
-    if (categoryType) where.categoryType = categoryType;
-    if (parentCategoryId) where.parentCategoryId = parentCategoryId;
-    if (isActive !== undefined) where.isActive = isActive;
+    if (categoryType) baseWhere.categoryType = categoryType;
+    if (parentCategoryId) baseWhere.parentCategoryId = parentCategoryId;
     if (search) {
-      where.name = { contains: search, mode: 'insensitive' };
+      baseWhere.name = { contains: search, mode: 'insensitive' };
     }
 
-    const [data, total] = await Promise.all([
+    const where: Prisma.ProductCategoryWhereInput = { ...baseWhere };
+    if (isActive !== undefined) where.isActive = isActive;
+
+    const [data, total, statusGroups] = await Promise.all([
       this.prisma.productCategory.findMany({
         where,
         include: {
@@ -58,9 +63,29 @@ export class ProductCategoriesService {
         take: limit,
       }),
       this.prisma.productCategory.count({ where }),
+      this.prisma.productCategory.groupBy({
+        by: ['isActive'],
+        where: baseWhere,
+        _count: { _all: true },
+      }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    // Collapse the groupBy rows into flat active/inactive totals for the tiles.
+    let activeCount = 0;
+    let inactiveCount = 0;
+    for (const group of statusGroups) {
+      if (group.isActive) activeCount += group._count._all;
+      else inactiveCount += group._count._all;
+    }
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      counts: { active: activeCount, inactive: inactiveCount, total: activeCount + inactiveCount },
+    };
   }
 
   async findOne(id: string, user: AuthUser, minimumAccess: AccessLevel = AccessLevel.READ) {

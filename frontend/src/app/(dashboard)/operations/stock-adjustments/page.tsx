@@ -15,7 +15,10 @@ import {
   PageSpinner,
   FormSelect,
   FormTextarea,
+  SkeletonTable,
+  EmptyState,
 } from '@/components/ui';
+import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
 import {
   backendDelete,
   backendGet,
@@ -350,18 +353,21 @@ function CreateAdjustmentModal({
             style={{ borderColor: 'var(--aurora-border)' }}
           >
             <table className="w-full text-sm">
+              <caption className="sr-only">Stock adjustment line items</caption>
               <thead>
                 <tr
                   className="text-left text-xs uppercase bg-gray-50"
                   style={{ color: 'var(--aurora-text-muted)' }}
                 >
-                  <th className="px-3 py-2">Product</th>
-                  <th className="px-3 py-2">System Qty</th>
-                  <th className="px-3 py-2">Counted Qty</th>
-                  <th className="px-3 py-2">Variance</th>
-                  <th className="px-3 py-2">Unit</th>
-                  <th className="px-3 py-2">Reason</th>
-                  <th className="px-3 py-2"></th>
+                  <th scope="col" className="px-3 py-2">Product</th>
+                  <th scope="col" className="px-3 py-2">System Qty</th>
+                  <th scope="col" className="px-3 py-2">Counted Qty</th>
+                  <th scope="col" className="px-3 py-2">Variance</th>
+                  <th scope="col" className="px-3 py-2">Unit</th>
+                  <th scope="col" className="px-3 py-2">Reason</th>
+                  <th scope="col" className="px-3 py-2">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -389,6 +395,7 @@ function CreateAdjustmentModal({
                       <td className="px-2 py-1">
                         <input
                           type="number"
+                          aria-label={`System quantity, line ${i + 1}`}
                           value={line.systemQty}
                           onChange={(e) => setLine(i, { systemQty: Number(e.target.value) })}
                           readOnly={line.systemQtyLocked}
@@ -412,6 +419,7 @@ function CreateAdjustmentModal({
                       <td className="px-2 py-1">
                         <input
                           type="number"
+                          aria-label={`Counted quantity, line ${i + 1}`}
                           value={line.countedQty}
                           onChange={(e) => setLine(i, { countedQty: Number(e.target.value) })}
                           className="w-24 text-xs border rounded px-2 py-1"
@@ -428,6 +436,7 @@ function CreateAdjustmentModal({
                       </td>
                       <td className="px-2 py-1">
                         <select
+                          aria-label={`Unit, line ${i + 1}`}
                           value={line.unitId}
                           onChange={(e) => setLine(i, { unitId: e.target.value })}
                           className="w-full text-xs border rounded px-2 py-1"
@@ -448,6 +457,7 @@ function CreateAdjustmentModal({
                       <td className="px-2 py-1">
                         <input
                           type="text"
+                          aria-label={`Reason, line ${i + 1}`}
                           value={line.reason}
                           onChange={(e) => setLine(i, { reason: e.target.value })}
                           className="w-full text-xs border rounded px-2 py-1"
@@ -460,7 +470,12 @@ function CreateAdjustmentModal({
                       </td>
                       <td className="px-2 py-1 text-right">
                         {form.lines.length > 1 && (
-                          <Btn variant="ghost" size="xs" onClick={() => removeLine(i)}>
+                          <Btn
+                            variant="ghost"
+                            size="xs"
+                            aria-label={`Remove line ${i + 1}`}
+                            onClick={() => removeLine(i)}
+                          >
                             ×
                           </Btn>
                         )}
@@ -681,6 +696,33 @@ export default function StockAdjustmentsPage() {
     load();
   }, [load]);
 
+  const exportCsv = () => {
+    const rows = (data?.data ?? []).map((a) => ({
+      Number: a.adjustmentNumber ?? a.id,
+      Company: a.company?.name ?? '',
+      Branch: a.branch?.name ?? a.location?.name ?? '',
+      Reason: a.reason ?? '',
+      Lines: a._count?.lines ?? a.lines?.length ?? 0,
+      Status: a.status,
+      Created: a.createdAt,
+    }));
+    if (!rows.length) return;
+    const csv = rowsToCsv(rows, [
+      'Number',
+      'Company',
+      'Branch',
+      'Reason',
+      'Lines',
+      'Status',
+      'Created',
+    ]);
+    downloadTextFile(
+      `stock-adjustments-${new Date().toISOString().slice(0, 10)}.csv`,
+      'text/csv;charset=utf-8',
+      csv,
+    );
+  };
+
   const doAction = async (id: string, action: 'submit' | 'approve' | 'post' | 'revert') => {
     setActionLoading(`${id}:${action}`);
     setActionError('');
@@ -808,14 +850,15 @@ export default function StockAdjustmentsPage() {
               <div className="text-xs uppercase text-slate-400 mb-2">Lines</div>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
+                  <caption className="sr-only">Adjustment line items</caption>
                   <thead>
                     <tr className="text-left text-slate-400 border-b" style={{ borderColor: 'var(--aurora-border)' }}>
-                      <th className="py-1.5 pr-2">Product</th>
-                      <th className="py-1.5 px-2 text-right">System</th>
-                      <th className="py-1.5 px-2 text-right">Counted</th>
-                      <th className="py-1.5 px-2 text-right">Variance</th>
-                      <th className="py-1.5 px-2">Unit</th>
-                      <th className="py-1.5 pl-2">Reason</th>
+                      <th scope="col" className="py-1.5 pr-2">Product</th>
+                      <th scope="col" className="py-1.5 px-2 text-right">System</th>
+                      <th scope="col" className="py-1.5 px-2 text-right">Counted</th>
+                      <th scope="col" className="py-1.5 px-2 text-right">Variance</th>
+                      <th scope="col" className="py-1.5 px-2">Unit</th>
+                      <th scope="col" className="py-1.5 pl-2">Reason</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y" style={{ borderColor: 'var(--aurora-border)' }}>
@@ -856,7 +899,7 @@ export default function StockAdjustmentsPage() {
 
       <PageHeader title="Stock Adjustments" subtitle="Reconcile inventory counts and corrections" />
 
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <StatCard label="Total" value={data?.total ?? 0} />
         <StatCard label="Draft (page)" value={counts.draft} />
         <StatCard label="Pending (page)" value={counts.pending} />
@@ -885,6 +928,7 @@ export default function StockAdjustmentsPage() {
         filters={
           <>
             <select
+              aria-label="Filter by company"
               value={companyId}
               onChange={(e) => {
                 setCompanyId(e.target.value);
@@ -901,6 +945,7 @@ export default function StockAdjustmentsPage() {
               ))}
             </select>
             <select
+              aria-label="Filter by status"
               value={status}
               onChange={(e) => {
                 setStatus(e.target.value);
@@ -944,46 +989,55 @@ export default function StockAdjustmentsPage() {
           </>
         }
         actions={
-          canCreate ? (
-            <Btn variant="primary" onClick={() => setCreating(true)}>
-              + New Adjustment
+          <>
+            <Btn
+              variant="secondary"
+              onClick={exportCsv}
+              disabled={!data?.data.length}
+            >
+              Export CSV
             </Btn>
-          ) : null
+            {canCreate ? (
+              <Btn variant="primary" onClick={() => setCreating(true)}>
+                + New Adjustment
+              </Btn>
+            ) : null}
+          </>
         }
       />
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[900px]">
+            <caption className="sr-only">Stock adjustments</caption>
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
                 style={{ color: 'var(--aurora-text-muted)' }}
               >
-                <th className="px-4 py-3">Number</th>
-                <th className="px-4 py-3">Company</th>
-                <th className="px-4 py-3">Branch / Location</th>
-                <th className="px-4 py-3">Reason</th>
-                <th className="px-4 py-3">Lines</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+                <th scope="col" className="px-4 py-3">Number</th>
+                <th scope="col" className="px-4 py-3">Company</th>
+                <th scope="col" className="px-4 py-3">Branch / Location</th>
+                <th scope="col" className="px-4 py-3">Reason</th>
+                <th scope="col" className="px-4 py-3">Lines</th>
+                <th scope="col" className="px-4 py-3">Status</th>
+                <th scope="col" className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7}>
-                    <PageSpinner />
+                  <td colSpan={7} className="p-3">
+                    <SkeletonTable rows={6} cols={7} />
                   </td>
                 </tr>
               ) : !data?.data.length ? (
                 <tr>
-                  <td
-                    colSpan={7}
-                    className="px-4 py-10 text-center text-sm"
-                    style={{ color: 'var(--aurora-text-muted)' }}
-                  >
-                    No adjustments
+                  <td colSpan={7}>
+                    <EmptyState
+                      title="No adjustments"
+                      description="No stock adjustments match the current filters."
+                    />
                   </td>
                 </tr>
               ) : (

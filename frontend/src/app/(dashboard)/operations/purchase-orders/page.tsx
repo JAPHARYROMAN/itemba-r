@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { DocumentPreviewLink } from '@/components/documents';
 import {
   Card,
@@ -12,6 +13,7 @@ import {
   ConfirmDialog,
   Btn,
   SkeletonTable,
+  EmptyState,
   FormInput,
   FormSelect,
   FormTextarea,
@@ -791,6 +793,7 @@ export default function PurchaseOrdersPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<PurchaseOrder> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [searchInput, setSearchInput] = useState('');
   const [filterSearch, setFilterSearch] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
   const [filterType, setFilterType] = useState('');
@@ -865,6 +868,18 @@ export default function PurchaseOrdersPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Debounce the search field (~300ms) so typing doesn't fire a fetch per keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setFilterSearch((current) => {
+        if (current === searchInput) return current;
+        setPage(1);
+        return searchInput;
+      });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   // Export the FULL filtered register (not just the visible page) to CSV.
   const exportCsv = useCallback(async () => {
@@ -1087,7 +1102,7 @@ export default function PurchaseOrdersPage() {
         subtitle="Supplier orders, receiving, and procurement spend"
       />
 
-      <div className="grid grid-cols-4 gap-3 aurora-stagger">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 aurora-stagger">
         <StatCard label="Total Orders" value={data?.total ?? 0} />
         <StatCard label="Confirmed (page)" value={stats.confirmed} />
         <StatCard label="Received (page)" value={stats.received} />
@@ -1112,15 +1127,13 @@ export default function PurchaseOrdersPage() {
       )}
 
       <PageToolbar
-        search={filterSearch}
-        onSearch={(v) => {
-          setFilterSearch(v);
-          setPage(1);
-        }}
+        search={searchInput}
+        onSearch={setSearchInput}
         searchPlaceholder="Order # or supplier…"
         filters={
           <>
             <select
+              aria-label="Filter by company"
               value={filterCompany}
               onChange={(e) => {
                 setFilterCompany(e.target.value);
@@ -1137,6 +1150,7 @@ export default function PurchaseOrdersPage() {
               ))}
             </select>
             <select
+              aria-label="Filter by purchase type"
               value={filterType}
               onChange={(e) => {
                 setFilterType(e.target.value);
@@ -1153,6 +1167,7 @@ export default function PurchaseOrdersPage() {
               ))}
             </select>
             <select
+              aria-label="Filter by status"
               value={filterStatus}
               onChange={(e) => {
                 setFilterStatus(e.target.value);
@@ -1169,6 +1184,7 @@ export default function PurchaseOrdersPage() {
               ))}
             </select>
             <select
+              aria-label="Filter by payment status"
               value={filterPayment}
               onChange={(e) => {
                 setFilterPayment(e.target.value);
@@ -1186,6 +1202,7 @@ export default function PurchaseOrdersPage() {
             </select>
             <input
               type="date"
+              aria-label="Filter from date"
               value={filterDateFrom}
               onChange={(e) => {
                 setFilterDateFrom(e.target.value);
@@ -1196,6 +1213,7 @@ export default function PurchaseOrdersPage() {
             />
             <input
               type="date"
+              aria-label="Filter to date"
               value={filterDateTo}
               onChange={(e) => {
                 setFilterDateTo(e.target.value);
@@ -1222,21 +1240,22 @@ export default function PurchaseOrdersPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1100px]">
+          <table className="w-full text-sm min-w-[1100px]" aria-label="Purchase orders">
+            <caption className="sr-only">Purchase orders with status, totals, and actions</caption>
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
                 style={{ color: 'var(--aurora-text-muted)' }}
               >
-                <th className="px-4 py-3">Number</th>
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Supplier</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3 text-right">Total</th>
-                <th className="px-4 py-3 text-right">Outstanding</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Payment</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+                <th scope="col" className="px-4 py-3">Number</th>
+                <th scope="col" className="px-4 py-3">Date</th>
+                <th scope="col" className="px-4 py-3">Supplier</th>
+                <th scope="col" className="px-4 py-3">Type</th>
+                <th scope="col" className="px-4 py-3 text-right">Total</th>
+                <th scope="col" className="px-4 py-3 text-right">Outstanding</th>
+                <th scope="col" className="px-4 py-3">Status</th>
+                <th scope="col" className="px-4 py-3">Payment</th>
+                <th scope="col" className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -1248,16 +1267,17 @@ export default function PurchaseOrdersPage() {
                 </tr>
               ) : !data?.data.length ? (
                 <tr>
-                  <td
-                    colSpan={9}
-                    className="px-4 py-10 text-center text-sm"
-                    style={{ color: 'var(--aurora-text-muted)' }}
-                  >
-                    No orders
+                  <td colSpan={9}>
+                    <EmptyState
+                      title="No purchase orders"
+                      description="No orders match the current filters."
+                    />
                   </td>
                 </tr>
               ) : (
-                data.data.map((o) => (
+                data.data.map((o) => {
+                  const orderLabel = o.purchaseOrderNumber ?? o.id.slice(0, 8);
+                  return (
                   <tr key={o.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono text-xs">
                       {o.purchaseOrderNumber ?? o.id.slice(0, 8)}
@@ -1286,9 +1306,21 @@ export default function PurchaseOrdersPage() {
                       <StatusBadge value={o.paymentStatus} />
                     </td>
                     <td className="px-4 py-3 text-right space-x-1">
+                      <Link
+                        href={`/operations/purchase-orders/${o.id}`}
+                        aria-label={`View order ${orderLabel}`}
+                        className="inline-flex items-center justify-center px-2.5 py-1 text-[11px] rounded-md font-medium bg-transparent text-zinc-600 hover:bg-zinc-100 border border-transparent transition"
+                      >
+                        View
+                      </Link>
                       <DocumentPreviewLink href={`/operations/purchase-orders/${o.id}/print`} />
                       {o.status === 'DRAFT' && canCreate && (
-                        <Btn variant="ghost" size="xs" onClick={() => setEditing(o)}>
+                        <Btn
+                          variant="ghost"
+                          size="xs"
+                          aria-label={`Edit order ${orderLabel}`}
+                          onClick={() => setEditing(o)}
+                        >
                           Edit
                         </Btn>
                       )}
@@ -1296,6 +1328,7 @@ export default function PurchaseOrdersPage() {
                         <Btn
                           variant="primary"
                           size="xs"
+                          aria-label={`Confirm order ${orderLabel}`}
                           loading={actionLoading === `${o.id}:confirm`}
                           onClick={() => setPendingAction({ id: o.id, action: 'confirm' })}
                         >
@@ -1304,7 +1337,12 @@ export default function PurchaseOrdersPage() {
                       )}
                       {(o.status === 'CONFIRMED' || o.status === 'PARTIALLY_RECEIVED') &&
                         canReceive && (
-                          <Btn variant="success" size="xs" onClick={() => setReceiving(o)}>
+                          <Btn
+                            variant="success"
+                            size="xs"
+                            aria-label={`Receive order ${orderLabel}`}
+                            onClick={() => setReceiving(o)}
+                          >
                             Receive
                           </Btn>
                         )}
@@ -1312,6 +1350,7 @@ export default function PurchaseOrdersPage() {
                         <Btn
                           variant="danger"
                           size="xs"
+                          aria-label={`Cancel order ${orderLabel}`}
                           loading={actionLoading === `${o.id}:cancel`}
                           onClick={() => setPendingAction({ id: o.id, action: 'cancel' })}
                         >
@@ -1319,13 +1358,19 @@ export default function PurchaseOrdersPage() {
                         </Btn>
                       )}
                       {o.status === 'DRAFT' && canCreate && (
-                        <Btn variant="ghost" size="xs" onClick={() => setDeleting(o)}>
+                        <Btn
+                          variant="ghost"
+                          size="xs"
+                          aria-label={`Delete order ${orderLabel}`}
+                          onClick={() => setDeleting(o)}
+                        >
                           Delete
                         </Btn>
                       )}
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>

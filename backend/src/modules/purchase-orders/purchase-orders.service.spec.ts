@@ -8,6 +8,11 @@ function makeService() {
       update: jest.fn(async ({ data }: any) => ({ id: 'po-1', companyId: 'company-1', ...data })),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       findFirst: jest.fn(),
+      findUniqueOrThrow: jest.fn(async () => ({ id: 'po-1', companyId: 'company-1' })),
+      groupBy: jest.fn().mockResolvedValue([]),
+    },
+    cashAccount: {
+      findMany: jest.fn().mockResolvedValue([]),
     },
     inventoryMovement: {
       findFirst: jest.fn().mockResolvedValue(null),
@@ -359,5 +364,84 @@ describe('PurchaseOrdersService payment state', () => {
       'has no active tank at the purchase order receiving branch',
     );
     expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+  });
+});
+
+describe('PurchaseOrdersService.summary', () => {
+  it('rolls status group sums into register-wide totals', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.groupBy.mockResolvedValue([
+      {
+        status: 'DRAFT',
+        _count: { _all: 2 },
+        _sum: { totalAmount: 100, outstandingAmount: 100 },
+      },
+      {
+        status: 'RECEIVED',
+        _count: { _all: 1 },
+        _sum: { totalAmount: 400, outstandingAmount: 0 },
+      },
+    ]);
+
+    const result = await service.summary({ companyId: 'company-1' } as any, user);
+
+    expect(prisma.purchaseOrder.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        by: ['status'],
+        where: expect.objectContaining({ deletedAt: null, companyId: 'company-1' }),
+        _sum: { totalAmount: true, outstandingAmount: true },
+      }),
+    );
+    expect(result.totals).toEqual({ count: 3, totalAmount: 500, outstandingAmount: 100 });
+    expect(result.byStatus).toEqual([
+      { status: 'DRAFT', count: 2, totalAmount: 100, outstandingAmount: 100 },
+      { status: 'RECEIVED', count: 1, totalAmount: 400, outstandingAmount: 0 },
+    ]);
+  });
+});
+
+describe('PurchaseOrdersService.confirm cash account currency', () => {
+  function draftOrder(currency: string, purchaseType = 'CASH_PURCHASE') {
+    return {
+      id: 'po-1',
+      companyId: 'company-1',
+      branchId: 'branch-1',
+      divisionId: 'division-1',
+      purchaseType,
+      currency,
+      status: 'DRAFT',
+      lines: [],
+    };
+  }
+
+  it('blocks a cash purchase when no cash account holds the order currency', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findFirst.mockResolvedValue(draftOrder('USD'));
+    prisma.cashAccount.findMany.mockResolvedValue([{ currency: 'TZS' }]);
+
+    await expect(service.confirm('po-1', user)).rejects.toThrow('No active cash account holds USD');
+    expect(prisma.purchaseOrder.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('confirms a cash purchase when a cash account currency matches', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findFirst.mockResolvedValue(draftOrder('TZS'));
+    prisma.cashAccount.findMany.mockResolvedValue([{ currency: 'TZS' }]);
+
+    await service.confirm('po-1', user);
+
+    expect(prisma.purchaseOrder.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'po-1', status: 'DRAFT' } }),
+    );
+  });
+
+  it('does not currency-check a credit purchase', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findFirst.mockResolvedValue(draftOrder('USD', 'CREDIT_PURCHASE'));
+
+    await service.confirm('po-1', user);
+
+    expect(prisma.cashAccount.findMany).not.toHaveBeenCalled();
+    expect(prisma.purchaseOrder.updateMany).toHaveBeenCalled();
   });
 });

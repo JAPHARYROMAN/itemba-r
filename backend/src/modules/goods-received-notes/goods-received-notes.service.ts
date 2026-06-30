@@ -5,6 +5,13 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
+import { UpdateGoodsReceivedNoteDto } from './dto/update-goods-received-note.dto';
+
+// Quantities are Decimal(18,4) but compared here as JS numbers; this tolerance
+// absorbs binary-float rounding (e.g. 0.1 + 0.2 = 0.30000000000000004) so an exact
+// receipt isn't falsely rejected as over-receipt or mis-classified as partial. It
+// is far below the 4-decimal storage precision, so it never masks a real overage.
+const QTY_EPSILON = 1e-6;
 
 @Injectable()
 export class GoodsReceivedNotesService {
@@ -95,8 +102,15 @@ export class GoodsReceivedNotesService {
     return item;
   }
 
-  async update(id: string, dto: any, user: AuthUser) {
+  async update(id: string, dto: UpdateGoodsReceivedNoteDto, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    // Once a GRN is approved/posted it has driven (or is about to drive) inventory
+    // movements and purchase-order receipt state, so its header and lines must stay
+    // immutable. Only DRAFTs are editable.
+    if (existing.status !== 'DRAFT') {
+      throw new BadRequestException('Only DRAFT GRNs can be edited');
+    }
+    const { lines, ...rest } = dto;
     const scope = await this.resolveReceiptScope({
       companyId: dto.companyId ?? existing.companyId,
       divisionId: dto.divisionId !== undefined ? dto.divisionId : existing.divisionId,
@@ -106,7 +120,17 @@ export class GoodsReceivedNotesService {
     });
     const updated = await this.prisma.goodsReceivedNote.update({
       where: { id },
-      data: { ...dto, divisionId: scope.divisionId, branchId: scope.branchId },
+      data: {
+        ...rest,
+        divisionId: scope.divisionId,
+        branchId: scope.branchId,
+        // Replacing the lines wholesale mirrors the create idiom and keeps the
+        // accepted/received quantities consistent with the header on a DRAFT.
+        // NOTE (deferred): persisting per-line landed/unit cost on the GRN needs a
+        // new `unitCost` column on GoodsReceivedNoteLine (a DB migration), so it is
+        // intentionally not captured here.
+        ...(lines ? { lines: { deleteMany: {}, create: lines as any } } : {}),
+      },
     });
     await this.auditLogs.log({
       action: 'GOODS_RECEIVED_NOTE_UPDATE',
@@ -199,7 +223,6 @@ export class GoodsReceivedNotesService {
         await this.assertLinkedPurchaseOrderCanReceiveStock({
           purchaseOrderId: existing.purchaseOrderId,
           companyId: existing.companyId,
-          goodsReceivedNoteId: existing.id,
           tx,
         });
       }
@@ -216,7 +239,14 @@ export class GoodsReceivedNotesService {
       const productIds = Array.from(new Set(existing.lines.map((line) => line.productId)));
       const products = await tx.product.findMany({
         where: { id: { in: productIds }, companyId: existing.companyId, deletedAt: null },
-        select: { id: true, name: true, trackInventory: true },
+        select: {
+          id: true,
+          name: true,
+          trackInventory: true,
+          baseUnitId: true,
+          defaultPurchasePrice: true,
+          productFamily: { select: { defaultPurchasePrice: true } },
+        },
       });
       const productById = new Map(products.map((product) => [product.id, product]));
       if (productById.size !== productIds.length) {
@@ -229,6 +259,7 @@ export class GoodsReceivedNotesService {
             select: {
               productId: true,
               unitId: true,
+              quantity: true,
               unitCost: true,
               batchNumber: true,
               expiryDate: true,
@@ -239,12 +270,119 @@ export class GoodsReceivedNotesService {
         poLines.map((line) => [`${line.productId}:${line.unitId}`, line]),
       );
 
+      // Ordered quantity per PO line, keyed by product:unit. A PO can in principle
+      // carry the same product on multiple lines/units, so we accumulate.
+      const orderedByProductUnit = new Map<string, number>();
+      const orderedProductIds = new Set<string>();
+      for (const poLine of poLines) {
+        const key = `${poLine.productId}:${poLine.unitId}`;
+        orderedByProductUnit.set(key, (orderedByProductUnit.get(key) ?? 0) + Number(poLine.quantity));
+        orderedProductIds.add(poLine.productId);
+      }
+
+      // Quantity already accepted on this PO by *prior* POSTED GRNs. This GRN was
+      // just flipped to POSTED above, so we exclude it explicitly by id.
+      const priorReceivedByProductUnit = new Map<string, number>();
+      if (existing.purchaseOrderId) {
+        const priorLines = await tx.goodsReceivedNoteLine.findMany({
+          where: {
+            goodsReceivedNote: {
+              purchaseOrderId: existing.purchaseOrderId,
+              companyId: existing.companyId,
+              status: 'POSTED' as any,
+              deletedAt: null,
+              id: { not: existing.id },
+            },
+          },
+          select: { productId: true, unitId: true, acceptedQuantity: true },
+        });
+        for (const priorLine of priorLines) {
+          const key = `${priorLine.productId}:${priorLine.unitId}`;
+          priorReceivedByProductUnit.set(
+            key,
+            (priorReceivedByProductUnit.get(key) ?? 0) + Number(priorLine.acceptedQuantity),
+          );
+        }
+      }
+
+      // Over-receipt guard: the running received-to-date (prior POSTED GRNs + this
+      // GRN) must never exceed the ordered quantity for any PO line.
+      if (existing.purchaseOrderId) {
+        const thisReceiptByProductUnit = new Map<string, number>();
+        for (const line of existing.lines) {
+          const key = `${line.productId}:${line.unitId}`;
+          thisReceiptByProductUnit.set(
+            key,
+            (thisReceiptByProductUnit.get(key) ?? 0) + Number(line.acceptedQuantity),
+          );
+        }
+        for (const [key, accepted] of thisReceiptByProductUnit) {
+          if (!orderedByProductUnit.has(key)) {
+            // Product is on the PO but received in a different unit than ordered.
+            // There is no unit conversion in this path, so quantities cannot be
+            // reconciled — reject rather than let the over-receipt ceiling be
+            // silently bypassed (which would also leave the PO stuck at
+            // PARTIALLY_RECEIVED forever). A product NOT on the PO at all carries
+            // no ordered ceiling and is allowed through.
+            const productId = key.slice(0, key.indexOf(':'));
+            if (orderedProductIds.has(productId)) {
+              throw new BadRequestException(
+                'Received unit does not match the ordered unit for this product on the purchase order',
+              );
+            }
+            continue;
+          }
+          const ordered = orderedByProductUnit.get(key) ?? 0;
+          const prior = priorReceivedByProductUnit.get(key) ?? 0;
+          if (prior + accepted - ordered > QTY_EPSILON) {
+            throw new BadRequestException(
+              'Accepted quantity exceeds the outstanding ordered quantity on the purchase order',
+            );
+          }
+        }
+      }
+
       for (const line of existing.lines) {
         const product = productById.get(line.productId);
         if (!product?.trackInventory) continue;
         const acceptedQuantity = Number(line.acceptedQuantity);
         if (acceptedQuantity <= 0) continue;
         const poLine = poLineByProductUnit.get(`${line.productId}:${line.unitId}`);
+        // Resolve a real per-unit cost for this receipt, in priority order:
+        //   1. the GRN line's own captured unitCost (an explicit landed cost),
+        //   2. the matching PO line's unitCost (keyed by product:unit, so unit-safe),
+        //   3. the product (then family) default purchase price.
+        // The product/family defaults are denominated in the product's BASE unit and
+        // there is no UoM conversion in this path, so they are only valid when the
+        // received unit IS the base unit. When nothing applies the cost is left
+        // undefined so the receipt fails loudly via assertInventoryMovementHasCost
+        // rather than valuing at a wrong-unit cost (which would corrupt WAC).
+        const baseUnitDefaultCost =
+          line.unitId === product.baseUnitId
+            ? product.defaultPurchasePrice != null
+              ? Number(product.defaultPurchasePrice)
+              : product.productFamily?.defaultPurchasePrice != null
+                ? Number(product.productFamily.defaultPurchasePrice)
+                : undefined
+            : undefined;
+        // Guard on poLine.unitCost being non-null (not just poLine existing): a PO
+        // line with a NULL unitCost must fall through to the base-unit default,
+        // otherwise Number(null)=0 would value the receipt at 0 and corrupt WAC. An
+        // explicit 0 (genuinely free goods) is honoured.
+        const resolvedUnitCost =
+          line.unitCost != null
+            ? Number(line.unitCost)
+            : poLine?.unitCost != null
+              ? Number(poLine.unitCost)
+              : baseUnitDefaultCost;
+        // Persist the resolved cost back onto the GRN line so the posted receipt
+        // carries the cost it was valued at (lines without their own unitCost yet).
+        if (line.unitCost == null && resolvedUnitCost != null) {
+          await tx.goodsReceivedNoteLine.update({
+            where: { id: line.id },
+            data: { unitCost: resolvedUnitCost },
+          });
+        }
         await this.inventoryMovements.createMovement({
           companyId: existing.companyId,
           divisionId: existing.divisionId ?? undefined,
@@ -253,7 +391,7 @@ export class GoodsReceivedNotesService {
           movementType: 'PURCHASE_RECEIPT',
           quantity: acceptedQuantity,
           unitId: line.unitId,
-          unitCost: poLine ? Number(poLine.unitCost) : undefined,
+          unitCost: resolvedUnitCost,
           movementDate: existing.receivedDate,
           createdById: user.id,
           referenceType: 'GoodsReceivedNote',
@@ -266,6 +404,21 @@ export class GoodsReceivedNotesService {
       }
 
       if (existing.purchaseOrderId) {
+        // Roll the running received-to-date forward with this GRN's accepted
+        // quantities, then decide PARTIALLY_RECEIVED vs RECEIVED. The PO is only
+        // RECEIVED once every ordered line has been fully received-to-date.
+        const receivedByProductUnit = new Map(priorReceivedByProductUnit);
+        for (const line of existing.lines) {
+          const key = `${line.productId}:${line.unitId}`;
+          receivedByProductUnit.set(
+            key,
+            (receivedByProductUnit.get(key) ?? 0) + Number(line.acceptedQuantity),
+          );
+        }
+        const fullyReceived = [...orderedByProductUnit.entries()].every(
+          ([key, ordered]) => (receivedByProductUnit.get(key) ?? 0) >= ordered - QTY_EPSILON,
+        );
+        const nextStatus = fullyReceived ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
         await tx.purchaseOrder.updateMany({
           where: {
             id: existing.purchaseOrderId,
@@ -274,9 +427,11 @@ export class GoodsReceivedNotesService {
             status: { in: ['CONFIRMED', 'PARTIALLY_RECEIVED'] as any },
           },
           data: {
-            status: 'RECEIVED' as any,
-            receivedAt: existing.receivedDate,
-            receivedById: user.id,
+            status: nextStatus as any,
+            // Only stamp the received-by/at fields once the PO is fully received.
+            ...(fullyReceived
+              ? { receivedAt: existing.receivedDate, receivedById: user.id }
+              : {}),
           },
         });
       }
@@ -304,10 +459,9 @@ export class GoodsReceivedNotesService {
   private async assertLinkedPurchaseOrderCanReceiveStock(input: {
     purchaseOrderId: string;
     companyId: string;
-    goodsReceivedNoteId: string;
     tx: Prisma.TransactionClient;
   }) {
-    const [purchaseOrder, directReceipt, postedGrn] = await Promise.all([
+    const [purchaseOrder, directReceipt] = await Promise.all([
       input.tx.purchaseOrder.findFirst({
         where: { id: input.purchaseOrderId, companyId: input.companyId, deletedAt: null },
         select: { status: true, purchaseOrderNumber: true },
@@ -320,16 +474,6 @@ export class GoodsReceivedNotesService {
           movementType: 'PURCHASE_RECEIPT',
         },
         select: { id: true },
-      }),
-      input.tx.goodsReceivedNote.findFirst({
-        where: {
-          companyId: input.companyId,
-          purchaseOrderId: input.purchaseOrderId,
-          status: 'POSTED',
-          deletedAt: null,
-          id: { not: input.goodsReceivedNoteId },
-        },
-        select: { grnNumber: true },
       }),
     ]);
 
@@ -347,13 +491,12 @@ export class GoodsReceivedNotesService {
       );
     }
     if (directReceipt) {
+      // A direct (non-GRN) PO stock receipt already exists. Layering GRN receipts
+      // on top of that path would double-count, so block it. Prior POSTED GRNs are
+      // intentionally allowed here to support partial receiving across GRNs; the
+      // over-receipt guard in post() enforces the ordered-quantity ceiling.
       throw new BadRequestException(
         `Purchase order ${purchaseOrder.purchaseOrderNumber} already has posted stock receipts`,
-      );
-    }
-    if (postedGrn) {
-      throw new BadRequestException(
-        `Purchase order ${purchaseOrder.purchaseOrderNumber} was already posted by GRN ${postedGrn.grnNumber}`,
       );
     }
   }

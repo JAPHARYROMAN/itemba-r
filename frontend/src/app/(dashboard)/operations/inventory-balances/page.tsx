@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Btn, Card, PageHeader, PageToolbar, ProductPicker, StatCard, PageSpinner } from '@/components/ui';
+import { Btn, Card, PageHeader, PageToolbar, ProductPicker, StatCard, SkeletonTable, EmptyState } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList, backendPage } from '@/lib/api-client';
 import { toFiniteNumber } from '@/lib/design-system/formatters';
+import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,16 @@ function fmtDate(d?: string | null) {
     month: 'short',
     year: 'numeric',
   });
+}
+
+function stockStatus(balance: InventoryBalance): string {
+  const quantityOnHand = toFiniteNumber(balance.quantityOnHand);
+  const available = quantityOnHand - toFiniteNumber(balance.quantityReserved);
+  if (quantityOnHand <= 0) return 'Out of Stock';
+  if (available < 0) return 'Oversold';
+  const reorderLevel = balance.product?.reorderLevel;
+  if (reorderLevel != null && quantityOnHand <= toFiniteNumber(reorderLevel)) return 'Low Stock';
+  return 'In Stock';
 }
 
 function StockBadge({ balance }: { balance: InventoryBalance }) {
@@ -209,6 +220,30 @@ export default function InventoryBalancesPage() {
     setPage(1);
   };
 
+  const exportCsv = () => {
+    const exportRows = (data?.data ?? []).map((bal) => ({
+      'Product Code': bal.product?.productCode ?? '',
+      'Product Name': bal.product?.name ?? '',
+      'Branch / Location': bal.branch
+        ? `${bal.branch.code ? `${bal.branch.code} - ` : ''}${bal.branch.name}`
+        : '',
+      Company: bal.company?.name ?? '',
+      Status: stockStatus(bal),
+      'Qty On Hand': fmtNum(bal.quantityOnHand),
+      'Qty Reserved': fmtNum(bal.quantityReserved),
+      'Qty Available': fmtNum(
+        toFiniteNumber(bal.quantityOnHand) - toFiniteNumber(bal.quantityReserved),
+      ),
+      'Avg Cost': fmtNum(bal.averageCost),
+      'Total Value': fmtNum(bal.totalValue),
+      'Last Movement': fmtDate(bal.lastMovementAt),
+    }));
+    const csv = rowsToCsv(exportRows as Record<string, unknown>[]);
+    if (!csv) return;
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadTextFile(`inventory-balances-${stamp}.csv`, 'text/csv;charset=utf-8', csv);
+  };
+
   if (!canView) {
     return (
       <div className="p-6">
@@ -257,9 +292,20 @@ export default function InventoryBalancesPage() {
 
       <PageToolbar
         actions={
-          <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-            {data?.total ?? 0} records
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              {data?.total ?? 0} records
+            </span>
+            <Btn
+              variant="secondary"
+              size="xs"
+              onClick={exportCsv}
+              disabled={!rows.length}
+              aria-label="Export filtered inventory balances to CSV"
+            >
+              Export CSV
+            </Btn>
+          </div>
         }
         filters={
           <>
@@ -271,6 +317,7 @@ export default function InventoryBalancesPage() {
               }}
               className={filterSelectCls}
               style={filterStyle}
+              aria-label="Filter by company"
             >
               <option value="">Select Company (required)…</option>
               {companies.map((c) => (
@@ -314,40 +361,49 @@ export default function InventoryBalancesPage() {
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[900px]">
+            <caption className="sr-only">
+              Inventory balances by product and branch/location
+            </caption>
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
                 style={{ color: 'var(--aurora-text-muted)' }}
               >
-                <th className={thCls}>Product Code</th>
-                <th className={thCls}>Product Name</th>
-                <th className={thCls}>Branch / Location</th>
-                <th className={thCls}>Company</th>
-                <th className={`${thCls} text-right`}>Qty On Hand</th>
-                <th className={`${thCls} text-right`}>Qty Reserved</th>
-                <th className={`${thCls} text-right`}>Qty Available</th>
-                <th className={`${thCls} text-right`}>Avg Cost</th>
-                <th className={`${thCls} text-right`}>Total Value</th>
-                <th className={thCls}>Last Movement</th>
+                <th scope="col" className={thCls}>Product Code</th>
+                <th scope="col" className={thCls}>Product Name</th>
+                <th scope="col" className={thCls}>Branch / Location</th>
+                <th scope="col" className={thCls}>Company</th>
+                <th scope="col" className={`${thCls} text-right`}>Qty On Hand</th>
+                <th scope="col" className={`${thCls} text-right`}>Qty Reserved</th>
+                <th scope="col" className={`${thCls} text-right`}>Qty Available</th>
+                <th scope="col" className={`${thCls} text-right`}>Avg Cost</th>
+                <th scope="col" className={`${thCls} text-right`}>Total Value</th>
+                <th scope="col" className={thCls}>Last Movement</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
                   <td colSpan={10}>
-                    <PageSpinner />
+                    <SkeletonTable rows={6} cols={10} />
                   </td>
                 </tr>
               ) : !companyId ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-400">
-                    Select a company to view balances.
+                  <td colSpan={10}>
+                    <EmptyState
+                      title="Select a company"
+                      description="Choose a company to view inventory balances."
+                    />
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-400">
-                    No inventory balances found.
+                  <td colSpan={10}>
+                    <EmptyState
+                      title="No inventory balances"
+                      description="No inventory balances match the current filters."
+                    />
                   </td>
                 </tr>
               ) : (

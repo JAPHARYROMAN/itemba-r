@@ -152,6 +152,7 @@ describe('Procurement and statement company isolation (P0-01 regression)', () =>
       new CompanyScopeService(prisma),
       { resolve: jest.fn() } as any,
       { postLines: jest.fn() } as any,
+      { next: jest.fn().mockResolvedValue('TWM-2026-000001') } as any,
     );
 
     await expect(

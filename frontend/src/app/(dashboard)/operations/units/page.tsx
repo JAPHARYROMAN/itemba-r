@@ -5,10 +5,12 @@ import {
   Card,
   PageHeader,
   StatCard,
+  StatusBadge,
+  SkeletonTable,
+  EmptyState,
   Modal,
   ConfirmDialog,
   Btn,
-  PageSpinner,
   FormInput,
   FormSelect,
   FormTextarea,
@@ -21,6 +23,7 @@ import {
   backendPatch,
   backendPost,
 } from '@/lib/api-client';
+import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
 
 interface Company {
   id: string;
@@ -315,6 +318,15 @@ function ConversionModal({
     return active;
   }, [allUnits, mode, initial]);
 
+  // Live preview: "1 <from> = <factor> <to>" using whatever is currently typed.
+  const preview = useMemo(() => {
+    const from = selectableUnits.find((u) => u.id === form.fromUnitId);
+    const to = selectableUnits.find((u) => u.id === form.toUnitId);
+    const factor = Number(form.conversionFactor);
+    if (!from || !to || !Number.isFinite(factor) || factor <= 0) return null;
+    return `1 ${from.symbol} = ${factor} ${to.symbol}`;
+  }, [selectableUnits, form.fromUnitId, form.toUnitId, form.conversionFactor]);
+
   const handleSubmit = async () => {
     if (!form.fromUnitId || !form.toUnitId) {
       setError('Both units required');
@@ -409,6 +421,16 @@ function ConversionModal({
           value={form.conversionFactor}
           onChange={(e) => set('conversionFactor', e.target.value)}
         />
+        <div
+          aria-live="polite"
+          className="rounded-lg border px-3 py-2 text-sm font-mono"
+          style={{
+            borderColor: 'var(--aurora-border)',
+            color: 'var(--aurora-text-muted)',
+          }}
+        >
+          {preview ?? 'Select both units and a factor to preview the conversion'}
+        </div>
         <FormTextarea
           label="Description"
           rows={2}
@@ -440,6 +462,8 @@ export default function UnitsPage() {
   const [error, setError] = useState('');
   const [unitsPage, setUnitsPage] = useState(1);
   const [convPage, setConvPage] = useState(1);
+  const [unitSearch, setUnitSearch] = useState('');
+  const [debouncedUnitSearch, setDebouncedUnitSearch] = useState('');
 
   const [creatingUnit, setCreatingUnit] = useState(false);
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
@@ -478,12 +502,22 @@ export default function UnitsPage() {
     };
   }, [canView]);
 
+  useEffect(() => {
+    const id = setTimeout(() => {
+      setDebouncedUnitSearch(unitSearch);
+      setUnitsPage(1);
+    }, 300);
+    return () => clearTimeout(id);
+  }, [unitSearch]);
+
   const loadUnits = useCallback(async () => {
     if (!canView) return;
     setUnitsLoading(true);
     setError('');
     try {
-      const result = await backendPage<Unit>('/units', { query: { page: unitsPage, limit: 20 } });
+      const result = await backendPage<Unit>('/units', {
+        query: { page: unitsPage, limit: 20, search: debouncedUnitSearch.trim() || undefined },
+      });
       setUnits(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load units');
@@ -491,7 +525,7 @@ export default function UnitsPage() {
     } finally {
       setUnitsLoading(false);
     }
-  }, [canView, unitsPage]);
+  }, [canView, unitsPage, debouncedUnitSearch]);
 
   const loadConversions = useCallback(async () => {
     if (!canView) return;
@@ -553,6 +587,33 @@ export default function UnitsPage() {
     } finally {
       setDeleteBusy(false);
     }
+  };
+
+  const exportUnits = () => {
+    const rows = (units?.data ?? []).map((u) => ({
+      Name: u.name,
+      Symbol: u.symbol,
+      Type: u.unitType,
+      Scope: u.isSystemUnit
+        ? 'System'
+        : u.companyId
+          ? (companyNameById.get(u.companyId) ?? '')
+          : '',
+      Base: u.isBaseUnit ? 'Yes' : 'No',
+      Status: u.status,
+    }));
+    downloadTextFile('units.csv', 'text/csv', rowsToCsv(rows));
+  };
+
+  const exportConversions = () => {
+    const rows = (conversions?.data ?? []).map((c) => ({
+      From: `${c.fromUnit?.name ?? ''} (${c.fromUnit?.symbol ?? ''})`,
+      To: `${c.toUnit?.name ?? ''} (${c.toUnit?.symbol ?? ''})`,
+      Factor: c.conversionFactor,
+      Description: c.description ?? '',
+      Status: c.isActive ? 'ACTIVE' : 'INACTIVE',
+    }));
+    downloadTextFile('unit-conversions.csv', 'text/csv', rowsToCsv(rows));
   };
 
   if (!canView) {
@@ -655,7 +716,7 @@ export default function UnitsPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <StatCard label="Total Units" value={units?.total ?? 0} />
         <StatCard label="Active Units (page)" value={activeUnits} />
         <StatCard label="Conversions" value={conversions?.total ?? 0} />
@@ -670,42 +731,73 @@ export default function UnitsPage() {
           <div className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
             Units
           </div>
-          {canCreate && (
-            <Btn variant="primary" size="sm" onClick={() => setCreatingUnit(true)}>
-              + New Unit
+          <div className="flex items-center gap-2">
+            <input
+              type="search"
+              aria-label="Search units by name or symbol"
+              value={unitSearch}
+              onChange={(e) => setUnitSearch(e.target.value)}
+              placeholder="Search units…"
+              className="w-44 px-3 py-1.5 text-[13px] rounded-lg border transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+              style={{
+                color: 'var(--aurora-text)',
+                borderColor: 'var(--aurora-border)',
+                background: 'var(--aurora-card)',
+              }}
+            />
+            <Btn
+              variant="secondary"
+              size="sm"
+              onClick={exportUnits}
+              disabled={!units?.data.length}
+            >
+              Export CSV
             </Btn>
-          )}
+            {canCreate && (
+              <Btn variant="primary" size="sm" onClick={() => setCreatingUnit(true)}>
+                + New Unit
+              </Btn>
+            )}
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[700px]">
+            <caption className="sr-only">Units of measure</caption>
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
                 style={{ color: 'var(--aurora-text-muted)' }}
               >
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Symbol</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Scope</th>
-                <th className="px-4 py-3">Base</th>
-                {canCreate && <th className="px-4 py-3 text-right">Actions</th>}
+                <th scope="col" className="px-4 py-3">Name</th>
+                <th scope="col" className="px-4 py-3">Symbol</th>
+                <th scope="col" className="px-4 py-3">Type</th>
+                <th scope="col" className="px-4 py-3">Scope</th>
+                <th scope="col" className="px-4 py-3">Base</th>
+                {canCreate && (
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Actions
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {unitsLoading ? (
                 <tr>
-                  <td colSpan={6}>
-                    <PageSpinner />
+                  <td colSpan={6} className="p-4">
+                    <SkeletonTable rows={5} cols={canCreate ? 6 : 5} />
                   </td>
                 </tr>
               ) : !units?.data.length ? (
                 <tr>
-                  <td
-                    colSpan={6}
-                    className="px-4 py-10 text-center text-sm"
-                    style={{ color: 'var(--aurora-text-muted)' }}
-                  >
-                    No units found
+                  <td colSpan={6}>
+                    <EmptyState
+                      title="No units found"
+                      description={
+                        debouncedUnitSearch
+                          ? 'Try adjusting your search.'
+                          : 'Create a unit of measure to get started.'
+                      }
+                    />
                   </td>
                 </tr>
               ) : (
@@ -732,10 +824,20 @@ export default function UnitsPage() {
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         {!u.isSystemUnit && (
                           <>
-                            <Btn variant="ghost" size="xs" onClick={() => setEditingUnit(u)}>
+                            <Btn
+                              variant="ghost"
+                              size="xs"
+                              aria-label={`Edit ${u.name}`}
+                              onClick={() => setEditingUnit(u)}
+                            >
                               Edit
                             </Btn>
-                            <Btn variant="ghost" size="xs" onClick={() => setDeletingUnit(u)}>
+                            <Btn
+                              variant="ghost"
+                              size="xs"
+                              aria-label={`Delete ${u.name}`}
+                              onClick={() => setDeletingUnit(u)}
+                            >
                               Delete
                             </Btn>
                           </>
@@ -787,42 +889,56 @@ export default function UnitsPage() {
           <div className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
             Unit Conversions
           </div>
-          {canCreate && (
-            <Btn variant="primary" size="sm" onClick={() => setCreatingConv(true)}>
-              + New Conversion
+          <div className="flex items-center gap-2">
+            <Btn
+              variant="secondary"
+              size="sm"
+              onClick={exportConversions}
+              disabled={!conversions?.data.length}
+            >
+              Export CSV
             </Btn>
-          )}
+            {canCreate && (
+              <Btn variant="primary" size="sm" onClick={() => setCreatingConv(true)}>
+                + New Conversion
+              </Btn>
+            )}
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[700px]">
+            <caption className="sr-only">Unit conversions</caption>
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
                 style={{ color: 'var(--aurora-text-muted)' }}
               >
-                <th className="px-4 py-3">From</th>
-                <th className="px-4 py-3">To</th>
-                <th className="px-4 py-3 text-right">Factor</th>
-                <th className="px-4 py-3">Description</th>
-                <th className="px-4 py-3">Status</th>
-                {canCreate && <th className="px-4 py-3 text-right">Actions</th>}
+                <th scope="col" className="px-4 py-3">From</th>
+                <th scope="col" className="px-4 py-3">To</th>
+                <th scope="col" className="px-4 py-3 text-right">Factor</th>
+                <th scope="col" className="px-4 py-3">Description</th>
+                <th scope="col" className="px-4 py-3">Status</th>
+                {canCreate && (
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Actions
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {convLoading ? (
                 <tr>
-                  <td colSpan={6}>
-                    <PageSpinner />
+                  <td colSpan={6} className="p-4">
+                    <SkeletonTable rows={5} cols={canCreate ? 6 : 5} />
                   </td>
                 </tr>
               ) : !conversions?.data.length ? (
                 <tr>
-                  <td
-                    colSpan={6}
-                    className="px-4 py-10 text-center text-sm"
-                    style={{ color: 'var(--aurora-text-muted)' }}
-                  >
-                    No conversions found
+                  <td colSpan={6}>
+                    <EmptyState
+                      title="No conversions found"
+                      description="Define a conversion between two units to get started."
+                    />
                   </td>
                 </tr>
               ) : (
@@ -851,20 +967,33 @@ export default function UnitsPage() {
                       {c.description ?? '—'}
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${c.isActive ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-zinc-100 text-zinc-500 border-zinc-200'}`}
-                      >
-                        {c.isActive ? 'Active' : 'Inactive'}
-                      </span>
+                      <StatusBadge status={c.isActive ? 'ACTIVE' : 'INACTIVE'} />
                     </td>
                     {canCreate && (
                       <td className="px-4 py-3 text-right whitespace-nowrap">
-                        <Btn variant="ghost" size="xs" onClick={() => setEditingConv(c)}>
-                          Edit
-                        </Btn>
-                        <Btn variant="ghost" size="xs" onClick={() => setDeletingConv(c)}>
-                          Delete
-                        </Btn>
+                        {(() => {
+                          const convLabel = `${c.fromUnit?.symbol ?? ''} to ${c.toUnit?.symbol ?? ''} conversion`;
+                          return (
+                            <>
+                              <Btn
+                                variant="ghost"
+                                size="xs"
+                                aria-label={`Edit ${convLabel}`}
+                                onClick={() => setEditingConv(c)}
+                              >
+                                Edit
+                              </Btn>
+                              <Btn
+                                variant="ghost"
+                                size="xs"
+                                aria-label={`Delete ${convLabel}`}
+                                onClick={() => setDeletingConv(c)}
+                              >
+                                Delete
+                              </Btn>
+                            </>
+                          );
+                        })()}
                       </td>
                     )}
                   </tr>

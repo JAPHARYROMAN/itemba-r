@@ -13,9 +13,11 @@ function makeService() {
     status: 'APPROVED',
     lines: [
       {
+        id: 'grn-line-1',
         productId: 'product-1',
         unitId: 'unit-1',
         acceptedQuantity: 20,
+        unitCost: null,
       },
     ],
   };
@@ -26,10 +28,20 @@ function makeService() {
       findFirst: jest.fn().mockResolvedValue(approvedGrn),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
+    goodsReceivedNoteLine: {
+      findMany: jest.fn().mockResolvedValue([]),
+      update: jest.fn().mockResolvedValue(undefined),
+    },
     product: {
-      findMany: jest
-        .fn()
-        .mockResolvedValue([{ id: 'product-1', name: 'Product 1', trackInventory: true }]),
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'product-1',
+          name: 'Product 1',
+          trackInventory: true,
+          baseUnitId: 'unit-1',
+          defaultPurchasePrice: 7,
+        },
+      ]),
     },
     purchaseOrderLine: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -86,6 +98,75 @@ describe('GoodsReceivedNotesService stock posting idempotency', () => {
     );
   });
 
+  it('values a no-PO receipt at the product default purchase price and persists it onto the line', async () => {
+    const { service, prisma, inventoryMovements } = makeService();
+
+    await service.post('grn-1', user);
+
+    // No PO and no line-level cost, so the receipt falls back to the product's
+    // default purchase price (7) instead of the previous `undefined`.
+    expect(inventoryMovements.createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({ unitCost: 7 }),
+    );
+    expect(prisma.goodsReceivedNoteLine.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'grn-line-1' },
+        data: { unitCost: 7 },
+      }),
+    );
+  });
+
+  it('prefers the GRN line own unitCost over PO and product default, without re-persisting it', async () => {
+    const { service, prisma, inventoryMovements, approvedGrn } = makeService();
+    prisma.goodsReceivedNote.findFirst.mockResolvedValue({
+      ...approvedGrn,
+      purchaseOrderId: 'po-1',
+      lines: [
+        {
+          id: 'grn-line-1',
+          productId: 'product-1',
+          unitId: 'unit-1',
+          acceptedQuantity: 20,
+          unitCost: 12,
+        },
+      ],
+    });
+    prisma.purchaseOrderLine.findMany.mockResolvedValue([
+      { productId: 'product-1', unitId: 'unit-1', quantity: 20, unitCost: 3 },
+    ]);
+
+    await service.post('grn-1', user);
+
+    expect(inventoryMovements.createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({ unitCost: 12 }),
+    );
+    // The line already carries its own cost, so post() does not rewrite it.
+    expect(prisma.goodsReceivedNoteLine.update).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the matching PO line unitCost when the GRN line has none', async () => {
+    const { service, prisma, inventoryMovements, approvedGrn } = makeService();
+    prisma.goodsReceivedNote.findFirst.mockResolvedValue({
+      ...approvedGrn,
+      purchaseOrderId: 'po-1',
+    });
+    prisma.purchaseOrderLine.findMany.mockResolvedValue([
+      { productId: 'product-1', unitId: 'unit-1', quantity: 20, unitCost: 3 },
+    ]);
+
+    await service.post('grn-1', user);
+
+    expect(inventoryMovements.createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({ unitCost: 3 }),
+    );
+    expect(prisma.goodsReceivedNoteLine.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'grn-line-1' },
+        data: { unitCost: 3 },
+      }),
+    );
+  });
+
   it('does not create inventory movements when the GRN was already posted', async () => {
     const { service, prisma, inventoryMovements } = makeService();
     prisma.goodsReceivedNote.updateMany.mockResolvedValueOnce({ count: 0 });
@@ -111,5 +192,44 @@ describe('GoodsReceivedNotesService stock posting idempotency', () => {
       'PO-2026-000001 has already been received',
     );
     expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+  });
+});
+
+describe('GoodsReceivedNotesService over-receipt unit guard', () => {
+  it('rejects a GRN line for an ordered product received in a different unit than ordered', async () => {
+    const { service, prisma, inventoryMovements, approvedGrn } = makeService();
+    prisma.goodsReceivedNote.findFirst.mockResolvedValue({
+      ...approvedGrn,
+      purchaseOrderId: 'po-1',
+      lines: [{ productId: 'product-1', unitId: 'unit-2', acceptedQuantity: 5 }],
+    });
+    // PO ordered product-1 in unit-1 — a different unit than the GRN received,
+    // which (without unit conversion) must be rejected rather than bypass the ceiling.
+    prisma.purchaseOrderLine.findMany.mockResolvedValue([
+      { productId: 'product-1', unitId: 'unit-1', quantity: 10, unitCost: 3 },
+    ]);
+    prisma.goodsReceivedNoteLine = { findMany: jest.fn().mockResolvedValue([]) };
+
+    await expect(service.post('grn-1', user)).rejects.toThrow('Received unit does not match');
+    expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+  });
+});
+
+describe('GoodsReceivedNotesService cost-by-unit guard', () => {
+  it('does not apply the base-unit default cost when received in a non-base unit', async () => {
+    const { service, prisma, inventoryMovements, approvedGrn } = makeService();
+    // No PO, no line cost, received in unit-2 while the product base unit is unit-1.
+    // The base-unit-denominated default (7) must NOT be applied to a different unit.
+    prisma.goodsReceivedNote.findFirst.mockResolvedValue({
+      ...approvedGrn,
+      lines: [{ id: 'grn-line-1', productId: 'product-1', unitId: 'unit-2', acceptedQuantity: 4 }],
+    });
+
+    await service.post('grn-1', user);
+
+    expect(inventoryMovements.createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({ unitId: 'unit-2', unitCost: undefined }),
+    );
+    expect(prisma.goodsReceivedNoteLine.update).not.toHaveBeenCalled();
   });
 });
