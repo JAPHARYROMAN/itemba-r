@@ -188,7 +188,12 @@ describe('AuthService persistent refresh sessions', () => {
       status: 'ACTIVE',
     });
 
-    const result = await service.refresh('user-1', 'old-rotated-refresh-token', undefined, 'session-1');
+    const result = await service.refresh(
+      'user-1',
+      'old-rotated-refresh-token',
+      undefined,
+      'session-1',
+    );
 
     expect(result.refreshToken).toBe('old-rotated-refresh-token');
     expect(prisma.refreshToken.updateMany).not.toHaveBeenCalled();

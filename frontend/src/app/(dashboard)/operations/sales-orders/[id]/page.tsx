@@ -42,7 +42,10 @@ const tabs = [
 ];
 
 function tabId(tab: string) {
-  return tab.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return tab
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 
 function money(value: unknown, currency = 'TZS') {
@@ -218,7 +221,9 @@ export default function SalesOrderDetailPage() {
   const order = data?.order;
   const currency = order?.currency ?? 'TZS';
   const receivableId = order?.receivableId ?? data?.ledger?.receivable?.id;
-  const outstanding = Number(order?.outstandingAmount ?? data?.ledger?.receivable?.outstandingAmount ?? 0);
+  const outstanding = Number(
+    order?.outstandingAmount ?? data?.ledger?.receivable?.outstandingAmount ?? 0,
+  );
   const lines = useMemo(() => order?.lines ?? [], [order?.lines]);
 
   const runAction = async (action: 'confirm' | 'cancel') => {
@@ -358,7 +363,11 @@ export default function SalesOrderDetailPage() {
       </div>
 
       <Card className="p-2">
-        <div role="tablist" aria-label="Sales order control center sections" className="flex flex-wrap gap-2">
+        <div
+          role="tablist"
+          aria-label="Sales order control center sections"
+          className="flex flex-wrap gap-2"
+        >
           {tabs.map((tab) => (
             <button
               key={tab}
@@ -379,200 +388,118 @@ export default function SalesOrderDetailPage() {
       </Card>
 
       {activeTab === 'Overview' && (
-       <div role="tabpanel" id={`tabpanel-${tabId('Overview')}`} aria-labelledby={`tab-${tabId('Overview')}`}>
-        <Card className="p-5">
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
-            <InfoRow label="Status" value={<StatusBadge value={order.status} />} />
-            <InfoRow label="Payment" value={<StatusBadge value={order.paymentStatus} />} />
-            <InfoRow label="Company" value={order.company?.name} />
-            <InfoRow
-              label="Division / Branch"
-              value={[order.division?.name, order.branch?.name].filter(Boolean).join(' / ')}
-            />
-            <InfoRow label="Customer" value={order.customer?.name ?? order.customerName} />
-            <InfoRow label="Salesperson" value={personName(order.salesperson)} />
-            <InfoRow label="Payment Method" value={order.paymentMethod?.replace(/_/g, ' ')} />
-            <InfoRow label="Receipt Account" value={order.cashAccount?.accountName} />
-            <InfoRow label="Reference" value={order.paymentReference} />
-            <InfoRow label="Order Date" value={date(order.orderDate)} />
-            <InfoRow label="Due Date" value={date(order.dueDate)} />
-            <InfoRow label="Credit Available" value={money(data.customerCredit?.availableCredit, currency)} />
-          </div>
-          {order.notes && (
-            <div className="mt-5 rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
-              <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
-                Notes
-              </p>
-              <p className="mt-1 text-sm" style={{ color: 'var(--aurora-text)' }}>
-                {order.notes}
-              </p>
+        <div
+          role="tabpanel"
+          id={`tabpanel-${tabId('Overview')}`}
+          aria-labelledby={`tab-${tabId('Overview')}`}
+        >
+          <Card className="p-5">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
+              <InfoRow label="Status" value={<StatusBadge value={order.status} />} />
+              <InfoRow label="Payment" value={<StatusBadge value={order.paymentStatus} />} />
+              <InfoRow label="Company" value={order.company?.name} />
+              <InfoRow
+                label="Division / Branch"
+                value={[order.division?.name, order.branch?.name].filter(Boolean).join(' / ')}
+              />
+              <InfoRow label="Customer" value={order.customer?.name ?? order.customerName} />
+              <InfoRow label="Salesperson" value={personName(order.salesperson)} />
+              <InfoRow label="Payment Method" value={order.paymentMethod?.replace(/_/g, ' ')} />
+              <InfoRow label="Receipt Account" value={order.cashAccount?.accountName} />
+              <InfoRow label="Reference" value={order.paymentReference} />
+              <InfoRow label="Order Date" value={date(order.orderDate)} />
+              <InfoRow label="Due Date" value={date(order.dueDate)} />
+              <InfoRow
+                label="Credit Available"
+                value={money(data.customerCredit?.availableCredit, currency)}
+              />
             </div>
-          )}
-        </Card>
-       </div>
+            {order.notes && (
+              <div
+                className="mt-5 rounded-lg border p-3"
+                style={{ borderColor: 'var(--aurora-border)' }}
+              >
+                <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Notes
+                </p>
+                <p className="mt-1 text-sm" style={{ color: 'var(--aurora-text)' }}>
+                  {order.notes}
+                </p>
+              </div>
+            )}
+          </Card>
+        </div>
       )}
 
       {activeTab === 'Lines & Stock' && (
-       <div role="tabpanel" id={`tabpanel-${tabId('Lines & Stock')}`} aria-labelledby={`tab-${tabId('Lines & Stock')}`}>
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-sm">
-              <caption className="sr-only">Order lines and stock availability</caption>
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr>
-                  <th scope="col" className="px-4 py-3">Product</th>
-                  <th scope="col" className="px-4 py-3">Description</th>
-                  <th scope="col" className="px-4 py-3 text-right">Qty</th>
-                  <th scope="col" className="px-4 py-3">Unit</th>
-                  <th scope="col" className="px-4 py-3 text-right">Available Stock</th>
-                  <th scope="col" className="px-4 py-3 text-right">Unit Price</th>
-                  <th scope="col" className="px-4 py-3 text-right">Line Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {lines.map((line: AnyRecord) => {
-                  const stock = line.stockSnapshot;
-                  const available =
-                    stock == null
-                      ? null
-                      : Number(stock.quantityOnHand ?? 0) - Number(stock.quantityReserved ?? 0);
-                  return (
-                    <tr key={line.id}>
-                      <td className="px-4 py-3 font-semibold">
-                        {line.product?.productCode ? `${line.product.productCode} - ` : ''}
-                        {line.product?.name}
-                      </td>
-                      <td className="px-4 py-3">{line.description ?? '-'}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{qty(line.quantity)}</td>
-                      <td className="px-4 py-3">{line.unit?.symbol ?? line.unit?.name}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        {available == null ? '-' : qty(available)}
-                      </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        {money(line.unitPrice, currency)}
-                      </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        {money(line.lineTotal, currency)}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {lines.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="px-4 py-8">
-                      <EmptyState
-                        title="No order lines"
-                        description="This order has no line items."
-                      />
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-       </div>
-      )}
-
-      {activeTab === 'Payments / Receivable' && (
-       <div role="tabpanel" id={`tabpanel-${tabId('Payments / Receivable')}`} aria-labelledby={`tab-${tabId('Payments / Receivable')}`}>
-        <Card className="p-5">
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
-            <InfoRow label="Payment Method" value={order.paymentMethod?.replace(/_/g, ' ')} />
-            <InfoRow label="Payment Status" value={<StatusBadge value={order.paymentStatus} />} />
-            <InfoRow label="Receivable" value={data.ledger?.receivable?.receivableNumber} />
-            <InfoRow label="Receivable Status" value={data.ledger?.receivable?.status} />
-            <InfoRow label="Paid" value={money(order.paidAmount, currency)} />
-            <InfoRow label="Outstanding" value={money(order.outstandingAmount, currency)} />
-            <InfoRow label="Cash / Bank Account" value={order.cashAccount?.accountName} />
-            <InfoRow label="Payment Reference" value={order.paymentReference} />
-          </div>
-          <div className="mt-5 flex flex-wrap gap-2">
-            <Btn variant="secondary" onClick={() => router.push('/finance/receivables')}>
-              View Receivables
-            </Btn>
-            {receivableId && outstanding > 0 && canRecordPayment && (
-              <Btn variant="primary" onClick={() => setRecordingPayment(true)}>
-                Record Payment
-              </Btn>
-            )}
-          </div>
-        </Card>
-       </div>
-      )}
-
-      {activeTab === 'Fulfillment / Delivery Notes' && (
-       <div role="tabpanel" id={`tabpanel-${tabId('Fulfillment / Delivery Notes')}`} aria-labelledby={`tab-${tabId('Fulfillment / Delivery Notes')}`}>
-        <Card className="p-5 space-y-5">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <StatCard label="Fulfillment" value={data.fulfillment?.summary?.status ?? 'Open'} />
-            <StatCard
-              label="Delivery Notes"
-              value={data.fulfillment?.summary?.deliveryNoteCount ?? 0}
-            />
-            <StatCard
-              label="Inventory Movements"
-              value={data.fulfillment?.summary?.inventoryMovementCount ?? 0}
-            />
-          </div>
-          <div>
-            <h3 className="mb-3 font-semibold">Delivery Notes</h3>
-            <div className="space-y-2">
-              {(data.fulfillment?.deliveryNotes ?? []).map((note: AnyRecord) => (
-                <div
-                  key={note.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"
-                  style={{ borderColor: 'var(--aurora-border)' }}
-                >
-                  <div>
-                    <p className="font-semibold">{note.deliveryNoteNumber}</p>
-                    <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                      {date(note.deliveryDate)} - {note.lines?.length ?? 0} lines
-                    </p>
-                  </div>
-                  <StatusBadge value={note.status} />
-                </div>
-              ))}
-              {(data.fulfillment?.deliveryNotes ?? []).length === 0 && (
-                <EmptyState
-                  title="No delivery notes"
-                  description="No delivery notes linked yet."
-                />
-              )}
-            </div>
-          </div>
-          <div>
-            <h3 className="mb-3 font-semibold">Inventory Issue Movements</h3>
+        <div
+          role="tabpanel"
+          id={`tabpanel-${tabId('Lines & Stock')}`}
+          aria-labelledby={`tab-${tabId('Lines & Stock')}`}
+        >
+          <Card className="overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[800px] text-sm">
-                <caption className="sr-only">Inventory issue movements for this order</caption>
+              <table className="w-full min-w-[1100px] text-sm">
+                <caption className="sr-only">Order lines and stock availability</caption>
                 <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                   <tr>
-                    <th scope="col" className="px-4 py-3">Movement</th>
-                    <th scope="col" className="px-4 py-3">Product</th>
-                    <th scope="col" className="px-4 py-3 text-right">Qty</th>
-                    <th scope="col" className="px-4 py-3 text-right">Cost</th>
-                    <th scope="col" className="px-4 py-3">Date</th>
+                    <th scope="col" className="px-4 py-3">
+                      Product
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Description
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Qty
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Unit
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Available Stock
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Unit Price
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Line Total
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {(data.fulfillment?.inventoryMovements ?? []).map((movement: AnyRecord) => (
-                    <tr key={movement.id}>
-                      <td className="px-4 py-3 font-mono text-xs">{movement.movementNumber}</td>
-                      <td className="px-4 py-3">{movement.product?.name}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{qty(movement.quantity)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        {money(movement.totalCost, currency)}
-                      </td>
-                      <td className="px-4 py-3">{date(movement.movementDate)}</td>
-                    </tr>
-                  ))}
-                  {(data.fulfillment?.inventoryMovements ?? []).length === 0 && (
+                  {lines.map((line: AnyRecord) => {
+                    const stock = line.stockSnapshot;
+                    const available =
+                      stock == null
+                        ? null
+                        : Number(stock.quantityOnHand ?? 0) - Number(stock.quantityReserved ?? 0);
+                    return (
+                      <tr key={line.id}>
+                        <td className="px-4 py-3 font-semibold">
+                          {line.product?.productCode ? `${line.product.productCode} - ` : ''}
+                          {line.product?.name}
+                        </td>
+                        <td className="px-4 py-3">{line.description ?? '-'}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">{qty(line.quantity)}</td>
+                        <td className="px-4 py-3">{line.unit?.symbol ?? line.unit?.name}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {available == null ? '-' : qty(available)}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {money(line.unitPrice, currency)}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {money(line.lineTotal, currency)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {lines.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-4 py-8">
+                      <td colSpan={7} className="px-4 py-8">
                         <EmptyState
-                          title="No inventory movements"
-                          description="No stock issue movements recorded for this order."
+                          title="No order lines"
+                          description="This order has no line items."
                         />
                       </td>
                     </tr>
@@ -580,186 +507,383 @@ export default function SalesOrderDetailPage() {
                 </tbody>
               </table>
             </div>
-          </div>
-        </Card>
-       </div>
+          </Card>
+        </div>
+      )}
+
+      {activeTab === 'Payments / Receivable' && (
+        <div
+          role="tabpanel"
+          id={`tabpanel-${tabId('Payments / Receivable')}`}
+          aria-labelledby={`tab-${tabId('Payments / Receivable')}`}
+        >
+          <Card className="p-5">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
+              <InfoRow label="Payment Method" value={order.paymentMethod?.replace(/_/g, ' ')} />
+              <InfoRow label="Payment Status" value={<StatusBadge value={order.paymentStatus} />} />
+              <InfoRow label="Receivable" value={data.ledger?.receivable?.receivableNumber} />
+              <InfoRow label="Receivable Status" value={data.ledger?.receivable?.status} />
+              <InfoRow label="Paid" value={money(order.paidAmount, currency)} />
+              <InfoRow label="Outstanding" value={money(order.outstandingAmount, currency)} />
+              <InfoRow label="Cash / Bank Account" value={order.cashAccount?.accountName} />
+              <InfoRow label="Payment Reference" value={order.paymentReference} />
+            </div>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Btn variant="secondary" onClick={() => router.push('/finance/receivables')}>
+                View Receivables
+              </Btn>
+              {receivableId && outstanding > 0 && canRecordPayment && (
+                <Btn variant="primary" onClick={() => setRecordingPayment(true)}>
+                  Record Payment
+                </Btn>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {activeTab === 'Fulfillment / Delivery Notes' && (
+        <div
+          role="tabpanel"
+          id={`tabpanel-${tabId('Fulfillment / Delivery Notes')}`}
+          aria-labelledby={`tab-${tabId('Fulfillment / Delivery Notes')}`}
+        >
+          <Card className="p-5 space-y-5">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <StatCard label="Fulfillment" value={data.fulfillment?.summary?.status ?? 'Open'} />
+              <StatCard
+                label="Delivery Notes"
+                value={data.fulfillment?.summary?.deliveryNoteCount ?? 0}
+              />
+              <StatCard
+                label="Inventory Movements"
+                value={data.fulfillment?.summary?.inventoryMovementCount ?? 0}
+              />
+            </div>
+            <div>
+              <h3 className="mb-3 font-semibold">Delivery Notes</h3>
+              <div className="space-y-2">
+                {(data.fulfillment?.deliveryNotes ?? []).map((note: AnyRecord) => (
+                  <div
+                    key={note.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"
+                    style={{ borderColor: 'var(--aurora-border)' }}
+                  >
+                    <div>
+                      <p className="font-semibold">{note.deliveryNoteNumber}</p>
+                      <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                        {date(note.deliveryDate)} - {note.lines?.length ?? 0} lines
+                      </p>
+                    </div>
+                    <StatusBadge value={note.status} />
+                  </div>
+                ))}
+                {(data.fulfillment?.deliveryNotes ?? []).length === 0 && (
+                  <EmptyState
+                    title="No delivery notes"
+                    description="No delivery notes linked yet."
+                  />
+                )}
+              </div>
+            </div>
+            <div>
+              <h3 className="mb-3 font-semibold">Inventory Issue Movements</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[800px] text-sm">
+                  <caption className="sr-only">Inventory issue movements for this order</caption>
+                  <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                    <tr>
+                      <th scope="col" className="px-4 py-3">
+                        Movement
+                      </th>
+                      <th scope="col" className="px-4 py-3">
+                        Product
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-right">
+                        Qty
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-right">
+                        Cost
+                      </th>
+                      <th scope="col" className="px-4 py-3">
+                        Date
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(data.fulfillment?.inventoryMovements ?? []).map((movement: AnyRecord) => (
+                      <tr key={movement.id}>
+                        <td className="px-4 py-3 font-mono text-xs">{movement.movementNumber}</td>
+                        <td className="px-4 py-3">{movement.product?.name}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {qty(movement.quantity)}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {money(movement.totalCost, currency)}
+                        </td>
+                        <td className="px-4 py-3">{date(movement.movementDate)}</td>
+                      </tr>
+                    ))}
+                    {(data.fulfillment?.inventoryMovements ?? []).length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-8">
+                          <EmptyState
+                            title="No inventory movements"
+                            description="No stock issue movements recorded for this order."
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Card>
+        </div>
       )}
 
       {activeTab === 'Profit & Margin' && (
-       <div role="tabpanel" id={`tabpanel-${tabId('Profit & Margin')}`} aria-labelledby={`tab-${tabId('Profit & Margin')}`}>
-        <Card className="overflow-hidden">
-          <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-4">
-            <StatCard label="Revenue Ex Tax" value={money(data.profit?.summary?.revenueExTax, currency)} />
-            <StatCard label="COGS" value={money(data.profit?.summary?.cogsAmount, currency)} />
-            <StatCard
-              label="Gross Profit"
-              value={money(data.profit?.summary?.grossProfitAmount, currency)}
-            />
-            <StatCard
-              label="Margin"
-              value={`${Number(data.profit?.summary?.grossMarginPct ?? 0).toFixed(2)}%`}
-            />
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1000px] text-sm">
-              <caption className="sr-only">Per-line profit and margin</caption>
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr>
-                  <th scope="col" className="px-4 py-3">Product</th>
-                  <th scope="col" className="px-4 py-3 text-right">Unit Cost</th>
-                  <th scope="col" className="px-4 py-3 text-right">COGS</th>
-                  <th scope="col" className="px-4 py-3 text-right">Profit</th>
-                  <th scope="col" className="px-4 py-3 text-right">Margin</th>
-                  <th scope="col" className="px-4 py-3">Cost Source</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {(data.profit?.lines ?? []).map((line: AnyRecord) => (
-                  <tr key={line.id}>
-                    <td className="px-4 py-3 font-semibold">{line.product?.name}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {money(line.unitCostAtSale, currency)}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {money(line.cogsAmount, currency)}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {money(line.grossProfitAmount ?? line.computedGrossProfit, currency)}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {Number(line.grossMarginPct ?? 0).toFixed(2)}%
-                    </td>
-                    <td className="px-4 py-3">{line.profitCostSource ?? '-'}</td>
-                  </tr>
-                ))}
-                {(data.profit?.lines ?? []).length === 0 && (
+        <div
+          role="tabpanel"
+          id={`tabpanel-${tabId('Profit & Margin')}`}
+          aria-labelledby={`tab-${tabId('Profit & Margin')}`}
+        >
+          <Card className="overflow-hidden">
+            <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-4">
+              <StatCard
+                label="Revenue Ex Tax"
+                value={money(data.profit?.summary?.revenueExTax, currency)}
+              />
+              <StatCard label="COGS" value={money(data.profit?.summary?.cogsAmount, currency)} />
+              <StatCard
+                label="Gross Profit"
+                value={money(data.profit?.summary?.grossProfitAmount, currency)}
+              />
+              <StatCard
+                label="Margin"
+                value={`${Number(data.profit?.summary?.grossMarginPct ?? 0).toFixed(2)}%`}
+              />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1000px] text-sm">
+                <caption className="sr-only">Per-line profit and margin</caption>
+                <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                   <tr>
-                    <td colSpan={6} className="px-4 py-8">
-                      <EmptyState
-                        title="No profit lines"
-                        description="No profit and margin detail available for this order."
-                      />
-                    </td>
+                    <th scope="col" className="px-4 py-3">
+                      Product
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Unit Cost
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      COGS
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Profit
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Margin
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Cost Source
+                    </th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-       </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(data.profit?.lines ?? []).map((line: AnyRecord) => (
+                    <tr key={line.id}>
+                      <td className="px-4 py-3 font-semibold">{line.product?.name}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {money(line.unitCostAtSale, currency)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {money(line.cogsAmount, currency)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {money(line.grossProfitAmount ?? line.computedGrossProfit, currency)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {Number(line.grossMarginPct ?? 0).toFixed(2)}%
+                      </td>
+                      <td className="px-4 py-3">{line.profitCostSource ?? '-'}</td>
+                    </tr>
+                  ))}
+                  {(data.profit?.lines ?? []).length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8">
+                        <EmptyState
+                          title="No profit lines"
+                          description="No profit and margin detail available for this order."
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
       )}
 
       {activeTab === 'Journal / Accounting' && (
-       <div role="tabpanel" id={`tabpanel-${tabId('Journal / Accounting')}`} aria-labelledby={`tab-${tabId('Journal / Accounting')}`}>
-        <Card className="overflow-hidden">
-          <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-4">
-            <InfoRow label="Journal" value={data.ledger?.journalEntry?.journalNumber} />
-            <InfoRow label="Status" value={data.ledger?.journalEntry?.status} />
-            <InfoRow label="Transaction Date" value={date(data.ledger?.journalEntry?.transactionDate)} />
-            <InfoRow label="Description" value={data.ledger?.journalEntry?.description} />
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
-              <caption className="sr-only">Journal entry lines</caption>
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr>
-                  <th scope="col" className="px-4 py-3">Account</th>
-                  <th scope="col" className="px-4 py-3">Description</th>
-                  <th scope="col" className="px-4 py-3 text-right">Debit</th>
-                  <th scope="col" className="px-4 py-3 text-right">Credit</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {(data.ledger?.journalEntry?.lines ?? []).map((line: AnyRecord) => (
-                  <tr key={line.id}>
-                    <td className="px-4 py-3">
-                      {line.account?.accountCode} - {line.account?.accountName}
-                    </td>
-                    <td className="px-4 py-3">{line.description ?? '-'}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{money(line.debit, currency)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{money(line.credit, currency)}</td>
-                  </tr>
-                ))}
-                {(data.ledger?.journalEntry?.lines ?? []).length === 0 && (
+        <div
+          role="tabpanel"
+          id={`tabpanel-${tabId('Journal / Accounting')}`}
+          aria-labelledby={`tab-${tabId('Journal / Accounting')}`}
+        >
+          <Card className="overflow-hidden">
+            <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-4">
+              <InfoRow label="Journal" value={data.ledger?.journalEntry?.journalNumber} />
+              <InfoRow label="Status" value={data.ledger?.journalEntry?.status} />
+              <InfoRow
+                label="Transaction Date"
+                value={date(data.ledger?.journalEntry?.transactionDate)}
+              />
+              <InfoRow label="Description" value={data.ledger?.journalEntry?.description} />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px] text-sm">
+                <caption className="sr-only">Journal entry lines</caption>
+                <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                   <tr>
-                    <td colSpan={4} className="px-4 py-8">
-                      <EmptyState
-                        title="No journal entry"
-                        description="No posted journal entry linked yet."
-                      />
-                    </td>
+                    <th scope="col" className="px-4 py-3">
+                      Account
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Description
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Debit
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Credit
+                    </th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-       </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(data.ledger?.journalEntry?.lines ?? []).map((line: AnyRecord) => (
+                    <tr key={line.id}>
+                      <td className="px-4 py-3">
+                        {line.account?.accountCode} - {line.account?.accountName}
+                      </td>
+                      <td className="px-4 py-3">{line.description ?? '-'}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {money(line.debit, currency)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {money(line.credit, currency)}
+                      </td>
+                    </tr>
+                  ))}
+                  {(data.ledger?.journalEntry?.lines ?? []).length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-8">
+                        <EmptyState
+                          title="No journal entry"
+                          description="No posted journal entry linked yet."
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
       )}
 
       {activeTab === 'Commission' && (
-       <div role="tabpanel" id={`tabpanel-${tabId('Commission')}`} aria-labelledby={`tab-${tabId('Commission')}`}>
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[800px] text-sm">
-              <caption className="sr-only">Commission rows for this order</caption>
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr>
-                  <th scope="col" className="px-4 py-3">Employee</th>
-                  <th scope="col" className="px-4 py-3">Basis</th>
-                  <th scope="col" className="px-4 py-3 text-right">Rate</th>
-                  <th scope="col" className="px-4 py-3 text-right">Amount</th>
-                  <th scope="col" className="px-4 py-3">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {(order.commissions ?? []).map((commission: AnyRecord) => (
-                  <tr key={commission.id}>
-                    <td className="px-4 py-3">{personName(commission.employee)}</td>
-                    <td className="px-4 py-3">{commission.basis}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {(Number(commission.rate ?? 0) * 100).toFixed(2)}%
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {money(commission.amount, currency)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge value={commission.status} />
-                    </td>
-                  </tr>
-                ))}
-                {(order.commissions ?? []).length === 0 && (
+        <div
+          role="tabpanel"
+          id={`tabpanel-${tabId('Commission')}`}
+          aria-labelledby={`tab-${tabId('Commission')}`}
+        >
+          <Card className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[800px] text-sm">
+                <caption className="sr-only">Commission rows for this order</caption>
+                <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                   <tr>
-                    <td colSpan={5} className="px-4 py-8">
-                      <EmptyState
-                        title="No commissions"
-                        description="No commission rows linked to this order."
-                      />
-                    </td>
+                    <th scope="col" className="px-4 py-3">
+                      Employee
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Basis
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Rate
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Amount
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Status
+                    </th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-       </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(order.commissions ?? []).map((commission: AnyRecord) => (
+                    <tr key={commission.id}>
+                      <td className="px-4 py-3">{personName(commission.employee)}</td>
+                      <td className="px-4 py-3">{commission.basis}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {(Number(commission.rate ?? 0) * 100).toFixed(2)}%
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {money(commission.amount, currency)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge value={commission.status} />
+                      </td>
+                    </tr>
+                  ))}
+                  {(order.commissions ?? []).length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8">
+                        <EmptyState
+                          title="No commissions"
+                          description="No commission rows linked to this order."
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
       )}
 
       {activeTab === 'Audit' && (
-       <div role="tabpanel" id={`tabpanel-${tabId('Audit')}`} aria-labelledby={`tab-${tabId('Audit')}`}>
-        <Card className="p-5">
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
-            <InfoRow label="Created At" value={date(data.audit?.createdAt)} />
-            <InfoRow label="Created By" value={personName(data.audit?.createdBy)} />
-            <InfoRow label="Updated At" value={date(data.audit?.updatedAt)} />
-            <InfoRow label="Confirmed At" value={date(data.audit?.confirmedAt)} />
-            <InfoRow label="Confirmed By" value={personName(data.audit?.confirmedBy)} />
-            <InfoRow label="Order ID" value={<span className="font-mono text-xs">{order.id}</span>} />
-            <InfoRow label="Receivable ID" value={<span className="font-mono text-xs">{receivableId ?? '-'}</span>} />
-            <InfoRow label="Journal ID" value={<span className="font-mono text-xs">{data.ledger?.journalEntry?.id ?? '-'}</span>} />
-          </div>
-        </Card>
-       </div>
+        <div
+          role="tabpanel"
+          id={`tabpanel-${tabId('Audit')}`}
+          aria-labelledby={`tab-${tabId('Audit')}`}
+        >
+          <Card className="p-5">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
+              <InfoRow label="Created At" value={date(data.audit?.createdAt)} />
+              <InfoRow label="Created By" value={personName(data.audit?.createdBy)} />
+              <InfoRow label="Updated At" value={date(data.audit?.updatedAt)} />
+              <InfoRow label="Confirmed At" value={date(data.audit?.confirmedAt)} />
+              <InfoRow label="Confirmed By" value={personName(data.audit?.confirmedBy)} />
+              <InfoRow
+                label="Order ID"
+                value={<span className="font-mono text-xs">{order.id}</span>}
+              />
+              <InfoRow
+                label="Receivable ID"
+                value={<span className="font-mono text-xs">{receivableId ?? '-'}</span>}
+              />
+              <InfoRow
+                label="Journal ID"
+                value={
+                  <span className="font-mono text-xs">{data.ledger?.journalEntry?.id ?? '-'}</span>
+                }
+              />
+            </div>
+          </Card>
+        </div>
       )}
     </div>
   );

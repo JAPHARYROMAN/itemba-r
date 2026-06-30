@@ -168,9 +168,7 @@ function makeUpdateService(prismaOverrides: Record<string, any> = {}) {
   return { service, prisma };
 }
 
-const updateLines = [
-  { description: 'Widget', quantity: 1, unitPrice: 100 },
-] as any;
+const updateLines = [{ description: 'Widget', quantity: 1, unitPrice: 100 }] as any;
 
 describe('SupplierInvoicesService update three-way match invalidation', () => {
   it('soft-deletes prior three-way matches when the lines are rewritten (reset to DRAFT)', async () => {
@@ -195,9 +193,11 @@ describe('SupplierInvoicesService update three-way match invalidation', () => {
 
   it('does not touch three-way matches when the lines are left unchanged', async () => {
     const { service, prisma } = makeUpdateService();
-    jest.spyOn(service, 'findOne').mockResolvedValue(
-      approvableInvoice({ status: 'DRAFT', purchaseOrderId: 'po-1', currency: 'TZS' }) as any,
-    );
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(
+        approvableInvoice({ status: 'DRAFT', purchaseOrderId: 'po-1', currency: 'TZS' }) as any,
+      );
 
     await service.update('si-1', { notes: 'memo' } as any, user);
 
@@ -218,20 +218,24 @@ describe('SupplierInvoicesService currency lock', () => {
         })),
       },
     });
-    jest.spyOn(service, 'findOne').mockResolvedValue(
-      approvableInvoice({ status: 'DRAFT', purchaseOrderId: 'po-1', currency: 'TZS' }) as any,
-    );
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(
+        approvableInvoice({ status: 'DRAFT', purchaseOrderId: 'po-1', currency: 'TZS' }) as any,
+      );
 
-    await expect(
-      service.update('si-1', { currency: 'TZS' } as any, user),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.update('si-1', { currency: 'TZS' } as any, user)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('allows an invoice whose currency matches its linked purchase order', async () => {
     const { service, prisma } = makeUpdateService();
-    jest.spyOn(service, 'findOne').mockResolvedValue(
-      approvableInvoice({ status: 'DRAFT', purchaseOrderId: 'po-1', currency: 'TZS' }) as any,
-    );
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(
+        approvableInvoice({ status: 'DRAFT', purchaseOrderId: 'po-1', currency: 'TZS' }) as any,
+      );
 
     await service.update('si-1', { currency: 'TZS' } as any, user);
 

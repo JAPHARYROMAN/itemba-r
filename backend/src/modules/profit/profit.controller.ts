@@ -9,7 +9,10 @@ export class ProfitController {
 
   @Get('product-summary')
   @RequireAnyPermissions('profit.view', 'operations.reports.view')
-  productSummary(@Query() query: Record<string, string | undefined>, @CurrentUser() user: AuthUser) {
+  productSummary(
+    @Query() query: Record<string, string | undefined>,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.profit.productSummary(query, user);
   }
 
@@ -21,7 +24,10 @@ export class ProfitController {
 
   @Get('below-cost-attempts')
   @RequireAnyPermissions('profit.audit', 'profit.view')
-  belowCostAttempts(@Query() query: Record<string, string | undefined>, @CurrentUser() user: AuthUser) {
+  belowCostAttempts(
+    @Query() query: Record<string, string | undefined>,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.profit.belowCostAttempts(query, user);
   }
 

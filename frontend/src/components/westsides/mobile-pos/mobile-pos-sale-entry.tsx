@@ -1927,7 +1927,13 @@ function MobileReceiptCard({
           className="animate-scale-pop flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-amber-500 text-white shadow-md"
           aria-hidden="true"
         >
-          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+          <svg
+            className="h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={3}
+          >
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
         </span>

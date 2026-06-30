@@ -1164,7 +1164,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             })
           )}
         </nav>
-
       </aside>
     </>
   );

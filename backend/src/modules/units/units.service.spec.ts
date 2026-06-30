@@ -24,21 +24,29 @@ function makeHarness() {
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
       findFirst: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockImplementation(({ data }: any) =>
-        Promise.resolve({ id: 'unit-new', companyId: data.companyId ?? null, ...data }),
-      ),
-      update: jest.fn().mockImplementation(({ where, data }: any) =>
-        Promise.resolve({ id: where.id, companyId: null, ...data }),
-      ),
+      create: jest
+        .fn()
+        .mockImplementation(({ data }: any) =>
+          Promise.resolve({ id: 'unit-new', companyId: data.companyId ?? null, ...data }),
+        ),
+      update: jest
+        .fn()
+        .mockImplementation(({ where, data }: any) =>
+          Promise.resolve({ id: where.id, companyId: null, ...data }),
+        ),
     },
     unitConversion: {
       findFirst: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockImplementation(({ data }: any) =>
-        Promise.resolve({ id: 'conv-new', companyId: data.companyId ?? null, ...data }),
-      ),
-      update: jest.fn().mockImplementation(({ where, data }: any) =>
-        Promise.resolve({ id: where.id, companyId: null, ...data }),
-      ),
+      create: jest
+        .fn()
+        .mockImplementation(({ data }: any) =>
+          Promise.resolve({ id: 'conv-new', companyId: data.companyId ?? null, ...data }),
+        ),
+      update: jest
+        .fn()
+        .mockImplementation(({ where, data }: any) =>
+          Promise.resolve({ id: where.id, companyId: null, ...data }),
+        ),
     },
     userCompanyAccess: {
       findMany: jest.fn().mockResolvedValue([]),

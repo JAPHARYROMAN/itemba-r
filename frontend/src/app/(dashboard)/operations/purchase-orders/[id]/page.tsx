@@ -130,15 +130,16 @@ export default function PurchaseOrderDetailPage() {
   const currency = order?.currency ?? 'TZS';
   const lines = useMemo(() => order?.lines ?? [], [order?.lines]);
 
+  const companyId = order?.companyId;
   const movementsHref = useMemo(() => {
-    if (!order?.companyId) return null;
+    if (!companyId) return null;
     const params = new URLSearchParams({
-      companyId: order.companyId,
+      companyId,
       referenceType: 'PurchaseOrder',
       referenceId: id,
     });
     return `/operations/inventory-movements?${params.toString()}`;
-  }, [order?.companyId, id]);
+  }, [companyId, id]);
 
   // Export the rows behind the active data tab. Each tab maps to a flat row
   // shape so the shared CSV builder produces stable, human-readable columns.
@@ -195,11 +196,7 @@ export default function PurchaseOrderDetailPage() {
     }
 
     if (!rows.length) return;
-    downloadTextFile(
-      `${base}-${suffix}-${stamp}.csv`,
-      'text/csv;charset=utf-8',
-      rowsToCsv(rows),
-    );
+    downloadTextFile(`${base}-${suffix}-${stamp}.csv`, 'text/csv;charset=utf-8', rowsToCsv(rows));
   }, [activeTab, order?.purchaseOrderNumber, id, lines, grns, invoices, matches, currency]);
 
   const canExportActiveTab =
@@ -360,14 +357,30 @@ export default function PurchaseOrderDetailPage() {
             <table className="w-full min-w-[1000px] text-sm" aria-label="Purchase order line items">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th scope="col" className="px-4 py-3">Product</th>
-                  <th scope="col" className="px-4 py-3">Description</th>
-                  <th scope="col" className="px-4 py-3 text-right">Qty</th>
-                  <th scope="col" className="px-4 py-3">Unit</th>
-                  <th scope="col" className="px-4 py-3 text-right">Unit Cost</th>
-                  <th scope="col" className="px-4 py-3 text-right">Discount</th>
-                  <th scope="col" className="px-4 py-3 text-right">Tax</th>
-                  <th scope="col" className="px-4 py-3 text-right">Line Total</th>
+                  <th scope="col" className="px-4 py-3">
+                    Product
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Description
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Qty
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Unit
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Unit Cost
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Discount
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Tax
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Line Total
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -413,11 +426,21 @@ export default function PurchaseOrderDetailPage() {
             <table className="w-full min-w-[800px] text-sm" aria-label="Goods received notes">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th scope="col" className="px-4 py-3">GRN #</th>
-                  <th scope="col" className="px-4 py-3">Received Date</th>
-                  <th scope="col" className="px-4 py-3 text-right">Lines</th>
-                  <th scope="col" className="px-4 py-3">Status</th>
-                  <th scope="col" className="px-4 py-3">Posted At</th>
+                  <th scope="col" className="px-4 py-3">
+                    GRN #
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Received Date
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Lines
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Status
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Posted At
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -451,14 +474,30 @@ export default function PurchaseOrderDetailPage() {
             <table className="w-full min-w-[1000px] text-sm" aria-label="Supplier invoices">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th scope="col" className="px-4 py-3">Invoice #</th>
-                  <th scope="col" className="px-4 py-3">Reference</th>
-                  <th scope="col" className="px-4 py-3">Invoice Date</th>
-                  <th scope="col" className="px-4 py-3">Due Date</th>
-                  <th scope="col" className="px-4 py-3 text-right">Total</th>
-                  <th scope="col" className="px-4 py-3 text-right">Paid</th>
-                  <th scope="col" className="px-4 py-3 text-right">Outstanding</th>
-                  <th scope="col" className="px-4 py-3">Status</th>
+                  <th scope="col" className="px-4 py-3">
+                    Invoice #
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Reference
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Invoice Date
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Due Date
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Total
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Paid
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Outstanding
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Status
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -501,11 +540,21 @@ export default function PurchaseOrderDetailPage() {
             <table className="w-full min-w-[900px] text-sm" aria-label="Three-way match results">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th scope="col" className="px-4 py-3">Match #</th>
-                  <th scope="col" className="px-4 py-3">Match Date</th>
-                  <th scope="col" className="px-4 py-3 text-right">Qty Variance</th>
-                  <th scope="col" className="px-4 py-3 text-right">Amount Variance</th>
-                  <th scope="col" className="px-4 py-3">Status</th>
+                  <th scope="col" className="px-4 py-3">
+                    Match #
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Match Date
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Qty Variance
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Amount Variance
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Status
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">

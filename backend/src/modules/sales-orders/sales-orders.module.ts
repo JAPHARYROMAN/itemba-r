@@ -9,7 +9,13 @@ import { ProfitModule } from '../profit/profit.module';
 import { CompanyScopeService } from '../../common/services';
 
 @Module({
-  imports: [PrismaModule, AuditLogsModule, InventoryMovementsModule, TaxAutoApplyModule, ProfitModule],
+  imports: [
+    PrismaModule,
+    AuditLogsModule,
+    InventoryMovementsModule,
+    TaxAutoApplyModule,
+    ProfitModule,
+  ],
   controllers: [SalesOrdersController],
   providers: [SalesOrdersService, CompanyScopeService],
   exports: [SalesOrdersService],

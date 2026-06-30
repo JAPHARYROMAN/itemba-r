@@ -12,10 +12,15 @@ export const QTY_TOLERANCE = new Prisma.Decimal('0.0001');
 
 type LineLike = Record<string, any>;
 
-export function groupQuantities(lines: LineLike[], quantityField: string): Map<string, Prisma.Decimal> {
+export function groupQuantities(
+  lines: LineLike[],
+  quantityField: string,
+): Map<string, Prisma.Decimal> {
   const grouped = new Map<string, Prisma.Decimal>();
   for (const line of lines ?? []) {
-    const key = line.productId ? `product:${line.productId}` : `desc:${line.description ?? line.id}`;
+    const key = line.productId
+      ? `product:${line.productId}`
+      : `desc:${line.description ?? line.id}`;
     const quantity = new Prisma.Decimal(line[quantityField] ?? 0);
     grouped.set(key, (grouped.get(key) ?? new Prisma.Decimal(0)).plus(quantity));
   }

@@ -148,13 +148,9 @@ describe('ProfitService productSummary db aggregation', () => {
 describe('ProfitService salesOrderWhere division filter', () => {
   it('scopes a divisionId filter by the order division OR its branch division', async () => {
     const { service } = makeService();
-    const where = await (service as any).salesOrderWhere(
-      { divisionId: 'div-1' },
-      { id: 'u1' } as any,
-    );
-    expect(where.OR).toEqual([
-      { divisionId: 'div-1' },
-      { branch: { divisionId: 'div-1' } },
-    ]);
+    const where = await (service as any).salesOrderWhere({ divisionId: 'div-1' }, {
+      id: 'u1',
+    } as any);
+    expect(where.OR).toEqual([{ divisionId: 'div-1' }, { branch: { divisionId: 'div-1' } }]);
   });
 });

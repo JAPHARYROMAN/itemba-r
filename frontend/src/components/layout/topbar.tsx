@@ -65,15 +65,26 @@ export function Topbar({ onMenuClick }: TopbarProps) {
             >
               <div
                 className="w-7 h-7 rounded-full font-semibold text-xs flex items-center justify-center"
-                style={{ background: 'var(--aurora-primary-subtle)', color: 'var(--aurora-primary-text)' }}
+                style={{
+                  background: 'var(--aurora-primary-subtle)',
+                  color: 'var(--aurora-primary-text)',
+                }}
               >
                 {initials}
               </div>
               <div className="hidden sm:block text-left">
-                <div className="text-[13px] font-medium leading-none" style={{ color: 'var(--aurora-text)' }}>
+                <div
+                  className="text-[13px] font-medium leading-none"
+                  style={{ color: 'var(--aurora-text)' }}
+                >
                   {user.fullName}
                 </div>
-                <div className="text-[11px] mt-0.5 leading-none" style={{ color: 'var(--aurora-text-muted)' }}>{user.email}</div>
+                <div
+                  className="text-[11px] mt-0.5 leading-none"
+                  style={{ color: 'var(--aurora-text-muted)' }}
+                >
+                  {user.email}
+                </div>
               </div>
               <ChevronDown
                 aria-hidden
@@ -92,15 +103,31 @@ export function Topbar({ onMenuClick }: TopbarProps) {
                 }}
                 role="menu"
               >
-                <div className="px-3.5 py-2.5 border-b" style={{ borderColor: 'var(--aurora-border)' }}>
-                  <div className="text-[13px] font-medium" style={{ color: 'var(--aurora-text)' }}>{user.fullName}</div>
-                  <div className="text-[11px] mt-0.5" style={{ color: 'var(--aurora-text-muted)' }}>{user.email}</div>
-                  <div className="text-[11px] mt-0.5 capitalize" style={{ color: 'var(--aurora-text-muted)' }}>
+                <div
+                  className="px-3.5 py-2.5 border-b"
+                  style={{ borderColor: 'var(--aurora-border)' }}
+                >
+                  <div className="text-[13px] font-medium" style={{ color: 'var(--aurora-text)' }}>
+                    {user.fullName}
+                  </div>
+                  <div className="text-[11px] mt-0.5" style={{ color: 'var(--aurora-text-muted)' }}>
+                    {user.email}
+                  </div>
+                  <div
+                    className="text-[11px] mt-0.5 capitalize"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
                     {(user.roles ?? []).join(', ')}
                   </div>
                 </div>
-                <div className="border-b px-3.5 py-2.5 sm:hidden" style={{ borderColor: 'var(--aurora-border)' }}>
-                  <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+                <div
+                  className="border-b px-3.5 py-2.5 sm:hidden"
+                  style={{ borderColor: 'var(--aurora-border)' }}
+                >
+                  <div
+                    className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
                     Theme
                   </div>
                   <ThemeSelector />

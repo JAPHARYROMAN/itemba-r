@@ -51,7 +51,13 @@ interface PurchaseOrderLine {
   quantity: number | string;
   unitCost: number | string;
   lineTotal: number | string;
-  product?: { id: string; productCode?: string | null; sku?: string | null; name: string; category?: { name: string } | null } | null;
+  product?: {
+    id: string;
+    productCode?: string | null;
+    sku?: string | null;
+    name: string;
+    category?: { name: string } | null;
+  } | null;
   unit?: { name: string; symbol?: string | null } | null;
 }
 
@@ -79,7 +85,12 @@ interface Payable {
   outstandingAmount: number | string;
   currency: string;
   notes?: string | null;
-  purchaseOrders?: Array<{ id: string; purchaseOrderNumber: string; status: string; totalAmount: number | string }>;
+  purchaseOrders?: Array<{
+    id: string;
+    purchaseOrderNumber: string;
+    status: string;
+    totalAmount: number | string;
+  }>;
 }
 
 interface StatementRun {
@@ -109,7 +120,13 @@ interface PerformanceProfile {
 }
 
 interface ProductCoverage {
-  product: { id: string; productCode?: string | null; sku?: string | null; name: string; category?: { name: string; categoryType?: string | null } | null };
+  product: {
+    id: string;
+    productCode?: string | null;
+    sku?: string | null;
+    name: string;
+    category?: { name: string; categoryType?: string | null } | null;
+  };
   unit?: { name: string; symbol?: string | null } | null;
   quantity: number;
   totalAmount: number;
@@ -159,7 +176,15 @@ interface SupplierControlCenter {
   };
 }
 
-const TABS = ['Overview', 'Purchases', 'Payables', 'Products', 'Statements', 'Performance', 'Audit'] as const;
+const TABS = [
+  'Overview',
+  'Purchases',
+  'Payables',
+  'Products',
+  'Statements',
+  'Performance',
+  'Audit',
+] as const;
 type Tab = (typeof TABS)[number];
 
 function money(value: number | string | null | undefined, currency = 'TZS') {
@@ -172,7 +197,11 @@ function money(value: number | string | null | undefined, currency = 'TZS') {
 
 function shortDate(value?: string | null) {
   if (!value) return '—';
-  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(value));
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(value));
 }
 
 function isoDate(value: Date) {
@@ -184,13 +213,24 @@ function monthStart() {
   return new Date(now.getFullYear(), now.getMonth(), 1);
 }
 
-function DetailItem({ label, value, mono = false }: { label: string; value?: string | number | null; mono?: boolean }) {
+function DetailItem({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value?: string | number | null;
+  mono?: boolean;
+}) {
   return (
     <div>
       <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
         {label}
       </p>
-      <p className={`mt-1 text-sm ${mono ? 'font-mono' : 'font-medium'}`} style={{ color: 'var(--aurora-text)' }}>
+      <p
+        className={`mt-1 text-sm ${mono ? 'font-mono' : 'font-medium'}`}
+        style={{ color: 'var(--aurora-text)' }}
+      >
         {value || '—'}
       </p>
     </div>
@@ -199,7 +239,10 @@ function DetailItem({ label, value, mono = false }: { label: string; value?: str
 
 function EmptyPanel({ text }: { text: string }) {
   return (
-    <div className="rounded-lg border px-4 py-8 text-center text-sm" style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}>
+    <div
+      className="rounded-lg border px-4 py-8 text-center text-sm"
+      style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}
+    >
       {text}
     </div>
   );
@@ -226,7 +269,9 @@ export default function SupplierDetailPage() {
     setLoading(true);
     setError('');
     try {
-      const record = await backendGet<SupplierControlCenter>(`/suppliers/${supplierId}/control-center`);
+      const record = await backendGet<SupplierControlCenter>(
+        `/suppliers/${supplierId}/control-center`,
+      );
       setData(record);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load supplier';
@@ -254,7 +299,11 @@ export default function SupplierDetailPage() {
       showToast('success', 'Supplier statement generated', data.supplier.name);
       load();
     } catch (err) {
-      showToast('error', 'Could not generate statement', err instanceof Error ? err.message : 'Failed');
+      showToast(
+        'error',
+        'Could not generate statement',
+        err instanceof Error ? err.message : 'Failed',
+      );
     } finally {
       setGenerating(false);
     }
@@ -291,7 +340,11 @@ export default function SupplierDetailPage() {
         <PageHeader title="Supplier" subtitle="Supplier control center" />
         <Card className="p-6">
           <p className="text-sm text-red-300">{error || 'Supplier not found'}</p>
-          <Btn className="mt-4" variant="secondary" onClick={() => router.push('/operations/suppliers')}>
+          <Btn
+            className="mt-4"
+            variant="secondary"
+            onClick={() => router.push('/operations/suppliers')}
+          >
             Back to Suppliers
           </Btn>
         </Card>
@@ -314,7 +367,9 @@ export default function SupplierDetailPage() {
           </Btn>
           <Btn
             variant="secondary"
-            onClick={() => router.push(`/operations/reports?search=${encodeURIComponent(supplier.name)}`)}
+            onClick={() =>
+              router.push(`/operations/reports?search=${encodeURIComponent(supplier.name)}`)
+            }
           >
             Supplier Reports
           </Btn>
@@ -330,7 +385,10 @@ export default function SupplierDetailPage() {
       </div>
 
       <Card className="overflow-hidden">
-        <div className="flex flex-wrap gap-2 border-b p-3" style={{ borderColor: 'var(--aurora-border)' }}>
+        <div
+          className="flex flex-wrap gap-2 border-b p-3"
+          style={{ borderColor: 'var(--aurora-border)' }}
+        >
           {TABS.map((item) => (
             <button
               key={item}
@@ -349,7 +407,10 @@ export default function SupplierDetailPage() {
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
               <div className="lg:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-2">
                 <DetailItem label="Legal Name" value={supplier.legalName} />
-                <DetailItem label="Supplier Type" value={supplier.supplierType?.replace(/_/g, ' ')} />
+                <DetailItem
+                  label="Supplier Type"
+                  value={supplier.supplierType?.replace(/_/g, ' ')}
+                />
                 <DetailItem label="Contact Person" value={supplier.contactPerson} />
                 <DetailItem label="Phone" value={supplier.phone} />
                 <DetailItem label="Email" value={supplier.email} />
@@ -365,14 +426,24 @@ export default function SupplierDetailPage() {
                   <DetailItem label="Notes" value={supplier.notes} />
                 </div>
               </div>
-              <div className="rounded-lg border p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+              <div
+                className="rounded-lg border p-4"
+                style={{ borderColor: 'var(--aurora-border)' }}
+              >
                 <h3 className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
                   Category Coverage
                 </h3>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {categories.length ? (
                     categories.map((category) => (
-                      <span key={category.id} className="rounded-full border px-2 py-1 text-xs" style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-secondary)' }}>
+                      <span
+                        key={category.id}
+                        className="rounded-full border px-2 py-1 text-xs"
+                        style={{
+                          borderColor: 'var(--aurora-border)',
+                          color: 'var(--aurora-text-secondary)',
+                        }}
+                      >
                         {category.name}
                       </span>
                     ))
@@ -392,11 +463,19 @@ export default function SupplierDetailPage() {
                 <EmptyPanel text="No purchase orders for this supplier yet." />
               ) : (
                 data.recentPurchaseOrders.map((order) => (
-                  <div key={order.id} className="rounded-lg border p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                  <div
+                    key={order.id}
+                    className="rounded-lg border p-4"
+                    style={{ borderColor: 'var(--aurora-border)' }}
+                  >
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>{order.purchaseOrderNumber}</p>
-                        <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{shortDate(order.orderDate)} · {money(order.totalAmount, order.currency)}</p>
+                        <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                          {order.purchaseOrderNumber}
+                        </p>
+                        <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                          {shortDate(order.orderDate)} · {money(order.totalAmount, order.currency)}
+                        </p>
                       </div>
                       <div className="flex items-center gap-2">
                         <StatusBadge status={order.status} />
@@ -404,7 +483,9 @@ export default function SupplierDetailPage() {
                         <Btn
                           variant="secondary"
                           size="xs"
-                          onClick={() => router.push(`/operations/purchase-orders/${order.id}/print`)}
+                          onClick={() =>
+                            router.push(`/operations/purchase-orders/${order.id}/print`)
+                          }
                         >
                           View / Print
                         </Btn>
@@ -422,11 +503,23 @@ export default function SupplierDetailPage() {
                         </thead>
                         <tbody>
                           {order.lines?.map((line) => (
-                            <tr key={line.id} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
-                              <td className="py-2">{line.product?.name ?? line.description ?? 'Product'}</td>
-                              <td className="py-2 text-right">{Number(line.quantity).toLocaleString()} {line.unit?.symbol ?? ''}</td>
-                              <td className="py-2 text-right">{money(line.unitCost, order.currency)}</td>
-                              <td className="py-2 text-right">{money(line.lineTotal, order.currency)}</td>
+                            <tr
+                              key={line.id}
+                              className="border-t"
+                              style={{ borderColor: 'var(--aurora-border)' }}
+                            >
+                              <td className="py-2">
+                                {line.product?.name ?? line.description ?? 'Product'}
+                              </td>
+                              <td className="py-2 text-right">
+                                {Number(line.quantity).toLocaleString()} {line.unit?.symbol ?? ''}
+                              </td>
+                              <td className="py-2 text-right">
+                                {money(line.unitCost, order.currency)}
+                              </td>
+                              <td className="py-2 text-right">
+                                {money(line.lineTotal, order.currency)}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -444,16 +537,26 @@ export default function SupplierDetailPage() {
                 <EmptyPanel text="No payables recorded for this supplier." />
               ) : (
                 data.recentPayables.map((payable) => (
-                  <div key={payable.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                  <div
+                    key={payable.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4"
+                    style={{ borderColor: 'var(--aurora-border)' }}
+                  >
                     <div>
-                      <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>{payable.payableNumber}</p>
+                      <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                        {payable.payableNumber}
+                      </p>
                       <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
                         Issued {shortDate(payable.issueDate)} · Due {shortDate(payable.dueDate)}
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold">{money(payable.outstandingAmount, payable.currency)}</p>
-                      <div className="mt-1 flex justify-end"><StatusBadge status={payable.status} /></div>
+                      <p className="font-semibold">
+                        {money(payable.outstandingAmount, payable.currency)}
+                      </p>
+                      <div className="mt-1 flex justify-end">
+                        <StatusBadge status={payable.status} />
+                      </div>
                     </div>
                   </div>
                 ))
@@ -467,7 +570,10 @@ export default function SupplierDetailPage() {
                 <EmptyPanel text="No product purchase coverage found yet." />
               ) : (
                 <table className="w-full min-w-[820px] text-sm">
-                  <thead className="text-left text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                  <thead
+                    className="text-left text-xs uppercase"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
                     <tr>
                       <th className="py-2">Product</th>
                       <th className="py-2">Category</th>
@@ -478,13 +584,24 @@ export default function SupplierDetailPage() {
                   </thead>
                   <tbody>
                     {data.productCoverage.map((row) => (
-                      <tr key={row.product.id} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+                      <tr
+                        key={row.product.id}
+                        className="border-t"
+                        style={{ borderColor: 'var(--aurora-border)' }}
+                      >
                         <td className="py-3">
                           <div className="font-medium">{row.product.name}</div>
-                          <div className="font-mono text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{row.product.productCode ?? row.product.sku ?? ''}</div>
+                          <div
+                            className="font-mono text-xs"
+                            style={{ color: 'var(--aurora-text-muted)' }}
+                          >
+                            {row.product.productCode ?? row.product.sku ?? ''}
+                          </div>
                         </td>
                         <td className="py-3">{row.product.category?.name ?? '—'}</td>
-                        <td className="py-3 text-right">{row.quantity.toLocaleString()} {row.unit?.symbol ?? ''}</td>
+                        <td className="py-3 text-right">
+                          {row.quantity.toLocaleString()} {row.unit?.symbol ?? ''}
+                        </td>
                         <td className="py-3 text-right">{money(row.totalAmount)}</td>
                         <td className="py-3">{shortDate(row.lastPurchasedAt)}</td>
                       </tr>
@@ -498,9 +615,20 @@ export default function SupplierDetailPage() {
           {tab === 'Statements' && (
             <div className="space-y-5">
               {canGenerateStatements && (
-                <div className="grid grid-cols-1 gap-3 rounded-lg border p-4 md:grid-cols-[1fr_1fr_auto]" style={{ borderColor: 'var(--aurora-border)' }}>
-                  <DateInput label="Period Start" value={statementStart} onChange={(event) => setStatementStart(event.target.value)} />
-                  <DateInput label="Period End" value={statementEnd} onChange={(event) => setStatementEnd(event.target.value)} />
+                <div
+                  className="grid grid-cols-1 gap-3 rounded-lg border p-4 md:grid-cols-[1fr_1fr_auto]"
+                  style={{ borderColor: 'var(--aurora-border)' }}
+                >
+                  <DateInput
+                    label="Period Start"
+                    value={statementStart}
+                    onChange={(event) => setStatementStart(event.target.value)}
+                  />
+                  <DateInput
+                    label="Period End"
+                    value={statementEnd}
+                    onChange={(event) => setStatementEnd(event.target.value)}
+                  />
                   <div className="flex items-end">
                     <Btn variant="primary" onClick={generateStatement} loading={generating}>
                       Generate
@@ -512,7 +640,11 @@ export default function SupplierDetailPage() {
                 <EmptyPanel text="No supplier statements have been generated." />
               ) : (
                 data.latestStatements.map((statement) => (
-                  <div key={statement.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4" style={{ borderColor: 'var(--aurora-border)' }}>
+                  <div
+                    key={statement.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4"
+                    style={{ borderColor: 'var(--aurora-border)' }}
+                  >
                     <div>
                       <p className="font-semibold">{statement.statementRunNumber}</p>
                       <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
@@ -529,29 +661,51 @@ export default function SupplierDetailPage() {
             </div>
           )}
 
-          {tab === 'Performance' && (
-            data.performance ? (
+          {tab === 'Performance' &&
+            (data.performance ? (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <DetailItem label="Rating" value={data.performance.rating} />
-                <DetailItem label="On-Time Delivery" value={`${Number(data.performance.onTimeDeliveryRate ?? 0).toFixed(2)}%`} />
-                <DetailItem label="Quality Score" value={`${Number(data.performance.qualityScore ?? 0).toFixed(2)}%`} />
-                <DetailItem label="Price Competitiveness" value={`${Number(data.performance.priceCompetitivenessScore ?? 0).toFixed(2)}%`} />
+                <DetailItem
+                  label="On-Time Delivery"
+                  value={`${Number(data.performance.onTimeDeliveryRate ?? 0).toFixed(2)}%`}
+                />
+                <DetailItem
+                  label="Quality Score"
+                  value={`${Number(data.performance.qualityScore ?? 0).toFixed(2)}%`}
+                />
+                <DetailItem
+                  label="Price Competitiveness"
+                  value={`${Number(data.performance.priceCompetitivenessScore ?? 0).toFixed(2)}%`}
+                />
                 <DetailItem label="Returns" value={money(data.performance.totalReturns)} />
                 <DetailItem label="Disputes" value={String(data.performance.disputeCount ?? 0)} />
-                <div className="md:col-span-3"><DetailItem label="Notes" value={data.performance.notes} /></div>
+                <div className="md:col-span-3">
+                  <DetailItem label="Notes" value={data.performance.notes} />
+                </div>
               </div>
             ) : (
               <EmptyPanel text="No supplier performance profile has been recorded." />
-            )
-          )}
+            ))}
 
           {tab === 'Audit' && (
             <div className="space-y-5">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <DetailItem label="Created At" value={shortDate(data.audit?.createdAt ?? supplier.createdAt)} />
-                <DetailItem label="Updated At" value={shortDate(data.audit?.updatedAt ?? supplier.updatedAt)} />
-                <DetailItem label="Created By" value={data.audit?.createdBy?.fullName ?? data.audit?.createdBy?.email} />
-                <DetailItem label="Updated By" value={data.audit?.updatedBy?.fullName ?? data.audit?.updatedBy?.email} />
+                <DetailItem
+                  label="Created At"
+                  value={shortDate(data.audit?.createdAt ?? supplier.createdAt)}
+                />
+                <DetailItem
+                  label="Updated At"
+                  value={shortDate(data.audit?.updatedAt ?? supplier.updatedAt)}
+                />
+                <DetailItem
+                  label="Created By"
+                  value={data.audit?.createdBy?.fullName ?? data.audit?.createdBy?.email}
+                />
+                <DetailItem
+                  label="Updated By"
+                  value={data.audit?.updatedBy?.fullName ?? data.audit?.updatedBy?.email}
+                />
               </div>
               <div>
                 <h3 className="mb-3 text-sm font-semibold">Recent Ledger Events</h3>
@@ -560,10 +714,16 @@ export default function SupplierDetailPage() {
                 ) : (
                   <div className="space-y-2">
                     {data.ledger.map((event) => (
-                      <div key={event.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
+                      <div
+                        key={event.id}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"
+                        style={{ borderColor: 'var(--aurora-border)' }}
+                      >
                         <div>
                           <p className="font-medium">{event.reference}</p>
-                          <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{event.type.replace(/_/g, ' ')} · {shortDate(event.date)}</p>
+                          <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                            {event.type.replace(/_/g, ' ')} · {shortDate(event.date)}
+                          </p>
                         </div>
                         <div className="text-right">
                           <p>{money(event.balanceImpact, event.currency)}</p>

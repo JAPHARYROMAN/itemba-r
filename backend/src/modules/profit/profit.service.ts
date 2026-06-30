@@ -170,7 +170,12 @@ export class ProfitService {
   }
 
   async assertInventoryMovementHasCost(
-    data: { companyId: string; productId: string; movementType: InventoryMovementType; unitCost?: number },
+    data: {
+      companyId: string;
+      productId: string;
+      movementType: InventoryMovementType;
+      unitCost?: number;
+    },
     db: DbClient = this.prisma,
   ) {
     if (!COST_REQUIRED_INBOUND_TYPES.includes(data.movementType)) return;
@@ -225,7 +230,8 @@ export class ProfitService {
     input: ValidateSaleLinesInput,
     db: DbClient = this.prisma,
   ): Promise<SaleLineProfitSnapshot[]> {
-    if (!input.companyId) throw new BadRequestException('Company is required for profit validation');
+    if (!input.companyId)
+      throw new BadRequestException('Company is required for profit validation');
     if (!input.lines?.length) throw new BadRequestException('At least one sale line is required');
 
     const productIds = [...new Set(input.lines.map((line) => line.productId).filter(Boolean))];
@@ -267,7 +273,9 @@ export class ProfitService {
         throw new BadRequestException(`Quantity for ${product.name} must be greater than zero`);
       }
       if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
-        throw new BadRequestException(`Selling price for ${product.name} must be greater than zero`);
+        throw new BadRequestException(
+          `Selling price for ${product.name} must be greater than zero`,
+        );
       }
       if (!Number.isFinite(discountAmount) || discountAmount < 0) {
         throw new BadRequestException(`Discount for ${product.name} cannot be negative`);
@@ -275,7 +283,9 @@ export class ProfitService {
 
       const netSalesAmount = roundMoney(quantity * unitPrice - discountAmount);
       if (netSalesAmount <= 0) {
-        throw new BadRequestException(`Net sales amount for ${product.name} must be greater than zero`);
+        throw new BadRequestException(
+          `Net sales amount for ${product.name} must be greater than zero`,
+        );
       }
       const netUnitPrice = netSalesAmount / quantity;
 
@@ -294,7 +304,11 @@ export class ProfitService {
         };
       }
 
-      const cost = this.resolveEffectiveCost(product, balanceByProductId.get(product.id) ?? null, input.branchId);
+      const cost = this.resolveEffectiveCost(
+        product,
+        balanceByProductId.get(product.id) ?? null,
+        input.branchId,
+      );
       if (netUnitPrice <= cost.unitCost) {
         throw new BadRequestException(
           `${product.name} cannot be sold below cost. Net unit price ${formatMoney(netUnitPrice)} must be greater than cost ${formatMoney(cost.unitCost)}.`,
@@ -302,7 +316,8 @@ export class ProfitService {
       }
       const cogsAmount = roundMoney(quantity * cost.unitCost);
       const grossProfitAmount = roundMoney(netSalesAmount - cogsAmount);
-      const grossMarginPct = netSalesAmount > 0 ? roundPercent((grossProfitAmount / netSalesAmount) * 100) : null;
+      const grossMarginPct =
+        netSalesAmount > 0 ? roundPercent((grossProfitAmount / netSalesAmount) * 100) : null;
 
       return {
         productId: product.id,
@@ -379,7 +394,8 @@ export class ProfitService {
       cogs += rowCogs;
       if (missing) {
         linesMissingCost += missing._count._all;
-        revenueMissingCost += Number(missing._sum.lineTotal ?? 0) - Number(missing._sum.taxAmount ?? 0);
+        revenueMissingCost +=
+          Number(missing._sum.lineTotal ?? 0) - Number(missing._sum.taxAmount ?? 0);
       }
 
       return {
@@ -437,10 +453,7 @@ export class ProfitService {
                 {
                   productFamily: {
                     is: {
-                      OR: [
-                        { defaultPurchasePrice: null },
-                        { defaultPurchasePrice: { lte: 0 } },
-                      ],
+                      OR: [{ defaultPurchasePrice: null }, { defaultPurchasePrice: { lte: 0 } }],
                     },
                   },
                 },
@@ -527,7 +540,11 @@ export class ProfitService {
     return { rows, total: rows.length };
   }
 
-  async productLedger(productId: string, query: Record<string, string | undefined>, user: AuthUser) {
+  async productLedger(
+    productId: string,
+    query: Record<string, string | undefined>,
+    user: AuthUser,
+  ) {
     const salesOrderWhere = await this.salesOrderWhere(query, user);
     const rows = await this.prisma.salesOrderLine.findMany({
       where: { productId, salesOrder: salesOrderWhere },
@@ -546,19 +563,19 @@ export class ProfitService {
       take: 250,
     });
     return rows.map((line) => ({
-        salesOrderId: line.salesOrder.id,
-        salesOrderNumber: line.salesOrder.salesOrderNumber,
-        orderDate: line.salesOrder.orderDate,
-        customerName: line.salesOrder.customerName,
-        quantity: Number(line.quantity),
-        unitPrice: Number(line.unitPrice),
-        discountAmount: Number(line.discountAmount ?? 0),
-        unitCostAtSale: line.unitCostAtSale == null ? null : Number(line.unitCostAtSale),
-        cogsAmount: Number(line.cogsAmount ?? 0),
-        grossProfitAmount: Number(line.grossProfitAmount ?? 0),
-        grossMarginPct: line.grossMarginPct == null ? null : Number(line.grossMarginPct),
-        profitCostSource: line.profitCostSource,
-      }));
+      salesOrderId: line.salesOrder.id,
+      salesOrderNumber: line.salesOrder.salesOrderNumber,
+      orderDate: line.salesOrder.orderDate,
+      customerName: line.salesOrder.customerName,
+      quantity: Number(line.quantity),
+      unitPrice: Number(line.unitPrice),
+      discountAmount: Number(line.discountAmount ?? 0),
+      unitCostAtSale: line.unitCostAtSale == null ? null : Number(line.unitCostAtSale),
+      cogsAmount: Number(line.cogsAmount ?? 0),
+      grossProfitAmount: Number(line.grossProfitAmount ?? 0),
+      grossMarginPct: line.grossMarginPct == null ? null : Number(line.grossMarginPct),
+      profitCostSource: line.profitCostSource,
+    }));
   }
 
   async belowCostAttempts(query: Record<string, string | undefined>, user: AuthUser) {
@@ -667,7 +684,9 @@ export class ProfitService {
     }
 
     if (!Object.keys(changes).length) {
-      throw new BadRequestException('Provide a default purchase cost or branch average cost to update');
+      throw new BadRequestException(
+        'Provide a default purchase cost or branch average cost to update',
+      );
     }
 
     await this.auditLogs.log({
@@ -728,7 +747,8 @@ export class ProfitService {
 
     let updated = 0;
     let skipped = 0;
-    const skippedSamples: Array<{ salesOrderNumber: string; productName: string; reason: string }> = [];
+    const skippedSamples: Array<{ salesOrderNumber: string; productName: string; reason: string }> =
+      [];
 
     for (const line of lines) {
       try {
@@ -886,7 +906,9 @@ export class ProfitService {
     branchId?: string | null,
   ): { unitCost: number; source: ProfitCostSource } {
     if (!branchId) {
-      throw new BadRequestException(`Branch/location is required to validate profit for ${product.name}`);
+      throw new BadRequestException(
+        `Branch/location is required to validate profit for ${product.name}`,
+      );
     }
 
     const balanceQty = Number(balance?.quantityOnHand ?? 0);

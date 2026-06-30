@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const HARDENED_OPERATION_PAGES = [
@@ -28,19 +28,12 @@ const HARDENED_JOB_BACKUP_PAGES = [
 
 const HARDENED_OPERATIONAL_READINESS_PAGES = [
   'src/app/(dashboard)/audit-logs/page.tsx',
-  'src/app/(dashboard)/monitoring/page.tsx',
-  'src/app/(dashboard)/monitoring/error-logs/page.tsx',
-  'src/app/(dashboard)/monitoring/health-checks/page.tsx',
-  'src/app/(dashboard)/monitoring/metrics/page.tsx',
   'src/app/(dashboard)/security/page.tsx',
   'src/app/(dashboard)/security/events/page.tsx',
   'src/app/(dashboard)/security/policies/page.tsx',
   'src/app/(dashboard)/security/sessions/page.tsx',
   'src/app/(dashboard)/security/two-factor/page.tsx',
   'src/app/(dashboard)/security/user-profiles/page.tsx',
-  'src/app/(dashboard)/retention/page.tsx',
-  'src/app/(dashboard)/retention/archive-jobs/page.tsx',
-  'src/app/(dashboard)/retention/policies/page.tsx',
 ];
 
 describe('frontend runtime safety', () => {
@@ -50,7 +43,12 @@ describe('frontend runtime safety', () => {
       ...HARDENED_JOB_BACKUP_PAGES,
       ...HARDENED_OPERATIONAL_READINESS_PAGES,
     ].flatMap((relativePath) => {
-      const source = readFileSync(resolve(process.cwd(), relativePath), 'utf8');
+      const absolutePath = resolve(process.cwd(), relativePath);
+      // A clear assertion beats an ENOENT crash if a listed page is later removed.
+      if (!existsSync(absolutePath)) {
+        return [`${relativePath}: missing (remove from list or restore the page)`];
+      }
+      const source = readFileSync(absolutePath, 'utf8');
       const issues: string[] = [];
       if (/\bfetch\s*\(/.test(source)) issues.push('raw fetch');
       if (/\.json\s*\(/.test(source)) issues.push('response json parse');

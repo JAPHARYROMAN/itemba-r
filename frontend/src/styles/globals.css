@@ -70,7 +70,8 @@
 
   /* Elevation tiers — prominence hierarchy for cards (default cards keep
      --aurora-shadow-sm; prominent/critical surfaces step up). */
-  --aurora-shadow-prominent: 0 12px 32px -6px rgb(2 6 23 / 0.14), 0 4px 12px -4px rgb(2 6 23 / 0.08);
+  --aurora-shadow-prominent:
+    0 12px 32px -6px rgb(2 6 23 / 0.14), 0 4px 12px -4px rgb(2 6 23 / 0.08);
   --aurora-glow-primary: 0 0 0 1px rgb(37 99 235 / 0.18), 0 8px 24px -6px rgb(37 99 235 / 0.25);
   --aurora-glow-success: 0 0 0 1px rgb(16 185 129 / 0.2), 0 8px 24px -6px rgb(16 185 129 / 0.25);
   --aurora-glow-accent: 0 0 0 1px rgb(217 119 6 / 0.2), 0 8px 24px -6px rgb(217 119 6 / 0.28);
@@ -312,18 +313,42 @@ html.motion-reduced *::after {
   .aurora-stagger > * {
     animation: auroraFadeUp 0.35s var(--aurora-ease) both;
   }
-  .aurora-stagger > *:nth-child(1) { animation-delay: 0ms; }
-  .aurora-stagger > *:nth-child(2) { animation-delay: 50ms; }
-  .aurora-stagger > *:nth-child(3) { animation-delay: 100ms; }
-  .aurora-stagger > *:nth-child(4) { animation-delay: 150ms; }
-  .aurora-stagger > *:nth-child(5) { animation-delay: 200ms; }
-  .aurora-stagger > *:nth-child(6) { animation-delay: 250ms; }
-  .aurora-stagger > *:nth-child(7) { animation-delay: 300ms; }
-  .aurora-stagger > *:nth-child(8) { animation-delay: 350ms; }
-  .aurora-stagger > *:nth-child(9) { animation-delay: 400ms; }
-  .aurora-stagger > *:nth-child(10) { animation-delay: 450ms; }
-  .aurora-stagger > *:nth-child(11) { animation-delay: 500ms; }
-  .aurora-stagger > *:nth-child(12) { animation-delay: 550ms; }
+  .aurora-stagger > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .aurora-stagger > *:nth-child(2) {
+    animation-delay: 50ms;
+  }
+  .aurora-stagger > *:nth-child(3) {
+    animation-delay: 100ms;
+  }
+  .aurora-stagger > *:nth-child(4) {
+    animation-delay: 150ms;
+  }
+  .aurora-stagger > *:nth-child(5) {
+    animation-delay: 200ms;
+  }
+  .aurora-stagger > *:nth-child(6) {
+    animation-delay: 250ms;
+  }
+  .aurora-stagger > *:nth-child(7) {
+    animation-delay: 300ms;
+  }
+  .aurora-stagger > *:nth-child(8) {
+    animation-delay: 350ms;
+  }
+  .aurora-stagger > *:nth-child(9) {
+    animation-delay: 400ms;
+  }
+  .aurora-stagger > *:nth-child(10) {
+    animation-delay: 450ms;
+  }
+  .aurora-stagger > *:nth-child(11) {
+    animation-delay: 500ms;
+  }
+  .aurora-stagger > *:nth-child(12) {
+    animation-delay: 550ms;
+  }
 
   /* Skeleton shimmer */
   .aurora-skeleton {

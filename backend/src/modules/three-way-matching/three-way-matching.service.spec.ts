@@ -20,9 +20,7 @@ function makeService(overrides: { existingMatch?: any } = {}) {
     threeWayMatch: {
       // First call is the duplicate guard (defaults to no duplicate), then the create.
       findFirst: jest.fn().mockResolvedValue(overrides.existingMatch ?? null),
-      create: jest
-        .fn()
-        .mockImplementation(async ({ data }: any) => ({ id: 'twm-1', ...data })),
+      create: jest.fn().mockImplementation(async ({ data }: any) => ({ id: 'twm-1', ...data })),
     },
     purchaseOrder: { findFirst: jest.fn().mockResolvedValue(purchaseOrder) },
     supplierInvoice: { findFirst: jest.fn().mockResolvedValue(supplierInvoice) },

@@ -11,11 +11,7 @@ import { InventoryMovementsService } from './inventory-movements.service';
  * quantity math so a future refactor cannot silently regress them.
  */
 
-function makeService(opts: {
-  grouped: any[];
-  totals: any;
-  companyWhere?: any;
-}) {
+function makeService(opts: { grouped: any[]; totals: any; companyWhere?: any }) {
   const prisma = {
     inventoryMovement: {
       groupBy: jest.fn().mockResolvedValue(opts.grouped),
@@ -28,13 +24,7 @@ function makeService(opts: {
     companyWhereFor: jest.fn().mockResolvedValue(opts.companyWhere ?? {}),
   } as any;
   const profit = {} as any;
-  const service = new InventoryMovementsService(
-    prisma,
-    auditLogs,
-    codes,
-    companyScope,
-    profit,
-  );
+  const service = new InventoryMovementsService(prisma, auditLogs, codes, companyScope, profit);
   return { service, prisma, companyScope };
 }
 
@@ -105,7 +95,11 @@ describe('InventoryMovementsService.summary', () => {
     });
 
     await service.summary(
-      { companyId: 'company-A', productId: 'product-9', movementType: 'PURCHASE_RECEIPT' as InventoryMovementType },
+      {
+        companyId: 'company-A',
+        productId: 'product-9',
+        movementType: 'PURCHASE_RECEIPT' as InventoryMovementType,
+      },
       user,
     );
 

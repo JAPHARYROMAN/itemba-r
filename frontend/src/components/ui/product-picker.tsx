@@ -236,7 +236,9 @@ export function ProductPicker({
               >
                 {p.productCode || p.sku ? (
                   <>
-                    <span className="font-mono text-xs text-slate-500">{p.productCode || p.sku}</span>{' '}
+                    <span className="font-mono text-xs text-slate-500">
+                      {p.productCode || p.sku}
+                    </span>{' '}
                     {p.name}
                   </>
                 ) : (

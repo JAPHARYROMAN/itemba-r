@@ -72,7 +72,8 @@ export class ReportsCatalogService {
       sectorCounts[e.sector] = (sectorCounts[e.sector] ?? 0) + 1;
       typeCounts[e.reportType] = (typeCounts[e.reportType] ?? 0) + 1;
       lifecycleCounts[e.lifecycleStatus] = (lifecycleCounts[e.lifecycleStatus] ?? 0) + 1;
-      securityCounts[e.securityClassification] = (securityCounts[e.securityClassification] ?? 0) + 1;
+      securityCounts[e.securityClassification] =
+        (securityCounts[e.securityClassification] ?? 0) + 1;
       categoryCounts[e.category] = (categoryCounts[e.category] ?? 0) + 1;
       ownerCounts[e.owner] = (ownerCounts[e.owner] ?? 0) + 1;
     }
@@ -114,9 +115,14 @@ export class ReportsCatalogService {
     return {
       entry,
       viewer: {
-        basis: entry.reportType === 'FINANCIAL_STATEMENT' ? 'Accrual by default, cash basis where endpoint supports it' : 'Operational basis',
+        basis:
+          entry.reportType === 'FINANCIAL_STATEMENT'
+            ? 'Accrual by default, cash basis where endpoint supports it'
+            : 'Operational basis',
         snapshotMode:
-          entry.reportType === 'FINANCIAL_STATEMENT' || entry.reportType === 'COMPLIANCE' || entry.reportType === 'AUDIT'
+          entry.reportType === 'FINANCIAL_STATEMENT' ||
+          entry.reportType === 'COMPLIANCE' ||
+          entry.reportType === 'AUDIT'
             ? 'Snapshot capable'
             : 'Live view',
         lineage: entry.drillPaths,
@@ -168,11 +174,23 @@ export class ReportsCatalogService {
       semanticModel: this.semanticModelFor(entry),
       sourceSystems: this.sourceSystemsFor(entry),
       lineage: [
-        { stage: 'Catalog', detail: `${entry.sector} / ${entry.category}`, reference: '/reports/catalog' },
-        { stage: 'Semantic layer', detail: entry.tags.join(', '), reference: '/reports/data-catalog' },
+        {
+          stage: 'Catalog',
+          detail: `${entry.sector} / ${entry.category}`,
+          reference: '/reports/catalog',
+        },
+        {
+          stage: 'Semantic layer',
+          detail: entry.tags.join(', '),
+          reference: '/reports/data-catalog',
+        },
         { stage: 'Source endpoint', detail: entry.apiPath, reference: entry.apiPath },
         { stage: 'Viewer', detail: entry.frontendPath, reference: entry.frontendPath },
-        { stage: 'Audit trail', detail: 'Report runs, exports, pack generation, and lifecycle actions are logged.', reference: '/audit-logs' },
+        {
+          stage: 'Audit trail',
+          detail: 'Report runs, exports, pack generation, and lifecycle actions are logged.',
+          reference: '/audit-logs',
+        },
       ],
       drillGraph: this.drillGraphFor(entry),
       drillThrough: this.drillThroughFor(entry),
@@ -182,7 +200,8 @@ export class ReportsCatalogService {
         accessLevel: 'READ',
         rowLevelFilter: companyId ? `companyId=${companyId}` : 'user company scope / group scope',
         exportControl:
-          entry.securityClassification === 'SENSITIVE' || entry.securityClassification === 'RESTRICTED'
+          entry.securityClassification === 'SENSITIVE' ||
+          entry.securityClassification === 'RESTRICTED'
             ? 'High-severity export audit required'
             : 'Standard export audit required',
       },
@@ -191,11 +210,7 @@ export class ReportsCatalogService {
     };
   }
 
-  async dataQualityWarnings(
-    reportId: string,
-    user: AuthUser,
-    query: Record<string, unknown> = {},
-  ) {
+  async dataQualityWarnings(reportId: string, user: AuthUser, query: Record<string, unknown> = {}) {
     const entry = this.catalog().find((candidate) => candidate.id === reportId);
     if (!entry) throw new NotFoundException('Report not found');
 
@@ -229,7 +244,8 @@ export class ReportsCatalogService {
         computedWarnings.push({
           severity: 'MEDIUM',
           title: 'Group-level financial pack',
-          description: 'No company was selected, so the output is treated as group-level and requires a group-scoped user.',
+          description:
+            'No company was selected, so the output is treated as group-level and requires a group-scoped user.',
           source: 'scope',
         });
       } else if (period) {
@@ -244,7 +260,8 @@ export class ReportsCatalogService {
           computedWarnings.push({
             severity: 'HIGH',
             title: 'No accounting period exists for this transaction date range',
-            description: 'Create or open the relevant accounting period before using this output as an official report.',
+            description:
+              'Create or open the relevant accounting period before using this output as an official report.',
             source: 'accounting_periods',
           });
         }
@@ -266,7 +283,8 @@ export class ReportsCatalogService {
         computedWarnings.push({
           severity: 'HIGH',
           title: 'Cash account mapping is incomplete',
-          description: 'Set accountSubType="cash_on_hand" or "bank" on cash/bank accounts, or create a conventional account code such as 1000, 1010, or 1020.',
+          description:
+            'Set accountSubType="cash_on_hand" or "bank" on cash/bank accounts, or create a conventional account code such as 1000, 1010, or 1020.',
           source: 'chart_of_accounts',
         });
       }
@@ -284,7 +302,9 @@ export class ReportsCatalogService {
         detectedAt: issue.detectedAt,
       })),
     ];
-    const severityCounts = this.countTextValues(warnings.map((warning) => String(warning.severity ?? 'UNKNOWN')));
+    const severityCounts = this.countTextValues(
+      warnings.map((warning) => String(warning.severity ?? 'UNKNOWN')),
+    );
     const readinessScore = Math.max(
       70,
       100 -
@@ -300,7 +320,8 @@ export class ReportsCatalogService {
       warnings,
       surface: {
         readinessScore,
-        trustStatus: readinessScore >= 90 ? 'READY' : readinessScore >= 80 ? 'ATTENTION' : 'BLOCKED',
+        trustStatus:
+          readinessScore >= 90 ? 'READY' : readinessScore >= 80 ? 'ATTENTION' : 'BLOCKED',
         severityCounts,
         affectedDimensions: this.qualityDimensionsFor(entry),
         displayMode: 'INLINE_VIEWER_AND_COMMAND_CENTER',
@@ -390,7 +411,9 @@ export class ReportsCatalogService {
           openQuality > 0
             ? 'The number should be treated as provisional because open or acknowledged data-quality issues exist in the selected scope.'
             : 'The number is grounded in currently accessible source records and can be investigated through the recommended drill-down path.',
-        nextBestActions: this.drillThroughFor(entry).slice(0, 3).map((target) => target.label),
+        nextBestActions: this.drillThroughFor(entry)
+          .slice(0, 3)
+          .map((target) => target.label),
       },
       promptTemplates: this.explainPromptLibrary([entry]),
       questions: entry.businessQuestions,
@@ -458,7 +481,8 @@ export class ReportsCatalogService {
       userId: user.id,
       companyId: companyId ?? undefined,
       severity:
-        entry.securityClassification === 'SENSITIVE' || entry.securityClassification === 'RESTRICTED'
+        entry.securityClassification === 'SENSITIVE' ||
+        entry.securityClassification === 'RESTRICTED'
           ? AuditSeverity.HIGH
           : AuditSeverity.MEDIUM,
       metadata: {
@@ -606,7 +630,8 @@ export class ReportsCatalogService {
       userId: user.id,
       companyId: companyId ?? undefined,
       severity:
-        entry.securityClassification === 'SENSITIVE' || entry.securityClassification === 'RESTRICTED'
+        entry.securityClassification === 'SENSITIVE' ||
+        entry.securityClassification === 'RESTRICTED'
           ? AuditSeverity.HIGH
           : AuditSeverity.MEDIUM,
       metadata: {
@@ -649,7 +674,14 @@ export class ReportsCatalogService {
       .map((term) => term.trim())
       .filter((term) => term.length > 1);
     const phraseSynonyms: Record<string, string[]> = {
-      'who owes us money': ['receivables', 'aging', 'customer', 'balance', 'collections', 'overdue'],
+      'who owes us money': [
+        'receivables',
+        'aging',
+        'customer',
+        'balance',
+        'collections',
+        'overdue',
+      ],
       'money we owe': ['payables', 'aging', 'supplier', 'vendor', 'open bills', 'overdue'],
       'cash position': ['cash', 'bank', 'treasury', 'liquidity', 'working capital'],
       'stock value': ['inventory', 'stock', 'valuation', 'warehouse', 'products'],
@@ -717,7 +749,10 @@ export class ReportsCatalogService {
   private discoveryFacets(catalog: EnterpriseCatalogEntry[]) {
     return {
       sectors: this.facet(catalog, (entry) => entry.sector),
-      scopes: this.facet(catalog.flatMap((entry) => entry.scopes.map((scope) => ({ scope }))), (entry) => entry.scope),
+      scopes: this.facet(
+        catalog.flatMap((entry) => entry.scopes.map((scope) => ({ scope }))),
+        (entry) => entry.scope,
+      ),
       reportTypes: this.facet(catalog, (entry) => entry.reportType),
       lifecycleStatuses: this.facet(catalog, (entry) => entry.lifecycleStatus),
       securityClassifications: this.facet(catalog, (entry) => entry.securityClassification),
@@ -788,17 +823,34 @@ export class ReportsCatalogService {
     };
 
     return [
-      collection('cfo-close', 'CFO close and statements', 'Financial statements, cash, AR/AP, consolidation, and close evidence.', (entry) =>
-        entry.sector === 'FINANCE' || entry.relatedCapabilities.includes('Financial Statements Archive'),
+      collection(
+        'cfo-close',
+        'CFO close and statements',
+        'Financial statements, cash, AR/AP, consolidation, and close evidence.',
+        (entry) =>
+          entry.sector === 'FINANCE' ||
+          entry.relatedCapabilities.includes('Financial Statements Archive'),
       ),
-      collection('operations-live', 'Operations control', 'Inventory, sales, purchases, movements, and branch execution.', (entry) =>
-        entry.sector === 'OPERATIONS' || entry.sector === 'WESTSIDES' || entry.sector === 'PETROLEUM',
+      collection(
+        'operations-live',
+        'Operations control',
+        'Inventory, sales, purchases, movements, and branch execution.',
+        (entry) =>
+          entry.sector === 'OPERATIONS' ||
+          entry.sector === 'WESTSIDES' ||
+          entry.sector === 'PETROLEUM',
       ),
-      collection('audit-compliance', 'Audit and compliance evidence', 'Formal reports, control evidence, tax readiness, and audit trail.', (entry) =>
-        entry.reportType === 'AUDIT' || entry.reportType === 'COMPLIANCE',
+      collection(
+        'audit-compliance',
+        'Audit and compliance evidence',
+        'Formal reports, control evidence, tax readiness, and audit trail.',
+        (entry) => entry.reportType === 'AUDIT' || entry.reportType === 'COMPLIANCE',
       ),
-      collection('self-service-bi', 'Self-service BI', 'Builder, saved views, report runs, scheduled delivery, and governed datasets.', (entry) =>
-        entry.reportType === 'SELF_SERVICE' || entry.sector === 'BI',
+      collection(
+        'self-service-bi',
+        'Self-service BI',
+        'Builder, saved views, report runs, scheduled delivery, and governed datasets.',
+        (entry) => entry.reportType === 'SELF_SERVICE' || entry.sector === 'BI',
       ),
     ];
   }
@@ -815,7 +867,16 @@ export class ReportsCatalogService {
         key: 'cfo',
         label: 'CFO / Controller',
         objective: 'Run statements, validate close evidence, and review AR/AP and consolidation.',
-        terms: ['trial', 'profit', 'balance', 'cash', 'aging', 'intercompany', 'financial', 'audit'],
+        terms: [
+          'trial',
+          'profit',
+          'balance',
+          'cash',
+          'aging',
+          'intercompany',
+          'financial',
+          'audit',
+        ],
       },
       {
         key: 'operations',
@@ -855,20 +916,25 @@ export class ReportsCatalogService {
   }
 
   private actionLanes(catalog: EnterpriseCatalogEntry[]) {
-    const count = (predicate: (entry: EnterpriseCatalogEntry) => boolean) => catalog.filter(predicate).length;
+    const count = (predicate: (entry: EnterpriseCatalogEntry) => boolean) =>
+      catalog.filter(predicate).length;
     return [
       {
         key: 'run-certified',
         title: 'Run certified reports',
-        description: 'Launch official and certified reports with context, export, and lineage controls.',
+        description:
+          'Launch official and certified reports with context, export, and lineage controls.',
         href: '/reports',
         badge: 'Run',
-        reportCount: count((entry) => entry.lifecycleStatus === 'CERTIFIED' || entry.lifecycleStatus === 'OFFICIAL'),
+        reportCount: count(
+          (entry) => entry.lifecycleStatus === 'CERTIFIED' || entry.lifecycleStatus === 'OFFICIAL',
+        ),
       },
       {
         key: 'answer-question',
         title: 'Answer a business question',
-        description: 'Use synonym-aware discovery to find reports by business language rather than menu location.',
+        description:
+          'Use synonym-aware discovery to find reports by business language rather than menu location.',
         href: '/reports',
         badge: 'Discover',
         reportCount: this.businessQuestionIndex(catalog).length,
@@ -876,7 +942,8 @@ export class ReportsCatalogService {
       {
         key: 'govern-catalog',
         title: 'Govern the catalog',
-        description: 'Review ownership, lifecycle, export sensitivity, readiness gaps, and certified coverage.',
+        description:
+          'Review ownership, lifecycle, export sensitivity, readiness gaps, and certified coverage.',
         href: '/reports',
         badge: 'Govern',
         reportCount: this.readinessGaps(catalog).length,
@@ -892,7 +959,8 @@ export class ReportsCatalogService {
       total: catalog.filter((entry) => entry.sector === sector).length,
       reportTypes: reportTypes.map((reportType) => ({
         reportType,
-        count: catalog.filter((entry) => entry.sector === sector && entry.reportType === reportType).length,
+        count: catalog.filter((entry) => entry.sector === sector && entry.reportType === reportType)
+          .length,
       })),
       certifiedOrOfficial: catalog.filter(
         (entry) =>
@@ -902,7 +970,8 @@ export class ReportsCatalogService {
       sensitiveOrRestricted: catalog.filter(
         (entry) =>
           entry.sector === sector &&
-          (entry.securityClassification === 'SENSITIVE' || entry.securityClassification === 'RESTRICTED'),
+          (entry.securityClassification === 'SENSITIVE' ||
+            entry.securityClassification === 'RESTRICTED'),
       ).length,
     }));
   }
@@ -929,7 +998,9 @@ export class ReportsCatalogService {
   private discoveryHealth(catalog: EnterpriseCatalogEntry[]) {
     const percent = (count: number) => Math.round((count / Math.max(catalog.length, 1)) * 100);
     const withOwner = percent(catalog.filter((entry) => Boolean(entry.owner)).length);
-    const withQuestions = percent(catalog.filter((entry) => entry.businessQuestions.length > 0).length);
+    const withQuestions = percent(
+      catalog.filter((entry) => entry.businessQuestions.length > 0).length,
+    );
     const withDrillPaths = percent(catalog.filter((entry) => entry.drillPaths.length > 0).length);
     const withOutputs = percent(catalog.filter((entry) => entry.outputFormats.length > 0).length);
     const withPermission = percent(catalog.filter((entry) => Boolean(entry.permission)).length);
@@ -937,7 +1008,9 @@ export class ReportsCatalogService {
     const withFrontendPath = percent(catalog.filter((entry) => Boolean(entry.frontendPath)).length);
     const withTags = percent(catalog.filter((entry) => entry.tags.length >= 4).length);
     const certifiedOrOfficial = percent(
-      catalog.filter((entry) => entry.lifecycleStatus === 'CERTIFIED' || entry.lifecycleStatus === 'OFFICIAL').length,
+      catalog.filter(
+        (entry) => entry.lifecycleStatus === 'CERTIFIED' || entry.lifecycleStatus === 'OFFICIAL',
+      ).length,
     );
     const overallScore = Math.round(
       (withOwner +
@@ -974,7 +1047,12 @@ export class ReportsCatalogService {
           reportId: entry.id,
           reportName: entry.name,
           semanticDataset: this.semanticModelFor(entry).dataset,
-          groundedBy: ['data-quality warnings', 'lineage', 'source-count drivers', 'drill-through targets'],
+          groundedBy: [
+            'data-quality warnings',
+            'lineage',
+            'source-count drivers',
+            'drill-through targets',
+          ],
           href: `/reports/run?reportId=${entry.id}`,
         })),
       )
@@ -999,25 +1077,80 @@ export class ReportsCatalogService {
   private drillThroughFor(entry: EnterpriseCatalogEntry) {
     if (entry.reportType === 'FINANCIAL_STATEMENT') {
       return [
-        { label: 'Statement line', href: '/finance/reports', target: 'financial-statement-line', evidenceType: 'financial_statement_line' },
-        { label: 'Account detail', href: '/accounting-engine/chart-of-accounts', target: 'chart-of-account', evidenceType: 'chart_of_account' },
-        { label: 'Journal entries', href: '/accounting-engine/journal-entries', target: 'journal-entry', evidenceType: 'journal_entry' },
-        { label: 'Source documents', href: '/documents', target: 'document', evidenceType: 'source_document' },
+        {
+          label: 'Statement line',
+          href: '/finance/reports',
+          target: 'financial-statement-line',
+          evidenceType: 'financial_statement_line',
+        },
+        {
+          label: 'Account detail',
+          href: '/accounting-engine/chart-of-accounts',
+          target: 'chart-of-account',
+          evidenceType: 'chart_of_account',
+        },
+        {
+          label: 'Journal entries',
+          href: '/accounting-engine/journal-entries',
+          target: 'journal-entry',
+          evidenceType: 'journal_entry',
+        },
+        {
+          label: 'Source documents',
+          href: '/documents',
+          target: 'document',
+          evidenceType: 'source_document',
+        },
       ];
     }
     if (entry.sector === 'OPERATIONS') {
       return [
-        { label: 'Operational summary', href: '/operations/reports', target: 'summary', evidenceType: 'operational_report' },
-        { label: 'Inventory movements', href: '/operations/inventory-movements', target: 'inventory-movement', evidenceType: 'inventory_movement' },
-        { label: 'Products', href: '/operations/products', target: 'product', evidenceType: 'product_master' },
-        { label: 'Source orders', href: '/operations/sales-orders', target: 'sales-order', evidenceType: 'sales_or_purchase_order' },
+        {
+          label: 'Operational summary',
+          href: '/operations/reports',
+          target: 'summary',
+          evidenceType: 'operational_report',
+        },
+        {
+          label: 'Inventory movements',
+          href: '/operations/inventory-movements',
+          target: 'inventory-movement',
+          evidenceType: 'inventory_movement',
+        },
+        {
+          label: 'Products',
+          href: '/operations/products',
+          target: 'product',
+          evidenceType: 'product_master',
+        },
+        {
+          label: 'Source orders',
+          href: '/operations/sales-orders',
+          target: 'sales-order',
+          evidenceType: 'sales_or_purchase_order',
+        },
       ];
     }
     if (entry.sector === 'COMPLIANCE' || entry.reportType === 'AUDIT') {
       return [
-        { label: 'Control finding', href: '/compliance/reports', target: 'control', evidenceType: 'control_finding' },
-        { label: 'Audit trail', href: '/audit-logs', target: 'audit-log', evidenceType: 'audit_log' },
-        { label: 'Evidence packs', href: '/compliance/evidence-packs', target: 'evidence-pack', evidenceType: 'evidence_pack' },
+        {
+          label: 'Control finding',
+          href: '/compliance/reports',
+          target: 'control',
+          evidenceType: 'control_finding',
+        },
+        {
+          label: 'Audit trail',
+          href: '/audit-logs',
+          target: 'audit-log',
+          evidenceType: 'audit_log',
+        },
+        {
+          label: 'Evidence packs',
+          href: '/compliance/evidence-packs',
+          target: 'evidence-pack',
+          evidenceType: 'evidence_pack',
+        },
       ];
     }
     return entry.drillPaths.map((step) => ({
@@ -1032,7 +1165,13 @@ export class ReportsCatalogService {
     if (entry.reportType === 'FINANCIAL_STATEMENT') {
       return {
         dataset: 'general_ledger',
-        measures: ['Opening balance', 'Debit movement', 'Credit movement', 'Closing balance', 'Period activity'],
+        measures: [
+          'Opening balance',
+          'Debit movement',
+          'Credit movement',
+          'Closing balance',
+          'Period activity',
+        ],
         dimensions: ['Company', 'Account', 'Fiscal period', 'Currency', 'Branch', 'Division'],
         basis: 'Accrual with endpoint-specific cash basis where supported',
         grain: 'Journal line / account period',
@@ -1041,7 +1180,14 @@ export class ReportsCatalogService {
     if (entry.sector === 'OPERATIONS') {
       return {
         dataset: 'operations_transactions',
-        measures: ['Quantity', 'Value', 'Average cost', 'Sales amount', 'Purchase amount', 'Variance'],
+        measures: [
+          'Quantity',
+          'Value',
+          'Average cost',
+          'Sales amount',
+          'Purchase amount',
+          'Variance',
+        ],
         dimensions: ['Company', 'Division', 'Branch', 'Product', 'Customer', 'Supplier', 'Date'],
         basis: 'Operational source transaction basis',
         grain: 'Order line, product balance, or inventory movement',
@@ -1068,17 +1214,33 @@ export class ReportsCatalogService {
   private sourceSystemsFor(entry: EnterpriseCatalogEntry) {
     if (entry.reportType === 'FINANCIAL_STATEMENT') {
       return [
-        { name: 'General Ledger', module: 'Accounting Engine', sourcePath: '/accounting-engine/journal-entries' },
+        {
+          name: 'General Ledger',
+          module: 'Accounting Engine',
+          sourcePath: '/accounting-engine/journal-entries',
+        },
         { name: 'Chart of Accounts', module: 'Finance', sourcePath: '/finance/chart-of-accounts' },
-        { name: 'Accounting Periods', module: 'Finance', sourcePath: '/finance/accounting-periods' },
+        {
+          name: 'Accounting Periods',
+          module: 'Finance',
+          sourcePath: '/finance/accounting-periods',
+        },
       ];
     }
     if (entry.sector === 'OPERATIONS') {
       return [
         { name: 'Products', module: 'Operations', sourcePath: '/operations/products' },
-        { name: 'Inventory Movements', module: 'Operations', sourcePath: '/operations/inventory-movements' },
+        {
+          name: 'Inventory Movements',
+          module: 'Operations',
+          sourcePath: '/operations/inventory-movements',
+        },
         { name: 'Sales Orders', module: 'Operations', sourcePath: '/operations/sales-orders' },
-        { name: 'Purchase Orders', module: 'Operations', sourcePath: '/operations/purchase-orders' },
+        {
+          name: 'Purchase Orders',
+          module: 'Operations',
+          sourcePath: '/operations/purchase-orders',
+        },
       ];
     }
     return [
@@ -1090,8 +1252,18 @@ export class ReportsCatalogService {
   private drillGraphFor(entry: EnterpriseCatalogEntry) {
     const sourceSystems = this.sourceSystemsFor(entry);
     return [
-      { id: 'report', label: entry.name, type: 'report', href: `/reports/run?reportId=${entry.id}` },
-      { id: 'semantic', label: this.semanticModelFor(entry).dataset, type: 'semantic_model', href: '/reports' },
+      {
+        id: 'report',
+        label: entry.name,
+        type: 'report',
+        href: `/reports/run?reportId=${entry.id}`,
+      },
+      {
+        id: 'semantic',
+        label: this.semanticModelFor(entry).dataset,
+        type: 'semantic_model',
+        href: '/reports',
+      },
       ...sourceSystems.map((source, index) => ({
         id: `source-${index + 1}`,
         label: source.name,
@@ -1110,16 +1282,31 @@ export class ReportsCatalogService {
   private operationalBridgeFor(entry: EnterpriseCatalogEntry) {
     if (entry.sector === 'FINANCE') {
       return {
-        upstream: ['Sales orders', 'Purchase orders', 'Inventory movements', 'Receivables', 'Payables'],
+        upstream: [
+          'Sales orders',
+          'Purchase orders',
+          'Inventory movements',
+          'Receivables',
+          'Payables',
+        ],
         downstream: ['Management pack', 'Board pack', 'Audit evidence pack', 'Exports'],
-        closeImpact: entry.reportType === 'FINANCIAL_STATEMENT' ? 'Official close evidence' : 'Management analysis',
+        closeImpact:
+          entry.reportType === 'FINANCIAL_STATEMENT'
+            ? 'Official close evidence'
+            : 'Management analysis',
       };
     }
     if (entry.sector === 'OPERATIONS') {
       return {
         upstream: ['Products', 'Customers', 'Suppliers', 'Orders', 'Inventory balances'],
-        downstream: ['Revenue analysis', 'Purchase analysis', 'Stock valuation', 'Finance close bridge'],
-        closeImpact: 'Operational evidence that feeds stock, sales, purchase, and working-capital reporting.',
+        downstream: [
+          'Revenue analysis',
+          'Purchase analysis',
+          'Stock valuation',
+          'Finance close bridge',
+        ],
+        closeImpact:
+          'Operational evidence that feeds stock, sales, purchase, and working-capital reporting.',
       };
     }
     return {
@@ -1130,7 +1317,11 @@ export class ReportsCatalogService {
   }
 
   private qualityDimensionsFor(entry?: EnterpriseCatalogEntry, pack?: { key: string }) {
-    if (entry?.sector === 'FINANCE' || pack?.key.includes('management') || pack?.key.includes('board')) {
+    if (
+      entry?.sector === 'FINANCE' ||
+      pack?.key.includes('management') ||
+      pack?.key.includes('board')
+    ) {
       return ['Company', 'Accounting period', 'Chart of accounts', 'Currency', 'Journal status'];
     }
     if (entry?.sector === 'OPERATIONS') {
@@ -1140,7 +1331,11 @@ export class ReportsCatalogService {
   }
 
   private qualityRemediationFor(entry?: EnterpriseCatalogEntry, pack?: { key: string }) {
-    if (entry?.sector === 'FINANCE' || pack?.key.includes('management') || pack?.key.includes('board')) {
+    if (
+      entry?.sector === 'FINANCE' ||
+      pack?.key.includes('management') ||
+      pack?.key.includes('board')
+    ) {
       return [
         'Confirm the reporting accounting period exists and is open or closed as intended.',
         'Review cash and bank chart-of-account mappings.',
@@ -1210,7 +1405,6 @@ export class ReportsCatalogService {
       {} as Record<string, number>,
     );
   }
-
 }
 
 function stringValue(value: unknown) {
@@ -1223,7 +1417,9 @@ function stringList(value: unknown) {
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function arrayObjects(value: unknown): Record<string, unknown>[] {
@@ -1232,7 +1428,8 @@ function arrayObjects(value: unknown): Record<string, unknown>[] {
 
 function numberValue(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value)))
+    return Number(value);
   return undefined;
 }
 
@@ -1240,7 +1437,11 @@ function decimalToNumber(value: unknown) {
   if (value === null || value === undefined) return 0;
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
   if (typeof value === 'string' && Number.isFinite(Number(value))) return Number(value);
-  if (typeof value === 'object' && 'toNumber' in value && typeof (value as { toNumber: () => number }).toNumber === 'function') {
+  if (
+    typeof value === 'object' &&
+    'toNumber' in value &&
+    typeof (value as { toNumber: () => number }).toNumber === 'function'
+  ) {
     return (value as { toNumber: () => number }).toNumber();
   }
   return 0;
