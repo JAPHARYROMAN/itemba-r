@@ -369,17 +369,77 @@ export class StockAdjustmentsService {
         throw new BadRequestException('Only APPROVED adjustments can be posted');
       }
 
+      // Inbound adjustments (count-ups) create a stock movement that must carry a
+      // unit cost > 0 for stock products (assertInventoryMovementHasCost). Adjustment
+      // lines hold no cost of their own (physical counts), so value the added units
+      // at the product's current weighted-average cost when it already holds valued
+      // stock, otherwise at the product (then family) default purchase cost.
+      const inboundProductIds = [
+        ...new Set(
+          existing.lines
+            .filter((line) => Number(line.varianceQuantity) > 0)
+            .map((line) => line.productId),
+        ),
+      ];
+      const costProducts = inboundProductIds.length
+        ? await tx.product.findMany({
+            where: {
+              id: { in: inboundProductIds },
+              companyId: existing.companyId,
+              deletedAt: null,
+            },
+            select: {
+              id: true,
+              defaultPurchasePrice: true,
+              productFamily: { select: { defaultPurchasePrice: true } },
+            },
+          })
+        : [];
+      const costProductById = new Map(costProducts.map((product) => [product.id, product]));
+      const balanceRows = inboundProductIds.length
+        ? await tx.inventoryBalance.findMany({
+            where: {
+              companyId: existing.companyId,
+              branchId: existing.branchId,
+              productId: { in: inboundProductIds },
+            },
+            select: { productId: true, averageCost: true },
+          })
+        : [];
+      const avgCostByProduct = new Map(
+        balanceRows.map((row) => [row.productId, Number(row.averageCost)]),
+      );
+
       for (const line of existing.lines) {
         const variance = Number(line.varianceQuantity);
         if (variance === 0) continue;
 
         const movementType = variance > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
+        // Outbound adjustments relieve value at the existing average cost, so the
+        // caller supplies no cost; inbound adjustments resolve one (WAC -> default).
+        let unitCost: number | undefined;
+        if (variance > 0) {
+          const wac = avgCostByProduct.get(line.productId) ?? 0;
+          if (wac > 0) {
+            unitCost = wac;
+          } else {
+            const product = costProductById.get(line.productId);
+            unitCost =
+              product?.defaultPurchasePrice != null
+                ? Number(product.defaultPurchasePrice)
+                : product?.productFamily?.defaultPurchasePrice != null
+                  ? Number(product.productFamily.defaultPurchasePrice)
+                  : undefined;
+          }
+        }
+
         await this.inventoryMovements.createMovement({
           companyId: existing.companyId,
           productId: line.productId,
           movementType: movementType as any,
           quantity: Math.abs(variance),
           unitId: line.unitId,
+          unitCost,
           movementDate: new Date(),
           createdById: userId,
           referenceType: 'StockAdjustment',

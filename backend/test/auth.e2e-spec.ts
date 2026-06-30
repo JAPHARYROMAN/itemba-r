@@ -234,22 +234,30 @@ describe('Authentication (e2e)', () => {
       expect(data.refreshToken).not.toBe(oldRefresh);
     });
 
-    it('old refresh token cannot be reused after rotation', async () => {
+    it('tolerates re-presenting a just-rotated refresh token within the rotation grace window', async () => {
+      // REFRESH_TOKEN_ROTATION_GRACE_MS deliberately tolerates re-presenting a
+      // just-rotated token: the web client drives several uncoordinated refresh
+      // paths (proactive timers, the 401-retry, the proxy's own refresh), and a
+      // tight window turned those benign concurrent refreshes into forced logouts.
+      // Genuine theft protection — rejecting a token revoked for a NON-rotation
+      // reason — is covered by the logout test above ("logout revokes refresh
+      // token so it cannot be reused").
       await resetUserAuthState();
       const tokens = await loginAs(app, TEST_EMAIL, TEST_PASS);
       const oldRefresh = tokens.refreshToken;
 
-      // Use it once
+      // Rotate once.
       await request(app.getHttpServer())
         .post('/api/v1/auth/refresh')
         .set('Authorization', `Bearer ${oldRefresh}`)
         .expect(200);
 
-      // Try to reuse — must fail
+      // Re-presented within the grace window: tolerated as a benign concurrent
+      // refresh and still issues tokens, NOT treated as reuse/theft.
       await request(app.getHttpServer())
         .post('/api/v1/auth/refresh')
         .set('Authorization', `Bearer ${oldRefresh}`)
-        .expect(401);
+        .expect(200);
     });
   });
 
