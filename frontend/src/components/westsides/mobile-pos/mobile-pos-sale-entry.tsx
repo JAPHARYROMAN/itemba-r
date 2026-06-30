@@ -666,9 +666,13 @@ export function MobilePosSaleEntry() {
   const [productQuery, setProductQuery] = useState('');
   const [productResults, setProductResults] = useState<Product[]>([]);
   const [productSearching, setProductSearching] = useState(false);
+  const [productHighlight, setProductHighlight] = useState(-1);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [pendingQty, setPendingQty] = useState(1);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const productListboxId = 'mobile-pos-product-listbox';
+  const productSearchInputId = 'mobile-pos-product-search';
+  const customerSearchInputId = 'mobile-pos-customer-search';
   // Stable per-checkout idempotency token: created on the first checkout
   // attempt, reused across retries so a lost-response retry replays the original
   // order instead of duplicating it, and cleared on success / new sale.
@@ -923,10 +927,12 @@ export function MobilePosSaleEntry() {
     if (!settings.companyId || !settings.divisionId || !settings.branchId || !productQuery.trim()) {
       setProductResults([]);
       setProductSearching(false);
+      setProductHighlight(-1);
       return;
     }
     if (selectedProduct && productQuery.trim() === selectedProduct.name) {
       setProductResults([]);
+      setProductHighlight(-1);
       return;
     }
 
@@ -944,10 +950,16 @@ export function MobilePosSaleEntry() {
         },
       })
         .then((rows) => {
-          if (!cancelled) setProductResults(rows);
+          if (!cancelled) {
+            setProductResults(rows);
+            setProductHighlight(rows.length > 0 ? 0 : -1);
+          }
         })
         .catch(() => {
-          if (!cancelled) setProductResults([]);
+          if (!cancelled) {
+            setProductResults([]);
+            setProductHighlight(-1);
+          }
         })
         .finally(() => {
           if (!cancelled) setProductSearching(false);
@@ -1181,10 +1193,49 @@ export function MobilePosSaleEntry() {
     setCart((current) => current.filter((_, lineIndex) => lineIndex !== index));
   };
 
+  const pickProduct = (product: Product) => {
+    setSelectedProduct(product);
+    setProductQuery(product.name);
+    setProductResults([]);
+    setProductHighlight(-1);
+    searchInputRef.current?.focus();
+  };
+
+  const productListboxOpen = productResults.length > 0;
+
   const handleSearchKey = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown') {
+      if (!productListboxOpen) return;
+      event.preventDefault();
+      setProductHighlight((current) =>
+        productResults.length === 0 ? -1 : (current + 1) % productResults.length,
+      );
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      if (!productListboxOpen) return;
+      event.preventDefault();
+      setProductHighlight((current) =>
+        productResults.length === 0
+          ? -1
+          : (current - 1 + productResults.length) % productResults.length,
+      );
+      return;
+    }
+    if (event.key === 'Escape') {
+      if (!productListboxOpen) return;
+      event.preventDefault();
+      setProductResults([]);
+      setProductHighlight(-1);
+      return;
+    }
     if (event.key !== 'Enter') return;
     event.preventDefault();
-    if (selectedProduct) {
+    const highlighted =
+      productListboxOpen && productHighlight >= 0 ? productResults[productHighlight] : undefined;
+    if (highlighted && !selectedProduct) {
+      pickProduct(highlighted);
+    } else if (selectedProduct) {
       addProduct(selectedProduct);
     } else if (productResults[0]) {
       addProduct(productResults[0]);
@@ -1484,12 +1535,14 @@ export function MobilePosSaleEntry() {
             <div className="grid grid-cols-[minmax(0,1fr)_5.5rem] gap-2">
               <div className="relative">
                 <label
+                  htmlFor={productSearchInputId}
                   className="mb-1 block text-[12px] font-medium"
                   style={{ color: 'var(--aurora-text-secondary)' }}
                 >
                   Find Product
                 </label>
                 <input
+                  id={productSearchInputId}
                   ref={searchInputRef}
                   className="aurora-input w-full rounded-lg px-3 py-2 text-[13px] transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed"
                   value={productQuery}
@@ -1501,9 +1554,21 @@ export function MobilePosSaleEntry() {
                   disabled={!settingsReady || Boolean(confirmed)}
                   placeholder={settingsReady ? 'Search name, code, SKU, barcode' : 'Pick settings'}
                   autoComplete="off"
+                  role="combobox"
+                  aria-expanded={productListboxOpen}
+                  aria-controls={productListboxId}
+                  aria-autocomplete="list"
+                  aria-activedescendant={
+                    productListboxOpen && productHighlight >= 0
+                      ? `${productListboxId}-option-${productHighlight}`
+                      : undefined
+                  }
                 />
                 {(productResults.length > 0 || productSearching) && (
                   <div
+                    id={productListboxId}
+                    role="listbox"
+                    aria-label="Product search results"
                     className="absolute left-0 right-0 z-30 mt-1 max-h-72 overflow-y-auto rounded-lg border shadow-lg"
                     style={{
                       background: 'var(--aurora-card)',
@@ -1513,17 +1578,15 @@ export function MobilePosSaleEntry() {
                     {productSearching && productResults.length === 0 ? (
                       <div className="px-3 py-2 text-[12px] text-slate-500">Searching</div>
                     ) : (
-                      productResults.map((product) => (
+                      productResults.map((product, index) => (
                         <ProductResultButton
                           key={product.id}
                           product={product}
                           allocated={allocatedByProduct.get(product.id) ?? 0}
-                          onPick={() => {
-                            setSelectedProduct(product);
-                            setProductQuery(product.name);
-                            setProductResults([]);
-                            searchInputRef.current?.focus();
-                          }}
+                          optionId={`${productListboxId}-option-${index}`}
+                          active={index === productHighlight}
+                          onHighlight={() => setProductHighlight(index)}
+                          onPick={() => pickProduct(product)}
                         />
                       ))
                     )}
@@ -1619,12 +1682,14 @@ export function MobilePosSaleEntry() {
               <>
                 <div className="relative">
                   <label
+                    htmlFor={customerSearchInputId}
                     className="mb-1 block text-[12px] font-medium"
                     style={{ color: 'var(--aurora-text-secondary)' }}
                   >
                     Customer
                   </label>
                   <input
+                    id={customerSearchInputId}
                     className="aurora-input w-full rounded-lg px-3 py-2 text-[13px] transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed"
                     value={customerSearch}
                     onChange={(event) => setCustomerSearch(event.target.value)}
@@ -1638,6 +1703,8 @@ export function MobilePosSaleEntry() {
                   />
                   {(customers.length > 0 || customerSearching) && (
                     <div
+                      role="listbox"
+                      aria-label="Customer search results"
                       className="absolute left-0 right-0 z-30 mt-1 max-h-72 overflow-y-auto rounded-lg border shadow-lg"
                       style={{
                         background: 'var(--aurora-card)',
@@ -2156,11 +2223,12 @@ function CustomerResultButton({ customer, onPick }: { customer: Customer; onPick
   return (
     <button
       type="button"
+      role="option"
+      aria-selected={false}
       className="block w-full px-3 py-2 text-left transition-colors hover:bg-zinc-50"
-      onMouseDown={(event) => {
-        event.preventDefault();
-        onPick();
-      }}
+      // Keep input focus on mousedown; commit the selection on click.
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onPick}
     >
       <div className="text-[13px] font-medium">{customer.name}</div>
       <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
@@ -2175,10 +2243,16 @@ function CustomerResultButton({ customer, onPick }: { customer: Customer; onPick
 function ProductResultButton({
   product,
   allocated,
+  optionId,
+  active,
+  onHighlight,
   onPick,
 }: {
   product: Product;
   allocated: number;
+  optionId: string;
+  active: boolean;
+  onHighlight: () => void;
   onPick: () => void;
 }) {
   const available = productAvailableStock(product);
@@ -2187,11 +2261,15 @@ function ProductResultButton({
   return (
     <button
       type="button"
-      className="block w-full px-3 py-2 text-left transition-colors hover:bg-zinc-50"
-      onMouseDown={(event) => {
-        event.preventDefault();
-        onPick();
-      }}
+      id={optionId}
+      role="option"
+      aria-selected={active}
+      className={`block w-full px-3 py-2 text-left transition-colors hover:bg-zinc-50 ${active ? 'bg-zinc-100' : ''}`}
+      // Keep input focus (so the combobox keeps managing aria-activedescendant);
+      // selection itself happens on click, not mousedown.
+      onMouseDown={(event) => event.preventDefault()}
+      onMouseEnter={onHighlight}
+      onClick={onPick}
     >
       <div className="text-[13px] font-medium">{product.name}</div>
       <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
@@ -2336,6 +2414,7 @@ function CartLineCard({
               disabled={disabled}
               className="aurora-input min-w-0 border-y px-1 py-2 text-center text-[13px]"
               style={{ borderColor: 'var(--aurora-border)' }}
+              aria-label={`Quantity for ${line.productName}`}
             />
             <button
               type="button"

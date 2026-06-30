@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Btn } from '@/components/ui';
 
 export interface OrderProductOption {
@@ -117,6 +117,25 @@ function quantity(value: number | null | undefined) {
 function numberOrZero(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+// Round to 2 decimal places so each line's contribution matches the persisted
+// (already-rounded) money value; composing the footer from rounded lines keeps
+// the displayed Total equal to the sum the backend stores.
+function roundMoney(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+// Parse a free-text numeric input. Returns null when the value is blank, NaN,
+// negative, or non-finite so callers can reject it; otherwise the finite >= 0
+// number. Used to harden the qty/price/discount/tax fields.
+function parseNonNegativeNumber(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
 }
 
 function productLabel(product: OrderProductOption) {
@@ -266,15 +285,19 @@ export function mergeOrderProductOptions<TProduct extends OrderProductOption>(
   return Array.from(byId.values());
 }
 
+// Discount field semantics differ by order variant:
+//   - sales: `line.discount` is a PER-UNIT amount, so the line discount is
+//     qty x discount.
+//   - purchase: `line.discount` is a FLAT amount applied once to the whole line.
 function lineDiscountTotal(line: EditableOrderLine, variant: OrderVariant) {
   const discount = numberOrZero(line.discount);
-  if (variant === 'sales') return numberOrZero(line.qty) * discount;
-  return discount;
+  if (variant === 'sales') return roundMoney(numberOrZero(line.qty) * discount);
+  return roundMoney(discount);
 }
 
 function lineTotal(line: EditableOrderLine, variant: OrderVariant) {
-  const subtotal = numberOrZero(line.qty) * numberOrZero(line.unitPrice);
-  return subtotal - lineDiscountTotal(line, variant) + numberOrZero(line.tax);
+  const subtotal = roundMoney(numberOrZero(line.qty) * numberOrZero(line.unitPrice));
+  return roundMoney(subtotal - lineDiscountTotal(line, variant) + roundMoney(numberOrZero(line.tax)));
 }
 
 function missingFields(line: EditableOrderLine) {
@@ -302,6 +325,21 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
 }: OrderLineEditorProps<TLine>) {
   const [productSearch, setProductSearch] = useState<Record<number, string>>({});
   const [productCategoryFilter, setProductCategoryFilter] = useState<Record<number, string>>({});
+  // String-backed drafts for the numeric line fields (qty/unitPrice/discount/
+  // tax). Inputs are uncontrolled-by-value while the user is mid-edit so partial
+  // entries ("", "1.") are preserved; we only commit finite >= 0 numbers to the
+  // line. Keyed by `${index}:${field}`.
+  type NumericField = 'qty' | 'unitPrice' | 'discount' | 'tax';
+  const [numberDrafts, setNumberDrafts] = useState<Record<string, string>>({});
+  // Debounce timer for the typed product search so each keystroke does not
+  // trigger a fetch (~300ms after the user stops typing).
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    },
+    [],
+  );
   const productById = useMemo(
     () => new Map(products.map((product) => [product.id, product])),
     [products],
@@ -327,6 +365,21 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
     }
     return allocated;
   }, [lines]);
+  // Memoize the filtered product list per line so each line only recomputes
+  // when its own search query / category filter (or the product catalog) change,
+  // rather than on every keystroke in an unrelated line.
+  const filteredProductsByLine = useMemo(() => {
+    const byIndex: Record<number, OrderProductOption[]> = {};
+    for (let index = 0; index < lines.length; index += 1) {
+      const query = productSearch[index] ?? '';
+      const selectedCategoryId = productCategoryFilter[index] ?? '';
+      byIndex[index] = products.filter(
+        (product) =>
+          productMatchesCategory(product, selectedCategoryId) && productMatches(product, query),
+      );
+    }
+    return byIndex;
+  }, [lines.length, products, productSearch, productCategoryFilter]);
   const stockWarnings = useMemo(() => {
     if (!enforceStockAvailability || variant !== 'sales') return [];
     const warnings: string[] = [];
@@ -379,18 +432,20 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
     () =>
       lines.reduce(
         (acc, line) => {
-          const subtotal = numberOrZero(line.qty) * numberOrZero(line.unitPrice);
+          // Round each line's contribution before summing so the footer equals
+          // the persisted (per-line rounded) sum.
+          const subtotal = roundMoney(numberOrZero(line.qty) * numberOrZero(line.unitPrice));
           return {
-            subtotal: acc.subtotal + subtotal,
-            discount: acc.discount + lineDiscountTotal(line, variant),
-            tax: acc.tax + numberOrZero(line.tax),
+            subtotal: roundMoney(acc.subtotal + subtotal),
+            discount: roundMoney(acc.discount + lineDiscountTotal(line, variant)),
+            tax: roundMoney(acc.tax + roundMoney(numberOrZero(line.tax))),
           };
         },
         { subtotal: 0, discount: 0, tax: 0 },
       ),
     [lines, variant],
   );
-  const total = totals.subtotal - totals.discount + totals.tax;
+  const total = roundMoney(totals.subtotal - totals.discount + totals.tax);
   const invalidCount = lines.filter((line) => missingFields(line).length > 0).length;
   const stockWarningCount = stockWarnings.length;
   const profitWarningCount = profitWarnings.length;
@@ -420,6 +475,31 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
     onLineChange(index, patch as Partial<TLine>);
   }
 
+  function numericFieldValue(index: number, field: NumericField, committed: number) {
+    const draft = numberDrafts[`${index}:${field}`];
+    return draft ?? String(committed);
+  }
+
+  function handleNumericChange(index: number, field: NumericField, raw: string) {
+    setNumberDrafts((current) => ({ ...current, [`${index}:${field}`]: raw }));
+    // Commit only finite, non-negative parses; reject NaN/negatives so the
+    // line never holds an invalid number while still letting the field show the
+    // in-progress text.
+    const parsed = parseNonNegativeNumber(raw);
+    if (parsed != null) patchLine(index, { [field]: parsed });
+  }
+
+  function handleNumericBlur(index: number, field: NumericField, committed: number) {
+    // On blur, normalize the visible text back to the committed numeric value
+    // (drops invalid/blank drafts so the input reflects what was actually saved).
+    setNumberDrafts((current) => {
+      const next = { ...current };
+      delete next[`${index}:${field}`];
+      return next;
+    });
+    void committed;
+  }
+
   function handleProductSelect(index: number, productId: string) {
     const line = lines[index];
     const product = products.find((item) => item.id === productId);
@@ -440,8 +520,12 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
       ...current,
       [index]: value,
     }));
+    if (!onProductSearch) return;
     const categoryId = productCategoryFilter[index] ?? '';
-    onProductSearch?.(value, { categoryId: categoryId || undefined });
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      onProductSearch(value, { categoryId: categoryId || undefined });
+    }, 300);
   }
 
   function handleCategoryFilter(index: number, categoryId: string) {
@@ -449,6 +533,9 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
       ...current,
       [index]: categoryId,
     }));
+    // A category change is an explicit selection, not a keystroke: fetch
+    // immediately and cancel any pending debounced search.
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     onProductSearch?.(productSearch[index] ?? '', {
       categoryId: categoryId || undefined,
     });
@@ -471,6 +558,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
       ...current,
       [index]: '',
     }));
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     const categoryId = productCategoryFilter[index] ?? '';
     onProductSearch?.('', { categoryId: categoryId || undefined });
   }
@@ -505,11 +593,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
             const query = productSearch[index] ?? '';
             const trimmedQuery = query.trim();
             const selectedCategoryId = productCategoryFilter[index] ?? '';
-            const filteredProducts = products.filter(
-              (product) =>
-                productMatchesCategory(product, selectedCategoryId) &&
-                productMatches(product, query),
-            );
+            const filteredProducts = filteredProductsByLine[index] ?? [];
             const productOptions =
               selectedProduct &&
               productMatchesCategory(selectedProduct, selectedCategoryId) &&
@@ -582,7 +666,12 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                       {money(lineTotal(line, variant), currency)}
                     </span>
                     {lines.length > 1 && (
-                      <Btn variant="ghost" size="xs" onClick={() => onRemoveLine(index)}>
+                      <Btn
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => onRemoveLine(index)}
+                        aria-label={`Remove line ${index + 1}`}
+                      >
                         Remove
                       </Btn>
                     )}
@@ -602,6 +691,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         value={selectedCategoryId}
                         onChange={(event) => handleCategoryFilter(index, event.target.value)}
                         className={fieldClass}
+                        aria-label={`Line ${index + 1} category filter`}
                       >
                         <option value="">All categories</option>
                         {categoryOptions.map((category) => (
@@ -625,6 +715,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         onChange={(event) => handleProductSearch(index, event.target.value)}
                         className={fieldClass}
                         placeholder="Search name, category, family, supplier, code, SKU, barcode"
+                        aria-label={`Line ${index + 1} find product`}
                       />
                     </label>
                     {trimmedQuery && (
@@ -634,6 +725,8 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                           borderColor: 'var(--aurora-border)',
                           background: 'var(--aurora-card)',
                         }}
+                        role="group"
+                        aria-label={`Line ${index + 1} product search results`}
                       >
                         {productSearchLoading && !searchResults.length ? (
                           <div
@@ -650,6 +743,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                               onClick={() => handleProductPick(index, product.id)}
                               className="block w-full px-3 py-2 text-left text-[13px] transition hover:bg-brand-50 dark:hover:bg-slate-800"
                               style={{ color: 'var(--aurora-text)' }}
+                              aria-label={`Select ${productLabel(product)} for line ${index + 1}`}
                             >
                               <span className="block font-medium">{productLabel(product)}</span>
                               <span
@@ -710,6 +804,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         onChange={(event) => handleProductSelect(index, event.target.value)}
                         className={fieldClass}
                         disabled={!products.length}
+                        aria-label={`Line ${index + 1} product`}
                       >
                         <option value="">
                           {products.length
@@ -819,6 +914,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         value={line.description}
                         onChange={(event) => patchLine(index, { description: event.target.value })}
                         className={fieldClass}
+                        aria-label={`Line ${index + 1} description`}
                       />
                     </label>
                     <label className="block">
@@ -832,9 +928,11 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         type="number"
                         min="0"
                         step="0.0001"
-                        value={line.qty}
-                        onChange={(event) => patchLine(index, { qty: Number(event.target.value) })}
+                        value={numericFieldValue(index, 'qty', line.qty)}
+                        onChange={(event) => handleNumericChange(index, 'qty', event.target.value)}
+                        onBlur={() => handleNumericBlur(index, 'qty', line.qty)}
                         className={fieldClass}
+                        aria-label={`Line ${index + 1} quantity`}
                       />
                     </label>
                     <label className="block">
@@ -848,6 +946,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         value={line.unitId}
                         onChange={(event) => patchLine(index, { unitId: event.target.value })}
                         className={fieldClass}
+                        aria-label={`Line ${index + 1} unit`}
                       >
                         <option value="">Select unit</option>
                         {units.map((unit) => (
@@ -868,11 +967,13 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         type="number"
                         min="0"
                         step="0.0001"
-                        value={line.unitPrice}
+                        value={numericFieldValue(index, 'unitPrice', line.unitPrice)}
                         onChange={(event) =>
-                          patchLine(index, { unitPrice: Number(event.target.value) })
+                          handleNumericChange(index, 'unitPrice', event.target.value)
                         }
+                        onBlur={() => handleNumericBlur(index, 'unitPrice', line.unitPrice)}
                         className={fieldClass}
+                        aria-label={`Line ${index + 1} ${unitPriceLabel.toLowerCase()}`}
                       />
                     </label>
                     <label className="block">
@@ -886,11 +987,17 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         type="number"
                         min="0"
                         step="0.01"
-                        value={line.discount}
+                        value={numericFieldValue(index, 'discount', line.discount)}
                         onChange={(event) =>
-                          patchLine(index, { discount: Number(event.target.value) })
+                          handleNumericChange(index, 'discount', event.target.value)
                         }
+                        onBlur={() => handleNumericBlur(index, 'discount', line.discount)}
                         className={fieldClass}
+                        aria-label={
+                          variant === 'sales'
+                            ? `Line ${index + 1} discount per unit`
+                            : `Line ${index + 1} discount`
+                        }
                       />
                     </label>
                     <label className="block">
@@ -904,9 +1011,11 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         type="number"
                         min="0"
                         step="0.01"
-                        value={line.tax}
-                        onChange={(event) => patchLine(index, { tax: Number(event.target.value) })}
+                        value={numericFieldValue(index, 'tax', line.tax)}
+                        onChange={(event) => handleNumericChange(index, 'tax', event.target.value)}
+                        onBlur={() => handleNumericBlur(index, 'tax', line.tax)}
                         className={fieldClass}
+                        aria-label={`Line ${index + 1} tax`}
                       />
                     </label>
                     {variant === 'purchase' ? (
@@ -924,6 +1033,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                               patchLine(index, { batchNumber: event.target.value })
                             }
                             className={fieldClass}
+                            aria-label={`Line ${index + 1} batch`}
                           />
                         </label>
                         <label className="block">
@@ -940,6 +1050,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                               patchLine(index, { expiryDate: event.target.value })
                             }
                             className={fieldClass}
+                            aria-label={`Line ${index + 1} expiry date`}
                           />
                         </label>
                       </>
@@ -955,6 +1066,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                           value={line.batchId ?? ''}
                           onChange={(event) => patchLine(index, { batchId: event.target.value })}
                           className={fieldClass}
+                          aria-label={`Line ${index + 1} batch ID`}
                         />
                       </label>
                     )}
@@ -1008,7 +1120,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                 background: 'var(--aurora-bg-subtle)',
               }}
             >
-              Complete every product, unit, location, and quantity before saving.
+              Complete every product, unit, and quantity before saving.
             </div>
           )}
           {stockWarnings.length > 0 && (

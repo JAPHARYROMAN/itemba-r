@@ -1,21 +1,24 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   Btn,
   Card,
+  EmptyState,
   FormInput,
   FormSelect,
   FormTextarea,
   Modal,
   PageHeader,
-  PageSpinner,
   PageToolbar,
+  SkeletonTable,
   StatCard,
   StatusBadge,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList, backendPage, backendPost, backendPut } from '@/lib/api-client';
+import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
 
 interface Company {
   id: string;
@@ -638,19 +641,36 @@ function InvoiceModal({
         style={{ borderColor: 'var(--aurora-border)' }}
       >
         <table className="w-full min-w-[900px] text-sm">
+          <caption className="sr-only">Invoice line items</caption>
           <thead>
             <tr
               className="text-left text-xs uppercase"
               style={{ color: 'var(--aurora-text-muted)' }}
             >
-              <th className="px-3 py-2">Description</th>
-              <th className="px-3 py-2">Qty</th>
-              <th className="px-3 py-2">Unit</th>
-              <th className="px-3 py-2">Unit Price</th>
-              <th className="px-3 py-2">Discount</th>
-              <th className="px-3 py-2">Tax</th>
-              <th className="px-3 py-2 text-right">Total</th>
-              <th className="px-3 py-2" />
+              <th scope="col" className="px-3 py-2">
+                Description
+              </th>
+              <th scope="col" className="px-3 py-2">
+                Qty
+              </th>
+              <th scope="col" className="px-3 py-2">
+                Unit
+              </th>
+              <th scope="col" className="px-3 py-2">
+                Unit Price
+              </th>
+              <th scope="col" className="px-3 py-2">
+                Discount
+              </th>
+              <th scope="col" className="px-3 py-2">
+                Tax
+              </th>
+              <th scope="col" className="px-3 py-2 text-right">
+                Total
+              </th>
+              <th scope="col" className="px-3 py-2">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -659,6 +679,7 @@ function InvoiceModal({
                 <td className="px-3 py-2">
                   <input
                     className="aurora-input w-full rounded-lg px-2 py-1.5 text-sm"
+                    aria-label={`Line ${index + 1} description`}
                     value={line.description}
                     onChange={(e) => updateLine(index, 'description', e.target.value)}
                   />
@@ -666,6 +687,7 @@ function InvoiceModal({
                 <td className="px-3 py-2">
                   <input
                     className="aurora-input w-24 rounded-lg px-2 py-1.5 text-sm"
+                    aria-label={`Line ${index + 1} quantity`}
                     type="number"
                     min="0"
                     value={line.quantity}
@@ -675,6 +697,7 @@ function InvoiceModal({
                 <td className="px-3 py-2">
                   <select
                     className="aurora-input w-32 rounded-lg px-2 py-1.5 text-sm"
+                    aria-label={`Line ${index + 1} unit`}
                     value={line.unitId}
                     onChange={(e) => updateLine(index, 'unitId', e.target.value)}
                   >
@@ -689,6 +712,7 @@ function InvoiceModal({
                 <td className="px-3 py-2">
                   <input
                     className="aurora-input w-28 rounded-lg px-2 py-1.5 text-sm"
+                    aria-label={`Line ${index + 1} unit price`}
                     type="number"
                     min="0"
                     value={line.unitPrice}
@@ -698,6 +722,7 @@ function InvoiceModal({
                 <td className="px-3 py-2">
                   <input
                     className="aurora-input w-24 rounded-lg px-2 py-1.5 text-sm"
+                    aria-label={`Line ${index + 1} discount`}
                     type="number"
                     min="0"
                     value={line.discountAmount}
@@ -707,6 +732,7 @@ function InvoiceModal({
                 <td className="px-3 py-2">
                   <input
                     className="aurora-input w-24 rounded-lg px-2 py-1.5 text-sm"
+                    aria-label={`Line ${index + 1} tax`}
                     type="number"
                     min="0"
                     value={line.taxAmount}
@@ -720,6 +746,7 @@ function InvoiceModal({
                   <Btn
                     variant="ghost"
                     size="xs"
+                    aria-label={`Remove line ${index + 1}`}
                     disabled={form.lines.length === 1}
                     onClick={() =>
                       setForm((current) => ({
@@ -787,6 +814,7 @@ export default function SupplierInvoicesPage() {
   const [data, setData] = useState<Paginated<SupplierInvoice> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [status, setStatus] = useState('');
@@ -815,6 +843,14 @@ export default function SupplierInvoicesPage() {
       cancelled = true;
     };
   }, [canView]);
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setSearch(searchInput);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
 
   const load = useCallback(async () => {
     if (!canView) return;
@@ -883,6 +919,28 @@ export default function SupplierInvoicesPage() {
     (sum, invoice) => sum + asNumber(invoice.outstandingAmount),
     0,
   );
+  const exportCsv = () => {
+    const rows = invoices.map((invoice) => ({
+      'Tax Invoice #': invoice.supplierInvoiceNumber,
+      Supplier: invoice.supplier?.name ?? invoice.supplierId,
+      Company: invoice.company?.name ?? invoice.companyId,
+      'Purchase Order': invoice.purchaseOrder?.purchaseOrderNumber ?? invoice.purchaseOrderId ?? '',
+      GRN: invoice.goodsReceivedNote?.grnNumber ?? invoice.goodsReceivedNoteId ?? '',
+      'Invoice Date': invoice.invoiceDate.slice(0, 10),
+      Currency: invoice.currency,
+      Total: asNumber(invoice.totalAmount).toFixed(2),
+      Outstanding: asNumber(invoice.outstandingAmount).toFixed(2),
+      Status: invoice.status,
+      Match: invoice.latestMatch?.matchStatus ?? '',
+      Payable: invoice.payable?.payableNumber ?? '',
+    }));
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadTextFile(
+      `supplier-invoices-${stamp}.csv`,
+      'text/csv;charset=utf-8',
+      rowsToCsv(rows),
+    );
+  };
   const filterSelectCls =
     'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
   const filterStyle = {
@@ -922,7 +980,7 @@ export default function SupplierInvoicesPage() {
         subtitle="Supplier tax invoices, matching, and AP posting"
       />
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="Invoices" value={data?.total ?? 0} />
         <StatCard label="Approved" value={approvedCount} />
         <StatCard label="Disputed" value={disputedCount} />
@@ -930,15 +988,13 @@ export default function SupplierInvoicesPage() {
       </div>
 
       <PageToolbar
-        search={search}
-        onSearch={(value) => {
-          setSearch(value);
-          setPage(1);
-        }}
+        search={searchInput}
+        onSearch={setSearchInput}
         searchPlaceholder="Search invoice number..."
         filters={
           <>
             <select
+              aria-label="Filter by company"
               value={companyId}
               onChange={(event) => {
                 setCompanyId(event.target.value);
@@ -955,6 +1011,7 @@ export default function SupplierInvoicesPage() {
               ))}
             </select>
             <select
+              aria-label="Filter by status"
               value={status}
               onChange={(event) => {
                 setStatus(event.target.value);
@@ -973,11 +1030,16 @@ export default function SupplierInvoicesPage() {
           </>
         }
         actions={
-          canCreate ? (
-            <Btn variant="primary" onClick={() => setCreating(true)}>
-              + New Supplier Invoice
+          <>
+            <Btn variant="secondary" onClick={exportCsv} disabled={!invoices.length}>
+              Export CSV
             </Btn>
-          ) : null
+            {canCreate ? (
+              <Btn variant="primary" onClick={() => setCreating(true)}>
+                + New Supplier Invoice
+              </Btn>
+            ) : null}
+          </>
         }
       />
 
@@ -990,38 +1052,58 @@ export default function SupplierInvoicesPage() {
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1100px] text-sm">
+            <caption className="sr-only">Supplier invoice register</caption>
             <thead>
               <tr
                 className="text-left text-xs uppercase"
                 style={{ color: 'var(--aurora-text-muted)' }}
               >
-                <th className="px-4 py-3">Tax Invoice #</th>
-                <th className="px-4 py-3">Supplier</th>
-                <th className="px-4 py-3">PO / GRN</th>
-                <th className="px-4 py-3">Invoice Date</th>
-                <th className="px-4 py-3 text-right">Total</th>
-                <th className="px-4 py-3 text-right">Outstanding</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Match</th>
-                <th className="px-4 py-3">Payable</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+                <th scope="col" className="px-4 py-3">
+                  Tax Invoice #
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Supplier
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  PO / GRN
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Invoice Date
+                </th>
+                <th scope="col" className="px-4 py-3 text-right">
+                  Total
+                </th>
+                <th scope="col" className="px-4 py-3 text-right">
+                  Outstanding
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Status
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Match
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Payable
+                </th>
+                <th scope="col" className="px-4 py-3 text-right">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={10}>
-                    <PageSpinner />
+                  <td colSpan={10} className="p-0">
+                    <SkeletonTable rows={6} cols={10} />
                   </td>
                 </tr>
               ) : !invoices.length ? (
                 <tr>
-                  <td
-                    colSpan={10}
-                    className="px-4 py-10 text-center text-sm"
-                    style={{ color: 'var(--aurora-text-muted)' }}
-                  >
-                    No supplier invoices found
+                  <td colSpan={10}>
+                    <EmptyState
+                      title="No supplier invoices found"
+                      description="Adjust your filters or create a new supplier tax invoice to get started."
+                    />
                   </td>
                 </tr>
               ) : (
@@ -1038,9 +1120,18 @@ export default function SupplierInvoicesPage() {
                     </td>
                     <td className="px-4 py-3 text-xs">
                       <div>
-                        {invoice.purchaseOrder?.purchaseOrderNumber ??
-                          invoice.purchaseOrderId ??
-                          '-'}
+                        {invoice.purchaseOrder?.id || invoice.purchaseOrderId ? (
+                          <Link
+                            href={`/operations/purchase-orders/${
+                              invoice.purchaseOrder?.id ?? invoice.purchaseOrderId
+                            }`}
+                            className="text-brand-600 hover:underline"
+                          >
+                            {invoice.purchaseOrder?.purchaseOrderNumber ?? invoice.purchaseOrderId}
+                          </Link>
+                        ) : (
+                          '-'
+                        )}
                       </div>
                       <div style={{ color: 'var(--aurora-text-muted)' }}>
                         {invoice.goodsReceivedNote?.grnNumber ?? invoice.goodsReceivedNoteId ?? '-'}
@@ -1090,7 +1181,12 @@ export default function SupplierInvoicesPage() {
                       <div className="flex justify-end gap-1">
                         {canUpdate &&
                           ['DRAFT', 'RECEIVED', 'DISPUTED'].includes(invoice.status) && (
-                            <Btn variant="ghost" size="xs" onClick={() => setEditing(invoice)}>
+                            <Btn
+                              variant="ghost"
+                              size="xs"
+                              aria-label={`Edit invoice ${invoice.supplierInvoiceNumber}`}
+                              onClick={() => setEditing(invoice)}
+                            >
                               Edit
                             </Btn>
                           )}
@@ -1100,6 +1196,7 @@ export default function SupplierInvoicesPage() {
                             <Btn
                               variant="secondary"
                               size="xs"
+                              aria-label={`Run match for invoice ${invoice.supplierInvoiceNumber}`}
                               loading={busyId === invoice.id}
                               onClick={() => runAction(invoice, 'match')}
                             >
@@ -1110,6 +1207,7 @@ export default function SupplierInvoicesPage() {
                           <Btn
                             variant="primary"
                             size="xs"
+                            aria-label={`Approve invoice ${invoice.supplierInvoiceNumber}`}
                             loading={busyId === invoice.id}
                             onClick={() => runAction(invoice, 'approve')}
                           >
@@ -1120,6 +1218,7 @@ export default function SupplierInvoicesPage() {
                           <Btn
                             variant="secondary"
                             size="xs"
+                            aria-label={`Approve variance for invoice ${invoice.supplierInvoiceNumber}`}
                             loading={busyId === invoice.id}
                             onClick={() => runAction(invoice, 'approveVariance')}
                           >

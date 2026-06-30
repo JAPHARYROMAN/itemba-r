@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Btn, Card, PageHeader, PageToolbar, ProductPicker, StatCard, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendList, backendPage } from '@/lib/api-client';
+import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -329,6 +330,32 @@ export default function InventoryMovementsPage() {
   const rows = data?.data ?? [];
   const totalCost = rows.reduce((s, r) => s + (Number(r.totalCost ?? 0) || 0), 0);
 
+  const exportCsv = () => {
+    const csvRows = rows.map((mov) => ({
+      'Movement #': mov.movementNumber ?? mov.id.slice(0, 8),
+      Date: fmtDate(mov.movementDate),
+      'Product Code': mov.product?.productCode ?? '',
+      Product: mov.product?.name ?? '',
+      Branch: mov.branch
+        ? `${mov.branch.code ? `${mov.branch.code} - ` : ''}${mov.branch.name}`
+        : '',
+      Type: mov.movementType.replace(/_/g, ' '),
+      Quantity: fmtNum(mov.quantity),
+      'Unit Cost': fmtNum(mov.unitCost),
+      'Total Cost': fmtNum(mov.totalCost),
+      Reference:
+        mov.referenceType && mov.referenceId
+          ? `${mov.referenceType} ${mov.referenceId}`
+          : '',
+      By: mov.createdBy?.fullName ?? '',
+      Notes: mov.notes ?? '',
+    }));
+    const csv = rowsToCsv(csvRows);
+    if (!csv) return;
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadTextFile(`inventory-movements-${stamp}.csv`, 'text/csv;charset=utf-8', csv);
+  };
+
   return (
     <div className="p-6 space-y-6">
       <PageHeader title="Inventory Movements" subtitle="Audit trail of all stock movements" />
@@ -357,9 +384,20 @@ export default function InventoryMovementsPage() {
 
       <PageToolbar
         actions={
-          <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-            {data?.total ?? 0} movements
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              {data?.total ?? 0} movements
+            </span>
+            <Btn
+              variant="secondary"
+              size="xs"
+              onClick={exportCsv}
+              disabled={rows.length === 0}
+              aria-label="Export filtered movements to CSV"
+            >
+              Export CSV
+            </Btn>
+          </div>
         }
         filters={
           <>
@@ -371,6 +409,7 @@ export default function InventoryMovementsPage() {
               }}
               className={filterSelectCls}
               style={filterStyle}
+              aria-label="Filter by company"
             >
               <option value="">All Companies</option>
               {companies.map((c) => (
@@ -386,6 +425,7 @@ export default function InventoryMovementsPage() {
               title="Branch / location"
               className={`${filterSelectCls} disabled:opacity-50`}
               style={filterStyle}
+              aria-label="Filter by branch or location"
             >
               <option value="">All Branches</option>
               {branches.map((b) => (
@@ -406,6 +446,7 @@ export default function InventoryMovementsPage() {
               onChange={(e) => reset(setMovementType)(e.target.value)}
               className={filterSelectCls}
               style={filterStyle}
+              aria-label="Filter by movement type"
             >
               <option value="">All Types</option>
               {MOVEMENT_TYPES.map((t) => (
@@ -439,22 +480,23 @@ export default function InventoryMovementsPage() {
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[1000px]">
+            <caption className="sr-only">Inventory movements audit trail</caption>
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
                 style={{ color: 'var(--aurora-text-muted)' }}
               >
-                <th className={thCls}>Movement #</th>
-                <th className={thCls}>Date</th>
-                <th className={thCls}>Product</th>
-                <th className={thCls}>Branch / Location</th>
-                <th className={thCls}>Type</th>
-                <th className={`${thCls} text-right`}>Quantity</th>
-                <th className={`${thCls} text-right`}>Unit Cost</th>
-                <th className={`${thCls} text-right`}>Total Cost</th>
-                <th className={thCls}>Reference</th>
-                <th className={thCls}>By</th>
-                <th className={thCls}>Notes</th>
+                <th scope="col" className={thCls}>Movement #</th>
+                <th scope="col" className={thCls}>Date</th>
+                <th scope="col" className={thCls}>Product</th>
+                <th scope="col" className={thCls}>Branch / Location</th>
+                <th scope="col" className={thCls}>Type</th>
+                <th scope="col" className={`${thCls} text-right`}>Quantity</th>
+                <th scope="col" className={`${thCls} text-right`}>Unit Cost</th>
+                <th scope="col" className={`${thCls} text-right`}>Total Cost</th>
+                <th scope="col" className={thCls}>Reference</th>
+                <th scope="col" className={thCls}>By</th>
+                <th scope="col" className={thCls}>Notes</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">

@@ -5,6 +5,8 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   Btn,
   Card,
+  EmptyState,
+  ErrorState,
   FormInput,
   FormTextarea,
   Modal,
@@ -38,6 +40,10 @@ const tabs = [
   'Commission',
   'Audit',
 ];
+
+function tabId(tab: string) {
+  return tab.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
 
 function money(value: unknown, currency = 'TZS') {
   const number = Number(value ?? 0);
@@ -248,13 +254,10 @@ export default function SalesOrderDetailPage() {
       <div className="p-6 space-y-6">
         <PageHeader title="Sales Order" subtitle="Control center" />
         <Card className="p-6">
-          <div className="text-sm text-red-600">{error}</div>
-          <div className="mt-4 flex gap-2">
+          <ErrorState message={error} onRetry={load} />
+          <div className="mt-4 flex justify-center">
             <Btn variant="secondary" onClick={() => router.push('/operations/sales-orders')}>
               Back
-            </Btn>
-            <Btn variant="primary" onClick={load}>
-              Try again
             </Btn>
           </div>
         </Card>
@@ -344,7 +347,7 @@ export default function SalesOrderDetailPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="Total" value={money(order.totalAmount, currency)} />
         <StatCard label="Paid" value={money(order.paidAmount, currency)} />
         <StatCard label="Outstanding" value={money(order.outstandingAmount, currency)} />
@@ -355,11 +358,15 @@ export default function SalesOrderDetailPage() {
       </div>
 
       <Card className="p-2">
-        <div className="flex flex-wrap gap-2">
+        <div role="tablist" aria-label="Sales order control center sections" className="flex flex-wrap gap-2">
           {tabs.map((tab) => (
             <button
               key={tab}
               type="button"
+              role="tab"
+              id={`tab-${tabId(tab)}`}
+              aria-selected={activeTab === tab}
+              aria-controls={`tabpanel-${tabId(tab)}`}
               onClick={() => setActiveTab(tab)}
               className={`rounded-md px-3 py-2 text-sm font-medium ${
                 activeTab === tab ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-100'
@@ -372,6 +379,7 @@ export default function SalesOrderDetailPage() {
       </Card>
 
       {activeTab === 'Overview' && (
+       <div role="tabpanel" id={`tabpanel-${tabId('Overview')}`} aria-labelledby={`tab-${tabId('Overview')}`}>
         <Card className="p-5">
           <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
             <InfoRow label="Status" value={<StatusBadge value={order.status} />} />
@@ -401,21 +409,24 @@ export default function SalesOrderDetailPage() {
             </div>
           )}
         </Card>
+       </div>
       )}
 
       {activeTab === 'Lines & Stock' && (
+       <div role="tabpanel" id={`tabpanel-${tabId('Lines & Stock')}`} aria-labelledby={`tab-${tabId('Lines & Stock')}`}>
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1100px] text-sm">
+              <caption className="sr-only">Order lines and stock availability</caption>
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Product</th>
-                  <th className="px-4 py-3">Description</th>
-                  <th className="px-4 py-3 text-right">Qty</th>
-                  <th className="px-4 py-3">Unit</th>
-                  <th className="px-4 py-3 text-right">Available Stock</th>
-                  <th className="px-4 py-3 text-right">Unit Price</th>
-                  <th className="px-4 py-3 text-right">Line Total</th>
+                  <th scope="col" className="px-4 py-3">Product</th>
+                  <th scope="col" className="px-4 py-3">Description</th>
+                  <th scope="col" className="px-4 py-3 text-right">Qty</th>
+                  <th scope="col" className="px-4 py-3">Unit</th>
+                  <th scope="col" className="px-4 py-3 text-right">Available Stock</th>
+                  <th scope="col" className="px-4 py-3 text-right">Unit Price</th>
+                  <th scope="col" className="px-4 py-3 text-right">Line Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -446,13 +457,25 @@ export default function SalesOrderDetailPage() {
                     </tr>
                   );
                 })}
+                {lines.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8">
+                      <EmptyState
+                        title="No order lines"
+                        description="This order has no line items."
+                      />
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </Card>
+       </div>
       )}
 
       {activeTab === 'Payments / Receivable' && (
+       <div role="tabpanel" id={`tabpanel-${tabId('Payments / Receivable')}`} aria-labelledby={`tab-${tabId('Payments / Receivable')}`}>
         <Card className="p-5">
           <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
             <InfoRow label="Payment Method" value={order.paymentMethod?.replace(/_/g, ' ')} />
@@ -475,11 +498,13 @@ export default function SalesOrderDetailPage() {
             )}
           </div>
         </Card>
+       </div>
       )}
 
       {activeTab === 'Fulfillment / Delivery Notes' && (
+       <div role="tabpanel" id={`tabpanel-${tabId('Fulfillment / Delivery Notes')}`} aria-labelledby={`tab-${tabId('Fulfillment / Delivery Notes')}`}>
         <Card className="p-5 space-y-5">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <StatCard label="Fulfillment" value={data.fulfillment?.summary?.status ?? 'Open'} />
             <StatCard
               label="Delivery Notes"
@@ -509,9 +534,10 @@ export default function SalesOrderDetailPage() {
                 </div>
               ))}
               {(data.fulfillment?.deliveryNotes ?? []).length === 0 && (
-                <p className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
-                  No delivery notes linked yet.
-                </p>
+                <EmptyState
+                  title="No delivery notes"
+                  description="No delivery notes linked yet."
+                />
               )}
             </div>
           </div>
@@ -519,13 +545,14 @@ export default function SalesOrderDetailPage() {
             <h3 className="mb-3 font-semibold">Inventory Issue Movements</h3>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[800px] text-sm">
+                <caption className="sr-only">Inventory issue movements for this order</caption>
                 <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                   <tr>
-                    <th className="px-4 py-3">Movement</th>
-                    <th className="px-4 py-3">Product</th>
-                    <th className="px-4 py-3 text-right">Qty</th>
-                    <th className="px-4 py-3 text-right">Cost</th>
-                    <th className="px-4 py-3">Date</th>
+                    <th scope="col" className="px-4 py-3">Movement</th>
+                    <th scope="col" className="px-4 py-3">Product</th>
+                    <th scope="col" className="px-4 py-3 text-right">Qty</th>
+                    <th scope="col" className="px-4 py-3 text-right">Cost</th>
+                    <th scope="col" className="px-4 py-3">Date</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -540,16 +567,28 @@ export default function SalesOrderDetailPage() {
                       <td className="px-4 py-3">{date(movement.movementDate)}</td>
                     </tr>
                   ))}
+                  {(data.fulfillment?.inventoryMovements ?? []).length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8">
+                        <EmptyState
+                          title="No inventory movements"
+                          description="No stock issue movements recorded for this order."
+                        />
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
           </div>
         </Card>
+       </div>
       )}
 
       {activeTab === 'Profit & Margin' && (
+       <div role="tabpanel" id={`tabpanel-${tabId('Profit & Margin')}`} aria-labelledby={`tab-${tabId('Profit & Margin')}`}>
         <Card className="overflow-hidden">
-          <div className="grid grid-cols-1 gap-3 p-5 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-4">
             <StatCard label="Revenue Ex Tax" value={money(data.profit?.summary?.revenueExTax, currency)} />
             <StatCard label="COGS" value={money(data.profit?.summary?.cogsAmount, currency)} />
             <StatCard
@@ -563,14 +602,15 @@ export default function SalesOrderDetailPage() {
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1000px] text-sm">
+              <caption className="sr-only">Per-line profit and margin</caption>
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Product</th>
-                  <th className="px-4 py-3 text-right">Unit Cost</th>
-                  <th className="px-4 py-3 text-right">COGS</th>
-                  <th className="px-4 py-3 text-right">Profit</th>
-                  <th className="px-4 py-3 text-right">Margin</th>
-                  <th className="px-4 py-3">Cost Source</th>
+                  <th scope="col" className="px-4 py-3">Product</th>
+                  <th scope="col" className="px-4 py-3 text-right">Unit Cost</th>
+                  <th scope="col" className="px-4 py-3 text-right">COGS</th>
+                  <th scope="col" className="px-4 py-3 text-right">Profit</th>
+                  <th scope="col" className="px-4 py-3 text-right">Margin</th>
+                  <th scope="col" className="px-4 py-3">Cost Source</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -592,13 +632,25 @@ export default function SalesOrderDetailPage() {
                     <td className="px-4 py-3">{line.profitCostSource ?? '-'}</td>
                   </tr>
                 ))}
+                {(data.profit?.lines ?? []).length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8">
+                      <EmptyState
+                        title="No profit lines"
+                        description="No profit and margin detail available for this order."
+                      />
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </Card>
+       </div>
       )}
 
       {activeTab === 'Journal / Accounting' && (
+       <div role="tabpanel" id={`tabpanel-${tabId('Journal / Accounting')}`} aria-labelledby={`tab-${tabId('Journal / Accounting')}`}>
         <Card className="overflow-hidden">
           <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-4">
             <InfoRow label="Journal" value={data.ledger?.journalEntry?.journalNumber} />
@@ -608,12 +660,13 @@ export default function SalesOrderDetailPage() {
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[900px] text-sm">
+              <caption className="sr-only">Journal entry lines</caption>
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Account</th>
-                  <th className="px-4 py-3">Description</th>
-                  <th className="px-4 py-3 text-right">Debit</th>
-                  <th className="px-4 py-3 text-right">Credit</th>
+                  <th scope="col" className="px-4 py-3">Account</th>
+                  <th scope="col" className="px-4 py-3">Description</th>
+                  <th scope="col" className="px-4 py-3 text-right">Debit</th>
+                  <th scope="col" className="px-4 py-3 text-right">Credit</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -629,8 +682,11 @@ export default function SalesOrderDetailPage() {
                 ))}
                 {(data.ledger?.journalEntry?.lines ?? []).length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-500">
-                      No posted journal entry linked yet.
+                    <td colSpan={4} className="px-4 py-8">
+                      <EmptyState
+                        title="No journal entry"
+                        description="No posted journal entry linked yet."
+                      />
                     </td>
                   </tr>
                 )}
@@ -638,19 +694,22 @@ export default function SalesOrderDetailPage() {
             </table>
           </div>
         </Card>
+       </div>
       )}
 
       {activeTab === 'Commission' && (
+       <div role="tabpanel" id={`tabpanel-${tabId('Commission')}`} aria-labelledby={`tab-${tabId('Commission')}`}>
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[800px] text-sm">
+              <caption className="sr-only">Commission rows for this order</caption>
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Employee</th>
-                  <th className="px-4 py-3">Basis</th>
-                  <th className="px-4 py-3 text-right">Rate</th>
-                  <th className="px-4 py-3 text-right">Amount</th>
-                  <th className="px-4 py-3">Status</th>
+                  <th scope="col" className="px-4 py-3">Employee</th>
+                  <th scope="col" className="px-4 py-3">Basis</th>
+                  <th scope="col" className="px-4 py-3 text-right">Rate</th>
+                  <th scope="col" className="px-4 py-3 text-right">Amount</th>
+                  <th scope="col" className="px-4 py-3">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -671,8 +730,11 @@ export default function SalesOrderDetailPage() {
                 ))}
                 {(order.commissions ?? []).length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-500">
-                      No commission rows linked to this order.
+                    <td colSpan={5} className="px-4 py-8">
+                      <EmptyState
+                        title="No commissions"
+                        description="No commission rows linked to this order."
+                      />
                     </td>
                   </tr>
                 )}
@@ -680,9 +742,11 @@ export default function SalesOrderDetailPage() {
             </table>
           </div>
         </Card>
+       </div>
       )}
 
       {activeTab === 'Audit' && (
+       <div role="tabpanel" id={`tabpanel-${tabId('Audit')}`} aria-labelledby={`tab-${tabId('Audit')}`}>
         <Card className="p-5">
           <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
             <InfoRow label="Created At" value={date(data.audit?.createdAt)} />
@@ -695,6 +759,7 @@ export default function SalesOrderDetailPage() {
             <InfoRow label="Journal ID" value={<span className="font-mono text-xs">{data.ledger?.journalEntry?.id ?? '-'}</span>} />
           </div>
         </Card>
+       </div>
       )}
     </div>
   );

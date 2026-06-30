@@ -422,13 +422,21 @@ export default function OperationsProfitPage() {
       </Card>
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+        >
           {error}
         </div>
       )}
 
       {notice && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+        <div
+          role="status"
+          aria-live="polite"
+          className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
+        >
           {notice}
         </div>
       )}
@@ -437,9 +445,9 @@ export default function OperationsProfitPage() {
         <Card>
           <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr_1fr_auto] lg:items-end">
             <div>
-              <label className="mb-2 block text-xs font-semibold uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+              <div className="mb-2 block text-xs font-semibold uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
                 Fix Cost Gap
-              </label>
+              </div>
               <div className="font-medium">{costFix.productName}</div>
               <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
                 Positive costs are required before this stock item can be sold.
@@ -489,6 +497,7 @@ export default function OperationsProfitPage() {
           {(summary?.linesMissingCost ?? 0) > 0 && (
             <div
               role="status"
+              aria-live="polite"
               className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
             >
               <strong>Gross profit may be overstated.</strong>{' '}
@@ -498,7 +507,7 @@ export default function OperationsProfitPage() {
               below for an accurate figure.
             </div>
           )}
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-5">
             <StatCard
               label="Revenue"
               value={fmtMoney(summary?.revenue)}
@@ -520,7 +529,7 @@ export default function OperationsProfitPage() {
             <StatCard
               label="Gross Margin"
               value={`${fmtNumber(summary?.grossMarginPct)}%`}
-              variant={(summary?.grossMarginPct ?? 0) > 0 ? 'green' : 'red'}
+              variant={(summary?.grossMarginPct ?? 0) >= 0 ? 'green' : 'red'}
               countUp={false}
             />
             <StatCard
@@ -536,15 +545,16 @@ export default function OperationsProfitPage() {
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
+                <caption className="sr-only">Product profitability</caption>
                 <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                   <tr className="text-left text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
-                    <th className="px-4 py-3">Product</th>
-                    <th className="px-4 py-3 text-right">Qty</th>
-                    <th className="px-4 py-3 text-right">Revenue</th>
-                    <th className="px-4 py-3 text-right">COGS</th>
-                    <th className="px-4 py-3 text-right">Profit</th>
-                    <th className="px-4 py-3 text-right">Margin</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
+                    <th scope="col" className="px-4 py-3">Product</th>
+                    <th scope="col" className="px-4 py-3 text-right">Qty</th>
+                    <th scope="col" className="px-4 py-3 text-right">Revenue</th>
+                    <th scope="col" className="px-4 py-3 text-right">COGS</th>
+                    <th scope="col" className="px-4 py-3 text-right">Profit</th>
+                    <th scope="col" className="px-4 py-3 text-right">Margin</th>
+                    <th scope="col" className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -580,7 +590,12 @@ export default function OperationsProfitPage() {
                           {fmtNumber(row.grossMarginPct)}%
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <Btn variant="secondary" size="xs" onClick={() => setSelectedProduct(row)}>
+                          <Btn
+                            variant="secondary"
+                            size="xs"
+                            aria-label={`Drilldown into ${row.productName}`}
+                            onClick={() => setSelectedProduct(row)}
+                          >
                             Drilldown
                           </Btn>
                         </td>
@@ -613,15 +628,16 @@ export default function OperationsProfitPage() {
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
+                    <caption className="sr-only">{`${selectedProduct.productName} sales ledger`}</caption>
                     <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                       <tr className="text-left text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
-                        <th className="px-4 py-3">Order</th>
-                        <th className="px-4 py-3">Customer</th>
-                        <th className="px-4 py-3 text-right">Qty</th>
-                        <th className="px-4 py-3 text-right">Price</th>
-                        <th className="px-4 py-3 text-right">Cost</th>
-                        <th className="px-4 py-3 text-right">Profit</th>
-                        <th className="px-4 py-3">Source</th>
+                        <th scope="col" className="px-4 py-3">Order</th>
+                        <th scope="col" className="px-4 py-3">Customer</th>
+                        <th scope="col" className="px-4 py-3 text-right">Qty</th>
+                        <th scope="col" className="px-4 py-3 text-right">Price</th>
+                        <th scope="col" className="px-4 py-3 text-right">Cost</th>
+                        <th scope="col" className="px-4 py-3 text-right">Profit</th>
+                        <th scope="col" className="px-4 py-3">Source</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -654,15 +670,16 @@ export default function OperationsProfitPage() {
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
+                <caption className="sr-only">Cost gaps blocking sales</caption>
                 <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                   <tr className="text-left text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
-                    <th className="px-4 py-3">Product</th>
-                    <th className="px-4 py-3">Scope</th>
-                    <th className="px-4 py-3 text-right">Qty</th>
-                    <th className="px-4 py-3 text-right">Avg Cost</th>
-                    <th className="px-4 py-3 text-right">Default Cost</th>
-                    <th className="px-4 py-3">Issue</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
+                    <th scope="col" className="px-4 py-3">Product</th>
+                    <th scope="col" className="px-4 py-3">Scope</th>
+                    <th scope="col" className="px-4 py-3 text-right">Qty</th>
+                    <th scope="col" className="px-4 py-3 text-right">Avg Cost</th>
+                    <th scope="col" className="px-4 py-3 text-right">Default Cost</th>
+                    <th scope="col" className="px-4 py-3">Issue</th>
+                    <th scope="col" className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -690,7 +707,12 @@ export default function OperationsProfitPage() {
                         <td className="px-4 py-3 text-red-600">{row.message}</td>
                         <td className="px-4 py-3 text-right">
                           {canManageCosts ? (
-                            <Btn variant="secondary" size="xs" onClick={() => startCostFix(row)}>
+                            <Btn
+                              variant="secondary"
+                              size="xs"
+                              aria-label={`Fix cost for ${row.productName}`}
+                              onClick={() => startCostFix(row)}
+                            >
                               Fix Cost
                             </Btn>
                           ) : (
@@ -713,13 +735,14 @@ export default function OperationsProfitPage() {
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
+                  <caption className="sr-only">Below-cost attempt audit</caption>
                   <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                     <tr className="text-left text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
-                      <th className="px-4 py-3">Time</th>
-                      <th className="px-4 py-3">User</th>
-                      <th className="px-4 py-3">Source</th>
-                      <th className="px-4 py-3">Company</th>
-                      <th className="px-4 py-3">Reason</th>
+                      <th scope="col" className="px-4 py-3">Time</th>
+                      <th scope="col" className="px-4 py-3">User</th>
+                      <th scope="col" className="px-4 py-3">Source</th>
+                      <th scope="col" className="px-4 py-3">Company</th>
+                      <th scope="col" className="px-4 py-3">Reason</th>
                     </tr>
                   </thead>
                   <tbody>
