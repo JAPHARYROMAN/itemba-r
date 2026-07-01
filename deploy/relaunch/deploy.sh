@@ -194,7 +194,11 @@ find /opt/itemba-backups -name 'itemba_r-*.sql.gz' -mtime +14 -delete
 echo "backup -> \$OUT"
 BKEOF
 chmod +x /usr/local/bin/itemba-backup.sh
-( crontab -l 2>/dev/null | grep -v itemba-backup.sh; echo "30 2 * * * /usr/local/bin/itemba-backup.sh >> /var/log/itemba-backup.log 2>&1" ) | crontab -
+CRON_TMP="$(mktemp)"
+crontab -l 2>/dev/null | grep -v 'itemba-backup.sh' > "$CRON_TMP" || true
+echo "30 2 * * * /usr/local/bin/itemba-backup.sh >> /var/log/itemba-backup.log 2>&1" >> "$CRON_TMP"
+crontab "$CRON_TMP"
+rm -f "$CRON_TMP"
 /usr/local/bin/itemba-backup.sh || log "first backup will run on the next cron tick"
 
 # ----------------------------------------------------------------------------
