@@ -223,7 +223,14 @@ export class DebtsService {
     const scope: Prisma.DebtWhereInput =
       accessibleIds === null ? {} : { companyId: { in: accessibleIds } };
     const base: Prisma.DebtWhereInput = { deletedAt: null, ...scope };
-    const outstanding: Prisma.DebtWhereInput = { ...base, status: DebtStatus.OUTSTANDING };
+    // A debt still owes money while it is OUTSTANDING or PARTIALLY_PAID; the
+    // remaining liability is amount - amountPaid, not the gross amount. Only
+    // these two statuses have a positive balance (PAID/WRITTEN_OFF/DISPUTED/
+    // RESTRUCTURED are excluded).
+    const outstanding: Prisma.DebtWhereInput = {
+      ...base,
+      status: { in: [DebtStatus.OUTSTANDING, DebtStatus.PARTIALLY_PAID] },
+    };
 
     const [
       totalCount,
@@ -238,15 +245,19 @@ export class DebtsService {
       this.prisma.debt.count({ where: { ...outstanding, dueDate: { lt: new Date() } } }),
       this.prisma.debt.count({ where: { ...base, riskLevel: { in: ['HIGH', 'CRITICAL'] } } }),
       this.prisma.debt.aggregate({ where: base, _sum: { amount: true } }),
-      this.prisma.debt.aggregate({ where: outstanding, _sum: { amount: true } }),
+      // Sum both columns for the owed set so we can net amountPaid off amount.
+      this.prisma.debt.aggregate({ where: outstanding, _sum: { amount: true, amountPaid: true } }),
     ]);
+    const outstandingGross = totalOutstanding._sum.amount ?? new Prisma.Decimal(0);
+    const outstandingPaid = totalOutstanding._sum.amountPaid ?? new Prisma.Decimal(0);
+    const totalOutstandingAmount = new Prisma.Decimal(outstandingGross).minus(outstandingPaid);
     return {
       totalCount,
       outstandingCount,
       overdueCount,
       highRiskCount,
       totalAmount: totalAmount._sum.amount ?? 0,
-      totalOutstandingAmount: totalOutstanding._sum.amount ?? 0,
+      totalOutstandingAmount,
     };
   }
 

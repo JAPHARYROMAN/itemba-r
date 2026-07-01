@@ -33,8 +33,10 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   async validate(payload: JwtPayload): Promise<CachedAuthPayload & { sid?: string }> {
-    // Reject 2FA challenge tokens — they only authorize the /2fa/challenge endpoint.
-    if (payload.scope === 'twoFactor') {
+    // Reject scoped challenge tokens (2FA challenge, forced-password-change) —
+    // they only authorize their dedicated flow, never general API access. A
+    // normal access token carries no `scope`.
+    if (payload.scope === 'twoFactor' || payload.scope === 'passwordChange') {
       throw new UnauthorizedException('Challenge token cannot be used for API access');
     }
 

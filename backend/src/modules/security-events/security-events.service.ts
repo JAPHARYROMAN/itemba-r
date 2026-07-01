@@ -2,7 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { companyWhereForUser, isGroupScopedUser } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 @Injectable()
 export class SecurityEventsService {
@@ -10,6 +11,28 @@ export class SecurityEventsService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
   ) {}
+
+  /**
+   * Build the company-scope predicate for security events.
+   *
+   * Authentication-origin events (LOGIN_FAILED, ACCOUNT_LOCKED, TWO_FACTOR_*,
+   * PASSWORD_RESET_*, SUSPICIOUS_ACTIVITY) are logged with companyId=null by
+   * design (they are group-level, not tenant-scoped). A plain company scope
+   * ({companyId:{in:[...]}}) can never match a null companyId, which made those
+   * events permanently unreviewable (audit HIGH). Group-scoped viewers oversee
+   * group-level records, so we additionally surface companyId:null rows to them
+   * WITHOUT loosening tenant isolation for company-scoped rows. Regular
+   * company-scoped users keep the strict scope and never see null rows.
+   */
+  private scopeWhere(user: AuthUser | undefined, requestedCompanyId?: string | null): any {
+    const scope = companyWhereForUser(user, requestedCompanyId);
+    // Only widen to include group-level (null companyId) auth events when the
+    // viewer is group-scoped and is not narrowing to a single requested company.
+    if (user && isGroupScopedUser(user) && !requestedCompanyId) {
+      return { OR: [scope, { companyId: null }] };
+    }
+    return scope;
+  }
 
   async findAll(query: any, user?: any) {
     const { page = 1, limit = 20, eventType, severity, status, userId, companyId, dateFrom, dateTo } = query;
@@ -19,7 +42,7 @@ export class SecurityEventsService {
     if (severity) where.severity = severity;
     if (status) where.status = status;
     if (userId) where.userId = userId;
-    applyCompanyScopeWhere(where, user, companyId);
+    Object.assign(where, this.scopeWhere(user, companyId));
     if (dateFrom || dateTo) {
       where.createdAt = {};
       if (dateFrom) where.createdAt.gte = new Date(dateFrom);
@@ -35,7 +58,7 @@ export class SecurityEventsService {
 
   async findOne(id: string, user?: any) {
     const where: Record<string, unknown> = { id };
-    if (user) applyCompanyScopeWhere(where, user, null);
+    if (user) Object.assign(where, this.scopeWhere(user, null));
     const record = await this.prisma.securityEvent.findFirst({ where });
     if (!record) throw new NotFoundException('Security event not found');
     return record;

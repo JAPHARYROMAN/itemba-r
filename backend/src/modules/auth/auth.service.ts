@@ -112,12 +112,15 @@ export class AuthService {
       );
     }
 
-    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    // Canonicalize email so it matches what login() looks up (lowercased). The
+    // RegisterDto @Transform already normalizes; this guards non-DTO callers.
+    const email = dto.email.trim().toLowerCase();
+    const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) throw new ConflictException('Email already registered');
 
     const passwordHash = await argon2.hash(dto.password);
     const user = await this.prisma.user.create({
-      data: { email: dto.email, passwordHash, fullName: dto.fullName },
+      data: { email, passwordHash, fullName: dto.fullName },
     });
 
     await this.audit.log({
@@ -140,10 +143,22 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const user = await this.prisma.user.findUnique({ where: { email: submittedEmail } });
+    // Look up by the normalized (lowercased) email so mixed-case registrants can
+    // log in with any casing and lookup matches the canonical form we store and
+    // that the in-memory lockout key uses. The DTO @Transform normalizes too;
+    // this is defense-in-depth for any non-DTO caller.
+    const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+
+    // Admin/security lock: honor BOTH the login-tracking column (User.lockedUntil)
+    // and the security-admin column (UserSecurityProfile.lockedUntil). The write
+    // side (user-security-profiles) sets the profile column; without this check an
+    // admin lock would be silently ignored. Fetched once here and reused below.
+    const secProfile = user
+      ? await this.prisma.userSecurityProfile.findUnique({ where: { userId: user.id } })
+      : null;
 
     // Account lockout check (only meaningful when the user exists).
-    if (user?.lockedUntil && user.lockedUntil > new Date()) {
+    if (user && this.isAccountLocked(user, secProfile)) {
       // Even on lockout, run the dummy verify so an attacker probing locked vs
       // active vs nonexistent accounts cannot use timing to distinguish them.
       await this.constantTimeVerify(undefined, dto.password);
@@ -213,10 +228,33 @@ export class AuthService {
       data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
     });
 
+    // Enforce password-rotation controls BEFORE issuing any session (or 2FA
+    // challenge): if the admin flagged the account for a forced change, or the
+    // password has expired, the credentials are correct but we must NOT hand out
+    // a normal session. Surface a must-change signal instead so the client drives
+    // the reset flow. Uses User.mustChangePassword +
+    // UserSecurityProfile.forcePasswordChange / passwordExpiresAt.
+    const passwordChangeReason = this.passwordChangeRequiredReason(user, secProfile);
+    if (passwordChangeReason) {
+      await this.audit.log({
+        action: 'LOGIN_REQUIRES_PASSWORD_CHANGE',
+        entityType: 'User',
+        entityId: user.id,
+        userId: user.id,
+        metadata: { reason: passwordChangeReason },
+        ipAddress: meta?.ipAddress,
+        userAgent: meta?.userAgent,
+      });
+      // Scoped short-lived token that only authorizes the password-change flow —
+      // it is NOT an access/refresh token, so no protected resource is reachable.
+      const tempToken = await this.jwt.signAsync(
+        { sub: user.id, email: user.email, scope: 'passwordChange' } as JwtPayload,
+        { secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'), expiresIn: '15m' },
+      );
+      return { requiresPasswordChange: true, reason: passwordChangeReason, tempToken };
+    }
+
     // Check if 2FA is required
-    const secProfile = await this.prisma.userSecurityProfile.findUnique({
-      where: { userId: user.id },
-    });
     if (secProfile?.twoFactorEnabled) {
       const tempToken = await this.jwt.signAsync(
         { sub: user.id, email: user.email, scope: 'twoFactor' } as JwtPayload,
@@ -262,9 +300,14 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
     if (!user || user.status !== 'ACTIVE') throw new UnauthorizedException('Invalid credentials');
 
+    const secProfile = await this.prisma.userSecurityProfile.findUnique({
+      where: { userId: user.id },
+    });
+
     // ITMB-051: re-check account lockout before verifying the 2FA code so a
     // locked account cannot be brute-forced through the 2FA challenge endpoint.
-    if (user.lockedUntil && user.lockedUntil > new Date()) {
+    // Honor both the login-tracking (User) and admin (UserSecurityProfile) locks.
+    if (this.isAccountLocked(user, secProfile)) {
       await this.logSecurityEvent('ACCOUNT_LOCKED', user.id, 'HIGH', meta);
       await this.audit.log({
         action: 'TWO_FACTOR_BLOCKED_ACCOUNT_LOCKED',
@@ -310,6 +353,27 @@ export class AuthService {
       where: { id: user.id },
       data: { failedLoginAttempts: 0, lockedUntil: null },
     });
+
+    // Enforce password-rotation controls after 2FA succeeds but before issuing a
+    // session, mirroring the primary login path — a forced/expired password must
+    // still block a full session even for 2FA users.
+    const passwordChangeReason = this.passwordChangeRequiredReason(user, secProfile);
+    if (passwordChangeReason) {
+      await this.audit.log({
+        action: 'LOGIN_REQUIRES_PASSWORD_CHANGE',
+        entityType: 'User',
+        entityId: user.id,
+        userId: user.id,
+        metadata: { reason: passwordChangeReason, method: '2FA' },
+        ipAddress: meta?.ipAddress,
+        userAgent: meta?.userAgent,
+      });
+      const pwChangeToken = await this.jwt.signAsync(
+        { sub: user.id, email: user.email, scope: 'passwordChange' } as JwtPayload,
+        { secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'), expiresIn: '15m' },
+      );
+      return { requiresPasswordChange: true, reason: passwordChangeReason, tempToken: pwChangeToken };
+    }
 
     await this.logSecurityEvent('LOGIN_SUCCESS', user.id, 'LOW', meta);
     await this.audit.log({
@@ -638,6 +702,45 @@ export class AuthService {
     return this.isNonExpiringDuration(refreshExpiresIn)
       ? PERSISTENT_SESSION_EXPIRES_AT
       : new Date(Date.now() + this.parseDuration(refreshExpiresIn));
+  }
+
+  /**
+   * True when the account is locked, honoring BOTH lock columns: the
+   * login-tracking lock (User.lockedUntil, set by failed-attempt throttling and
+   * cleared on success) and the security-admin lock
+   * (UserSecurityProfile.lockedUntil, set via the admin PATCH route). Either one
+   * being in the future locks the account.
+   */
+  private isAccountLocked(
+    user: { lockedUntil?: Date | null } | null | undefined,
+    secProfile: { lockedUntil?: Date | null } | null | undefined,
+  ): boolean {
+    const now = Date.now();
+    const userLocked = !!user?.lockedUntil && user.lockedUntil.getTime() > now;
+    const profileLocked = !!secProfile?.lockedUntil && secProfile.lockedUntil.getTime() > now;
+    return userLocked || profileLocked;
+  }
+
+  /**
+   * Returns a reason string when the user must change their password before a
+   * normal session may be issued, else null. Honors User.mustChangePassword,
+   * UserSecurityProfile.forcePasswordChange, and an elapsed
+   * UserSecurityProfile.passwordExpiresAt. Returning a reason (rather than a
+   * boolean) lets the caller surface why to the client and the audit log.
+   */
+  private passwordChangeRequiredReason(
+    user: { mustChangePassword?: boolean | null } | null | undefined,
+    secProfile:
+      | { forcePasswordChange?: boolean | null; passwordExpiresAt?: Date | null }
+      | null
+      | undefined,
+  ): 'MUST_CHANGE_PASSWORD' | 'FORCE_PASSWORD_CHANGE' | 'PASSWORD_EXPIRED' | null {
+    if (user?.mustChangePassword) return 'MUST_CHANGE_PASSWORD';
+    if (secProfile?.forcePasswordChange) return 'FORCE_PASSWORD_CHANGE';
+    if (secProfile?.passwordExpiresAt && secProfile.passwordExpiresAt.getTime() <= Date.now()) {
+      return 'PASSWORD_EXPIRED';
+    }
+    return null;
   }
 
   private isEmailLoginLocked(email: string): boolean {

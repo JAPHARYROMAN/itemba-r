@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CreateCustomerSegmentDto } from './dto/create-customer-segment.dto';
 import { UpdateCustomerSegmentDto } from './dto/update-customer-segment.dto';
 import { QueryCustomerSegmentDto } from './dto/query-customer-segment.dto';
@@ -15,6 +16,7 @@ export class CustomerSegmentsService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly codes: EntityCodeGeneratorService,
   ) {}
 
   async findAll(query: QueryCustomerSegmentDto, user: AuthUser) {
@@ -40,18 +42,54 @@ export class CustomerSegmentsService {
     // against the caller's access before writing.
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
 
-    const item = await this.prisma.customerSegment.create({
-      data: {
-        companyId: dto.companyId,
-        segmentCode: dto.segmentCode,
-        name: dto.name,
-        description: dto.description,
-        criteria: (dto.criteria ?? undefined) as Prisma.InputJsonValue | undefined,
-        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
-      },
-    });
-    await this.auditLogs.log({ action: 'CREATE', entityType: 'CustomerSegment', entityId: item.id, userId: user.id, companyId: item.companyId });
-    return item;
+    // segmentCode is required and GLOBALLY unique (schema: `segmentCode String
+    // @unique`, no DB default). The frontend never supplies one, so a POST with
+    // a bare body used to fail the NOT-NULL/unique constraint (500). Generate it
+    // server-side via the central EntityCodeGeneratorService. Because the
+    // constraint is global (not per-company), we draw from the GLOBAL counter
+    // (companyId omitted) so two companies can never collide. A caller may still
+    // supply an explicit code for backward-compat/migration; if it collides we
+    // return a clear 400. Generation + insert share one transaction so the
+    // counter advance commits atomically with the row, and on a rare unique
+    // collision (concurrent create or a manually seeded code) we retry with a
+    // fresh number.
+    const providedCode = dto.segmentCode?.trim();
+    const maxAttempts = providedCode ? 1 : 5;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const item = await this.prisma.$transaction(async (tx) => {
+          const segmentCode =
+            providedCode ??
+            (await this.codes.next({ entityType: 'CustomerSegment', tx }));
+          return tx.customerSegment.create({
+            data: {
+              companyId: dto.companyId,
+              segmentCode,
+              name: dto.name,
+              description: dto.description,
+              criteria: (dto.criteria ?? undefined) as Prisma.InputJsonValue | undefined,
+              ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+            },
+          });
+        });
+        await this.auditLogs.log({ action: 'CREATE', entityType: 'CustomerSegment', entityId: item.id, userId: user.id, companyId: item.companyId });
+        return item;
+      } catch (err) {
+        // P2002 = unique constraint violation. When we generated the code we
+        // retry with a fresh number; when the caller supplied one we surface a
+        // clear 400 instead of a generic 500.
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+          if (providedCode) {
+            throw new BadRequestException(`Customer segment code "${providedCode}" already exists`);
+          }
+          if (attempt < maxAttempts) continue;
+          throw new BadRequestException('Failed to generate a unique customer segment code, please retry');
+        }
+        throw err;
+      }
+    }
+    // Unreachable: the loop either returns or throws on every path.
+    throw new BadRequestException('Failed to create customer segment');
   }
 
   async update(id: string, dto: UpdateCustomerSegmentDto, user: AuthUser) {

@@ -11,9 +11,12 @@ export class CreateCustomerSegmentDto {
   @IsString()
   companyId!: string;
 
-  @IsNotEmpty()
+  // Optional: the server generates a globally-unique segmentCode when omitted
+  // (the DB column is `@unique` with no default). A caller may still supply one
+  // for backward-compat / migration; if it collides a clear 400 is returned.
+  @IsOptional()
   @IsString()
-  segmentCode!: string;
+  segmentCode?: string;
 
   @IsNotEmpty()
   @IsString()

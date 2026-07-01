@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateReturnablePackageDto } from './dto/create-returnable-package.dto';
@@ -13,28 +14,66 @@ export class ReturnablePackagesService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  private async generatePackageCode(companyId: string): Promise<string> {
+  /**
+   * Build a short, deterministic, company-scoped prefix so that packageCode is
+   * globally unique *by construction* — `packageCode` is declared `@unique`
+   * globally in schema.prisma (no `@@unique([companyId, packageCode])`), so a
+   * plain per-company counter (PKG-2026-00001 for every company's first row)
+   * collides across tenants and 500s. Embedding the company id keeps each
+   * company's namespace disjoint while preserving a readable, sequential code.
+   */
+  private companyPrefix(companyId: string): string {
+    // First UUID segment, uppercased — 8 hex chars, unique per company.
+    return companyId.replace(/-/g, '').slice(0, 8).toUpperCase();
+  }
+
+  private async generatePackageCode(
+    companyId: string,
+    client: Prisma.TransactionClient = this.prisma,
+  ): Promise<string> {
     const year = new Date().getFullYear();
-    const count = await this.prisma.returnablePackage.count({
-      where: { companyId, packageCode: { startsWith: `PKG-${year}` } },
+    const prefix = this.companyPrefix(companyId);
+    const count = await client.returnablePackage.count({
+      where: { companyId, packageCode: { startsWith: `PKG-${prefix}-${year}` } },
     });
-    return `PKG-${year}-${String(count + 1).padStart(5, '0')}`;
+    return `PKG-${prefix}-${year}-${String(count + 1).padStart(5, '0')}`;
   }
 
   async create(dto: CreateReturnablePackageDto, userId: string) {
-    const packageCode = await this.generatePackageCode(dto.companyId);
-    const record = await this.prisma.returnablePackage.create({
-      data: {
-        packageCode,
-        companyId: dto.companyId,
-        productId: dto.productId,
-        packageType: dto.packageType,
-        name: dto.name,
-        depositValue: dto.depositValue,
-        unitId: dto.unitId,
-        status: 'ACTIVE',
-      },
+    // Generate the code and insert in one transaction, retrying once on a
+    // unique-constraint violation, so two concurrent creates for the same
+    // company cannot compute the same counter and 500 on the loser
+    // (mirrors ProductBatch.create).
+    const buildData = (packageCode: string) => ({
+      packageCode,
+      companyId: dto.companyId,
+      productId: dto.productId,
+      packageType: dto.packageType,
+      name: dto.name,
+      depositValue: dto.depositValue,
+      unitId: dto.unitId,
+      status: 'ACTIVE' as const,
     });
+
+    const createPackage = () =>
+      this.prisma.$transaction(async (tx) => {
+        const packageCode = await this.generatePackageCode(dto.companyId, tx);
+        return tx.returnablePackage.create({ data: buildData(packageCode) });
+      });
+
+    let record;
+    try {
+      record = await createPackage();
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        record = await createPackage();
+      } else {
+        throw error;
+      }
+    }
     await this.auditLogs.log({
       action: 'RETURNABLE_PACKAGE_CREATE',
       entityType: 'ReturnablePackage',

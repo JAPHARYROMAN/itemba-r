@@ -30,7 +30,13 @@ export class ActiveSessionsService {
   async findAll(query: any, user: AuthUser) {
     const { page = 1, limit = 20, userId, companyId, status, sessionType } = query;
     const skip = (Number(page) - 1) * Number(limit);
-    const where: any = await this.companyScope.companyWhereFor(user, companyId);
+    // Login-minted sessions carry companyId=null (issued by AuthService before a
+    // company is selected). Use the same session-aware scope as findByUser/
+    // findOne so an authorized group admin can see and revoke those real login
+    // sessions. A company-scoped admin still only sees their own companies'
+    // sessions, and an explicit ?companyId filter narrows to that single company
+    // (which excludes the null-company rows by design).
+    const where: any = await this.sessionScopeWhere(user, undefined, companyId);
     if (userId) where.userId = userId;
     if (status) where.status = status;
     if (sessionType) where.sessionType = sessionType;
@@ -183,8 +189,15 @@ export class ActiveSessionsService {
     }
   }
 
-  private async sessionScopeWhere(user: AuthUser, id?: string) {
+  private async sessionScopeWhere(user: AuthUser, id?: string, requestedCompanyId?: string | null) {
     const where: any = id ? { id } : {};
+    // An explicit company filter narrows to that single company (after an access
+    // check); the group-level null-company rows are intentionally excluded in
+    // that case because the caller asked for one specific company.
+    if (requestedCompanyId) {
+      Object.assign(where, await this.companyScope.companyWhereFor(user, requestedCompanyId));
+      return where;
+    }
     if (this.companyScope.isGroupScoped(user)) {
       const companyIds = await this.companyScope.accessibleCompanyIds(user);
       where.OR = [

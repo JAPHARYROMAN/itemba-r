@@ -1,4 +1,9 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { AccessLevel, AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -86,9 +91,20 @@ export class UserSecurityProfilesService {
   async create(dto: any, user: AuthUser) {
     const target = await this.findTargetUser(dto.userId);
     await this.assertCanAccessTargetUser(user, target, AccessLevel.MANAGE);
+
+    // A profile is created without a TOTP secret (secrets are only ever provisioned
+    // by the /auth/2fa/setup flow). Enabling twoFactorEnabled here would leave the
+    // user with a flag but no secret, so login issues a 2FA challenge that can never
+    // be satisfied — permanently locking them out. Reject it and require enrolment.
+    if (dto.twoFactorEnabled === true || dto.twoFactorEnabled === 'true') {
+      throw new BadRequestException(
+        'twoFactorEnabled cannot be turned on here — the user must complete the /auth/2fa/setup flow to provision a secret. Set forceTwoFactorSetup to require enrolment.',
+      );
+    }
+
     const data: any = {
       userId: dto.userId,
-      twoFactorEnabled: dto.twoFactorEnabled ?? false,
+      twoFactorEnabled: false,
       twoFactorMethod: dto.twoFactorMethod ?? 'NONE',
       forcePasswordChange: dto.forcePasswordChange ?? false,
       forceTwoFactorSetup: dto.forceTwoFactorSetup ?? false,
@@ -109,7 +125,9 @@ export class UserSecurityProfilesService {
   async update(id: string, dto: any, user: AuthUser) {
     const existing = await this.prisma.userSecurityProfile.findFirst({
       where: { id },
-      select: this.safeSelectWithUser,
+      // twoFactorSecretEncrypted is needed to validate 2FA enablement below; it is
+      // NOT returned to the caller (the response uses this.safeSelect).
+      select: { ...this.safeSelectWithUser, twoFactorSecretEncrypted: true, userId: true },
     });
     if (!existing) throw new NotFoundException('User security profile not found');
     await this.assertCanAccessTargetUser(user, existing.user, AccessLevel.MANAGE);
@@ -128,10 +146,41 @@ export class UserSecurityProfilesService {
       if (dto[key] !== undefined) updateData[key] = dto[key];
     }
 
-    const record = await this.prisma.userSecurityProfile.update({
-      where: { id },
-      data: updateData,
-      select: this.safeSelect,
+    // Never allow twoFactorEnabled to be turned on without a provisioned TOTP secret.
+    // Login gates the 2FA challenge on this flag alone; enabling it without a secret
+    // means every submitted code fails verification, permanently locking the user out.
+    if (
+      (updateData.twoFactorEnabled === true || updateData.twoFactorEnabled === 'true') &&
+      !existing.twoFactorSecretEncrypted
+    ) {
+      throw new BadRequestException(
+        'twoFactorEnabled cannot be turned on for a user with no 2FA secret — the user must complete the /auth/2fa/setup flow first. Set forceTwoFactorSetup to require enrolment.',
+      );
+    }
+
+    // Keep the admin lock effective and the two lock columns consistent. Login and the
+    // security dashboards read User.lockedUntil / UserSecurityProfile.lockedUntil
+    // independently, so an admin lock set only on the profile would not block login on
+    // paths that read the User column, and dashboard counts would disagree. Mirror any
+    // profile lock change onto the User row (clearing failedLoginAttempts on unlock).
+    const willUpdateLock = Object.prototype.hasOwnProperty.call(updateData, 'lockedUntil');
+
+    const record = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.userSecurityProfile.update({
+        where: { id },
+        data: updateData,
+        select: this.safeSelect,
+      });
+      if (willUpdateLock) {
+        const lockedUntil = updateData.lockedUntil ? new Date(updateData.lockedUntil) : null;
+        await tx.user.update({
+          where: { id: existing.userId },
+          data: lockedUntil
+            ? { lockedUntil }
+            : { lockedUntil: null, failedLoginAttempts: 0 },
+        });
+      }
+      return updated;
     });
     await this.auditLogs.log({
       action: 'USER_SECURITY_PROFILE_UPDATED',

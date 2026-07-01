@@ -19,9 +19,9 @@ import {
 import { UpdateSupplierInvoiceDto } from './dto/update-supplier-invoice.dto';
 import { QuerySupplierInvoiceDto } from './dto/query-supplier-invoice.dto';
 import { ApproveSupplierInvoiceDto } from './dto/approve-supplier-invoice.dto';
+import { computeThreeWayMatch } from '../three-way-matching/three-way-match-calculator';
 
 const MONEY_TOLERANCE = new Prisma.Decimal('0.01');
-const QTY_TOLERANCE = new Prisma.Decimal('0.0001');
 
 @Injectable()
 export class SupplierInvoicesService {
@@ -849,20 +849,19 @@ export class SupplierInvoicesService {
       throw new BadRequestException('GRN not found for invoice');
     }
 
-    const quantityVariance = grn
-      ? this.quantityVariance(
-          this.groupQuantities(grn.lines, 'acceptedQuantity'),
-          this.groupQuantities(invoice.lines, 'quantity'),
-        )
-      : this.quantityVariance(
-          this.groupQuantities(purchaseOrder.lines, 'quantity'),
-          this.groupQuantities(invoice.lines, 'quantity'),
-        );
-    const amountVariance = this.amountVarianceAgainstPurchaseOrder(invoice, purchaseOrder.lines);
-    const matchStatus =
-      quantityVariance.lte(QTY_TOLERANCE) && amountVariance.lte(MONEY_TOLERANCE)
-        ? 'MATCHED'
-        : 'VARIANCE';
+    // Route both variance computations through the shared three-way-match
+    // calculator so the SI approval flow and the standalone three-way-matching
+    // register derive variances identically and can never drift. The calculator
+    // aggregates ALL split PO lines per product (quantity-weighted average unit
+    // cost) — the previous ad-hoc logic kept only the LAST PO line per product,
+    // mis-valuing any product split across multiple PO lines — and compares the
+    // full invoice total against the matched expected amount on the same basis
+    // the standalone register uses.
+    const { quantityVariance, amountVariance, matchStatus } = computeThreeWayMatch({
+      invoice: { lines: invoice.lines ?? [], totalAmount: invoice.totalAmount },
+      purchaseOrderLines: purchaseOrder.lines,
+      grnLines: grn?.lines ?? null,
+    });
 
     const match = await db.threeWayMatch.create({
       data: {
@@ -892,74 +891,6 @@ export class SupplierInvoicesService {
     });
 
     return match;
-  }
-
-  private groupQuantities(lines: any[], quantityField: string) {
-    const grouped = new Map<string, Prisma.Decimal>();
-    for (const line of lines ?? []) {
-      const key = line.productId
-        ? `product:${line.productId}`
-        : `desc:${line.description ?? line.id}`;
-      const quantity = new Prisma.Decimal(line[quantityField] ?? 0);
-      grouped.set(key, (grouped.get(key) ?? new Prisma.Decimal(0)).plus(quantity));
-    }
-    return grouped;
-  }
-
-  private quantityVariance(
-    expected: Map<string, Prisma.Decimal>,
-    actual: Map<string, Prisma.Decimal>,
-  ) {
-    let variance = new Prisma.Decimal(0);
-    const keys = new Set([...expected.keys(), ...actual.keys()]);
-    for (const key of keys) {
-      variance = variance.plus(
-        (expected.get(key) ?? new Prisma.Decimal(0))
-          .minus(actual.get(key) ?? new Prisma.Decimal(0))
-          .abs(),
-      );
-    }
-    return variance;
-  }
-
-  private amountVarianceAgainstPurchaseOrder(invoice: any, purchaseOrderLines: any[]) {
-    const poLinesByProduct = new Map<string, any>();
-    let purchaseOrderTotal = new Prisma.Decimal(0);
-    for (const line of purchaseOrderLines ?? []) {
-      purchaseOrderTotal = purchaseOrderTotal.plus(line.lineTotal ?? 0);
-      if (line.productId) poLinesByProduct.set(line.productId, line);
-    }
-
-    let expectedAmount = new Prisma.Decimal(0);
-    // Accumulate the ACTUAL invoiced amount over the SAME line set used to build
-    // expectedAmount (matched lines only). Comparing a matched-lines expected
-    // against the all-lines invoice total mixes two bases: a perfectly-matched
-    // invoice carrying an extra freight/service line would always report a bogus
-    // variance, and an unmatched overcharge would hide inside the whole-invoice gap.
-    let actualMatchedAmount = new Prisma.Decimal(0);
-    let hasLineMatch = false;
-    for (const line of invoice.lines ?? []) {
-      const poLine = line.productId ? poLinesByProduct.get(line.productId) : null;
-      if (!poLine) continue;
-      hasLineMatch = true;
-      expectedAmount = expectedAmount
-        .plus(new Prisma.Decimal(line.quantity).mul(poLine.unitCost))
-        .minus(line.discountAmount ?? 0)
-        .plus(line.taxAmount ?? 0);
-      actualMatchedAmount = actualMatchedAmount.plus(
-        line.lineTotal ??
-          new Prisma.Decimal(line.quantity)
-            .mul(line.unitPrice ?? 0)
-            .minus(line.discountAmount ?? 0)
-            .plus(line.taxAmount ?? 0),
-      );
-    }
-
-    if (!hasLineMatch) {
-      return new Prisma.Decimal(invoice.totalAmount).minus(purchaseOrderTotal).abs();
-    }
-
-    return actualMatchedAmount.minus(expectedAmount).abs();
   }
 
   private withinTolerance(

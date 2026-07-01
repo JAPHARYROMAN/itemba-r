@@ -5,10 +5,33 @@ import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { isGroupScopedUser } from '../../common/services/company-scope.service';
+import { PermissionCacheService } from '../../common/services';
 
 @Injectable()
 export class RolesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly permissionCache: PermissionCacheService,
+  ) {}
+
+  /**
+   * Evict the JwtStrategy permission cache for every user holding this role.
+   *
+   * PermissionsGuard authorizes off the cached, role-derived permission set
+   * (TTL 60s). When a role's permission set, scope, or existence changes, the
+   * effective permissions of every user holding it change too, so their cache
+   * entries must be dropped immediately — otherwise a revoked permission stays
+   * usable (and a newly-granted one stays unavailable) for up to the TTL.
+   * Mirrors the invalidation UsersService performs on role/access changes.
+   */
+  private async invalidateCacheForRole(roleId: string): Promise<void> {
+    const holders = await this.prisma.userRole.findMany({
+      where: { roleId },
+      select: { userId: true },
+    });
+    const userIds = [...new Set(holders.map((h) => h.userId))];
+    await Promise.all(userIds.map((userId) => this.permissionCache.invalidate(userId)));
+  }
 
   /**
    * Authority guard for role mutations (ITMB-039) — prevents a delegated
@@ -118,7 +141,7 @@ export class RolesService {
     const effectiveScope = dto.scope ?? current.scope;
     await this.assertRoleMutationAllowed(user, effectiveScope, dto.permissionIds);
 
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       if (dto.permissionIds) {
         await tx.rolePermission.deleteMany({ where: { roleId: id } });
         if (dto.permissionIds.length > 0) {
@@ -137,6 +160,13 @@ export class RolesService {
         },
       });
     });
+
+    // The role's effective permission set / scope may have changed; drop the
+    // cached permissions of every user holding it so the change takes effect
+    // immediately instead of lagging up to the cache TTL.
+    await this.invalidateCacheForRole(id);
+
+    return updated;
   }
 
   /**
@@ -162,6 +192,11 @@ export class RolesService {
         `Role "${role.name}" is still assigned to ${role._count.userRoles} user(s). Reassign them before deleting.`,
       );
     }
-    return this.prisma.role.delete({ where: { id } });
+    // Capture any current holders before the cascade removes their UserRole
+    // rows, then evict their cached permissions after deletion. In practice the
+    // guard above means there are none, but this is race-safe and cheap.
+    const deleted = await this.prisma.role.delete({ where: { id } });
+    await this.invalidateCacheForRole(id);
+    return deleted;
   }
 }

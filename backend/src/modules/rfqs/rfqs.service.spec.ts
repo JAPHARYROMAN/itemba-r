@@ -11,6 +11,11 @@ function makeService() {
       findFirst: jest.fn(),
       update: jest.fn(async ({ data }: any) => ({ id: 'rfq-1', ...data })),
     },
+    rFQSupplier: {
+      findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn(async ({ data }: any) => ({ id: 'rfqsup-new', ...data })),
+      update: jest.fn(async ({ where, data }: any) => ({ id: where.id, ...data })),
+    },
   } as any;
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const codes = { next: jest.fn().mockResolvedValue('RFQ-2026-00001') } as any;
@@ -274,5 +279,82 @@ describe('RfqsService company scoping', () => {
       AccessLevel.WRITE,
     );
     expect(prisma.requestForQuotation.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('RfqsService.send supplier invites', () => {
+  function draftRfq() {
+    return { id: 'rfq-1', companyId: 'company-1', status: 'DRAFT', rfqSuppliers: [] };
+  }
+
+  it('rejects sending an RFQ that is not in DRAFT', async () => {
+    const { service, prisma } = makeService();
+    prisma.requestForQuotation.findFirst.mockResolvedValueOnce({ ...draftRfq(), status: 'SENT' });
+
+    await expect(service.send('rfq-1', { supplierIds: ['sup-1'] }, user)).rejects.toThrow(
+      'Only DRAFT RFQs can be sent',
+    );
+    expect(prisma.rFQSupplier.create).not.toHaveBeenCalled();
+    expect(prisma.requestForQuotation.update).not.toHaveBeenCalled();
+  });
+
+  it('creates one invite per new supplier and stamps sentAt (no more where:{id:""} upsert)', async () => {
+    const { service, prisma } = makeService();
+    prisma.requestForQuotation.findFirst.mockResolvedValueOnce(draftRfq());
+
+    const updated = await service.send('rfq-1', { supplierIds: ['sup-1', 'sup-2'] }, user);
+
+    expect(prisma.rFQSupplier.findMany).toHaveBeenCalledWith({
+      where: { rfqId: 'rfq-1', supplierId: { in: ['sup-1', 'sup-2'] } },
+      select: { id: true, supplierId: true },
+    });
+    expect(prisma.rFQSupplier.create).toHaveBeenCalledTimes(2);
+    for (const call of prisma.rFQSupplier.create.mock.calls) {
+      expect(call[0].data.rfqId).toBe('rfq-1');
+      expect(call[0].data.sentAt).toBeInstanceOf(Date);
+    }
+    expect(prisma.rFQSupplier.update).not.toHaveBeenCalled();
+    expect(updated.status).toBe('SENT');
+  });
+
+  it('dedupes repeated supplierIds so a supplier is invited only once', async () => {
+    const { service, prisma } = makeService();
+    prisma.requestForQuotation.findFirst.mockResolvedValueOnce(draftRfq());
+
+    await service.send('rfq-1', { supplierIds: ['sup-1', 'sup-1'] }, user);
+
+    expect(prisma.rFQSupplier.findMany).toHaveBeenCalledWith({
+      where: { rfqId: 'rfq-1', supplierId: { in: ['sup-1'] } },
+      select: { id: true, supplierId: true },
+    });
+    expect(prisma.rFQSupplier.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes sentAt on already-invited suppliers instead of inserting duplicates', async () => {
+    const { service, prisma } = makeService();
+    prisma.requestForQuotation.findFirst.mockResolvedValueOnce(draftRfq());
+    // sup-1 already invited (retry / re-send); sup-2 is new.
+    prisma.rFQSupplier.findMany.mockResolvedValueOnce([{ id: 'existing-1', supplierId: 'sup-1' }]);
+
+    await service.send('rfq-1', { supplierIds: ['sup-1', 'sup-2'] }, user);
+
+    expect(prisma.rFQSupplier.update).toHaveBeenCalledTimes(1);
+    expect(prisma.rFQSupplier.update).toHaveBeenCalledWith({
+      where: { id: 'existing-1' },
+      data: { sentAt: expect.any(Date) },
+    });
+    expect(prisma.rFQSupplier.create).toHaveBeenCalledTimes(1);
+    expect(prisma.rFQSupplier.create.mock.calls[0][0].data.supplierId).toBe('sup-2');
+  });
+
+  it('sends with no supplierIds without touching the invite table', async () => {
+    const { service, prisma } = makeService();
+    prisma.requestForQuotation.findFirst.mockResolvedValueOnce(draftRfq());
+
+    const updated = await service.send('rfq-1', {}, user);
+
+    expect(prisma.rFQSupplier.findMany).not.toHaveBeenCalled();
+    expect(prisma.rFQSupplier.create).not.toHaveBeenCalled();
+    expect(updated.status).toBe('SENT');
   });
 });

@@ -23,11 +23,22 @@ export class CompaniesService {
     const page = parseInt(query.page ?? '1');
     const limit = Math.min(parseInt(query.limit ?? '20'), 100);
     const skip = (page - 1) * limit;
-    const accessibleCompanyIds = await this.companyScope.accessibleCompanyIds(user);
+
+    // ITMB-999: A GROUP-scoped user (e.g. the seeded GROUP_SUPER_ADMIN) may reach
+    // any company in the group even without an explicit UserCompanyAccess grant —
+    // this mirrors CompanyScopeService.assertCanAccessCompany, which defaults an
+    // unlisted company to READ for group-scoped users. Restricting the list to
+    // only explicitly-granted companies would hide every seeded company from an
+    // admin who has no grants (id: { in: [] } => zero rows). So for group-scoped
+    // users we do not constrain by id at all; non-group users stay limited to
+    // their explicit grants / home company.
+    const idScope = this.companyScope.isGroupScoped(user)
+      ? undefined
+      : { id: { in: await this.companyScope.accessibleCompanyIds(user) } };
 
     const where: Prisma.CompanyWhereInput = {
       deletedAt: null,
-      ...(accessibleCompanyIds && { id: { in: accessibleCompanyIds } }),
+      ...idScope,
       ...(query.status && { status: query.status }),
       ...(query.industryType && {
         industryType: { contains: query.industryType, mode: 'insensitive' },

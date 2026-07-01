@@ -160,3 +160,120 @@ describe('ActiveSessionsService.revoke (P1-01 regression)', () => {
     );
   });
 });
+
+/**
+ * Regression for the audit finding "GET /active-sessions omits every real login
+ * session (companyId=null)". Login-minted sessions carry companyId=null, and the
+ * old findAll built its where solely from companyWhereFor, which only ever emits
+ * a companyId equality/IN clause — never matching NULL — so those sessions were
+ * invisible (and thus unrevocable) via the admin list. findAll now uses the same
+ * session-aware scope as findByUser/findOne.
+ */
+describe('ActiveSessionsService.findAll (companyId=null session visibility)', () => {
+  function makeHarness() {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const count = jest.fn().mockResolvedValue(0);
+
+    const prisma = {
+      activeSession: { findMany, count },
+    } as any;
+
+    const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
+    const companyScope = {
+      isGroupScoped: jest.fn(),
+      accessibleCompanyIds: jest.fn(),
+      companyWhereFor: jest.fn(),
+    } as any;
+    const permissionCache = { invalidate: jest.fn() } as any;
+
+    const service = new ActiveSessionsService(prisma, auditLogs, companyScope, permissionCache);
+    return { service, prisma, companyScope, findMany, count };
+  }
+
+  it('surfaces companyId=null login sessions to a group-scoped admin (no company filter)', async () => {
+    const harness = makeHarness();
+    const admin: AuthUser = {
+      id: 'admin-1',
+      email: 'admin@itemba.local',
+      roles: ['Group Admin'],
+      roleScopes: ['GROUP'],
+      permissions: ['active_sessions.view'],
+      companyId: null,
+      companyAccess: [],
+    };
+    harness.companyScope.isGroupScoped.mockReturnValue(true);
+    harness.companyScope.accessibleCompanyIds.mockResolvedValue(['co-a', 'co-b']);
+
+    await harness.service.findAll({}, admin);
+
+    const where = harness.findMany.mock.calls[0][0].where;
+    expect(harness.companyScope.companyWhereFor).not.toHaveBeenCalled();
+    expect(where.OR).toEqual(
+      expect.arrayContaining([{ companyId: null }, { companyId: { in: ['co-a', 'co-b'] } }]),
+    );
+  });
+
+  it('surfaces companyId=null sessions to a group admin with no company grants', async () => {
+    const harness = makeHarness();
+    const admin: AuthUser = {
+      id: 'admin-1',
+      email: 'admin@itemba.local',
+      roles: ['Group Admin'],
+      roleScopes: ['GROUP'],
+      permissions: ['active_sessions.view'],
+      companyId: null,
+      companyAccess: [],
+    };
+    harness.companyScope.isGroupScoped.mockReturnValue(true);
+    harness.companyScope.accessibleCompanyIds.mockResolvedValue([]);
+
+    await harness.service.findAll({}, admin);
+
+    const where = harness.findMany.mock.calls[0][0].where;
+    expect(where.OR).toEqual([{ companyId: null }]);
+  });
+
+  it('does NOT leak companyId=null / other-tenant rows to a company-scoped admin', async () => {
+    const harness = makeHarness();
+    const admin: AuthUser = {
+      id: 'admin-2',
+      email: 'co-admin@itemba.local',
+      roles: ['Company Admin'],
+      roleScopes: ['COMPANY'],
+      permissions: ['active_sessions.view'],
+      companyId: 'co-a',
+      companyAccess: [{ companyId: 'co-a', accessLevel: 'MANAGE' } as any],
+    };
+    harness.companyScope.isGroupScoped.mockReturnValue(false);
+    harness.companyScope.companyWhereFor.mockResolvedValue({ companyId: { in: ['co-a'] } });
+
+    await harness.service.findAll({}, admin);
+
+    const where = harness.findMany.mock.calls[0][0].where;
+    // No null-company OR clause for a company-scoped admin.
+    expect(where.OR).toBeUndefined();
+    expect(where.companyId).toEqual({ in: ['co-a'] });
+  });
+
+  it('narrows to a single company (and excludes null rows) when ?companyId is provided', async () => {
+    const harness = makeHarness();
+    const admin: AuthUser = {
+      id: 'admin-1',
+      email: 'admin@itemba.local',
+      roles: ['Group Admin'],
+      roleScopes: ['GROUP'],
+      permissions: ['active_sessions.view'],
+      companyId: null,
+      companyAccess: [],
+    };
+    harness.companyScope.isGroupScoped.mockReturnValue(true);
+    harness.companyScope.companyWhereFor.mockResolvedValue({ companyId: 'co-b' });
+
+    await harness.service.findAll({ companyId: 'co-b' }, admin);
+
+    const where = harness.findMany.mock.calls[0][0].where;
+    expect(harness.companyScope.companyWhereFor).toHaveBeenCalledWith(admin, 'co-b');
+    expect(where.OR).toBeUndefined();
+    expect(where.companyId).toBe('co-b');
+  });
+});

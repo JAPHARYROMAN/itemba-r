@@ -17,6 +17,20 @@ function groupUser(overrides: Partial<AuthUser> = {}): AuthUser {
   };
 }
 
+function companyUser(overrides: Partial<AuthUser> = {}): AuthUser {
+  return {
+    id: 'user-2',
+    email: 'clerk@itemba.local',
+    fullName: 'Company Clerk',
+    roles: ['COMPANY_ACCOUNTANT'],
+    roleScopes: ['COMPANY'],
+    permissions: ['companies.view'],
+    companyId: 'company-a',
+    companyAccess: [{ companyId: 'company-a', accessLevel: AccessLevel.READ }],
+    ...overrides,
+  };
+}
+
 function makeHarness() {
   const createdCompany = {
     id: 'company-new',
@@ -32,9 +46,14 @@ function makeHarness() {
     accessLevel: AccessLevel.MANAGE,
   });
 
+  const companyFindMany = jest.fn().mockResolvedValue([]);
+  const companyCount = jest.fn().mockResolvedValue(0);
+
   const prisma = {
     company: {
       create: jest.fn(),
+      findMany: companyFindMany,
+      count: companyCount,
     },
     userCompanyAccess: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -56,7 +75,16 @@ function makeHarness() {
     permissionCache,
   );
 
-  return { service, prisma, auditLogs, permissionCache, companyCreate, accessUpsert };
+  return {
+    service,
+    prisma,
+    auditLogs,
+    permissionCache,
+    companyCreate,
+    accessUpsert,
+    companyFindMany,
+    companyCount,
+  };
 }
 
 describe('CompaniesService.create', () => {
@@ -101,5 +129,53 @@ describe('CompaniesService.create', () => {
         severity: AuditSeverity.HIGH,
       }),
     );
+  });
+});
+
+describe('CompaniesService.findAll', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('lists all companies for a GROUP-scoped user with no explicit access grants', async () => {
+    const harness = makeHarness();
+    // Seeded GROUP_SUPER_ADMIN: no home company, no UserCompanyAccess grants.
+    const user = groupUser({ companyId: null, companyAccess: [] });
+
+    await harness.service.findAll({}, user);
+
+    // The where clause must NOT contain an id filter (which would be `id: { in: [] }`
+    // and hide every seeded company) — group-scoped users see all non-deleted rows.
+    const where = harness.companyFindMany.mock.calls[0][0].where;
+    expect(where).toEqual({ deletedAt: null });
+    expect(where).not.toHaveProperty('id');
+    expect(harness.companyCount).toHaveBeenCalledWith({ where: { deletedAt: null } });
+  });
+
+  it('restricts a non-group user to their explicitly-granted companies', async () => {
+    const harness = makeHarness();
+    const user = companyUser();
+
+    await harness.service.findAll({}, user);
+
+    const where = harness.companyFindMany.mock.calls[0][0].where;
+    expect(where).toEqual({
+      deletedAt: null,
+      id: { in: ['company-a'] },
+    });
+  });
+
+  it('keeps other filters alongside the group-scoped listing', async () => {
+    const harness = makeHarness();
+    const user = groupUser({ companyId: null, companyAccess: [] });
+
+    await harness.service.findAll({ status: 'ACTIVE', search: 'itemba' }, user);
+
+    const where = harness.companyFindMany.mock.calls[0][0].where;
+    expect(where).toEqual(
+      expect.objectContaining({
+        deletedAt: null,
+        status: 'ACTIVE',
+      }),
+    );
+    expect(where).not.toHaveProperty('id');
   });
 });

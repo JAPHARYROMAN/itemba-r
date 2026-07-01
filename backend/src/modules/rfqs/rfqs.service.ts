@@ -130,10 +130,28 @@ export class RfqsService {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== 'DRAFT') throw new BadRequestException('Only DRAFT RFQs can be sent');
     if (dto.supplierIds?.length) {
+      // The previous implementation used upsert({ where: { id: '' } }): the empty
+      // id never matched a real row, so every call INSERTED a fresh RFQSupplier
+      // (the update branch was dead) and duplicate invitee rows accumulated on
+      // retries / re-sends. RFQSupplier has only @@index([rfqId, supplierId]) (no
+      // @@unique), so there is no composite key to upsert on; instead we dedupe
+      // the incoming ids, look up which suppliers are already invited, create only
+      // the missing ones (stamping sentAt, which was never populated before), and
+      // refresh sentAt on the already-invited ones.
+      const now = new Date();
+      const uniqueSupplierIds = [...new Set<string>(dto.supplierIds)];
+      const existingInvites = await this.prisma.rFQSupplier.findMany({
+        where: { rfqId: id, supplierId: { in: uniqueSupplierIds } },
+        select: { id: true, supplierId: true },
+      });
+      const existingBySupplier = new Map(existingInvites.map((s) => [s.supplierId, s.id]));
       await Promise.all(
-        dto.supplierIds.map((supplierId: string) =>
-          this.prisma.rFQSupplier.upsert({ where: { id: '' }, create: { rfqId: id, supplierId }, update: { supplierId } }),
-        ),
+        uniqueSupplierIds.map((supplierId) => {
+          const inviteId = existingBySupplier.get(supplierId);
+          return inviteId
+            ? this.prisma.rFQSupplier.update({ where: { id: inviteId }, data: { sentAt: now } })
+            : this.prisma.rFQSupplier.create({ data: { rfqId: id, supplierId, sentAt: now } });
+        }),
       );
     }
     const updated = await this.prisma.requestForQuotation.update({ where: { id }, data: { status: 'SENT' } });

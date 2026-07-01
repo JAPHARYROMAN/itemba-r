@@ -194,6 +194,10 @@ export class TaxFilingEngineService {
         companyId: base.companyId,
         taxTypeId: base.taxTypeId,
         transactionDate: { gte: base.periodStart, lte: base.periodEnd },
+        // WHT filing must count only amounts actually WITHHELD (the documented
+        // rule) — not OUTPUT/INPUT rows that may share the taxTypeId. Summing all
+        // directions previously overstated the return.
+        direction: 'WITHHELD',
         deletedAt: null,
       },
       _sum: { taxableAmount: true, taxAmount: true },

@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { AccessLevel } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { CustomerSegmentsService } from './customer-segments.service';
 
 function makeService() {
@@ -18,14 +18,27 @@ function makeService() {
       upsert: jest.fn(async () => ({ id: 'm1' })),
       deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
+    // create() runs inside a $transaction; run the callback against the same
+    // mock client so the create/generator spies are observable.
+    $transaction: jest.fn(async (cb: any) => cb(prisma)),
   };
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const companyScope = {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
     companyWhereFor: jest.fn().mockResolvedValue({ companyId: { in: ['c1'] } }),
   } as any;
-  const service = new CustomerSegmentsService(prisma, auditLogs, companyScope);
-  return { service, prisma, companyScope, auditLogs };
+  const codes = {
+    next: jest.fn().mockResolvedValue('CUSTOMER-SEGMENT-2026-00001'),
+  } as any;
+  const service = new CustomerSegmentsService(prisma, auditLogs, companyScope, codes);
+  return { service, prisma, companyScope, auditLogs, codes };
+}
+
+function p2002(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+    code: 'P2002',
+    clientVersion: 'test',
+  });
 }
 
 const user = { id: 'u1' } as any;
@@ -74,8 +87,27 @@ describe('CustomerSegmentsService company scoping', () => {
   });
 
   describe('create', () => {
+    it('generates a globally-unique segmentCode server-side when none is supplied', async () => {
+      const { service, prisma, companyScope, codes } = makeService();
+
+      const result = await service.create(
+        { companyId: 'c1', name: 'VIP', isActive: true } as any,
+        user,
+      );
+
+      expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'c1', AccessLevel.WRITE);
+      // GLOBAL counter (no companyId) → global uniqueness for the @unique column.
+      expect(codes.next).toHaveBeenCalledWith(
+        expect.objectContaining({ entityType: 'CustomerSegment' }),
+      );
+      expect(codes.next.mock.calls[0][0]).not.toHaveProperty('companyId');
+      const data = prisma.customerSegment.create.mock.calls[0][0].data;
+      expect(data.segmentCode).toBe('CUSTOMER-SEGMENT-2026-00001');
+      expect(result.segmentCode).toBe('CUSTOMER-SEGMENT-2026-00001');
+    });
+
     it('validates the dto.companyId against WRITE access and whitelists fields', async () => {
-      const { service, prisma, companyScope } = makeService();
+      const { service, prisma, companyScope, codes } = makeService();
 
       await service.create(
         {
@@ -92,6 +124,8 @@ describe('CustomerSegmentsService company scoping', () => {
       );
 
       expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'c1', AccessLevel.WRITE);
+      // Caller supplied a code → generator not consulted (backward-compat).
+      expect(codes.next).not.toHaveBeenCalled();
       const data = prisma.customerSegment.create.mock.calls[0][0].data;
       expect(data).toEqual(
         expect.objectContaining({
@@ -114,6 +148,41 @@ describe('CustomerSegmentsService company scoping', () => {
         service.create({ companyId: 'other', segmentCode: 'X', name: 'Y' } as any, user),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(prisma.customerSegment.create).not.toHaveBeenCalled();
+    });
+
+    it('retries with a fresh generated code on a unique collision', async () => {
+      const { service, prisma, codes } = makeService();
+      prisma.customerSegment.create
+        .mockRejectedValueOnce(p2002())
+        .mockImplementationOnce(async ({ data }: any) => ({ id: 'seg1', ...data }));
+
+      const result = await service.create({ companyId: 'c1', name: 'VIP' } as any, user);
+
+      expect(codes.next).toHaveBeenCalledTimes(2);
+      expect(prisma.customerSegment.create).toHaveBeenCalledTimes(2);
+      expect(result.id).toBe('seg1');
+    });
+
+    it('surfaces a 400 (not a 500) when a caller-supplied code collides', async () => {
+      const { service, prisma, codes } = makeService();
+      prisma.customerSegment.create.mockRejectedValueOnce(p2002());
+
+      await expect(
+        service.create({ companyId: 'c1', segmentCode: 'DUP', name: 'VIP' } as any, user),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      // No retry when the caller pinned the code.
+      expect(codes.next).not.toHaveBeenCalled();
+      expect(prisma.customerSegment.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('gives up with a 400 after exhausting generation retries', async () => {
+      const { service, prisma } = makeService();
+      prisma.customerSegment.create.mockRejectedValue(p2002());
+
+      await expect(
+        service.create({ companyId: 'c1', name: 'VIP' } as any, user),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.customerSegment.create).toHaveBeenCalledTimes(5);
     });
   });
 

@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { pagination } from '../../common/utils/pagination';
 import {
@@ -15,6 +16,7 @@ export class DocumentNumberSequencesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   async findAll(query: QueryDocumentNumberSequenceDto, user?: AuthUser) {
@@ -35,11 +37,12 @@ export class DocumentNumberSequencesService {
     return { items, total, page: paging.page, limit: paging.limit };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const item = await this.prisma.documentNumberSequence.findFirst({
       where: { id, deletedAt: null },
     });
     if (!item) throw new NotFoundException('Document number sequence not found');
+    if (user) await this.companyScope.assertCanAccessCompany(user, item.companyId, minimum);
     return item;
   }
 
@@ -59,7 +62,7 @@ export class DocumentNumberSequencesService {
   }
 
   async update(id: string, dto: UpdateDocumentNumberSequenceDto, user: AuthUser) {
-    const existing = await this.findOne(id);
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
     const updated = await this.prisma.documentNumberSequence.update({ where: { id }, data: dto });
     await this.auditLogs.log({
       action: 'UPDATE',
@@ -73,7 +76,7 @@ export class DocumentNumberSequencesService {
   }
 
   async nextNumber(id: string, user: AuthUser) {
-    const seq = await this.findOne(id);
+    const seq = await this.findOne(id, user, AccessLevel.WRITE);
     const updated = await this.prisma.documentNumberSequence.update({
       where: { id },
       data: { currentNumber: { increment: 1 } },

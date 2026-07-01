@@ -20,8 +20,8 @@ export class DocumentNumberSequencesController {
 
   @Get(':id')
   @RequirePermissions('doc_sequences.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()

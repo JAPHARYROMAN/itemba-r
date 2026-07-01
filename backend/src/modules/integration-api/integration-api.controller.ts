@@ -1,22 +1,23 @@
 import {
   BadRequestException,
-  Body,
   Controller,
   Get,
+  NotFoundException,
   Param,
   Post,
   Query,
   Req,
   UseGuards,
+  Body,
 } from '@nestjs/common';
 import { ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { ApiKeyAuthGuard } from '../../common/guards/api-key-auth.guard';
 import { RequireApiScope } from '../../common/decorators/require-api-scope.decorator';
+import { PrismaService } from '../../prisma/prisma.service';
 import { ExternalPaymentsService } from '../external-payments/external-payments.service';
 import { ExternalMessagesService } from '../external-messages/external-messages.service';
-import { WebhookEventsService } from '../webhook-events/webhook-events.service';
 import { CreateExternalPaymentDto } from '../external-payments/dto/create-external-payment.dto';
 
 /**
@@ -52,7 +53,7 @@ export class IntegrationApiController {
   constructor(
     private readonly externalPayments: ExternalPaymentsService,
     private readonly externalMessages: ExternalMessagesService,
-    private readonly webhookEvents: WebhookEventsService,
+    private readonly prisma: PrismaService,
   ) {}
 
   private requireBoundCompany(req: Request): { apiKey: any; companyId: string } {
@@ -120,10 +121,39 @@ export class IntegrationApiController {
 
   @Get('webhooks/events/:id')
   @RequireApiScope('webhooks.read')
-  async getWebhookEvent(@Param('id') id: string) {
-    if (typeof (this.webhookEvents as any).findOne === 'function') {
-      return (this.webhookEvents as any).findOne(id);
-    }
-    throw new BadRequestException('Webhook event lookup not available');
+  async getWebhookEvent(@Param('id') id: string, @Req() req: Request) {
+    // ITMB-AUDIT: previously delegated to WebhookEventsService.findOne(id) with a
+    // single argument. That method requires (id, includeSensitive, user); calling
+    // it with only `id` left `user` undefined, so its internal
+    // companyScope.assertCanAccessCompany(undefined, ...) always threw — the route
+    // was effectively dead. The integration surface authenticates with an API key
+    // (no AuthUser), so scope the lookup by the key's bound company directly,
+    // mirroring ExternalPaymentsService.findOneForCompany. Sensitive fields
+    // (payload/headers) are never exposed on this read route.
+    const { companyId } = this.requireBoundCompany(req);
+    const record = await this.prisma.webhookEvent.findFirst({
+      where: { id, companyId },
+      select: {
+        id: true,
+        webhookEventNumber: true,
+        webhookEndpointId: true,
+        providerId: true,
+        connectionId: true,
+        companyId: true,
+        eventName: true,
+        externalEventId: true,
+        verificationStatus: true,
+        processingStatus: true,
+        linkedEntityType: true,
+        linkedEntityId: true,
+        errorMessage: true,
+        receivedAt: true,
+        processedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    if (!record) throw new NotFoundException('Webhook event not found');
+    return record;
   }
 }

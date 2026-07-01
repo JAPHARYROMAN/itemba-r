@@ -329,13 +329,49 @@ describe('SupplierInvoicesService re-approval preserves payable payments (#6)', 
   });
 });
 
-describe('SupplierInvoicesService amountVarianceAgainstPurchaseOrder (#16)', () => {
-  function poLine(overrides: Record<string, unknown> = {}) {
-    return { productId: 'p-a', unitCost: 100, lineTotal: 1000, ...overrides };
+describe('SupplierInvoicesService createThreeWayMatch shared-calculator variance (#16)', () => {
+  // The SI approval matcher now routes both quantity- and amount-variance through
+  // the shared three-way-match calculator so it can never drift from the
+  // standalone three-way-matching register. These tests exercise the whole
+  // createThreeWayMatch path (the previous suite poked a now-removed private
+  // helper) to prove: (a) split PO lines for one product are aggregated instead
+  // of only the last line being kept, and (b) the calculator's whole-invoice
+  // actual basis is used, matching the register.
+  function makeMatchService(po: any, grn: any = null) {
+    const created: any[] = [];
+    const statusWrites: any[] = [];
+    const prisma: any = {
+      purchaseOrder: { findFirst: jest.fn(async () => po) },
+      goodsReceivedNote: { findFirst: jest.fn(async () => grn) },
+      threeWayMatch: {
+        create: jest.fn(async ({ data }: any) => {
+          created.push(data);
+          return { id: 'twm-1', ...data };
+        }),
+      },
+      supplierInvoice: {
+        update: jest.fn(async ({ data }: any) => {
+          statusWrites.push(data);
+          return { id: 'si-1', ...data };
+        }),
+      },
+    };
+    const codes = { next: jest.fn(async () => 'TWM-2026-000001') } as any;
+    const service = new SupplierInvoicesService(
+      prisma,
+      { log: jest.fn() } as any,
+      { assertCanAccessCompany: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      codes,
+    );
+    return { service, created, statusWrites };
   }
+
   function invLine(overrides: Record<string, unknown> = {}) {
     return {
       productId: 'p-a',
+      description: 'Widget',
       quantity: 10,
       unitPrice: 100,
       lineTotal: 1000,
@@ -345,40 +381,107 @@ describe('SupplierInvoicesService amountVarianceAgainstPurchaseOrder (#16)', () 
     };
   }
 
-  it('does not flag a matched line just because the invoice carries an extra non-PO line', () => {
-    const { service } = makeService();
+  it('aggregates split PO lines for one product (weighted average), not just the last line', async () => {
+    // PO orders product p-a across two lines: 5 @ 4 (=20) and 5 @ 6 (=30).
+    // Weighted avg unit cost = (20+30)/(5+5) = 5. An invoice of 10 @ 5 = 50 matches.
+    // The old logic kept only the LAST PO line (unitCost 6) => expected 60 => bogus
+    // variance of 10 on a genuinely matched invoice.
+    const po = {
+      id: 'po-1',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      lines: [
+        { productId: 'p-a', quantity: 5, unitCost: 4, lineTotal: 20 },
+        { productId: 'p-a', quantity: 5, unitCost: 6, lineTotal: 30 },
+      ],
+    };
+    const { service, created } = makeMatchService(po);
     const invoice = {
+      id: 'si-1',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      purchaseOrderId: 'po-1',
+      goodsReceivedNoteId: null,
+      totalAmount: 50,
+      lines: [invLine({ quantity: 10, unitPrice: 5, lineTotal: 50 })],
+    };
+    await (service as any).createThreeWayMatch(invoice, 'user-1');
+    expect(created).toHaveLength(1);
+    expect(Number(created[0].amountVariance)).toBe(0);
+    expect(created[0].matchStatus).toBe('MATCHED');
+  });
+
+  it('detects a genuine overcharge on a matched line', async () => {
+    const po = {
+      id: 'po-1',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      lines: [{ productId: 'p-a', quantity: 10, unitCost: 100, lineTotal: 1000 }],
+    };
+    const { service, created } = makeMatchService(po);
+    const invoice = {
+      id: 'si-1',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      purchaseOrderId: 'po-1',
+      goodsReceivedNoteId: null,
+      totalAmount: 1200,
+      lines: [invLine({ unitPrice: 120, lineTotal: 1200 })], // billed 1200 vs expected 1000
+    };
+    await (service as any).createThreeWayMatch(invoice, 'user-1');
+    expect(Number(created[0].amountVariance)).toBe(200);
+    expect(created[0].matchStatus).toBe('VARIANCE');
+  });
+
+  it('uses the shared whole-invoice actual basis (matches the standalone register)', async () => {
+    // A perfectly-priced PO product line plus a non-PO freight line. The shared
+    // calculator compares invoice.totalAmount (2000) against the matched expected
+    // (1000) => variance 1000. This intentionally aligns the SI approval flow with
+    // the standalone three-way-matching register, which computes the same value.
+    const po = {
+      id: 'po-1',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      lines: [{ productId: 'p-a', quantity: 10, unitCost: 100, lineTotal: 1000 }],
+    };
+    const { service, created } = makeMatchService(po);
+    const invoice = {
+      id: 'si-1',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      purchaseOrderId: 'po-1',
+      goodsReceivedNoteId: null,
       totalAmount: 2000,
       lines: [
         invLine(), // matches PO product p-a exactly: 1000
         invLine({ productId: null, lineTotal: 1000, quantity: 1, unitPrice: 1000 }), // freight 1000
       ],
     };
-    const variance = (service as any).amountVarianceAgainstPurchaseOrder(invoice, [poLine()]);
-    // Old (buggy) code compared expected 1000 against invoice.totalAmount 2000 => 1000.
-    // Like-for-like over matched lines only => 0.
-    expect(Number(variance)).toBe(0);
+    await (service as any).createThreeWayMatch(invoice, 'user-1');
+    expect(Number(created[0].amountVariance)).toBe(1000);
+    expect(created[0].matchStatus).toBe('VARIANCE');
   });
 
-  it('still detects a genuine overcharge on a matched line', () => {
-    const { service } = makeService();
-    const invoice = {
-      totalAmount: 1200,
-      lines: [invLine({ unitPrice: 120, lineTotal: 1200 })], // billed 1200 vs expected 1000
+  it('falls back to whole-invoice vs PO total when no invoice line matches a PO product', async () => {
+    const po = {
+      id: 'po-1',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      lines: [{ productId: 'p-a', quantity: 10, unitCost: 100, lineTotal: 1000 }],
     };
-    const variance = (service as any).amountVarianceAgainstPurchaseOrder(invoice, [poLine()]);
-    expect(Number(variance)).toBe(200);
-  });
-
-  it('falls back to whole-invoice vs PO total when no line matches', () => {
-    const { service } = makeService();
+    const { service, created } = makeMatchService(po);
     const invoice = {
+      id: 'si-1',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      purchaseOrderId: 'po-1',
+      goodsReceivedNoteId: null,
       totalAmount: 1500,
       lines: [invLine({ productId: 'p-other', lineTotal: 1500, unitPrice: 150 })],
     };
-    const variance = (service as any).amountVarianceAgainstPurchaseOrder(invoice, [poLine()]);
+    await (service as any).createThreeWayMatch(invoice, 'user-1');
     // No matched line => whole-invoice fallback: |1500 - 1000| = 500.
-    expect(Number(variance)).toBe(500);
+    expect(Number(created[0].amountVariance)).toBe(500);
   });
 });
 

@@ -2,6 +2,8 @@ import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { CommunicationLogsService } from './communication-logs.service';
+import { CreateCommunicationLogDto } from './dto/create-communication-log.dto';
+import { UpdateCommunicationLogDto } from './dto/update-communication-log.dto';
 
 @Controller('communication-logs')
 export class CommunicationLogsController {
@@ -21,13 +23,13 @@ export class CommunicationLogsController {
 
   @Post()
   @RequirePermissions('communication_logs.create')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreateCommunicationLogDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
   }
 
   @Put(':id')
   @RequirePermissions('communication_logs.update')
-  update(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+  update(@Param('id') id: string, @Body() dto: UpdateCommunicationLogDto, @CurrentUser() user: AuthUser) {
     return this.service.update(id, dto, user);
   }
 
