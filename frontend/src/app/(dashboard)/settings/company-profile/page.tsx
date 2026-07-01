@@ -734,7 +734,7 @@ function LetterheadPreview({ organization }: { organization: ReturnType<typeof d
             )}
           </div>
           <div className="min-w-0 text-xs leading-5">
-            <div className="text-lg font-extrabold uppercase leading-tight text-slate-950">{organization.groupName}</div>
+            <div className="text-lg font-extrabold uppercase leading-tight text-slate-900">{organization.groupName}</div>
             <div className="mt-0.5 text-sm font-bold leading-tight text-slate-900">{organization.name}</div>
             {organization.branchName && <div className="mt-0.5 text-sm text-slate-700">{organization.branchName}</div>}
             {organization.address && <div className="mt-2 text-slate-600">Address: {organization.address}</div>}
@@ -752,7 +752,7 @@ function LetterheadPreview({ organization }: { organization: ReturnType<typeof d
         </div>
         <div className="mt-5">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Document</div>
-          <div className="mt-1 text-2xl font-bold text-slate-950">Sales Order</div>
+          <div className="mt-1 text-2xl font-bold text-slate-900">Sales Order</div>
           <div className="mt-1 text-sm text-slate-500">SO-2026-000001</div>
         </div>
       </div>

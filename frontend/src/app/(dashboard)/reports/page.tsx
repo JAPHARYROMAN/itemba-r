@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   BarChart3,
   Building2,
-  ClipboardList,
   FileBarChart,
   FileSearch,
   Filter,
@@ -242,6 +241,9 @@ export default function SimpleReportsPage() {
 
   const runnableCount = entries.filter(canRunInViewer).length;
   const officialCount = entries.filter((entry) => ['CERTIFIED', 'OFFICIAL'].includes(entry.lifecycleStatus)).length;
+  const totalReports = catalog?.total ?? entries.length;
+  const officialPct = totalReports > 0 ? Math.round((officialCount / totalReports) * 100) : 0;
+  const isFiltering = search.trim() !== '' || sector !== 'ALL' || reportType !== 'ALL';
   const generatedAt = catalog?.generatedAt ? new Date(catalog.generatedAt).toLocaleString() : 'Not loaded yet';
 
   return (
@@ -252,11 +254,27 @@ export default function SimpleReportsPage() {
         breadcrumbs={[{ label: 'Reports' }]}
       />
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-        <SummaryTile icon={<FileBarChart className="h-4 w-4" />} label="Total reports" value={String(catalog?.total ?? entries.length)} />
-        <SummaryTile icon={<Search className="h-4 w-4" />} label="Matching now" value={String(filteredReports.length)} />
-        <SummaryTile icon={<ClipboardList className="h-4 w-4" />} label="Runnable here" value={String(runnableCount)} />
-        <SummaryTile icon={<ShieldCheck className="h-4 w-4" />} label="Certified / official" value={String(officialCount)} />
+      <div className={`grid grid-cols-1 gap-3 ${isFiltering ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+        <SummaryTile
+          icon={<FileBarChart className="h-4 w-4" />}
+          label="Total reports"
+          value={String(totalReports)}
+          subtitle={`${runnableCount} runnable here`}
+        />
+        <SummaryTile
+          icon={<ShieldCheck className="h-4 w-4" />}
+          label="Certified / official"
+          value={String(officialCount)}
+          subtitle={`${officialPct}% of the catalog`}
+        />
+        {isFiltering && (
+          <SummaryTile
+            icon={<Search className="h-4 w-4" />}
+            label="Matching your filters"
+            value={String(filteredReports.length)}
+            subtitle={`of ${totalReports} total`}
+          />
+        )}
       </div>
 
       <Card className="p-5">
@@ -400,14 +418,25 @@ export default function SimpleReportsPage() {
   );
 }
 
-function SummaryTile({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+function SummaryTile({
+  icon,
+  label,
+  value,
+  subtitle,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  subtitle?: string;
+}) {
   return (
     <Card className="p-4">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-700">{icon}</div>
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-          <div className="mt-1 text-2xl font-semibold tabular-nums text-slate-950">{value}</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">{label}</div>
+          <div className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">{value}</div>
+          {subtitle && <div className="mt-0.5 text-[11px] text-slate-500">{subtitle}</div>}
         </div>
       </div>
     </Card>
@@ -417,8 +446,8 @@ function SummaryTile({ icon, label, value }: { icon: ReactNode; label: string; v
 function SectionHeading({ title, description }: { title: string; description: string }) {
   return (
     <div>
-      <h2 className="text-base font-semibold text-slate-950">{title}</h2>
-      <p className="mt-1 text-sm leading-6 text-slate-500">{description}</p>
+      <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+      <p className="mt-1 text-sm leading-6 text-slate-600">{description}</p>
     </div>
   );
 }
@@ -442,8 +471,8 @@ function QuickRoomCard({
       <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-700 group-hover:bg-brand-50 group-hover:text-brand-700">
         {icon}
       </div>
-      <div className="mt-4 text-sm font-semibold text-slate-950">{title}</div>
-      <p className="mt-2 text-xs leading-5 text-slate-500">{description}</p>
+      <div className="mt-4 text-sm font-semibold text-slate-900">{title}</div>
+      <p className="mt-2 text-xs leading-5 text-slate-600">{description}</p>
     </Link>
   );
 }
@@ -465,11 +494,11 @@ function ReportCard({ entry, compact = false }: { entry: CatalogEntry; compact?:
               <Badge tone="good">{LIFECYCLE_LABELS[entry.lifecycleStatus]}</Badge>
             )}
           </div>
-          <h3 className="mt-3 text-sm font-semibold leading-5 text-slate-950">{entry.name}</h3>
+          <h3 className="mt-3 text-sm font-semibold leading-5 text-slate-900">{entry.name}</h3>
         </div>
       </div>
 
-      <p className={`mt-2 text-xs leading-5 text-slate-500 ${compact ? 'line-clamp-2' : ''}`}>
+      <p className={`mt-2 text-xs leading-5 text-slate-600 ${compact ? 'line-clamp-2' : ''}`}>
         {entry.description}
       </p>
 
