@@ -175,6 +175,17 @@ export class CustomerPaymentsService {
     // Cash/bank account belongs to the company; type drives the GL debit role.
     const cashAccount = await this.resolveCashAccount(this.prisma, dto.companyId, dto.cashAccountId);
 
+    // Guard against mixing currencies on the cash ledger: we increment the cash
+    // account's running balance by the payment amount below, so the receipt
+    // currency MUST match the cash account currency (mirrors sales-orders).
+    const paymentCurrency = dto.currency ?? CurrencyCode.TZS;
+    if (cashAccount.currency && cashAccount.currency !== paymentCurrency) {
+      throw new BadRequestException(
+        `Receipt account currency (${cashAccount.currency}) does not match the payment currency ` +
+          `(${paymentCurrency}). Choose a ${paymentCurrency} cash/bank account.`,
+      );
+    }
+
     const paymentDate = new Date(dto.paymentDate);
     const divisionId = dto.divisionId ?? cashAccount.divisionId ?? customer.divisionId ?? null;
     const branchId = dto.branchId ?? cashAccount.branchId ?? customer.branchId ?? null;
@@ -297,6 +308,16 @@ export class CustomerPaymentsService {
         include: this.includeScope(),
       });
 
+      // Keep the denormalised CashAccount.currentBalance (a subledger cache of
+      // the GL cash position, read by finance/dashboards) consistent with the
+      // DR Cash/Bank leg we just posted. Increment by the FULL receipt amount in
+      // the SAME transaction — mirrors sales-orders (increment on cash receipt)
+      // and is unwound on reverse below. Scoped by companyId to be safe.
+      await tx.cashAccount.updateMany({
+        where: { id: dto.cashAccountId, companyId: dto.companyId, deletedAt: null },
+        data: { currentBalance: { increment: amount } },
+      });
+
       // Sync balances for every customer whose receivables changed (all == this
       // payment's customer, but sync defensively per touched customer).
       for (const cid of touchedCustomerIds) {
@@ -408,6 +429,23 @@ export class CustomerPaymentsService {
         throw new ConflictException(
           'Customer payment reversal could not be posted; reversal aborted to avoid an unbalanced ledger',
         );
+      }
+
+      // Unwind the CashAccount.currentBalance increment applied at create time,
+      // in lock-step with the CR Cash/Bank mirror JE. Only decrement when the
+      // reversal JE actually posted (reversalJe truthy): a payment that never
+      // posted a cash leg (journalEntryId null, reversalJe null) also never
+      // incremented the balance, so there is nothing to unwind. Scoped by
+      // companyId; matches the create-time increment above.
+      if (reversalJe && current.cashAccountId) {
+        await tx.cashAccount.updateMany({
+          where: {
+            id: current.cashAccountId,
+            companyId: current.companyId,
+            deletedAt: null,
+          },
+          data: { currentBalance: { decrement: new Prisma.Decimal(current.amount) } },
+        });
       }
 
       const updated = await tx.customerPayment.update({
@@ -669,6 +707,7 @@ export class CustomerPaymentsService {
         branchId: true,
         accountType: true,
         accountName: true,
+        currency: true,
       },
     });
     if (!cashAccount || cashAccount.companyId !== companyId) {

@@ -1,10 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AccessLevel, AuditSeverity, Prisma } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { CompanyScopeService } from '../../common/services';
+import { AccountResolverService, CompanyScopeService } from '../../common/services';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
+import { PostingEngineService, PostingLine } from '../accounting-engine/posting-engine.service';
 import {
   CreateStockAdjustmentDto,
   StockAdjustmentLineDto,
@@ -44,6 +45,8 @@ export class StockAdjustmentsService {
     private readonly auditLogs: AuditLogsService,
     private readonly inventoryMovements: InventoryMovementsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly postingEngine: PostingEngineService,
+    private readonly accountResolver: AccountResolverService,
   ) {}
 
   async findAll(query: QueryStockAdjustmentDto, user: AuthUser) {
@@ -355,6 +358,11 @@ export class StockAdjustmentsService {
     if (!existing.branchId) {
       throw new BadRequestException('Branch/location is required to post stock adjustment');
     }
+    // Narrow to a non-null `string` const the transaction closure can carry:
+    // TypeScript does not propagate the `existing.branchId` guard into the async
+    // closure below (the captured object could, in principle, be reassigned), so
+    // bind the checked value here where the narrowing is guaranteed.
+    const branchId: string = existing.branchId;
 
     // ITMB-042: Apply all inventory movements and flip the status in ONE transaction so a
     // mid-loop failure rolls back every balance change, and atomically claim the document
@@ -410,6 +418,19 @@ export class StockAdjustmentsService {
         balanceRows.map((row) => [row.productId, Number(row.averageCost)]),
       );
 
+      // ITMB (GL audit fix): a stock adjustment relieves/adds inventory subledger
+      // VALUE via applyMovementToBalance but must post the matching GL swing in
+      // the SAME transaction so the GL Inventory Asset stays reconciled to the
+      // subledger and the shrinkage loss / count-up gain hits P&L. We measure the
+      // EXACT value change by reading inventoryBalance.totalValue immediately
+      // before and after each movement (the movement math floors relieved value
+      // at zero and forces value to zero when qty hits zero, so qty*avgCost is not
+      // always the true delta). The net of those deltas becomes the Inventory
+      // Asset GL leg; the offset goes to the inventory-adjustment variance
+      // account (Dr on a net loss / count-down, Cr on a net gain / count-up).
+      const postingBranchId = branchId; // asserted non-null before the tx
+      let inventoryValueDelta = new Prisma.Decimal(0); // >0 = inventory grew
+
       for (const line of existing.lines) {
         const variance = Number(line.varianceQuantity);
         if (variance === 0) continue;
@@ -433,6 +454,13 @@ export class StockAdjustmentsService {
           }
         }
 
+        const beforeValue = await this.readBalanceValue(
+          tx,
+          existing.companyId,
+          line.productId,
+          postingBranchId,
+        );
+
         await this.inventoryMovements.createMovement({
           companyId: existing.companyId,
           productId: line.productId,
@@ -447,6 +475,31 @@ export class StockAdjustmentsService {
           divisionId: existing.divisionId ?? undefined,
           branchId: existing.branchId ?? undefined,
           tx,
+        });
+
+        const afterValue = await this.readBalanceValue(
+          tx,
+          existing.companyId,
+          line.productId,
+          postingBranchId,
+        );
+        inventoryValueDelta = inventoryValueDelta.plus(afterValue.minus(beforeValue));
+      }
+
+      // Only touch the GL when a real value swing occurred. Zero-value moves
+      // (e.g. a cost-less count-up onto empty stock, or an outbound floored to
+      // zero) leave inventory value unchanged and need no journal entry.
+      const netDelta = inventoryValueDelta.toDecimalPlaces(2);
+      if (!netDelta.isZero()) {
+        await this.postAdjustmentLedger(tx, {
+          companyId: existing.companyId,
+          divisionId: existing.divisionId ?? null,
+          branchId: postingBranchId,
+          adjustmentId: existing.id,
+          adjustmentNumber: existing.adjustmentNumber,
+          transactionDate: new Date(),
+          inventoryValueDelta: netDelta,
+          userId,
         });
       }
 
@@ -489,6 +542,150 @@ export class StockAdjustmentsService {
     });
 
     return { success: true };
+  }
+
+  /**
+   * Read the current inventory subledger VALUE (totalValue) for a
+   * company/product/branch line, returning 0 when no balance row exists yet.
+   * Used to measure the exact GL swing produced by a movement (see post()).
+   */
+  private async readBalanceValue(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    productId: string,
+    branchId: string,
+  ): Promise<Prisma.Decimal> {
+    const row = await tx.inventoryBalance.findUnique({
+      where: { companyId_productId_branchId: { companyId, productId, branchId } },
+      select: { totalValue: true },
+    });
+    return row ? new Prisma.Decimal(row.totalValue) : new Prisma.Decimal(0);
+  }
+
+  /**
+   * Post the balanced GL entry for a posted stock adjustment so the GL Inventory
+   * Asset account moves in lock-step with the inventory subledger, and the
+   * shrinkage loss / count-up gain is recognised in P&L.
+   *
+   * `inventoryValueDelta` is the net change in inventory subledger value across
+   * every line of the adjustment (positive = inventory grew on a net count-up,
+   * negative = inventory shrank on a net loss/count-down):
+   *
+   *   net count-DOWN (delta < 0):
+   *     DR  INVENTORY_ADJUSTMENT_VARIANCE   |value|   (loss -> P&L)
+   *     CR  INVENTORY_ASSET                 |value|   (subledger relieved)
+   *
+   *   net count-UP (delta > 0):
+   *     DR  INVENTORY_ASSET                  value    (subledger added)
+   *     CR  INVENTORY_ADJUSTMENT_VARIANCE    value    (gain -> P&L)
+   *
+   * The variance leg uses a NEW semantic role the shared AccountResolver does not
+   * yet enumerate, resolved defensively so a mis-seeded chart throws a clear
+   * BadRequest instead of posting to a wrong/zero account.
+   */
+  private async postAdjustmentLedger(
+    tx: Prisma.TransactionClient,
+    input: {
+      companyId: string;
+      divisionId: string | null;
+      branchId: string;
+      adjustmentId: string;
+      adjustmentNumber: string;
+      transactionDate: Date;
+      inventoryValueDelta: Prisma.Decimal;
+      userId: string;
+    },
+  ): Promise<{ id: string; journalNumber: string } | null> {
+    const delta = input.inventoryValueDelta.toDecimalPlaces(2);
+    if (delta.isZero()) return null;
+
+    const [inventoryAccount, varianceAccount] = await Promise.all([
+      this.accountResolver.resolve(input.companyId, 'INVENTORY_ASSET', tx),
+      this.resolveAdjustmentVarianceAccount(input.companyId, tx),
+    ]);
+
+    // Two distinct roles must map to two distinct accounts or the JE is a silent
+    // no-op that still balances.
+    if (inventoryAccount.id === varianceAccount.id) {
+      throw new BadRequestException(
+        `Chart-of-accounts misconfiguration on company ${input.companyId}: the inventory asset and ` +
+          `inventory-adjustment variance accounts resolve to the same account. Configure a distinct ` +
+          `account (accountSubType="inventory_adjustment_variance") for the variance leg and retry.`,
+      );
+    }
+
+    const magnitude = delta.abs();
+    const grew = delta.gt(0);
+    const lines: PostingLine[] = grew
+      ? [
+          {
+            accountId: inventoryAccount.id,
+            description: 'Inventory count-up',
+            debit: magnitude,
+            credit: 0,
+          },
+          {
+            accountId: varianceAccount.id,
+            description: 'Inventory adjustment gain',
+            debit: 0,
+            credit: magnitude,
+          },
+        ]
+      : [
+          {
+            accountId: varianceAccount.id,
+            description: 'Inventory adjustment loss',
+            debit: magnitude,
+            credit: 0,
+          },
+          {
+            accountId: inventoryAccount.id,
+            description: 'Inventory written off',
+            debit: 0,
+            credit: magnitude,
+          },
+        ];
+
+    return this.postingEngine.postLines(
+      {
+        companyId: input.companyId,
+        divisionId: input.divisionId,
+        branchId: input.branchId,
+        transactionDate: input.transactionDate,
+        description: `Stock adjustment ${input.adjustmentNumber}`,
+        referenceType: 'StockAdjustment',
+        referenceId: input.adjustmentId,
+        moduleName: 'stock-adjustments',
+        userId: input.userId,
+        lines,
+      },
+      tx,
+    );
+  }
+
+  /**
+   * Resolve the "inventory adjustment variance" account (P&L) used as the
+   * counter-leg of a stock-adjustment posting. This is a NEW semantic role the
+   * shared AccountResolverService does not (yet) enumerate in its AccountRole
+   * union, so we resolve it defensively via a cast: the resolver matches an
+   * account whose accountSubType is "inventory_adjustment_variance" (or a
+   * conventional code) and otherwise throws. We re-wrap that failure with
+   * actionable guidance rather than posting the variance to an arbitrary account.
+   */
+  private async resolveAdjustmentVarianceAccount(companyId: string, tx: Prisma.TransactionClient) {
+    try {
+      return await this.accountResolver.resolve(
+        companyId,
+        'INVENTORY_ADJUSTMENT_VARIANCE' as any,
+        tx,
+      );
+    } catch {
+      throw new BadRequestException(
+        `Cannot post this stock adjustment: no "inventory adjustment variance" account is ` +
+          `configured for company ${companyId}. Create a P&L account (typically an expense/other-loss ` +
+          `account) and set accountSubType="inventory_adjustment_variance" on it, then retry.`,
+      );
+    }
   }
 
   private async assertReferencesBelongToCompany(

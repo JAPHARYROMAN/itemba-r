@@ -39,8 +39,25 @@ function makeService() {
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const inventoryMovements = { createMovement: jest.fn().mockResolvedValue(undefined) } as any;
   const companyScope = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) } as any;
-  const service = new StockAdjustmentsService(prisma, auditLogs, inventoryMovements, companyScope);
-  return { service, prisma };
+  const postingEngine = {
+    postLines: jest.fn().mockResolvedValue({ id: 'je-1', journalNumber: 'JE-1' }),
+  } as any;
+  const accountResolver = {
+    resolve: jest.fn(async (_companyId: string, role: string) => ({
+      id: `acct-${role}`,
+      accountCode: role,
+      accountName: role,
+    })),
+  } as any;
+  const service = new StockAdjustmentsService(
+    prisma,
+    auditLogs,
+    inventoryMovements,
+    companyScope,
+    postingEngine,
+    accountResolver,
+  );
+  return { service, prisma, postingEngine, accountResolver, inventoryMovements };
 }
 
 const user = { id: 'user-1', permissions: ['inventory.adjustments.create'] } as any;

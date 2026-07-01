@@ -36,6 +36,11 @@ const ZERO = new Prisma.Decimal(0);
  *
  * Voiding an ISSUED credit note posts the exact reverse of that entry.
  *
+ * The AR credit is mirrored in the receivable subledger + customer balance:
+ * issue() relieves the linked receivable whether it is linked DIRECTLY
+ * (receivableId) or only via the sales order (salesOrderId → the SO's
+ * receivable), so the GL AR control never drifts from the AR subledger.
+ *
  * SCOPE (this slice): financial reversal only. We do NOT create inventory
  * movements / restock — that is a deliberate future enhancement (a returned
  * physical good would additionally Dr Inventory / Cr COGS). See TODO in issue().
@@ -287,14 +292,28 @@ export class CreditNotesService {
       throw new BadRequestException('Credit note total must be greater than zero to issue');
     }
 
+    // [GL/subledger fix — HIGH salesOrderId-only relief] Determine which
+    // receivable this credit note relieves. A note may link the debt EITHER
+    // directly (receivableId) OR only via its sales order (salesOrderId). In the
+    // latter case we must still resolve and relieve the underlying receivable —
+    // otherwise issue() credits AR_CONTROL in the GL for the full total while the
+    // receivable subledger + customer balance stay inflated (silent AR-vs-GL
+    // divergence). We resolve the SO's receivable the SAME way sales-orders does
+    // (SalesOrder.receivableId first, then Receivable.sourceType='SalesOrder').
+    const effectiveReceivableId = await this.resolveLinkedReceivableId(
+      this.prisma,
+      existing.receivableId,
+      existing.salesOrderId,
+      existing.companyId,
+    );
+
     // [GL guard — HIGH double-reversal] Refuse to credit a receivable that another
     // flow (write-off / cancellation) has already reversed. Crediting a
     // CANCELLED/WRITTEN_OFF receivable would double-relieve AR and re-inflate the
     // customer's credit position against a debt that no longer carries value.
-    // (The sales-orders link is guarded on that side of the ledger.)
-    if (existing.receivableId) {
+    if (effectiveReceivableId) {
       const linked = await this.prisma.receivable.findFirst({
-        where: { id: existing.receivableId, companyId: existing.companyId, deletedAt: null },
+        where: { id: effectiveReceivableId, companyId: existing.companyId, deletedAt: null },
         select: { status: true },
       });
       if (
@@ -379,24 +398,35 @@ export class CreditNotesService {
       //   Dr Inventory / Cr COGS and create the inventory movement. Out of scope
       //   for this financial-reversal slice.
 
-      // If a receivable is linked, atomically reduce its outstanding — but never
-      // drive it negative. Any excess credit is left un-applied on the credit
-      // note (appliedAmount < totalAmount) and remains available as a customer
-      // credit for a future invoice/refund.
+      // If a receivable is linked (directly, or resolved from the sales order),
+      // atomically reduce its outstanding — but never drive it negative. Any
+      // excess credit is left un-applied on the credit note (appliedAmount <
+      // totalAmount) and remains available as a customer credit for a future
+      // invoice/refund.
       let appliedAmount = ZERO;
-      if (existing.receivableId) {
+      if (effectiveReceivableId) {
         appliedAmount = await this.applyToReceivable(
           tx,
-          existing.receivableId,
+          effectiveReceivableId,
           existing.companyId,
           totalAmount,
           user,
         );
       }
 
+      // Persist the resolved receivableId back onto the credit note when it was
+      // only linked via the sales order. This keeps the subledger consistent with
+      // the GL (the receivable we relieved is now recorded) and lets void()
+      // restore the exact receivable via existing.receivableId on reversal.
       const updated: CreditNoteRow = await db.creditNote.update({
         where: { id },
-        data: { journalEntryId: journalEntry.id, appliedAmount },
+        data: {
+          journalEntryId: journalEntry.id,
+          appliedAmount,
+          ...(effectiveReceivableId && !existing.receivableId
+            ? { receivableId: effectiveReceivableId }
+            : {}),
+        },
       });
 
       return { updated, journalEntry, appliedAmount };
@@ -514,6 +544,44 @@ export class CreditNotesService {
   }
 
   // ─── Internals ────────────────────────────────────────────────────────────────
+
+  /**
+   * Resolve the receivable a credit note relieves. Prefers the explicit
+   * receivableId link; when that is absent but a salesOrderId is present, resolve
+   * the sales order's receivable exactly the way sales-orders.service does:
+   *   1. SalesOrder.receivableId (the direct FK set when a credit sale confirms), then
+   *   2. Receivable where sourceType='SalesOrder' AND sourceId=salesOrderId.
+   * Company-scoped throughout so we never resolve another tenant's receivable.
+   * Returns null when nothing is linked (a standalone credit note that only
+   * credits AR in the GL and leaves an available customer credit).
+   */
+  private async resolveLinkedReceivableId(
+    client: Prisma.TransactionClient | PrismaService,
+    receivableId: string | null,
+    salesOrderId: string | null,
+    companyId: string,
+  ): Promise<string | null> {
+    if (receivableId) return receivableId;
+    if (!salesOrderId) return null;
+
+    const so = await client.salesOrder.findFirst({
+      where: { id: salesOrderId, companyId, deletedAt: null },
+      select: { receivableId: true },
+    });
+    if (so?.receivableId) return so.receivableId;
+
+    const rec = await client.receivable.findFirst({
+      where: {
+        companyId,
+        sourceType: 'SalesOrder',
+        sourceId: salesOrderId,
+        deletedAt: null,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    return rec?.id ?? null;
+  }
 
   /**
    * Reduce a linked receivable's outstanding by up to `credit`, without driving

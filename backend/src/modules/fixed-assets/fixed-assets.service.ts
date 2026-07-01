@@ -1,8 +1,15 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel, AssetFinancingStatus, AssetOwnershipLevel, Prisma } from '@prisma/client';
+import {
+  AccessLevel,
+  AssetFinancingStatus,
+  AssetOwnershipLevel,
+  FixedAssetStatus,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService, CompanyScopeService } from '../../common/services';
+import { AccountRole } from '../../common/services/account-resolver.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateFixedAssetDto } from './dto/create-fixed-asset.dto';
 import { UpdateFixedAssetDto } from './dto/update-fixed-asset.dto';
@@ -21,6 +28,17 @@ const ASSET_INCLUDES = {
   division: { select: { id: true, name: true, code: true } },
   branch: { select: { id: true, name: true } },
 };
+
+/**
+ * Statuses an asset can be disposed FROM. Anything already in a terminal
+ * disposal status (SOLD/DISPOSED/WRITTEN_OFF/LOST/TRANSFERRED) must not be
+ * re-disposed, or the GL cost / accumulated depreciation would be relieved
+ * twice.
+ */
+const DISPOSABLE_STATUSES: FixedAssetStatus[] = [
+  FixedAssetStatus.ACTIVE,
+  FixedAssetStatus.UNDER_MAINTENANCE,
+];
 
 @Injectable()
 export class FixedAssetsService {
@@ -215,15 +233,57 @@ export class FixedAssetsService {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
     const userId = user.id;
-    const updated = await this.prisma.fixedAsset.update({
-      where: { id },
-      data: {
-        status: dto.disposalStatus,
-        disposalDate: new Date(dto.disposalDate),
-        ...(dto.disposalValue && { disposalValue: new Prisma.Decimal(dto.disposalValue) }),
-        ...(dto.notes && { notes: dto.notes }),
-      },
-      include: ASSET_INCLUDES,
+
+    // Guard: an asset can only be disposed from a "live" state. This blocks
+    // double-disposal (which would double-relieve the GL cost / accumulated
+    // depreciation). The actual DRAFT->disposed flip is claimed atomically
+    // inside the transaction below via updateMany.
+    if (!DISPOSABLE_STATUSES.includes(existing.status)) {
+      throw new BadRequestException(
+        `Fixed asset ${existing.assetCode} is already ${existing.status} and cannot be disposed again`,
+      );
+    }
+
+    const disposalDate = new Date(dto.disposalDate);
+    const proceeds = dto.disposalValue
+      ? new Prisma.Decimal(dto.disposalValue).toDecimalPlaces(2)
+      : new Prisma.Decimal(0);
+    if (proceeds.lt(0)) {
+      throw new BadRequestException('Disposal value cannot be negative');
+    }
+
+    const { updated, journalEntry } = await this.prisma.$transaction(async (tx) => {
+      // Atomic status claim: only one transaction can move the asset out of a
+      // live status. The loser sees count === 0 and aborts before posting any
+      // GL swing, preventing a double-relief of cost / accumulated depreciation.
+      const claimed = await tx.fixedAsset.updateMany({
+        where: { id, status: { in: DISPOSABLE_STATUSES }, deletedAt: null },
+        data: {
+          status: dto.disposalStatus,
+          disposalDate,
+          disposalValue: proceeds,
+          // Book value is now fully relieved from the register on disposal.
+          currentBookValue: new Prisma.Decimal(0),
+          ...(dto.notes && { notes: dto.notes }),
+        },
+      });
+      if (claimed.count === 0) {
+        throw new BadRequestException(
+          `Fixed asset ${existing.assetCode} is no longer in a disposable state`,
+        );
+      }
+
+      const journalEntry = await this.postDisposalLedger(tx, existing, {
+        disposalDate,
+        proceeds,
+        userId: user.id,
+      });
+
+      const updated = await tx.fixedAsset.findFirst({
+        where: { id },
+        include: ASSET_INCLUDES,
+      });
+      return { updated, journalEntry };
     });
 
     await this.audit.log({
@@ -236,11 +296,167 @@ export class FixedAssetsService {
       newValue: {
         status: dto.disposalStatus,
         disposalDate: dto.disposalDate,
-        disposalValue: dto.disposalValue,
+        disposalValue: proceeds.toString(),
+        journalEntryId: journalEntry?.id ?? null,
       },
     });
 
     return updated;
+  }
+
+  /**
+   * Post the balanced disposal journal entry that relieves the GL of the asset
+   * that {@link capitalize} put there and recognizes any gain/loss:
+   *
+   *   CR  Fixed Asset               (acquisitionCost — remove the asset)
+   *   DR  Accumulated Depreciation  (posted contra — remove it)
+   *   DR  Cash on hand              (disposalValue proceeds, if any)
+   *   DR  Loss on disposal          (balancing figure when proceeds < NBV)
+   *     — or —
+   *   CR  Gain on disposal          (balancing figure when proceeds > NBV)
+   *
+   * where net book value (NBV) = acquisitionCost − accumulated depreciation as
+   * carried in the GL. Accumulated depreciation is read from the asset's
+   * DepreciationSchedule rows (the same figure the depreciation poster credited
+   * to ACCUMULATED_DEPRECIATION), so the swing exactly matches what is in the
+   * GL. Returns null (posting skipped) for assets that were never capitalized
+   * into the GL — there is no cost/contra to relieve in that case.
+   */
+  private async postDisposalLedger(
+    tx: Prisma.TransactionClient,
+    asset: { id: string; companyId: string | null; divisionId: string | null; branchId: string | null; assetCode: string; name: string; acquisitionCost: Prisma.Decimal },
+    opts: { disposalDate: Date; proceeds: Prisma.Decimal; userId: string },
+  ): Promise<{ id: string; journalNumber: string } | null> {
+    // Only company-owned, capitalized assets have a GL cost/contra to relieve.
+    if (!asset.companyId) return null;
+
+    const capitalization = await tx.journalEntry.findFirst({
+      where: {
+        companyId: asset.companyId,
+        referenceType: 'FixedAsset',
+        referenceId: asset.id,
+        deletedAt: null,
+        status: 'POSTED',
+      },
+      select: { id: true },
+    });
+    // Not capitalized into the GL — nothing to relieve. The subledger status
+    // change still stands; flagged in the audit trail via journalEntryId=null.
+    if (!capitalization) return null;
+
+    // Idempotency: never post a second disposal JE for the same asset.
+    const existingDisposal = await tx.journalEntry.findFirst({
+      where: {
+        companyId: asset.companyId,
+        referenceType: 'FixedAssetDisposal',
+        referenceId: asset.id,
+        deletedAt: null,
+        status: { in: ['DRAFT', 'POSTED'] },
+      },
+      select: { id: true, journalNumber: true },
+    });
+    if (existingDisposal) return existingDisposal;
+
+    const cost = new Prisma.Decimal(asset.acquisitionCost).toDecimalPlaces(2);
+
+    // Accumulated depreciation as carried in the GL = sum of the asset's
+    // DepreciationSchedule.accumulatedDepreciation (what the depreciation
+    // poster credited to ACCUMULATED_DEPRECIATION). Capped at cost so a
+    // mis-seeded schedule can never over-relieve the contra account.
+    const depAgg = await tx.depreciationSchedule.aggregate({
+      where: { fixedAssetId: asset.id, companyId: asset.companyId, deletedAt: null },
+      _sum: { accumulatedDepreciation: true },
+    });
+    let accumulatedDepreciation = new Prisma.Decimal(
+      depAgg._sum.accumulatedDepreciation ?? 0,
+    ).toDecimalPlaces(2);
+    if (accumulatedDepreciation.gt(cost)) accumulatedDepreciation = cost;
+    if (accumulatedDepreciation.lt(0)) accumulatedDepreciation = new Prisma.Decimal(0);
+
+    const netBookValue = cost.minus(accumulatedDepreciation); // GL carrying value
+    const proceeds = opts.proceeds;
+    // Positive => gain (proceeds exceed NBV); negative => loss.
+    const gainLoss = proceeds.minus(netBookValue);
+    const description = `Dispose fixed asset ${asset.assetCode} - ${asset.name}`;
+
+    // Resolve gain/loss defensively: these roles are not part of the shared
+    // AccountResolver role map yet, so resolve() will throw a clear BadRequest
+    // if the chart isn't configured, rather than posting to a wrong account.
+    const lines: Array<{ accountId: string; description: string; debit: Prisma.Decimal | number; credit: Prisma.Decimal | number }> = [];
+
+    const assetAccount = await this.accountResolver.resolve(asset.companyId, 'FIXED_ASSET', tx);
+    // CR Fixed Asset for full cost — reverse the capitalize debit.
+    lines.push({ accountId: assetAccount.id, description, debit: 0, credit: cost });
+
+    if (accumulatedDepreciation.gt(0)) {
+      const accumulatedAccount = await this.accountResolver.resolve(
+        asset.companyId,
+        'ACCUMULATED_DEPRECIATION',
+        tx,
+      );
+      // DR Accumulated Depreciation — remove the contra-asset balance.
+      lines.push({
+        accountId: accumulatedAccount.id,
+        description,
+        debit: accumulatedDepreciation,
+        credit: 0,
+      });
+    }
+
+    if (proceeds.gt(0)) {
+      const cashAccount = await this.accountResolver.resolve(asset.companyId, 'CASH_ON_HAND', tx);
+      // DR Cash for the disposal proceeds.
+      lines.push({
+        accountId: cashAccount.id,
+        description: `Disposal proceeds: ${asset.assetCode}`,
+        debit: proceeds,
+        credit: 0,
+      });
+    }
+
+    if (gainLoss.gt(0)) {
+      const gainAccount = await this.accountResolver.resolve(
+        asset.companyId,
+        'GAIN_ON_DISPOSAL' as AccountRole,
+        tx,
+      );
+      // CR Gain on disposal — balancing credit.
+      lines.push({
+        accountId: gainAccount.id,
+        description: `Gain on disposal: ${asset.assetCode}`,
+        debit: 0,
+        credit: gainLoss,
+      });
+    } else if (gainLoss.lt(0)) {
+      const lossAccount = await this.accountResolver.resolve(
+        asset.companyId,
+        'LOSS_ON_DISPOSAL' as AccountRole,
+        tx,
+      );
+      // DR Loss on disposal — balancing debit (absolute value).
+      lines.push({
+        accountId: lossAccount.id,
+        description: `Loss on disposal: ${asset.assetCode}`,
+        debit: gainLoss.abs(),
+        credit: 0,
+      });
+    }
+
+    return this.postingEngine.postLines(
+      {
+        companyId: asset.companyId,
+        divisionId: asset.divisionId,
+        branchId: asset.branchId,
+        transactionDate: opts.disposalDate,
+        description,
+        referenceType: 'FixedAssetDisposal',
+        referenceId: asset.id,
+        moduleName: 'fixed_assets',
+        userId: opts.userId,
+        lines,
+      },
+      tx,
+    );
   }
 
   async markCollateral(id: string, dto: MarkCollateralDto, user: AuthUser) {

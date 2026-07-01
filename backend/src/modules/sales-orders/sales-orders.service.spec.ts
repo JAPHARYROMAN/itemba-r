@@ -113,6 +113,11 @@ function makeService() {
     creditNote: {
       findFirst: jest.fn(async () => null),
     },
+    inventoryMovement: {
+      // Default: no prior movements recorded for the order under test. Cancel
+      // tests that assert stock reversal override the SALE_ISSUE lookup.
+      findMany: jest.fn(async () => []),
+    },
   } as any;
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const inventoryMovements = { createMovement: jest.fn().mockResolvedValue(undefined) } as any;
@@ -901,6 +906,110 @@ describe('SalesOrdersService cancel GL reversal (#2)', () => {
     expect((service as any).postingEngine.postLines).not.toHaveBeenCalled();
     expect(prisma.salesOrder.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'CANCELLED' }) }),
+    );
+  });
+});
+
+describe('SalesOrdersService cancel phantom-inventory guard', () => {
+  const stockLine = {
+    id: 'line-1',
+    productId: 'product-1',
+    description: 'Item',
+    quantity: 10,
+    unitId: 'unit-1',
+    unitPrice: 100,
+    discountAmount: 0,
+    taxAmount: 0,
+    lineTotal: 1000,
+    batchId: null,
+    unitCostAtSale: 6,
+    cogsAmount: 60,
+  };
+
+  function confirmedStockOrder(overrides: Record<string, unknown> = {}) {
+    return persistedOrder({
+      status: 'CONFIRMED',
+      salesType: 'CREDIT_SALE',
+      paymentMethod: 'CREDIT',
+      cashAccountId: null,
+      paidAmount: 0,
+      outstandingAmount: 1000,
+      paymentStatus: 'UNPAID',
+      receivableId: null,
+      journalEntryId: null,
+      lines: [stockLine],
+      ...overrides,
+    });
+  }
+
+  function makeStockService() {
+    const ctx = makeService();
+    // Treat product-1 as a tracked stock product for these tests.
+    ctx.prisma.product.findUnique.mockResolvedValue({
+      id: 'product-1',
+      trackInventory: true,
+      defaultPurchasePrice: 6,
+    });
+    return ctx;
+  }
+
+  it('does NOT reverse stock for a converted order that never issued stock (no SALE_ISSUE)', async () => {
+    const { service, prisma } = makeStockService();
+    prisma.salesOrder.findFirst.mockResolvedValue(confirmedStockOrder());
+    // No SALE_ISSUE (and no SALES_RETURN) movements exist for this order.
+    prisma.inventoryMovement.findMany.mockResolvedValue([]);
+
+    await service.cancel('so-1', user);
+
+    // Critically: NO phantom SALES_RETURN is posted.
+    expect((service as any).inventoryMovements.createMovement).not.toHaveBeenCalled();
+    expect(prisma.salesOrder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'CANCELLED' }) }),
+    );
+  });
+
+  it('reverses stock only up to the quantity that was actually issued', async () => {
+    const { service, prisma } = makeStockService();
+    prisma.salesOrder.findFirst.mockResolvedValue(confirmedStockOrder());
+    prisma.inventoryMovement.findMany.mockImplementation(async ({ where }: any) => {
+      if (where.movementType === 'SALE_ISSUE') {
+        return [{ productId: 'product-1', quantity: 10 }];
+      }
+      return []; // no prior SALES_RETURN
+    });
+
+    await service.cancel('so-1', user);
+
+    const createMovement = (service as any).inventoryMovements.createMovement;
+    expect(createMovement).toHaveBeenCalledTimes(1);
+    expect(createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        movementType: 'SALES_RETURN',
+        productId: 'product-1',
+        quantity: 10,
+        referenceType: 'SalesOrder',
+        referenceId: 'so-1',
+      }),
+    );
+  });
+
+  it('does not over-reverse when stock was already partially returned', async () => {
+    const { service, prisma } = makeStockService();
+    prisma.salesOrder.findFirst.mockResolvedValue(confirmedStockOrder());
+    // Issued 10, already returned 4 → only 6 remain to reverse.
+    prisma.inventoryMovement.findMany.mockImplementation(async ({ where }: any) => {
+      if (where.movementType === 'SALE_ISSUE') {
+        return [{ productId: 'product-1', quantity: 10 }];
+      }
+      return [{ productId: 'product-1', quantity: 4 }];
+    });
+
+    await service.cancel('so-1', user);
+
+    const createMovement = (service as any).inventoryMovements.createMovement;
+    expect(createMovement).toHaveBeenCalledTimes(1);
+    expect(createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({ movementType: 'SALES_RETURN', quantity: 6 }),
     );
   });
 });

@@ -193,7 +193,9 @@ export class DepreciationService {
     const entry = await this.prisma.depreciationEntry.findFirst({
       where: { id },
       include: {
-        depreciationSchedule: { select: { id: true, companyId: true, fixedAssetId: true } },
+        depreciationSchedule: {
+          select: { id: true, companyId: true, fixedAssetId: true, salvageValue: true },
+        },
         fixedAsset: { select: { name: true, assetCode: true, divisionId: true, branchId: true } },
       },
     });
@@ -273,6 +275,28 @@ export class DepreciationService {
         data: {
           accumulatedDepreciation: { increment: new Prisma.Decimal(amount) },
         },
+      });
+
+      // Keep the fixed-asset subledger in lockstep with the GL: the JE credits
+      // the ACCUMULATED_DEPRECIATION contra-account, so net book value falls by
+      // `amount` in the ledger. Mirror that on FixedAsset.currentBookValue,
+      // floored at the schedule's salvage value so book value never dips below
+      // residual. Lock the asset row FOR UPDATE first so the read-modify-write
+      // is atomic under concurrent posts (mirrors loans.recordRepayment).
+      const assetRows = await tx.$queryRaw<Array<{ currentBookValue: Prisma.Decimal }>>`
+        SELECT "currentBookValue" FROM "fixed_assets"
+        WHERE "id" = ${entry.depreciationSchedule.fixedAssetId}
+        FOR UPDATE`;
+      if (assetRows.length === 0) {
+        throw new NotFoundException('Fixed asset not found');
+      }
+      const priorBookValue = new Prisma.Decimal(assetRows[0].currentBookValue);
+      const salvageFloor = new Prisma.Decimal(entry.depreciationSchedule.salvageValue);
+      let newBookValue = priorBookValue.minus(new Prisma.Decimal(amount));
+      if (newBookValue.lt(salvageFloor)) newBookValue = salvageFloor;
+      await tx.fixedAsset.update({
+        where: { id: entry.depreciationSchedule.fixedAssetId },
+        data: { currentBookValue: newBookValue },
       });
 
       return tx.depreciationEntry.update({

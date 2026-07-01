@@ -167,7 +167,25 @@ export class BankReconciliationsService {
     const tolerance = (options.amountToleranceCents ?? 1) / 100;
 
     const unmatched = reconciliation.statementLines.filter((l) => !l.matched);
-    const cashAccountId = reconciliation.cashAccountId;
+
+    // JournalEntryLine.accountId is a FK to ChartOfAccount, NOT to CashAccount.
+    // Resolve the GL cash/bank account for this reconciliation the same way
+    // postAdjustment does (by semantic role derived from the CashAccount type),
+    // then match statement lines against journal lines posted to THAT account.
+    // Querying by reconciliation.cashAccountId (a CashAccount PK) never matches
+    // a JournalEntryLine.accountId (a ChartOfAccount PK) — they are disjoint id
+    // pools — so the previous behaviour returned zero candidates for every line.
+    const cashAccount = await this.prisma.cashAccount.findFirst({
+      where: {
+        id: reconciliation.cashAccountId,
+        companyId: reconciliation.companyId,
+        deletedAt: null,
+      },
+      select: { accountType: true },
+    });
+    const cashRole = cashAccount?.accountType === 'BANK' ? 'BANK' : 'CASH_ON_HAND';
+    const cashChart = await this.accountResolver.resolve(reconciliation.companyId, cashRole);
+    const cashChartAccountId = cashChart.id;
 
     let autoMatched = 0;
     let ambiguous = 0;
@@ -195,10 +213,10 @@ export class BankReconciliationsService {
       const start = this.addDays(line.transactionDate, -dateWindowDays);
       const end = this.addDays(line.transactionDate, dateWindowDays);
 
-      // Candidate journal-entry lines on the same cash account in window.
+      // Candidate journal-entry lines on the same GL cash/bank account in window.
       const candidates = await this.prisma.journalEntryLine.findMany({
         where: {
-          accountId: cashAccountId,
+          accountId: cashChartAccountId,
           companyId: reconciliation.companyId,
           journalEntry: {
             status: 'POSTED',
@@ -564,12 +582,26 @@ export class BankReconciliationsService {
   private async recomputeBalances(reconciliationId: string) {
     const reconciliation = await this.prisma.bankReconciliation.findUniqueOrThrow({
       where: { id: reconciliationId },
-      include: { statementLines: true, matches: true },
+      include: { statementLines: { include: { matches: true } } },
     });
-    const matchedTotal = reconciliation.matches.reduce(
-      (sum, match) => sum.plus(match.amount),
-      new Prisma.Decimal(0),
-    );
+
+    // reconciled = bookOpeningBalance + NET matched movement. `match.amount` is
+    // stored as a positive magnitude with no direction, so we must sign each
+    // matched amount by the direction of the statement line it settles: a bank
+    // CREDIT (creditAmount > 0) increases cash on the books, a bank DEBIT
+    // (debitAmount > 0) decreases it. Summing every match as positive (the old
+    // behaviour) double-counts outflows and inflates the reconciled balance by
+    // 2x the outbound movements, corrupting differenceAmount and blocking a
+    // genuinely reconciled account from being approved.
+    const matchedTotal = reconciliation.statementLines.reduce((sum, line) => {
+      const lineMatched = line.matches.reduce(
+        (acc, match) => acc.plus(match.amount),
+        new Prisma.Decimal(0),
+      );
+      const outbound = new Prisma.Decimal(line.debitAmount).gt(0);
+      return outbound ? sum.minus(lineMatched) : sum.plus(lineMatched);
+    }, new Prisma.Decimal(0));
+
     const reconciled = new Prisma.Decimal(reconciliation.bookOpeningBalance).plus(matchedTotal);
     const difference = new Prisma.Decimal(reconciliation.statementClosingBalance).minus(reconciled);
     await this.prisma.bankReconciliation.update({

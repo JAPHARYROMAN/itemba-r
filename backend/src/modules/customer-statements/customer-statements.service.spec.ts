@@ -234,6 +234,42 @@ describe('CustomerStatementsService.buildStatement', () => {
     }
   });
 
+  it('excludes WRITTEN_OFF / CANCELLED receivables from the statement debit set', async () => {
+    const { service, prisma } = makeService();
+    await service.buildStatement(SEL, USER);
+    const where = prisma.receivable.findMany.mock.calls[0][0].where;
+    // A written-off / cancelled receivable is no longer owed — its original
+    // amount must not contribute a debit and overstate the balance.
+    expect(where.status).toEqual({ notIn: ['WRITTEN_OFF', 'CANCELLED'] });
+  });
+
+  it('scopes every movement query to a single currency (default TZS)', async () => {
+    const { service, prisma } = makeService();
+    await service.buildStatement(SEL, USER);
+    for (const model of ['receivable', 'customerPayment', 'creditNote', 'refund'] as const) {
+      const where = prisma[model].findMany.mock.calls[0][0].where;
+      expect(where.currency).toBe('TZS');
+    }
+  });
+
+  it('honours an explicit currency label so it reconciles with the persisted run', async () => {
+    const { service, prisma } = makeService();
+    const s = await service.buildStatement({ ...SEL, currency: 'USD' }, USER);
+    for (const model of ['receivable', 'customerPayment', 'creditNote', 'refund'] as const) {
+      const where = prisma[model].findMany.mock.calls[0][0].where;
+      expect(where.currency).toBe('USD');
+    }
+    expect(s.currency).toBe('USD');
+  });
+
+  it('falls back to TZS for an unrecognised currency label', async () => {
+    const { service, prisma } = makeService();
+    const s = await service.buildStatement({ ...SEL, currency: 'not-a-currency' }, USER);
+    expect(s.currency).toBe('TZS');
+    const where = prisma.receivable.findMany.mock.calls[0][0].where;
+    expect(where.currency).toBe('TZS');
+  });
+
   it('enforces company access before returning data', async () => {
     const assertCanAccessCompany = jest
       .fn()
@@ -252,6 +288,170 @@ describe('CustomerStatementsService.buildStatement', () => {
     const { service } = makeService();
     await expect(
       service.buildStatement({ ...SEL, dateFrom: '2026-03-01', dateTo: '2026-02-01' }, USER),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('CustomerStatementsService.generate (persisted summary run)', () => {
+  const GEN = {
+    companyId: COMPANY,
+    customerId: CUSTOMER,
+    periodStart: '2026-02-01',
+    periodEnd: '2026-02-28',
+  };
+
+  /**
+   * Build a service whose movement fetches return the supplied fixtures and
+   * that captures the persisted CustomerStatementRun.create() payload.
+   */
+  function makeGen(fixtures: {
+    receivables?: any[];
+    payments?: any[];
+    creditNotes?: any[];
+    refunds?: any[];
+  }) {
+    const created: any[] = [];
+    const prisma: any = {
+      customer: { findFirst: jest.fn().mockResolvedValue({ id: CUSTOMER }) },
+      receivable: { findMany: jest.fn().mockResolvedValue(fixtures.receivables ?? []) },
+      customerPayment: { findMany: jest.fn().mockResolvedValue(fixtures.payments ?? []) },
+      creditNote: { findMany: jest.fn().mockResolvedValue(fixtures.creditNotes ?? []) },
+      refund: { findMany: jest.fn().mockResolvedValue(fixtures.refunds ?? []) },
+      customerStatementRun: {
+        create: jest.fn().mockImplementation((args: any) => {
+          const row = { id: 'run-1', ...args.data };
+          created.push(row);
+          return Promise.resolve(row);
+        }),
+      },
+    };
+    const audit: any = { log: jest.fn().mockResolvedValue(undefined) };
+    const companyScope: any = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) };
+    const service = new CustomerStatementsService(prisma, audit, companyScope);
+    return { service, prisma, created };
+  }
+
+  it('failure scenario: credit note + refund + payment net into the persisted balance', async () => {
+    // 1,000,000 in-period invoice; 400,000 ISSUED credit note; 600,000 payment.
+    // The credit note fully clears the invoice with the payment -> real closing 0.
+    const { service, created } = makeGen({
+      receivables: [{ amount: D(1_000_000), issueDate: new Date('2026-02-05') }],
+      payments: [{ amount: D(600_000), paymentDate: new Date('2026-02-20') }],
+      creditNotes: [{ totalAmount: D(400_000), issueDate: new Date('2026-02-18') }],
+      refunds: [],
+    });
+    const run = await service.generate(GEN as any, USER);
+
+    // Legacy math would have stored debits 1,000,000 / credits 600,000 / closing
+    // 400,000 (credit note invisible). The fix nets the credit note in.
+    expect(run.totalDebits.toFixed(2)).toBe('1000000.00');
+    expect(run.totalCredits.toFixed(2)).toBe('1000000.00'); // 600k payment + 400k CN
+    expect(run.closingBalance.toFixed(2)).toBe('0.00');
+    expect(run.openingBalance.toFixed(2)).toBe('0.00');
+    // closing == opening + debits - credits (reconciles)
+    const recomputed = run.openingBalance.plus(run.totalDebits).minus(run.totalCredits);
+    expect(recomputed.toFixed(2)).toBe(run.closingBalance.toFixed(2));
+    expect(created).toHaveLength(1);
+  });
+
+  it('includes cash refunds as debits (raise the balance)', async () => {
+    const { service } = makeGen({
+      receivables: [{ amount: D(1000), issueDate: new Date('2026-02-05') }],
+      refunds: [{ amount: D(250), refundDate: new Date('2026-02-25') }],
+    });
+    const run = await service.generate(GEN as any, USER);
+    // debits 1000 invoice + 250 refund = 1250; no credits -> closing 1250
+    expect(run.totalDebits.toFixed(2)).toBe('1250.00');
+    expect(run.totalCredits.toFixed(2)).toBe('0.00');
+    expect(run.closingBalance.toFixed(2)).toBe('1250.00');
+  });
+
+  it('computes opening balance from strictly-before-period activity', async () => {
+    const { service } = makeGen({
+      // pre-period invoice 2000 (rolls into opening), in-period invoice 500
+      receivables: [
+        { amount: D(2000), issueDate: new Date('2026-01-10') },
+        { amount: D(500), issueDate: new Date('2026-02-10') },
+      ],
+      // pre-period payment 800 (rolls into opening)
+      payments: [{ amount: D(800), paymentDate: new Date('2026-01-15') }],
+    });
+    const run = await service.generate(GEN as any, USER);
+    // opening = 2000 - 800 = 1200; in-period debits 500, credits 0
+    expect(run.openingBalance.toFixed(2)).toBe('1200.00');
+    expect(run.totalDebits.toFixed(2)).toBe('500.00');
+    expect(run.totalCredits.toFixed(2)).toBe('0.00');
+    expect(run.closingBalance.toFixed(2)).toBe('1700.00');
+  });
+
+  it('does not count payments made after periodEnd on an in-period invoice', async () => {
+    const { service, prisma } = makeGen({
+      receivables: [{ amount: D(1000), issueDate: new Date('2026-02-05') }],
+      // payment dated AFTER periodEnd -> must be excluded from the query window
+      payments: [{ amount: D(1000), paymentDate: new Date('2026-03-10') }],
+    });
+    // The service filters payments by paymentDate <= periodEnd; simulate the DB
+    // returning only in-window rows (none) so credits stay 0.
+    prisma.customerPayment.findMany.mockResolvedValue([]);
+    const run = await service.generate(GEN as any, USER);
+    expect(run.totalCredits.toFixed(2)).toBe('0.00');
+    expect(run.closingBalance.toFixed(2)).toBe('1000.00');
+    // Assert the query really bounds paymentDate to periodEnd (inclusive EOD).
+    const where = prisma.customerPayment.findMany.mock.calls[0][0].where;
+    expect(where.status).toBe('COMPLETED');
+    expect(where.paymentDate.lte).toBeInstanceOf(Date);
+    expect(where.currency).toBe('TZS');
+  });
+
+  it('excludes WRITTEN_OFF / CANCELLED receivables from the persisted debit set', async () => {
+    const { service, prisma } = makeGen({});
+    await service.generate(GEN as any, USER);
+    const where = prisma.receivable.findMany.mock.calls[0][0].where;
+    // Must match the detail (buildStatement) path so the saved run reconciles.
+    expect(where.status).toEqual({ notIn: ['WRITTEN_OFF', 'CANCELLED'] });
+  });
+
+  it('scopes every source to companyId + currency (single currency, no cross-currency sum)', async () => {
+    const { service, prisma } = makeGen({});
+    await service.generate({ ...GEN, currency: 'USD' } as any, USER);
+    for (const model of ['receivable', 'customerPayment', 'creditNote', 'refund'] as const) {
+      const where = prisma[model].findMany.mock.calls[0][0].where;
+      expect(where.companyId).toBe(COMPANY);
+      expect(where.customerId).toBe(CUSTOMER);
+      expect(where.currency).toBe('USD');
+    }
+  });
+
+  it('persists openingBalance and currency on the run row', async () => {
+    const { service, prisma } = makeGen({
+      receivables: [{ amount: D(1000), issueDate: new Date('2026-02-05') }],
+    });
+    await service.generate(GEN as any, USER);
+    const data = prisma.customerStatementRun.create.mock.calls[0][0].data;
+    expect(data.currency).toBe('TZS');
+    expect(data.openingBalance.toFixed(2)).toBe('0.00');
+    expect(data.closingBalance.toFixed(2)).toBe('1000.00');
+  });
+
+  it('supports an ALL-customers run (no customerId scope on the fetch)', async () => {
+    const { service, prisma } = makeGen({
+      receivables: [{ amount: D(3000), issueDate: new Date('2026-02-05') }],
+    });
+    const run = await service.generate(
+      { companyId: COMPANY, periodStart: '2026-02-01', periodEnd: '2026-02-28' } as any,
+      USER,
+    );
+    expect(run.customerId).toBe('ALL');
+    const where = prisma.receivable.findMany.mock.calls[0][0].where;
+    expect(where.customerId).toBeUndefined();
+    expect(prisma.customer.findFirst).not.toHaveBeenCalled();
+    expect(run.closingBalance.toFixed(2)).toBe('3000.00');
+  });
+
+  it('rejects periodStart after periodEnd', async () => {
+    const { service } = makeGen({});
+    await expect(
+      service.generate({ ...GEN, periodStart: '2026-03-01', periodEnd: '2026-02-01' } as any, USER),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

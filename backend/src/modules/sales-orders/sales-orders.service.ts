@@ -2533,7 +2533,54 @@ export class SalesOrdersService {
         // the original entry, inside this transaction, so AR/Revenue/VAT/COGS
         // unwind together with the receivable and stock. Without this, every
         // cancelled confirmed order permanently drifts the trial balance.
+        // (reverseSalesOrderJournal no-ops when no confirmation JE exists, e.g.
+        // quotation/proforma-converted orders, so the GL stays untouched there.)
         await this.reverseSalesOrderJournal(tx, existing as any, userId);
+
+        // Phantom-inventory guard: only reverse stock that was ACTUALLY issued.
+        // confirm() is the sole path that posts SALE_ISSUE movements; but
+        // quotation/proforma conversion creates a CONFIRMED order WITHOUT ever
+        // issuing stock (no SALE_ISSUE). Blindly posting a SALES_RETURN for every
+        // stock line (an INBOUND movement) would inject phantom on-hand quantity
+        // that was never removed, with no offsetting GL entry. Load the real
+        // SALE_ISSUE movements for this order and reverse each product only up to
+        // the net quantity that was issued, so a never-issued order reverses
+        // nothing.
+        const issueMovements = await tx.inventoryMovement.findMany({
+          where: {
+            companyId: existing.companyId,
+            referenceType: 'SalesOrder',
+            referenceId: id,
+            movementType: 'SALE_ISSUE',
+          },
+          select: { productId: true, quantity: true },
+        });
+        // Sum issued quantity per product (a product may span multiple lines).
+        const issuedQtyByProduct = new Map<string, number>();
+        for (const mv of issueMovements) {
+          issuedQtyByProduct.set(
+            mv.productId,
+            (issuedQtyByProduct.get(mv.productId) ?? 0) + Number(mv.quantity),
+          );
+        }
+        // Guard against already-recorded SALES_RETURN reversals (idempotency /
+        // partial prior reversal): subtract any stock already returned for this
+        // order so a re-run never over-reverses.
+        const returnMovements = await tx.inventoryMovement.findMany({
+          where: {
+            companyId: existing.companyId,
+            referenceType: 'SalesOrder',
+            referenceId: id,
+            movementType: 'SALES_RETURN',
+          },
+          select: { productId: true, quantity: true },
+        });
+        for (const mv of returnMovements) {
+          issuedQtyByProduct.set(
+            mv.productId,
+            (issuedQtyByProduct.get(mv.productId) ?? 0) - Number(mv.quantity),
+          );
+        }
 
         for (const line of existing.lines as any[]) {
           const product = await tx.product.findUnique({ where: { id: line.productId } });
@@ -2544,11 +2591,28 @@ export class SalesOrdersService {
             );
           }
 
+          // Reverse at most the quantity that remains outstanding-issued for this
+          // product. If nothing was issued (converted order) this is <= 0 and we
+          // skip the line, so no phantom stock is created.
+          const remainingIssued = issuedQtyByProduct.get(line.productId) ?? 0;
+          if (remainingIssued <= 0) continue;
+          const reverseQty = Math.min(Number(line.quantity), remainingIssued);
+          if (reverseQty <= 0) continue;
+          // Consume the reversed amount so multiple lines of the same product
+          // don't each reverse the full issued quantity.
+          issuedQtyByProduct.set(line.productId, remainingIssued - reverseQty);
+
           try {
-            const quantity = Number(line.quantity);
+            const quantity = reverseQty;
+            const lineQuantity = Number(line.quantity);
             const frozenUnitCost = Number(line.unitCostAtSale ?? 0);
+            // Per-unit cost is derived from the FULL line's cogsAmount/quantity,
+            // not the (possibly partial) reversed quantity, so a partial reversal
+            // still values each returned unit at its true unit cost.
             const cogsUnitCost =
-              quantity > 0 && line.cogsAmount != null ? Number(line.cogsAmount) / quantity : 0;
+              lineQuantity > 0 && line.cogsAmount != null
+                ? Number(line.cogsAmount) / lineQuantity
+                : 0;
             const unitCost =
               frozenUnitCost > 0
                 ? frozenUnitCost

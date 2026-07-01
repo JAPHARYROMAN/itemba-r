@@ -4287,6 +4287,12 @@ const DEFAULT_COA: AccountSeed[] = [
     type: AccountType.LIABILITY,
     subType: 'Current Liability',
   },
+  {
+    code: '2280',
+    name: 'Other Payroll Deductions Payable',
+    type: AccountType.LIABILITY,
+    subType: 'Current Liability',
+  },
   // Equity
   { code: '3000', name: 'Owner Capital', type: AccountType.EQUITY },
   { code: '3100', name: 'Retained Earnings', type: AccountType.EQUITY },

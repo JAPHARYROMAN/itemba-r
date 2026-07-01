@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { SupplierInvoicesService } from './supplier-invoices.service';
 
 function approvableInvoice(overrides: Record<string, unknown> = {}) {
@@ -378,5 +379,118 @@ describe('SupplierInvoicesService amountVarianceAgainstPurchaseOrder (#16)', () 
     const variance = (service as any).amountVarianceAgainstPurchaseOrder(invoice, [poLine()]);
     // No matched line => whole-invoice fallback: |1500 - 1000| = 500.
     expect(Number(variance)).toBe(500);
+  });
+});
+
+describe('SupplierInvoicesService postSupplierInvoicePayable inventory-receipt guard', () => {
+  function makePostService(prismaOverrides: Record<string, any> = {}) {
+    const prisma: any = {
+      product: {
+        findMany: jest.fn(async () => [{ id: 'product-1', trackInventory: true }]),
+      },
+      goodsReceivedNote: { findFirst: jest.fn(async () => null) },
+      purchaseOrder: { findFirst: jest.fn(async () => null) },
+      ...prismaOverrides,
+    };
+    const accountResolver = {
+      resolve: jest.fn(async (_companyId: string, role: string) => ({ id: `acc-${role}` })),
+    } as any;
+    const postingEngine = {
+      postLines: jest.fn(async () => ({ id: 'je-1', journalNumber: 'JE-1' })),
+    } as any;
+    const service = new SupplierInvoicesService(
+      prisma,
+      { log: jest.fn() } as any,
+      { assertCanAccessCompany: jest.fn() } as any,
+      accountResolver,
+      postingEngine,
+      { next: jest.fn() } as any,
+    );
+    return { service, prisma, accountResolver, postingEngine };
+  }
+
+  function stockInvoice(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'si-1',
+      companyId: 'company-1',
+      supplierInvoiceNumber: 'SI-1',
+      invoiceDate: new Date('2026-05-30T00:00:00.000Z'),
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      purchaseOrderId: null,
+      goodsReceivedNoteId: null,
+      lines: [{ id: 'line-1', productId: 'product-1', lineTotal: 10000 }],
+      ...overrides,
+    };
+  }
+
+  const payable = { id: 'pay-1', amount: new Prisma.Decimal(10000) };
+
+  it('rejects an inventory-line invoice with no posted goods receipt (GL would overstate subledger)', async () => {
+    const { service, postingEngine } = makePostService();
+    const tx: any = {
+      product: { findMany: jest.fn(async () => [{ id: 'product-1', trackInventory: true }]) },
+      goodsReceivedNote: { findFirst: jest.fn(async () => null) },
+      purchaseOrder: { findFirst: jest.fn(async () => null) },
+    };
+    await expect(
+      (service as any).postSupplierInvoicePayable(stockInvoice(), payable, 'user-1', tx),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+  });
+
+  it('posts DR INVENTORY_ASSET / CR AP_CONTROL when a POSTED GRN backs the invoice', async () => {
+    const { service, postingEngine } = makePostService();
+    const tx: any = {
+      product: { findMany: jest.fn(async () => [{ id: 'product-1', trackInventory: true }]) },
+      goodsReceivedNote: { findFirst: jest.fn(async () => ({ id: 'grn-1' })) },
+      purchaseOrder: { findFirst: jest.fn(async () => null) },
+    };
+    await (service as any).postSupplierInvoicePayable(
+      stockInvoice({ goodsReceivedNoteId: 'grn-1' }),
+      payable,
+      'user-1',
+      tx,
+    );
+    expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
+    const lines = postingEngine.postLines.mock.calls[0][0].lines;
+    const inventoryLine = lines.find((l: any) => l.accountId === 'acc-INVENTORY_ASSET');
+    const apLine = lines.find((l: any) => l.accountId === 'acc-AP_CONTROL');
+    expect(Number(inventoryLine.debit)).toBe(10000);
+    expect(Number(apLine.credit)).toBe(10000);
+    const debits = lines.reduce((s: number, l: any) => s + Number(l.debit ?? 0), 0);
+    const credits = lines.reduce((s: number, l: any) => s + Number(l.credit ?? 0), 0);
+    expect(debits).toBe(credits); // balanced JE
+  });
+
+  it('posts a received PO as a valid receipt (no GRN linked)', async () => {
+    const { service, postingEngine } = makePostService();
+    const tx: any = {
+      product: { findMany: jest.fn(async () => [{ id: 'product-1', trackInventory: true }]) },
+      goodsReceivedNote: { findFirst: jest.fn(async () => null) },
+      purchaseOrder: { findFirst: jest.fn(async () => ({ id: 'po-1' })) },
+    };
+    await (service as any).postSupplierInvoicePayable(
+      stockInvoice({ purchaseOrderId: 'po-1' }),
+      payable,
+      'user-1',
+      tx,
+    );
+    expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not require a receipt for a non-stock (expense-only) invoice', async () => {
+    const { service, postingEngine } = makePostService();
+    const tx: any = {
+      // product tracks no inventory -> line is routed to GENERAL_EXPENSE, no guard
+      product: { findMany: jest.fn(async () => [{ id: 'product-1', trackInventory: false }]) },
+      goodsReceivedNote: { findFirst: jest.fn(async () => null) },
+      purchaseOrder: { findFirst: jest.fn(async () => null) },
+    };
+    await (service as any).postSupplierInvoicePayable(stockInvoice(), payable, 'user-1', tx);
+    expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
+    const lines = postingEngine.postLines.mock.calls[0][0].lines;
+    expect(lines.some((l: any) => l.accountId === 'acc-GENERAL_EXPENSE')).toBe(true);
+    expect(lines.some((l: any) => l.accountId === 'acc-INVENTORY_ASSET')).toBe(false);
   });
 });

@@ -22,7 +22,10 @@ function lockedPayable(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeService(lockedRow: Record<string, unknown>, opts: { originalJe?: any } = {}) {
+function makeService(
+  lockedRow: Record<string, unknown>,
+  opts: { originalJe?: any; resolve?: jest.Mock } = {},
+) {
   const tx = {
     $queryRaw: jest.fn().mockResolvedValue([lockedRow]),
     payable: {
@@ -42,11 +45,16 @@ function makeService(lockedRow: Record<string, unknown>, opts: { originalJe?: an
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
   } as any;
   const postingEngine = { postLines: jest.fn().mockResolvedValue({ id: 'je-rev' }) } as any;
+  // Resolve accounts by semantic role so writeOff posts DR AP_CONTROL /
+  // CR LIABILITY_WRITEOFF_INCOME. Default returns a role-named stub account.
+  const resolve =
+    opts.resolve ??
+    jest.fn(async (_companyId: string, role: string) => ({ id: `${role}-acc` }) as any);
   const service = new PayablesService(
     prisma,
     { log: jest.fn() } as any,
     companyScope,
-    { resolve: jest.fn() } as any,
+    { resolve } as any,
     postingEngine,
     { next: jest.fn() } as any,
   );
@@ -54,7 +62,7 @@ function makeService(lockedRow: Record<string, unknown>, opts: { originalJe?: an
   jest
     .spyOn(service as any, 'findOne')
     .mockResolvedValue({ ...lockedRow, status: lockedRow.status });
-  return { service, tx, postingEngine, prisma };
+  return { service, tx, postingEngine, prisma, resolve };
 }
 
 describe('PayablesService.recordPayment status guard', () => {
@@ -71,21 +79,31 @@ describe('PayablesService.recordPayment status guard', () => {
   });
 });
 
-describe('PayablesService.writeOff reversing journal (#9)', () => {
-  const originalTwoLine = {
-    totalDebit: '500',
-    lines: [
-      { accountId: 'expense-acc', debit: '500', credit: '0', description: 'Payable expense' },
-      { accountId: 'ap-acc', debit: '0', credit: '500', description: 'Accounts payable' },
-    ],
-  };
+describe('PayablesService.writeOff forgiveness journal (#H write-off, ITMB)', () => {
+  // Role-aware resolver: writeOff must post DR AP_CONTROL / CR
+  // LIABILITY_WRITEOFF_INCOME. It must NEVER credit INVENTORY_ASSET (the bug:
+  // reversing an SI-backed payable's DR INVENTORY_ASSET / CR AP_CONTROL wiped
+  // inventory still on hand).
+  function roleResolver() {
+    return jest.fn(async (_companyId: string, role: string) => {
+      const ids: Record<string, string> = {
+        AP_CONTROL: 'ap-acc',
+        LIABILITY_WRITEOFF_INCOME: 'writeoff-income-acc',
+        INVENTORY_ASSET: 'inventory-acc',
+        GENERAL_EXPENSE: 'expense-acc',
+      };
+      const id = ids[role];
+      if (!id) throw new BadRequestException(`Cannot resolve role "${role}"`);
+      return { id } as any;
+    });
+  }
 
-  it('posts a balanced reversing JE (swapped debit/credit) and zeroes outstanding', async () => {
+  it('posts DR AP_CONTROL / CR LIABILITY_WRITEOFF_INCOME (never touches inventory) and zeroes outstanding', async () => {
     const { service, tx, postingEngine } = makeService(lockedPayable(), {
-      originalJe: originalTwoLine,
+      resolve: roleResolver(),
     });
 
-    await service.writeOff('pay-1', { reason: 'uncollectible' } as any, user);
+    await service.writeOff('pay-1', { reason: 'supplier dispute' } as any, user);
 
     // Outstanding is zeroed and status flipped so it can never be paid again.
     expect(tx.payable.update).toHaveBeenCalledWith({
@@ -93,33 +111,39 @@ describe('PayablesService.writeOff reversing journal (#9)', () => {
       data: expect.objectContaining({ status: 'WRITTEN_OFF', outstandingAmount: 0 }),
     });
 
-    // A reversing journal was posted.
+    // A single forgiveness journal was posted.
     expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
     const [postingInput] = postingEngine.postLines.mock.calls[0];
     const lines = postingInput.lines;
 
-    // Debit/credit are swapped relative to the original: AP is now debited,
-    // expense credited.
+    // DR AP_CONTROL for the outstanding amount.
     const apLine = lines.find((l: any) => l.accountId === 'ap-acc');
-    const expenseLine = lines.find((l: any) => l.accountId === 'expense-acc');
     expect(Number(apLine.debit)).toBe(500);
     expect(Number(apLine.credit)).toBe(0);
-    expect(Number(expenseLine.credit)).toBe(500);
-    expect(Number(expenseLine.debit)).toBe(0);
 
-    // The entry balances.
+    // CR the liabilities-written-off / other-income account.
+    const incomeLine = lines.find((l: any) => l.accountId === 'writeoff-income-acc');
+    expect(Number(incomeLine.credit)).toBe(500);
+    expect(Number(incomeLine.debit)).toBe(0);
+
+    // The bug regression guard: NO inventory (or expense) line is emitted, so
+    // stock still on hand is left in the GL.
+    expect(lines.some((l: any) => l.accountId === 'inventory-acc')).toBe(false);
+    expect(lines.some((l: any) => l.accountId === 'expense-acc')).toBe(false);
+
+    // The entry balances at the outstanding amount.
     const totalDebit = lines.reduce((s: number, l: any) => s + Number(l.debit), 0);
     const totalCredit = lines.reduce((s: number, l: any) => s + Number(l.credit), 0);
     expect(totalDebit).toBe(totalCredit);
     expect(totalDebit).toBe(500);
   });
 
-  it('reverses only the unpaid remainder when the payable is partially paid', async () => {
-    // Original was 500; 300 already paid, 200 outstanding. Only 200 of AP should
-    // be derecognised so the prior payment is not double-relieved.
+  it('writes off only the unpaid remainder when the payable is partially paid', async () => {
+    // Original was 500; 300 already paid, 200 outstanding. Only the 200 unpaid
+    // remainder is forgiven so the prior payment is not double-relieved.
     const { service, postingEngine } = makeService(
       lockedPayable({ status: 'PARTIALLY_PAID', outstandingAmount: '200', paidAmount: '300' }),
-      { originalJe: originalTwoLine },
+      { resolve: roleResolver() },
     );
 
     await service.writeOff('pay-1', { reason: 'settle remainder' } as any, user);
@@ -127,7 +151,9 @@ describe('PayablesService.writeOff reversing journal (#9)', () => {
     const [postingInput] = postingEngine.postLines.mock.calls[0];
     const lines = postingInput.lines;
     const apLine = lines.find((l: any) => l.accountId === 'ap-acc');
+    const incomeLine = lines.find((l: any) => l.accountId === 'writeoff-income-acc');
     expect(Number(apLine.debit)).toBe(200);
+    expect(Number(incomeLine.credit)).toBe(200);
     const totalDebit = lines.reduce((s: number, l: any) => s + Number(l.debit), 0);
     const totalCredit = lines.reduce((s: number, l: any) => s + Number(l.credit), 0);
     expect(totalDebit).toBe(totalCredit);
@@ -136,7 +162,7 @@ describe('PayablesService.writeOff reversing journal (#9)', () => {
 
   it('posts no journal when there is nothing outstanding', async () => {
     const { service, postingEngine, tx } = makeService(lockedPayable({ outstandingAmount: '0' }), {
-      originalJe: originalTwoLine,
+      resolve: roleResolver(),
     });
 
     await service.writeOff('pay-1', { reason: 'already settled' } as any, user);
@@ -146,11 +172,29 @@ describe('PayablesService.writeOff reversing journal (#9)', () => {
   });
 
   it('rejects writing off an already-PAID payable', async () => {
-    const { service, postingEngine, tx } = makeService(lockedPayable({ status: 'PAID' }));
+    const { service, postingEngine, tx } = makeService(lockedPayable({ status: 'PAID' }), {
+      resolve: roleResolver(),
+    });
 
     await expect(service.writeOff('pay-1', { reason: 'x' } as any, user)).rejects.toBeInstanceOf(
       BadRequestException,
     );
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.payable.update).not.toHaveBeenCalled();
+  });
+
+  it('fails loudly (no journal, no status change) when the write-off income account is unconfigured', async () => {
+    // Resolver has AP_CONTROL but NOT LIABILITY_WRITEOFF_INCOME: rather than
+    // posting the forgiveness gain to a wrong/zero account, writeOff throws.
+    const resolve = jest.fn(async (_companyId: string, role: string) => {
+      if (role === 'AP_CONTROL') return { id: 'ap-acc' } as any;
+      throw new BadRequestException(`Cannot resolve role "${role}"`);
+    });
+    const { service, postingEngine, tx } = makeService(lockedPayable(), { resolve });
+
+    await expect(
+      service.writeOff('pay-1', { reason: 'dispute' } as any, user),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(postingEngine.postLines).not.toHaveBeenCalled();
     expect(tx.payable.update).not.toHaveBeenCalled();
   });

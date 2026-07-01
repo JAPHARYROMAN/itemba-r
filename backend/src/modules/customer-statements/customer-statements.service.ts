@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { AccessLevel, Prisma } from '@prisma/client';
+import { AccessLevel, CurrencyCode, Prisma, ReceivableStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -20,6 +20,16 @@ import {
 
 const ZERO = new Prisma.Decimal(0);
 const DAY_MS = 1000 * 60 * 60 * 24;
+
+// Receivable statuses that must NOT contribute a debit to the statement.
+// A WRITTEN_OFF / CANCELLED receivable is no longer owed by the customer — its
+// original `amount` would otherwise overstate the AR balance. Exclude them from
+// the statement debit set in both the persisted (netMovements) and detail
+// (buildStatement) paths so the two reconcile.
+const EXCLUDED_RECEIVABLE_STATUSES: ReceivableStatus[] = [
+  ReceivableStatus.WRITTEN_OFF,
+  ReceivableStatus.CANCELLED,
+];
 
 interface StatementSelection {
   companyId: string;
@@ -93,7 +103,7 @@ export class CustomerStatementsService {
 
   async generate(dto: GenerateCustomerStatementDto, user: AuthUser) {
     const periodStart = new Date(dto.periodStart);
-    const periodEnd = new Date(dto.periodEnd);
+    const periodEnd = dateRangeEnd(dto.periodEnd);
     if (periodStart > periodEnd) {
       throw new BadRequestException('Statement start date cannot be after end date');
     }
@@ -110,20 +120,24 @@ export class CustomerStatementsService {
       }
     }
 
-    const receivableWhere: Prisma.ReceivableWhereInput = {
-      companyId: dto.companyId,
-      deletedAt: null,
-      issueDate: { gte: periodStart, lte: periodEnd },
-    };
-    if (dto.customerId) receivableWhere.customerId = dto.customerId;
+    // A statement must never sum across currencies. Scope every source to a
+    // single currency (base TZS by default) and persist it on the run.
+    const currency: CurrencyCode = dto.currency ?? CurrencyCode.TZS;
 
-    const summary = await this.prisma.receivable.aggregate({
-      where: receivableWhere,
-      _sum: { amount: true, paidAmount: true },
-    });
-    const totalDebits = summary._sum.amount ?? new Prisma.Decimal(0);
-    const totalCredits = summary._sum.paidAmount ?? new Prisma.Decimal(0);
-    const closingBalance = totalDebits.minus(totalCredits);
+    // Net the SAME movement set the detail path (buildStatement) uses —
+    // receivables (debit), COMPLETED customer payments (credit), ISSUED credit
+    // notes (credit) and PAID cash refunds (debit) — with a real opening
+    // balance from strictly-before-period activity. This replaces the legacy
+    // receivable.paidAmount aggregate, which ignored credit notes/refunds and
+    // counted cumulative (not period-scoped) payments.
+    const { openingBalance, totalDebits, totalCredits, closingBalance } =
+      await this.netMovements({
+        companyId: dto.companyId,
+        customerId: dto.customerId,
+        currency,
+        periodStart,
+        periodEnd,
+      });
 
     const run = await this.prisma.customerStatementRun.create({
       data: {
@@ -132,9 +146,11 @@ export class CustomerStatementsService {
         customerId: dto.customerId ?? 'ALL',
         periodStart,
         periodEnd,
+        openingBalance,
         totalDebits,
         totalCredits,
         closingBalance,
+        currency,
         generatedById: user.id,
         status: 'GENERATED',
       },
@@ -149,6 +165,90 @@ export class CustomerStatementsService {
       newValue: run as any,
     });
     return run;
+  }
+
+  /**
+   * Compute the reconciling summary totals for the persisted statement run.
+   *
+   * Nets the same movement set as {@link buildStatement} — receivables (debit,
+   * excluding WRITTEN_OFF / CANCELLED which are no longer owed), COMPLETED
+   * customer payments (credit), ISSUED credit notes (credit), and PAID cash
+   * refunds (debit) — so the saved CustomerStatementRun ties out to the detail
+   * statement and the customer's real balance:
+   *   closingBalance === openingBalance + totalDebits - totalCredits
+   *
+   * `customerId` is optional (a whole-company "ALL" run nets across every
+   * customer). Every source is scoped to `companyId` and a single `currency`
+   * (statements never sum across currencies). Opening balance is the net of all
+   * activity strictly BEFORE `periodStart`; debits/credits are the in-period
+   * movements only, so post-period payments never leak in.
+   */
+  private async netMovements(args: {
+    companyId: string;
+    customerId?: string;
+    currency: CurrencyCode;
+    periodStart: Date;
+    periodEnd: Date;
+  }): Promise<{
+    openingBalance: Prisma.Decimal;
+    totalDebits: Prisma.Decimal;
+    totalCredits: Prisma.Decimal;
+    closingBalance: Prisma.Decimal;
+  }> {
+    const { companyId, customerId, currency, periodStart, periodEnd } = args;
+    const scope: { companyId: string; currency: CurrencyCode; customerId?: string } = {
+      companyId,
+      currency,
+    };
+    if (customerId) scope.customerId = customerId;
+
+    const [receivables, payments, creditNotes, refunds] = await Promise.all([
+      this.prisma.receivable.findMany({
+        where: {
+          ...scope,
+          deletedAt: null,
+          status: { notIn: EXCLUDED_RECEIVABLE_STATUSES },
+          issueDate: { lte: periodEnd },
+        },
+        select: { amount: true, issueDate: true },
+      }),
+      this.prisma.customerPayment.findMany({
+        where: { ...scope, deletedAt: null, status: 'COMPLETED', paymentDate: { lte: periodEnd } },
+        select: { amount: true, paymentDate: true },
+      }),
+      this.prisma.creditNote.findMany({
+        where: { ...scope, deletedAt: null, status: 'ISSUED', issueDate: { lte: periodEnd } },
+        select: { totalAmount: true, issueDate: true },
+      }),
+      this.prisma.refund.findMany({
+        where: { ...scope, deletedAt: null, status: 'PAID', refundDate: { lte: periodEnd } },
+        select: { amount: true, refundDate: true },
+      }),
+    ]);
+
+    // Each movement contributes a signed delta (debit raises, credit lowers the
+    // AR balance). Pre-period deltas roll into the opening balance; in-period
+    // deltas split into the debit / credit period totals.
+    const deltas: Array<{ date: Date; debit: Prisma.Decimal; credit: Prisma.Decimal }> = [
+      ...receivables.map((r) => ({ date: r.issueDate, debit: r.amount, credit: ZERO })),
+      ...payments.map((p) => ({ date: p.paymentDate, debit: ZERO, credit: p.amount })),
+      ...creditNotes.map((c) => ({ date: c.issueDate, debit: ZERO, credit: c.totalAmount })),
+      ...refunds.map((rf) => ({ date: rf.refundDate, debit: rf.amount, credit: ZERO })),
+    ];
+
+    let openingBalance = ZERO;
+    let totalDebits = ZERO;
+    let totalCredits = ZERO;
+    for (const d of deltas) {
+      if (d.date < periodStart) {
+        openingBalance = openingBalance.plus(d.debit).minus(d.credit);
+      } else {
+        totalDebits = totalDebits.plus(d.debit);
+        totalCredits = totalCredits.plus(d.credit);
+      }
+    }
+    const closingBalance = openingBalance.plus(totalDebits).minus(totalCredits);
+    return { openingBalance, totalDebits, totalCredits, closingBalance };
   }
 
   // ─── Professional statement of account (detail) ──────────────────────────────
@@ -174,8 +274,14 @@ export class CustomerStatementsService {
    *   openingBalance + totalDebits - totalCredits === closingBalance.
    *
    * Sign convention (customer AR ledger — what the customer owes us):
-   *   DEBIT  (raises balance): invoices/receivables issued, cash refunds paid out
+   *   DEBIT  (raises balance): invoices/receivables issued (excluding
+   *          WRITTEN_OFF / CANCELLED, which are no longer owed), cash refunds
+   *          paid out
    *   CREDIT (lowers balance): customer payments received, credit notes issued
+   *
+   * Scoped to a single currency (base TZS by default) exactly like the persisted
+   * generate()/netMovements path so the detail statement reconciles with the
+   * saved CustomerStatementRun.
    */
   async buildStatement(sel: StatementSelection, user: AuthUser): Promise<CustomerStatement> {
     await this.companyScope.assertCanAccessCompany(user, sel.companyId, AccessLevel.READ);
@@ -199,12 +305,21 @@ export class CustomerStatementsService {
 
     // Pull every ledger-affecting movement up to and including `to`, then split
     // into pre-period (opening) vs in-period. One fetch per source keeps the
-    // company+customer scope explicit on each query.
-    const base = { companyId: sel.companyId, customerId: sel.customerId };
+    // company+customer scope explicit on each query. A statement must never sum
+    // across currencies, so — exactly like the persisted generate()/netMovements
+    // path — scope every source to a single currency (base TZS by default) so
+    // the detail statement reconciles with the saved run.
+    const currency: CurrencyCode = this.resolveCurrency(sel.currency);
+    const base = { companyId: sel.companyId, customerId: sel.customerId, currency };
 
     const [receivables, payments, creditNotes, refunds] = await Promise.all([
       this.prisma.receivable.findMany({
-        where: { ...base, deletedAt: null, issueDate: { lte: to } },
+        where: {
+          ...base,
+          deletedAt: null,
+          status: { notIn: EXCLUDED_RECEIVABLE_STATUSES },
+          issueDate: { lte: to },
+        },
         select: {
           id: true,
           receivableNumber: true,
@@ -386,7 +501,7 @@ export class CustomerStatementsService {
       customerId: sel.customerId,
       customerName: customer.name,
       customerEmail: customer.email,
-      currency: sel.currency ?? 'TZS',
+      currency,
       dateFrom: from,
       dateTo: to,
       openingBalance,
@@ -880,6 +995,19 @@ export class CustomerStatementsService {
   }
 
   // ─── Small formatters ────────────────────────────────────────────────────────
+
+  /**
+   * Coerce an optional currency label into a concrete {@link CurrencyCode} for
+   * single-currency scoping. Mirrors the persisted generate() path (base TZS by
+   * default). An unrecognised label falls back to TZS rather than throwing so a
+   * stale presentation label never breaks the read-only detail endpoint.
+   */
+  private resolveCurrency(currency?: string): CurrencyCode {
+    if (currency && (Object.values(CurrencyCode) as string[]).includes(currency)) {
+      return currency as CurrencyCode;
+    }
+    return CurrencyCode.TZS;
+  }
 
   private money(d: Prisma.Decimal): string {
     return d.toFixed(2);

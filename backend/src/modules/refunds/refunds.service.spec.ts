@@ -103,7 +103,10 @@ function makeService(opts: {
     refund: refundDelegate,
     creditNote: creditNoteDelegate,
     journalEntry: journalEntryDelegate,
-    cashAccount: { findFirst: jest.fn(async () => cashAccount) },
+    cashAccount: {
+      findFirst: jest.fn(async () => cashAccount),
+      update: jest.fn(async ({ data }: any) => ({ ...(cashAccount ?? {}), ...data })),
+    },
     customer: { findFirst: jest.fn(async () => ({ companyId: 'company-1' })) },
     $executeRaw: jest.fn(async () => 1),
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
@@ -412,6 +415,28 @@ describe('RefundsService.pay — balanced JE & DRAFT-only guard', () => {
       }),
     );
   });
+
+  it('decrements CashAccount.currentBalance by the refund amount (subledger consistent with GL cash CR)', async () => {
+    const { service, prisma } = makeService();
+    await service.pay('refund-1', {} as any, user);
+    expect(prisma.cashAccount.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'cash-1' },
+        data: { currentBalance: { decrement: new Prisma.Decimal(100) } },
+      }),
+    );
+  });
+
+  it('does NOT touch CashAccount.currentBalance when the pay claim is lost (never posts)', async () => {
+    const { service, prisma } = makeService({
+      refund: {
+        updateMany: jest.fn(async () => ({ count: 0 })),
+        findFirst: jest.fn(async () => draftRefund({ status: RefundStatus.PAID })),
+      },
+    });
+    await expect(service.pay('refund-1', {} as any, user)).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.cashAccount.update).not.toHaveBeenCalled();
+  });
 });
 
 describe('RefundsService.void — reversing JE', () => {
@@ -437,6 +462,14 @@ describe('RefundsService.void — reversing JE', () => {
     // Original JE claimed REVERSED before the reversal is posted.
     expect(prisma.journalEntry.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'REVERSED' }) }),
+    );
+    // Reversal re-debits GL cash (money back in), so the subledger cache is
+    // incremented back by the same amount.
+    expect(prisma.cashAccount.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'cash-1' },
+        data: { currentBalance: { increment: new Prisma.Decimal(100) } },
+      }),
     );
   });
 
@@ -466,5 +499,20 @@ describe('RefundsService.void — reversing JE', () => {
     const result = await service.void('refund-1', { reason: 'x' } as any, user);
     expect(postLines).not.toHaveBeenCalled();
     expect(result.status).toBe(RefundStatus.VOID);
+  });
+
+  it('does NOT increment CashAccount.currentBalance when no reversal JE is posted', async () => {
+    const { service, prisma } = makeService({
+      refund: {
+        updateMany: jest.fn(async () => ({ count: 1 })),
+        findFirst: jest.fn(async () => draftRefund({ status: RefundStatus.PAID, journalEntryId: null })),
+      },
+      journalEntry: { findFirst: jest.fn(async () => null), updateMany: jest.fn(async () => ({ count: 0 })) },
+    });
+
+    await service.void('refund-1', { reason: 'x' } as any, user);
+    // No reversal posted -> the pay() decrement was never unwound, so we must
+    // not increment (avoids inflating cash on a void with no cash swing).
+    expect(prisma.cashAccount.update).not.toHaveBeenCalled();
   });
 });

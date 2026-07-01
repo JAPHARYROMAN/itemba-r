@@ -81,8 +81,13 @@ function makeService(opts: {
           branchId: null,
           accountType: 'CASH_ON_HAND',
           accountName: 'Main Till',
+          currency: 'TZS',
         }
       : opts.cashAccount;
+
+  // Captures the last cashAccount.updateMany data so tests can assert the
+  // currentBalance increment (create) / decrement (reverse).
+  const cashAccountUpdates: any[] = [];
 
   const customer =
     opts.customer === undefined
@@ -112,7 +117,13 @@ function makeService(opts: {
       findFirst: jest.fn(async () => customer),
       updateMany: jest.fn(async () => ({ count: 1 })),
     },
-    cashAccount: { findFirst: jest.fn(async () => cashAccount) },
+    cashAccount: {
+      findFirst: jest.fn(async () => cashAccount),
+      updateMany: jest.fn(async ({ data }: any) => {
+        cashAccountUpdates.push(data);
+        return { count: 1 };
+      }),
+    },
     chartOfAccount: {
       findFirst: jest.fn(async () =>
         opts.advanceAccountId ? { id: opts.advanceAccountId } : null,
@@ -185,7 +196,7 @@ function makeService(opts: {
     postingEngine,
     codes,
   );
-  return { service, prisma, tx, receivableUpdates, auditLogs, companyScope, accountResolver, postingEngine, postLines, codes };
+  return { service, prisma, tx, receivableUpdates, cashAccountUpdates, auditLogs, companyScope, accountResolver, postingEngine, postLines, codes };
 }
 
 describe('CustomerPaymentsService.create — allocation across multiple receivables', () => {
@@ -632,5 +643,116 @@ describe('CustomerPaymentsService.reverse — restores receivables + mirror JE',
     ).resolves.toBeDefined();
     // No mirror JE posted (nothing to reverse), and no throw.
     expect(postLines).not.toHaveBeenCalled();
+  });
+});
+
+describe('CustomerPaymentsService — CashAccount.currentBalance maintenance', () => {
+  it('increments CashAccount.currentBalance by the full payment amount on create', async () => {
+    const { service, cashAccountUpdates } = makeService({
+      receivablesById: { 'rec-1': receivable({ outstandingAmount: new Prisma.Decimal(100) }) },
+    });
+
+    await service.create(
+      {
+        companyId: 'company-1',
+        customerId: 'customer-1',
+        amount: 150,
+        paymentDate: '2026-06-01',
+        cashAccountId: 'cash-1',
+        // 100 applied + 50 unapplied — the WHOLE 150 hit the cash account.
+        allocations: [{ receivableId: 'rec-1', amount: 100 }],
+      } as any,
+      user,
+    );
+
+    expect(cashAccountUpdates).toHaveLength(1);
+    expect(Number(cashAccountUpdates[0].currentBalance.increment)).toBe(150);
+  });
+
+  it('scopes the cash-account balance update by id + companyId', async () => {
+    const { service, tx } = makeService({
+      receivablesById: { 'rec-1': receivable({ outstandingAmount: new Prisma.Decimal(100) }) },
+    });
+
+    await service.create(
+      {
+        companyId: 'company-1',
+        customerId: 'customer-1',
+        amount: 100,
+        paymentDate: '2026-06-01',
+        cashAccountId: 'cash-1',
+        allocations: [{ receivableId: 'rec-1', amount: 100 }],
+      } as any,
+      user,
+    );
+
+    expect(tx.cashAccount.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 'cash-1', companyId: 'company-1', deletedAt: null }),
+        data: { currentBalance: { increment: expect.anything() } },
+      }),
+    );
+  });
+
+  it('rejects a payment whose currency differs from the cash account currency', async () => {
+    const { service, tx } = makeService({
+      receivablesById: { 'rec-1': receivable({ outstandingAmount: new Prisma.Decimal(100) }) },
+      cashAccount: {
+        id: 'cash-1',
+        companyId: 'company-1',
+        divisionId: null,
+        branchId: null,
+        accountType: 'BANK',
+        accountName: 'USD Account',
+        currency: 'USD',
+      },
+    });
+
+    await expect(
+      service.create(
+        {
+          companyId: 'company-1',
+          customerId: 'customer-1',
+          amount: 100,
+          currency: 'TZS',
+          paymentDate: '2026-06-01',
+          cashAccountId: 'cash-1',
+          allocations: [{ receivableId: 'rec-1', amount: 100 }],
+        } as any,
+        user,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    // Never mutated the receivable or the cash balance on a currency mismatch.
+    expect(tx.customerPayment.create).not.toHaveBeenCalled();
+    expect(tx.cashAccount.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('decrements CashAccount.currentBalance by the payment amount on reverse (mirror of create)', async () => {
+    const { service, cashAccountUpdates } = makeService({
+      paymentAllocations: [{ receivableId: 'rec-1', amount: new Prisma.Decimal(150) }],
+      receivablesById: {
+        'rec-1': receivable({ id: 'rec-1', outstandingAmount: new Prisma.Decimal(0), paidAmount: new Prisma.Decimal(150), status: 'PAID' }),
+      },
+    });
+
+    await service.reverse('pay-1', { reason: 'bounced cheque' } as any, user);
+
+    expect(cashAccountUpdates).toHaveLength(1);
+    expect(Number(cashAccountUpdates[0].currentBalance.decrement)).toBe(150);
+  });
+
+  it('does NOT touch CashAccount.currentBalance on reverse when no mirror JE posted (never-posted payment)', async () => {
+    const { service, tx } = makeService({
+      paymentAllocations: [{ receivableId: 'rec-1', amount: new Prisma.Decimal(150) }],
+      paymentOverrides: { journalEntryId: null },
+      receivablesById: {
+        'rec-1': receivable({ id: 'rec-1', outstandingAmount: new Prisma.Decimal(0), paidAmount: new Prisma.Decimal(150), status: 'PAID' }),
+      },
+      originalJournalMissing: true,
+    });
+
+    await service.reverse('pay-1', {} as any, user);
+    // No cash leg was ever posted -> nothing to unwind.
+    expect(tx.cashAccount.updateMany).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -293,6 +294,24 @@ export class IntercompanyTransactionsService {
     });
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // Atomic status guard: claim the APPROVED -> POSTED transition guarded on
+      // the current status so two concurrent posts race here and exactly one
+      // wins (the loser sees count 0). Without this, both requests pass the
+      // pre-transaction status check above and each writes a full pair of
+      // journal entries, doubling both companies' intercompany balances and
+      // cash movements. postedAt is stamped now so the claim is a single
+      // atomic write; the journal entry ids are attached after posting.
+      const postedAt = new Date();
+      const claim = await tx.interCompanyTransaction.updateMany({
+        where: { id, status: 'APPROVED', deletedAt: null },
+        data: { status: 'POSTED', postedAt },
+      });
+      if (claim.count !== 1) {
+        throw new ConflictException(
+          'Intercompany transaction is no longer APPROVED and cannot be posted (it may already be posted)',
+        );
+      }
+
       const amount = Number(existing.amount);
       const desc = existing.description;
       const date = existing.transactionDate;
@@ -370,11 +389,12 @@ export class IntercompanyTransactionsService {
         ],
       }, tx);
 
+      // Status/postedAt were already set by the atomic claim above; here we
+      // only attach the journal entry ids so we never re-flip status (which
+      // would defeat the guard) and never overwrite a claim we did not win.
       return tx.interCompanyTransaction.update({
         where: { id },
         data: {
-          status: 'POSTED',
-          postedAt: new Date(),
           fromCompanyJournalEntryId: fromJe.id,
           toCompanyJournalEntryId: toJe.id,
         },

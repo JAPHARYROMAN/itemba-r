@@ -377,8 +377,8 @@ export class PayablesService {
     const userId = user.id;
     const record = await this.prisma.$transaction(async (tx) => {
       // Re-read under a row lock so a concurrent recordPayment / second writeOff
-      // cannot race us. We read the live status + outstandingAmount + the linked
-      // original journal entry so the derecognition reverses exactly what is left.
+      // cannot race us. We read the live status + outstandingAmount so the
+      // forgiveness entry derecognises exactly what is still outstanding.
       const [locked] = await tx.$queryRaw<
         Array<{
           id: string;
@@ -390,10 +390,8 @@ export class PayablesService {
           payableNumber: string;
           outstandingAmount: Prisma.Decimal;
           status: string;
-          journalEntryId: string | null;
-          issueDate: Date;
         }>
-      >`SELECT "id", "companyId", "divisionId", "branchId", "supplierId", "supplierName", "payableNumber", "outstandingAmount", "status", "journalEntryId", "issueDate"
+      >`SELECT "id", "companyId", "divisionId", "branchId", "supplierId", "supplierName", "payableNumber", "outstandingAmount", "status"
         FROM "payables"
         WHERE "id" = ${id} AND "deletedAt" IS NULL
         FOR UPDATE`;
@@ -410,23 +408,35 @@ export class PayablesService {
       const outstanding = new Prisma.Decimal(locked.outstandingAmount);
 
       // Derecognise the remaining liability in the GL so AP_CONTROL and the
-      // subledger move together. We post a BALANCED reversing entry that swaps
-      // debit and credit on every line of the original payable journal, scaled
-      // to the still-outstanding amount (per the GL audit decision: look up the
-      // stored original journalEntryId and reverse it). When the whole payable
-      // is unpaid this is a full reversal; when part was paid we only unwind the
-      // unpaid remainder, so payments already settled via recordPayment are left
-      // untouched. A payable with no remaining balance (outstanding == 0) needs
-      // no GL movement.
-      if (outstanding.gt(0) && locked.journalEntryId) {
-        await this.postWriteOffReversal(tx, {
+      // subledger move together.
+      //
+      // ITMB (GL audit fix): a write-off is a *forgiveness / cancellation of the
+      // debt only* — it must NOT reverse the original source posting. The old
+      // approach blindly swapped debit<->credit on every line of the payable's
+      // stored journalEntryId. For a supplier-invoice-backed payable that
+      // original entry is DR INVENTORY_ASSET / CR AP_CONTROL, so reversing it
+      // credited (removed) INVENTORY_ASSET from the GL even though the physical
+      // stock and the inventoryBalance subledger were still on hand — silently
+      // understating inventory in the GL. (Same class of error for an
+      // expense-backed payable: reversing would credit back the expense, which
+      // is also wrong for a forgiveness.)
+      //
+      // The correct entry, regardless of what the payable was sourced from, is:
+      //     DR AP_CONTROL                    (liability down — we no longer owe)
+      //     CR LIABILITY_WRITEOFF_INCOME     (gain / other income — forgiveness)
+      // for the still-outstanding amount. This keeps AP_CONTROL and the supplier
+      // subledger moving together while leaving INVENTORY_ASSET and the original
+      // expense untouched. A payable with no remaining balance (outstanding == 0)
+      // needs no GL movement.
+      if (outstanding.gt(0)) {
+        await this.postWriteOff(tx, {
           companyId: locked.companyId,
           divisionId: locked.divisionId,
           branchId: locked.branchId,
           payableId: locked.id,
           payableNumber: locked.payableNumber,
-          originalJournalEntryId: locked.journalEntryId,
-          outstanding,
+          supplierName: locked.supplierName,
+          outstanding: outstanding.toDecimalPlaces(2),
           transactionDate: new Date(),
           userId,
         });
@@ -461,16 +471,26 @@ export class PayablesService {
   }
 
   /**
-   * Post a balanced reversing journal for a written-off payable. Reads the
-   * original payable journal entry's lines and swaps debit/credit on each,
-   * scaled to the remaining `outstanding` amount, so the entry both balances
-   * and exactly unwinds the unpaid portion of the original posting (e.g. the
-   * original DR Expense / CR AP_CONTROL becomes DR AP_CONTROL / CR Expense for
-   * the outstanding amount). Scaling is done in integer cents with the rounding
-   * residual absorbed by the last line so debits still equal credits to the
-   * cent.
+   * Post the balanced write-off (debt-forgiveness) journal for a payable.
+   *
+   * A write-off cancels the *liability only* — the goods/services behind the
+   * payable are NOT being returned or reversed, so we must not touch the
+   * original source accounts (INVENTORY_ASSET for a stock supplier invoice, or
+   * the expense account for a manual/expense payable). Instead we recognise the
+   * forgiveness as a gain:
+   *
+   *     DR AP_CONTROL                 (liability derecognised — we no longer owe)
+   *     CR LIABILITY_WRITEOFF_INCOME  (other income — liability written off)
+   *
+   * for the still-outstanding amount. This is a 2-line, inherently-balanced
+   * entry, so no cent-scaling/residual juggling is needed.
+   *
+   * The credit account is resolved by a dedicated semantic role
+   * (LIABILITY_WRITEOFF_INCOME) rather than by numeric code. If the chart is not
+   * configured for that role we FAIL LOUDLY (the resolver throws a descriptive
+   * BadRequest) instead of falling back to an arbitrary or zero account.
    */
-  private async postWriteOffReversal(
+  private async postWriteOff(
     tx: Prisma.TransactionClient,
     input: {
       companyId: string;
@@ -478,77 +498,24 @@ export class PayablesService {
       branchId: string | null;
       payableId: string;
       payableNumber: string;
-      originalJournalEntryId: string;
+      supplierName: string | null;
       outstanding: Prisma.Decimal;
       transactionDate: Date;
       userId: string;
     },
   ) {
-    const original = await tx.journalEntry.findFirst({
-      where: { id: input.originalJournalEntryId, companyId: input.companyId },
-      select: {
-        totalDebit: true,
-        lines: {
-          select: { accountId: true, debit: true, credit: true, description: true },
-          orderBy: { createdAt: 'asc' as const },
-        },
-      },
-    });
+    if (input.outstanding.lte(0)) return;
 
-    // If the original journal is missing or empty we cannot derive a faithful
-    // reversal; skip rather than post a fabricated entry.
-    if (!original || original.lines.length === 0) return;
-
-    const originalTotal = new Prisma.Decimal(original.totalDebit);
-    if (originalTotal.lte(0)) return;
-
-    // Scale factor (outstanding / original total). When the payable is fully
-    // unpaid this is 1 and the reversal mirrors the original exactly.
-    const outstandingCents = input.outstanding.times(100).round();
-    const totalCents = originalTotal.times(100).round();
-
-    // Swap debit<->credit per line, scaling each amount by outstanding/total in
-    // integer cents. The last line carries any rounding residual so the entry
-    // stays balanced.
-    const scaled = original.lines.map((line) => {
-      const debitCents = new Prisma.Decimal(line.debit).times(100).round();
-      const creditCents = new Prisma.Decimal(line.credit).times(100).round();
-      return {
-        accountId: line.accountId,
-        description: line.description ?? undefined,
-        // post-swap, pre-scale magnitudes in cents
-        newDebitCents: this.scaleCents(creditCents, outstandingCents, totalCents),
-        newCreditCents: this.scaleCents(debitCents, outstandingCents, totalCents),
-      };
-    });
-
-    const sumDebit = scaled.reduce((acc, l) => acc.plus(l.newDebitCents), new Prisma.Decimal(0));
-    const sumCredit = scaled.reduce((acc, l) => acc.plus(l.newCreditCents), new Prisma.Decimal(0));
-
-    // Absorb any rounding residual on the last debit and last credit lines so
-    // total debits == total credits == outstanding.
-    const lastDebitIdx = this.lastIndexWhere(scaled, (l) => l.newDebitCents.gt(0));
-    const lastCreditIdx = this.lastIndexWhere(scaled, (l) => l.newCreditCents.gt(0));
-    if (lastDebitIdx >= 0) {
-      scaled[lastDebitIdx].newDebitCents = scaled[lastDebitIdx].newDebitCents.plus(
-        outstandingCents.minus(sumDebit),
-      );
-    }
-    if (lastCreditIdx >= 0) {
-      scaled[lastCreditIdx].newCreditCents = scaled[lastCreditIdx].newCreditCents.plus(
-        outstandingCents.minus(sumCredit),
-      );
-    }
-
-    const lines = scaled
-      .map((l) => ({
-        accountId: l.accountId,
-        description: l.description,
-        debit: l.newDebitCents.dividedBy(100),
-        credit: l.newCreditCents.dividedBy(100),
-      }))
-      // Drop any zero-on-both-sides lines the posting engine would reject.
-      .filter((l) => l.debit.gt(0) || l.credit.gt(0));
+    const [apAccount, writeOffIncomeAccount] = await Promise.all([
+      this.accountResolver.resolve(input.companyId, 'AP_CONTROL', tx),
+      // Defensive resolve of a role the shared resolver does not yet list in its
+      // AccountRole union / CONVENTIONAL_CODES. The resolver still matches it by
+      // accountSubType="liability_writeoff_income" (case-insensitive) and throws
+      // a clear BadRequest if the chart has no such account — which is exactly
+      // the behaviour we want (never post the forgiveness gain to a wrong or
+      // zero account). See summary note: seed a LIABILITY_WRITEOFF_INCOME role.
+      this.resolveWriteOffIncomeAccount(input.companyId, tx),
+    ]);
 
     await this.postingEngine.postLines(
       {
@@ -561,26 +528,48 @@ export class PayablesService {
         referenceId: input.payableId,
         moduleName: 'payables',
         userId: input.userId,
-        lines,
+        lines: [
+          {
+            accountId: apAccount.id,
+            description: `Accounts payable written off: ${input.supplierName ?? ''}`.trim(),
+            debit: input.outstanding,
+            credit: 0,
+          },
+          {
+            accountId: writeOffIncomeAccount.id,
+            description: `Liability written off (forgiveness) ${input.payableNumber}`,
+            debit: 0,
+            credit: input.outstanding,
+          },
+        ],
       },
       tx,
     );
   }
 
-  private scaleCents(
-    amountCents: Prisma.Decimal,
-    numeratorCents: Prisma.Decimal,
-    denominatorCents: Prisma.Decimal,
-  ): Prisma.Decimal {
-    if (amountCents.isZero() || denominatorCents.isZero()) return new Prisma.Decimal(0);
-    return amountCents.times(numeratorCents).dividedBy(denominatorCents).round();
-  }
-
-  private lastIndexWhere<T>(arr: T[], pred: (item: T) => boolean): number {
-    for (let i = arr.length - 1; i >= 0; i--) {
-      if (pred(arr[i])) return i;
+  /**
+   * Resolve the "liabilities written off / other income" account used as the
+   * credit leg of a payable write-off. This is a NEW semantic role that the
+   * shared AccountResolverService does not (yet) enumerate in its AccountRole
+   * type, so we resolve it defensively via a cast: the resolver will match an
+   * account whose accountSubType is "liability_writeoff_income" and otherwise
+   * throw a descriptive BadRequest. We re-wrap that failure with actionable
+   * guidance rather than posting the gain to an arbitrary account.
+   */
+  private async resolveWriteOffIncomeAccount(companyId: string, tx: Prisma.TransactionClient) {
+    try {
+      return await this.accountResolver.resolve(
+        companyId,
+        'LIABILITY_WRITEOFF_INCOME' as any,
+        tx,
+      );
+    } catch {
+      throw new BadRequestException(
+        `Cannot write off this payable: no "liabilities written off / other income" account is ` +
+          `configured for company ${companyId}. Create an income account and set ` +
+          `accountSubType="liability_writeoff_income" on it, then retry.`,
+      );
     }
-    return -1;
   }
 
   async remove(id: string, user: AuthUser) {

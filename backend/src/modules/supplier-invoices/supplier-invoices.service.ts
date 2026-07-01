@@ -532,6 +532,20 @@ export class SupplierInvoicesService {
       );
     }
 
+    // GL-vs-subledger reconciliation guard (audit finding): an INVENTORY_ASSET
+    // debit here is the GL counterpart of a perpetual-inventory increase that is
+    // ONLY ever booked by the goods-receipt path (GoodsReceivedNotesService.post
+    // flips the GRN to POSTED and calls InventoryMovements.createMovement; and
+    // PurchaseOrdersService.receive moves the subledger on RECEIVED /
+    // PARTIALLY_RECEIVED). This module never moves the inventory subledger. So if
+    // we would debit INVENTORY_ASSET for stock lines with no posted receipt
+    // behind them, the GL inventory asset would overstate the subledger with no
+    // offsetting movement and the two could never reconcile. Require a matching
+    // posted receipt before allowing the inventory debit.
+    if (inventoryCents > 0) {
+      await this.assertStockLinesAreReceipted(invoice, tx);
+    }
+
     const [inventoryAccount, expenseAccount, apAccount] = await Promise.all([
       this.accountResolver.resolve(invoice.companyId, 'INVENTORY_ASSET', tx),
       this.accountResolver.resolve(invoice.companyId, 'GENERAL_EXPENSE', tx),
@@ -576,6 +590,70 @@ export class SupplierInvoicesService {
         lines,
       },
       tx,
+    );
+  }
+
+  /**
+   * Assert that the goods behind this invoice's stock (INVENTORY_ASSET) lines
+   * have actually been received into the perpetual-inventory subledger before we
+   * post the offsetting GL inventory debit. A receipt exists when:
+   *   - the invoice is linked to a GRN that has been POSTED (GRN.post ran the
+   *     inventory movement), OR
+   *   - the invoice's PO carries at least one POSTED GRN, OR
+   *   - the invoice's PO is itself RECEIVED / PARTIALLY_RECEIVED (the
+   *     PurchaseOrdersService.receive path moved the subledger directly).
+   * Otherwise the inventory subledger was never moved and debiting
+   * INVENTORY_ASSET would leave the GL permanently overstating the subledger.
+   */
+  private async assertStockLinesAreReceipted(
+    invoice: {
+      companyId: string;
+      goodsReceivedNoteId?: string | null;
+      purchaseOrderId?: string | null;
+    },
+    tx: Prisma.TransactionClient,
+  ) {
+    if (invoice.goodsReceivedNoteId) {
+      const grn = await tx.goodsReceivedNote.findFirst({
+        where: {
+          id: invoice.goodsReceivedNoteId,
+          companyId: invoice.companyId,
+          status: 'POSTED' as any,
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      if (grn) return;
+    }
+
+    if (invoice.purchaseOrderId) {
+      const [postedGrn, receivedPo] = await Promise.all([
+        tx.goodsReceivedNote.findFirst({
+          where: {
+            purchaseOrderId: invoice.purchaseOrderId,
+            companyId: invoice.companyId,
+            status: 'POSTED' as any,
+            deletedAt: null,
+          },
+          select: { id: true },
+        }),
+        tx.purchaseOrder.findFirst({
+          where: {
+            id: invoice.purchaseOrderId,
+            companyId: invoice.companyId,
+            status: { in: ['RECEIVED', 'PARTIALLY_RECEIVED'] as any },
+            deletedAt: null,
+          },
+          select: { id: true },
+        }),
+      ]);
+      if (postedGrn || receivedPo) return;
+    }
+
+    throw new BadRequestException(
+      'Supplier invoice has stock (inventory) lines but no posted goods receipt. ' +
+        'Post the goods-received note (or receive the purchase order) so the inventory ' +
+        'subledger is moved before approving this invoice.',
     );
   }
 

@@ -8,6 +8,7 @@ import { QueryQuotationDto } from './dto/query-quotation.dto';
 import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { SalesOrdersService } from '../sales-orders/sales-orders.service';
 
 function calcLines(lines: any[]) {
   let subtotal = 0, totalDiscount = 0, totalTax = 0;
@@ -28,6 +29,7 @@ export class QuotationsService {
     private readonly auditLogs: AuditLogsService,
     private readonly codes: EntityCodeGeneratorService,
     private readonly companyScope: CompanyScopeService,
+    private readonly salesOrders: SalesOrdersService,
   ) {}
 
   async create(dto: CreateQuotationDto, user: AuthUser) {
@@ -250,15 +252,23 @@ export class QuotationsService {
     await this.companyScope.assertCanAccessCompany(user, quotation.companyId, AccessLevel.WRITE);
     if (quotation.status !== 'ACCEPTED') throw new BadRequestException('Only ACCEPTED quotations can be converted');
 
-    const so = await this.prisma.$transaction(async (tx) => {
-      // Re-check status inside the transaction to prevent a double-convert race
-      // producing two sales orders (and later duplicate receivables).
-      const locked = await tx.quotation.findFirst({
-        where: { id, deletedAt: null },
-        select: { status: true },
+    // Phase 1 (atomic): claim the quotation (ACCEPTED -> CONVERTED) and create
+    // the resulting sales order as DRAFT. The order is DRAFT — not CONFIRMED —
+    // precisely so it can be routed through SalesOrdersService.confirm() below,
+    // which posts the confirmation journal (DR AR, CR Revenue, CR Output VAT;
+    // DR COGS, CR Inventory), creates the receivable, and issues stock. The
+    // previous implementation created a CONFIRMED order directly and skipped ALL
+    // of those side effects, leaving the GL, AR subledger, output-VAT ledger and
+    // inventory permanently out of sync with the sales report.
+    //
+    // The claim is a guarded updateMany (ACCEPTED -> CONVERTED): a concurrent
+    // second convert matches 0 rows and throws, so we never produce two orders.
+    const created = await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.quotation.updateMany({
+        where: { id, deletedAt: null, status: 'ACCEPTED' as any },
+        data: { status: 'CONVERTED' as any },
       });
-      if (!locked) throw new NotFoundException('Quotation not found');
-      if (locked.status !== 'ACCEPTED') {
+      if (claim.count === 0) {
         throw new BadRequestException('Only ACCEPTED quotations can be converted');
       }
 
@@ -268,14 +278,19 @@ export class QuotationsService {
         tx,
       });
 
-      const created = await tx.salesOrder.create({
+      const order = await tx.salesOrder.create({
         data: {
           salesOrderNumber,
           companyId: quotation.companyId,
           customerId: quotation.customerId,
           divisionId: quotation.divisionId,
           branchId: quotation.branchId,
-          salesType: 'CASH_SALE' as any,
+          // A quotation carries no cash-account / payment info, so the converted
+          // order settles on credit: confirm() raises a Receivable (DR AR) rather
+          // than debiting an (absent) cash account. A cash receipt can be recorded
+          // against the receivable afterwards through the normal receivables flow.
+          salesType: 'CREDIT_SALE' as any,
+          paymentMethod: 'CREDIT' as any,
           orderDate: new Date(),
           currency: quotation.currency as any,
           subtotal: quotation.subtotal,
@@ -284,7 +299,7 @@ export class QuotationsService {
           totalAmount: quotation.totalAmount,
           paidAmount: 0,
           outstandingAmount: quotation.totalAmount,
-          status: 'CONFIRMED' as any,
+          status: 'DRAFT' as any,
           paymentStatus: 'UNPAID' as any,
           createdById: userId,
           notes: `Converted from quotation ${quotation.quotationNumber}`,
@@ -293,7 +308,7 @@ export class QuotationsService {
 
       await tx.salesOrderLine.createMany({
         data: (quotation.lines as any[]).map((l) => ({
-          salesOrderId: created.id,
+          salesOrderId: order.id,
           productId: l.productId,
           description: l.description,
           quantity: l.quantity,
@@ -307,11 +322,30 @@ export class QuotationsService {
 
       await tx.quotation.update({
         where: { id },
-        data: { status: 'CONVERTED' as any, convertedSalesOrderId: created.id },
+        data: { convertedSalesOrderId: order.id },
       });
 
-      return created;
+      return order;
     });
+
+    // Phase 2: confirm the DRAFT order. This runs its own transaction and posts
+    // the balanced GL journal, creates + links the Receivable, issues stock
+    // (SALE_ISSUE), and stamps journalEntryId/receivableId on the order.
+    //
+    // Phase 1 and Phase 2 are two SEPARATE transactions, so if confirm() throws
+    // (e.g. missing branch for a stock sale, closed period, insufficient stock)
+    // the quotation would be left CONVERTED and linked to an unposted DRAFT order
+    // — a permanent half-done state the user cannot re-drive from the quotation.
+    // To keep the operation effectively all-or-nothing, we run a COMPENSATING
+    // action on failure: revert the quotation (CONVERTED -> ACCEPTED, unlink the
+    // order) and soft-delete the just-created DRAFT order, then rethrow the
+    // ORIGINAL error so the caller sees the real cause and can retry the convert.
+    try {
+      await this.salesOrders.confirm(created.id, user);
+    } catch (confirmError) {
+      await this.compensateFailedConversion(id, created.id, quotation.companyId);
+      throw confirmError;
+    }
 
     await this.auditLogs.log({
       action: 'QUOTATION_CONVERTED',
@@ -319,9 +353,75 @@ export class QuotationsService {
       entityId: id,
       userId,
       companyId: quotation.companyId,
-      newValue: { convertedSalesOrderId: so.id } as any,
+      newValue: { convertedSalesOrderId: created.id } as any,
     });
     return this.findOne(id, user);
+  }
+
+  /**
+   * Undo the Phase 1 writes when Phase 2 (SalesOrdersService.confirm) fails, so a
+   * failed convert leaves the quotation exactly as it was (ACCEPTED, unlinked) and
+   * the retry can start clean. Both writes are guarded and idempotent:
+   *  - the quotation revert only matches the row we just claimed (status CONVERTED
+   *    AND still pointing at this order), so a re-run — or a status the user has
+   *    since moved on from — matches 0 rows and is a no-op;
+   *  - the order soft-delete only matches a still-DRAFT, not-yet-deleted order, so
+   *    it never touches an order that some other flow has since confirmed/deleted.
+   *
+   * Runs in a single transaction and swallows nothing to the caller: any failure
+   * here is logged but must NOT mask the original confirm() error, which the
+   * caller rethrows.
+   */
+  private async compensateFailedConversion(
+    quotationId: string,
+    salesOrderId: string,
+    companyId: string,
+  ) {
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.quotation.updateMany({
+          where: {
+            id: quotationId,
+            companyId,
+            status: 'CONVERTED' as any,
+            convertedSalesOrderId: salesOrderId,
+          },
+          data: { status: 'ACCEPTED' as any, convertedSalesOrderId: null },
+        });
+        await tx.salesOrder.updateMany({
+          where: {
+            id: salesOrderId,
+            companyId,
+            status: 'DRAFT' as any,
+            deletedAt: null,
+          },
+          data: { deletedAt: new Date() },
+        });
+      });
+      await this.auditLogs.log({
+        action: 'QUOTATION_CONVERT_COMPENSATED',
+        entityType: 'Quotation',
+        entityId: quotationId,
+        companyId,
+        oldValue: { status: 'CONVERTED', convertedSalesOrderId: salesOrderId } as any,
+        newValue: { status: 'ACCEPTED', convertedSalesOrderId: null } as any,
+      });
+    } catch (compensationError) {
+      // Never let a compensation failure hide the real (confirm) error. Log the
+      // secondary failure so an operator can reconcile the stuck quotation.
+      await this.auditLogs
+        .log({
+          action: 'QUOTATION_CONVERT_COMPENSATION_FAILED',
+          entityType: 'Quotation',
+          entityId: quotationId,
+          companyId,
+          newValue: {
+            salesOrderId,
+            error: (compensationError as Error)?.message,
+          } as any,
+        })
+        .catch(() => undefined);
+    }
   }
 
   async remove(id: string, user: AuthUser) {

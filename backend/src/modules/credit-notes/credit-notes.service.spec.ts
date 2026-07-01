@@ -44,6 +44,13 @@ function makeService(opts?: {
   receivableStatus?: string;
   /** number of live (DRAFT|PAID) refunds referencing this credit note. */
   liveRefundCount?: number;
+  /** SalesOrder.receivableId returned by salesOrder.findFirst (SO→receivable link). */
+  salesOrderReceivableId?: string | null;
+  /**
+   * Id returned by the receivable.findFirst({ sourceType:'SalesOrder', sourceId })
+   * fallback lookup. When set, exercises the source-back-reference resolution path.
+   */
+  sourceReceivableId?: string | null;
 }) {
   const note: CreditNoteState = {
     id: 'cn-1',
@@ -96,14 +103,19 @@ function makeService(opts?: {
   const creditNoteLine = { createMany: jest.fn(async () => ({ count: 1 })) };
 
   const receivableDelegate = {
-    // issue() reads the linked receivable's status via findFirst to block
-    // crediting a CANCELLED/WRITTEN_OFF receivable. Fall back to the raw
-    // receivable's status (or OPEN) when no explicit override is given.
-    findFirst: jest.fn(async () =>
-      receivable
+    // receivable.findFirst is called in two contexts:
+    //   1. resolveLinkedReceivableId fallback: where has sourceType/sourceId ->
+    //      returns { id } of the receivable back-referenced by the sales order.
+    //   2. issue-time dead-receivable guard: where has id -> returns { status }
+    //      so a CANCELLED/WRITTEN_OFF receivable blocks issuing.
+    findFirst: jest.fn(async ({ where }: any = {}) => {
+      if (where?.sourceType === 'SalesOrder') {
+        return opts?.sourceReceivableId ? { id: opts.sourceReceivableId } : null;
+      }
+      return receivable
         ? { companyId: receivable.companyId, status: opts?.receivableStatus ?? receivable.status ?? 'OPEN' }
-        : null,
-    ),
+        : null;
+    }),
     update: jest.fn(async () => ({})),
     aggregate: jest.fn(async () => ({ _sum: { outstandingAmount: D('0') } })),
   };
@@ -148,7 +160,11 @@ function makeService(opts?: {
       updateMany: jest.fn(async () => ({ count: 1 })),
     },
     salesOrder: {
-      findFirst: jest.fn(async () => ({ companyId: 'company-1', customerId: 'customer-1' })),
+      findFirst: jest.fn(async () => ({
+        companyId: 'company-1',
+        customerId: 'customer-1',
+        receivableId: opts?.salesOrderReceivableId ?? null,
+      })),
     },
     $queryRaw,
     $transaction: jest.fn(async (cb: any) => cb(prisma)),
@@ -282,6 +298,113 @@ describe('CreditNotesService.issue — receivable reduction never goes negative'
     const updateArg = prisma.receivable.update.mock.calls[0][0];
     expect(new Prisma.Decimal(updateArg.data.outstandingAmount).toString()).toBe('3820'); // 5000 - 1180
     expect(updateArg.data.status).toBe('PARTIALLY_PAID');
+  });
+});
+
+describe('CreditNotesService.issue — salesOrderId-only relieves the receivable subledger', () => {
+  it('resolves the receivable from SalesOrder.receivableId and relieves it (GL AR credit mirrored in subledger)', async () => {
+    // Note links ONLY the sales order (receivableId is null). The SO points at
+    // rec-1 via its FK. Issuing must relieve rec-1 so the AR subledger + customer
+    // balance track the GL AR credit.
+    const receivable = {
+      id: 'rec-1',
+      companyId: 'company-1',
+      customerId: 'customer-1',
+      outstandingAmount: D('1180'),
+      paidAmount: D('0'),
+    };
+    const { service, prisma } = makeService({
+      note: { receivableId: null, salesOrderId: 'so-1' },
+      receivable,
+      salesOrderReceivableId: 'rec-1',
+    });
+
+    await service.issue('cn-1', user);
+
+    // The GL AR credit is mirrored: rec-1 outstanding driven to 0.
+    expect(prisma.receivable.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'rec-1' },
+        data: expect.objectContaining({ outstandingAmount: expect.anything(), status: 'PAID' }),
+      }),
+    );
+    const updateArg = prisma.receivable.update.mock.calls[0][0];
+    expect(new Prisma.Decimal(updateArg.data.outstandingAmount).toString()).toBe('0');
+
+    // Customer balance re-synced from receivable subledger.
+    expect(prisma.customer.updateMany).toHaveBeenCalled();
+
+    // Resolved receivableId persisted back onto the credit note (so void restores it).
+    const finalUpdate = prisma.creditNote.update.mock.calls.find(
+      (c: any) => c[0].data.appliedAmount !== undefined,
+    );
+    expect(finalUpdate[0].data.receivableId).toBe('rec-1');
+    expect(new Prisma.Decimal(finalUpdate[0].data.appliedAmount).toString()).toBe('1180');
+  });
+
+  it('falls back to Receivable.sourceType=SalesOrder/sourceId when the SO has no direct FK', async () => {
+    const receivable = {
+      id: 'rec-2',
+      companyId: 'company-1',
+      customerId: 'customer-1',
+      outstandingAmount: D('1180'),
+      paidAmount: D('0'),
+    };
+    const { service, prisma } = makeService({
+      note: { receivableId: null, salesOrderId: 'so-1' },
+      receivable,
+      salesOrderReceivableId: null, // no direct FK -> use the source back-reference
+      sourceReceivableId: 'rec-2',
+    });
+
+    await service.issue('cn-1', user);
+
+    const updateArg = prisma.receivable.update.mock.calls[0][0];
+    expect(new Prisma.Decimal(updateArg.data.outstandingAmount).toString()).toBe('0');
+    const finalUpdate = prisma.creditNote.update.mock.calls.find(
+      (c: any) => c[0].data.appliedAmount !== undefined,
+    );
+    expect(finalUpdate[0].data.receivableId).toBe('rec-2');
+  });
+
+  it('blocks issuing when the sales-order-resolved receivable is WRITTEN_OFF (no JE, no relief)', async () => {
+    const receivable = {
+      id: 'rec-1',
+      companyId: 'company-1',
+      customerId: 'customer-1',
+      outstandingAmount: D('0'),
+      paidAmount: D('0'),
+    };
+    const { service, postingEngine, prisma } = makeService({
+      note: { receivableId: null, salesOrderId: 'so-1' },
+      receivable,
+      salesOrderReceivableId: 'rec-1',
+      receivableStatus: 'WRITTEN_OFF',
+    });
+
+    await expect(service.issue('cn-1', user)).rejects.toBeInstanceOf(ConflictException);
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(prisma.receivable.update).not.toHaveBeenCalled();
+  });
+
+  it('leaves AR as a standalone customer credit when neither link resolves a receivable', async () => {
+    // salesOrderId set but the SO has no receivable and no source back-reference:
+    // GL still credits AR (available customer credit), no subledger relief.
+    const { service, prisma, postingEngine } = makeService({
+      note: { receivableId: null, salesOrderId: 'so-1' },
+      salesOrderReceivableId: null,
+      sourceReceivableId: null,
+    });
+
+    await service.issue('cn-1', user);
+
+    expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
+    expect(prisma.receivable.update).not.toHaveBeenCalled();
+    const finalUpdate = prisma.creditNote.update.mock.calls.find(
+      (c: any) => c[0].data.appliedAmount !== undefined,
+    );
+    expect(new Prisma.Decimal(finalUpdate[0].data.appliedAmount).toString()).toBe('0');
+    expect(finalUpdate[0].data.receivableId).toBeUndefined();
   });
 });
 

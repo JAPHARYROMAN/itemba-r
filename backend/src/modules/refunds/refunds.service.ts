@@ -331,6 +331,17 @@ export class RefundsService {
         tx,
       );
 
+      // Keep the CashAccount.currentBalance subledger cache consistent with the
+      // GL swing above: paying a refund is money OUT, so decrement by the same
+      // amount we credited to the GL cash/bank account, inside this transaction
+      // (mirrors expenses.pay -> cashAccount.update decrement). Without this the
+      // denormalized currentBalance (summed as the live cash position by finance/
+      // dashboard services) drifts permanently below the GL.
+      await (tx as PrismaService).cashAccount.update({
+        where: { id: cashAccount.id },
+        data: { currentBalance: { decrement: amount } },
+      });
+
       const updated = await this.refunds(tx).update({
         where: { id: current.id },
         data: {
@@ -385,6 +396,21 @@ export class RefundsService {
       }
 
       const reversalJe = await this.reverseRefundJournal(tx, current, userId);
+
+      // If (and only if) the reversal JE was actually posted, unwind the cash
+      // subledger cache too: the reversal re-debits GL cash (money back in), so
+      // increment CashAccount.currentBalance by the same amount inside this
+      // transaction. reverseRefundJournal returns null when there is no traceable
+      // posted journal (e.g. the refund was never paid) or a concurrent void
+      // already reversed it; in that case the pay() decrement never happened / was
+      // already unwound, so we must NOT increment.
+      if (reversalJe) {
+        const amount = new Prisma.Decimal(current.amount).toDecimalPlaces(2);
+        await (tx as PrismaService).cashAccount.update({
+          where: { id: current.cashAccountId },
+          data: { currentBalance: { increment: amount } },
+        });
+      }
 
       const updated = await this.refunds(tx).update({
         where: { id: current.id },

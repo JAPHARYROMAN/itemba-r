@@ -1,8 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel, PaymentStatus, Prisma } from '@prisma/client';
+import { AccessLevel, CashAccountType, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService, CompanyScopeService } from '../../common/services';
+import type { AccountRole } from '../../common/services/account-resolver.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { CreateReceivableDto } from './dto/create-receivable.dto';
@@ -269,12 +270,16 @@ export class ReceivablesService {
           Array<{
             id: string;
             companyId: string;
+            divisionId: string | null;
+            branchId: string | null;
             customerId: string | null;
+            customerName: string | null;
+            receivableNumber: string;
             outstandingAmount: Prisma.Decimal;
             paidAmount: Prisma.Decimal;
             status: string;
           }>
-        >`SELECT "id", "companyId", "customerId", "outstandingAmount", "paidAmount", "status"
+        >`SELECT "id", "companyId", "divisionId", "branchId", "customerId", "customerName", "receivableNumber", "outstandingAmount", "paidAmount", "status"
           FROM "receivables"
           WHERE "id" = ${id} AND "deletedAt" IS NULL
           FOR UPDATE`;
@@ -313,6 +318,72 @@ export class ReceivablesService {
           },
         });
 
+        // GL: post the balanced settlement entry so the AR control account is
+        // relieved in step with the subledger. Mirrors the sibling settlement
+        // posters (payables.recordPayment DR AP / CR Cash; customer-payments
+        // DR Cash / CR AR). Here the receivable's creation entry debited
+        // AR_CONTROL, so collecting cash must:
+        //   DR Cash on hand | Bank  (asset up)
+        //   CR AR control          (asset/subledger down)
+        // The cash side is resolved from the optional cashAccountId (its
+        // accountType selects CASH_ON_HAND vs BANK); legacy callers that omit it
+        // default to CASH_ON_HAND. Posting inside the same tx also routes this
+        // path through the period-close guard in the posting engine.
+        const cashRole = await this.resolvePaymentCashRole(
+          tx,
+          locked.companyId,
+          dto.cashAccountId,
+        );
+        const [cashAccount, arAccount] = await Promise.all([
+          this.accountResolver.resolve(locked.companyId, cashRole, tx),
+          this.accountResolver.resolve(locked.companyId, 'AR_CONTROL', tx),
+        ]);
+        const settlementDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
+        await this.postingEngine.postLines(
+          {
+            companyId: locked.companyId,
+            divisionId: locked.divisionId,
+            branchId: locked.branchId,
+            transactionDate: settlementDate,
+            description: `Receivable settlement ${locked.receivableNumber}`,
+            referenceType: 'Receivable',
+            referenceId: locked.id,
+            moduleName: 'receivables',
+            userId,
+            lines: [
+              {
+                accountId: cashAccount.id,
+                description: `Payment received: ${locked.customerName ?? 'customer'}`,
+                debit: paymentAmount,
+                credit: 0,
+              },
+              {
+                accountId: arAccount.id,
+                description: `Accounts receivable settlement: ${locked.customerName ?? 'customer'}`,
+                debit: 0,
+                credit: paymentAmount,
+              },
+            ],
+          },
+          tx,
+        );
+
+        // Keep the denormalised CashAccount.currentBalance (a subledger cache of
+        // the GL cash position, read by finance/dashboards) consistent with the
+        // DR Cash|Bank leg we just posted. Increment by the payment amount in the
+        // SAME transaction — mirrors customer-payments.create (increment on cash
+        // receipt). Only when a company-scoped cashAccountId is supplied;
+        // resolvePaymentCashRole has already validated it belongs to this company
+        // (throws otherwise), and the updateMany is re-scoped by companyId +
+        // deletedAt to stay safe. Legacy callers that omit cashAccountId post the
+        // cash leg to CASH_ON_HAND but have no CashAccount row to cache.
+        if (dto.cashAccountId) {
+          await tx.cashAccount.updateMany({
+            where: { id: dto.cashAccountId, companyId: locked.companyId, deletedAt: null },
+            data: { currentBalance: { increment: paymentAmount } },
+          });
+        }
+
         await this.syncSalesOrderPaymentFromReceivable(tx, updated);
         await this.syncCustomerBalance(tx, updated.companyId, updated.customerId);
 
@@ -348,9 +419,89 @@ export class ReceivablesService {
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
     const userId = user.id;
     const record = await this.prisma.$transaction(async (tx) => {
+      // Re-read under a row lock so a concurrent recordPayment / second writeOff
+      // cannot race us. We read the live status + outstandingAmount so the
+      // bad-debt derecognition relieves exactly what is still open.
+      const [locked] = await tx.$queryRaw<
+        Array<{
+          id: string;
+          companyId: string;
+          divisionId: string | null;
+          branchId: string | null;
+          customerId: string | null;
+          customerName: string | null;
+          receivableNumber: string;
+          outstandingAmount: Prisma.Decimal;
+          status: string;
+        }>
+      >`SELECT "id", "companyId", "divisionId", "branchId", "customerId", "customerName", "receivableNumber", "outstandingAmount", "status"
+        FROM "receivables"
+        WHERE "id" = ${id} AND "deletedAt" IS NULL
+        FOR UPDATE`;
+
+      if (!locked) throw new NotFoundException('Receivable not found');
+
+      // A receivable already settled (PAID), already written off, or cancelled
+      // must not be written off again — a second derecognition would double
+      // relieve AR_CONTROL and double-count the bad-debt expense.
+      if (!['OPEN', 'PARTIALLY_PAID', 'OVERDUE'].includes(locked.status)) {
+        throw new BadRequestException(`Cannot write off a ${locked.status} receivable`);
+      }
+
+      const outstanding = new Prisma.Decimal(locked.outstandingAmount).toDecimalPlaces(2);
+
+      // GL: recognise the uncollectible debt so AR_CONTROL and the subledger move
+      // together (the creation entry debited AR_CONTROL; we must credit it back).
+      //   DR Bad debt expense  (P&L loss recognised)
+      //   CR AR control        (asset/subledger down)
+      // A receivable with nothing outstanding needs no GL movement. Only the
+      // still-open remainder is derecognised, so any amount already collected via
+      // recordPayment (already credited to AR at settlement) is left untouched.
+      if (outstanding.gt(0)) {
+        const [badDebtAccount, arAccount] = await Promise.all([
+          this.resolveBadDebtExpenseAccount(tx, locked.companyId),
+          this.accountResolver.resolve(locked.companyId, 'AR_CONTROL', tx),
+        ]);
+        await this.postingEngine.postLines(
+          {
+            companyId: locked.companyId,
+            divisionId: locked.divisionId,
+            branchId: locked.branchId,
+            transactionDate: new Date(),
+            description: `Receivable write-off ${locked.receivableNumber}`,
+            referenceType: 'Receivable',
+            referenceId: locked.id,
+            moduleName: 'receivables',
+            userId,
+            lines: [
+              {
+                accountId: badDebtAccount.id,
+                description: `Bad debt written off: ${locked.customerName ?? 'customer'}`,
+                debit: outstanding,
+                credit: 0,
+              },
+              {
+                accountId: arAccount.id,
+                description: `Derecognise receivable ${locked.receivableNumber}`,
+                debit: 0,
+                credit: outstanding,
+              },
+            ],
+          },
+          tx,
+        );
+      }
+
       const updated = await tx.receivable.update({
         where: { id },
-        data: { status: 'WRITTEN_OFF', notes: dto.reason },
+        data: {
+          status: 'WRITTEN_OFF',
+          // Zero the outstanding so the amount can no longer be paid (closes the
+          // recordPayment resurrection hole) and so the subledger aggregate drops
+          // in step with the GL credit above.
+          outstandingAmount: 0,
+          notes: dto.reason,
+        },
       });
       await this.syncCustomerBalance(tx, updated.companyId, updated.customerId);
       return updated;
@@ -653,6 +804,74 @@ export class ReceivablesService {
       : undefined;
 
     return { divisionId, branchId, customerName };
+  }
+
+  /**
+   * Pick the GL cash/bank role for a settlement. When a cashAccountId is
+   * supplied it must belong to the company and be active; its accountType then
+   * selects BANK vs CASH_ON_HAND (mirroring customer-payments.cashAccountRole).
+   * Legacy callers that omit it fall back to CASH_ON_HAND so the entry still
+   * balances.
+   */
+  private async resolvePaymentCashRole(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    cashAccountId?: string | null,
+  ): Promise<AccountRole> {
+    if (!cashAccountId) return 'CASH_ON_HAND';
+    const cashAccount = await tx.cashAccount.findFirst({
+      where: { id: cashAccountId, deletedAt: null, isActive: true },
+      select: { companyId: true, accountType: true },
+    });
+    if (!cashAccount || cashAccount.companyId !== companyId) {
+      throw new BadRequestException('Cash account does not belong to this company');
+    }
+    return cashAccount.accountType === CashAccountType.BANK ? 'BANK' : 'CASH_ON_HAND';
+  }
+
+  /**
+   * Resolve the bad-debt / doubtful-debt expense account for a write-off.
+   *
+   * The typed {@link AccountRole} union has no dedicated BAD_DEBT role yet, so we
+   * probe the chart directly by conventional accountSubType keys and Tanzanian
+   * SME expense codes (the same defensive pattern customer-payments uses for the
+   * customer-advance liability). If none is configured we fall back to the typed
+   * GENERAL_EXPENSE role — a real, resolvable expense account — so the loss is
+   * still recognised in the P&L rather than posted to a wrong/zero account.
+   *
+   * SEEDING NOTE: to book write-offs to a dedicated line, seed a chart account
+   * with accountSubType="bad_debt_expense" (or code 6800/5800) per company.
+   */
+  private async resolveBadDebtExpenseAccount(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+  ) {
+    const subTypeKeys = [
+      'bad_debt_expense',
+      'bad_debt',
+      'bad_debts',
+      'doubtful_debts',
+      'doubtful_debt_expense',
+      'provision_for_doubtful_debts',
+      'write_off_expense',
+    ];
+    const codes = ['6800', '6810', '5800', '5810'];
+
+    const account = await tx.chartOfAccount.findFirst({
+      where: {
+        companyId,
+        deletedAt: null,
+        isActive: true,
+        OR: [
+          { accountSubType: { in: subTypeKeys, mode: 'insensitive' } },
+          { accountCode: { in: codes } },
+        ],
+      },
+    });
+    if (account) return account;
+
+    // Fall back to a general operating-expense account (typed, always seeded).
+    return this.accountResolver.resolve(companyId, 'GENERAL_EXPENSE', tx);
   }
 
   private async syncCustomerBalance(

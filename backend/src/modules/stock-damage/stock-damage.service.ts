@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { AccessLevel } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -7,7 +7,16 @@ import { InventoryMovementsService } from '../inventory-movements/inventory-move
 import { CreateStockDamageDto } from './dto/create-stock-damage.dto';
 import { UpdateStockDamageDto } from './dto/update-stock-damage.dto';
 import { QueryStockDamageDto } from './dto/query-stock-damage.dto';
-import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
+import {
+  applyCompanyScopeWhere,
+  AccountResolverService,
+  CompanyScopeService,
+} from '../../common/services';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+
+interface InventoryBalanceValueRow {
+  totalValue: Prisma.Decimal;
+}
 
 type StockDamageReferenceIds = {
   branchId?: string | null;
@@ -23,7 +32,35 @@ export class StockDamageService {
     private readonly auditLogs: AuditLogsService,
     private readonly inventoryMovements: InventoryMovementsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly postingEngine: PostingEngineService,
+    private readonly accountResolver: AccountResolverService,
   ) {}
+
+  /**
+   * Read the current inventory subledger VALUE (totalValue) for a
+   * company/product/branch line under a row lock (FOR UPDATE), returning 0 when
+   * no balance row exists yet. Used to MEASURE the exact GL swing a DAMAGE
+   * movement produces (see post()): read before and after the movement and post
+   * the delta, so the GL credit to INVENTORY_ASSET ties to the subledger relief
+   * to the cent. The lock is held for the whole transaction, serialising
+   * concurrent posts against the same balance row.
+   */
+  private async readBalanceValueForUpdate(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    productId: string,
+    branchId: string,
+  ): Promise<Prisma.Decimal> {
+    const rows = await tx.$queryRaw<InventoryBalanceValueRow[]>(Prisma.sql`
+      SELECT "totalValue"
+      FROM "inventory_balances"
+      WHERE "companyId" = ${companyId}
+        AND "productId" = ${productId}
+        AND "branchId" = ${branchId}
+      FOR UPDATE
+    `);
+    return rows[0] ? new Prisma.Decimal(rows[0].totalValue) : new Prisma.Decimal(0);
+  }
 
   private async generateDamageNumber(companyId: string): Promise<string> {
     const year = new Date().getFullYear();
@@ -263,6 +300,7 @@ export class StockDamageService {
     }
 
     const damageQty = Number(quantity);
+    const movementDate = new Date();
 
     // ITMB-043: Perform the movement, batch decrement and status flip in ONE transaction
     // so they commit or roll back together. Claim the document atomically (guarded on
@@ -277,6 +315,25 @@ export class StockDamageService {
         throw new BadRequestException('Only APPROVED records can be posted');
       }
 
+      // ITMB-audit (GL): the DAMAGE movement below relieves the inventory
+      // subledger's totalValue at weighted-average cost but posts NO journal
+      // entry, so the GL Inventory Asset and P&L drift from the subledger on
+      // every post. Rather than RE-DERIVE the relieved value with an independent
+      // WAC formula (min(qty*avg, totalValue)) — which can diverge from
+      // applyMovementToBalance by rounding and in edge cases (e.g. the movement
+      // forces totalValue to zero when qty hits zero, or the qty*avg invariant
+      // was broken by a prior cost-less inbound) — we MEASURE the actual relief:
+      // read the subledger totalValue (locked FOR UPDATE) immediately before the
+      // movement, apply the movement, then re-read totalValue and post the exact
+      // delta. This guarantees the GL credit to INVENTORY_ASSET equals the
+      // subledger reduction to the cent. (Mirrors stock-adjustments.post.)
+      const beforeValue = await this.readBalanceValueForUpdate(
+        tx,
+        companyId,
+        productId,
+        branchId,
+      );
+
       await this.inventoryMovements.createMovement({
         companyId,
         productId,
@@ -284,12 +341,72 @@ export class StockDamageService {
         movementType: 'DAMAGE',
         quantity: damageQty,
         unitId,
-        movementDate: new Date(),
+        movementDate,
         createdById: userId,
         referenceType: 'StockDamage',
         referenceId: id,
         tx,
       });
+
+      const afterValue = await this.readBalanceValueForUpdate(
+        tx,
+        companyId,
+        productId,
+        branchId,
+      );
+      // Relief = before - after (>= 0 for an outbound DAMAGE). Round to money
+      // precision (2 dp) so the balanced JE ties to the cent.
+      const writeOffValue = beforeValue.minus(afterValue).toDecimalPlaces(2);
+
+      // Post the matching GL swing IN THE SAME TRANSACTION so the subledger and
+      // GL never diverge. A stock damage is a physical write-off:
+      //   DR damage/write-off expense (P&L loss)   [GENERAL_EXPENSE]
+      //   CR Inventory Asset (relieve the subledger) [INVENTORY_ASSET]
+      // Both legs use the EXACT value relieved from the subledger above
+      // (before - after). When there is no cost basis (writeOffValue == 0) there
+      // is nothing to relieve and no balanced entry to post, so the GL leg is
+      // skipped (mirrors the subledger, which also relieved zero in that case).
+      let journalEntryId: string | null = null;
+      if (writeOffValue.gt(0)) {
+        const branch = await tx.branch.findFirst({
+          where: { id: branchId },
+          select: { divisionId: true },
+        });
+        const accounts = await this.accountResolver.resolveMany(
+          companyId,
+          ['GENERAL_EXPENSE', 'INVENTORY_ASSET'],
+          tx,
+        );
+        const je = await this.postingEngine.postLines(
+          {
+            companyId,
+            divisionId: branch?.divisionId ?? null,
+            branchId,
+            transactionDate: movementDate,
+            description: `Stock damage write-off ${existing.damageNumber}`,
+            referenceType: 'StockDamage',
+            referenceId: id,
+            moduleName: 'stock-damage',
+            userId,
+            lines: [
+              {
+                accountId: accounts.GENERAL_EXPENSE.id,
+                description: 'Stock damage write-off',
+                debit: writeOffValue,
+                credit: 0,
+              },
+              {
+                accountId: accounts.INVENTORY_ASSET.id,
+                description: 'Inventory relieved (damage)',
+                debit: 0,
+                credit: writeOffValue,
+              },
+            ],
+          },
+          tx,
+        );
+        journalEntryId = je.id;
+      }
 
       if (batchId) {
         // ITMB-audit: only decrement a batch that belongs to the same company,
@@ -324,10 +441,11 @@ export class StockDamageService {
         }
       }
 
-      return tx.stockDamage.update({
+      const updated = await tx.stockDamage.update({
         where: { id },
         data: { status: 'POSTED' },
       });
+      return { updated, journalEntryId };
     });
 
     await this.auditLogs.log({
@@ -335,10 +453,13 @@ export class StockDamageService {
       entityType: 'StockDamage',
       entityId: id,
       userId,
-      companyId: record.companyId,
-      newValue: { status: 'POSTED' } as any,
+      companyId: record.updated.companyId,
+      // StockDamage has no journalEntryId column (schema unchanged this wave);
+      // record the posted JE id in the audit trail so the GL entry stays
+      // traceable to the source document.
+      newValue: { status: 'POSTED', journalEntryId: record.journalEntryId } as any,
     });
-    return record;
+    return record.updated;
   }
 
   async remove(id: string, user: AuthUser) {

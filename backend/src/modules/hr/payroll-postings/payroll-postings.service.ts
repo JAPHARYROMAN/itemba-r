@@ -20,7 +20,19 @@ import { EntityCodeGeneratorService } from '../../entity-code-generator/entity-c
  *      Cr SDL Payable                   (SDL total)
  *      Cr NHIF Payable                  (employee + employer NHIF)
  *      Cr HESLB Payable                 (HESLB total)
+ *      Cr Employee Receivable (1110)    (salary-advance recovery withheld this period)
+ *      Cr Other Payroll Deductions Pay. (capped non-statutory deductions, e.g. housing loans)
  *      Cr Salaries Payable (Net)        (sum of net pay)
+ *
+ * The persisted `PayrollEntry.netPay` is already NET of statutory deductions,
+ * capped non-statutory deductions AND salary-advance recovery
+ * (payroll-runs.service.ts computes netPay = gross − statutory − nonStatutory −
+ * advanceRecovery). The accrual therefore MUST credit those two extra buckets or
+ * total credits fall short of the gross debit by exactly
+ * (nonStatutory + advanceRecovery) and the balance guard aborts approval.
+ * Crediting Employee Receivable (1110) for the advance recovery also relieves the
+ * advance asset booked by `postAdvancePayment`, so a fully-recovered advance nets
+ * 1110 back to zero.
  *
  * Account lookup is by `accountCode` (TZ payroll accounts seeded in
  * `seedFinance` default COA). If a code doesn't exist on the company, the
@@ -38,6 +50,12 @@ const ACCOUNT_CODES = {
   NHIF_PAYABLE: '2250',
   HESLB_PAYABLE: '2260',
   SALARIES_PAYABLE: '2270',
+  // Payable for capped non-statutory deductions withheld from employees
+  // (housing loans, SACCO, welfare, union dues, etc.) pending remittance.
+  OTHER_DEDUCTIONS_PAYABLE: '2280',
+  // Assets
+  // Employee Receivable — carries salary advances; recovery credits relieve it.
+  EMPLOYEE_RECEIVABLE: '1110',
   // Expenses
   SALARIES_EXPENSE: '6000',
   NSSF_EMPLOYER_EXPENSE: '6040',
@@ -86,6 +104,12 @@ export class PayrollPostingsService {
         statutoryLines: {
           include: { taxType: { select: { taxTypeCode: true } } },
         },
+        // Non-statutory deductions + salary-advance recovery installments.
+        // Needed so the accrual credits the two buckets that net pay already
+        // withholds; otherwise credits fall short of gross and the JE aborts.
+        deductions: {
+          select: { amount: true, statutory: true, salaryAdvanceId: true },
+        },
       },
     });
     if (entries.length === 0) {
@@ -103,6 +127,11 @@ export class PayrollPostingsService {
       sdlEmployee: decimal(0),
       nhifEmployee: decimal(0),
       heslb: decimal(0),
+      // Non-statutory deductions withheld from the employee.
+      // - advanceRecovery credits Employee Receivable (1110), relieving the asset.
+      // - otherDeductions credits Other Payroll Deductions Payable (2280).
+      advanceRecovery: decimal(0),
+      otherDeductions: decimal(0),
       // Employer-side (debit expenses, credit payables)
       nssfEmployer: decimal(0),
       psssfEmployer: decimal(0),
@@ -114,6 +143,18 @@ export class PayrollPostingsService {
     for (const e of entries) {
       totals.grossPay = totals.grossPay.plus(decimal(e.grossPay));
       totals.netPay = totals.netPay.plus(decimal(e.netPay));
+      // Split non-statutory deduction lines: advance recovery (has an FK to the
+      // SalaryAdvance) vs everything else. Statutory lines live in
+      // statutoryLines, so `statutory: true` rows here are defensive dedupe only.
+      for (const d of e.deductions ?? []) {
+        if (d.statutory) continue;
+        const amt = decimal(d.amount);
+        if (d.salaryAdvanceId) {
+          totals.advanceRecovery = totals.advanceRecovery.plus(amt);
+        } else {
+          totals.otherDeductions = totals.otherDeductions.plus(amt);
+        }
+      }
       for (const l of e.statutoryLines) {
         const code = l.taxType.taxTypeCode;
         const ee = decimal(l.employeeContribution);
@@ -215,6 +256,15 @@ export class PayrollPostingsService {
     cr('SDL_PAYABLE', totals.sdlEmployer, 'SDL payable — to TRA');
     cr('NHIF_PAYABLE', totals.nhifEmployee.plus(totals.nhifEmployer), 'NHIF (employee + employer)');
     cr('HESLB_PAYABLE', totals.heslb, 'HESLB — to Loans Board');
+    // Salary-advance recovery relieves the Employee Receivable asset (1110) —
+    // clears the advance booked by postAdvancePayment as it is withheld.
+    cr('EMPLOYEE_RECEIVABLE', totals.advanceRecovery, 'Salary advance recovery — relieve receivable');
+    // Capped non-statutory deductions withheld pending remittance.
+    cr(
+      'OTHER_DEDUCTIONS_PAYABLE',
+      totals.otherDeductions,
+      'Non-statutory deductions withheld — pending remittance',
+    );
     cr('SALARIES_PAYABLE', totals.netPay, 'Net pay accrued — to be disbursed');
 
     const totalDebit = money(lines.reduce((s, l) => s.plus(l.debit), decimal(0)));
