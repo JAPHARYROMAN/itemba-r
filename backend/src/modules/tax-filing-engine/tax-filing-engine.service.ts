@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma, TaxCategory, TaxReturnStatus } from '@prisma/client';
+import { AccessLevel, Prisma, TaxCategory, TaxReturnStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CompanyScopeService } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 
 /**
@@ -36,11 +38,15 @@ export class TaxFilingEngineService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   /** Compute and persist a draft TaxReturn for the given filing period. */
-  async computeReturn(periodId: string, userId: string): Promise<TaxReturnComputeResult> {
-    const figures = await this.computeFigures(periodId);
+  async computeReturn(periodId: string, user: AuthUser): Promise<TaxReturnComputeResult> {
+    // MANAGE: compute persists/overwrites a draft TaxReturn under the period's
+    // company, so require write-level access to that company (blocks a company-A
+    // user from mutating company-B's returns via a company-B periodId).
+    const figures = await this.computeFigures(periodId, user, AccessLevel.MANAGE);
     if (figures.notSupported) return figures;
 
     // Find or create the draft return for this period+type.
@@ -67,7 +73,7 @@ export class TaxFilingEngineService {
       totalDue: figures.netTaxDue, // penalties + interest are operator-entered
       outstandingAmount: figures.netTaxDue,
       currency: 'TZS',
-      preparedById: userId,
+      preparedById: user.id,
       notes: this.buildNotes(figures),
       status: TaxReturnStatus.DRAFT,
     };
@@ -88,17 +94,27 @@ export class TaxFilingEngineService {
   }
 
   /** Compute figures without persisting — for "what would this period look like?" previews. */
-  async previewReturn(periodId: string): Promise<TaxReturnComputeResult> {
-    return this.computeFigures(periodId);
+  async previewReturn(periodId: string, user: AuthUser): Promise<TaxReturnComputeResult> {
+    // READ: preview discloses the period's company figures, so require at least
+    // read access to that company.
+    return this.computeFigures(periodId, user, AccessLevel.READ);
   }
 
   // ── Core dispatch ────────────────────────────────────────────────────────
-  private async computeFigures(periodId: string): Promise<TaxReturnComputeResult> {
+  private async computeFigures(
+    periodId: string,
+    user: AuthUser,
+    minimum: AccessLevel,
+  ): Promise<TaxReturnComputeResult> {
     const period = await this.prisma.taxFilingPeriod.findUnique({
       where: { id: periodId },
       include: { taxType: true },
     });
     if (!period || period.deletedAt) throw new NotFoundException(`TaxFilingPeriod ${periodId} not found`);
+
+    // Multi-tenant guard: the caller must have the required access level on the
+    // PERIOD's company before we read its ledger/GL or persist a return.
+    await this.companyScope.assertCanAccessCompany(user, period.companyId, minimum);
 
     const base: TaxReturnComputeBase = {
       companyId: period.companyId,

@@ -2,6 +2,7 @@ import { Controller, Param, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
+import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.decorator';
 import { DisbursementsService } from './disbursements.service';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -16,7 +17,7 @@ export class DisbursementsController {
    */
   @Post(':id/disbursement-files')
   @RequirePermissions('payroll.pay')
-  generate(@Param('id') id: string) {
-    return this.service.generateForRun(id);
+  generate(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.generateForRun(id, user);
   }
 }

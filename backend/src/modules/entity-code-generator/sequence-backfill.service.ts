@@ -1,5 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CompanyScopeService } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { DEFAULT_PATTERNS, fallbackPattern } from './defaults';
 
 /**
@@ -74,19 +77,57 @@ export interface BackfillResult {
 @Injectable()
 export class SequenceBackfillService {
   private readonly logger = new Logger(SequenceBackfillService.name);
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly companyScope: CompanyScopeService,
+  ) {}
 
   /**
    * Backfill all known entity-type sequences for the given company (or
    * across the whole group if `companyId` is omitted, repeated per company).
+   *
+   * Company scope (guard-gap fix): backfilling advances another company's
+   * sequence counters, so it is a WRITE-level cross-company action. The caller
+   * must hold WRITE access to the requested `companyId`. When `companyId` is
+   * omitted the all-companies sweep is restricted to the companies the caller
+   * can actually write to — group-scoped users hit the whole group, non-group
+   * users only their own accessible set.
    */
-  async backfillAll(query: { companyId?: string } = {}): Promise<BackfillResult[]> {
-    const companies = query.companyId
-      ? [{ id: query.companyId }]
-      : await this.prisma.company.findMany({
+  async backfillAll(
+    user: AuthUser,
+    query: { companyId?: string } = {},
+  ): Promise<BackfillResult[]> {
+    let companies: Array<{ id: string }>;
+
+    if (query.companyId) {
+      await this.companyScope.assertCanAccessCompany(
+        user,
+        query.companyId,
+        AccessLevel.WRITE,
+      );
+      companies = [{ id: query.companyId }];
+    } else {
+      // No company specified: sweep only the caller's accessible companies.
+      // Group-scoped users get every non-deleted company in the group; other
+      // users are restricted to their explicitly accessible set. This avoids a
+      // non-group user with `doc_sequences.update` advancing every company's
+      // counters via the all-companies path.
+      if (this.companyScope.isGroupScoped(user)) {
+        companies = await this.prisma.company.findMany({
           where: { deletedAt: null },
           select: { id: true },
         });
+      } else {
+        const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
+        companies =
+          accessibleIds.length === 0
+            ? []
+            : await this.prisma.company.findMany({
+                where: { id: { in: accessibleIds }, deletedAt: null },
+                select: { id: true },
+              });
+      }
+    }
 
     const results: BackfillResult[] = [];
     for (const company of companies) {

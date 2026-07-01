@@ -5,6 +5,8 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import {
+  AccessLevel,
+  ApproverType,
   ApprovalRequestStatus,
   DataQualityIssueSeverity,
   DataQualityIssueStatus,
@@ -14,7 +16,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateApprovalRequestDto } from './dto/create-approval-request.dto';
 import { ApprovalActionDto } from './dto/approval-action.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { CompanyScopeService, applyCompanyScopeWhere } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 type ReadinessStatus = 'READY' | 'WARNING' | 'CRITICAL';
 
@@ -32,9 +35,10 @@ export class ApprovalRequestsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
-  async findAll(user: any, query: any) {
+  async findAll(user: AuthUser, query: any) {
     const { page = 1, limit = 20, companyId, entityType, status, requestedById } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
@@ -266,7 +270,7 @@ export class ApprovalRequestsService {
     };
   }
 
-  async findOne(id: string, user: any) {
+  async findOne(id: string, user: AuthUser) {
     const record = await this.prisma.approvalRequest.findFirst({
       where: { id, deletedAt: null },
       include: {
@@ -281,30 +285,89 @@ export class ApprovalRequestsService {
       },
     });
     if (!record) throw new NotFoundException('Approval request not found');
+    // ITMB: company-scope reads. Assert the caller can reach the request's
+    // company before returning it, mirroring the receivables canonical pattern
+    // (fetch by id, then assertCanAccessCompany). This also correctly handles
+    // group-level (null companyId) requests, which only group-scoped users may
+    // reach. Throw NotFound rather than Forbidden so a foreign-tenant id does
+    // not leak the record's existence.
+    try {
+      await this.companyScope.assertCanAccessCompany(user, record.companyId, AccessLevel.READ);
+    } catch {
+      throw new NotFoundException('Approval request not found');
+    }
     return record;
   }
 
-  async findPendingForMe(user: any, query: any) {
-    const { page = 1, limit = 20 } = query;
-    const skip = (Number(page) - 1) * Number(limit);
-    const where: any = { status: 'PENDING', deletedAt: null };
-    const [data, total] = await Promise.all([
-      this.prisma.approvalRequest.findMany({
-        where,
-        skip,
-        take: Number(limit),
-        orderBy: { createdAt: 'desc' },
-        include: {
-          requestedBy: { select: { id: true, fullName: true, email: true } },
-          workflow: { select: { id: true, name: true } },
+  async findPendingForMe(user: AuthUser, query: any) {
+    const { page = 1, limit = 20, companyId } = query;
+    const take = Number(limit);
+    const skip = (Number(page) - 1) * take;
+
+    // ITMB (CRITICAL): this queue previously returned every PENDING request in
+    // the database with no company scope and no user filter — a cross-company
+    // leak and a broken "awaiting my action" queue. Scope to the caller's
+    // accessible companies, exclude the caller's own requests (maker-checker),
+    // then keep only requests for which the caller is an eligible approver of
+    // the current step.
+    const where: any = { status: ApprovalRequestStatus.PENDING, deletedAt: null };
+    applyCompanyScopeWhere(where, user, companyId);
+    where.requestedById = { not: user.id };
+
+    // Resolve the caller's role ids once so ROLE-based steps can be evaluated
+    // (AuthUser only carries role names / permission codes, not role ids).
+    const roleIds = await this.getUserRoleIds(user);
+    const delegatorIds = await this.getActiveDelegatorIdsFor(user);
+
+    // Fetch the company-scoped candidate set with the current step config so we
+    // can filter by approver eligibility in-memory. We over-fetch relative to
+    // the page window because eligibility cannot be expressed as a single
+    // Prisma where-clause across the polymorphic approver model.
+    const candidates = await this.prisma.approvalRequest.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        requestedBy: { select: { id: true, fullName: true, email: true } },
+        workflow: {
+          select: {
+            id: true,
+            name: true,
+            steps: {
+              where: { deletedAt: null },
+              orderBy: { stepOrder: 'asc' },
+              select: {
+                stepOrder: true,
+                approverType: true,
+                approverUserId: true,
+                approverRoleId: true,
+                approverPermission: true,
+                allowSelfApproval: true,
+              },
+            },
+          },
         },
-      }),
-      this.prisma.approvalRequest.count({ where }),
-    ]);
-    return { data, total, page: Number(page), limit: Number(limit) };
+      },
+    });
+
+    const eligible = candidates.filter((req) =>
+      this.isEligibleApprover(req as any, user, roleIds, delegatorIds),
+    );
+
+    const total = eligible.length;
+    const data = eligible.slice(skip, skip + take).map((req) => {
+      // Trim the step config from the payload — it was only needed for filtering
+      // and mirrors the previous response shape.
+      const { workflow, ...rest } = req as any;
+      return {
+        ...rest,
+        workflow: workflow ? { id: workflow.id, name: workflow.name } : null,
+      };
+    });
+
+    return { data, total, page: Number(page), limit: take };
   }
 
-  async findSubmittedByMe(user: any, query: any) {
+  async findSubmittedByMe(user: AuthUser, query: any) {
     const { page = 1, limit = 20, status } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { requestedById: user.id, deletedAt: null };
@@ -323,7 +386,12 @@ export class ApprovalRequestsService {
   }
 
   async create(dto: CreateApprovalRequestDto, user: any) {
+    // ITMB: never trust a client-supplied companyId for authorization. Validate
+    // it against the caller's access before stamping it on the new request
+    // (a null companyId is a group-level request and requires group scope).
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId ?? null, AccessLevel.WRITE);
     const approvalRequestNumber = `REQ-${Date.now()}`;
+    // Whitelist explicit fields — never spread the raw DTO into prisma.create.
     const record = await this.prisma.approvalRequest.create({
       data: {
         approvalRequestNumber,
@@ -349,7 +417,7 @@ export class ApprovalRequestsService {
     return record;
   }
 
-  async submit(id: string, user: any) {
+  async submit(id: string, user: AuthUser) {
     const record = await this.findOne(id, user);
     if (record.status !== 'DRAFT')
       throw new BadRequestException('Only DRAFT requests can be submitted');
@@ -378,7 +446,8 @@ export class ApprovalRequestsService {
     return updated;
   }
 
-  async approve(id: string, dto: ApprovalActionDto, user: any) {
+  async approve(id: string, dto: ApprovalActionDto, user: AuthUser) {
+    // findOne now enforces company scope, so a cross-tenant id 404s here.
     const record = await this.findOne(id, user);
     if (record.status !== 'PENDING')
       throw new BadRequestException('Only PENDING requests can be approved');
@@ -387,6 +456,10 @@ export class ApprovalRequestsService {
         'Maker-checker: you cannot approve a request you submitted. Another approver must act.',
       );
     }
+    // ITMB (HIGH): enforce the designated step approver / role / permission /
+    // delegation. Previously any holder of the coarse approval_requests.approve
+    // permission could approve any request, defeating segregation of duties.
+    await this.assertEligibleApprover(record, user);
     const updated = await this.prisma.approvalRequest.update({
       where: { id },
       data: { status: 'APPROVED', approvedAt: new Date() },
@@ -410,7 +483,8 @@ export class ApprovalRequestsService {
     return updated;
   }
 
-  async reject(id: string, dto: ApprovalActionDto, user: any) {
+  async reject(id: string, dto: ApprovalActionDto, user: AuthUser) {
+    // findOne now enforces company scope, so a cross-tenant id 404s here.
     const record = await this.findOne(id, user);
     if (record.status !== 'PENDING')
       throw new BadRequestException('Only PENDING requests can be rejected');
@@ -419,6 +493,10 @@ export class ApprovalRequestsService {
         'Maker-checker: you cannot reject a request you submitted. Another approver must act.',
       );
     }
+    // ITMB (HIGH): rejecting is a decision on the current step; require the same
+    // step-approver eligibility as approve so a non-approver cannot kill a
+    // request they merely hold the coarse permission for.
+    await this.assertEligibleApprover(record, user);
     const updated = await this.prisma.approvalRequest.update({
       where: { id },
       data: { status: 'REJECTED', rejectedAt: new Date() },
@@ -443,7 +521,8 @@ export class ApprovalRequestsService {
     return updated;
   }
 
-  async cancel(id: string, dto: ApprovalActionDto, user: any) {
+  async cancel(id: string, dto: ApprovalActionDto, user: AuthUser) {
+    // findOne now enforces company scope, so a cross-tenant id 404s here.
     const record = await this.findOne(id, user);
     if (!['DRAFT', 'PENDING'].includes(record.status as string))
       throw new BadRequestException('Cannot cancel this request');
@@ -471,7 +550,7 @@ export class ApprovalRequestsService {
     return updated;
   }
 
-  async addComment(id: string, dto: ApprovalActionDto, user: any) {
+  async addComment(id: string, dto: ApprovalActionDto, user: AuthUser) {
     const record = await this.findOne(id, user);
     const action = await this.prisma.approvalAction.create({
       data: {
@@ -490,6 +569,120 @@ export class ApprovalRequestsService {
       newValue: { comment: dto.comment },
     });
     return action;
+  }
+
+  /**
+   * ITMB (HIGH): resolve whether `user` is a valid approver for the request's
+   * CURRENT step and throw ForbiddenException otherwise.
+   *
+   * Scope of this wave: honor the per-step designated approver (USER / ROLE /
+   * PERMISSION), allowSelfApproval, and active ApprovalDelegation (a delegate
+   * may act for a designated USER approver). Multi-step advancement,
+   * minRequiredApprovals counting, and the other approver types
+   * (DEPARTMENT_MANAGER / COMPANY_MANAGER / GROUP_CONTROL / DIRECT_MANAGER /
+   * CUSTOM) are intentionally DEFERRED to a later wave (see class notes). For a
+   * request with no workflow or no matching step, we fall back to the coarse
+   * approval_requests.approve/reject permission already enforced by the guard
+   * (do NOT over-restrict legitimate approvals when no step is configured).
+   */
+  private async assertEligibleApprover(record: any, user: AuthUser) {
+    const roleIds = await this.getUserRoleIds(user);
+    const delegatorIds = await this.getActiveDelegatorIdsFor(user);
+    if (!this.isEligibleApprover(record, user, roleIds, delegatorIds)) {
+      throw new ForbiddenException(
+        'You are not a designated approver for the current step of this request.',
+      );
+    }
+  }
+
+  private isEligibleApprover(
+    record: {
+      requestedById: string;
+      currentStepOrder: number;
+      workflow?: {
+        steps?: Array<{
+          stepOrder: number;
+          approverType: ApproverType;
+          approverUserId: string | null;
+          approverRoleId: string | null;
+          approverPermission: string | null;
+          allowSelfApproval: boolean;
+        }>;
+      } | null;
+    },
+    user: AuthUser,
+    roleIds: Set<string>,
+    delegatorIds: Set<string>,
+  ): boolean {
+    const steps = record.workflow?.steps ?? [];
+    // No workflow / no step config -> fall back to the coarse permission the
+    // controller guard already enforced.
+    if (steps.length === 0) return true;
+
+    const step =
+      steps.find((s) => s.stepOrder === record.currentStepOrder) ??
+      // If currentStepOrder does not line up (legacy data), use the lowest step.
+      steps[0];
+    if (!step) return true;
+
+    // Self-approval guard: a designated user may only self-approve when the step
+    // explicitly allows it.
+    const isRequester = record.requestedById === user.id;
+
+    switch (step.approverType) {
+      case ApproverType.USER: {
+        if (!step.approverUserId) return true; // misconfigured -> don't block
+        if (step.approverUserId === user.id) {
+          return !isRequester || step.allowSelfApproval;
+        }
+        // Active delegation: the caller may act on behalf of the designated user.
+        return delegatorIds.has(step.approverUserId);
+      }
+      case ApproverType.ROLE: {
+        if (!step.approverRoleId) return true; // misconfigured -> don't block
+        if (!roleIds.has(step.approverRoleId)) return false;
+        return !isRequester || step.allowSelfApproval;
+      }
+      case ApproverType.PERMISSION: {
+        if (!step.approverPermission) return true; // misconfigured -> don't block
+        if (!(user.permissions ?? []).includes(step.approverPermission)) return false;
+        return !isRequester || step.allowSelfApproval;
+      }
+      default:
+        // DEFERRED approver types (DEPARTMENT_MANAGER/COMPANY_MANAGER/
+        // GROUP_CONTROL/DIRECT_MANAGER/CUSTOM): not resolvable in this wave.
+        // Fall back to the coarse permission guard rather than block legitimate
+        // approvals.
+        return true;
+    }
+  }
+
+  private async getUserRoleIds(user: AuthUser): Promise<Set<string>> {
+    const rows = await this.prisma.userRole.findMany({
+      where: { userId: user.id },
+      select: { roleId: true },
+    });
+    return new Set(rows.map((r) => r.roleId));
+  }
+
+  /**
+   * Ids of users who have delegated their approval authority TO `user` under an
+   * active, in-window, non-deleted delegation. A delegate may then act on steps
+   * that designate one of these users as the approver.
+   */
+  private async getActiveDelegatorIdsFor(user: AuthUser): Promise<Set<string>> {
+    const now = new Date();
+    const rows = await this.prisma.approvalDelegation.findMany({
+      where: {
+        delegateUserId: user.id,
+        status: DelegationStatus.ACTIVE,
+        startDate: { lte: now },
+        endDate: { gte: now },
+        deletedAt: null,
+      },
+      select: { delegatorUserId: true },
+    });
+    return new Set(rows.map((r) => r.delegatorUserId));
   }
 
   private buildWorkflowCoverageCheck(

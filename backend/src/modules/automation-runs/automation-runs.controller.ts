@@ -15,8 +15,8 @@ export class AutomationRunsController {
 
   @Get(':id')
   @RequirePermissions('automation_runs.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post('trigger')
@@ -27,7 +27,7 @@ export class AutomationRunsController {
 
   @Get(':id/items')
   @RequirePermissions('automation_runs.view')
-  getItems(@Param('id') id: string) {
-    return this.service.getItems(id);
+  getItems(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.getItems(id, user);
   }
 }

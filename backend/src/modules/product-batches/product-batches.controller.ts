@@ -16,7 +16,7 @@ export class ProductBatchesController {
   @RequirePermissions('product_batches.manage')
   @ApiOperation({ summary: 'Create product batch' })
   create(@Body() dto: CreateProductBatchDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Get()
@@ -43,28 +43,28 @@ export class ProductBatchesController {
   @Get('product/:productId')
   @RequirePermissions('product_batches.view')
   @ApiOperation({ summary: 'Get batches for a product' })
-  findByProduct(@Param('productId') productId: string) {
-    return this.service.findByProduct(productId);
+  findByProduct(@Param('productId') productId: string, @CurrentUser() user: AuthUser) {
+    return this.service.findByProduct(productId, user);
   }
 
   @Get(':id')
   @RequirePermissions('product_batches.view')
   @ApiOperation({ summary: 'Get product batch by ID' })
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Patch(':id')
   @RequirePermissions('product_batches.manage')
   @ApiOperation({ summary: 'Update product batch' })
   update(@Param('id') id: string, @Body() dto: UpdateProductBatchDto, @CurrentUser() user: AuthUser) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 
   @Delete(':id')
   @RequirePermissions('product_batches.manage')
   @ApiOperation({ summary: 'Soft delete product batch' })
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user);
   }
 }

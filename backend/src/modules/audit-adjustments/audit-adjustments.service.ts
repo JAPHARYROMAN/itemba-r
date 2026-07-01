@@ -69,6 +69,13 @@ export class AuditAdjustmentsService {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const lines = Array.isArray(dto.lines) ? dto.lines : [];
 
+    // If lines are supplied at creation, ensure every referenced account is an
+    // active, non-deleted account owned by this company — never store a
+    // cross-company / inactive account reference on the draft.
+    if (lines.length > 0) {
+      await this.validateLineAccounts(dto.companyId, lines);
+    }
+
     const adjustmentNumber = dto.adjustmentNumber ?? await this.codes.next({ entityType: 'AuditAdjustment', companyId: dto.companyId });
     const item = await this.prisma.auditAdjustment.create({
       data: {
@@ -150,6 +157,9 @@ export class AuditAdjustmentsService {
       if (!Number.isFinite(numeric)) {
         throw new BadRequestException('Adjustment line amounts must be finite numbers');
       }
+      if (numeric < 0) {
+        throw new BadRequestException('Adjustment line amounts cannot be negative');
+      }
       const cents = Math.round(numeric * 100);
       if (Math.abs(numeric * 100 - cents) > 1e-6) {
         throw new BadRequestException('Adjustment line amounts cannot exceed 2 decimal places');
@@ -174,6 +184,11 @@ export class AuditAdjustmentsService {
     });
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      // Validate every line account exists, is active, non-deleted, and
+      // belongs to THIS company before we write it into the GL. Prevents
+      // cross-company / inactive-account leakage into the ledger.
+      await this.validateLineAccounts(existing.companyId, existing.lines, tx);
+
       const journalNumber = await this.codes.next({ entityType: 'AuditAdjustmentJournal', companyId: existing.companyId, tx });
       const je = await tx.journalEntry.create({
         data: {
@@ -252,6 +267,11 @@ export class AuditAdjustmentsService {
     const totalCredit = existing.lines.reduce((s, l) => s + Number(l.debit), 0);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      // Re-validate accounts at reversal time: an account may have been
+      // deactivated / soft-deleted since the original posting, and we must
+      // never post reversal lines against a foreign or inactive account.
+      await this.validateLineAccounts(existing.companyId, existing.lines, tx);
+
       const journalNumber = await this.codes.next({ entityType: 'AuditAdjustmentReversalJournal', companyId: existing.companyId, tx });
       const reversalJe = await tx.journalEntry.create({
         data: {
@@ -306,5 +326,35 @@ export class AuditAdjustmentsService {
     });
 
     return updated;
+  }
+
+  /**
+   * Assert every line account is an active, non-deleted account that belongs
+   * to the given company. Mirrors JournalEntriesService.validateLineAccounts /
+   * PostingEngine.validatePostingLines so audit-adjustment postings cannot leak
+   * cross-company or inactive/soft-deleted accounts into the GL.
+   */
+  private async validateLineAccounts(
+    companyId: string,
+    lines: Array<{ accountId: string }>,
+    tx: Pick<PrismaService, 'chartOfAccount'> | Prisma.TransactionClient = this.prisma,
+  ) {
+    const accountIds = Array.from(new Set(lines.map((l) => l.accountId)));
+    if (accountIds.length === 0) {
+      throw new BadRequestException('Adjustment must reference at least one account');
+    }
+    const count = await tx.chartOfAccount.count({
+      where: {
+        id: { in: accountIds },
+        companyId,
+        deletedAt: null,
+        isActive: true,
+      },
+    });
+    if (count !== accountIds.length) {
+      throw new BadRequestException(
+        'All adjustment line accounts must be active accounts for the adjustment company',
+      );
+    }
   }
 }

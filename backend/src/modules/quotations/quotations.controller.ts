@@ -16,7 +16,7 @@ export class QuotationsController {
   @RequirePermissions('quotations.create')
   @ApiOperation({ summary: 'Create quotation with lines' })
   create(@Body() dto: CreateQuotationDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Get()
@@ -37,41 +37,41 @@ export class QuotationsController {
   @RequirePermissions('quotations.update')
   @ApiOperation({ summary: 'Send quotation (DRAFT → SENT)' })
   send(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.send(id, user.id);
+    return this.service.send(id, user);
   }
 
   @Patch(':id/accept')
   @RequirePermissions('quotations.approve')
   @ApiOperation({ summary: 'Accept quotation (SENT → ACCEPTED)' })
   accept(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.accept(id, user.id);
+    return this.service.accept(id, user);
   }
 
   @Patch(':id/reject')
   @RequirePermissions('quotations.approve')
   @ApiOperation({ summary: 'Reject quotation (SENT → REJECTED)' })
   reject(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.reject(id, user.id);
+    return this.service.reject(id, user);
   }
 
   @Patch(':id/convert-to-sales-order')
   @RequirePermissions('quotations.convert')
   @ApiOperation({ summary: 'Convert quotation to sales order (ACCEPTED → CONVERTED)' })
   convertToSalesOrder(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.convertToSalesOrder(id, user.id);
+    return this.service.convertToSalesOrder(id, user);
   }
 
   @Patch(':id')
   @RequirePermissions('quotations.update')
   @ApiOperation({ summary: 'Update quotation (DRAFT or SENT)' })
   update(@Param('id') id: string, @Body() dto: UpdateQuotationDto, @CurrentUser() user: AuthUser) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 
   @Delete(':id')
   @RequirePermissions('quotations.create')
   @ApiOperation({ summary: 'Soft delete quotation (DRAFT only)' })
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user);
   }
 }

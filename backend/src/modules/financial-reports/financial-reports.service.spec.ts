@@ -137,3 +137,86 @@ describe('FinancialReportsService.getCustomerAgingDetail', () => {
     expect(findMany).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Regression cover for the reversal double-count finding: reports must include
+ * REVERSED originals so they net against their POSTED reversal mirror instead
+ * of leaving only the (negative) reversal in the totals.
+ */
+function makeJournalService(lines: any[]) {
+  const findMany = jest.fn().mockResolvedValue(lines);
+  const prisma = {
+    journalEntryLine: { findMany },
+  } as any;
+  const companyScope = {
+    assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
+  } as any;
+  const service = new FinancialReportsService(prisma, companyScope);
+  return { service, prisma, companyScope, findMany };
+}
+
+// A journal entry line as returned by prisma with the account include used by
+// getTrialBalance / getProfitAndLoss.
+function jeLine(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    accountId: 'acc-rev',
+    journalEntryId: 'je-orig',
+    debit: 0,
+    credit: 0,
+    account: {
+      id: 'acc-rev',
+      accountCode: '4000',
+      accountName: 'Revenue',
+      accountType: 'INCOME',
+    },
+    ...overrides,
+  };
+}
+
+describe('FinancialReportsService reversal netting', () => {
+  it('getTrialBalance queries POSTED and REVERSED journal entries', async () => {
+    const { service, findMany } = makeJournalService([]);
+
+    await service.getTrialBalance('co-1', undefined, undefined, undefined, user);
+
+    const where = findMany.mock.calls[0][0].where;
+    expect(where.journalEntry.status).toEqual({ in: ['POSTED', 'REVERSED'] });
+  });
+
+  it('getProfitAndLoss queries POSTED and REVERSED journal entries', async () => {
+    const { service, findMany } = makeJournalService([]);
+
+    await service.getProfitAndLoss('co-1', undefined, undefined, user);
+
+    const where = findMany.mock.calls[0][0].where;
+    expect(where.journalEntry.status).toEqual({ in: ['POSTED', 'REVERSED'] });
+  });
+
+  it('nets a reversed original against its reversal mirror to zero in P&L income', async () => {
+    // Original sale (CR Revenue 100) -> flipped to REVERSED but still returned.
+    // Reversal (DR Revenue 100) -> POSTED. Correct net income contribution = 0.
+    const { service } = makeJournalService([
+      jeLine({ journalEntryId: 'je-orig', credit: 100, debit: 0 }),
+      jeLine({ journalEntryId: 'je-reversal', credit: 0, debit: 100 }),
+    ]);
+
+    const result = await service.getProfitAndLoss('co-1', undefined, undefined, user);
+
+    expect(result.income).toBe(0);
+    expect(result.netIncome).toBe(0);
+  });
+
+  it('nets a reversed original against its reversal mirror to zero in the trial balance', async () => {
+    const { service } = makeJournalService([
+      jeLine({ journalEntryId: 'je-orig', credit: 100, debit: 0 }),
+      jeLine({ journalEntryId: 'je-reversal', credit: 0, debit: 100 }),
+    ]);
+
+    const result = await service.getTrialBalance('co-1', undefined, undefined, undefined, user);
+
+    const revenueRow = result.rows.find((r) => r.account.accountCode === '4000');
+    expect(revenueRow?.debit).toBe(100);
+    expect(revenueRow?.credit).toBe(100);
+    expect(revenueRow?.balance).toBe(0);
+  });
+});

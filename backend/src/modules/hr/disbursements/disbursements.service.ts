@@ -1,5 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { CompanyScopeService } from '../../../common/services';
+import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
 /**
  * Generates payroll disbursement files for a payroll run. Each Tanzanian bank
@@ -23,14 +25,21 @@ import { PrismaService } from '../../../prisma/prisma.service';
  */
 @Injectable()
 export class DisbursementsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly companyScope: CompanyScopeService,
+  ) {}
 
-  async generateForRun(payrollRunId: string) {
+  async generateForRun(payrollRunId: string, user: AuthUser) {
     const run = await this.prisma.payrollRun.findFirst({
       where: { id: payrollRunId, deletedAt: null },
       include: { company: { select: { id: true, code: true, name: true } } },
     });
     if (!run) throw new NotFoundException('Payroll run not found');
+    // ITMB: prevent cross-tenant PII/salary leak — the caller must be able to
+    // access the run's company before any employee bank/mobile-money data or net
+    // pay is emitted. Mirrors PayrollRunsService.findOne scoping.
+    await this.companyScope.assertCanAccessCompany(user, run.companyId);
     if (!['CALCULATED', 'APPROVED', 'PAID'].includes(run.status)) {
       throw new BadRequestException(
         'Disbursement files can only be generated for CALCULATED, APPROVED, or PAID runs.',

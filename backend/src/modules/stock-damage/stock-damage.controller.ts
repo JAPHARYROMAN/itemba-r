@@ -16,7 +16,7 @@ export class StockDamageController {
   @RequirePermissions('stock_damage.create')
   @ApiOperation({ summary: 'Create stock damage record' })
   create(@Body() dto: CreateStockDamageDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Get()
@@ -29,49 +29,49 @@ export class StockDamageController {
   @Get(':id')
   @RequirePermissions('stock_damage.view')
   @ApiOperation({ summary: 'Get stock damage record by ID' })
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Patch(':id/submit')
   @RequirePermissions('stock_damage.create')
   @ApiOperation({ summary: 'Submit stock damage (DRAFT → SUBMITTED)' })
   submit(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.submit(id, user.id);
+    return this.service.submit(id, user);
   }
 
   @Patch(':id/approve')
   @RequirePermissions('stock_damage.approve')
   @ApiOperation({ summary: 'Approve stock damage (SUBMITTED → APPROVED)' })
   approve(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approve(id, user.id);
+    return this.service.approve(id, user);
   }
 
   @Patch(':id/reject')
   @RequirePermissions('stock_damage.approve')
   @ApiOperation({ summary: 'Reject stock damage (SUBMITTED → REJECTED)' })
   reject(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.reject(id, user.id);
+    return this.service.reject(id, user);
   }
 
   @Patch(':id/post')
   @RequirePermissions('stock_damage.post')
   @ApiOperation({ summary: 'Post stock damage (APPROVED → POSTED, affects inventory)' })
   post(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.post(id, user.id);
+    return this.service.post(id, user);
   }
 
   @Patch(':id')
   @RequirePermissions('stock_damage.create')
   @ApiOperation({ summary: 'Update stock damage (DRAFT only)' })
   update(@Param('id') id: string, @Body() dto: UpdateStockDamageDto, @CurrentUser() user: AuthUser) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 
   @Delete(':id')
   @RequirePermissions('stock_damage.create')
   @ApiOperation({ summary: 'Soft delete stock damage (DRAFT only)' })
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user);
   }
 }

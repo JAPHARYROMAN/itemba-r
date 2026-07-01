@@ -282,6 +282,17 @@ export class ReceivablesService {
         if (!locked) throw new NotFoundException('Receivable not found');
         await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);
 
+        // A settled receivable (WRITTEN_OFF / PAID / CANCELLED) must not accept a
+        // payment. writeOff leaves outstandingAmount non-zero, so the amount check
+        // below does not catch this on its own; without this guard a payment would
+        // flip the status back to PARTIALLY_PAID and silently un-write-off the debt
+        // (re-adding it to the customer's currentBalance via syncCustomerBalance).
+        if (!['OPEN', 'PARTIALLY_PAID', 'OVERDUE'].includes(locked.status)) {
+          throw new BadRequestException(
+            `Cannot record a payment against a ${locked.status} receivable`,
+          );
+        }
+
         const outstanding = new Prisma.Decimal(locked.outstandingAmount);
         if (paymentAmount.gt(outstanding)) {
           throw new BadRequestException(

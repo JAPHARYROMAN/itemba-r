@@ -1,11 +1,20 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { CreateStockDamageDto } from './dto/create-stock-damage.dto';
 import { UpdateStockDamageDto } from './dto/update-stock-damage.dto';
 import { QueryStockDamageDto } from './dto/query-stock-damage.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
+
+type StockDamageReferenceIds = {
+  branchId?: string | null;
+  productId?: string | null;
+  unitId?: string | null;
+  batchId?: string | null;
+};
 
 @Injectable()
 export class StockDamageService {
@@ -13,6 +22,7 @@ export class StockDamageService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly inventoryMovements: InventoryMovementsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   private async generateDamageNumber(companyId: string): Promise<string> {
@@ -23,7 +33,70 @@ export class StockDamageService {
     return `DMG-${year}-${String(count + 1).padStart(5, '0')}`;
   }
 
-  async create(dto: CreateStockDamageDto, userId: string) {
+  // ITMB-audit: verify every client-supplied reference (branch, product, unit,
+  // batch) belongs to the damage record's company (and, for the batch, the same
+  // product/branch) so a caller cannot bind another company's rows to a record
+  // and later corrupt/deplete them on post.
+  private async assertReferencesBelongToCompany(
+    companyId: string,
+    refs: StockDamageReferenceIds,
+  ) {
+    if (refs.branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: refs.branchId, deletedAt: null },
+        select: { division: { select: { companyId: true } } },
+      });
+      if (!branch || branch.division.companyId !== companyId) {
+        throw new BadRequestException('Branch does not belong to this company');
+      }
+    }
+
+    if (refs.productId) {
+      const product = await this.prisma.product.findFirst({
+        where: { id: refs.productId, deletedAt: null },
+        select: { companyId: true },
+      });
+      if (!product || product.companyId !== companyId) {
+        throw new BadRequestException('Product does not belong to this company');
+      }
+    }
+
+    if (refs.unitId) {
+      const unit = await this.prisma.unitOfMeasure.findFirst({
+        where: { id: refs.unitId, deletedAt: null, status: 'ACTIVE' },
+        select: { companyId: true },
+      });
+      if (!unit || (unit.companyId !== null && unit.companyId !== companyId)) {
+        throw new BadRequestException('Unit does not belong to this company');
+      }
+    }
+
+    if (refs.batchId) {
+      const batch = await this.prisma.productBatch.findFirst({
+        where: { id: refs.batchId, deletedAt: null },
+        select: { companyId: true, productId: true, branchId: true },
+      });
+      if (!batch || batch.companyId !== companyId) {
+        throw new BadRequestException('Batch does not belong to this company');
+      }
+      if (refs.productId && batch.productId !== refs.productId) {
+        throw new BadRequestException('Batch does not belong to the selected product');
+      }
+      if (refs.branchId && batch.branchId && batch.branchId !== refs.branchId) {
+        throw new BadRequestException('Batch does not belong to the selected branch');
+      }
+    }
+  }
+
+  async create(dto: CreateStockDamageDto, user: AuthUser) {
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    await this.assertReferencesBelongToCompany(dto.companyId, {
+      branchId: dto.branchId,
+      productId: dto.productId,
+      unitId: dto.unitId,
+      batchId: dto.batchId,
+    });
+    const userId = user.id;
     const damageNumber = await this.generateDamageNumber(dto.companyId);
     const record = await this.prisma.stockDamage.create({
       data: {
@@ -73,15 +146,27 @@ export class StockDamageService {
     return { data, total, page, limit };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const record = await this.prisma.stockDamage.findFirst({ where: { id, deletedAt: null } });
     if (!record) throw new NotFoundException('Stock damage not found');
+    if (user) {
+      await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
+    }
     return record;
   }
 
-  async update(id: string, dto: UpdateStockDamageDto, userId: string) {
-    const existing = await this.findOne(id);
+  async update(id: string, dto: UpdateStockDamageDto, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== 'DRAFT') throw new BadRequestException('Can only update DRAFT records');
+    // companyId is immutable on update; validate any changed references against
+    // the record's own company (never a client-supplied companyId).
+    await this.assertReferencesBelongToCompany(existing.companyId, {
+      branchId: dto.branchId ?? existing.branchId,
+      productId: dto.productId ?? existing.productId,
+      unitId: dto.unitId ?? existing.unitId,
+      batchId: dto.batchId !== undefined ? dto.batchId : existing.batchId,
+    });
     const record = await this.prisma.stockDamage.update({
       where: { id },
       data: {
@@ -107,8 +192,9 @@ export class StockDamageService {
     return record;
   }
 
-  async submit(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async submit(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== 'DRAFT')
       throw new BadRequestException('Only DRAFT records can be submitted');
     const record = await this.prisma.stockDamage.update({
@@ -127,8 +213,9 @@ export class StockDamageService {
     return record;
   }
 
-  async approve(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async approve(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== 'SUBMITTED')
       throw new BadRequestException('Only SUBMITTED records can be approved');
     const record = await this.prisma.stockDamage.update({
@@ -145,8 +232,9 @@ export class StockDamageService {
     return record;
   }
 
-  async reject(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async reject(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== 'SUBMITTED')
       throw new BadRequestException('Only SUBMITTED records can be rejected');
     const record = await this.prisma.stockDamage.update({
@@ -163,8 +251,9 @@ export class StockDamageService {
     return record;
   }
 
-  async post(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async post(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== 'APPROVED')
       throw new BadRequestException('Only APPROVED records can be posted');
 
@@ -203,11 +292,34 @@ export class StockDamageService {
       });
 
       if (batchId) {
+        // ITMB-audit: only decrement a batch that belongs to the same company,
+        // product and (when set) branch as the damage record, so a mismatched
+        // batchId can never deplete an unrelated / cross-company batch.
         const res = await tx.productBatch.updateMany({
-          where: { id: batchId, remainingQuantity: { gte: damageQty } },
+          where: {
+            id: batchId,
+            companyId,
+            productId,
+            ...(branchId ? { branchId } : {}),
+            remainingQuantity: { gte: damageQty },
+          },
           data: { remainingQuantity: { decrement: damageQty } },
         });
         if (res.count === 0) {
+          const batch = await tx.productBatch.findFirst({
+            where: { id: batchId },
+            select: { companyId: true, productId: true, branchId: true },
+          });
+          if (
+            !batch ||
+            batch.companyId !== companyId ||
+            batch.productId !== productId ||
+            (branchId && batch.branchId && batch.branchId !== branchId)
+          ) {
+            throw new BadRequestException(
+              'Batch does not belong to this damage record (company/product/branch mismatch)',
+            );
+          }
           throw new BadRequestException('Insufficient batch quantity');
         }
       }
@@ -229,8 +341,9 @@ export class StockDamageService {
     return record;
   }
 
-  async remove(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async remove(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== 'DRAFT')
       throw new BadRequestException('Only DRAFT records can be deleted');
     await this.prisma.stockDamage.update({ where: { id }, data: { deletedAt: new Date() } });

@@ -1,10 +1,12 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateQuotationDto } from './dto/create-quotation.dto';
 import { UpdateQuotationDto } from './dto/update-quotation.dto';
 import { QueryQuotationDto } from './dto/query-quotation.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 
 function calcLines(lines: any[]) {
@@ -25,9 +27,15 @@ export class QuotationsService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
-  async create(dto: CreateQuotationDto, userId: string) {
+  async create(dto: CreateQuotationDto, user: AuthUser) {
+    const userId = user.id;
+    // Never trust the client-supplied companyId for authorization: validate it
+    // against the caller's access before writing into that company.
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+
     const { computed, subtotal, totalDiscount, totalTax, totalAmount } = calcLines(dto.lines);
 
     const record = await this.prisma.$transaction(async (tx) => {
@@ -81,7 +89,7 @@ export class QuotationsService {
       companyId: record.companyId,
       newValue: record as any,
     });
-    return this.findOne(record.id);
+    return this.findOne(record.id, user);
   }
 
   async findAll(query: QueryQuotationDto, user?: any) {
@@ -143,8 +151,10 @@ export class QuotationsService {
     return record;
   }
 
-  async update(id: string, dto: UpdateQuotationDto, userId: string) {
-    const existing = await this.findOne(id);
+  async update(id: string, dto: UpdateQuotationDto, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user);
+    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     if (!['DRAFT', 'SENT'].includes(existing.status as string)) {
       throw new BadRequestException('Can only update DRAFT or SENT quotations');
     }
@@ -192,11 +202,13 @@ export class QuotationsService {
       userId,
       companyId: existing.companyId,
     });
-    return this.findOne(id);
+    return this.findOne(id, user);
   }
 
-  private async changeStatus(id: string, from: string | string[], to: string, userId: string, extra?: any) {
-    const existing = await this.findOne(id);
+  private async changeStatus(id: string, from: string | string[], to: string, user: AuthUser, extra?: any) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user);
+    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     const allowed = Array.isArray(from) ? from : [from];
     if (!allowed.includes(existing.status as string)) {
       throw new BadRequestException(`Cannot transition from ${existing.status} to ${to}`);
@@ -217,23 +229,25 @@ export class QuotationsService {
     return record;
   }
 
-  async send(id: string, userId: string) {
-    return this.changeStatus(id, 'DRAFT', 'SENT', userId);
+  async send(id: string, user: AuthUser) {
+    return this.changeStatus(id, 'DRAFT', 'SENT', user);
   }
 
-  async accept(id: string, userId: string) {
-    return this.changeStatus(id, 'SENT', 'ACCEPTED', userId, {
-      approvedById: userId,
+  async accept(id: string, user: AuthUser) {
+    return this.changeStatus(id, 'SENT', 'ACCEPTED', user, {
+      approvedById: user.id,
       approvedAt: new Date(),
     });
   }
 
-  async reject(id: string, userId: string) {
-    return this.changeStatus(id, 'SENT', 'REJECTED', userId);
+  async reject(id: string, user: AuthUser) {
+    return this.changeStatus(id, 'SENT', 'REJECTED', user);
   }
 
-  async convertToSalesOrder(id: string, userId: string) {
-    const quotation = await this.findOne(id);
+  async convertToSalesOrder(id: string, user: AuthUser) {
+    const userId = user.id;
+    const quotation = await this.findOne(id, user);
+    await this.companyScope.assertCanAccessCompany(user, quotation.companyId, AccessLevel.WRITE);
     if (quotation.status !== 'ACCEPTED') throw new BadRequestException('Only ACCEPTED quotations can be converted');
 
     const so = await this.prisma.$transaction(async (tx) => {
@@ -307,11 +321,13 @@ export class QuotationsService {
       companyId: quotation.companyId,
       newValue: { convertedSalesOrderId: so.id } as any,
     });
-    return this.findOne(id);
+    return this.findOne(id, user);
   }
 
-  async remove(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async remove(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOne(id, user);
+    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     if (existing.status !== 'DRAFT') throw new BadRequestException('Only DRAFT quotations can be deleted');
     await this.prisma.quotation.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.auditLogs.log({

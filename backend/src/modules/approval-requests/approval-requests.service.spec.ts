@@ -37,7 +37,11 @@ function makePrisma(overrides: Partial<Record<string, unknown>> = {}) {
 describe('ApprovalRequestsService readiness', () => {
   it('returns approvals/workflow/data-quality readiness above the 90% threshold', async () => {
     const prisma = makePrisma();
-    const service = new ApprovalRequestsService(prisma, { log: jest.fn() } as any);
+    const service = new ApprovalRequestsService(
+      prisma,
+      { log: jest.fn() } as any,
+      { assertCanAccessCompany: jest.fn() } as any,
+    );
 
     const readiness = await service.getReadiness(
       { id: 'user-1', companyId: 'company-1' },
@@ -58,7 +62,11 @@ describe('ApprovalRequestsService readiness', () => {
         count: jest.fn().mockResolvedValueOnce(4).mockResolvedValueOnce(1).mockResolvedValueOnce(2),
       },
     });
-    const service = new ApprovalRequestsService(prisma, { log: jest.fn() } as any);
+    const service = new ApprovalRequestsService(
+      prisma,
+      { log: jest.fn() } as any,
+      { assertCanAccessCompany: jest.fn() } as any,
+    );
 
     const readiness = await service.getReadiness(
       { id: 'user-1', companyId: 'company-1' },

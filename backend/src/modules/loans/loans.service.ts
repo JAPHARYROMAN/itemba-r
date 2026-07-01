@@ -122,7 +122,11 @@ export class LoansService {
     if (borrowerLevel === BorrowerLevel.GROUP && !dto.groupId) {
       throw new BadRequestException('groupId is required when borrowerLevel is GROUP');
     }
-    await this.companyScope.assertCanAccessCompany(user, dto.companyId);
+    // Creating a loan is a mutation, so require WRITE-level access to the target
+    // company (matches expenses.create / fixed-assets.create and the other
+    // mutating loan methods). A user with only READ access must not create a
+    // financial record scoped to that company.
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
 
     // ITMB-105: amounts are validated as non-negative numeric strings by the DTO.
     // Enforce the cross-field invariant that the opening outstanding balance

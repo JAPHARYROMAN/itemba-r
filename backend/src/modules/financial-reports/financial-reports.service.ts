@@ -10,6 +10,22 @@ type ReportScope = {
   excludeIntercompany?: boolean;
 };
 
+/**
+ * Journal-entry statuses that must be INCLUDED in every report/statement.
+ *
+ * The system reversal convention (journal-entries reverse(), and the sibling
+ * void/reverse paths in credit-notes, customer-payments, refunds, sales-orders,
+ * payroll-postings) flips the ORIGINAL entry to status 'REVERSED' AND posts a
+ * separate reversal entry (flipped debit/credit) at status 'POSTED'. If reports
+ * filtered on 'POSTED' alone they would EXCLUDE the REVERSED original but INCLUDE
+ * the flipped reversal, so every reversed transaction would push the statements
+ * negative by its full amount. Including 'REVERSED' lets the original net the
+ * reversal to zero. 'VOIDED' entries have no offsetting mirror and stay excluded;
+ * 'DRAFT' entries are not yet posted and stay excluded.
+ */
+export const REPORTABLE_JE_STATUSES = ['POSTED', 'REVERSED'] as const;
+export const REPORTABLE_JE_STATUS_FILTER = { in: [...REPORTABLE_JE_STATUSES] };
+
 @Injectable()
 export class FinancialReportsService {
   constructor(
@@ -24,7 +40,7 @@ export class FinancialReportsService {
         by: ['companyId'],
         where: {
           companyId,
-          journalEntry: { status: 'POSTED', deletedAt: null },
+          journalEntry: { status: REPORTABLE_JE_STATUS_FILTER, deletedAt: null },
         },
         _sum: { debit: true, credit: true },
       }),
@@ -86,7 +102,7 @@ export class FinancialReportsService {
     scope: ReportScope = {},
   ) {
     if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
-    const jeWhere: any = { companyId, status: 'POSTED', deletedAt: null };
+    const jeWhere: any = { companyId, status: REPORTABLE_JE_STATUS_FILTER, deletedAt: null };
     if (periodId) jeWhere.accountingPeriodId = periodId;
     if (dateFrom || dateTo) {
       jeWhere.transactionDate = {};
@@ -146,7 +162,7 @@ export class FinancialReportsService {
 
   async getScopeRollup(companyId: string, dateFrom?: string, dateTo?: string, user?: AuthUser) {
     if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
-    const jeWhere: any = { companyId, status: 'POSTED', deletedAt: null };
+    const jeWhere: any = { companyId, status: REPORTABLE_JE_STATUS_FILTER, deletedAt: null };
     if (dateFrom || dateTo) {
       jeWhere.transactionDate = {};
       if (dateFrom) jeWhere.transactionDate.gte = new Date(dateFrom);
@@ -219,7 +235,7 @@ export class FinancialReportsService {
     scope: ReportScope = {},
   ) {
     if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
-    const jeWhere: any = { companyId, status: 'POSTED', deletedAt: null };
+    const jeWhere: any = { companyId, status: REPORTABLE_JE_STATUS_FILTER, deletedAt: null };
     if (dateFrom || dateTo) {
       jeWhere.transactionDate = {};
       if (dateFrom) jeWhere.transactionDate.gte = new Date(dateFrom);
@@ -286,7 +302,7 @@ export class FinancialReportsService {
     const asOfDate = asOf ? new Date(asOf) : new Date();
     const jeWhere: any = {
       companyId,
-      status: 'POSTED',
+      status: REPORTABLE_JE_STATUS_FILTER,
       deletedAt: null,
       transactionDate: { lte: asOfDate },
     };
@@ -680,7 +696,7 @@ export class FinancialReportsService {
     const start = new Date(periodStart);
     const end = new Date(periodEnd);
     const jeWhere: any = {
-      status: 'POSTED',
+      status: REPORTABLE_JE_STATUS_FILTER,
       deletedAt: null,
       transactionDate: { gte: start, lte: end },
     };
@@ -860,7 +876,7 @@ export class FinancialReportsService {
     user?: AuthUser,
   ) {
     if (user) this.companyScope.assertGroupScoped(user, 'view group financial reports');
-    const jeWhere: any = { status: 'POSTED', deletedAt: null };
+    const jeWhere: any = { status: REPORTABLE_JE_STATUS_FILTER, deletedAt: null };
     if (periodId) jeWhere.accountingPeriodId = periodId;
     if (dateFrom || dateTo) {
       jeWhere.transactionDate = {};
@@ -1345,7 +1361,9 @@ export class FinancialReportsService {
     asOf?: string;
   }) {
     const where: any = {
-      status: 'POSTED',
+      // Match the same JE status set the consolidated reports include so a
+      // reversed intercompany entry is still recognised for elimination.
+      status: REPORTABLE_JE_STATUS_FILTER,
       deletedAt: null,
       referenceType: 'InterCompanyTransaction',
     };

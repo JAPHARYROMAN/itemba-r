@@ -1,5 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { CompanyScopeService } from '../../../common/services';
+import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
 /**
  * Generates monthly Tanzanian statutory returns from data already persisted on
@@ -98,11 +101,14 @@ export interface HeslbRow {
 
 @Injectable()
 export class StatutoryReturnsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly companyScope: CompanyScopeService,
+  ) {}
 
   // ─── PAYE (TRA, ITX 215.01.E) ──────────────────────────────────────────
-  async payeReturn(filter: ReturnFilter) {
-    const ctx = await this.context(filter, 'PAYE');
+  async payeReturn(user: AuthUser, filter: ReturnFilter) {
+    const ctx = await this.context(user, filter, 'PAYE');
     const lines = await this.prisma.payrollStatutoryLine.findMany({
       where: this.lineWhere(filter, ['PAYE_MAINLAND', 'PAYE_ZANZIBAR']),
       include: this.lineInclude(),
@@ -155,17 +161,17 @@ export class StatutoryReturnsService {
   }
 
   // ─── NSSF (Form NSSF/CON-1) ────────────────────────────────────────────
-  async nssfReturn(filter: ReturnFilter) {
-    return this.pensionReturn(filter, 'NSSF', 'NSSF/CON-1', 'NSSF — Monthly Contributions Return', 'nssf');
+  async nssfReturn(user: AuthUser, filter: ReturnFilter) {
+    return this.pensionReturn(user, filter, 'NSSF', 'NSSF/CON-1', 'NSSF — Monthly Contributions Return', 'nssf');
   }
 
   // ─── PSSSF ─────────────────────────────────────────────────────────────
-  async psssfReturn(filter: ReturnFilter) {
-    return this.pensionReturn(filter, 'PSSSF', 'PSSSF/MMC-1', 'PSSSF — Monthly Member Contributions', 'pssf');
+  async psssfReturn(user: AuthUser, filter: ReturnFilter) {
+    return this.pensionReturn(user, filter, 'PSSSF', 'PSSSF/MMC-1', 'PSSSF — Monthly Member Contributions', 'pssf');
   }
 
-  private async pensionReturn(filter: ReturnFilter, taxTypeCode: 'NSSF' | 'PSSSF', formCode: string, formName: string, idField: 'nssf' | 'pssf') {
-    const ctx = await this.context(filter, taxTypeCode);
+  private async pensionReturn(user: AuthUser, filter: ReturnFilter, taxTypeCode: 'NSSF' | 'PSSSF', formCode: string, formName: string, idField: 'nssf' | 'pssf') {
+    const ctx = await this.context(user, filter, taxTypeCode);
     const lines = await this.prisma.payrollStatutoryLine.findMany({
       where: this.lineWhere(filter, [taxTypeCode]),
       include: this.lineInclude(),
@@ -228,8 +234,8 @@ export class StatutoryReturnsService {
   }
 
   // ─── WCF (Workers Compensation Fund) ──────────────────────────────────
-  async wcfReturn(filter: ReturnFilter) {
-    const ctx = await this.context(filter, 'WCF');
+  async wcfReturn(user: AuthUser, filter: ReturnFilter) {
+    const ctx = await this.context(user, filter, 'WCF');
     const lines = await this.prisma.payrollStatutoryLine.findMany({
       where: this.lineWhere(filter, ['WCF']),
       include: this.lineInclude(),
@@ -275,8 +281,8 @@ export class StatutoryReturnsService {
   }
 
   // ─── SDL (Skills Development Levy — bundled with PAYE) ─────────────────
-  async sdlReturn(filter: ReturnFilter) {
-    const ctx = await this.context(filter, 'SDL');
+  async sdlReturn(user: AuthUser, filter: ReturnFilter) {
+    const ctx = await this.context(user, filter, 'SDL');
     const lines = await this.prisma.payrollStatutoryLine.findMany({
       where: this.lineWhere(filter, ['SDL']),
       include: this.lineInclude(),
@@ -319,8 +325,8 @@ export class StatutoryReturnsService {
   }
 
   // ─── NHIF ───────────────────────────────────────────────────────────────
-  async nhifReturn(filter: ReturnFilter) {
-    const ctx = await this.context(filter, 'NHIF');
+  async nhifReturn(user: AuthUser, filter: ReturnFilter) {
+    const ctx = await this.context(user, filter, 'NHIF');
     const lines = await this.prisma.payrollStatutoryLine.findMany({
       where: this.lineWhere(filter, ['NHIF']),
       include: this.lineInclude(),
@@ -374,8 +380,8 @@ export class StatutoryReturnsService {
   }
 
   // ─── HESLB (Higher Education Students Loans Board) ────────────────────
-  async heslbReturn(filter: ReturnFilter) {
-    const ctx = await this.context(filter, 'HESLB');
+  async heslbReturn(user: AuthUser, filter: ReturnFilter) {
+    const ctx = await this.context(user, filter, 'HESLB');
     const lines = await this.prisma.payrollStatutoryLine.findMany({
       where: this.lineWhere(filter, ['HESLB']),
       include: this.lineInclude(),
@@ -426,15 +432,15 @@ export class StatutoryReturnsService {
   }
 
   // ─── Combined manifest — generate everything for the period ────────────
-  async generateAll(filter: ReturnFilter) {
+  async generateAll(user: AuthUser, filter: ReturnFilter) {
     const [paye, nssf, psssf, wcf, sdl, nhif, heslb] = await Promise.all([
-      this.payeReturn(filter),
-      this.nssfReturn(filter),
-      this.psssfReturn(filter),
-      this.wcfReturn(filter),
-      this.sdlReturn(filter),
-      this.nhifReturn(filter),
-      this.heslbReturn(filter),
+      this.payeReturn(user, filter),
+      this.nssfReturn(user, filter),
+      this.psssfReturn(user, filter),
+      this.wcfReturn(user, filter),
+      this.sdlReturn(user, filter),
+      this.nhifReturn(user, filter),
+      this.heslbReturn(user, filter),
     ]);
     return {
       generatedAt: new Date().toISOString(),
@@ -446,13 +452,19 @@ export class StatutoryReturnsService {
 
   // ─── Helpers ────────────────────────────────────────────────────────────
 
-  private async context(filter: ReturnFilter, taxType: string): Promise<ReturnHeader> {
+  private async context(user: AuthUser, filter: ReturnFilter, taxType: string): Promise<ReturnHeader> {
     if (filter.month < 1 || filter.month > 12) {
       throw new BadRequestException('month must be between 1 and 12');
     }
     if (filter.year < 2000 || filter.year > 2100) {
       throw new BadRequestException('year is out of range');
     }
+    if (!filter.companyId) {
+      throw new BadRequestException('companyId is required');
+    }
+    // Multi-tenant guard: reject callers requesting a company they cannot access
+    // before any employee PII (TIN/NIDA/member numbers/salaries) is queried.
+    await this.companyScope.assertCanAccessCompany(user, filter.companyId, AccessLevel.READ);
     const company = await this.prisma.company.findUnique({
       where: { id: filter.companyId },
       include: { profile: { select: { tin: true, vrn: true } } },

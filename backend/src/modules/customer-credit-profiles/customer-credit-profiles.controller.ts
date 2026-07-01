@@ -15,8 +15,8 @@ export class CustomerCreditProfilesController {
 
   @Get(':id')
   @RequirePermissions('credit_profiles.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()

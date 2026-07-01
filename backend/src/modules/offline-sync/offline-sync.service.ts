@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
-import { AuditSeverity, OfflineSyncBatchStatus, OfflineSyncDirection, OfflineSyncRecordStatus, Prisma } from '@prisma/client';
+import { AccessLevel, AuditSeverity, OfflineSyncBatchStatus, OfflineSyncDirection, OfflineSyncRecordStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
@@ -108,7 +108,16 @@ export class OfflineSyncService {
     return this.prisma.syncCheckpoint.findMany({ where });
   }
 
-  async upsertCheckpoint(dto: UpsertCheckpointDto, userId: string) {
+  async upsertCheckpoint(dto: UpsertCheckpointDto, user: AuthUser) {
+    const userId = user.id;
+    // Guard-gap fix: never persist a caller-supplied companyId without an access
+    // check. companyId is optional on a checkpoint (user+device+entityType scoped
+    // cursor), so only validate access when the client actually supplies one —
+    // this avoids over-restricting the legitimate no-company case.
+    if (dto.companyId) {
+      await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    }
+
     // Prisma compound unique with nullable field — find-then-upsert pattern
     const existing = await this.prisma.syncCheckpoint.findFirst({
       where: { userId, deviceId: dto.deviceId ?? null, entityType: dto.entityType },

@@ -21,12 +21,14 @@ export class TaxAutoApplyController {
   @Post('sales-order/:id')
   @RequirePermissions('finance.reports.view')
   applySalesOrder(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.applyForSalesOrder(id, user.id);
+    // Pass the AuthUser so the service asserts the resolved order's company
+    // against the caller's access (MANAGE) before booking any ledger row.
+    return this.service.applyForSalesOrder(id, user.id, undefined, user);
   }
 
   @Post('purchase-order/:id')
   @RequirePermissions('finance.reports.view')
   applyPurchaseOrder(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.applyForPurchaseOrder(id, user.id);
+    return this.service.applyForPurchaseOrder(id, user.id, undefined, user);
   }
 }

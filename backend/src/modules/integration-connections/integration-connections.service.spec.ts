@@ -8,7 +8,10 @@ describe('IntegrationConnectionsService', () => {
 
   let prisma: any;
   let auditLogs: any;
+  let companyScope: any;
   let service: IntegrationConnectionsService;
+
+  const user = { id: 'user-1' } as any;
 
   beforeEach(() => {
     prisma = {
@@ -18,9 +21,15 @@ describe('IntegrationConnectionsService', () => {
       },
     };
     auditLogs = { log: jest.fn() };
-    service = new IntegrationConnectionsService(prisma, auditLogs, {
-      encrypt: jest.fn((value: string) => `encrypted:${value}`),
-    } as any);
+    companyScope = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) };
+    service = new IntegrationConnectionsService(
+      prisma,
+      auditLogs,
+      {
+        encrypt: jest.fn((value: string) => `encrypted:${value}`),
+      } as any,
+      companyScope,
+    );
   });
 
   afterEach(() => {
@@ -46,7 +55,7 @@ describe('IntegrationConnectionsService', () => {
       .spyOn(dns.promises, 'lookup')
       .mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
 
-    await expect(service.testConnection('connection-1', 'user-1')).resolves.toMatchObject({
+    await expect(service.testConnection('connection-1', user)).resolves.toMatchObject({
       status: IntegrationConnectionStatus.ACTIVE,
     });
 
@@ -78,7 +87,7 @@ describe('IntegrationConnectionsService', () => {
       status: IntegrationConnectionStatus.ERROR,
     });
 
-    await expect(service.testConnection('connection-1', 'user-1')).rejects.toBeInstanceOf(
+    await expect(service.testConnection('connection-1', user)).rejects.toBeInstanceOf(
       BadRequestException,
     );
 

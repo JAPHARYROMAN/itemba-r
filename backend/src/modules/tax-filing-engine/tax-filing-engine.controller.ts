@@ -23,13 +23,13 @@ export class TaxFilingEngineController {
 
   @Get('preview/:periodId')
   @RequirePermissions('finance.reports.view')
-  preview(@Param('periodId') periodId: string) {
-    return this.service.previewReturn(periodId);
+  preview(@Param('periodId') periodId: string, @CurrentUser() user: AuthUser) {
+    return this.service.previewReturn(periodId, user);
   }
 
   @Post('compute/:periodId')
   @RequirePermissions('finance.reports.view')
   compute(@Param('periodId') periodId: string, @CurrentUser() user: AuthUser) {
-    return this.service.computeReturn(periodId, user.id);
+    return this.service.computeReturn(periodId, user);
   }
 }

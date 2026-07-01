@@ -15,8 +15,8 @@ export class PurchaseRequisitionsController {
 
   @Get(':id')
   @RequirePermissions('purchase_requisitions.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()

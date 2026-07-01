@@ -101,6 +101,9 @@ export class BankReconciliationsService {
 
   async update(id: string, dto: UpsertBankReconciliationDto, user: AuthUser) {
     const existing = await this.findOne(id, user);
+    if (existing.status !== 'DRAFT') {
+      throw new BadRequestException('Only DRAFT reconciliations can be updated');
+    }
     if (dto.companyId && dto.companyId !== existing.companyId) {
       assertCanAccessCompanyFromUser(user, dto.companyId);
     }
@@ -125,7 +128,10 @@ export class BankReconciliationsService {
   }
 
   async addLine(reconciliationId: string, dto: AddBankStatementLineDto, user: AuthUser) {
-    await this.findOne(reconciliationId, user);
+    const reconciliation = await this.findOne(reconciliationId, user);
+    if (reconciliation.status !== 'DRAFT') {
+      throw new BadRequestException('Statement lines can only be added to DRAFT reconciliations');
+    }
     const line = await this.prisma.bankStatementLine.create({
       data: { ...dto, bankReconciliationId: reconciliationId },
     });
@@ -325,6 +331,9 @@ export class BankReconciliationsService {
     user: AuthUser,
   ) {
     const reconciliation = await this.findOne(reconciliationId, user);
+    if (reconciliation.status !== 'DRAFT') {
+      throw new BadRequestException('Statement lines can only be matched on DRAFT reconciliations');
+    }
     const line = reconciliation.statementLines.find((l) => l.id === statementLineId);
     if (!line) throw new NotFoundException('Statement line not on this reconciliation');
 
@@ -362,7 +371,10 @@ export class BankReconciliationsService {
   }
 
   async unmatch(reconciliationId: string, statementLineId: string, user: AuthUser) {
-    await this.findOne(reconciliationId, user);
+    const reconciliation = await this.findOne(reconciliationId, user);
+    if (reconciliation.status !== 'DRAFT') {
+      throw new BadRequestException('Statement lines can only be unmatched on DRAFT reconciliations');
+    }
     await this.prisma.bankReconciliationMatch.deleteMany({
       where: { bankReconciliationId: reconciliationId, bankStatementLineId: statementLineId },
     });

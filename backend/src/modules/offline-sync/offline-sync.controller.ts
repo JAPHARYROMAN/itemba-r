@@ -47,7 +47,7 @@ export class OfflineSyncController {
   @Post('checkpoints')
   @RequirePermissions('offline_sync.manage')
   upsertCheckpoint(@Body() dto: UpsertCheckpointDto, @CurrentUser() user: AuthUser) {
-    return this.service.upsertCheckpoint(dto, user.id);
+    return this.service.upsertCheckpoint(dto, user);
   }
 
   @Get('conflicts')

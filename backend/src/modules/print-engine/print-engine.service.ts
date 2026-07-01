@@ -1,12 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { CompanyScopeService } from '../../common/services';
 
 @Injectable()
 export class PrintEngineService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   async render(dto: any, user: any) {
@@ -16,6 +20,7 @@ export class PrintEngineService {
       : 'HTML';
     const { template, html } = await this.loadAndFillTemplate(
       templateId,
+      user,
       entityType,
       entityId,
       data,
@@ -74,6 +79,7 @@ export class PrintEngineService {
     const { templateId, entityType, entityId, data, pdfSections } = dto;
     const { template, html } = await this.loadAndFillTemplate(
       templateId,
+      user,
       entityType,
       entityId,
       data,
@@ -117,7 +123,7 @@ export class PrintEngineService {
     user: any,
   ): Promise<{ id: string; filename: string; buffer: Buffer; mimeType: string }> {
     const { templateId, entityType, entityId, data, sheetData, sheetName } = dto;
-    const { template } = await this.loadAndFillTemplate(templateId, entityType, entityId, data);
+    const { template } = await this.loadAndFillTemplate(templateId, user, entityType, entityId, data);
     const rows: Array<Record<string, unknown>> = Array.isArray(sheetData) ? sheetData : [];
     const buffer = await this.dataToExcel({
       sheetName: sheetName ?? template.name ?? 'Report',
@@ -166,6 +172,7 @@ export class PrintEngineService {
 
   private async loadAndFillTemplate(
     templateId: string,
+    user: AuthUser,
     entityType?: string,
     entityId?: string,
     data?: Record<string, unknown>,
@@ -175,6 +182,11 @@ export class PrintEngineService {
       where: { id: templateId, deletedAt: null, status: 'ACTIVE' },
     });
     if (!template) throw new NotFoundException('Active document template not found');
+    // Enforce company scoping (mirrors DocumentTemplatesService.findOne): a user
+    // may only render a template belonging to a company they can access. Prevents
+    // cross-company template content (letterhead, terms, fields) from leaking to
+    // a caller that merely holds the print_engine.render permission.
+    await this.companyScope.assertCanAccessCompany(user, template.companyId, AccessLevel.READ);
 
     let html: string = template.content ?? '';
     const vars: Record<string, unknown> = { ...(data ?? {}), entityType, entityId };

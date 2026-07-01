@@ -24,8 +24,10 @@ export class AutomationRunsService {
     return { items, total, page: Number(page), limit: Number(limit) };
   }
 
-  async findOne(id: string) {
-    const item = await this.prisma.automationRun.findFirst({ where: { id } });
+  async findOne(id: string, user?: any) {
+    const where: any = { id };
+    applyCompanyScopeWhere(where, user);
+    const item = await this.prisma.automationRun.findFirst({ where });
     if (!item) throw new NotFoundException('Automation run not found');
     return item;
   }
@@ -50,7 +52,10 @@ export class AutomationRunsService {
     return run;
   }
 
-  async getItems(runId: string) {
+  async getItems(runId: string, user?: any) {
+    // Scope through the parent run's company: findOne throws if the caller
+    // cannot access the run's company, preventing a cross-company item leak.
+    await this.findOne(runId, user);
     return this.prisma.automationRunItem.findMany({ where: { automationRunId: runId }, orderBy: { createdAt: 'asc' } });
   }
 }

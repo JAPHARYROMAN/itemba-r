@@ -21,7 +21,13 @@ function makeService() {
     },
   };
   const audit: any = { log: jest.fn().mockResolvedValue(undefined) };
-  return { service: new PrintEngineService(prisma, audit), prisma, generatedRecords };
+  const companyScope: any = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) };
+  return {
+    service: new PrintEngineService(prisma, audit, companyScope),
+    prisma,
+    generatedRecords,
+    companyScope,
+  };
 }
 
 describe('PrintEngineService PDF and Excel materialization', () => {
@@ -82,5 +88,25 @@ describe('PrintEngineService PDF and Excel materialization', () => {
     prisma.documentTemplate.findFirst.mockResolvedValueOnce(null);
 
     await expect(service.renderPdf({ templateId: 'missing' }, { id: 'user-1' })).rejects.toThrow();
+  });
+
+  it('enforces company scope on the loaded template before rendering', async () => {
+    const { service, companyScope, generatedRecords } = makeService();
+    companyScope.assertCanAccessCompany.mockRejectedValueOnce(
+      new Error('You do not have access to this company'),
+    );
+
+    await expect(
+      service.renderPdf({ templateId: 'tmpl-1' }, { id: 'user-1' }),
+    ).rejects.toThrow(/access to this company/);
+
+    // Called with the template's owning companyId at READ level, and no
+    // GeneratedDocument was persisted for the blocked (cross-company) render.
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+      { id: 'user-1' },
+      'co-1',
+      'READ',
+    );
+    expect(generatedRecords).toHaveLength(0);
   });
 });

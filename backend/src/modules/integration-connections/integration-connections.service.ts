@@ -1,13 +1,18 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import * as dns from 'dns';
 import * as net from 'net';
-import { AuditSeverity, IntegrationConnectionStatus } from '@prisma/client';
+import { AccessLevel, AuditSeverity, IntegrationConnectionStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateIntegrationConnectionDto } from './dto/create-integration-connection.dto';
 import { UpdateIntegrationConnectionDto } from './dto/update-integration-connection.dto';
 import { QueryIntegrationConnectionDto } from './dto/query-integration-connection.dto';
-import { EncryptionService, applyCompanyScopeWhere } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  CompanyScopeService,
+  EncryptionService,
+  applyCompanyScopeWhere,
+} from '../../common/services';
 
 /** Fields that must never be sent to the frontend */
 const SAFE_SELECT = {
@@ -38,6 +43,7 @@ export class IntegrationConnectionsService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly encryption: EncryptionService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   async findAll(query: QueryIntegrationConnectionDto, user?: any) {
@@ -62,16 +68,23 @@ export class IntegrationConnectionsService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser) {
     const record = await this.prisma.integrationConnection.findFirst({
       where: { id, deletedAt: null },
       select: SAFE_SELECT,
     });
     if (!record) throw new NotFoundException('Integration connection not found');
+    await this.companyScope.assertCanAccessCompany(user, record.companyId, AccessLevel.READ);
     return record;
   }
 
-  async create(dto: CreateIntegrationConnectionDto, userId: string) {
+  async create(dto: CreateIntegrationConnectionDto, user: AuthUser) {
+    const userId = user.id;
+    // Validate the client-supplied companyId against the caller's access before
+    // trusting it. Never let a client create a connection under a company they
+    // cannot write to.
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+
     const existing = await this.prisma.integrationConnection.findFirst({
       where: { connectionCode: dto.connectionCode, deletedAt: null },
     });
@@ -115,8 +128,17 @@ export class IntegrationConnectionsService {
     return record;
   }
 
-  async update(id: string, dto: UpdateIntegrationConnectionDto, userId: string) {
-    await this.findOneRaw(id);
+  async update(id: string, dto: UpdateIntegrationConnectionDto, user: AuthUser) {
+    const userId = user.id;
+    // Loads the row and asserts WRITE access on its owning company.
+    const existing = await this.findOneRaw(id, user, AccessLevel.WRITE);
+
+    // companyId is immutable: reassigning a connection to another company would
+    // move credentials/config across the tenant boundary. Reject any attempt to
+    // change it (a no-op re-send of the same value is allowed).
+    if (dto.companyId !== undefined && dto.companyId !== existing.companyId) {
+      throw new BadRequestException('companyId cannot be changed on an integration connection');
+    }
 
     const credentialsEncrypted = dto.credentials ? this.encryptJson(dto.credentials) : undefined;
     const privateConfigEncrypted = dto.privateConfig
@@ -136,7 +158,6 @@ export class IntegrationConnectionsService {
         ...(privateConfigEncrypted !== undefined && {
           privateConfigEncrypted: privateConfigEncrypted as any,
         }),
-        ...(dto.companyId !== undefined && { companyId: dto.companyId }),
         ...(dto.divisionId !== undefined && { divisionId: dto.divisionId }),
         ...(dto.branchId !== undefined && { branchId: dto.branchId }),
         ...(dto.licensedBusinessUnitId !== undefined && {
@@ -157,8 +178,9 @@ export class IntegrationConnectionsService {
     return record;
   }
 
-  async remove(id: string, userId: string) {
-    const existing = await this.findOneRaw(id);
+  async remove(id: string, user: AuthUser) {
+    const userId = user.id;
+    await this.findOneRaw(id, user, AccessLevel.WRITE);
     await this.prisma.integrationConnection.update({
       where: { id },
       data: { deletedAt: new Date() },
@@ -175,8 +197,9 @@ export class IntegrationConnectionsService {
     return { success: true };
   }
 
-  async testConnection(id: string, userId: string) {
-    const connection = await this.findOneWithProvider(id);
+  async testConnection(id: string, user: AuthUser) {
+    const userId = user.id;
+    const connection = await this.findOneWithProvider(id, user);
     const testedAt = new Date();
 
     try {
@@ -228,15 +251,22 @@ export class IntegrationConnectionsService {
     }
   }
 
-  private async findOneRaw(id: string) {
+  private async findOneRaw(id: string, user?: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
     const record = await this.prisma.integrationConnection.findFirst({
       where: { id, deletedAt: null },
     });
     if (!record) throw new NotFoundException('Integration connection not found');
+    if (user) {
+      await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
+    }
     return record;
   }
 
-  private async findOneWithProvider(id: string) {
+  private async findOneWithProvider(
+    id: string,
+    user?: AuthUser,
+    minimum: AccessLevel = AccessLevel.WRITE,
+  ) {
     const record = await this.prisma.integrationConnection.findFirst({
       where: { id, deletedAt: null },
       include: {
@@ -244,6 +274,9 @@ export class IntegrationConnectionsService {
       },
     });
     if (!record) throw new NotFoundException('Integration connection not found');
+    if (user) {
+      await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
+    }
     return record;
   }
 

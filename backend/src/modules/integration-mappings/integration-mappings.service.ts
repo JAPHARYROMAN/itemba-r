@@ -1,24 +1,28 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { AuditSeverity } from '@prisma/client';
+import { AccessLevel, AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateIntegrationMappingDto } from './dto/create-integration-mapping.dto';
 import { UpdateIntegrationMappingDto } from './dto/update-integration-mapping.dto';
 import { QueryIntegrationMappingDto } from './dto/query-integration-mapping.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { CompanyScopeService } from '../../common/services';
 
 @Injectable()
 export class IntegrationMappingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
-  async findAll(query: QueryIntegrationMappingDto, user?: any) {
+  async findAll(query: QueryIntegrationMappingDto, user: AuthUser) {
     const { page = 1, limit = 20, companyId, providerId, connectionId, internalEntityType, externalEntityType, status } = query;
     const skip = (page - 1) * limit;
-    const where: any = { deletedAt: null };
-    applyCompanyScopeWhere(where, user, companyId);
+    const where: any = {
+      deletedAt: null,
+      ...(await this.companyScope.companyWhereFor(user, companyId)),
+    };
     if (providerId) where.providerId = providerId;
     if (connectionId) where.connectionId = connectionId;
     if (internalEntityType) where.internalEntityType = internalEntityType;
@@ -37,13 +41,19 @@ export class IntegrationMappingsService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUser) {
     const record = await this.prisma.integrationMapping.findFirst({ where: { id, deletedAt: null } });
     if (!record) throw new NotFoundException('Integration mapping not found');
+    await this.companyScope.assertCanAccessCompany(user, record.companyId, AccessLevel.READ);
     return record;
   }
 
-  async create(dto: CreateIntegrationMappingDto, userId: string) {
+  async create(dto: CreateIntegrationMappingDto, user: AuthUser) {
+    const userId = user.id;
+    // NEVER trust a client-supplied companyId for authorization: validate it
+    // against the user's WRITE access before writing the record.
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+
     const existing = await this.prisma.integrationMapping.findFirst({
       where: { mappingCode: dto.mappingCode, deletedAt: null },
     });
@@ -76,8 +86,14 @@ export class IntegrationMappingsService {
     return record;
   }
 
-  async update(id: string, dto: UpdateIntegrationMappingDto, userId: string) {
-    const existing = await this.findOneRaw(id);
+  async update(id: string, dto: UpdateIntegrationMappingDto, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOneRaw(id, user, AccessLevel.WRITE);
+    // companyId is immutable: reject any attempt to re-scope the mapping to a
+    // different company (prevents cross-tenant reassignment via mass-assignment).
+    if (dto.companyId !== undefined && dto.companyId !== existing.companyId) {
+      throw new BadRequestException('companyId cannot be changed');
+    }
     const record = await this.prisma.integrationMapping.update({
       where: { id },
       data: {
@@ -105,8 +121,9 @@ export class IntegrationMappingsService {
     return record;
   }
 
-  async remove(id: string, userId: string) {
-    const existing = await this.findOneRaw(id);
+  async remove(id: string, user: AuthUser) {
+    const userId = user.id;
+    const existing = await this.findOneRaw(id, user, AccessLevel.WRITE);
     await this.prisma.integrationMapping.update({ where: { id }, data: { deletedAt: new Date() } });
 
     await this.auditLogs.log({
@@ -121,9 +138,16 @@ export class IntegrationMappingsService {
     return { success: true };
   }
 
-  private async findOneRaw(id: string) {
+  private async findOneRaw(
+    id: string,
+    user?: AuthUser,
+    minimum: AccessLevel = AccessLevel.READ,
+  ) {
     const record = await this.prisma.integrationMapping.findFirst({ where: { id, deletedAt: null } });
     if (!record) throw new NotFoundException('Integration mapping not found');
+    if (user) {
+      await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
+    }
     return record;
   }
 }

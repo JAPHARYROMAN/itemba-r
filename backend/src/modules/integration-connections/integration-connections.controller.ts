@@ -27,14 +27,14 @@ export class IntegrationConnectionsController {
 
   @Get(':id')
   @RequirePermissions('integration_connections.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()
   @RequirePermissions('integration_connections.manage')
   create(@Body() dto: CreateIntegrationConnectionDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Patch(':id')
@@ -44,18 +44,18 @@ export class IntegrationConnectionsController {
     @Body() dto: UpdateIntegrationConnectionDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 
   @Delete(':id')
   @RequirePermissions('integration_connections.manage')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user);
   }
 
   @Post(':id/test')
   @RequirePermissions('integration_connections.test')
   test(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.testConnection(id, user.id);
+    return this.service.testConnection(id, user);
   }
 }

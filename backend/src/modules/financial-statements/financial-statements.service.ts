@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
+import { REPORTABLE_JE_STATUS_FILTER } from '../financial-reports/financial-reports.service';
 
 @Injectable()
 export class FinancialStatementsService {
@@ -36,7 +37,14 @@ export class FinancialStatementsService {
     const { companyId, periodStart, periodEnd, statementType } = dto;
     await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.WRITE);
 
-    // Build trial balance from journal entry lines
+    // Build trial balance from journal entry lines.
+    //
+    // Reversal convention (see REPORTABLE_JE_STATUS_FILTER in
+    // financial-reports.service): reversing a posted entry flips the ORIGINAL to
+    // status 'REVERSED' and posts a separate mirror entry at status 'POSTED'.
+    // Filtering on 'POSTED' alone would EXCLUDE the reversed original but INCLUDE
+    // its mirror, double-counting the reversal negatively. Including 'REVERSED'
+    // (via the shared filter) lets the original net its mirror to zero.
     const lines = await this.prisma.journalEntryLine.findMany({
       where: {
         journalEntry: {
@@ -45,7 +53,7 @@ export class FinancialStatementsService {
             gte: periodStart ? new Date(periodStart) : undefined,
             lte: periodEnd ? new Date(periodEnd) : undefined,
           },
-          status: 'POSTED',
+          status: REPORTABLE_JE_STATUS_FILTER,
         },
       },
       include: { account: true },

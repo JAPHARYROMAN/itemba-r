@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
+import { CompanyScopeService } from '../../common/services';
 import { EntityCodeGeneratorService } from './entity-code-generator.service';
 import { SequenceBackfillService } from './sequence-backfill.service';
 import { EntityCodeGeneratorController } from './entity-code-generator.controller';
@@ -12,7 +13,7 @@ import { EntityCodeGeneratorController } from './entity-code-generator.controlle
 @Global()
 @Module({
   imports: [PrismaModule],
-  providers: [EntityCodeGeneratorService, SequenceBackfillService],
+  providers: [EntityCodeGeneratorService, SequenceBackfillService, CompanyScopeService],
   controllers: [EntityCodeGeneratorController],
   exports: [EntityCodeGeneratorService, SequenceBackfillService],
 })

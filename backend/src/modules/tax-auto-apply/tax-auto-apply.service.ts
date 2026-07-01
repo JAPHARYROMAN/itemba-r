@@ -1,6 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CompanyScopeService } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 /**
  * TaxAutoApplyService — Sprint C2.
@@ -43,17 +45,29 @@ import { PrismaService } from '../../prisma/prisma.service';
 @Injectable()
 export class TaxAutoApplyService {
   private readonly logger = new Logger(TaxAutoApplyService.name);
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly companyScope: CompanyScopeService,
+  ) {}
 
   private isEnabled(): boolean {
     return (process.env.TAX_AUTO_APPLY ?? 'false').toLowerCase() === 'true';
   }
 
-  /** Capture sales-order line tax into the TaxTransaction ledger. */
+  /**
+   * Capture sales-order line tax into the TaxTransaction ledger.
+   *
+   * `user` is REQUIRED for externally-triggered (manual endpoint) calls: when
+   * present, the resolved order's company is checked against the caller's access
+   * (MANAGE) before any ledger row is booked, preventing a cross-company write.
+   * The in-transaction confirm-path callers omit it because the order is already
+   * proven to belong to the confirming company inside their own $transaction.
+   */
   async applyForSalesOrder(
     salesOrderId: string,
     userId: string,
     tx?: Prisma.TransactionClient,
+    user?: AuthUser,
   ): Promise<TaxApplyResult> {
     if (!this.isEnabled()) return { skipped: 0, booked: 0, total: 0, disabled: true };
     return this.apply({
@@ -63,14 +77,20 @@ export class TaxAutoApplyService {
       sourceId: salesOrderId,
       userId,
       tx,
+      user,
     });
   }
 
-  /** Capture purchase-order line tax into the TaxTransaction ledger. */
+  /**
+   * Capture purchase-order line tax into the TaxTransaction ledger.
+   *
+   * See {@link applyForSalesOrder} for the `user` company-scope contract.
+   */
   async applyForPurchaseOrder(
     purchaseOrderId: string,
     userId: string,
     tx?: Prisma.TransactionClient,
+    user?: AuthUser,
   ): Promise<TaxApplyResult> {
     if (!this.isEnabled()) return { skipped: 0, booked: 0, total: 0, disabled: true };
     return this.apply({
@@ -80,6 +100,7 @@ export class TaxAutoApplyService {
       sourceId: purchaseOrderId,
       userId,
       tx,
+      user,
     });
   }
 
@@ -139,6 +160,21 @@ export class TaxAutoApplyService {
         `Tax auto-apply FAILED (tax not determined) for ${input.sourceType} ${input.sourceId}: ${result.error}`,
       );
       return result;
+    }
+
+    // Company-scope guard for externally-triggered (manual endpoint) calls.
+    // We deliberately load the order FIRST, then compare its real companyId to
+    // the caller's access — never trusting a client-supplied company. This
+    // block is intentionally OUTSIDE the try/catch above so an authorization
+    // failure propagates as a 403 instead of being swallowed into the soft
+    // `failed` result used for "tax could not be determined". The in-tx
+    // confirm-path callers pass no `user` and are already company-safe.
+    if (input.user) {
+      await this.companyScope.assertCanAccessCompany(
+        input.user,
+        order.companyId,
+        AccessLevel.MANAGE,
+      );
     }
 
     // Resolve a default TaxCode. Company-scoped wins over global; isDefault
@@ -326,6 +362,11 @@ interface ApplyInput {
   sourceId: string;
   userId: string;
   tx?: Prisma.TransactionClient;
+  /**
+   * Present only for externally-triggered (manual endpoint) calls. When set, the
+   * loaded order's company is asserted against this user's access before booking.
+   */
+  user?: AuthUser;
 }
 
 export interface TaxApplyResult {

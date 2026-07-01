@@ -2,6 +2,7 @@ import { Controller, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { SequenceBackfillService } from './sequence-backfill.service';
 
 /**
@@ -22,7 +23,10 @@ export class EntityCodeGeneratorController {
 
   @Post('backfill')
   @RequirePermissions('doc_sequences.update')
-  runBackfill(@Query('companyId') companyId?: string) {
-    return this.backfill.backfillAll({ companyId });
+  runBackfill(
+    @CurrentUser() user: AuthUser,
+    @Query('companyId') companyId?: string,
+  ) {
+    return this.backfill.backfillAll(user, { companyId });
   }
 }

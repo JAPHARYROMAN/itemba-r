@@ -1,5 +1,5 @@
-import { BadRequestException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { RfqsService } from './rfqs.service';
 
 function makeService() {
@@ -8,13 +8,18 @@ function makeService() {
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     requestForQuotation: {
       create: jest.fn(async ({ data }: any) => ({ id: 'rfq-1', ...data, rfqSuppliers: [] })),
+      findFirst: jest.fn(),
+      update: jest.fn(async ({ data }: any) => ({ id: 'rfq-1', ...data })),
     },
   } as any;
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const codes = { next: jest.fn().mockResolvedValue('RFQ-2026-00001') } as any;
+  const companyScope = {
+    assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
+  } as any;
 
-  const service = new RfqsService(prisma, auditLogs, codes);
-  return { service, prisma, auditLogs, codes };
+  const service = new RfqsService(prisma, auditLogs, codes, companyScope);
+  return { service, prisma, auditLogs, codes, companyScope };
 }
 
 const user = { id: 'user-1' } as any;
@@ -123,5 +128,151 @@ describe('RfqsService.create rfqNumber generation', () => {
       'companyId is required',
     );
     expect(prisma.requestForQuotation.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a create when the user lacks WRITE access to the target company', async () => {
+    const { service, prisma, companyScope } = makeService();
+    companyScope.assertCanAccessCompany.mockRejectedValueOnce(
+      new ForbiddenException('You do not have access to this company'),
+    );
+
+    await expect(service.create(createDto(), user)).rejects.toThrow(ForbiddenException);
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+      user,
+      'company-1',
+      AccessLevel.WRITE,
+    );
+    expect(prisma.requestForQuotation.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('RfqsService company scoping', () => {
+  it('findOne enforces company access on the fetched record', async () => {
+    const { service, prisma, companyScope } = makeService();
+    prisma.requestForQuotation.findFirst.mockResolvedValueOnce({
+      id: 'rfq-1',
+      companyId: 'company-2',
+      rfqSuppliers: [],
+    });
+    companyScope.assertCanAccessCompany.mockRejectedValueOnce(
+      new ForbiddenException('You do not have access to this company'),
+    );
+
+    await expect(service.findOne('rfq-1', user)).rejects.toThrow(ForbiddenException);
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+      user,
+      'company-2',
+      AccessLevel.READ,
+    );
+  });
+
+  it('findOne returns the record for an authorized user', async () => {
+    const { service, prisma, companyScope } = makeService();
+    const record = { id: 'rfq-1', companyId: 'company-1', rfqSuppliers: [] };
+    prisma.requestForQuotation.findFirst.mockResolvedValueOnce(record);
+
+    await expect(service.findOne('rfq-1', user)).resolves.toBe(record);
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+      user,
+      'company-1',
+      AccessLevel.READ,
+    );
+  });
+
+  it('findOne throws NotFound (and skips the scope check) when no record exists', async () => {
+    const { service, prisma, companyScope } = makeService();
+    prisma.requestForQuotation.findFirst.mockResolvedValueOnce(null);
+
+    await expect(service.findOne('missing', user)).rejects.toThrow(NotFoundException);
+    expect(companyScope.assertCanAccessCompany).not.toHaveBeenCalled();
+  });
+
+  it('update requires WRITE access to the record company', async () => {
+    const { service, prisma, companyScope } = makeService();
+    prisma.requestForQuotation.findFirst.mockResolvedValueOnce({
+      id: 'rfq-1',
+      companyId: 'company-2',
+      rfqSuppliers: [],
+    });
+    companyScope.assertCanAccessCompany.mockRejectedValueOnce(
+      new ForbiddenException('You do not have access to this company'),
+    );
+
+    await expect(service.update('rfq-1', { title: 'x' }, user)).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+      user,
+      'company-2',
+      AccessLevel.WRITE,
+    );
+    expect(prisma.requestForQuotation.update).not.toHaveBeenCalled();
+  });
+
+  it('update rejects a companyId change (cross-tenant reassignment)', async () => {
+    const { service, prisma } = makeService();
+    prisma.requestForQuotation.findFirst.mockResolvedValueOnce({
+      id: 'rfq-1',
+      companyId: 'company-1',
+      rfqSuppliers: [],
+    });
+
+    await expect(
+      service.update('rfq-1', { companyId: 'company-2', title: 'x' }, user),
+    ).rejects.toThrow(BadRequestException);
+    expect(prisma.requestForQuotation.update).not.toHaveBeenCalled();
+  });
+
+  it('update whitelists mutable columns and drops privileged/immutable fields', async () => {
+    const { service, prisma } = makeService();
+    prisma.requestForQuotation.findFirst.mockResolvedValueOnce({
+      id: 'rfq-1',
+      companyId: 'company-1',
+      rfqSuppliers: [],
+    });
+
+    await service.update(
+      'rfq-1',
+      {
+        // editable
+        title: 'Updated title',
+        notes: 'note',
+        // matching companyId is allowed (no-op) and must not be persisted
+        companyId: 'company-1',
+        // privileged / immutable — must be stripped
+        status: 'SENT',
+        createdById: 'attacker',
+        rfqNumber: 'RFQ-HACK',
+        awardedSupplierId: 'sup-x',
+        id: 'rfq-2',
+      } as any,
+      user,
+    );
+
+    expect(prisma.requestForQuotation.update).toHaveBeenCalledWith({
+      where: { id: 'rfq-1' },
+      data: { title: 'Updated title', notes: 'note' },
+    });
+  });
+
+  it('send requires WRITE access to the record company', async () => {
+    const { service, prisma, companyScope } = makeService();
+    prisma.requestForQuotation.findFirst.mockResolvedValueOnce({
+      id: 'rfq-1',
+      companyId: 'company-2',
+      status: 'DRAFT',
+      rfqSuppliers: [],
+    });
+    companyScope.assertCanAccessCompany.mockRejectedValueOnce(
+      new ForbiddenException('You do not have access to this company'),
+    );
+
+    await expect(service.send('rfq-1', {}, user)).rejects.toThrow(ForbiddenException);
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+      user,
+      'company-2',
+      AccessLevel.WRITE,
+    );
+    expect(prisma.requestForQuotation.update).not.toHaveBeenCalled();
   });
 });
