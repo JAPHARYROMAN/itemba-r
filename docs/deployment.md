@@ -187,8 +187,9 @@ npm run verify:deploy
 # before the backend is allowed to start.
 docker compose --env-file .env.production -f docker-compose.production.yml up -d --build
 
-# 4. Run seed only when intentionally bootstrapping a fresh environment
-docker exec itemba_r_backend_prod npm run db:seed
+# 4. Run seed only when intentionally bootstrapping a fresh environment.
+# Requires SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD in .env.production.
+docker compose --env-file .env.production -f docker-compose.production.yml --profile seed run --rm backend-seed
 ```
 
 ## Health Checks

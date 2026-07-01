@@ -19,6 +19,7 @@ RUN npm ci
 # from backend/package.json as ../database/prisma/schema.prisma.
 WORKDIR /app
 COPY database/prisma ./database/prisma
+COPY database/seeds ./database/seeds
 
 # Source for the backend build.
 COPY backend/ ./backend/

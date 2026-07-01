@@ -49,6 +49,8 @@ const requiredSecretKeys = [
   'API_HOST',
   'WEBSITE_HOST',
   'WEBSITE_WWW_HOST',
+  'SEED_ADMIN_EMAIL',
+  'SEED_ADMIN_PASSWORD',
 ];
 
 const sampleEnv = {
@@ -73,6 +75,9 @@ const sampleEnv = {
   WEBSITE_WWW_HOST: 'www.validation.local',
   ACME_EMAIL: 'ops@validation.local',
   JOB_WORKER_ENABLED: 'true',
+  SEED_ADMIN_EMAIL: 'admin@validation.local',
+  SEED_ADMIN_PASSWORD: 'seed-admin-deploy-validation-secret-40',
+  SEED_DEMO_DATA: 'true',
 };
 
 const tempDir = mkdtempSync(join(tmpdir(), 'itemba-deploy-validate-'));
@@ -110,6 +115,8 @@ function composeConfig(target, extraEnv = {}) {
       emptyEnvFile,
       '-f',
       resolve(rootDir, target.file),
+      '--profile',
+      'seed',
       'config',
       '--format',
       'json',
@@ -164,6 +171,7 @@ function assertDeploymentShape(target, config) {
     'postgres',
     'redis',
     'backend-migrate',
+    'backend-seed',
     'backend',
     'frontend',
     'website',
@@ -174,11 +182,18 @@ function assertDeploymentShape(target, config) {
   const caddy = services.caddy;
   const backend = services.backend;
   const migrate = services['backend-migrate'];
+  const seed = services['backend-seed'];
   const frontend = services.frontend;
   const website = services.website;
   const redis = services.redis;
 
   assertEqual(target, migrate.build?.target, 'migration', 'backend-migrate uses migration target');
+  assertEqual(target, seed.build?.target, 'migration', 'backend-seed uses migration target');
+  assert(
+    target,
+    flatten(seed.command).includes('npm run db:seed'),
+    'backend-seed runs the database seed command',
+  );
   assertEqual(target, backend.build?.target, 'production', 'backend uses production target');
   assertEqual(target, frontend.build?.target, 'runner', 'frontend uses runner target');
   assert(target, website.build, 'website has build configuration');
@@ -227,6 +242,7 @@ function assertDeploymentShape(target, config) {
     target.expectedNodeEnv,
     'backend-migrate NODE_ENV',
   );
+  assertEqual(target, seed.environment?.NODE_ENV, target.expectedNodeEnv, 'backend-seed NODE_ENV');
 
   for (const envKey of [
     'DATABASE_URL',
@@ -241,7 +257,12 @@ function assertDeploymentShape(target, config) {
     'REDIS_PASSWORD',
   ]) {
     assert(target, migrate.environment?.[envKey], `backend-migrate has ${envKey}`);
+    assert(target, seed.environment?.[envKey], `backend-seed has ${envKey}`);
     assert(target, backend.environment?.[envKey], `backend has ${envKey}`);
+  }
+
+  for (const envKey of ['SEED_ADMIN_EMAIL', 'SEED_ADMIN_PASSWORD', 'SEED_DEMO_DATA']) {
+    assert(target, seed.environment?.[envKey], `backend-seed has ${envKey}`);
   }
 
   for (const envKey of [

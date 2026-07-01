@@ -74,7 +74,7 @@ git clone https://<YOUR_PAT>@github.com/JAPHARYROMAN/itemba-r.git /opt/itemba-r
 cd /opt/itemba-r
 DOMAIN=itembagrouptz.com bash deploy/relaunch/deploy.sh
 ```
-It will: install Docker, add swap, generate `.env` with **fresh secrets**, build the
+It will: install Docker, add swap, generate `.env.production` with **fresh secrets**, build the
 images (one at a time), start the stack, wait for the backend to go healthy
 (migrations apply automatically), run the seed, and install a nightly backup cron.
 First run takes ~10–20 min (image builds).
@@ -83,35 +83,36 @@ First run takes ~10–20 min (image builds).
 
 ## 5. Verify
 ```bash
-docker compose -f docker-compose.production.yml ps          # all healthy
+docker compose --env-file .env.production -f docker-compose.production.yml ps          # all healthy
 curl -fsS https://api.itembagrouptz.com/api/v1/health       # {"status":"ok",...}
 ```
 Then open **https://app.itembagrouptz.com** and log in:
-- `admin@itemba.local` / `ChangeMe!123`
+- `admin@itembagrouptz.com`
+- Password: read `SEED_ADMIN_PASSWORD` from `/opt/itemba-r/.env.production`
 
 If HTTPS isn't ready yet, wait for DNS to propagate (Caddy retries automatically);
-check `docker compose -f docker-compose.production.yml logs -f caddy`.
+check `docker compose --env-file .env.production -f docker-compose.production.yml logs -f caddy`.
 
 ---
 
 ## 6. Immediately after go-live
 1. **Change the admin password** (and the seeded email if you want) in the UI.
-2. **Back up `/opt/itemba-r/.env`** to a password manager — those secrets cannot be
+2. **Back up `/opt/itemba-r/.env.production`** to a password manager — those secrets cannot be
    regenerated without invalidating sessions/encryption.
 3. Confirm backups: `ls -la /opt/itemba-backups` (nightly 02:30 UTC, 14-day retention).
    Consider shipping them off-box (DO Spaces / `rclone`) so a future droplet loss
    doesn't lose data again.
-4. Optional: fill SMTP + mobile-money keys in `.env`, then
-   `docker compose -f docker-compose.production.yml up -d` to apply.
+4. Optional: fill SMTP + mobile-money keys in `.env.production`, then
+   `docker compose --env-file .env.production -f docker-compose.production.yml up -d` to apply.
 
 ---
 
 ## Operations cheatsheet
 ```bash
 cd /opt/itemba-r
-docker compose -f docker-compose.production.yml ps
-docker compose -f docker-compose.production.yml logs -f backend
-docker compose -f docker-compose.production.yml restart backend
+docker compose --env-file .env.production -f docker-compose.production.yml ps
+docker compose --env-file .env.production -f docker-compose.production.yml logs -f backend
+docker compose --env-file .env.production -f docker-compose.production.yml restart backend
 git pull && bash deploy/relaunch/deploy.sh     # update to latest main + rebuild
 /usr/local/bin/itemba-backup.sh                # backup on demand
 ```
