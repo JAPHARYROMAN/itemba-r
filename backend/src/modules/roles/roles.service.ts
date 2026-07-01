@@ -29,8 +29,13 @@ export class RolesService {
       where: { roleId },
       select: { userId: true },
     });
-    const userIds = [...new Set(holders.map((h) => h.userId))];
-    await Promise.all(userIds.map((userId) => this.permissionCache.invalidate(userId)));
+    await this.invalidateCacheForUsers(holders.map((h) => h.userId));
+  }
+
+  /** Evict the JwtStrategy permission cache for a set of user ids (de-duped). */
+  private async invalidateCacheForUsers(userIds: string[]): Promise<void> {
+    const distinct = [...new Set(userIds)];
+    await Promise.all(distinct.map((userId) => this.permissionCache.invalidate(userId)));
   }
 
   /**
@@ -192,11 +197,18 @@ export class RolesService {
         `Role "${role.name}" is still assigned to ${role._count.userRoles} user(s). Reassign them before deleting.`,
       );
     }
-    // Capture any current holders before the cascade removes their UserRole
-    // rows, then evict their cached permissions after deletion. In practice the
-    // guard above means there are none, but this is race-safe and cheap.
+    // Capture any current holders BEFORE the delete: UserRole.role is
+    // onDelete:Cascade, so once role.delete() runs the join rows are gone and a
+    // post-delete userRole.findMany would evict nothing. In practice the guard
+    // above means there are none, but reading holders first keeps this race-safe
+    // and correct. Invalidate the captured holders after the delete commits so
+    // any lingering cached permissions are dropped immediately.
+    const holders = await this.prisma.userRole.findMany({
+      where: { roleId: id },
+      select: { userId: true },
+    });
     const deleted = await this.prisma.role.delete({ where: { id } });
-    await this.invalidateCacheForRole(id);
+    await this.invalidateCacheForUsers(holders.map((h) => h.userId));
     return deleted;
   }
 }

@@ -115,4 +115,33 @@ describe('RolesService — permission cache invalidation', () => {
       select: { userId: true },
     });
   });
+
+  it('remove() captures holders BEFORE the cascading delete and invalidates them', async () => {
+    // Regression: UserRole.role is onDelete:Cascade, so holders must be read
+    // before role.delete() — a post-delete findMany would return zero rows and
+    // evict nothing, leaving stale permissions cached up to the TTL.
+    const { service, prisma, permissionCache } = makeService({
+      userRoleCount: 0,
+      holders: ['user-a', 'user-b', 'user-a'], // duplicate proves de-dup
+    });
+
+    const callOrder: string[] = [];
+    prisma.userRole.findMany.mockImplementation(async () => {
+      callOrder.push('findMany');
+      return [{ userId: 'user-a' }, { userId: 'user-b' }, { userId: 'user-a' }];
+    });
+    prisma.role.delete.mockImplementation(async () => {
+      callOrder.push('delete');
+      return { id: 'role-1' };
+    });
+
+    await service.remove('role-1');
+
+    // Holders were read before the cascading delete.
+    expect(callOrder).toEqual(['findMany', 'delete']);
+    // Each distinct captured holder had its cache evicted (de-duped).
+    expect(permissionCache.invalidate).toHaveBeenCalledTimes(2);
+    expect(permissionCache.invalidate).toHaveBeenCalledWith('user-a');
+    expect(permissionCache.invalidate).toHaveBeenCalledWith('user-b');
+  });
 });

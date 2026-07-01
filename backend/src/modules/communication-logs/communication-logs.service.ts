@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -38,37 +38,61 @@ export class CommunicationLogsService {
   }
 
   async create(dto: CreateCommunicationLogDto, user: any) {
-    // `communicationNumber` is a required, globally-unique column with no DB
-    // default. Generate it server-side via the shared code generator (like
-    // credit-notes/customer-payments) so the insert satisfies the constraint.
-    const communicationNumber = await this.codes.next({
-      entityType: 'CommunicationLog',
-      companyId: dto.companyId,
-    });
-    const item = await this.prisma.communicationLog.create({
-      data: {
-        communicationNumber,
-        companyId: dto.companyId,
-        entityType: dto.entityType,
-        entityId: dto.entityId,
-        communicationType: dto.communicationType,
-        ...(dto.direction !== undefined ? { direction: dto.direction } : {}),
-        ...(dto.subject !== undefined ? { subject: dto.subject } : {}),
-        summary: dto.summary,
-        ...(dto.communicationDate !== undefined
-          ? { communicationDate: new Date(dto.communicationDate) }
-          : {}),
-        ...(dto.followUpRequired !== undefined ? { followUpRequired: dto.followUpRequired } : {}),
-        ...(dto.followUpDate !== undefined
-          ? { followUpDate: dto.followUpDate ? new Date(dto.followUpDate) : null }
-          : {}),
-        ...(dto.assignedToId !== undefined ? { assignedToId: dto.assignedToId } : {}),
-        status: 'OPEN',
-        createdById: user.id,
-      },
-    });
-    await this.auditLogs.log({ action: 'CREATE', entityType: 'CommunicationLog', entityId: item.id, userId: user.id, companyId: item.companyId });
-    return item;
+    // `communicationNumber` is a required column declared GLOBALLY `@unique` in
+    // schema.prisma (`communicationNumber String @unique`, NOT
+    // `@@unique([companyId, communicationNumber])`). A per-company counter would
+    // make every company's first log compute the same `COMMUN-YYYY-00001`, so
+    // the second tenant's insert 500s on P2002. Draw from the GLOBAL counter
+    // (companyId omitted, matching customer-segments) so numbers are unique
+    // across every company by construction. Generation + insert share one
+    // transaction so the counter advance commits atomically with the row, and a
+    // rare unique collision (concurrent create) retries with a fresh number
+    // instead of surfacing a 500.
+    const maxAttempts = 5;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const item = await this.prisma.$transaction(async (tx) => {
+          const communicationNumber = await this.codes.next({
+            entityType: 'CommunicationLog',
+            tx,
+          });
+          return tx.communicationLog.create({
+            data: {
+              communicationNumber,
+              companyId: dto.companyId,
+              entityType: dto.entityType,
+              entityId: dto.entityId,
+              communicationType: dto.communicationType,
+              ...(dto.direction !== undefined ? { direction: dto.direction } : {}),
+              ...(dto.subject !== undefined ? { subject: dto.subject } : {}),
+              summary: dto.summary,
+              ...(dto.communicationDate !== undefined
+                ? { communicationDate: new Date(dto.communicationDate) }
+                : {}),
+              ...(dto.followUpRequired !== undefined ? { followUpRequired: dto.followUpRequired } : {}),
+              ...(dto.followUpDate !== undefined
+                ? { followUpDate: dto.followUpDate ? new Date(dto.followUpDate) : null }
+                : {}),
+              ...(dto.assignedToId !== undefined ? { assignedToId: dto.assignedToId } : {}),
+              status: 'OPEN',
+              createdById: user.id,
+            },
+          });
+        });
+        await this.auditLogs.log({ action: 'CREATE', entityType: 'CommunicationLog', entityId: item.id, userId: user.id, companyId: item.companyId });
+        return item;
+      } catch (err) {
+        // P2002 = unique constraint violation on communicationNumber. Retry with
+        // a fresh number; only give up (400) after exhausting the attempts.
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+          if (attempt < maxAttempts) continue;
+          throw new BadRequestException('Failed to generate a unique communication number, please retry');
+        }
+        throw err;
+      }
+    }
+    // Unreachable: the loop either returns or throws on every path.
+    throw new BadRequestException('Failed to create communication log');
   }
 
   async update(id: string, dto: UpdateCommunicationLogDto, user: any) {

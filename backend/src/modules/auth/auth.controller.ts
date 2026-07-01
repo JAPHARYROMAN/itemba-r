@@ -24,6 +24,7 @@ import {
 } from './dto/two-factor.dto';
 import { RequestPasswordResetDto } from './dto/request-password-reset.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { VerifyPasswordDto } from './dto/verify-password.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { JwtRefresh } from '../../common/decorators/jwt-refresh.decorator';
@@ -56,6 +57,21 @@ export class AuthController {
   @ApiOperation({ summary: 'Authenticate and obtain JWT tokens' })
   login(@Body() dto: LoginDto, @Req() req: Request) {
     return this.auth.login(dto, { ipAddress: req.ip, userAgent: req.headers['user-agent'] });
+  }
+
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
+  @Post('change-password')
+  @ApiOperation({
+    summary:
+      'Complete a forced password change using the passwordChange token from login, then auto-login',
+  })
+  changePassword(@Body() dto: ChangePasswordDto, @Req() req: Request) {
+    return this.auth.changePassword(dto.tempToken, dto.newPassword, {
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
   }
 
   @JwtRefresh()

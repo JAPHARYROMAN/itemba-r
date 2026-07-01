@@ -7,6 +7,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 const RESET_TOKEN_TTL_MINUTES = 30;
+// Password rotation window used to refresh passwordExpiresAt after a reset so the
+// freshly-set password is not instantly re-flagged as expired. Configurable via
+// PASSWORD_ROTATION_DAYS; a non-positive value disables expiry (null).
+const DEFAULT_PASSWORD_ROTATION_DAYS = 90;
 
 @Injectable()
 export class PasswordResetService {
@@ -103,27 +107,50 @@ export class PasswordResetService {
     }
 
     const newHash = await argon2.hash(newPassword);
+    const changedAt = new Date();
+    const passwordExpiresAt = this.nextPasswordExpiry(changedAt);
 
-    // Mark token as used (single-use)
-    await this.prisma.passwordResetToken.update({
-      where: { id: matched.id },
-      data: { usedAt: new Date() },
-    });
-
-    // Update password and save to history
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: {
-        passwordHash: newHash,
-        passwordChangedAt: new Date(),
-        failedLoginAttempts: 0,
-        lockedUntil: null,
-      },
-    });
-
-    await this.prisma.passwordHistory.create({
-      data: { userId: user.id, passwordHash: newHash },
-    });
+    // Apply the reset atomically so this is a complete recovery path: mark the
+    // token used, set the new hash and CLEAR the rotation flags on BOTH the User
+    // (mustChangePassword) and UserSecurityProfile (forcePasswordChange) rows,
+    // refresh passwordExpiresAt so the new password is not instantly re-flagged as
+    // expired, reset lockout counters, and record history. Upsert the profile so a
+    // user without one still ends up with forcePasswordChange=false + fresh expiry.
+    await this.prisma.$transaction([
+      this.prisma.passwordResetToken.update({
+        where: { id: matched.id },
+        data: { usedAt: changedAt },
+      }),
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordHash: newHash,
+          passwordChangedAt: changedAt,
+          mustChangePassword: false,
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+        },
+      }),
+      this.prisma.userSecurityProfile.upsert({
+        where: { userId: user.id },
+        update: {
+          forcePasswordChange: false,
+          passwordChangedAt: changedAt,
+          passwordExpiresAt,
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+        },
+        create: {
+          userId: user.id,
+          forcePasswordChange: false,
+          passwordChangedAt: changedAt,
+          passwordExpiresAt,
+        },
+      }),
+      this.prisma.passwordHistory.create({
+        data: { userId: user.id, passwordHash: newHash },
+      }),
+    ]);
 
     // Invalidate all existing refresh tokens AND active sessions: a password
     // reset must drop every authenticated surface the user had.
@@ -173,6 +200,21 @@ export class PasswordResetService {
     }
 
     return null;
+  }
+
+  /**
+   * Next password expiry after a reset: `from` + PASSWORD_ROTATION_DAYS. Returns
+   * null when rotation is disabled (non-positive days) so the password never
+   * auto-expires. Kept in sync with AuthService.nextPasswordExpiry.
+   */
+  private nextPasswordExpiry(from: Date = new Date()): Date | null {
+    const raw = this.config.get<string>('PASSWORD_ROTATION_DAYS');
+    const days =
+      raw === undefined || raw === null || `${raw}`.trim() === ''
+        ? DEFAULT_PASSWORD_ROTATION_DAYS
+        : Number(`${raw}`.trim());
+    if (!Number.isFinite(days) || days <= 0) return null;
+    return new Date(from.getTime() + days * 86_400_000);
   }
 
   private hashResetToken(rawToken: string): string {

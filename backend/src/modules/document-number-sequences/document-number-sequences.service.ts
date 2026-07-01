@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
+import { companyWhereForUser, isGroupScopedUser, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { pagination } from '../../common/utils/pagination';
 import {
@@ -19,11 +19,34 @@ export class DocumentNumberSequencesService {
     private readonly companyScope: CompanyScopeService,
   ) {}
 
+  /**
+   * Build the company-scope predicate for document number sequences.
+   *
+   * Sequences may be created at the group level (companyId=null) to serve as
+   * shared/default templates across the tenant group. A plain company scope
+   * ({companyId:{in:[...]}}) can never match a null companyId, so those
+   * group-level sequences were readable by id (findOne widens to null for
+   * group-scoped users) yet invisible in findAll — an inconsistency. Group-scoped
+   * viewers oversee group-level records, so we additionally surface
+   * companyId:null rows to them WITHOUT loosening tenant isolation for
+   * company-scoped rows. Regular company-scoped users keep the strict scope and
+   * never see null rows.
+   */
+  private scopeWhere(user: AuthUser | undefined, requestedCompanyId?: string | null): any {
+    const scope = companyWhereForUser(user, requestedCompanyId);
+    // Only widen to include group-level (null companyId) sequences when the
+    // viewer is group-scoped and is not narrowing to a single requested company.
+    if (user && isGroupScopedUser(user) && !requestedCompanyId) {
+      return { OR: [scope, { companyId: null }] };
+    }
+    return scope;
+  }
+
   async findAll(query: QueryDocumentNumberSequenceDto, user?: AuthUser) {
     const { companyId, entityType, page = 1, limit = 20 } = query;
     const paging = pagination({ page, limit });
     const where: any = { deletedAt: null };
-    applyCompanyScopeWhere(where, user, companyId);
+    Object.assign(where, this.scopeWhere(user, companyId));
     if (entityType) where.entityType = entityType;
     const [items, total] = await Promise.all([
       this.prisma.documentNumberSequence.findMany({

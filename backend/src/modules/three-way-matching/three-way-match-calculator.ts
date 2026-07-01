@@ -70,6 +70,15 @@ export function amountVarianceAgainstPurchaseOrder(
   }
 
   let expectedAmount = new Prisma.Decimal(0);
+  // Accumulate the ACTUAL billed amount over the SAME matched-line set that builds
+  // expectedAmount. The amount variance must compare like against like: expected
+  // (PO-priced) vs actual (invoice-priced) for the matched lines only. Comparing
+  // the matched expected against the WHOLE invoice total falsely flags a variance
+  // whenever the invoice carries an extra non-PO line (e.g. freight/service) that
+  // has no PO product to match — that line inflates totalAmount but has no expected
+  // counterpart. Both sides are net-of-discount, plus-tax (SupplierInvoiceLine
+  // stores lineTotal = qty*unitPrice - discount + tax), so the bases align.
+  let actualMatchedAmount = new Prisma.Decimal(0);
   let hasLineMatch = false;
   for (const line of invoice.lines ?? []) {
     const agg = line.productId ? poByProduct.get(line.productId) : null;
@@ -84,12 +93,23 @@ export function amountVarianceAgainstPurchaseOrder(
       .plus(new Prisma.Decimal(line.quantity).mul(avgUnitCost))
       .minus(line.discountAmount ?? 0)
       .plus(line.taxAmount ?? 0);
+    // Actual billed amount for this matched line. Prefer the persisted lineTotal
+    // (already net-of-discount, plus-tax); fall back to reconstructing it from
+    // quantity/unitPrice when a caller supplies bare lines without lineTotal.
+    const actualLine =
+      line.lineTotal != null
+        ? new Prisma.Decimal(line.lineTotal)
+        : new Prisma.Decimal(line.quantity ?? 0)
+            .mul(line.unitPrice ?? 0)
+            .minus(line.discountAmount ?? 0)
+            .plus(line.taxAmount ?? 0);
+    actualMatchedAmount = actualMatchedAmount.plus(actualLine);
   }
 
   if (!hasLineMatch) {
     return new Prisma.Decimal(invoice.totalAmount).minus(purchaseOrderTotal).abs();
   }
-  return new Prisma.Decimal(invoice.totalAmount).minus(expectedAmount).abs();
+  return actualMatchedAmount.minus(expectedAmount).abs();
 }
 
 export interface ComputedThreeWayMatch {

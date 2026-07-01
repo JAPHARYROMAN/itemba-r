@@ -433,11 +433,13 @@ describe('SupplierInvoicesService createThreeWayMatch shared-calculator variance
     expect(created[0].matchStatus).toBe('VARIANCE');
   });
 
-  it('uses the shared whole-invoice actual basis (matches the standalone register)', async () => {
-    // A perfectly-priced PO product line plus a non-PO freight line. The shared
-    // calculator compares invoice.totalAmount (2000) against the matched expected
-    // (1000) => variance 1000. This intentionally aligns the SI approval flow with
-    // the standalone three-way-matching register, which computes the same value.
+  it('does NOT report a variance for an extra non-PO freight line on an otherwise matched invoice', async () => {
+    // A perfectly-priced PO product line plus a non-PO freight/service line. The
+    // amount variance must compare the matched expected (1000) against the matched
+    // ACTUAL (1000) over the SAME matched-line set — NOT against the whole-invoice
+    // total (2000). The freight line has no PO product to match, so it must not
+    // manufacture a bogus 1000 variance on a genuinely matched invoice. (Quantity
+    // variance is also nil: the single matched product line ties out to the PO.)
     const po = {
       id: 'po-1',
       companyId: 'company-1',
@@ -454,12 +456,18 @@ describe('SupplierInvoicesService createThreeWayMatch shared-calculator variance
       totalAmount: 2000,
       lines: [
         invLine(), // matches PO product p-a exactly: 1000
-        invLine({ productId: null, lineTotal: 1000, quantity: 1, unitPrice: 1000 }), // freight 1000
+        // Flat non-PO freight charge (no product, no unit quantity) — it inflates
+        // invoice.totalAmount to 2000 but has no PO counterpart. Modeled with
+        // quantity 0 so it is a pure charge line and does not perturb the separate
+        // quantity-variance path, isolating the amount-variance behaviour under test.
+        invLine({ productId: null, description: 'Freight', quantity: 0, unitPrice: 0, lineTotal: 1000 }),
       ],
     };
     await (service as any).createThreeWayMatch(invoice, 'user-1');
-    expect(Number(created[0].amountVariance)).toBe(1000);
-    expect(created[0].matchStatus).toBe('VARIANCE');
+    // Amount variance is measured over the matched-line set only (1000 vs 1000),
+    // so the freight line does not manufacture a variance.
+    expect(Number(created[0].amountVariance)).toBe(0);
+    expect(created[0].matchStatus).toBe('MATCHED');
   });
 
   it('falls back to whole-invoice vs PO total when no invoice line matches a PO product', async () => {

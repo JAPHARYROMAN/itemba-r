@@ -23,6 +23,9 @@ function makeService() {
   const prisma = {
     user: {
       findUnique: jest.fn(),
+      // login() falls back to a case-insensitive findFirst when findUnique misses
+      // (legacy mixed-case rows). Default it to null so "missing user" stays missing.
+      findFirst: jest.fn().mockResolvedValue(null),
       update: jest.fn().mockResolvedValue(undefined),
     },
     refreshToken: {

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -81,6 +82,11 @@ const TWO_FACTOR_LOCK_MS = 15 * 60_000;
 const REFRESH_TOKEN_ROTATION_GRACE_MS = 10 * 60_000;
 const DEFAULT_REFRESH_EXPIRES_IN = 'never';
 const PERSISTENT_SESSION_EXPIRES_AT = new Date('9999-12-31T23:59:59.999Z');
+// Password rotation window. After a successful change/reset the next expiry is
+// pushed this far into the future so the freshly-set password is not instantly
+// re-flagged as PASSWORD_EXPIRED. Configurable via PASSWORD_ROTATION_DAYS; 0 (or
+// a non-positive value) disables expiry (passwordExpiresAt = null).
+const DEFAULT_PASSWORD_ROTATION_DAYS = 90;
 
 @Injectable()
 export class AuthService {
@@ -147,7 +153,19 @@ export class AuthService {
     // log in with any casing and lookup matches the canonical form we store and
     // that the in-memory lockout key uses. The DTO @Transform normalizes too;
     // this is defense-in-depth for any non-DTO caller.
-    const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+    let user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+
+    // Tolerant fallback for legacy mixed-case rows: accounts created before email
+    // was canonicalized to lowercase are stored with their original casing, so the
+    // strict findUnique above misses them. A case-insensitive findFirst still
+    // resolves the single matching row (email is unique per casing, and the DB is
+    // not expected to hold two rows that differ only by case) so those users keep
+    // authenticating. Skipped when the strict lookup already matched.
+    if (!user) {
+      user = await this.prisma.user.findFirst({
+        where: { email: { equals: submittedEmail, mode: 'insensitive' } },
+      });
+    }
 
     // Admin/security lock: honor BOTH the login-tracking column (User.lockedUntil)
     // and the security-admin column (UserSecurityProfile.lockedUntil). The write
@@ -228,12 +246,32 @@ export class AuthService {
       data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
     });
 
-    // Enforce password-rotation controls BEFORE issuing any session (or 2FA
-    // challenge): if the admin flagged the account for a forced change, or the
-    // password has expired, the credentials are correct but we must NOT hand out
-    // a normal session. Surface a must-change signal instead so the client drives
-    // the reset flow. Uses User.mustChangePassword +
-    // UserSecurityProfile.forcePasswordChange / passwordExpiresAt.
+    // Check if 2FA is required — this MUST be evaluated BEFORE the
+    // password-rotation gate. A 2FA-enrolled account has to clear the second
+    // factor first; otherwise an attacker who knows only the password could,
+    // for an account that also happens to be flagged for rotation (e.g. an
+    // elapsed passwordExpiresAt or an admin-set forcePasswordChange), be handed
+    // a `passwordChange`-scoped token, call POST /auth/change-password, and be
+    // auto-logged-in with FULL tokens — a complete 2FA bypass. completeLogin2FA
+    // re-checks the rotation gate AFTER verifying the code, so 2FA users still
+    // hit the password-change flow, just on the correct (post-2FA) side.
+    if (secProfile?.twoFactorEnabled) {
+      const tempToken = await this.jwt.signAsync(
+        { sub: user.id, email: user.email, scope: 'twoFactor' } as JwtPayload,
+        { secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'), expiresIn: '5m' },
+      );
+      await this.logSecurityEvent('TWO_FACTOR_CHALLENGE', user.id, 'LOW', meta);
+      return { requires2FA: true, tempToken };
+    }
+
+    // Enforce password-rotation controls BEFORE issuing any session: if the
+    // admin flagged the account for a forced change, or the password has
+    // expired, the credentials are correct but we must NOT hand out a normal
+    // session. Surface a must-change signal instead so the client drives the
+    // reset flow. Uses User.mustChangePassword +
+    // UserSecurityProfile.forcePasswordChange / passwordExpiresAt. Only reached
+    // for non-2FA accounts (2FA users are routed above and re-checked after the
+    // code in completeLogin2FA).
     const passwordChangeReason = this.passwordChangeRequiredReason(user, secProfile);
     if (passwordChangeReason) {
       await this.audit.log({
@@ -252,16 +290,6 @@ export class AuthService {
         { secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'), expiresIn: '15m' },
       );
       return { requiresPasswordChange: true, reason: passwordChangeReason, tempToken };
-    }
-
-    // Check if 2FA is required
-    if (secProfile?.twoFactorEnabled) {
-      const tempToken = await this.jwt.signAsync(
-        { sub: user.id, email: user.email, scope: 'twoFactor' } as JwtPayload,
-        { secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'), expiresIn: '5m' },
-      );
-      await this.logSecurityEvent('TWO_FACTOR_CHALLENGE', user.id, 'LOW', meta);
-      return { requires2FA: true, tempToken };
     }
 
     await this.logSecurityEvent('LOGIN_SUCCESS', user.id, 'LOW', meta);
@@ -386,6 +414,131 @@ export class AuthService {
       userAgent: meta?.userAgent,
     });
 
+    return this.issueTokens(user.id, user.email, meta);
+  }
+
+  /**
+   * Recovery path for the password-rotation gate. login()/completeLogin2FA()
+   * hand out a short-lived `passwordChange`-scoped tempToken when the account is
+   * flagged (User.mustChangePassword / UserSecurityProfile.forcePasswordChange /
+   * elapsed passwordExpiresAt); without a consumer for that token the account —
+   * including the seeded admin@itemba.local — could verify its password yet
+   * never obtain a session. This verifies the tempToken, sets the new password,
+   * CLEARS the rotation flags, resets lockout counters, and auto-logs-in.
+   */
+  async changePassword(
+    tempToken: string,
+    newPassword: string,
+    meta?: { ipAddress?: string; userAgent?: string },
+  ) {
+    let payload: JwtPayload;
+    try {
+      payload = await this.jwt.verifyAsync<JwtPayload>(tempToken, {
+        secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
+      });
+    } catch {
+      throw new UnauthorizedException('Invalid or expired password-change token');
+    }
+
+    if (payload.scope !== 'passwordChange') {
+      throw new UnauthorizedException('Invalid password-change token scope');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!user || user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Password policy: minimum length + no reuse of recent passwords (mirrors the
+    // email-reset flow so both recovery paths enforce the same rules).
+    if (newPassword.length < 8) {
+      throw new BadRequestException('Password must be at least 8 characters long.');
+    }
+
+    const currentHashes = [
+      user.passwordHash,
+      ...(
+        await this.prisma.passwordHistory.findMany({
+          where: { userId: user.id },
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+        })
+      ).map((h) => h.passwordHash),
+    ];
+    for (const h of currentHashes) {
+      try {
+        if (await argon2.verify(h, newPassword)) {
+          throw new BadRequestException('You cannot reuse a recent password.');
+        }
+      } catch (err) {
+        if (err instanceof BadRequestException) throw err;
+        // Malformed/legacy hash — treat as non-match and continue.
+      }
+    }
+
+    const newHash = await argon2.hash(newPassword);
+    const now = new Date();
+    const passwordExpiresAt = this.nextPasswordExpiry(now);
+
+    // Apply everything atomically: set the new hash, CLEAR the rotation flags on
+    // BOTH the User and UserSecurityProfile rows, refresh passwordExpiresAt, reset
+    // lockout state, and record history. Upsert the profile so a user without one
+    // still ends up with forcePasswordChange=false + a fresh expiry.
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordHash: newHash,
+          passwordChangedAt: now,
+          mustChangePassword: false,
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+        },
+      }),
+      this.prisma.userSecurityProfile.upsert({
+        where: { userId: user.id },
+        update: {
+          forcePasswordChange: false,
+          passwordChangedAt: now,
+          passwordExpiresAt,
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+        },
+        create: {
+          userId: user.id,
+          forcePasswordChange: false,
+          passwordChangedAt: now,
+          passwordExpiresAt,
+        },
+      }),
+      this.prisma.passwordHistory.create({
+        data: { userId: user.id, passwordHash: newHash },
+      }),
+    ]);
+
+    // The changed password invalidates other authenticated surfaces, mirroring the
+    // email-reset flow — drop existing refresh tokens and active sessions.
+    await this.prisma.refreshToken.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: now, revokedReason: 'PASSWORD_CHANGE' },
+    });
+    await this.prisma.activeSession.updateMany({
+      where: { userId: user.id, revokedAt: null, status: 'ACTIVE' },
+      data: { revokedAt: now, status: 'REVOKED' },
+    });
+
+    await this.logSecurityEvent('PASSWORD_CHANGED', user.id, 'LOW', meta);
+    await this.audit.log({
+      action: 'PASSWORD_CHANGED_ON_LOGIN',
+      entityType: 'User',
+      entityId: user.id,
+      userId: user.id,
+      ipAddress: meta?.ipAddress,
+      userAgent: meta?.userAgent,
+    });
+
+    // Auto-login: issue NORMAL access + refresh tokens so the user lands
+    // authenticated instead of bouncing back to the login screen.
     return this.issueTokens(user.id, user.email, meta);
   }
 
@@ -741,6 +894,22 @@ export class AuthService {
       return 'PASSWORD_EXPIRED';
     }
     return null;
+  }
+
+  /**
+   * Next password expiry after a change/reset: `from` + PASSWORD_ROTATION_DAYS.
+   * Returns null when rotation is disabled (non-positive days) so the account's
+   * password never auto-expires. Keeping the freshly-set password from being
+   * instantly re-flagged as PASSWORD_EXPIRED is essential to the recovery path.
+   */
+  private nextPasswordExpiry(from: Date = new Date()): Date | null {
+    const raw = this.config.get<string>('PASSWORD_ROTATION_DAYS');
+    const days =
+      raw === undefined || raw === null || `${raw}`.trim() === ''
+        ? DEFAULT_PASSWORD_ROTATION_DAYS
+        : Number(`${raw}`.trim());
+    if (!Number.isFinite(days) || days <= 0) return null;
+    return new Date(from.getTime() + days * 86_400_000);
   }
 
   private isEmailLoginLocked(email: string): boolean {

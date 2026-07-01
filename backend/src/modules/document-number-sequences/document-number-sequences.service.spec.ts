@@ -133,6 +133,62 @@ describe('DocumentNumberSequencesService company scoping', () => {
     });
   });
 
+  describe('findAll', () => {
+    it('scopes a company user to their own companies (no null-company rows)', async () => {
+      const prisma = makePrisma();
+      const service = makeService(prisma);
+
+      await service.findAll({} as any, companyUser());
+
+      const where = prisma.documentNumberSequence.findMany.mock.calls[0][0].where;
+      expect(where).toMatchObject({
+        deletedAt: null,
+        companyId: { in: ['company-1'] },
+      });
+      // Company-scoped users must never have the null-company OR widening applied.
+      expect(where.OR).toBeUndefined();
+      // The same predicate is used for the count so pagination totals match.
+      expect(prisma.documentNumberSequence.count.mock.calls[0][0].where).toEqual(where);
+    });
+
+    it('surfaces group-level (null company) sequences to a group-scoped user', async () => {
+      const prisma = makePrisma();
+      const service = makeService(
+        prisma,
+      );
+
+      await service.findAll(
+        {} as any,
+        groupUser({
+          companyAccess: [{ companyId: 'company-1', accessLevel: AccessLevel.MANAGE }],
+        }),
+      );
+
+      const where = prisma.documentNumberSequence.findMany.mock.calls[0][0].where;
+      expect(where.deletedAt).toBeNull();
+      expect(where.OR).toEqual([
+        { companyId: { in: ['company-1'] } },
+        { companyId: null },
+      ]);
+    });
+
+    it('does not widen to null-company rows when a group user narrows to one company', async () => {
+      const prisma = makePrisma();
+      const service = makeService(prisma);
+
+      await service.findAll(
+        { companyId: 'company-1' } as any,
+        groupUser({
+          companyAccess: [{ companyId: 'company-1', accessLevel: AccessLevel.MANAGE }],
+        }),
+      );
+
+      const where = prisma.documentNumberSequence.findMany.mock.calls[0][0].where;
+      expect(where.OR).toBeUndefined();
+      expect(where).toMatchObject({ companyId: 'company-1' });
+    });
+  });
+
   describe('update', () => {
     it('blocks cross-company updates instead of mutating another tenant\'s sequence', async () => {
       const prisma = makePrisma();
