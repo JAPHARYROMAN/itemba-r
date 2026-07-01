@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   Card,
   PageHeader,
@@ -69,6 +70,8 @@ interface Branch {
 interface Product {
   id: string;
   productCode?: string | null;
+  sku?: string | null;
+  barcode?: string | null;
   name: string;
   productType: string;
   status: string;
@@ -96,6 +99,10 @@ interface Product {
   categoryId: string;
   productFamilyId?: string | null;
   baseUnitId: string;
+  purchaseUnitId?: string | null;
+  salesUnitId?: string | null;
+  isTaxable?: boolean | null;
+  taxRate?: number | null;
   variantName?: string | null;
   variantColor?: string | null;
   variantSize?: string | null;
@@ -124,6 +131,8 @@ interface ProductForm {
   companyId: string;
   divisionId: string;
   productCode: string;
+  sku: string;
+  barcode: string;
   name: string;
   categoryId: string;
   productFamilyId: string;
@@ -135,6 +144,10 @@ interface ProductForm {
   variantFinish: string;
   productType: string;
   baseUnitId: string;
+  purchaseUnitId: string;
+  salesUnitId: string;
+  isTaxable: boolean;
+  taxRate: string;
   defaultSellingPrice: string;
   defaultPurchasePrice: string;
   wholesalePrice: string;
@@ -185,6 +198,8 @@ const BLANK: ProductForm = {
   companyId: '',
   divisionId: '',
   productCode: '',
+  sku: '',
+  barcode: '',
   name: '',
   categoryId: '',
   productFamilyId: '',
@@ -196,6 +211,10 @@ const BLANK: ProductForm = {
   variantFinish: '',
   productType: 'STOCK_ITEM',
   baseUnitId: '',
+  purchaseUnitId: '',
+  salesUnitId: '',
+  isTaxable: false,
+  taxRate: '',
   defaultSellingPrice: '',
   defaultPurchasePrice: '',
   wholesalePrice: '',
@@ -296,6 +315,8 @@ function ProductModal({
           companyId: initial.companyId,
           divisionId: initial.divisionId ?? '',
           productCode: initial.productCode ?? '',
+          sku: initial.sku ?? '',
+          barcode: initial.barcode ?? '',
           name: initial.name,
           categoryId: initial.categoryId,
           productFamilyId: initial.productFamilyId ?? '',
@@ -307,6 +328,10 @@ function ProductModal({
           variantFinish: initial.variantFinish ?? '',
           productType: initial.productType,
           baseUnitId: initial.baseUnitId,
+          purchaseUnitId: initial.purchaseUnitId ?? '',
+          salesUnitId: initial.salesUnitId ?? '',
+          isTaxable: Boolean(initial.isTaxable),
+          taxRate: initial.taxRate != null ? String(initial.taxRate) : '',
           defaultSellingPrice:
             initial.defaultSellingPrice != null ? String(initial.defaultSellingPrice) : '',
           defaultPurchasePrice:
@@ -484,6 +509,27 @@ function ProductModal({
       if (mode === 'create') body.companyId = form.companyId;
       if (form.productCode.trim()) body.productCode = form.productCode.trim();
       if (form.description.trim()) body.description = form.description.trim();
+      // sku / barcode: send trimmed value on create; on edit send null to clear.
+      for (const k of ['sku', 'barcode'] as const) {
+        const v = (form[k] as string).trim();
+        if (mode === 'edit') body[k] = v || null;
+        else if (v) body[k] = v;
+      }
+      // Optional purchase/sales units: assign when picked, clear (null) on edit.
+      if (mode === 'edit') {
+        body.purchaseUnitId = form.purchaseUnitId || null;
+        body.salesUnitId = form.salesUnitId || null;
+      } else {
+        if (form.purchaseUnitId) body.purchaseUnitId = form.purchaseUnitId;
+        if (form.salesUnitId) body.salesUnitId = form.salesUnitId;
+      }
+      body.isTaxable = form.isTaxable;
+      // Tax rate only meaningful when taxable; clear on edit when blank/exempt.
+      if (form.isTaxable && form.taxRate.trim()) {
+        body.taxRate = Number(form.taxRate);
+      } else if (mode === 'edit') {
+        body.taxRate = null;
+      }
       if (form.productFamilyName.trim()) {
         body.productFamilyName = form.productFamilyName.trim();
         if (form.productFamilyBrand.trim()) body.productFamilyBrand = form.productFamilyBrand.trim();
@@ -715,6 +761,18 @@ function ProductModal({
           onChange={(e) => set('name', e.target.value)}
         />
         <FormInput
+          label="SKU"
+          value={form.sku}
+          onChange={(e) => set('sku', e.target.value)}
+          placeholder="Stock-keeping unit"
+        />
+        <FormInput
+          label="Barcode"
+          value={form.barcode}
+          onChange={(e) => set('barcode', e.target.value)}
+          placeholder="EAN / UPC"
+        />
+        <FormInput
           label="Variant Name"
           value={form.variantName}
           onChange={(e) => set('variantName', e.target.value)}
@@ -756,6 +814,30 @@ function ProductModal({
           value={form.baseUnitId}
           onChange={(e) => set('baseUnitId', e.target.value)}
           placeholder="Select unit"
+        >
+          {units.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name} ({u.symbol})
+            </option>
+          ))}
+        </FormSelect>
+        <FormSelect
+          label="Purchase Unit"
+          value={form.purchaseUnitId}
+          onChange={(e) => set('purchaseUnitId', e.target.value)}
+          placeholder="Same as base unit"
+        >
+          {units.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name} ({u.symbol})
+            </option>
+          ))}
+        </FormSelect>
+        <FormSelect
+          label="Sales Unit"
+          value={form.salesUnitId}
+          onChange={(e) => set('salesUnitId', e.target.value)}
+          placeholder="Same as base unit"
         >
           {units.map((u) => (
             <option key={u.id} value={u.id}>
@@ -889,6 +971,32 @@ function ProductModal({
           type="number"
           value={form.reorderLevel}
           onChange={(e) => set('reorderLevel', e.target.value)}
+        />
+        <label
+          className="flex items-center gap-2 text-sm"
+          style={{ color: 'var(--aurora-text)' }}
+        >
+          <input
+            type="checkbox"
+            className="rounded"
+            checked={form.isTaxable}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                isTaxable: e.target.checked,
+                taxRate: e.target.checked ? f.taxRate : '',
+              }))
+            }
+          />
+          Taxable (VAT)
+        </label>
+        <FormInput
+          label="Tax Rate (%)"
+          type="number"
+          value={form.taxRate}
+          onChange={(e) => set('taxRate', e.target.value)}
+          disabled={!form.isTaxable}
+          placeholder={form.isTaxable ? 'e.g. 18' : 'Exempt'}
         />
         <FormSelect
           label="Status"
@@ -1495,8 +1603,23 @@ export default function ProductsPage() {
               ) : (
                 data.data.map((p) => (
                   <tr key={p.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-mono text-xs">{p.productCode ?? '—'}</td>
-                    <td className="px-4 py-3 font-medium">{p.name}</td>
+                    <td className="px-4 py-3 font-mono text-xs">
+                      <Link
+                        href={`/operations/products/${p.id}`}
+                        className="text-blue-600 hover:underline"
+                      >
+                        {p.productCode ?? '—'}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3 font-medium">
+                      <Link
+                        href={`/operations/products/${p.id}`}
+                        className="text-blue-600 hover:underline"
+                        title={`View ${p.name}`}
+                      >
+                        {p.name}
+                      </Link>
+                    </td>
                     <td className="px-4 py-3 text-xs">
                       {p.productFamily
                         ? p.productFamily.brand

@@ -1,4 +1,25 @@
-import React from 'react';
+'use client';
+import React, { useEffect, useRef, useState } from 'react';
+
+/**
+ * Shake the field once whenever a NEW error appears (not on every render with
+ * the same error). Defined locally to keep this component self-contained
+ * (parity with components/ui/forms.tsx).
+ */
+function useShakeOnError(error?: string) {
+  const [shaking, setShaking] = useState(false);
+  const prev = useRef(error);
+  useEffect(() => {
+    if (error && error !== prev.current) {
+      setShaking(true);
+      const t = setTimeout(() => setShaking(false), 320);
+      prev.current = error;
+      return () => clearTimeout(t);
+    }
+    prev.current = error;
+  }, [error]);
+  return shaking ? ' animate-shake' : '';
+}
 
 interface FormSelectOption {
   value: string;
@@ -14,10 +35,14 @@ interface FormSelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> 
   options: FormSelectOption[];
   placeholder?: string;
   fullWidth?: boolean;
+  /** Green border after validation passes. No check icon — the native arrow lives on the right. */
+  success?: boolean;
 }
 
-export function FormSelect({ label, error, help, required, options, placeholder, fullWidth = true, id, className = '', ...props }: FormSelectProps) {
+export function FormSelect({ label, error, help, required, options, placeholder, fullWidth = true, success, id, className = '', ...props }: FormSelectProps) {
   const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-');
+  const shake = useShakeOnError(error);
+  const showSuccess = !!success && !error;
   return (
     <div className={fullWidth ? 'w-full' : ''}>
       {label && (
@@ -30,8 +55,8 @@ export function FormSelect({ label, error, help, required, options, placeholder,
         <select
           id={inputId}
           aria-invalid={!!error}
-          className={`aurora-input appearance-none pr-8 ${className}`}
-          style={error ? { borderColor: 'var(--aurora-danger)' } : {}}
+          className={`aurora-input appearance-none pr-8 ${className}${shake}`}
+          style={error ? { borderColor: 'var(--aurora-danger)' } : showSuccess ? { borderColor: 'var(--aurora-success, #10b981)' } : {}}
           {...props}
         >
           {placeholder && <option value="">{placeholder}</option>}

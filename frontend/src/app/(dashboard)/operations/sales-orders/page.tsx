@@ -56,6 +56,7 @@ interface Customer {
   branchId?: string | null;
   creditLimit?: number | string | null;
   currentBalance?: number | string | null;
+  paymentTerms?: string | null;
   status?: string | null;
 }
 interface Product {
@@ -73,6 +74,8 @@ interface Product {
   retailPrice?: number | string | null;
   productType?: string | null;
   trackInventory?: boolean | null;
+  isTaxable?: boolean | null;
+  taxRate?: number | string | null;
   sellingPrice?: number | string | null;
   availableStock?: number | string | null;
   availableQuantity?: number | string | null;
@@ -128,6 +131,8 @@ interface SalesOrderLine {
   unitPrice: number;
   discount: number;
   tax: number;
+  // True once the user manually overrides the auto-computed VAT for this line.
+  taxManual?: boolean;
   batchId: string;
 }
 
@@ -216,6 +221,7 @@ interface SalesOrderForm {
   paymentMethod: string;
   cashAccountId: string;
   paymentReference: string;
+  documentDiscount: number;
   lines: SalesOrderLine[];
 }
 
@@ -354,8 +360,38 @@ const blankForm = (): SalesOrderForm => ({
   paymentMethod: defaultPaymentMethodForSalesType('CASH_SALE'),
   cashAccountId: '',
   paymentReference: '',
+  documentDiscount: 0,
   lines: [BLANK_LINE()],
 });
+
+// Parse a net-days value out of a free-text customer payment-terms string, e.g.
+// "Net 30", "NET30", "30 days", "n/30", or a bare "45". Returns null when the
+// terms are immediate/COD/unparseable so the due-date is left as-is.
+function netDaysFromPaymentTerms(terms: string | null | undefined): number | null {
+  if (!terms) return null;
+  const text = String(terms).toLowerCase();
+  if (/\b(cod|due on receipt|on receipt|immediate|cash|prepaid|advance)\b/.test(text)) {
+    return 0;
+  }
+  const match = text.match(/(\d{1,3})/);
+  if (!match) return null;
+  const days = Number(match[1]);
+  return Number.isFinite(days) && days >= 0 ? days : null;
+}
+
+// Add `days` calendar days to an ISO date-only string (yyyy-mm-dd) and return
+// the resulting ISO date-only string. Returns '' for an invalid base date.
+// Works in UTC end-to-end so the round-trip through toISOString() cannot shift
+// the calendar day in non-UTC zones (e.g. UTC+3 was previously one day early).
+function addDaysToDate(isoDate: string, days: number): string {
+  if (!isoDate) return '';
+  const [y, m, d] = isoDate.split('-').map(Number);
+  if (![y, m, d].every((part) => Number.isFinite(part))) return '';
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (Number.isNaN(dt.getTime())) return '';
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
 
 function fmtMoney(n: number | string | null | undefined, ccy = 'TZS') {
   const value = Number(n ?? 0);
@@ -399,6 +435,9 @@ function SalesOrderModal({
             initial.paymentMethod ?? defaultPaymentMethodForSalesType(initial.salesType),
           cashAccountId: initial.cashAccountId ?? '',
           paymentReference: initial.paymentReference ?? '',
+          // Header discountAmount currently mirrors the sum of line discounts, so
+          // there is no separable document-level discount to restore on edit.
+          documentDiscount: 0,
           lines: initial.lines?.length
             ? initial.lines.map((line: any) => ({
                 id: line.id,
@@ -413,6 +452,9 @@ function SalesOrderModal({
                     : Number(line.discountAmount ?? 0) /
                       Math.max(1, Number(line.qty ?? line.quantity ?? 1)),
                 tax: Number(line.tax ?? line.taxAmount ?? 0),
+                // Preserve the persisted tax as a manual value so auto-VAT does
+                // not overwrite an already-saved order's line tax on open.
+                taxManual: true,
                 batchId: line.batchId ?? '',
               }))
             : [BLANK_LINE()],
@@ -432,6 +474,12 @@ function SalesOrderModal({
   const [branches, setBranches] = useState<Branch[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // Once the user hand-edits the due date, auto due-date stops overwriting it.
+  // Pre-populated orders (edit mode) count as already-set so we don't clobber.
+  const [dueDateTouched, setDueDateTouched] = useState<boolean>(() => Boolean(initial?.dueDate));
+  const [autoDueDateInfo, setAutoDueDateInfo] = useState<{ netDays: number; terms: string } | null>(
+    null,
+  );
   const [lineValidation, setLineValidation] = useState<OrderLineValidationState>({
     hasBlockingErrors: false,
     stockWarnings: [],
@@ -666,6 +714,26 @@ function SalesOrderModal({
     });
   }, [cashAccounts, form.paymentMethod, receiptAccounts]);
 
+  // AUTO DUE-DATE: when a customer with parseable payment terms is selected,
+  // auto-compute dueDate = orderDate + netDays. Stays editable — once the user
+  // hand-edits the due date (dueDateTouched) we stop overwriting it.
+  const customerNetDays = useMemo(
+    () => netDaysFromPaymentTerms(selectedCustomer?.paymentTerms),
+    [selectedCustomer?.paymentTerms],
+  );
+  useEffect(() => {
+    if (customerNetDays == null || !selectedCustomer?.paymentTerms) {
+      setAutoDueDateInfo(null);
+      return;
+    }
+    setAutoDueDateInfo({ netDays: customerNetDays, terms: selectedCustomer.paymentTerms });
+    if (dueDateTouched) return;
+    const computed = addDaysToDate(form.orderDate, customerNetDays);
+    if (computed) {
+      setForm((current) => (current.dueDate === computed ? current : { ...current, dueDate: computed }));
+    }
+  }, [customerNetDays, selectedCustomer?.paymentTerms, form.orderDate, dueDateTouched]);
+
   const handleSubmit = async () => {
     if (!form.companyId) {
       setError('Company is required');
@@ -727,6 +795,7 @@ function SalesOrderModal({
       if (form.customerId) body.customerId = form.customerId;
       if (form.customerName) body.customerName = form.customerName;
       if (form.dueDate) body.dueDate = form.dueDate;
+      // document-level discount deferred until backend honours it (Wave B)
       if (form.notes) body.notes = form.notes;
       if (form.salespersonId) body.salespersonId = form.salespersonId;
       if (form.cashAccountId) body.cashAccountId = form.cashAccountId;
@@ -905,7 +974,12 @@ function SalesOrderModal({
           <FormSelect
             label="Customer"
             value={form.customerId}
-            onChange={(e) => setField('customerId', e.target.value)}
+            onChange={(e) => {
+              // A fresh customer selection re-enables auto due-date so the newly
+              // selected customer's payment terms drive the due date.
+              setDueDateTouched(false);
+              setField('customerId', e.target.value);
+            }}
             placeholder={form.branchId ? 'Walk-in (use name)' : 'Select branch first'}
             disabled={!form.branchId}
           >
@@ -933,7 +1007,17 @@ function SalesOrderModal({
             label="Due Date"
             type="date"
             value={form.dueDate}
-            onChange={(e) => setField('dueDate', e.target.value)}
+            onChange={(e) => {
+              setDueDateTouched(true);
+              setField('dueDate', e.target.value);
+            }}
+            hint={
+              autoDueDateInfo
+                ? autoDueDateInfo.netDays === 0
+                  ? `Due on receipt (${autoDueDateInfo.terms})`
+                  : `Auto: ${autoDueDateInfo.netDays} days from order date (${autoDueDateInfo.terms})`
+                : undefined
+            }
           />
           <FormSelect
             label="Salesperson"
@@ -1010,9 +1094,9 @@ function SalesOrderModal({
               />
             </>
           )}
-          {form.paymentMethod === 'CREDIT' && selectedCustomer && (
+          {selectedCustomer && (
             <div
-              className="col-span-3 grid grid-cols-3 gap-3 rounded-lg border p-3 text-sm"
+              className="col-span-3 grid grid-cols-2 gap-3 rounded-lg border p-3 text-sm sm:grid-cols-4"
               style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)' }}
             >
               <div>
@@ -1033,6 +1117,14 @@ function SalesOrderModal({
               </div>
               <div>
                 <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Current balance
+                </p>
+                <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                  {fmtMoney(selectedCustomer.currentBalance, form.currency)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
                   Available credit
                 </p>
                 <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
@@ -1046,6 +1138,21 @@ function SalesOrderModal({
                   )}
                 </p>
               </div>
+              {selectedCustomer.paymentTerms ? (
+                <div className="col-span-2 sm:col-span-4">
+                  <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                    Payment terms
+                  </p>
+                  <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                    {selectedCustomer.paymentTerms}
+                    {customerNetDays != null
+                      ? customerNetDays === 0
+                        ? ' (due on receipt)'
+                        : ` (net ${customerNetDays} days)`
+                      : ''}
+                  </p>
+                </div>
+              ) : null}
             </div>
           )}
           <div className="col-span-2">
@@ -1067,6 +1174,8 @@ function SalesOrderModal({
           currency={form.currency}
           productSearchLoading={productSearchLoading}
           enforceStockAvailability
+          autoTax
+          // document-level discount deferred until backend honours it (Wave B)
           onAddLine={addLine}
           onRemoveLine={removeLine}
           onLineChange={setLine}

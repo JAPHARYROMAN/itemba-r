@@ -13,6 +13,7 @@ import {
   AuroraCard,
   AuroraButton,
   StatCard,
+  MetricCard,
   AlertCard,
   SummaryGrid,
   LoadingState,
@@ -298,6 +299,16 @@ function companyMeta(name: string) {
   return COMPANY_META.default;
 }
 
+interface MoneyRiskTile {
+  title: string;
+  value: string;
+  detail: string;
+  href: string;
+  icon: AppIconName;
+  status: string;
+  trend?: { value: number; period?: string };
+}
+
 type AuditRow = AuditEntry & Record<string, unknown>;
 
 const auditColumns: Column<AuditRow>[] = [
@@ -521,58 +532,80 @@ export default function DashboardPage() {
       data.alerts.expiringDocuments.length +
       data.alerts.highRiskLoans.length;
 
-  const operatingSignals = useMemo(() => {
+  const moneyRiskTiles = useMemo<MoneyRiskTile[]>(() => {
     if (!data) return [];
+
+    const so = data.operations.salesOrders;
+    // executive-summary carries today vs month revenue, so we can derive a
+    // faithful today-vs-prior-daily-average delta. monthRevenue includes today,
+    // so prior days = monthRevenue - todayRevenue, spread over (dayOfMonth - 1).
+    const dayOfMonth = new Date().getDate();
+    const priorDays = Math.max(dayOfMonth - 1, 0);
+    const priorRevenue = Math.max(so.monthRevenue - so.todayRevenue, 0);
+    const avgPriorDaily = priorDays > 0 ? priorRevenue / priorDays : 0;
+    const salesTrend: MoneyRiskTile['trend'] =
+      avgPriorDaily > 0
+        ? {
+            value: ((so.todayRevenue - avgPriorDaily) / avgPriorDaily) * 100,
+            period: 'daily avg',
+          }
+        : undefined;
+
+    const rec = data.finance.receivables;
+    const pay = data.finance.payables;
+
+    return [
+      {
+        title: 'Today sales',
+        value: compactMoney(so.todayRevenue),
+        detail: `${so.todayCount} orders captured today`,
+        href: '/operations/sales-orders',
+        icon: 'sale' as AppIconName,
+        status: so.todayCount > 0 ? 'LIVE' : 'QUIET',
+        trend: salesTrend,
+      },
+      {
+        title: 'Receivable exposure',
+        value: compactMoney(rec.outstanding),
+        detail:
+          rec.overdue > 0
+            ? `${rec.overdue} overdue · ${compactMoney(rec.overdueOutstanding)} at risk`
+            : `${rec.open} open customer balances`,
+        href: '/finance/receivables',
+        icon: 'cash' as AppIconName,
+        status: rec.overdue > 0 ? 'COLLECT' : 'CLEAR',
+      },
+      {
+        title: 'Payable exposure',
+        value: compactMoney(pay.outstanding),
+        detail:
+          pay.overdue > 0
+            ? `${pay.overdue} overdue · ${compactMoney(pay.overdueOutstanding)} due now`
+            : `${pay.open} open supplier balances`,
+        href: '/finance/payables',
+        icon: 'payment' as AppIconName,
+        status: pay.overdue > 0 ? 'PAY' : 'CLEAR',
+      },
+    ];
+  }, [data]);
+
+  const actionQueue = useMemo(() => {
+    if (!data) return null;
     const blockingIssues =
       data.operations.inventory.negative +
       data.operations.stockAdjustments.approvedUnposted +
       data.workflow.approvals.escalated +
       data.compliance.obligations.overdue;
 
-    return [
-      {
-        title: 'Today sales',
-        value: compactMoney(data.operations.salesOrders.todayRevenue),
-        detail: `${data.operations.salesOrders.todayCount} orders captured today`,
-        href: '/operations/sales-orders',
-        icon: 'sale' as AppIconName,
-        status: data.operations.salesOrders.todayCount > 0 ? 'LIVE' : 'QUIET',
-        tone: 'var(--aurora-success-text)',
-      },
-      {
-        title: 'Receivable exposure',
-        value: compactMoney(data.finance.receivables.outstanding),
-        detail: `${data.finance.receivables.overdue} overdue customer balances`,
-        href: '/finance/receivables',
-        icon: 'cash' as AppIconName,
-        status: data.finance.receivables.overdue > 0 ? 'COLLECT' : 'CLEAR',
-        tone:
-          data.finance.receivables.overdue > 0
-            ? 'var(--aurora-warning-text)'
-            : 'var(--aurora-primary)',
-      },
-      {
-        title: 'Payable exposure',
-        value: compactMoney(data.finance.payables.outstanding),
-        detail: `${data.finance.payables.overdue} overdue supplier balances`,
-        href: '/finance/payables',
-        icon: 'payment' as AppIconName,
-        status: data.finance.payables.overdue > 0 ? 'PAY' : 'CLEAR',
-        tone:
-          data.finance.payables.overdue > 0
-            ? 'var(--aurora-warning-text)'
-            : 'var(--aurora-primary)',
-      },
-      {
-        title: 'Action queue',
-        value: blockingIssues,
-        detail: 'overdue compliance, escalations, stock and posting issues',
-        href: '#exceptions',
-        icon: 'alert' as AppIconName,
-        status: blockingIssues > 0 ? 'ACTION' : 'CLEAR',
-        tone: blockingIssues > 0 ? 'var(--aurora-danger)' : 'var(--aurora-success-text)',
-      },
-    ];
+    return {
+      title: 'Action queue',
+      value: blockingIssues,
+      detail: 'overdue compliance, escalations, stock and posting issues',
+      href: '#exceptions',
+      icon: 'alert' as AppIconName,
+      status: blockingIssues > 0 ? 'ACTION' : 'CLEAR',
+      tone: blockingIssues > 0 ? 'var(--aurora-danger)' : 'var(--aurora-success-text)',
+    };
   }, [data]);
 
   return (
@@ -634,10 +667,30 @@ export default function DashboardPage() {
         className="mt-5"
       >
         {data && (
-          <div className="aurora-stagger grid grid-cols-1 gap-3 animate-fade-up md:grid-cols-4">
-            {operatingSignals.map((item) => (
-              <SignalCard key={item.title} {...item} />
-            ))}
+          <div className="animate-fade-up space-y-3">
+            {/* Money & risk dominate: prominent, larger metric tiles */}
+            <div className="aurora-stagger grid grid-cols-1 gap-4 md:grid-cols-3">
+              {moneyRiskTiles.map((item) => (
+                <Link key={item.title} href={item.href} className="block group">
+                  <MetricCard
+                    prominent
+                    className="h-full aurora-transition group-hover:-translate-y-0.5 group-hover:shadow-md"
+                    title={item.title}
+                    value={item.value}
+                    description={item.detail}
+                    icon={<AppIcon name={item.icon} size={20} strokeWidth={1.8} />}
+                    badge={<StatusBadge status={item.status} size="sm" />}
+                    trend={item.trend}
+                  />
+                </Link>
+              ))}
+            </div>
+            {/* Operational counts stay secondary, at their existing weight */}
+            {actionQueue && (
+              <div className="aurora-stagger grid grid-cols-1">
+                <SignalCard {...actionQueue} />
+              </div>
+            )}
           </div>
         )}
       </AuroraToolbar>

@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DocumentPreviewLink } from '@/components/documents';
-import { Card, PageHeader } from '@/components/ui';
+import { Card, PageHeader, StatusBadge, showToast } from '@/components/ui';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -17,6 +17,47 @@ interface DeliveryNote {
   driverName?: string;
   vehicleNumber?: string;
   status: string;
+}
+
+/** Minimal shape of a confirmed sales order shown in the picker. */
+interface SalesOrderOption {
+  id: string;
+  salesOrderNumber?: string;
+  orderNumber?: string;
+  orderDate?: string;
+  status: string;
+  customerId?: string | null;
+  customerName?: string | null;
+  customer?: { id?: string; name?: string | null; customerCode?: string | null } | null;
+}
+
+/** A single line as returned by GET /sales-orders/:id. */
+interface SalesOrderLine {
+  id?: string;
+  productId?: string | null;
+  description?: string | null;
+  quantity?: number | string | null;
+  qty?: number | string | null;
+  unitId?: string | null;
+  unit?: { name?: string | null; symbol?: string | null } | null;
+  product?: { name?: string | null; productCode?: string | null; sku?: string | null } | null;
+}
+
+/** Full sales order detail (only the fields this screen prefills from). */
+interface SalesOrderDetail extends SalesOrderOption {
+  lines?: SalesOrderLine[];
+}
+
+/** A delivery-note line prefilled from a sales order, ready to POST. */
+interface DeliveryNoteLine {
+  productId: string;
+  description: string;
+  orderedQuantity: number;
+  deliveredQuantity: number;
+  unitId: string;
+  // Display-only helpers (not sent to the backend).
+  productLabel: string;
+  unitLabel: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -46,6 +87,35 @@ function Badge({ status }: { status: string }) {
 
 function fmtDate(d: string) { return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
 
+function fmtQty(v: number | string | null | undefined) {
+  const n = Number(v ?? 0);
+  return new Intl.NumberFormat('en-GB', { maximumFractionDigits: 4 }).format(Number.isFinite(n) ? n : 0);
+}
+
+function soLabel(so: SalesOrderOption) {
+  const ref = so.salesOrderNumber ?? so.orderNumber ?? so.id.slice(0, 8);
+  const customer = so.customer?.name ?? so.customerName;
+  const when = so.orderDate ? fmtDate(so.orderDate) : '';
+  return [ref, customer, when].filter(Boolean).join(' · ');
+}
+
+/** Map a sales-order line to the delivery-note line contract (delivered defaults to ordered). */
+function soLineToDnLine(line: SalesOrderLine): DeliveryNoteLine {
+  const ordered = Number(line.quantity ?? line.qty ?? 0) || 0;
+  const productLabel = [line.product?.productCode, line.product?.name]
+    .filter(Boolean)
+    .join(' — ') || line.description || 'Item';
+  return {
+    productId: line.productId ?? '',
+    description: line.description ?? line.product?.name ?? '',
+    orderedQuantity: ordered,
+    deliveredQuantity: ordered,
+    unitId: line.unitId ?? '',
+    productLabel,
+    unitLabel: line.unit?.symbol ?? line.unit?.name ?? '',
+  };
+}
+
 function Spinner() {
   return (
     <div className="flex justify-center py-10">
@@ -72,8 +142,86 @@ function DeliveryNoteModal({ item, onClose, onSaved }: ModalProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  // ── Confirmed sales-order picker + line prefill ──────────────────────────────
+  const [salesOrders, setSalesOrders] = useState<SalesOrderOption[]>([]);
+  const [soLoading, setSoLoading] = useState(false);
+  const [soError, setSoError] = useState('');
+  const [soSearch, setSoSearch] = useState('');
+  const [selectedSo, setSelectedSo] = useState<SalesOrderDetail | null>(null);
+  const [linesLoading, setLinesLoading] = useState(false);
+  const [lines, setLines] = useState<DeliveryNoteLine[]>([]);
+
+  // Load confirmed sales orders once when the modal opens — these are the only
+  // orders eligible to be turned into a delivery note.
+  useEffect(() => {
+    let cancelled = false;
+    setSoLoading(true);
+    setSoError('');
+    fetch('/api/backend/sales-orders?status=CONFIRMED&limit=100')
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Failed to load sales orders');
+        const json = await res.json();
+        const rows: SalesOrderOption[] = json.data?.data ?? json.data ?? [];
+        if (!cancelled) setSalesOrders(Array.isArray(rows) ? rows : []);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setSoError(err instanceof Error ? err.message : 'Could not load sales orders');
+      })
+      .finally(() => {
+        if (!cancelled) setSoLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const filteredSalesOrders = useMemo(() => {
+    const q = soSearch.trim().toLowerCase();
+    if (!q) return salesOrders;
+    return salesOrders.filter((so) => soLabel(so).toLowerCase().includes(q));
+  }, [salesOrders, soSearch]);
+
+  // When a sales order is chosen, pull its detail (with lines) and prefill the
+  // delivery-note lines so the user does not re-enter each item by hand.
+  const handleSelectSalesOrder = useCallback(async (id: string) => {
+    setSalesOrderId(id);
+    setSelectedSo(null);
+    setLines([]);
+    if (!id) return;
+    setLinesLoading(true);
+    setSoError('');
+    try {
+      const res = await fetch(`/api/backend/sales-orders/${id}`);
+      if (!res.ok) throw new Error('Failed to load sales order lines');
+      const json = await res.json();
+      const detail: SalesOrderDetail = json.data ?? json;
+      setSelectedSo(detail);
+      setLines((detail.lines ?? []).map(soLineToDnLine));
+      // Inherit the customer from the sales order so the note stays linked.
+      const soCustomerId = detail.customerId ?? detail.customer?.id ?? '';
+      if (soCustomerId) setCustomerId(soCustomerId);
+    } catch (err: unknown) {
+      setSoError(err instanceof Error ? err.message : 'Could not load sales order lines');
+    } finally {
+      setLinesLoading(false);
+    }
+  }, []);
+
+  const setDeliveredQty = (index: number, value: string) => {
+    const qty = Number(value);
+    setLines((prev) =>
+      prev.map((line, i) =>
+        i === index ? { ...line, deliveredQuantity: Number.isFinite(qty) && qty >= 0 ? qty : 0 } : line,
+      ),
+    );
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Creating a delivery note requires a source sales order (with lines) so the
+    // note carries real fulfillment data instead of an empty shell.
+    if (!item && !salesOrderId) {
+      setError('Select a confirmed sales order to build this delivery note.');
+      return;
+    }
     setSaving(true); setError('');
     try {
       const body = {
@@ -83,11 +231,21 @@ function DeliveryNoteModal({ item, onClose, onSaved }: ModalProps) {
         vehicleId: vehicleId || undefined,
         dnDate: dnDate || undefined,
         notes: notes || undefined,
+        lines: !item && lines.length
+          ? lines.map((line) => ({
+              productId: line.productId || undefined,
+              description: line.description || undefined,
+              orderedQuantity: line.orderedQuantity,
+              deliveredQuantity: line.deliveredQuantity,
+              unitId: line.unitId || undefined,
+            }))
+          : undefined,
       };
       const url = item ? `/api/backend/westsides/delivery-notes/${item.id}` : '/api/backend/westsides/delivery-notes';
       const method = item ? 'PATCH' : 'POST';
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
+      showToast('success', item ? 'Delivery note updated' : 'Delivery note created');
       onSaved();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error saving');
@@ -96,21 +254,100 @@ function DeliveryNoteModal({ item, onClose, onSaved }: ModalProps) {
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[92vh]">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <h2 className="text-base font-semibold text-slate-900">{item ? 'Edit Delivery Note' : 'New Delivery Note'}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><CloseIcon /></button>
         </div>
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4 overflow-y-auto">
           {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
+
+          {/* Sales-order lookup — replaces the raw SO id field and drives line prefill. */}
+          {!item && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <label className={labelCls} htmlFor="dn-so-picker">
+                  Sales Order <span className="text-red-500">*</span>
+                </label>
+                {selectedSo && <StatusBadge value={selectedSo.status} />}
+              </div>
+              <input
+                value={soSearch}
+                onChange={(e) => setSoSearch(e.target.value)}
+                className={fieldCls}
+                placeholder="Search confirmed orders by number or customer…"
+              />
+              <select
+                id="dn-so-picker"
+                value={salesOrderId}
+                onChange={(e) => handleSelectSalesOrder(e.target.value)}
+                disabled={soLoading}
+                className={fieldCls}
+              >
+                <option value="">
+                  {soLoading ? 'Loading confirmed sales orders…' : 'Select a confirmed sales order'}
+                </option>
+                {filteredSalesOrders.map((so) => (
+                  <option key={so.id} value={so.id}>{soLabel(so)}</option>
+                ))}
+              </select>
+              {soError && <p className="text-xs text-red-600">{soError}</p>}
+              {!soLoading && !soError && salesOrders.length === 0 && (
+                <p className="text-xs text-slate-500">No confirmed sales orders are available to deliver.</p>
+              )}
+
+              {/* Prefilled lines pulled from the chosen sales order. */}
+              {linesLoading ? (
+                <p className="text-xs text-slate-500">Loading order lines…</p>
+              ) : selectedSo ? (
+                lines.length ? (
+                  <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+                    <table className="w-full">
+                      <thead className="bg-slate-50 border-b border-slate-200">
+                        <tr>
+                          <th className={thCls}>Item</th>
+                          <th className={`${thCls} text-right`}>Ordered</th>
+                          <th className={`${thCls} text-right`}>Delivered</th>
+                          <th className={thCls}>Unit</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {lines.map((line, i) => (
+                          <tr key={`${line.productId}-${i}`}>
+                            <td className={tdCls}>{line.productLabel}</td>
+                            <td className={`${tdCls} text-right tabular-nums`}>{fmtQty(line.orderedQuantity)}</td>
+                            <td className="px-4 py-2 text-right">
+                              <input
+                                type="number"
+                                min={0}
+                                step="any"
+                                value={line.deliveredQuantity}
+                                onChange={(e) => setDeliveredQty(i, e.target.value)}
+                                aria-label={`Delivered quantity for ${line.productLabel}`}
+                                className="w-24 text-sm border border-slate-200 rounded-md px-2 py-1 text-right bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                              />
+                            </td>
+                            <td className={tdCls}>{line.unitLabel || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">This sales order has no lines to deliver.</p>
+                )
+              ) : (
+                <p className="text-xs text-slate-500">
+                  Pick a sales order to pre-fill delivery lines — no need to re-enter items.
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={labelCls}>Customer ID</label>
               <input value={customerId} onChange={(e) => setCustomerId(e.target.value)} className={fieldCls} placeholder="Customer ID" />
-            </div>
-            <div>
-              <label className={labelCls}>Sales Order ID</label>
-              <input value={salesOrderId} onChange={(e) => setSalesOrderId(e.target.value)} className={fieldCls} placeholder="Sales Order ID" />
             </div>
             <div>
               <label className={labelCls}>Driver ID</label>
@@ -120,7 +357,7 @@ function DeliveryNoteModal({ item, onClose, onSaved }: ModalProps) {
               <label className={labelCls}>Vehicle ID</label>
               <input value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} className={fieldCls} placeholder="Vehicle ID" />
             </div>
-            <div className="col-span-2">
+            <div>
               <label className={labelCls}>Delivery Date</label>
               <input type="date" value={dnDate} onChange={(e) => setDnDate(e.target.value)} className={fieldCls} />
             </div>

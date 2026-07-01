@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, PageHeader, StatCard, SkeletonCardGrid, showToast } from '@/components/ui';
+import { ProgressRing } from '@/components/aurora/charts/ProgressRing';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList } from '@/lib/api-client';
 
@@ -91,6 +92,19 @@ function readinessStatusClass(status: OperationsReadiness['checks'][number]['sta
   if (status === 'PASS') return 'bg-emerald-100 text-emerald-700';
   if (status === 'WARN') return 'bg-amber-100 text-amber-700';
   return 'bg-red-100 text-red-700';
+}
+
+/** Ring color driven by score vs target: at/above target = success, within 15pts = warning, else danger. */
+function readinessRingColor(score: number, target: number) {
+  if (score >= target) return 'var(--aurora-success-text)';
+  if (score >= target - 15) return 'var(--aurora-warning-text)';
+  return 'var(--aurora-danger)';
+}
+
+/** StatCard risk variant: 0 is clean; a nonzero count is a risk (danger for hard failures, amber for watch). */
+function riskVariant(count: number, level: 'danger' | 'watch' = 'danger') {
+  if (count <= 0) return 'default' as const;
+  return level === 'danger' ? ('red' as const) : ('amber' as const);
 }
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';
@@ -230,28 +244,45 @@ export default function OperationsDashboardPage() {
                 <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
                   Operations Readiness
                 </div>
-                <div className="mt-3 flex items-end gap-2">
-                  <span className="text-5xl font-bold text-slate-900">{data.readiness.score}</span>
-                  <span className="pb-2 text-sm text-slate-500">/100</span>
-                </div>
-                <div className="mt-3 text-sm font-medium text-slate-700 capitalize">
-                  {data.readiness.maturity.replace(/-/g, ' ')}
+                <div className="mt-3 flex items-center gap-4">
+                  <ProgressRing
+                    value={data.readiness.score}
+                    size={96}
+                    strokeWidth={10}
+                    color={readinessRingColor(data.readiness.score, data.readiness.target)}
+                    label={String(data.readiness.score)}
+                    sublabel="/ 100"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-slate-700 capitalize">
+                      {data.readiness.maturity.replace(/-/g, ' ')}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-400">
+                      Target {data.readiness.target}+
+                    </div>
+                  </div>
                 </div>
                 <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-500">
                   <div>
-                    <div className="font-semibold text-slate-700">
+                    <div
+                      className={`font-semibold ${data.readiness.indicators.transactionIntegrityIssues > 0 ? 'text-red-600' : 'text-slate-700'}`}
+                    >
                       {fmtNum(data.readiness.indicators.transactionIntegrityIssues)}
                     </div>
                     cash issues
                   </div>
                   <div>
-                    <div className="font-semibold text-slate-700">
+                    <div
+                      className={`font-semibold ${data.readiness.indicators.negativeBalances > 0 ? 'text-red-600' : 'text-slate-700'}`}
+                    >
                       {fmtNum(data.readiness.indicators.negativeBalances)}
                     </div>
                     negative stock
                   </div>
                   <div>
-                    <div className="font-semibold text-slate-700">
+                    <div
+                      className={`font-semibold ${data.readiness.indicators.workflowBacklog > 0 ? 'text-amber-600' : 'text-slate-700'}`}
+                    >
                       {fmtNum(data.readiness.indicators.workflowBacklog)}
                     </div>
                     workflow backlog
@@ -306,43 +337,71 @@ export default function OperationsDashboardPage() {
 
           {/* Row 1 — Entity counts */}
           <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 aurora-stagger">
-            <StatCard
-              label="Total Customers"
-              value={fmtNum(data.customers.total)}
-              hint={`${data.customers.active} active`}
-            />
-            <StatCard
-              label="Active Suppliers"
-              value={fmtNum(data.suppliers.active)}
-              hint={`${data.suppliers.total} total`}
-            />
-            <StatCard
-              label="Total Products"
-              value={fmtNum(data.products.total)}
-              hint={`${data.products.outOfStock} out of stock`}
-            />
+            <Link href="/operations/customers" className="block">
+              <StatCard
+                label="Total Customers"
+                value={fmtNum(data.customers.total)}
+                hint={`${fmtNum(data.customers.active)} active · ${fmtNum(data.customers.blocked)} blocked`}
+                variant={riskVariant(data.customers.blocked, 'watch')}
+              />
+            </Link>
+            <Link href="/operations/suppliers" className="block">
+              <StatCard
+                label="Active Suppliers"
+                value={fmtNum(data.suppliers.active)}
+                hint={`${fmtNum(data.suppliers.total)} total · ${fmtNum(data.suppliers.blocked)} blocked`}
+                variant={riskVariant(data.suppliers.blocked, 'watch')}
+              />
+            </Link>
+            <Link href="/operations/products" className="block">
+              <StatCard
+                label="Total Products"
+                value={fmtNum(data.products.total)}
+                hint={`${fmtNum(data.products.active)} active`}
+              />
+            </Link>
             <Link href="/operations/inventory-balances?lowStock=1" className="block">
-              <StatCard label="Out of Stock" value={fmtNum(data.products.outOfStock)} />
+              <StatCard
+                label="Out of Stock"
+                value={fmtNum(data.products.outOfStock)}
+                hint="Needs replenishment"
+                variant={riskVariant(data.products.outOfStock, 'danger')}
+                tier={data.products.outOfStock > 0 ? 'critical' : 'default'}
+              />
             </Link>
           </div>
 
           {/* Row 2 — Financial values */}
           <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 aurora-stagger">
-            <StatCard label="Total Sales Value (TZS)" value={fmtTZS(data.salesOrders.totalValue)} />
+            <Link href="/operations/sales-orders" className="block">
+              <StatCard
+                label="Total Sales Value (TZS)"
+                value={fmtTZS(data.salesOrders.totalValue)}
+                hint={`${fmtNum(data.salesOrders.total)} orders`}
+                variant="green"
+              />
+            </Link>
             <Link href="/operations/sales-orders?paymentStatus=UNPAID" className="block">
               <StatCard
                 label="Outstanding Sales (TZS)"
                 value={fmtTZS(data.salesOrders.outstandingValue)}
+                hint="Unpaid receivables"
+                variant={data.salesOrders.outstandingValue > 0 ? 'amber' : 'default'}
               />
             </Link>
-            <StatCard
-              label="Total Purchase Value (TZS)"
-              value={fmtTZS(data.purchaseOrders.totalValue)}
-            />
+            <Link href="/operations/purchase-orders" className="block">
+              <StatCard
+                label="Total Purchase Value (TZS)"
+                value={fmtTZS(data.purchaseOrders.totalValue)}
+                hint={`${fmtNum(data.purchaseOrders.total)} orders`}
+              />
+            </Link>
             <Link href="/operations/purchase-orders?paymentStatus=UNPAID" className="block">
               <StatCard
                 label="Outstanding Purchases (TZS)"
                 value={fmtTZS(data.purchaseOrders.outstandingValue)}
+                hint="Unpaid payables"
+                variant={data.purchaseOrders.outstandingValue > 0 ? 'amber' : 'default'}
               />
             </Link>
           </div>

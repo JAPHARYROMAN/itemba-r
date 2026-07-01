@@ -33,6 +33,11 @@ export interface OrderProductOption {
   priceSource?: string | null;
   productType?: string | null;
   trackInventory?: boolean | null;
+  // VAT metadata. When `isTaxable` is true, the per-line tax is auto-computed
+  // from `taxRate` (a percentage, e.g. 18 for 18% VAT) unless the user has
+  // manually overridden the tax field for that line.
+  isTaxable?: boolean | null;
+  taxRate?: number | string | null;
   sellingPrice?: number | string | null;
   availableStock?: number | string | null;
   availableQuantity?: number | string | null;
@@ -67,6 +72,9 @@ export interface EditableOrderLine {
   unitPrice: number;
   discount: number;
   tax: number;
+  // Set to true once the user manually edits the tax field so auto-VAT stops
+  // overwriting it. Optional/backward-compatible: absent means "auto".
+  taxManual?: boolean;
   batchNumber?: string;
   expiryDate?: string;
   batchId?: string;
@@ -89,6 +97,16 @@ interface OrderLineEditorProps<TLine extends EditableOrderLine> {
   currency: string;
   productSearchLoading?: boolean;
   enforceStockAvailability?: boolean;
+  // When true, a per-line tax is auto-computed from the selected product's VAT
+  // rate (isTaxable/taxRate) unless the line's tax was manually overridden.
+  // Defaults to false so existing consumers keep the legacy manual-only
+  // behavior; the sales-order editor opts in explicitly.
+  autoTax?: boolean;
+  // Optional document-level discount applied on top of line discounts. When
+  // `onDocumentDiscountChange` is supplied the editor renders an editable input
+  // in the Totals panel; the discount is subtracted from the grand total.
+  documentDiscount?: number;
+  onDocumentDiscountChange?: (value: number) => void;
   onAddLine: () => void;
   onRemoveLine: (index: number) => void;
   onLineChange: (index: number, patch: Partial<TLine>) => void;
@@ -302,6 +320,29 @@ function lineTotal(line: EditableOrderLine, variant: OrderVariant) {
   );
 }
 
+// The tax base for a line is its discounted subtotal (qty x unitPrice minus the
+// line discount). VAT is charged on the net amount after discounts.
+function lineTaxBase(line: EditableOrderLine, variant: OrderVariant) {
+  const subtotal = roundMoney(numberOrZero(line.qty) * numberOrZero(line.unitPrice));
+  return Math.max(0, roundMoney(subtotal - lineDiscountTotal(line, variant)));
+}
+
+// Percentage VAT rate for a product, or null when it is not taxable / has no
+// rate configured. `taxRate` is stored as a percentage (e.g. 18 for 18%).
+function productTaxRate(product: OrderProductOption | undefined) {
+  if (!product || product.isTaxable !== true) return null;
+  const rate = Number(product.taxRate);
+  return Number.isFinite(rate) && rate > 0 ? rate : null;
+}
+
+// Auto-computed VAT amount for a line given the selected product's rate, or null
+// when the product is not taxable (so callers can leave the manual tax alone).
+function autoLineTax(line: EditableOrderLine, product: OrderProductOption | undefined, variant: OrderVariant) {
+  const rate = productTaxRate(product);
+  if (rate == null) return null;
+  return roundMoney((lineTaxBase(line, variant) * rate) / 100);
+}
+
 function missingFields(line: EditableOrderLine) {
   const missing: string[] = [];
   if (!line.productId) missing.push('product');
@@ -319,6 +360,9 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
   currency,
   productSearchLoading = false,
   enforceStockAvailability = false,
+  autoTax = false,
+  documentDiscount,
+  onDocumentDiscountChange,
   onAddLine,
   onRemoveLine,
   onLineChange,
@@ -333,6 +377,9 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
   // line. Keyed by `${index}:${field}`.
   type NumericField = 'qty' | 'unitPrice' | 'discount' | 'tax';
   const [numberDrafts, setNumberDrafts] = useState<Record<string, string>>({});
+  // String-backed draft for the optional document-level discount input so
+  // partial entries ("", "1.") are preserved while typing; null = not editing.
+  const [docDiscountDraft, setDocDiscountDraft] = useState<string | null>(null);
   // Debounce timer for the typed product search so each keystroke does not
   // trigger a fetch (~300ms after the user stops typing).
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -449,7 +496,17 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
       ),
     [lines, variant],
   );
-  const total = roundMoney(totals.subtotal - totals.discount + totals.tax);
+  // Document-level discount clamps to the discounted-net so the total never goes
+  // negative; it only affects presentation/totals when the caller opts in via
+  // `documentDiscount`/`onDocumentDiscountChange`.
+  const showDocumentDiscount = onDocumentDiscountChange != null || (documentDiscount ?? 0) > 0;
+  const netBeforeDocDiscount = roundMoney(totals.subtotal - totals.discount);
+  const appliedDocumentDiscount = roundMoney(
+    Math.min(Math.max(0, numberOrZero(documentDiscount)), Math.max(0, netBeforeDocDiscount)),
+  );
+  const total = roundMoney(
+    totals.subtotal - totals.discount - appliedDocumentDiscount + totals.tax,
+  );
   const invalidCount = lines.filter((line) => missingFields(line).length > 0).length;
   const stockWarningCount = stockWarnings.length;
   const profitWarningCount = profitWarnings.length;
@@ -475,6 +532,24 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
     });
   }, [categoryOptions]);
 
+  // AUTO-VAT: keep each auto (non-manual) line's tax in sync with its taxable
+  // product's rate. Fires when qty/unitPrice/discount/product change. Lines whose
+  // tax was manually overridden (line.taxManual) are left untouched, and only
+  // taxable products drive an update so non-taxable lines keep their existing tax.
+  useEffect(() => {
+    if (!autoTax) return;
+    lines.forEach((line, index) => {
+      if (line.taxManual) return;
+      const product = productById.get(line.productId);
+      const computed = autoLineTax(line, product, variant);
+      if (computed == null) return;
+      if (roundMoney(numberOrZero(line.tax)) !== computed) {
+        onLineChange(index, { tax: computed } as Partial<TLine>);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoTax, lines, productById, variant]);
+
   function patchLine(index: number, patch: Partial<EditableOrderLine>) {
     onLineChange(index, patch as Partial<TLine>);
   }
@@ -490,7 +565,13 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
     // line never holds an invalid number while still letting the field show the
     // in-progress text.
     const parsed = parseNonNegativeNumber(raw);
-    if (parsed != null) patchLine(index, { [field]: parsed });
+    if (parsed != null) {
+      // Editing the tax field is an explicit manual override: pin it so auto-VAT
+      // stops recomputing this line.
+      const patch: Partial<EditableOrderLine> =
+        field === 'tax' ? { tax: parsed, taxManual: true } : { [field]: parsed };
+      patchLine(index, patch);
+    }
   }
 
   function handleNumericBlur(index: number, field: NumericField, committed: number) {
@@ -507,16 +588,51 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
   function handleProductSelect(index: number, productId: string) {
     const line = lines[index];
     const product = products.find((item) => item.id === productId);
-    const patch: Partial<EditableOrderLine> = { productId };
+    // Selecting a (new) product clears any prior manual tax pin so auto-VAT
+    // applies to the newly chosen product.
+    const patch: Partial<EditableOrderLine> = { productId, taxManual: false };
 
     if (product) {
       if (!line.description.trim()) patch.description = product.name;
       if (product.baseUnitId && !line.unitId) patch.unitId = product.baseUnitId;
       const defaultPrice = defaultPriceForProduct(product, variant);
       if (defaultPrice > 0 && numberOrZero(line.unitPrice) === 0) patch.unitPrice = defaultPrice;
+      // Compute VAT immediately from the (possibly just-defaulted) price so the
+      // tax cell is correct on selection; the auto-VAT effect keeps it in sync
+      // afterwards. Non-taxable products reset the auto tax to 0.
+      if (autoTax) {
+        const previewLine: EditableOrderLine = {
+          ...line,
+          unitPrice: patch.unitPrice ?? line.unitPrice,
+        };
+        patch.tax = autoLineTax(previewLine, product, variant) ?? 0;
+      }
+    } else if (autoTax) {
+      patch.tax = 0;
     }
 
+    // Drop any stale tax draft so the recomputed value is shown.
+    setNumberDrafts((current) => {
+      const next = { ...current };
+      delete next[`${index}:tax`];
+      return next;
+    });
+
     patchLine(index, patch);
+  }
+
+  // Revert a manually-overridden line back to auto-VAT: recompute from the
+  // product rate and clear the manual pin so the effect keeps it in sync.
+  function handleResetLineTaxToAuto(index: number) {
+    const line = lines[index];
+    const product = productById.get(line.productId);
+    const computed = autoLineTax(line, product, variant) ?? 0;
+    setNumberDrafts((current) => {
+      const next = { ...current };
+      delete next[`${index}:tax`];
+      return next;
+    });
+    patchLine(index, { tax: computed, taxManual: false });
   }
 
   function handleProductSearch(index: number, value: string) {
@@ -594,6 +710,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
         <div className="space-y-3">
           {lines.map((line, index) => {
             const selectedProduct = productById.get(line.productId);
+            const lineTaxRate = productTaxRate(selectedProduct);
             const query = productSearch[index] ?? '';
             const trimmedQuery = query.trim();
             const selectedCategoryId = productCategoryFilter[index] ?? '';
@@ -1005,10 +1122,29 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                     </label>
                     <label className="block">
                       <span
-                        className="mb-1 block text-[12px] font-medium"
+                        className="mb-1 flex items-center justify-between gap-2 text-[12px] font-medium"
                         style={{ color: 'var(--aurora-text-secondary)' }}
                       >
-                        Tax
+                        <span>
+                          Tax
+                          {lineTaxRate != null ? (
+                            <span style={{ color: 'var(--aurora-text-muted)' }}>
+                              {' '}
+                              (VAT {lineTaxRate}%
+                              {line.taxManual ? ', manual' : ' auto'})
+                            </span>
+                          ) : null}
+                        </span>
+                        {autoTax && lineTaxRate != null && line.taxManual ? (
+                          <button
+                            type="button"
+                            onClick={() => handleResetLineTaxToAuto(index)}
+                            className="text-[11px] font-medium text-brand-600 hover:underline"
+                            aria-label={`Reset line ${index + 1} tax to auto VAT`}
+                          >
+                            Auto
+                          </button>
+                        ) : null}
                       </span>
                       <input
                         type="number"
@@ -1095,11 +1231,51 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
               </span>
             </div>
             <div className="flex justify-between gap-4">
-              <span style={{ color: 'var(--aurora-text-muted)' }}>Discount</span>
+              <span style={{ color: 'var(--aurora-text-muted)' }}>
+                {showDocumentDiscount ? 'Line Discount' : 'Discount'}
+              </span>
               <span className="font-medium tabular-nums text-red-600">
                 -{money(totals.discount, currency)}
               </span>
             </div>
+            {showDocumentDiscount && (
+              <div className="flex items-center justify-between gap-4">
+                <span style={{ color: 'var(--aurora-text-muted)' }}>Order Discount</span>
+                {onDocumentDiscountChange ? (
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={docDiscountDraft ?? String(numberOrZero(documentDiscount))}
+                    onChange={(event) => {
+                      const raw = event.target.value;
+                      setDocDiscountDraft(raw);
+                      const parsed = parseNonNegativeNumber(raw);
+                      if (parsed != null) onDocumentDiscountChange(parsed);
+                    }}
+                    onBlur={() => setDocDiscountDraft(null)}
+                    className="aurora-input w-28 rounded-lg px-2 py-1 text-right text-[13px] tabular-nums focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    aria-label="Order-level discount"
+                  />
+                ) : (
+                  <span className="font-medium tabular-nums text-red-600">
+                    -{money(appliedDocumentDiscount, currency)}
+                  </span>
+                )}
+              </div>
+            )}
+            {showDocumentDiscount &&
+              onDocumentDiscountChange &&
+              roundMoney(numberOrZero(documentDiscount)) > appliedDocumentDiscount && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-[12px]" style={{ color: 'var(--aurora-warning)' }}>
+                    Capped to net; applied
+                  </span>
+                  <span className="font-medium tabular-nums text-red-600">
+                    -{money(appliedDocumentDiscount, currency)}
+                  </span>
+                </div>
+              )}
             <div className="flex justify-between gap-4">
               <span style={{ color: 'var(--aurora-text-muted)' }}>Tax</span>
               <span className="font-medium tabular-nums" style={{ color: 'var(--aurora-text)' }}>

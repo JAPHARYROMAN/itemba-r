@@ -18,6 +18,12 @@ import {
 } from '@/components/ui';
 import { backendGet, backendPatch } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import {
+  ApprovalTimeline,
+  AuditTimeline,
+  type ApprovalStep,
+  type AuditEntry,
+} from '@/components/aurora/timelines';
 
 type AnyRecord = Record<string, any>;
 
@@ -70,6 +76,19 @@ function date(value?: string | null) {
   return parsed.toLocaleDateString('en-GB');
 }
 
+function dateTime(value?: string | null) {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function personName(value?: AnyRecord | null) {
   if (!value) return '-';
   return (
@@ -119,6 +138,12 @@ function RecordPaymentModal({
       setError('Enter a valid payment amount');
       return;
     }
+    if (numericAmount > outstanding + 0.005) {
+      setError(
+        `Amount exceeds outstanding balance of ${money(outstanding, currency)}`,
+      );
+      return;
+    }
     setSaving(true);
     setError('');
     try {
@@ -127,7 +152,16 @@ function RecordPaymentModal({
         paymentDate,
         notes: notes.trim() || undefined,
       });
-      showToast('success', 'Payment recorded', money(numericAmount, currency));
+      const prevOutstanding = outstanding;
+      const newOutstanding = Math.max(0, prevOutstanding - numericAmount);
+      showToast(
+        'success',
+        'Payment recorded',
+        `${money(numericAmount, currency)} · Balance ${money(prevOutstanding, currency)} → ${money(
+          newOutstanding,
+          currency,
+        )}`,
+      );
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not record payment');
@@ -185,6 +219,128 @@ function RecordPaymentModal({
   );
 }
 
+function buildStatusSteps(
+  order: AnyRecord,
+  audit: AnyRecord | null | undefined,
+  fulfillment: AnyRecord | null | undefined,
+): ApprovalStep[] {
+  const status = String(order?.status ?? '').toUpperCase();
+  const paymentStatus = String(order?.paymentStatus ?? '').toUpperCase();
+  const isCancelled = status === 'CANCELLED';
+  const isConfirmed = ['CONFIRMED', 'PARTIALLY_PAID', 'PAID', 'DELIVERED', 'COMPLETED'].includes(
+    status,
+  );
+
+  const fulfillmentStatus = String(fulfillment?.summary?.status ?? '').toUpperCase();
+  const deliveryCount = Number(fulfillment?.summary?.deliveryNoteCount ?? 0);
+  const isDelivered =
+    ['DELIVERED', 'FULFILLED', 'COMPLETED'].includes(fulfillmentStatus) ||
+    ['DELIVERED', 'COMPLETED'].includes(status) ||
+    deliveryCount > 0;
+
+  const outstanding = Number(order?.outstandingAmount ?? 0);
+  const isPaid =
+    paymentStatus === 'PAID' ||
+    (isConfirmed && Number.isFinite(outstanding) && outstanding <= 0);
+
+  const drafted: ApprovalStep = {
+    id: 'draft',
+    stepNumber: 1,
+    title: 'Draft',
+    status: 'APPROVED',
+    approver: personName(audit?.createdBy),
+    actionedAt: dateTime(audit?.createdAt) || undefined,
+  };
+
+  const confirmed: ApprovalStep = {
+    id: 'confirmed',
+    stepNumber: 2,
+    title: 'Confirmed',
+    status: isCancelled ? 'REJECTED' : isConfirmed ? 'APPROVED' : 'PENDING',
+    approver: isConfirmed ? personName(audit?.confirmedBy) : undefined,
+    actionedAt: isConfirmed ? dateTime(audit?.confirmedAt) || undefined : undefined,
+    comment: isCancelled ? 'Order cancelled' : undefined,
+  };
+
+  const delivered: ApprovalStep = {
+    id: 'delivered',
+    stepNumber: 3,
+    title: 'Delivered',
+    status: isCancelled ? 'SKIPPED' : isDelivered ? 'APPROVED' : 'PENDING',
+    description:
+      isDelivered && deliveryCount > 0
+        ? `${deliveryCount} delivery note${deliveryCount === 1 ? '' : 's'}`
+        : undefined,
+  };
+
+  const paid: ApprovalStep = {
+    id: 'paid',
+    stepNumber: 4,
+    title: 'Paid',
+    status: isCancelled ? 'SKIPPED' : isPaid ? 'APPROVED' : 'PENDING',
+    description:
+      !isCancelled && !isPaid && Number.isFinite(outstanding) && outstanding > 0
+        ? `Outstanding ${money(outstanding, order?.currency ?? 'TZS')}`
+        : undefined,
+  };
+
+  return [drafted, confirmed, delivered, paid];
+}
+
+function buildAuditEntries(
+  order: AnyRecord,
+  audit: AnyRecord | null | undefined,
+): AuditEntry[] {
+  const entries: AuditEntry[] = [];
+  const entityType = 'Sales Order';
+
+  if (audit?.createdAt) {
+    entries.push({
+      id: 'audit-created',
+      action: 'Order created',
+      entityType,
+      userEmail: personName(audit.createdBy) !== '-' ? personName(audit.createdBy) : undefined,
+      createdAt: dateTime(audit.createdAt),
+    });
+  }
+
+  if (audit?.confirmedAt) {
+    entries.push({
+      id: 'audit-confirmed',
+      action: 'Order confirmed',
+      entityType,
+      userEmail:
+        personName(audit.confirmedBy) !== '-' ? personName(audit.confirmedBy) : undefined,
+      createdAt: dateTime(audit.confirmedAt),
+    });
+  }
+
+  if (
+    audit?.updatedAt &&
+    audit.updatedAt !== audit.createdAt &&
+    audit.updatedAt !== audit.confirmedAt
+  ) {
+    entries.push({
+      id: 'audit-updated',
+      action: 'Order updated',
+      entityType,
+      createdAt: dateTime(audit.updatedAt),
+    });
+  }
+
+  if (String(order?.status ?? '').toUpperCase() === 'CANCELLED') {
+    entries.push({
+      id: 'audit-cancelled',
+      action: 'Order cancelled',
+      entityType,
+      createdAt: dateTime(audit?.updatedAt),
+    });
+  }
+
+  // Newest first for the audit trail.
+  return entries.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+}
+
 export default function SalesOrderDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -225,6 +381,14 @@ export default function SalesOrderDetailPage() {
     order?.outstandingAmount ?? data?.ledger?.receivable?.outstandingAmount ?? 0,
   );
   const lines = useMemo(() => order?.lines ?? [], [order?.lines]);
+  const statusSteps = useMemo(
+    () => (order ? buildStatusSteps(order, data?.audit, data?.fulfillment) : []),
+    [order, data?.audit, data?.fulfillment],
+  );
+  const auditEntries = useMemo(
+    () => (order ? buildAuditEntries(order, data?.audit) : []),
+    [order, data?.audit],
+  );
 
   const runAction = async (action: 'confirm' | 'cancel') => {
     setActionLoading(action);
@@ -392,7 +556,14 @@ export default function SalesOrderDetailPage() {
           role="tabpanel"
           id={`tabpanel-${tabId('Overview')}`}
           aria-labelledby={`tab-${tabId('Overview')}`}
+          className="space-y-6"
         >
+          <Card className="p-5">
+            <h3 className="mb-4 text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+              Order Lifecycle
+            </h3>
+            <ApprovalTimeline steps={statusSteps} />
+          </Card>
           <Card className="p-5">
             <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
               <InfoRow label="Status" value={<StatusBadge value={order.status} />} />
@@ -859,7 +1030,14 @@ export default function SalesOrderDetailPage() {
           role="tabpanel"
           id={`tabpanel-${tabId('Audit')}`}
           aria-labelledby={`tab-${tabId('Audit')}`}
+          className="space-y-6"
         >
+          <Card className="p-5">
+            <h3 className="mb-4 text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+              Audit Trail
+            </h3>
+            <AuditTimeline entries={auditEntries} emptyText="No audit records for this order" />
+          </Card>
           <Card className="p-5">
             <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
               <InfoRow label="Created At" value={date(data.audit?.createdAt)} />

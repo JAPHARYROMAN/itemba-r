@@ -1,11 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { ResponsiveDataTable } from '@/components/aurora';
+import type { ResponsiveColumn } from '@/components/aurora';
 import { useAuth } from '@/hooks/use-auth';
 
 interface TaxType { id: string; name: string }
-interface TaxRate {
+interface TaxRate extends Record<string, unknown> {
   id: string;
   taxTypeId: string;
   taxType?: { name: string };
@@ -97,6 +99,7 @@ export default function TaxRatesPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [taxTypeId, setTaxTypeId] = useState('');
   const [status, setStatus] = useState('');
   const [creating, setCreating] = useState(false);
@@ -110,13 +113,20 @@ export default function TaxRatesPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     const params = new URLSearchParams({ page: String(page), limit: '20' });
     if (taxTypeId) params.set('taxTypeId', taxTypeId);
     if (status) params.set('status', status);
-    const j = await fetch(`/api/backend/compliance/tax-rates?${params}`).then((r) => r.json()).catch(() => ({}));
-    const p: Paginated<TaxRate> = j.data ?? {};
-    setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
-    setLoading(false);
+    try {
+      const j = await fetch(`/api/backend/compliance/tax-rates?${params}`).then((r) => r.json());
+      const p: Paginated<TaxRate> = j.data ?? {};
+      setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
+    } catch {
+      setLoadError('Failed to load tax rates');
+      setItems([]); setTotal(0); setTotalPages(1);
+    } finally {
+      setLoading(false);
+    }
   }, [page, taxTypeId, status]);
 
   useEffect(() => { load(); }, [load]);
@@ -137,6 +147,42 @@ export default function TaxRatesPage() {
   const draftCount = items.filter((r) => r.status === 'DRAFT').length;
 
   if (!canView) return <div className="p-6"><PageHeader title="Tax Rates" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
+
+  const columns: ResponsiveColumn<TaxRate>[] = [
+    { key: 'taxType', header: 'Tax Type', priority: 2, accessor: (r) => <span className="text-xs">{r.taxType?.name ?? '—'}</span> },
+    { key: 'rateName', header: 'Rate Name', priority: 1, accessor: (r) => r.rateName },
+    { key: 'rate', header: 'Rate', priority: 1, align: 'right', accessor: (r) => <span className="font-mono">{Number(r.rate).toFixed(4)}</span> },
+    { key: 'calculationMethod', header: 'Method', priority: 3, accessor: (r) => <span className="text-xs">{r.calculationMethod}</span> },
+    {
+      key: 'effective',
+      header: 'Effective',
+      priority: 2,
+      accessor: (r) => (
+        <span className="text-xs">
+          {r.effectiveFrom?.split('T')[0]}
+          {r.effectiveTo ? ` → ${r.effectiveTo.split('T')[0]}` : ''}
+        </span>
+      ),
+    },
+    { key: 'status', header: 'Status', priority: 1, accessor: (r) => <StatusBadge status={r.status} /> },
+    ...(canManage
+      ? [{
+          key: 'actions',
+          header: 'Actions',
+          priority: 1 as const,
+          align: 'right' as const,
+          exportExclude: true,
+          accessor: (r: TaxRate) => (
+            <div className="whitespace-nowrap">
+              {r.status === 'DRAFT' && <Btn variant="success" size="xs" loading={actingId === r.id} onClick={() => doAction(r.id, 'approve')}>Approve</Btn>}
+              {r.status === 'ACTIVE' && <Btn variant="warning" size="xs" loading={actingId === r.id} onClick={() => doAction(r.id, 'deactivate')}>Deactivate</Btn>}
+              <Btn variant="ghost" size="xs" onClick={() => setEditing(r)}>Edit</Btn>
+              <Btn variant="ghost" size="xs" onClick={() => setDeleting(r)}>Delete</Btn>
+            </div>
+          ),
+        }]
+      : []),
+  ];
 
   return (
     <div className="p-6 space-y-6">
@@ -164,56 +210,27 @@ export default function TaxRatesPage() {
         actions={canManage ? <Btn variant="primary" onClick={() => setCreating(true)}>+ New Rate</Btn> : null}
       />
 
-      <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : items.length === 0 ? (
-          <div className="p-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No tax rates</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
-                  <th className="px-4 py-3">Tax Type</th>
-                  <th className="px-4 py-3">Rate Name</th>
-                  <th className="px-4 py-3 text-right">Rate</th>
-                  <th className="px-4 py-3">Method</th>
-                  <th className="px-4 py-3">Effective</th>
-                  <th className="px-4 py-3">Status</th>
-                  {canManage && <th className="px-4 py-3 text-right">Actions</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((r) => (
-                  <tr key={r.id} className="border-t" style={{ borderColor: 'var(--aurora-border)' }}>
-                    <td className="px-4 py-3 text-xs">{r.taxType?.name ?? '—'}</td>
-                    <td className="px-4 py-3">{r.rateName}</td>
-                    <td className="px-4 py-3 text-right font-mono">{Number(r.rate).toFixed(4)}</td>
-                    <td className="px-4 py-3 text-xs">{r.calculationMethod}</td>
-                    <td className="px-4 py-3 text-xs">{r.effectiveFrom?.split('T')[0]}{r.effectiveTo ? ` → ${r.effectiveTo.split('T')[0]}` : ''}</td>
-                    <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
-                    {canManage && (
-                      <td className="px-4 py-3 text-right whitespace-nowrap">
-                        {r.status === 'DRAFT' && <Btn variant="success" size="xs" loading={actingId === r.id} onClick={() => doAction(r.id, 'approve')}>Approve</Btn>}
-                        {r.status === 'ACTIVE' && <Btn variant="warning" size="xs" loading={actingId === r.id} onClick={() => doAction(r.id, 'deactivate')}>Deactivate</Btn>}
-                        <Btn variant="ghost" size="xs" onClick={() => setEditing(r)}>Edit</Btn>
-                        <Btn variant="ghost" size="xs" onClick={() => setDeleting(r)}>Delete</Btn>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between p-3 border-t" style={{ borderColor: 'var(--aurora-border)' }}>
-            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>Page {page} of {totalPages} ({total} total)</span>
-            <div className="flex gap-2">
-              <Btn variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Btn>
-              <Btn variant="secondary" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Btn>
-            </div>
-          </div>
-        )}
-      </Card>
+      <ResponsiveDataTable<TaxRate>
+        columns={columns}
+        data={items}
+        keyField="id"
+        loading={loading}
+        error={loadError}
+        onRetry={load}
+        errorTitle="Couldn't load tax rates"
+        emptyTitle="No tax rates"
+        emptyDescription="There are no tax rates to display."
+        pagination={
+          totalPages > 1
+            ? {
+                page,
+                limit: 20,
+                total,
+                onPageChange: (p) => setPage(p),
+              }
+            : undefined
+        }
+      />
 
       {creating && <RateModal mode="create" taxTypes={taxTypes} onClose={() => setCreating(false)} onSaved={onSaved} />}
       {editing && <RateModal mode="edit" initial={editing} taxTypes={taxTypes} onClose={() => setEditing(null)} onSaved={onSaved} />}

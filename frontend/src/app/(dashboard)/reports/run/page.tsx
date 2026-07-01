@@ -1,8 +1,11 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { Card, PageHeader, SkeletonCardGrid, showToast } from '@/components/ui';
+import { ChartCard, MiniTrendLine } from '@/components/aurora/charts';
+import { Sparkline } from '@/components/ui/sparkline';
 import {
   flattenForCsv,
   isFlatObject,
@@ -170,6 +173,34 @@ interface ExportAuditResponse {
   };
 }
 
+/** Parameters persisted inside a saved view's `filters` blob. */
+interface SavedViewFilters {
+  companyId?: string;
+  divisionId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  asOf?: string;
+}
+
+/** Presentation config persisted inside a saved view's `chartConfig` blob. */
+interface SavedViewChartConfig {
+  viewMode?: 'table' | 'chart';
+  metricColumns?: string[];
+}
+
+interface SavedReportView {
+  id: string;
+  name: string;
+  reportDefinitionId: string;
+  companyId?: string | null;
+  filters?: SavedViewFilters | null;
+  chartConfig?: SavedViewChartConfig | null;
+  isDefault?: boolean;
+  isShared?: boolean;
+  userId?: string;
+  createdAt?: string;
+}
+
 const fmtNumber = (v: unknown): string => {
   if (v === null || v === undefined) return '—';
   if (typeof v === 'number') {
@@ -310,6 +341,21 @@ function ReportRunContent() {
   const [exportHistory, setExportHistory] = useState<ExportHistoryItem[]>([]);
   const [lastExportAudit, setLastExportAudit] = useState<ExportAuditResponse['audit'] | null>(null);
 
+  // Presentation + in-result filtering.
+  const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
+  const [rowSearch, setRowSearch] = useState('');
+  const [selectedMetricColumns, setSelectedMetricColumns] = useState<string[]>([]);
+
+  // Saved views.
+  const [savedViews, setSavedViews] = useState<SavedReportView[]>([]);
+  const [savedViewsLoading, setSavedViewsLoading] = useState(false);
+  const [savedViewsSupported, setSavedViewsSupported] = useState(true);
+  const [showSaveView, setShowSaveView] = useState(false);
+  const [newViewName, setNewViewName] = useState('');
+  const [savingView, setSavingView] = useState(false);
+  const [appliedViewId, setAppliedViewId] = useState('');
+  const defaultViewApplied = useRef(false);
+
   // Load catalog and find the entry.
   useEffect(() => {
     if (!reportId) return;
@@ -438,6 +484,181 @@ function ReportRunContent() {
     void loadExportHistory();
   }, [loadExportHistory]);
 
+  // ----- Saved views (bi/saved-report-views) -----
+  const loadSavedViews = useCallback(async () => {
+    if (!reportId) return;
+    setSavedViewsLoading(true);
+    try {
+      const qs = new URLSearchParams();
+      qs.set('reportDefinitionId', reportId);
+      if (companyId) qs.set('companyId', companyId);
+      qs.set('limit', '50');
+      const response = await fetch(`/api/backend/bi/saved-report-views?${qs.toString()}`);
+      if (!response.ok) {
+        // 401/403 => the current user lacks the view permission; hide the surface.
+        if (response.status === 401 || response.status === 403) setSavedViewsSupported(false);
+        setSavedViews([]);
+        return;
+      }
+      const payload = await response.json();
+      const inner = payload.data?.data ?? payload.data ?? payload;
+      const rows: SavedReportView[] = Array.isArray(inner)
+        ? inner
+        : Array.isArray(inner?.data)
+          ? inner.data
+          : [];
+      setSavedViews(rows);
+    } catch {
+      setSavedViews([]);
+    } finally {
+      setSavedViewsLoading(false);
+    }
+  }, [companyId, reportId]);
+
+  useEffect(() => {
+    void loadSavedViews();
+  }, [loadSavedViews]);
+
+  const adoptSavedView = useCallback((view: SavedReportView) => {
+    const f = view.filters ?? {};
+    // Only adopt the company the view targets when present; otherwise keep current.
+    if (typeof f.companyId === 'string') {
+      setCompanyId(f.companyId);
+    } else if (typeof view.companyId === 'string') {
+      setCompanyId(view.companyId);
+    }
+    setDivisionId(typeof f.divisionId === 'string' ? f.divisionId : '');
+    setDateFrom(typeof f.dateFrom === 'string' ? f.dateFrom : '');
+    setDateTo(typeof f.dateTo === 'string' ? f.dateTo : '');
+    setAsOf(typeof f.asOf === 'string' ? f.asOf : '');
+    const cfg = view.chartConfig ?? {};
+    if (cfg.viewMode === 'chart' || cfg.viewMode === 'table') setViewMode(cfg.viewMode);
+    if (Array.isArray(cfg.metricColumns)) setSelectedMetricColumns(cfg.metricColumns);
+    setAppliedViewId(view.id);
+  }, []);
+
+  const applySavedView = useCallback(
+    (view: SavedReportView) => {
+      adoptSavedView(view);
+      showToast('success', 'View applied', view.name);
+    },
+    [adoptSavedView],
+  );
+
+  // Apply the user's default view once on first load — but never override
+  // filters the user arrived with via the URL, so deep links stay honoured.
+  useEffect(() => {
+    if (defaultViewApplied.current) return;
+    if (savedViewsLoading || savedViews.length === 0) return;
+    defaultViewApplied.current = true;
+    const hadUrlFilters = Boolean(
+      initialCompanyId || initialDivisionId,
+    );
+    if (hadUrlFilters) return;
+    const def = savedViews.find((v) => v.isDefault);
+    if (def) adoptSavedView(def);
+  }, [adoptSavedView, initialCompanyId, initialDivisionId, savedViews, savedViewsLoading]);
+
+  const createSavedView = useCallback(
+    async (asDefault: boolean) => {
+      const name = newViewName.trim();
+      if (!name || !reportId) return;
+      setSavingView(true);
+      try {
+        const filters: SavedViewFilters = {
+          companyId: companyId || undefined,
+          divisionId: divisionId || undefined,
+          dateFrom: dateFrom || undefined,
+          dateTo: dateTo || undefined,
+          asOf: asOf || undefined,
+        };
+        const chartConfig: SavedViewChartConfig = {
+          viewMode,
+          metricColumns: selectedMetricColumns,
+        };
+        const response = await fetch('/api/backend/bi/saved-report-views', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reportDefinitionId: reportId,
+            companyId: companyId || undefined,
+            name,
+            filters,
+            chartConfig,
+            isDefault: asDefault,
+          }),
+        });
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            showToast('error', 'Not permitted', 'You do not have permission to save report views.');
+          } else if (response.status === 404) {
+            showToast(
+              'error',
+              'Saved views unavailable',
+              'No report definition is registered for this report, so views cannot be stored.',
+            );
+          } else {
+            showToast('error', 'Could not save view', `HTTP ${response.status}`);
+          }
+          return;
+        }
+        const payload = await response.json();
+        const created = (payload.data ?? payload) as SavedReportView;
+        if (created?.id) setAppliedViewId(created.id);
+        showToast('success', 'View saved', name);
+        setShowSaveView(false);
+        setNewViewName('');
+        await loadSavedViews();
+      } catch {
+        showToast('error', 'Could not save view', 'The saved-views service is unavailable.');
+      } finally {
+        setSavingView(false);
+      }
+    },
+    [asOf, companyId, dateFrom, dateTo, divisionId, loadSavedViews, newViewName, reportId, selectedMetricColumns, viewMode],
+  );
+
+  const setSavedViewDefault = useCallback(
+    async (view: SavedReportView) => {
+      try {
+        const response = await fetch(
+          `/api/backend/bi/saved-report-views/${encodeURIComponent(view.id)}/set-default`,
+          { method: 'PATCH' },
+        );
+        if (!response.ok) {
+          showToast('error', 'Could not set default', `HTTP ${response.status}`);
+          return;
+        }
+        showToast('success', 'Default view set', view.name);
+        await loadSavedViews();
+      } catch {
+        showToast('error', 'Could not set default', 'The saved-views service is unavailable.');
+      }
+    },
+    [loadSavedViews],
+  );
+
+  const deleteSavedView = useCallback(
+    async (view: SavedReportView) => {
+      try {
+        const response = await fetch(
+          `/api/backend/bi/saved-report-views/${encodeURIComponent(view.id)}`,
+          { method: 'DELETE' },
+        );
+        if (!response.ok) {
+          showToast('error', 'Could not delete view', `HTTP ${response.status}`);
+          return;
+        }
+        showToast('success', 'View deleted', view.name);
+        if (appliedViewId === view.id) setAppliedViewId('');
+        await loadSavedViews();
+      } catch {
+        showToast('error', 'Could not delete view', 'The saved-views service is unavailable.');
+      }
+    },
+    [appliedViewId, loadSavedViews],
+  );
+
   const run = useCallback(async () => {
     if (!builtUrl) return;
     setLoading(true);
@@ -507,6 +728,63 @@ function ReportRunContent() {
         k !== primary.key,
     );
   }, [data, primary.key]);
+
+  // Flatten the primary table once; reuse for table render, in-result search, and charting.
+  const flatTable = useMemo(() => flattenForCsv(primary.rows), [primary.rows]);
+
+  // Client-side row filter over the flattened matrix (case-insensitive, any-column match).
+  const filteredRowIndexes = useMemo(() => {
+    const q = rowSearch.trim().toLowerCase();
+    if (!q) return flatTable.data.map((_, i) => i);
+    return flatTable.data
+      .map((row, i) => ({ row, i }))
+      .filter(({ row }) => row.some((cell) => cell.toLowerCase().includes(q)))
+      .map(({ i }) => i);
+  }, [flatTable.data, rowSearch]);
+
+  // Columns whose values are (mostly) numeric — candidates for chart series.
+  const numericColumns = useMemo(() => {
+    return flatTable.columns.filter((col) => {
+      const ci = flatTable.columns.indexOf(col);
+      let numeric = 0;
+      let nonEmpty = 0;
+      for (const row of flatTable.data) {
+        const raw = row[ci];
+        if (raw === '' || raw === undefined) continue;
+        nonEmpty += 1;
+        if (Number.isFinite(Number(raw))) numeric += 1;
+      }
+      return nonEmpty > 0 && numeric / nonEmpty >= 0.6;
+    });
+  }, [flatTable.columns, flatTable.data]);
+
+  // Default the charted metric columns to the first few numeric columns once data lands.
+  useEffect(() => {
+    if (!numericColumns.length) return;
+    setSelectedMetricColumns((prev) => {
+      const stillValid = prev.filter((c) => numericColumns.includes(c));
+      if (stillValid.length) return stillValid;
+      return numericColumns.slice(0, 4);
+    });
+  }, [numericColumns]);
+
+  // Label column for the x-axis / chart caption: first non-numeric column, else row index.
+  const labelColumn = useMemo(
+    () => flatTable.columns.find((c) => !numericColumns.includes(c)) ?? null,
+    [flatTable.columns, numericColumns],
+  );
+
+  const chartSeries = useMemo(() => {
+    return selectedMetricColumns.map((col) => {
+      const ci = flatTable.columns.indexOf(col);
+      const values = filteredRowIndexes
+        .map((ri) => Number(flatTable.data[ri]?.[ci]))
+        .filter((n) => Number.isFinite(n));
+      const total = values.reduce((sum, n) => sum + n, 0);
+      const last = values.length ? values[values.length - 1] : null;
+      return { column: col, values, total, last };
+    });
+  }, [filteredRowIndexes, flatTable.columns, flatTable.data, selectedMetricColumns]);
 
   const recordExport = async (format: string) => {
     if (!entry) return;
@@ -636,6 +914,17 @@ function ReportRunContent() {
         ]}
         actions={
           <div className="flex items-center gap-2 print:hidden">
+            {savedViewsSupported && (
+              <button
+                onClick={() => {
+                  setShowSaveView((v) => !v);
+                  setNewViewName((n) => n || entry.name);
+                }}
+                className="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-md bg-white text-slate-700 hover:bg-slate-50"
+              >
+                Save view
+              </button>
+            )}
             <button
               onClick={run}
               disabled={loading || !builtUrl}
@@ -700,11 +989,162 @@ function ReportRunContent() {
               Drill and lineage path
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
-              {(lineage?.drillThrough?.map((target) => target.label) ?? entry.drillPaths ?? ['Summary', 'Record', 'Source']).map((step) => metaBadge(step, 'blue'))}
+              {lineage?.drillThrough?.length
+                ? lineage.drillThrough.map((target) => (
+                    <Link
+                      key={`${target.target}-${target.href}`}
+                      href={target.href}
+                      title={target.evidenceType ? `${target.evidenceType} → ${target.href}` : target.href}
+                      className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors hover:underline"
+                      style={{
+                        background: 'var(--aurora-primary-subtle)',
+                        color: 'var(--aurora-primary-text)',
+                        borderColor: 'var(--aurora-border)',
+                      }}
+                    >
+                      {target.label}
+                      <span aria-hidden>↗</span>
+                    </Link>
+                  ))
+                : (entry.drillPaths ?? ['Summary', 'Record', 'Source']).map((step) => metaBadge(step, 'blue'))}
             </div>
           </div>
         </div>
       </Card>
+
+      {savedViewsSupported && (
+        <Card className="p-4 print:hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+              My saved views
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void loadSavedViews()}
+                className="rounded-md border px-2 py-1 text-[11px]"
+                style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-secondary)' }}
+              >
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSaveView((v) => !v);
+                  setNewViewName((n) => n || entry.name);
+                }}
+                className="rounded-md border px-2 py-1 text-[11px]"
+                style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-secondary)' }}
+              >
+                {showSaveView ? 'Cancel' : 'Save current view'}
+              </button>
+            </div>
+          </div>
+
+          {showSaveView && (
+            <div className="mt-3 flex flex-wrap items-end gap-2 rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+              <div className="flex-1 min-w-[220px]">
+                <div className="text-[11px] font-medium uppercase tracking-wide mb-1" style={{ color: 'var(--aurora-text-muted)' }}>
+                  View name
+                </div>
+                <input
+                  type="text"
+                  value={newViewName}
+                  onChange={(e) => setNewViewName(e.target.value)}
+                  placeholder="e.g. Q1 export view"
+                  className="w-full text-sm border border-slate-200 rounded-md px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void createSavedView(false)}
+                disabled={savingView || !newViewName.trim()}
+                className="px-3 py-2 text-xs font-medium border border-slate-200 rounded-md bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {savingView ? 'Saving…' : 'Save view'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void createSavedView(true)}
+                disabled={savingView || !newViewName.trim()}
+                className="px-3 py-2 text-xs font-medium border rounded-md disabled:opacity-50"
+                style={{ background: 'var(--aurora-primary-subtle)', color: 'var(--aurora-primary-text)', borderColor: 'var(--aurora-border)' }}
+              >
+                Save as default
+              </button>
+              <span className="text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+                Captures the current filters and {viewMode} view.
+              </span>
+            </div>
+          )}
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {savedViewsLoading && (
+              <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                Loading saved views…
+              </span>
+            )}
+            {!savedViewsLoading && savedViews.length === 0 && (
+              <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                No saved views yet for this report. Save the current filters to reuse them.
+              </span>
+            )}
+            {savedViews.map((view) => {
+              const active = appliedViewId === view.id;
+              return (
+                <div
+                  key={view.id}
+                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs"
+                  style={{
+                    borderColor: active ? 'var(--aurora-primary)' : 'var(--aurora-border)',
+                    background: active ? 'var(--aurora-primary-subtle)' : 'var(--aurora-bg-subtle)',
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => applySavedView(view)}
+                    className="font-medium hover:underline"
+                    style={{ color: active ? 'var(--aurora-primary-text)' : 'var(--aurora-text)' }}
+                    title="Apply this saved view"
+                  >
+                    {view.name}
+                  </button>
+                  {view.isDefault && (
+                    <span className="rounded px-1 text-[9px] font-semibold uppercase" style={{ background: 'var(--aurora-success-bg)', color: 'var(--aurora-success-text)' }}>
+                      Default
+                    </span>
+                  )}
+                  {view.isShared && (
+                    <span className="rounded px-1 text-[9px] font-semibold uppercase" style={{ background: 'var(--aurora-border)', color: 'var(--aurora-text-secondary)' }}>
+                      Shared
+                    </span>
+                  )}
+                  {!view.isDefault && (
+                    <button
+                      type="button"
+                      onClick={() => void setSavedViewDefault(view)}
+                      className="text-[10px] hover:underline"
+                      style={{ color: 'var(--aurora-text-muted)' }}
+                      title="Set as default view"
+                    >
+                      Set default
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void deleteSavedView(view)}
+                    className="text-[10px] hover:underline"
+                    style={{ color: 'var(--aurora-danger)' }}
+                    title="Delete this saved view"
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       <Card className="p-4 print:hidden">
         <div className="flex flex-wrap items-end gap-3">
@@ -955,47 +1395,161 @@ function ReportRunContent() {
 
           {primary.rows.length > 0 && (
             <Card className="overflow-hidden">
-              <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+              <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs text-slate-500 uppercase tracking-wide">
                   {primary.key ?? 'Rows'}
                 </div>
-                <div className="text-[11px] text-slate-400">
-                  {primary.rows.length} row{primary.rows.length === 1 ? '' : 's'}
+                <div className="flex flex-wrap items-center gap-2 print:hidden">
+                  <input
+                    type="search"
+                    value={rowSearch}
+                    onChange={(e) => setRowSearch(e.target.value)}
+                    placeholder="Search rows…"
+                    className="text-xs border border-slate-200 rounded-md px-2.5 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  />
+                  <div className="inline-flex rounded-md border border-slate-200 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('table')}
+                      className={`px-2.5 py-1.5 text-[11px] font-medium ${viewMode === 'table' ? 'bg-slate-100 text-slate-800' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
+                    >
+                      Table
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('chart')}
+                      disabled={numericColumns.length === 0}
+                      title={numericColumns.length === 0 ? 'No numeric columns to chart' : 'Chart view'}
+                      className={`px-2.5 py-1.5 text-[11px] font-medium border-l border-slate-200 disabled:opacity-40 ${viewMode === 'chart' ? 'bg-slate-100 text-slate-800' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
+                    >
+                      Chart
+                    </button>
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    {filteredRowIndexes.length}
+                    {filteredRowIndexes.length !== primary.rows.length ? ` / ${primary.rows.length}` : ''} row
+                    {filteredRowIndexes.length === 1 ? '' : 's'}
+                  </div>
                 </div>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 border-b border-slate-100">
-                    <tr>
-                      {(() => {
-                        const { columns } = flattenForCsv(primary.rows);
-                        return columns.map((c) => (
+
+              {viewMode === 'chart' && numericColumns.length > 0 ? (
+                <div className="p-4 space-y-4">
+                  <div className="flex flex-wrap gap-2 print:hidden">
+                    {numericColumns.map((col) => {
+                      const on = selectedMetricColumns.includes(col);
+                      return (
+                        <button
+                          key={col}
+                          type="button"
+                          onClick={() =>
+                            setSelectedMetricColumns((prev) =>
+                              prev.includes(col) ? prev.filter((c) => c !== col) : [...prev, col],
+                            )
+                          }
+                          className="rounded-md border px-2 py-0.5 text-[11px] font-medium"
+                          style={{
+                            background: on ? 'var(--aurora-primary-subtle)' : 'var(--aurora-bg-subtle)',
+                            color: on ? 'var(--aurora-primary-text)' : 'var(--aurora-text-secondary)',
+                            borderColor: on ? 'var(--aurora-primary)' : 'var(--aurora-border)',
+                          }}
+                        >
+                          {col}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {chartSeries.filter((s) => selectedMetricColumns.includes(s.column)).length === 0 ? (
+                    <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                      Select at least one numeric column to chart.
+                    </div>
+                  ) : (
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {chartSeries
+                        .filter((s) => selectedMetricColumns.includes(s.column))
+                        .map((series) => (
+                          <ChartCard
+                            key={series.column}
+                            title={series.column}
+                            value={series.last !== null ? fmtNumber(series.last) : '—'}
+                            subtitle={`${series.values.length} point${series.values.length === 1 ? '' : 's'} · total ${fmtNumber(series.total)}${labelColumn ? ` · by ${labelColumn}` : ''}`}
+                            height={140}
+                            emptyText="Not enough numeric points to chart"
+                            chart={
+                              series.values.length >= 2 ? (
+                                <div className="flex h-full items-center px-4">
+                                  <Sparkline data={series.values} height={120} className="w-full" />
+                                </div>
+                              ) : undefined
+                            }
+                          />
+                        ))}
+                    </div>
+                  )}
+                  {selectedMetricColumns.length >= 2 &&
+                    chartSeries.filter((s) => selectedMetricColumns.includes(s.column) && s.values.length >= 2).length >= 2 && (
+                      <div className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}>
+                        <div className="text-[11px] font-medium uppercase tracking-wide mb-2" style={{ color: 'var(--aurora-text-muted)' }}>
+                          Series overlay
+                        </div>
+                        <div className="space-y-2">
+                          {chartSeries
+                            .filter((s) => selectedMetricColumns.includes(s.column) && s.values.length >= 2)
+                            .map((series) => (
+                              <div key={series.column} className="flex items-center gap-3">
+                                <div className="w-32 shrink-0 truncate text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
+                                  {series.column}
+                                </div>
+                                <MiniTrendLine data={series.values} width={220} height={28} />
+                                <div className="ml-auto text-xs font-mono" style={{ color: 'var(--aurora-text-muted)' }}>
+                                  {series.last !== null ? fmtNumber(series.last) : '—'}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 border-b border-slate-100">
+                      <tr>
+                        {flatTable.columns.map((c) => (
                           <th
                             key={c}
                             className="px-4 py-2 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide"
                           >
                             {c}
                           </th>
-                        ));
-                      })()}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      const { columns, data } = flattenForCsv(primary.rows);
-                      return data.map((row, idx) => (
-                        <tr key={idx} className="border-b border-slate-50 hover:bg-slate-50">
-                          {row.map((cell, ci) => (
-                            <td key={ci} className="px-4 py-2 text-slate-700">
-                              {cell || '—'}
-                            </td>
-                          ))}
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredRowIndexes.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={flatTable.columns.length || 1}
+                            className="px-4 py-6 text-center text-slate-400"
+                          >
+                            No rows match “{rowSearch}”.
+                          </td>
                         </tr>
-                      ));
-                    })()}
-                  </tbody>
-                </table>
-              </div>
+                      ) : (
+                        filteredRowIndexes.map((ri) => (
+                          <tr key={ri} className="border-b border-slate-50 hover:bg-slate-50">
+                            {flatTable.data[ri].map((cell, ci) => (
+                              <td key={ci} className="px-4 py-2 text-slate-700">
+                                {cell || '—'}
+                              </td>
+                            ))}
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </Card>
           )}
 

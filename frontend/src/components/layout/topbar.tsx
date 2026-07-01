@@ -1,19 +1,61 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, LogOut, Menu } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ChevronDown, LogOut, Menu, Plus } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { GlobalSearchBox } from '@/components/aurora/command';
+import { AppIcon, type AppIconName } from '@/components/ui/icon-set';
 import { ThemeSelector } from '@/components/ui/theme-selector';
 
 interface TopbarProps {
   onMenuClick: () => void;
 }
 
+// Global Quick-Create targets. Routes mirror the EXTRA_ROUTE_COMMANDS-style
+// entries in the command palette so both surfaces stay consistent. Each is
+// permission-gated; items the user can't create are hidden.
+interface QuickCreateItem {
+  label: string;
+  href: string;
+  icon: AppIconName;
+  permission?: string;
+}
+
+const QUICK_CREATE_ITEMS: QuickCreateItem[] = [
+  { label: 'New Sale', href: '/westsides/quick-sale', icon: 'pos', permission: 'sales.create' },
+  {
+    label: 'New Sales Order',
+    href: '/operations/sales-orders?create=1',
+    icon: 'order',
+    permission: 'sales.create',
+  },
+  {
+    label: 'New Purchase Order',
+    href: '/operations/purchase-orders?create=1',
+    icon: 'purchase',
+    permission: 'purchases.create',
+  },
+  {
+    label: 'New Company',
+    href: '/companies/new',
+    icon: 'company',
+    permission: 'companies.create',
+  },
+  { label: 'Run Report', href: '/reports/run', icon: 'run', permission: 'report_runs.create' },
+];
+
 export function Topbar({ onMenuClick }: TopbarProps) {
-  const { user, logout, loading } = useAuth();
+  const { user, logout, loading, hasPermission } = useAuth();
+  const router = useRouter();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const createRef = useRef<HTMLDivElement>(null);
+
+  const quickCreateItems = QUICK_CREATE_ITEMS.filter(
+    (item) => !item.permission || hasPermission(item.permission),
+  );
 
   const initials = user?.fullName
     ? user.fullName
@@ -28,6 +70,9 @@ export function Topbar({ onMenuClick }: TopbarProps) {
     function handler(e: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setDropdownOpen(false);
+      }
+      if (createRef.current && !createRef.current.contains(e.target as Node)) {
+        setCreateOpen(false);
       }
     }
     document.addEventListener('mousedown', handler);
@@ -51,6 +96,66 @@ export function Topbar({ onMenuClick }: TopbarProps) {
 
       <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
         <GlobalSearchBox />
+
+        {/* Quick Create ("+ New") */}
+        {!loading && user && quickCreateItems.length > 0 && (
+          <div className="relative" ref={createRef}>
+            <button
+              onClick={() => setCreateOpen((v) => !v)}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors"
+              style={{
+                background: 'var(--aurora-primary)',
+                color: 'var(--aurora-primary-contrast, #fff)',
+              }}
+              aria-expanded={createOpen}
+              aria-haspopup="menu"
+              aria-label="Quick create"
+            >
+              <Plus aria-hidden className="h-4 w-4" />
+              <span className="hidden sm:block">New</span>
+              <ChevronDown aria-hidden className="hidden h-3.5 w-3.5 sm:block" />
+            </button>
+
+            {createOpen && (
+              <div
+                className="absolute right-0 top-full mt-1.5 w-56 rounded-xl border py-1.5 z-50 animate-fade-in"
+                style={{
+                  background: 'var(--aurora-card-elevated)',
+                  borderColor: 'var(--aurora-border)',
+                  boxShadow: 'var(--aurora-shadow)',
+                }}
+                role="menu"
+              >
+                <div
+                  className="px-3.5 pb-1.5 pt-1 text-[11px] font-semibold uppercase tracking-wide"
+                  style={{ color: 'var(--aurora-text-muted)' }}
+                >
+                  Create
+                </div>
+                {quickCreateItems.map((item) => (
+                  <button
+                    key={item.href}
+                    onClick={() => {
+                      setCreateOpen(false);
+                      router.push(item.href);
+                    }}
+                    className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-[13px] transition-colors hover:bg-[var(--aurora-bg-subtle)]"
+                    style={{ color: 'var(--aurora-text)' }}
+                    role="menuitem"
+                  >
+                    <span
+                      className="flex w-4 items-center justify-center"
+                      style={{ color: 'var(--aurora-text-muted)' }}
+                    >
+                      <AppIcon name={item.icon} size={15} />
+                    </span>
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <ThemeSelector className="hidden sm:flex" />
 

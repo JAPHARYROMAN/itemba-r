@@ -2,19 +2,25 @@
 
 *Design-engineering lead synthesis of four audits (foundation, component library, high-traffic screens, motion & feedback). All claims cite files in `C:\projects\Actual Projects\itemba-r\frontend\`. Presentational layer only — no API, data-flow, route, or backend changes.*
 
+> **Status update (verified against code, 2026-07-01).** Parts of this plan have shipped since it was written; several original claims are now stale. Corrected inline below (see ⚠️ annotations). Summary:
+> - **DONE — Toast is live.** `showToast` now has ~84 call sites across ~29 files (not "zero call sites"), and `ToastProvider` is mounted in `app/(dashboard)/layout.tsx:69`. Phase 2's "Toast (built, zero call sites)" and much of Phase 4's "Toast everywhere" are effectively delivered.
+> - **DONE — Phase 1 keyframes exist.** `fade-out`, `scale-out`, `scale-pop`, and `shake` are all defined in `tailwind.config.ts` (lines ~107–117). The "~90% of the motion system is dormant" figure and the "new keyframes to add" list in Phase 1 no longer describe current state.
+> - **DONE — POS "Sale Complete" celebration is shipped.** The flagship Phase-3 moment (`scale-pop` card + brass checkmark + receipt #/total + "Posted" badge + vibration buzz) exists in `components/westsides/mobile-pos/mobile-pos-sale-entry.tsx` (~lines 1923–1951). It is no longer a to-build item.
+> - **STILL OPEN.** Accent/elevation/status-contrast tokens and typography ramp (rest of Phase 1); the primitive upgrades (Phase 2 buttons, StatCard count-up, skeletons, icon set, modal exit animations); the hero-screen redesigns beyond POS (login, dashboard, sales-orders layout, westsides hub); count-up KPIs, stagger, route progress bar (rest of Phase 4); and the consistency sweep + dark mode (Phase 5).
+
 ---
 
 ## 1. Design vision
 
-**Direction: "Confident Trade Counter" — warm industrial precision.** Itemba-R should feel like the best-run hardware counter in Tanzania: fast hands, clear numbers, and a visible pulse of activity — never a casino. The evidence says the bones are excellent: a complete Aurora token system (`src/styles/globals.css` defines color, shadow, radius, and motion tokens including `--aurora-duration-fast/200ms/slow` and three easing curves) and a full keyframe library in `tailwind.config.ts` — but **~90% of the motion system is dormant** (only 5 of 10+ keyframes used across 35 of 200+ files), the Toast system has **zero call sites**, KPI numbers render flat, and success is silent everywhere (sales-orders modal closes mutely at `operations/sales-orders/page.tsx:598-603`; mobile POS says only "Receipt ready."). "Energetic" here means: numbers that count up, rows that cascade in, sales that *celebrate*, statuses you can read across the counter, and one warm amber accent (hardware-store brass against the existing trustworthy blue `#2563eb`) reserved for moments of pride. "Trustworthy" means: density preserved, motion under 350ms, everything respecting the `prefers-reduced-motion` guard already in `globals.css:191-199`, and zero animation in the POS critical path.
+**Direction: "Confident Trade Counter" — warm industrial precision.** Itemba-R should feel like the best-run hardware counter in Tanzania: fast hands, clear numbers, and a visible pulse of activity — never a casino. The evidence says the bones are excellent: a complete Aurora token system (`src/styles/globals.css` defines color, shadow, radius, and motion tokens including `--aurora-duration-fast/200ms/slow` and three easing curves) and a full keyframe library in `tailwind.config.ts` — but ~~**~90% of the motion system is dormant** (only 5 of 10+ keyframes used across 35 of 200+ files)~~ *(⚠️ stale: the Phase-1 keyframes have since been added to `tailwind.config.ts`; the exit/pop/shake set is now present — see Status update)*, ~~the Toast system has **zero call sites**~~ *(⚠️ stale: `showToast` now has ~84 call sites across ~29 files and `ToastProvider` is mounted in `app/(dashboard)/layout.tsx:69`)*, KPI numbers render flat, and success is silent everywhere (sales-orders modal closes mutely at `operations/sales-orders/page.tsx:598-603`; mobile POS says only "Receipt ready."). "Energetic" here means: numbers that count up, rows that cascade in, sales that *celebrate*, statuses you can read across the counter, and one warm amber accent (hardware-store brass against the existing trustworthy blue `#2563eb`) reserved for moments of pride. "Trustworthy" means: density preserved, motion under 350ms, everything respecting the `prefers-reduced-motion` guard already in `globals.css:191-199`, and zero animation in the POS critical path.
 
 ---
 
 ## 2. What's already good — keep and build on
 
 - **Aurora CSS variable system** (`globals.css`): complete light/dark token sets (`.dark` scope exists at line 91, including a dark-mode compatibility shim for raw Tailwind classes at lines 367+), shadows (`--aurora-shadow-sm/-/lg/command`), radius scale, motion tokens. *This is the foundation — we extend, never replace.*
-- **Motion infrastructure already written**: `tailwind.config.ts:92-136` keyframes (`fade-in`, `fade-up`, `slide-in-right/left`, `slide-up`, `scale-in`, `skeleton`, `pulse-subtle`, `spin-slow`) and the `prefers-reduced-motion` kill-switch. We deploy, not invent.
-- **Toast system fully built** (`components/aurora/feedback/Toast.tsx`, typed variants, auto-dismiss) — needs only call sites.
+- **Motion infrastructure already written**: `tailwind.config.ts` keyframes (`fade-in`, `fade-up`, `slide-in-right/left`, `slide-up`, `scale-in`, `skeleton`, `pulse-subtle`, `spin-slow`) and the `prefers-reduced-motion` kill-switch. We deploy, not invent. *(⚠️ update: the Phase-1 exit/pop/shake set — `fade-out`, `scale-out`, `scale-pop`, `shake` — has since been added too, lines ~107–117.)*
+- **Toast system fully built** (`components/aurora/feedback/Toast.tsx`, typed variants, auto-dismiss) — ~~needs only call sites~~ *(⚠️ update: now wired — ~84 `showToast` call sites across ~29 files; `ToastProvider` mounted in `app/(dashboard)/layout.tsx:69`)*.
 - **Semantic status mapping across 50+ states** (StatusBadge) — consistent finance/inventory/HR/compliance semantics; we raise contrast, not redo the taxonomy.
 - **Feature-complete DataTable** (sort, search, pagination, skeleton rows), solid form infrastructure (prefix/suffix, error/help text), Modal/overlay keyboard support, focus rings, unified scrollbars.
 - **Accessibility baseline & data density**: semantic HTML, labeled forms, color+text badges, responsive grids; mobile POS already phone-targeted (`max-w-md`).
@@ -30,7 +36,7 @@
 1. **Accent ramp**: add `--aurora-accent: #f59e0b`-family ("brass") tokens distinct from `--aurora-warning` — `--aurora-accent`, `--aurora-accent-subtle`, `--aurora-accent-text` in both `:root` and `.dark`. Reserved for celebration/pride moments only.
 2. **Elevation tiers**: add `--aurora-shadow-prominent` and `--aurora-glow-primary` / `--aurora-glow-success` (soft colored box-shadows) so cards can have prominence hierarchy — audit found *all* cards share `aurora-shadow-sm`.
 3. **Status contrast tokens**: darken `-text` pairs one step (e.g. emerald-700 → emerald-900 pattern flagged in the badge audit) at the token level so every consumer inherits the fix.
-4. **New keyframes** in `tailwind.config.ts`: `fade-out`, `scale-out` (modal exits — audit: no exit animations anywhere), `scale-pop` (success pop), `count-up` registration hook class, `stagger` utility (row cascade), `shake` (form error). All ≤350ms, all inside the existing reduced-motion guard.
+4. **New keyframes** in `tailwind.config.ts`: `fade-out`, `scale-out` (modal exits — audit: no exit animations anywhere), `scale-pop` (success pop), `count-up` registration hook class, `stagger` utility (row cascade), `shake` (form error). All ≤350ms, all inside the existing reduced-motion guard. *(⚠️ update: `fade-out`, `scale-out`, `scale-pop`, and `shake` already exist in `tailwind.config.ts` lines ~107–117 — this sub-item is largely DONE; only the `count-up` hook class and `stagger` utility remain.)*
 5. **Dark-mode groundwork**: verify token completeness of the `.dark` block (it exists and is substantial); add a `data-theme` toggle hook + localStorage persistence stub in `globals.css`/layout class only. No shipping yet — Phase 5.
 6. **Typography ramp**: define `--aurora-display` sizes for hero numerals (KPI cards) using existing Inter 700/800 weights already imported at `globals.css:1`.
 
@@ -47,7 +53,7 @@
 | **StatCard / MetricCard** (`aurora/dashboards/`) | Static number + label, one shadow tier | `tier` prop (default/prominent/critical → Phase 1 elevation tokens), optional sparkline + trend badge ("+12% vs yesterday"), `useCountUp` hook (rAF, 0.8s) |
 | **FormInput/Select/Textarea** (`aurora/forms/`) | Error = border color only | Animated focus transition, error icon + one-time shake, optional success checkmark fade-in |
 | **Skeleton primitives** (new, `aurora/feedback/`) | Bare `PageSpinner` (`ui/loading-state.tsx:13-27`), no label | `SkeletonCardGrid`, `SkeletonTable`, `SkeletonForm` using existing shimmer keyframe; `PageSpinner`/`LoadingState` gain `context` prop ("Loading journal entries…") |
-| **Toast** (`aurora/feedback/Toast.tsx`) | Built, **zero call sites** | Add `slide-in` entrance/exit polish; document the `showToast` pattern — mass wiring is Phase 4 |
+| **Toast** (`aurora/feedback/Toast.tsx`) | ~~Built, **zero call sites**~~ ⚠️ now wired: ~84 `showToast` sites / ~29 files, `ToastProvider` mounted | Add `slide-in` entrance/exit polish; document the `showToast` pattern — ~~mass wiring is Phase 4~~ (mass wiring largely DONE) |
 | **Modal/Drawer** (`aurora/overlays/`) | Entry-only `animate-scale-in` (Modal.tsx:33); snap-close; no backdrop fade | Backdrop fade-in, staggered entrance, `isClosing` exit animation (~150ms); new **ConfirmDialog** to retire `window.confirm` (mobile POS line 1256) |
 | **EmptyState** (`aurora/feedback/EmptyState.tsx`) | Static icon + generic copy | Fade-in entry, contextual copy + CTA slot ("No orders yet — start one") |
 | **MiniTrendLine / ProgressRing** (`aurora/charts/`) | Static SVG | Animated stroke draw-in, hover value tooltip |
@@ -79,7 +85,7 @@
 2. Replace `window.confirm` (line 1256) with branded ConfirmDialog.
 3. Error states: input bounce/red flash instead of silent text (lines 1026-1058).
 4. Receipt gets Westsides header flourish + "Asante!" line (lines 490-579).
-5. **Delight (the signature moment of the whole programme):** replace "Receipt ready." (lines 1335-1346) with a **Sale Complete card** — scale-up 0.9→1.0, brass checkmark, receipt #, total, then Print/Share/"Next sale" buttons.
+5. **Delight (the signature moment of the whole programme):** ~~replace "Receipt ready." (lines 1335-1346) with a **Sale Complete card** — scale-up 0.9→1.0, brass checkmark, receipt #, total, then Print/Share/"Next sale" buttons.~~ *(⚠️ SHIPPED: the **Sale Complete card** now exists in `mobile-pos-sale-entry.tsx` (~lines 1923–1951) — `animate-scale-pop`, brass/amber checkmark, receipt # + total, "Posted" badge, and a 50ms vibration buzz on land.)*
 
 **Westsides Hub** (`app/(dashboard)/westsides/page.tsx:423-500` — audit: "wall of 13 text buttons")
 1. "Today's Priority" hero card (e.g. "5 high-risk receivables") with tone color + link, gentle pulse.
@@ -90,7 +96,7 @@
 *(Finance dashboard gets its narrative headline — "Group cash position is healthy" tone-driven line at `finance/page.tsx:103-120` — folded in here as a sixth, small item.)*
 
 ### Phase 4 — Motion & feedback layer (roll the energy through everything)
-1. **Toast everywhere**: replace the ~60 silent `setError → red div` patterns (audit: `journal-entries/page.tsx:305-350`, `operations/page.tsx:130-144`, POS `:1026-1058`) with `showToast` calls. *Catch-block message routing only — fetch logic untouched.*
+1. **Toast everywhere**: replace the ~60 silent `setError → red div` patterns (audit: `journal-entries/page.tsx:305-350`, `operations/page.tsx:130-144`, POS `:1026-1058`) with `showToast` calls. *Catch-block message routing only — fetch logic untouched.* *(⚠️ largely DONE: `showToast` is now wired across ~29 files / ~84 sites; remaining work is sweeping the last un-migrated `setError`-only spots, not building the system.)*
 2. **Skeletons everywhere**: every `PageSpinner` becomes a contextual skeleton or labeled spinner.
 3. **Count-up KPIs** across all dashboards (operations, finance, HR, compliance, westsides).
 4. **Stagger** on dashboard card grids (50ms cascade) — *not* on large tables (see §7).

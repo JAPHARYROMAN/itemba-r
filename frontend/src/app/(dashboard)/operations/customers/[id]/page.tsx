@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Btn,
   Card,
+  ConfirmDialog,
   DateInput,
   PageHeader,
   SkeletonCardGrid,
@@ -13,7 +14,7 @@ import {
   showToast,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
-import { backendGet, backendPost } from '@/lib/api-client';
+import { backendGet, backendPatch, backendPost } from '@/lib/api-client';
 
 type Tab =
   | 'Overview'
@@ -222,6 +223,63 @@ function humanize(value: string) {
   return value.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+// Faithful copy of agingBucket() from finance/receivables/page.tsx so the
+// customer control center classifies debtor age with identical math.
+type AgingKey = 'Current' | '1-30 days' | '31-60 days' | '61-90 days' | '90+ days';
+
+function agingBucket(dueDate: string): AgingKey {
+  const days = Math.floor((Date.now() - new Date(dueDate).getTime()) / 86400000);
+  if (days <= 0) return 'Current';
+  if (days <= 30) return '1-30 days';
+  if (days <= 60) return '31-60 days';
+  if (days <= 90) return '61-90 days';
+  return '90+ days';
+}
+
+const AGING_ORDER: AgingKey[] = [
+  'Current',
+  '1-30 days',
+  '31-60 days',
+  '61-90 days',
+  '90+ days',
+];
+
+const AGING_TONE: Record<AgingKey, string> = {
+  Current: 'text-emerald-300',
+  '1-30 days': 'text-sky-300',
+  '31-60 days': 'text-amber-300',
+  '61-90 days': 'text-orange-300',
+  '90+ days': 'text-red-300',
+};
+
+interface AgingRow {
+  key: AgingKey;
+  amount: number;
+  count: number;
+}
+
+// Builds the current/1-30/31-60/61-90/90+ breakdown from the customer's
+// receivables. Receivables without a due date fall into "Current".
+function buildAging(receivables: Receivable[]): { rows: AgingRow[]; total: number } {
+  const totals: Record<AgingKey, AgingRow> = {
+    Current: { key: 'Current', amount: 0, count: 0 },
+    '1-30 days': { key: '1-30 days', amount: 0, count: 0 },
+    '31-60 days': { key: '31-60 days', amount: 0, count: 0 },
+    '61-90 days': { key: '61-90 days', amount: 0, count: 0 },
+    '90+ days': { key: '90+ days', amount: 0, count: 0 },
+  };
+  let total = 0;
+  for (const receivable of receivables) {
+    const outstanding = Number(receivable.outstandingAmount ?? 0);
+    if (!Number.isFinite(outstanding) || outstanding <= 0) continue;
+    const bucket = receivable.dueDate ? agingBucket(receivable.dueDate) : 'Current';
+    totals[bucket].amount += outstanding;
+    totals[bucket].count += 1;
+    total += outstanding;
+  }
+  return { rows: AGING_ORDER.map((key) => totals[key]), total };
+}
+
 function DetailItem({
   label,
   value,
@@ -269,9 +327,14 @@ export default function CustomerDetailPage() {
   const [statementStart, setStatementStart] = useState(isoDate(monthStart()));
   const [statementEnd, setStatementEnd] = useState(isoDate(new Date()));
   const [generating, setGenerating] = useState(false);
+  const [confirmBlock, setConfirmBlock] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
 
   const canView = hasPermission('customers.view');
   const canGenerateStatements = hasPermission('customer_statements.generate');
+  const canManageCustomers = hasPermission('customers.manage');
+  const canManageReceivables = hasPermission('receivables.manage');
+  const canManageSales = hasPermission('sales_orders.manage');
 
   const load = useCallback(async () => {
     if (!canView || !customerId) return;
@@ -318,12 +381,59 @@ export default function CustomerDetailPage() {
     }
   };
 
+  const toggleBlock = async () => {
+    if (!data) return;
+    const nextStatus = data.customer.status === 'BLOCKED' ? 'ACTIVE' : 'BLOCKED';
+    setUpdatingStatus(true);
+    try {
+      await backendPatch(`/customers/${data.customer.id}`, {
+        companyId: data.customer.companyId,
+        status: nextStatus,
+      });
+      showToast(
+        'success',
+        nextStatus === 'BLOCKED' ? 'Customer blocked' : 'Customer unblocked',
+        data.customer.name,
+      );
+      setConfirmBlock(false);
+      load();
+    } catch (err) {
+      showToast(
+        'error',
+        'Could not update customer status',
+        err instanceof Error ? err.message : 'Failed',
+      );
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
   const creditColor = useMemo(() => {
     const utilization = data?.summary.creditUtilizationPct ?? 0;
     if (utilization >= 90) return 'text-red-300';
     if (utilization >= 70) return 'text-amber-300';
     return 'text-emerald-300';
   }, [data?.summary.creditUtilizationPct]);
+
+  // Prefer the full open-receivables list (with due dates) for aging; fall back
+  // to recentReceivables if the control-center payload omits openReceivables.
+  //
+  // IMPORTANT: the backend control-center caps openReceivables at take:10
+  // (10 most-recent by issueDate), so the per-bucket breakdown only reflects the
+  // LISTED invoices — it is NOT the true aggregate. The headline "Total
+  // Outstanding" is therefore driven from summary.openReceivableBalance (an
+  // unbounded aggregate sum) instead of the bucket sum. A proper per-customer
+  // aging endpoint (unbounded, bucketed on the backend) is the correct fix and
+  // is tracked for Wave B.
+  const aging = useMemo(() => {
+    if (!data) return { rows: [] as AgingRow[], total: 0, listedCount: 0 };
+    const source =
+      data.openReceivables && data.openReceivables.length > 0
+        ? data.openReceivables
+        : data.recentReceivables;
+    const built = buildAging(source);
+    return { ...built, listedCount: source.length };
+  }, [data]);
 
   if (!canView) {
     return (
@@ -373,6 +483,63 @@ export default function CustomerDetailPage() {
           subtitle={`${customer.customerCode ?? 'No code'} - ${customer.company?.name ?? 'Company'} - ${customer.branch?.name ?? 'No branch'}`}
         />
         <div className="flex flex-wrap gap-2">
+          {canManageReceivables && (
+            <Btn
+              variant="success"
+              onClick={() =>
+                router.push(
+                  `/finance/receivables?customerId=${encodeURIComponent(customer.id)}&companyId=${encodeURIComponent(customer.companyId)}`,
+                )
+              }
+            >
+              Receive Payment
+            </Btn>
+          )}
+          {canManageSales && (
+            <Btn
+              variant="primary"
+              onClick={() =>
+                router.push(
+                  `/operations/sales-orders?customerId=${encodeURIComponent(customer.id)}&companyId=${encodeURIComponent(customer.companyId)}&create=1`,
+                )
+              }
+            >
+              Create Sale
+            </Btn>
+          )}
+          {canGenerateStatements && (
+            <Btn
+              variant="secondary"
+              onClick={() => {
+                setTab('Statements');
+                if (typeof window !== 'undefined') {
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+              }}
+            >
+              Send Statement
+            </Btn>
+          )}
+          {canManageCustomers && (
+            <>
+              <Btn
+                variant="secondary"
+                onClick={() =>
+                  router.push(
+                    `/operations/customers?customerId=${encodeURIComponent(customer.id)}&edit=credit`,
+                  )
+                }
+              >
+                Set Credit Limit
+              </Btn>
+              <Btn
+                variant={customer.status === 'BLOCKED' ? 'warning' : 'danger'}
+                onClick={() => setConfirmBlock(true)}
+              >
+                {customer.status === 'BLOCKED' ? 'Unblock Credit' : 'Block Credit'}
+              </Btn>
+            </>
+          )}
           <Btn variant="secondary" onClick={() => router.push('/operations/customers')}>
             Back to Customers
           </Btn>
@@ -388,12 +555,132 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
+      <ConfirmDialog
+        open={confirmBlock}
+        title={customer.status === 'BLOCKED' ? 'Unblock customer credit' : 'Block customer credit'}
+        message={
+          customer.status === 'BLOCKED'
+            ? `Restore ${customer.name} to ACTIVE status? New sales and credit can resume.`
+            : `Block ${customer.name}? This prevents new credit sales until the customer is unblocked.`
+        }
+        variant={customer.status === 'BLOCKED' ? 'warning' : 'danger'}
+        confirmLabel={customer.status === 'BLOCKED' ? 'Unblock' : 'Block'}
+        loading={updatingStatus}
+        onConfirm={toggleBlock}
+        onClose={() => setConfirmBlock(false)}
+      />
+
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         <StatCard label="Lifetime Sales" value={money(summary.lifetimeSalesTotal)} />
         <StatCard label="YTD Sales" value={money(summary.ytdSalesTotal)} />
         <StatCard label="Open AR" value={money(summary.openReceivableBalance)} />
         <StatCard label="Overdue AR" value={money(summary.overdueReceivableBalance)} />
       </div>
+
+      {(() => {
+        // Headline uses the TRUE aggregate (unbounded backend sum), not the
+        // capped bucket total, so exposure reconciles with the Open AR StatCard.
+        const totalOutstanding = summary.openReceivableBalance;
+        // The buckets only cover the listed (most-recent) invoices. If the true
+        // total exceeds the bucketed sum, older open invoices exist but were not
+        // returned by the control-center (take:10) — surface that gap.
+        const unaccounted = Math.max(0, totalOutstanding - aging.total);
+        const isPartial = unaccounted > 0.005;
+        const hasAnyOutstanding = totalOutstanding > 0 || aging.total > 0;
+        return (
+          <Card className="p-5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                  A/R Aging
+                </h3>
+                <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Outstanding receivables by days past due
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Total Outstanding
+                </p>
+                <p className="text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                  {money(totalOutstanding)}
+                </p>
+              </div>
+            </div>
+            {!hasAnyOutstanding ? (
+              <div className="mt-4">
+                <EmptyPanel text="No outstanding receivables to age for this customer." />
+              </div>
+            ) : (
+              <>
+            <div className="mt-4 flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-xs font-medium uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                Aging (latest {aging.listedCount}{' '}
+                {aging.listedCount === 1 ? 'invoice' : 'invoices'})
+              </p>
+              {isPartial && (
+                <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Breakdown covers the most-recent invoices only.
+                </p>
+              )}
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-5">
+              {aging.rows.map((row) => {
+                const pct = aging.total > 0 ? (row.amount / aging.total) * 100 : 0;
+                return (
+                  <div
+                    key={row.key}
+                    className="rounded-lg border p-4"
+                    style={{ borderColor: 'var(--aurora-border)' }}
+                  >
+                    <p
+                      className="text-xs uppercase"
+                      style={{ color: 'var(--aurora-text-muted)' }}
+                    >
+                      {row.key}
+                    </p>
+                    <p className={`mt-1 text-lg font-semibold ${AGING_TONE[row.key]}`}>
+                      {money(row.amount)}
+                    </p>
+                    <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                      {row.count} {row.count === 1 ? 'invoice' : 'invoices'} · {pct.toFixed(0)}%
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+            <div
+              className="mt-4 flex h-2 w-full overflow-hidden rounded-full"
+              style={{ background: 'var(--aurora-border)' }}
+              role="img"
+              aria-label="A/R aging distribution"
+            >
+              {aging.rows.map((row) => {
+                const pct = aging.total > 0 ? (row.amount / aging.total) * 100 : 0;
+                if (pct <= 0) return null;
+                return (
+                  <div
+                    key={row.key}
+                    className={AGING_TONE[row.key]}
+                    style={{ width: `${pct}%`, background: 'currentColor' }}
+                    title={`${row.key}: ${money(row.amount)}`}
+                  />
+                );
+              })}
+            </div>
+            {isPartial && (
+              <p className="mt-3 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                Buckets total {money(aging.total)} across the listed invoices ·{' '}
+                <span className="font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+                  + {money(unaccounted)} in older invoices not shown
+                </span>
+              </p>
+            )}
+          </>
+        )}
+      </Card>
+        );
+      })()}
 
       <Card className="overflow-hidden">
         <div

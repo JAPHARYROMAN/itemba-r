@@ -5,6 +5,10 @@ import { useAuth } from '@/hooks/use-auth';
 import { backendGet } from '@/lib/api-client';
 import { NAV, isGroup, type NavItem, type NavLeaf } from '@/components/layout/sidebar';
 import { AppIcon, type AppIconName } from '@/components/ui/icon-set';
+import {
+  usePersonalization,
+  type PersonalizationEntry,
+} from '@/hooks/use-personalization';
 
 interface CommandItem {
   id: string;
@@ -21,6 +25,8 @@ interface CommandItem {
   badge?: string;
   date?: string;
   keywords?: string[];
+  /** Sidebar icon key, carried so favoriting keeps a consistent icon everywhere. */
+  iconKey?: string;
 }
 
 interface GlobalSearchApiResult {
@@ -406,6 +412,7 @@ function navLeafToCommand(
     href: leaf.href,
     group: parentLabel ?? 'Navigation',
     icon: iconForNavKey(leaf.iconKey),
+    iconKey: String(leaf.iconKey),
     permission: leaf.permission ?? parentPermission,
     source: 'navigation',
     keywords: [leaf.href, leaf.label, parentLabel, iconLabel].filter(Boolean) as string[],
@@ -468,6 +475,12 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const { user, hasPermission } = useAuth();
+  const {
+    favorites,
+    recent,
+    isFavorite,
+    toggleFavorite,
+  } = usePersonalization();
 
   const allCommands = useMemo(
     () => [...DEFAULT_COMMANDS, ...additionalCommands],
@@ -493,8 +506,56 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
     [allCommands, canSeeCommand],
   );
 
+  const isEmptyQuery = !query.trim();
+
+  // Resolve a stored personalization entry (href only) into the full command —
+  // preferring the canonical visible command so icon/permission stay consistent;
+  // falling back to a synthesized item if the route isn't in the command set.
+  const commandByHref = useMemo(() => {
+    const map = new Map<string, CommandItem>();
+    for (const c of visibleCommands) {
+      if (c.href && !map.has(c.href)) map.set(c.href, c);
+    }
+    return map;
+  }, [visibleCommands]);
+
+  const resolveEntry = useCallback(
+    (entry: PersonalizationEntry, groupOverride: string): CommandItem | null => {
+      const existing = commandByHref.get(entry.href);
+      if (existing) {
+        // Gate stored entries by current permissions via the visible command set.
+        return { ...existing, group: groupOverride };
+      }
+      // Route not in the command catalog (or not permitted) — skip it.
+      return null;
+    },
+    [commandByHref],
+  );
+
+  // When the query is empty, show "Recently viewed" + "Favorites" instead of the
+  // full nav dump. Otherwise, fuzzy-match across every visible command.
   const filteredCommands = useMemo(() => {
-    if (!query.trim()) return visibleCommands;
+    if (isEmptyQuery) {
+      const items: CommandItem[] = [];
+      const seen = new Set<string>();
+      for (const fav of favorites) {
+        const cmd = resolveEntry(fav, 'Favorites');
+        if (cmd && !seen.has(cmd.id)) {
+          items.push(cmd);
+          seen.add(cmd.id);
+        }
+      }
+      for (const r of recent) {
+        // Don't repeat a favorite inside recents.
+        if (isFavorite(r.href)) continue;
+        const cmd = resolveEntry(r, 'Recently viewed');
+        if (cmd && !seen.has(cmd.id)) {
+          items.push(cmd);
+          seen.add(cmd.id);
+        }
+      }
+      return items;
+    }
     const q = query.toLowerCase();
     return visibleCommands.filter(
       (c) =>
@@ -504,7 +565,7 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
         c.href?.toLowerCase().includes(q) ||
         c.keywords?.some((keyword) => keyword.toLowerCase().includes(q)),
     );
-  }, [query, visibleCommands]);
+  }, [isEmptyQuery, query, visibleCommands, favorites, recent, isFavorite, resolveEntry]);
 
   const remoteItems = useMemo<CommandItem[]>(() => {
     return remoteGroups.flatMap((group) =>
@@ -548,6 +609,19 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
       onClose();
     },
     [onClose, router],
+  );
+
+  const handleToggleFavorite = useCallback(
+    (item: CommandItem) => {
+      if (!item.href) return;
+      toggleFavorite({
+        href: item.href,
+        label: item.label,
+        group: item.group,
+        iconKey: item.iconKey,
+      });
+    },
+    [toggleFavorite],
   );
 
   useEffect(() => {
@@ -695,7 +769,11 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
               className="px-4 py-8 text-sm text-center"
               style={{ color: 'var(--aurora-text-muted)' }}
             >
-              {remoteLoading ? 'Searching records...' : 'No results found'}
+              {remoteLoading
+                ? 'Searching records...'
+                : isEmptyQuery
+                  ? 'Star pages to pin them here, or start typing to search.'
+                  : 'No results found'}
             </p>
           ) : (
             Object.entries(grouped).map(([group, items]) => {
@@ -710,60 +788,99 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
                   {items.map((item) => {
                     const itemIndex = flatItems.indexOf(item);
                     const isSelected = itemIndex === selected;
+                    // Star toggle only applies to routes (navigation targets), not
+                    // dynamic record search results.
+                    const canFavorite = Boolean(item.href) && item.source !== 'record';
+                    const starred = item.href ? isFavorite(item.href) : false;
                     return (
-                      <button
+                      <div
                         key={item.id}
-                        onClick={() => executeCommand(item)}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors"
+                        className="group/cmd flex items-center transition-colors"
                         style={{
                           background: isSelected ? 'var(--aurora-primary-subtle)' : 'transparent',
-                          color: 'var(--aurora-text)',
                         }}
                       >
-                        {item.icon && (
-                          <span
-                            className="w-5 flex items-center justify-center flex-shrink-0"
-                            style={{ color: 'var(--aurora-text-muted)' }}
-                          >
-                            {item.icon}
-                          </span>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{item.label}</p>
-                          {item.description && (
-                            <p
-                              className="text-xs truncate"
+                        <button
+                          onClick={() => executeCommand(item)}
+                          className="flex flex-1 min-w-0 items-center gap-3 px-4 py-2.5 text-left"
+                          style={{ color: 'var(--aurora-text)' }}
+                        >
+                          {item.icon && (
+                            <span
+                              className="w-5 flex items-center justify-center flex-shrink-0"
                               style={{ color: 'var(--aurora-text-muted)' }}
                             >
-                              {item.description}
-                            </p>
+                              {item.icon}
+                            </span>
                           )}
-                        </div>
-                        {item.badge && (
-                          <span
-                            className="max-w-28 truncate rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase"
-                            style={{
-                              background: 'var(--aurora-bg-muted)',
-                              color: 'var(--aurora-text-muted)',
-                              border: '1px solid var(--aurora-border)',
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{item.label}</p>
+                            {item.description && (
+                              <p
+                                className="text-xs truncate"
+                                style={{ color: 'var(--aurora-text-muted)' }}
+                              >
+                                {item.description}
+                              </p>
+                            )}
+                          </div>
+                          {item.badge && (
+                            <span
+                              className="max-w-28 truncate rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase"
+                              style={{
+                                background: 'var(--aurora-bg-muted)',
+                                color: 'var(--aurora-text-muted)',
+                                border: '1px solid var(--aurora-border)',
+                              }}
+                            >
+                              {item.badge}
+                            </span>
+                          )}
+                          {item.shortcut && (
+                            <kbd
+                              className="text-xs px-1.5 py-0.5 rounded flex-shrink-0"
+                              style={{
+                                background: 'var(--aurora-bg-muted)',
+                                color: 'var(--aurora-text-muted)',
+                                border: '1px solid var(--aurora-border)',
+                              }}
+                            >
+                              {item.shortcut}
+                            </kbd>
+                          )}
+                        </button>
+                        {canFavorite && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleToggleFavorite(item);
                             }}
+                            aria-pressed={starred}
+                            aria-label={starred ? `Unpin ${item.label}` : `Pin ${item.label}`}
+                            title={starred ? 'Remove from favorites' : 'Add to favorites'}
+                            className={`mr-3 flex-shrink-0 rounded p-1.5 transition-opacity ${
+                              starred
+                                ? 'opacity-100'
+                                : 'opacity-0 group-hover/cmd:opacity-70 hover:!opacity-100 focus:opacity-100'
+                            }`}
+                            style={{ color: starred ? '#facc15' : 'var(--aurora-text-muted)' }}
                           >
-                            {item.badge}
-                          </span>
+                            <svg
+                              className="w-4 h-4"
+                              viewBox="0 0 24 24"
+                              fill={starred ? 'currentColor' : 'none'}
+                              stroke="currentColor"
+                              strokeWidth={1.75}
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01z" />
+                            </svg>
+                          </button>
                         )}
-                        {item.shortcut && (
-                          <kbd
-                            className="text-xs px-1.5 py-0.5 rounded flex-shrink-0"
-                            style={{
-                              background: 'var(--aurora-bg-muted)',
-                              color: 'var(--aurora-text-muted)',
-                              border: '1px solid var(--aurora-border)',
-                            }}
-                          >
-                            {item.shortcut}
-                          </kbd>
-                        )}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -787,6 +904,7 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
         >
           <span>↑↓ navigate</span>
           <span>↵ select</span>
+          <span>★ favorite</span>
           <span>esc close</span>
         </div>
       </div>

@@ -12,6 +12,11 @@ import { ToastProvider } from '@/components/aurora/feedback';
 import { CsrfFetchProvider } from '@/components/security/CsrfFetchProvider';
 import { PageSpinner } from '@/components/ui';
 import { RouteProgress } from '@/components/layout/route-progress';
+import { BreadcrumbTrail } from '@/components/aurora/navigation/BreadcrumbTrail';
+
+// Routes where a breadcrumb trail is redundant (top-level landing pages that
+// would only render "Home / Dashboard").
+const BREADCRUMB_HIDDEN_PATHS = new Set(['/', '/dashboard']);
 
 const PUBLIC_DASHBOARD_PATHS = new Set(['/westsides/mobile-pos/install']);
 
@@ -50,6 +55,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const mobilePosStandalone =
     pathname?.startsWith('/westsides/mobile-pos') || pathname?.startsWith('/operations/mobile-pos');
+  const showBreadcrumbs = !BREADCRUMB_HIDDEN_PATHS.has(pathname ?? '');
 
   useEffect(() => {
     initTheme();
@@ -75,6 +81,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <div className="flex-1 flex flex-col min-w-0 lg:ml-0">
                   <Topbar onMenuClick={() => setSidebarOpen(true)} />
                   <main className="flex-1 overflow-auto" style={{ background: 'var(--aurora-bg)' }}>
+                    {showBreadcrumbs && (
+                      <div className="px-4 pt-4 sm:px-6 lg:px-8">
+                        <BreadcrumbTrail />
+                      </div>
+                    )}
                     {children}
                   </main>
                 </div>

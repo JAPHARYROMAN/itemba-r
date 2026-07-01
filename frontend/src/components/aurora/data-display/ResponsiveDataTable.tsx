@@ -1,6 +1,7 @@
 'use client';
 import React, { useState } from 'react';
 import { DataTable, Column as BaseColumn } from './DataTable';
+import { ErrorState } from '../feedback/ErrorState';
 
 /**
  * ResponsiveDataTable — drop-in wrapper over Aurora's DataTable that adds:
@@ -60,6 +61,23 @@ interface ResponsiveDataTableProps<T> {
   compact?: boolean;
   className?: string;
   /**
+   * When set (truthy), render an ErrorState with an optional retry button
+   * instead of the rows (both in table and card layouts).
+   */
+  error?: boolean | string | Error | null;
+  /** Retry handler shown as a button inside the error state. */
+  onRetry?: () => void;
+  /** Optional title for the error state. */
+  errorTitle?: string;
+  /** Show an "Export CSV" button in the toolbar. */
+  exportable?: boolean;
+  /** Custom export handler receiving the displayed rows. */
+  onExport?: (rows: T[]) => void;
+  /** Base filename (no extension) for the auto CSV export. */
+  exportFileName?: string;
+  /** Make the header stick to the top on scroll (default true). */
+  stickyHeader?: boolean;
+  /**
    * - `'auto'` (default): card layout on viewports < 640px, table otherwise.
    * - `'never'`: always render as a table (use the underlying DataTable directly if
    *   you need this — the wrapper exists primarily for the auto behavior).
@@ -89,6 +107,9 @@ export function ResponsiveDataTable<T extends Record<string, unknown>>(
         keyField={keyField}
         onRowClick={onRowClick}
         loading={rest.loading}
+        error={rest.error}
+        onRetry={rest.onRetry}
+        errorTitle={rest.errorTitle}
         emptyTitle={rest.emptyTitle ?? 'No records found'}
         emptyDescription={rest.emptyDescription ?? 'There are no records to display.'}
       />
@@ -132,6 +153,9 @@ function CardList<T extends Record<string, unknown>>({
   keyField,
   onRowClick,
   loading,
+  error,
+  onRetry,
+  errorTitle,
   emptyTitle,
   emptyDescription,
 }: {
@@ -140,9 +164,29 @@ function CardList<T extends Record<string, unknown>>({
   keyField: string;
   onRowClick?: (row: T) => void;
   loading?: boolean;
+  error?: boolean | string | Error | null;
+  onRetry?: () => void;
+  errorTitle?: string;
   emptyTitle: string;
   emptyDescription: string;
 }) {
+  if (error) {
+    const description = typeof error === 'string'
+      ? error
+      : error instanceof Error
+        ? error.message
+        : undefined;
+    return (
+      <div
+        className="rounded-lg border"
+        style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-card)' }}
+        role="status"
+      >
+        <ErrorState title={errorTitle} description={description} onRetry={onRetry} />
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="space-y-3" role="list">

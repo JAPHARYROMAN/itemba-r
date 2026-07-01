@@ -1,5 +1,7 @@
 'use client';
 import React, { useState, useMemo } from 'react';
+import { ErrorState } from '../feedback/ErrorState';
+import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
 
 export interface Column<T> {
   key: string;
@@ -9,6 +11,8 @@ export interface Column<T> {
   width?: string;
   align?: 'left' | 'center' | 'right';
   className?: string;
+  /** Exclude this column when generating CSV exports (e.g. action buttons). */
+  exportExclude?: boolean;
 }
 
 interface DataTableProps<T> {
@@ -34,6 +38,32 @@ interface DataTableProps<T> {
   onRowClick?: (row: T) => void;
   compact?: boolean;
   className?: string;
+  /**
+   * When set (truthy), the table body is replaced with an ErrorState instead of
+   * rendering rows. Accepts a boolean, a string (used as the description), or an
+   * Error. Toolbar and pagination still render so the user can retry/adjust.
+   */
+  error?: boolean | string | Error | null;
+  /** Retry handler shown as a button inside the error state. */
+  onRetry?: () => void;
+  /** Optional title for the error state (defaults to the ErrorState default). */
+  errorTitle?: string;
+  /**
+   * When true, render an "Export CSV" button in the toolbar. By default it
+   * exports the current (filtered/sorted) rows using each column's `key` as the
+   * CSV header. Provide `onExport` to fully override the export behavior.
+   */
+  exportable?: boolean;
+  /**
+   * Custom export handler. Receives the rows currently displayed (after local
+   * search/sort). When omitted and `exportable` is true, a CSV of those rows is
+   * downloaded automatically.
+   */
+  onExport?: (rows: T[]) => void;
+  /** Base filename (no extension) for the auto CSV export. */
+  exportFileName?: string;
+  /** Make the header stick to the top of the scroll container (default false; opt-in). */
+  stickyHeader?: boolean;
 }
 
 function SkeletonRow({ cols }: { cols: number }) {
@@ -65,6 +95,13 @@ export function DataTable<T extends Record<string, unknown>>({
   onRowClick,
   compact = false,
   className = '',
+  error = null,
+  onRetry,
+  errorTitle,
+  exportable = false,
+  onExport,
+  exportFileName = 'export',
+  stickyHeader = false,
 }: DataTableProps<T>) {
   const [localSearch, setLocalSearch] = useState('');
   const [sortKey, setSortKey] = useState<string | null>(null);
@@ -107,15 +144,47 @@ export function DataTable<T extends Record<string, unknown>>({
     );
   }, [sortedData, query, onSearch]);
 
+  const hasError = Boolean(error);
+  const errorDescription = typeof error === 'string'
+    ? error
+    : error instanceof Error
+      ? error.message
+      : undefined;
+
+  function handleExport() {
+    if (onExport) {
+      onExport(filteredData);
+      return;
+    }
+    const exportColumns = columns.filter(c => !c.exportExclude);
+    const rows: Record<string, unknown>[] = filteredData.map(row => {
+      const rec: Record<string, unknown> = {};
+      for (const col of exportColumns) {
+        const value = row[col.key];
+        rec[col.header] = value === undefined ? '' : value;
+      }
+      return rec;
+    });
+    const headers = exportColumns.map(c => c.header);
+    const csv = rowsToCsv(rows, headers);
+    if (csv) {
+      const stamp = new Date().toISOString().slice(0, 10);
+      downloadTextFile(`${exportFileName}-${stamp}.csv`, 'text/csv;charset=utf-8', csv);
+    }
+  }
+
   const rowPad = compact ? 'px-4 py-2.5' : 'px-4 py-3.5';
   const thPad = compact ? 'px-4 py-2' : 'px-4 py-3';
+  const stickyThStyle: React.CSSProperties = stickyHeader
+    ? { position: 'sticky', top: 0, zIndex: 1, background: 'var(--aurora-bg-subtle)' }
+    : {};
 
   return (
     <div className={`rounded-aurora border overflow-hidden ${className}`}
       style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)', boxShadow: 'var(--aurora-shadow-sm)' }}>
 
       {/* Toolbar */}
-      {(searchable || actions || filters) && (
+      {(searchable || actions || filters || exportable) && (
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-3 border-b"
           style={{ borderColor: 'var(--aurora-border)' }}>
           <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -137,7 +206,27 @@ export function DataTable<T extends Record<string, unknown>>({
             )}
             {filters}
           </div>
-          {actions && <div className="flex items-center gap-2 flex-shrink-0">{actions}</div>}
+          {(actions || exportable) && (
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {actions}
+              {exportable && (
+                <button
+                  type="button"
+                  onClick={handleExport}
+                  disabled={hasError || loading || filteredData.length === 0}
+                  className="flex items-center gap-1.5 text-sm font-medium px-3 rounded-lg transition-colors disabled:opacity-40"
+                  style={{ height: '36px', border: '1px solid var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text-secondary)' }}
+                  aria-label="Export to CSV"
+                  title="Export to CSV"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                  </svg>
+                  Export
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -147,7 +236,7 @@ export function DataTable<T extends Record<string, unknown>>({
           <thead>
             <tr style={{ background: 'var(--aurora-bg-subtle)' }}>
               {columns.map(col => (
-                <th key={col.key} className={`${thPad} text-left`} style={{ width: col.width }}>
+                <th key={col.key} className={`${thPad} text-left`} style={{ width: col.width, ...stickyThStyle }}>
                   {col.sortable ? (
                     <button
                       onClick={() => toggleSort(col.key)}
@@ -169,7 +258,13 @@ export function DataTable<T extends Record<string, unknown>>({
             </tr>
           </thead>
           <tbody>
-            {loading ? (
+            {hasError ? (
+              <tr>
+                <td colSpan={columns.length} className="p-0">
+                  <ErrorState title={errorTitle} description={errorDescription} onRetry={onRetry} />
+                </td>
+              </tr>
+            ) : loading ? (
               Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={columns.length} />)
             ) : filteredData.length === 0 ? (
               <tr>

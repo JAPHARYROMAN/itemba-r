@@ -10,10 +10,6 @@ export { Sparkline } from './sparkline';
 export { AppIcon } from './icon-set';
 export type { AppIconName } from './icon-set';
 
-// Data
-export { DataTable } from './data-table';
-export type { Column } from './data-table';
-
 // State
 export { EmptyState } from './empty-state';
 export { LoadingState, PageSpinner } from './loading-state';

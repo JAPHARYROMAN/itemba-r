@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { useAuth } from '@/hooks/use-auth';
+import { usePersonalization } from '@/hooks/use-personalization';
 
 // ─── SVG Icon Components ──────────────────────────────────────────────────────
 function Icon({ d, className = '' }: { d: string; className?: string }) {
@@ -43,6 +44,8 @@ const ICONS = {
     'M12 15a3 3 0 100-6 3 3 0 000 6zm0 0v3m0-3a3 3 0 000-6m0 0V6M6.34 17.66l-2.12 2.12M5.07 5.07 2.95 2.95m16.97 14.14 2.12 2.12M18.93 5.07l2.12-2.12',
   chevronDown: 'M6 9l6 6 6-6',
   chevronRight: 'M9 18l6-6-6-6',
+  star: 'M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01z',
+  starFilled: 'M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01z',
   scale:
     'M12 3v1m0 16v1M5.636 5.636l.707.707m11.314 11.314.707.707M3 12h1m16 0h1M5.636 18.364l.707-.707m11.314-11.314.707-.707M12 7a5 5 0 100 10 5 5 0 000-10z',
   // M11 icons
@@ -701,7 +704,26 @@ export const NAV: NavItem[] = [
       },
     ],
   },
-  { href: '/reports', label: 'Reports', iconKey: 'barChart', permission: undefined },
+  {
+    label: 'Reports',
+    iconKey: 'barChart',
+    children: [
+      { href: '/reports', label: 'Catalog', iconKey: 'barChart' },
+      { href: '/reports/run', label: 'Run Report', iconKey: 'play', permission: 'report_runs.create' },
+      {
+        href: '/reports/saved-views',
+        label: 'Saved Views',
+        iconKey: 'bookmark',
+        permission: 'saved_report_views.view',
+      },
+      {
+        href: '/reports/scheduled',
+        label: 'Scheduled Reports',
+        iconKey: 'clock',
+        permission: 'scheduled_reports.view',
+      },
+    ],
+  },
   { href: '/settings', label: 'Settings', iconKey: 'settings', permission: undefined },
   // === Approvals & Controls (M11) ===
   {
@@ -1026,6 +1048,7 @@ interface SidebarProps {
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { hasPermission, loading } = useAuth();
+  const { favorites, hydrated: personalizationReady, removeFavorite } = usePersonalization();
 
   // Auto-expand group if a child is active
   function groupHasActive(group: NavGroup) {
@@ -1050,6 +1073,23 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     if (!permission) return true;
     return hasPermission(permission);
   }
+
+  // Permission gate for favorites: look up the route's declared permission from
+  // the canonical NAV tree so a starred item the user can no longer access is
+  // hidden (and, if it's stale, offer the star to unpin it).
+  function permissionForHref(href: string): string | undefined {
+    for (const item of NAV) {
+      if (isGroup(item)) {
+        const child = item.children.find((c) => c.href === href);
+        if (child) return child.permission ?? item.permission;
+      } else if (item.href === href) {
+        return item.permission;
+      }
+    }
+    return undefined;
+  }
+
+  const visibleFavorites = favorites.filter((f) => canSee(permissionForHref(f.href)));
 
   return (
     <>
@@ -1080,6 +1120,64 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
+          {/* Favorites (pinned routes) */}
+          {personalizationReady && !loading && visibleFavorites.length > 0 && (
+            <div className="mb-2 pb-2 border-b border-sidebar-border">
+              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-sidebar-text/70">
+                Favorites
+              </p>
+              {visibleFavorites.map((fav) => {
+                const active = isActive(fav.href, pathname);
+                const iconKey = (fav.iconKey && fav.iconKey in ICONS
+                  ? (fav.iconKey as keyof typeof ICONS)
+                  : 'star') as keyof typeof ICONS;
+                return (
+                  <div key={fav.href} className="group relative">
+                    <Link
+                      href={fav.href}
+                      onClick={onClose}
+                      className={`
+                        flex items-center gap-2.5 px-3 py-2 pr-8 rounded-md text-[13px] font-medium transition-colors
+                        ${
+                          active
+                            ? 'bg-sidebar-active text-white border-l-2 border-brand-500 pl-[10px]'
+                            : 'text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-textHigh'
+                        }
+                      `}
+                    >
+                      <Icon d={ICONS[iconKey]} />
+                      <span className="truncate">{fav.label}</span>
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        removeFavorite(fav.href);
+                      }}
+                      aria-label={`Unpin ${fav.label}`}
+                      title="Unpin"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded text-yellow-400 opacity-70 hover:opacity-100 hover:bg-sidebar-hover transition-opacity"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        stroke="currentColor"
+                        strokeWidth={1.5}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="w-3.5 h-3.5"
+                      >
+                        <path d={ICONS.starFilled} />
+                      </svg>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {loading ? (
             <div className="px-3 py-2 text-xs text-sidebar-text animate-pulse">Loading…</div>
           ) : (

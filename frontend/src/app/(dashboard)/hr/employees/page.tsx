@@ -4,18 +4,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Btn,
-  Card,
   FormInput,
   FormSelect,
   Modal,
   PageHeader,
-  PageSpinner,
   PageToolbar,
   StatusBadge,
 } from '@/components/ui';
-
-const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
-const tdCls = 'px-4 py-2 text-sm';
+import { ResponsiveDataTable } from '@/components/aurora';
+import type { ResponsiveColumn } from '@/components/aurora';
 
 interface Company {
   id: string;
@@ -41,7 +38,7 @@ interface Position {
   departmentId?: string;
 }
 
-interface EmployeeRow {
+interface EmployeeRow extends Record<string, unknown> {
   id: string;
   employeeCode: string;
   firstName: string;
@@ -171,16 +168,25 @@ export default function EmployeesPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     const params = new URLSearchParams();
     if (search) params.set('search', search);
     if (filterStatus) params.set('employmentStatus', filterStatus);
     if (filterCompanyId) params.set('companyId', filterCompanyId);
-    const r = await fetch(`/api/backend/hr/employees?${params}`);
-    const j = await r.json();
-    setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
-    setLoading(false);
+    try {
+      const r = await fetch(`/api/backend/hr/employees?${params}`);
+      const j = await r.json();
+      setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
+    } catch {
+      setLoadError('Failed to load employees');
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
   }, [filterCompanyId, filterStatus, search]);
 
   // Initial lookup load
@@ -341,6 +347,60 @@ export default function EmployeesPage() {
 
   const fullName = (e: EmployeeRow) => e.fullName ?? `${e.firstName} ${e.lastName}`;
 
+  const columns: ResponsiveColumn<EmployeeRow>[] = [
+    {
+      key: 'employeeCode',
+      header: 'Code',
+      priority: 1,
+      accessor: (emp) => <span className="font-mono">{emp.employeeCode}</span>,
+    },
+    {
+      key: 'fullName',
+      header: 'Full Name',
+      priority: 1,
+      accessor: (emp) => <span className="font-medium text-indigo-600">{fullName(emp)}</span>,
+    },
+    {
+      key: 'company',
+      header: 'Company',
+      priority: 2,
+      accessor: (emp) =>
+        typeof emp.company === 'object' ? (emp.company?.name ?? '—') : (emp.company ?? '—'),
+    },
+    {
+      key: 'department',
+      header: 'Department',
+      priority: 2,
+      accessor: (emp) =>
+        typeof emp.department === 'object' ? (emp.department?.name ?? '—') : (emp.department ?? '—'),
+    },
+    {
+      key: 'position',
+      header: 'Position',
+      priority: 3,
+      accessor: (emp) =>
+        typeof emp.position === 'object' ? (emp.position?.title ?? '—') : (emp.position ?? '—'),
+    },
+    {
+      key: 'employmentType',
+      header: 'Type',
+      priority: 3,
+      accessor: (emp) => emp.employmentType ?? '—',
+    },
+    {
+      key: 'payrollRegion',
+      header: 'Region',
+      priority: 3,
+      accessor: (emp) => emp.payrollRegion ?? '—',
+    },
+    {
+      key: 'employmentStatus',
+      header: 'Status',
+      priority: 1,
+      accessor: (emp) => <StatusBadge status={emp.employmentStatus ?? emp.status ?? '—'} />,
+    },
+  ];
+
   return (
     <div className="p-6">
       <PageHeader title="Employees" subtitle="All employee profiles across the group" />
@@ -402,68 +462,18 @@ export default function EmployeesPage() {
         }
       />
 
-      <Card className="overflow-hidden">
-        {loading ? (
-          <PageSpinner />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead
-                style={{ color: 'var(--aurora-text-muted)' }}
-                className="bg-slate-50 border-b border-slate-100"
-              >
-                <tr>
-                  <th className={thCls}>Code</th>
-                  <th className={thCls}>Full Name</th>
-                  <th className={thCls}>Company</th>
-                  <th className={thCls}>Department</th>
-                  <th className={thCls}>Position</th>
-                  <th className={thCls}>Type</th>
-                  <th className={thCls}>Region</th>
-                  <th className={thCls}>Status</th>
-                </tr>
-              </thead>
-              <tbody style={{ color: 'var(--aurora-text)' }}>
-                {rows.map((emp) => (
-                  <tr
-                    key={emp.id}
-                    onClick={() => router.push(`/hr/employees/${emp.id}`)}
-                    className="border-b border-slate-50 hover:bg-indigo-50 cursor-pointer"
-                  >
-                    <td className={`${tdCls} font-mono`}>{emp.employeeCode}</td>
-                    <td className={`${tdCls} font-medium text-indigo-600`}>{fullName(emp)}</td>
-                    <td className={tdCls}>
-                      {typeof emp.company === 'object' ? emp.company?.name : (emp.company ?? '—')}
-                    </td>
-                    <td className={tdCls}>
-                      {typeof emp.department === 'object'
-                        ? emp.department?.name
-                        : (emp.department ?? '—')}
-                    </td>
-                    <td className={tdCls}>
-                      {typeof emp.position === 'object'
-                        ? emp.position?.title
-                        : (emp.position ?? '—')}
-                    </td>
-                    <td className={tdCls}>{emp.employmentType ?? '—'}</td>
-                    <td className={tdCls}>{emp.payrollRegion ?? '—'}</td>
-                    <td className={tdCls}>
-                      <StatusBadge status={emp.employmentStatus ?? emp.status ?? '—'} />
-                    </td>
-                  </tr>
-                ))}
-                {rows.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="text-center py-8 text-slate-400 text-sm">
-                      No employees found
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+      <ResponsiveDataTable<EmployeeRow>
+        columns={columns}
+        data={rows}
+        keyField="id"
+        loading={loading}
+        error={loadError}
+        onRetry={load}
+        errorTitle="Couldn't load employees"
+        onRowClick={(emp) => router.push(`/hr/employees/${emp.id}`)}
+        emptyTitle="No employees found"
+        emptyDescription="No employees match the current filters."
+      />
 
       <Modal
         open={showCreate}
