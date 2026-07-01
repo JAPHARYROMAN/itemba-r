@@ -158,6 +158,54 @@ function calculateLineTotals(
   return { computed, subtotal, totalDiscount, totalTax, totalAmount };
 }
 
+type SalesOrderTotals = ReturnType<typeof calculateLineTotals>;
+
+/**
+ * Fold an order-level (document) discount into the line-derived totals.
+ *
+ * The document discount is a flat currency amount deducted from the whole order
+ * ON TOP OF the per-line discounts. It is treated as a PRE-TAX reduction of the
+ * revenue base: it lowers `totalAmount` (and therefore the posted revenue, the
+ * AR/cash debit, and the receivable) but does NOT recompute VAT — exactly how
+ * per-line discounts behave in `calculateLineTotals`, where `taxAmount` is the
+ * caller-supplied per-line value and is never re-derived from the net base.
+ *
+ * `discountAmount` on the order accumulates both the per-line discount total and
+ * the document discount so the persisted, displayed, and posted figures agree.
+ *
+ * Guards (defensive; the DTO already enforces `>= 0`): rejects a negative or
+ * non-finite discount and one that exceeds the net-of-line-discount subtotal
+ * (`subtotal - totalDiscount`) so the order total can never go negative and
+ * revenue stays non-negative. Default 0 leaves the totals untouched
+ * (backward-compatible).
+ */
+function applyDocumentDiscount(
+  totals: SalesOrderTotals,
+  documentDiscountInput?: number | null,
+): SalesOrderTotals & { documentDiscount: number } {
+  const documentDiscount = roundMoney(Number(documentDiscountInput ?? 0));
+  if (!Number.isFinite(documentDiscount) || documentDiscount < 0) {
+    throw new BadRequestException('Document discount cannot be negative');
+  }
+  const netLineSubtotal = roundMoney(totals.subtotal - totals.totalDiscount);
+  if (documentDiscount > netLineSubtotal) {
+    throw new BadRequestException(
+      'Document discount cannot exceed the order subtotal after line discounts',
+    );
+  }
+  if (documentDiscount === 0) {
+    return { ...totals, documentDiscount: 0 };
+  }
+  return {
+    ...totals,
+    // Roll the document discount into the aggregate discount total so the order's
+    // discountAmount reflects every reduction applied to the sale.
+    totalDiscount: roundMoney(totals.totalDiscount + documentDiscount),
+    totalAmount: roundMoney(totals.totalAmount - documentDiscount),
+    documentDiscount,
+  };
+}
+
 function salesLineProfitData(snapshot: SaleLineProfitSnapshot | undefined) {
   if (!snapshot) return {};
   return {
@@ -183,6 +231,7 @@ type IdempotentSalesOrderSnapshot = {
   cashAccountId: string | null;
   subtotal: Prisma.Decimal | number | string;
   discountAmount: Prisma.Decimal | number | string;
+  documentDiscount: Prisma.Decimal | number | string;
   taxAmount: Prisma.Decimal | number | string;
   totalAmount: Prisma.Decimal | number | string;
   lines: Array<{
@@ -272,9 +321,11 @@ function idempotentSalesOrderMatchesDto(
   const paymentMethod = normalizePaymentMethodForSalesType(dto.salesType, dto.paymentMethod);
   const cashAccountId =
     paymentMethod === SalesPaymentMethod.CREDIT ? null : (dto.cashAccountId ?? null);
-  const { computed, subtotal, totalDiscount, totalTax, totalAmount } = calculateLineTotals(
-    dto.lines,
-  );
+  // Fold the document discount in the same way create() does so an idempotent
+  // replay of a discounted order matches the persisted totals instead of
+  // falsely reporting a payload mismatch.
+  const { computed, subtotal, totalDiscount, totalTax, totalAmount, documentDiscount } =
+    applyDocumentDiscount(calculateLineTotals(dto.lines), dto.documentDiscount);
   const expectedLines = computed.map(lineSignature).sort();
   const existingLines = existing.lines.map(lineSignature).sort();
 
@@ -291,6 +342,7 @@ function idempotentSalesOrderMatchesDto(
     existing.cashAccountId === cashAccountId &&
     sameMoney(existing.subtotal, subtotal) &&
     sameMoney(existing.discountAmount, totalDiscount) &&
+    sameMoney(existing.documentDiscount, documentDiscount) &&
     sameMoney(existing.taxAmount, totalTax) &&
     sameMoney(existing.totalAmount, totalAmount) &&
     existingLines.length === expectedLines.length &&
@@ -1352,9 +1404,8 @@ export class SalesOrdersService {
       cashAccountId,
     });
     const userId = user.id;
-    const { computed, subtotal, totalDiscount, totalTax, totalAmount } = calculateLineTotals(
-      dto.lines,
-    );
+    const { computed, subtotal, totalDiscount, totalTax, totalAmount, documentDiscount } =
+      applyDocumentDiscount(calculateLineTotals(dto.lines), dto.documentDiscount);
     const profitSnapshots = await this.profit.assertSaleLinesProfitable(
       {
         companyId: dto.companyId,
@@ -1404,6 +1455,7 @@ export class SalesOrdersService {
           currency: dto.currency as CurrencyCode,
           subtotal,
           discountAmount: totalDiscount,
+          documentDiscount,
           taxAmount: totalTax,
           totalAmount,
           paidAmount: 0,
@@ -1513,9 +1565,18 @@ export class SalesOrdersService {
           taxAmount: Number(line.taxAmount ?? 0),
         };
       });
-    const { computed, subtotal, totalDiscount, totalTax, totalAmount } =
-      calculateLineTotals(linesToProcess);
+    // Effective document discount: an explicit value in the DTO wins, otherwise
+    // the stored value is preserved so a totals refresh triggered by a line/branch
+    // edit doesn't silently drop a previously-applied order-level discount.
+    const effectiveDocumentDiscount =
+      dto.documentDiscount ?? Number((existing as any).documentDiscount ?? 0);
+    const { computed, subtotal, totalDiscount, totalTax, totalAmount, documentDiscount } =
+      applyDocumentDiscount(calculateLineTotals(linesToProcess), effectiveDocumentDiscount);
+    // Refresh the persisted totals when the lines/branch change OR when the
+    // caller supplies a new document discount (which alters totalAmount even
+    // though the lines are untouched).
     const shouldRefreshLines = Boolean(dto.lines || dto.branchId !== undefined);
+    const shouldRefreshTotals = shouldRefreshLines || dto.documentDiscount !== undefined;
     const profitSnapshots = await this.profit.assertSaleLinesProfitable(
       {
         companyId: existing.companyId,
@@ -1589,9 +1650,10 @@ export class SalesOrdersService {
           paymentMethod: nextPaymentMethod,
           cashAccountId: nextCashAccountId,
           ...(dto.paymentReference !== undefined && { paymentReference: dto.paymentReference }),
-          ...(shouldRefreshLines && {
+          ...(shouldRefreshTotals && {
             subtotal,
             discountAmount: totalDiscount,
+            documentDiscount,
             taxAmount: totalTax,
             totalAmount,
             outstandingAmount: totalAmount,
@@ -2376,6 +2438,7 @@ export class SalesOrdersService {
         cashAccountId: true,
         subtotal: true,
         discountAmount: true,
+        documentDiscount: true,
         taxAmount: true,
         totalAmount: true,
         status: true,

@@ -146,6 +146,7 @@ interface SalesOrder {
   customerName?: string | null;
   salesType: string;
   totalAmount: number;
+  documentDiscount?: number | string | null;
   outstandingAmount: number;
   status: string;
   paymentStatus: string;
@@ -435,9 +436,11 @@ function SalesOrderModal({
             initial.paymentMethod ?? defaultPaymentMethodForSalesType(initial.salesType),
           cashAccountId: initial.cashAccountId ?? '',
           paymentReference: initial.paymentReference ?? '',
-          // Header discountAmount currently mirrors the sum of line discounts, so
-          // there is no separable document-level discount to restore on edit.
-          documentDiscount: 0,
+          // Restore the persisted order-level (document) discount so the editor
+          // shows the same total the backend stores and an edit-save round-trips
+          // it instead of silently dropping it. Defaults to 0 for older orders
+          // that never carried one.
+          documentDiscount: Number(initial.documentDiscount ?? 0) || 0,
           lines: initial.lines?.length
             ? initial.lines.map((line: any) => ({
                 id: line.id,
@@ -795,7 +798,16 @@ function SalesOrderModal({
       if (form.customerId) body.customerId = form.customerId;
       if (form.customerName) body.customerName = form.customerName;
       if (form.dueDate) body.dueDate = form.dueDate;
-      // document-level discount deferred until backend honours it (Wave B)
+      // Order-level (document) discount: a flat currency amount deducted from the
+      // whole order on top of line discounts. The backend honours this field
+      // (SalesOrder.documentDiscount) and applies the same clamp/total math, so
+      // the displayed total matches what is persisted. On create, only send when
+      // > 0 to keep the payload minimal (the DTO defaults to 0). On edit, always
+      // send it — the update preserves the stored value when omitted, so we must
+      // send an explicit 0 to let the user clear a previously-applied discount.
+      if (mode === 'edit' || form.documentDiscount > 0) {
+        body.documentDiscount = form.documentDiscount;
+      }
       if (form.notes) body.notes = form.notes;
       if (form.salespersonId) body.salespersonId = form.salespersonId;
       if (form.cashAccountId) body.cashAccountId = form.cashAccountId;
@@ -1175,7 +1187,8 @@ function SalesOrderModal({
           productSearchLoading={productSearchLoading}
           enforceStockAvailability
           autoTax
-          // document-level discount deferred until backend honours it (Wave B)
+          documentDiscount={form.documentDiscount}
+          onDocumentDiscountChange={(value) => setField('documentDiscount', value)}
           onAddLine={addLine}
           onRemoveLine={removeLine}
           onLineChange={setLine}

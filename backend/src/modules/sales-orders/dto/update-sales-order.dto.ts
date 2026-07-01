@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -39,6 +40,15 @@ export class UpdateSalesOrderDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  /**
+   * Order-level (document) discount. See CreateSalesOrderDto.documentDiscount.
+   * Optional on update; when omitted the stored value is preserved.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  documentDiscount?: number;
 
   @IsOptional()
   @IsString()

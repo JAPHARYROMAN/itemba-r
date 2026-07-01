@@ -11,11 +11,12 @@ import {
   PermissionDeniedState,
   showToast,
 } from '@/components/ui';
-import { Modal } from '@/components/aurora/overlays';
+import { Modal, Drawer } from '@/components/aurora/overlays';
 import {
   ResponsiveDataTable,
   type ResponsiveColumn,
 } from '@/components/aurora/data-display/ResponsiveDataTable';
+import { DetailList } from '@/components/aurora/data-display/DetailList';
 import {
   FormShell,
   FormSection,
@@ -24,11 +25,18 @@ import {
   FormActions,
 } from '@/components/aurora/forms';
 import { useAuth } from '@/hooks/use-auth';
-import { backendList, backendPage, backendPost } from '@/lib/api-client';
+import { backendList, backendPage, backendPost, backendGet } from '@/lib/api-client';
 
 // The generate service uses the literal 'ALL' sentinel for a company-wide run
 // (no specific customer). Surface it as a friendly label instead of a raw id.
 const ALL_CUSTOMERS = 'ALL';
+
+// The backend proxy the professional-statement PDF/Excel endpoints live behind.
+// These return binary blobs (not JSON), so they cannot go through the JSON
+// api-client helpers — we raw-fetch the proxy directly. The global
+// CsrfFetchProvider automatically attaches the CSRF token to POST /api/backend
+// requests, so no manual CSRF handling is required here.
+const BACKEND_PROXY = '/api/backend';
 
 interface Company {
   id: string;
@@ -40,6 +48,7 @@ interface Customer {
   id: string;
   name: string;
   customerCode?: string | null;
+  email?: string | null;
 }
 
 interface StatementRun extends Record<string, unknown> {
@@ -57,6 +66,59 @@ interface StatementRun extends Record<string, unknown> {
   // Included by the backend list endpoint.
   company?: { id: string; name: string; code?: string | null } | null;
   generatedBy?: { id: string; fullName?: string | null; email?: string | null } | null;
+}
+
+// ─── Professional statement-of-account (GET /customer-statements/detail) ──────
+// Money fields arrive as fixed-2 decimal STRINGS (Prisma.Decimal.toFixed(2)).
+type StatementLineType = 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE' | 'REFUND' | 'ADJUSTMENT';
+
+interface StatementLine {
+  date: string;
+  type: StatementLineType;
+  reference: string;
+  description: string;
+  sourceId: string;
+  debit: string;
+  credit: string;
+  balance: string;
+}
+
+interface StatementAging {
+  current: number;
+  days1_30: number;
+  days31_60: number;
+  days61_90: number;
+  over90: number;
+  total: number;
+  oldestDaysOverdue: number;
+}
+
+interface StatementDetail {
+  companyId: string;
+  customerId: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  currency: string;
+  dateFrom: string;
+  dateTo: string;
+  openingBalance: string;
+  totalDebits: string;
+  totalCredits: string;
+  closingBalance: string;
+  lineCount: number;
+  lines: StatementLine[];
+  aging: StatementAging;
+  generatedAt: string;
+}
+
+// Selection that identifies a single-customer statement of account.
+interface StatementSelection {
+  companyId: string;
+  customerId: string;
+  customerName?: string | null;
+  dateFrom: string;
+  dateTo: string;
+  currency: string;
 }
 
 interface Paginated<T> {
@@ -99,11 +161,71 @@ function monthStart() {
   return new Date(now.getFullYear(), now.getMonth(), 1);
 }
 
+// Friendly label for the ledger movement type shown in the detail table.
+const LINE_TYPE_LABEL: Record<StatementLineType, string> = {
+  INVOICE: 'Invoice',
+  PAYMENT: 'Payment',
+  CREDIT_NOTE: 'Credit note',
+  REFUND: 'Refund',
+  ADJUSTMENT: 'Adjustment',
+};
+
+/**
+ * Download a binary export (PDF / Excel) produced by a POST endpoint. The proxy
+ * streams the file back with a Content-Disposition filename; we honour it when
+ * present and fall back to the supplied name otherwise. Throws with the server
+ * error message on a non-2xx so callers can surface it via showToast.
+ */
+async function downloadExport(
+  path: string,
+  body: unknown,
+  fallbackName: string,
+): Promise<void> {
+  const res = await fetch(`${BACKEND_PROXY}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let message = `Export failed (${res.status})`;
+    try {
+      const j = await res.json();
+      if (j?.message) message = Array.isArray(j.message) ? j.message.join(', ') : j.message;
+    } catch {
+      // Non-JSON error body — keep the status-based fallback message.
+    }
+    throw new Error(message);
+  }
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const match = /filename="?([^"]+)"?/i.exec(disposition);
+  const filename = match?.[1] ?? fallbackName;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+interface EmailStatementResponse {
+  emailed: boolean;
+  smtpConfigured: boolean;
+  to: string | null;
+  filename: string;
+  documentId: string | null;
+  closingBalance: string;
+  message: string;
+}
+
 export default function CustomerStatementsPage() {
   const { hasPermission } = useAuth();
 
   const canView =
     hasPermission('customer_statements.list') || hasPermission('customer_statements.view');
+  const canViewDetail = hasPermission('customer_statements.view');
   const canGenerate = hasPermission('customer_statements.generate');
 
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -126,6 +248,14 @@ export default function CustomerStatementsPage() {
   const [genEnd, setGenEnd] = useState(isoDate(new Date()));
   const [genErrors, setGenErrors] = useState<Record<string, string>>({});
   const [generating, setGenerating] = useState(false);
+
+  // Statement-of-account detail drawer state.
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailSelection, setDetailSelection] = useState<StatementSelection | null>(null);
+  const [detail, setDetail] = useState<StatementDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<'pdf' | 'excel' | 'email' | null>(null);
 
   // Name-resolution lookups: the list endpoint returns raw FK ids for the
   // customer (only the company relation is included).
@@ -279,10 +409,30 @@ export default function CustomerStatementsPage() {
         periodEnd: genEnd,
       });
       const target = genCustomerId
-        ? customerMap.get(genCustomerId)?.name ?? 'customer'
+        ? genCustomers.find((c) => c.id === genCustomerId)?.name ??
+          customerMap.get(genCustomerId)?.name ??
+          'customer'
         : 'all customers';
       showToast('success', 'Customer statement generated', `Statement generated for ${target}.`);
       setGenerateOpen(false);
+
+      // When a single customer was targeted, jump straight into the professional
+      // statement of account for that customer + period. Company-wide runs have
+      // no single-customer detail, so we just refresh the runs list.
+      if (genCustomerId) {
+        openDetail({
+          companyId: genCompanyId,
+          customerId: genCustomerId,
+          customerName:
+            genCustomers.find((c) => c.id === genCustomerId)?.name ??
+            customerMap.get(genCustomerId)?.name ??
+            null,
+          dateFrom: genStart,
+          dateTo: genEnd,
+          currency: 'TZS',
+        });
+      }
+
       // Reset filters to reflect the freshly generated run at the top of the list.
       setPage(1);
       await load();
@@ -294,6 +444,137 @@ export default function CustomerStatementsPage() {
       );
     } finally {
       setGenerating(false);
+    }
+  };
+
+  // ─── Statement of account (detail) ─────────────────────────────────────────
+
+  const loadDetail = useCallback(async (sel: StatementSelection) => {
+    setDetailLoading(true);
+    setDetailError(null);
+    setDetail(null);
+    try {
+      const result = await backendGet<StatementDetail>('/customer-statements/detail', {
+        query: {
+          companyId: sel.companyId,
+          customerId: sel.customerId,
+          dateFrom: sel.dateFrom,
+          dateTo: sel.dateTo,
+          currency: sel.currency || undefined,
+        },
+      });
+      setDetail(result);
+    } catch (err) {
+      setDetailError(
+        err instanceof Error ? err.message : 'Failed to load statement of account',
+      );
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  const openDetail = useCallback(
+    (sel: StatementSelection) => {
+      setDetailSelection(sel);
+      setDetailOpen(true);
+      void loadDetail(sel);
+    },
+    [loadDetail],
+  );
+
+  const openDetailForRun = useCallback(
+    (row: StatementRun) => {
+      openDetail({
+        companyId: row.companyId,
+        customerId: row.customerId,
+        customerName: customerName(row),
+        dateFrom: isoDate(new Date(row.periodStart)),
+        dateTo: isoDate(new Date(row.periodEnd)),
+        currency: 'TZS',
+      });
+    },
+    [customerName, openDetail],
+  );
+
+  const closeDetail = () => {
+    if (exporting) return;
+    setDetailOpen(false);
+  };
+
+  const exportPayload = useCallback(() => {
+    if (!detailSelection) return null;
+    return {
+      companyId: detailSelection.companyId,
+      customerId: detailSelection.customerId,
+      dateFrom: detailSelection.dateFrom,
+      dateTo: detailSelection.dateTo,
+      currency: detailSelection.currency || undefined,
+    };
+  }, [detailSelection]);
+
+  const handleExportPdf = async () => {
+    const payload = exportPayload();
+    if (!payload) return;
+    setExporting('pdf');
+    try {
+      await downloadExport('/customer-statements/export/pdf', payload, 'statement.pdf');
+      showToast('success', 'PDF downloaded', 'The statement PDF has been downloaded.');
+    } catch (err) {
+      showToast(
+        'error',
+        'Could not export PDF',
+        err instanceof Error ? err.message : 'Please try again.',
+      );
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    const payload = exportPayload();
+    if (!payload) return;
+    setExporting('excel');
+    try {
+      await downloadExport('/customer-statements/export/excel', payload, 'statement.xlsx');
+      showToast('success', 'Excel downloaded', 'The statement spreadsheet has been downloaded.');
+    } catch (err) {
+      showToast(
+        'error',
+        'Could not export Excel',
+        err instanceof Error ? err.message : 'Please try again.',
+      );
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const handleEmail = async () => {
+    const payload = exportPayload();
+    if (!payload) return;
+    setExporting('email');
+    try {
+      const res = await backendPost<EmailStatementResponse>(
+        '/customer-statements/email',
+        payload,
+      );
+      if (res.emailed) {
+        showToast(
+          'success',
+          'Statement emailed',
+          res.to ? `Statement emailed to ${res.to}.` : res.message,
+        );
+      } else {
+        // Best-effort delivery: SMTP not configured or no recipient on file.
+        showToast('warning', 'Statement not emailed', res.message);
+      }
+    } catch (err) {
+      showToast(
+        'error',
+        'Could not email statement',
+        err instanceof Error ? err.message : 'Please try again.',
+      );
+    } finally {
+      setExporting(null);
     }
   };
 
@@ -390,12 +671,22 @@ export default function CustomerStatementsPage() {
           <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
             —
           </span>
+        ) : canViewDetail ? (
+          <button
+            type="button"
+            onClick={() => openDetailForRun(r)}
+            className="text-xs font-medium hover:underline"
+            style={{ color: 'var(--aurora-primary)' }}
+            title="Open the professional statement of account"
+          >
+            View statement
+          </button>
         ) : (
           <Link
             href={`/operations/customers/${r.customerId}`}
             className="text-xs font-medium hover:underline"
             style={{ color: 'var(--aurora-primary)' }}
-            title="Open the customer 360 to view / print statements"
+            title="Open the customer 360"
           >
             View
           </Link>
@@ -425,11 +716,13 @@ export default function CustomerStatementsPage() {
     color: 'var(--aurora-text)',
   } as const;
 
+  const detailCurrency = detail?.currency ?? detailSelection?.currency ?? 'TZS';
+
   return (
     <div className="p-6 space-y-6">
       <PageHeader
         title="Customer Statements"
-        subtitle="Generate and review customer account statements by period"
+        subtitle="Generate and review professional customer statements of account"
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -538,7 +831,7 @@ export default function CustomerStatementsPage() {
                 />
                 <FormSelect
                   label="Customer"
-                  help="Leave blank to generate a company-wide statement for all customers."
+                  help="Leave blank to generate a company-wide statement for all customers. Select a customer to open the full statement of account."
                   placeholder="All customers"
                   value={genCustomerId}
                   disabled={!genCompanyId}
@@ -573,6 +866,289 @@ export default function CustomerStatementsPage() {
             </FormShell>
           </div>
         </Modal>
+      )}
+
+      {canViewDetail && (
+        <Drawer
+          open={detailOpen}
+          onClose={closeDetail}
+          title="Statement of Account"
+          width="720px"
+        >
+          {detailLoading ? (
+            <div className="py-16 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+              Loading statement of account…
+            </div>
+          ) : detailError ? (
+            <div className="space-y-4">
+              <div
+                className="rounded-lg border p-4 text-sm"
+                style={{
+                  borderColor: 'var(--aurora-danger)',
+                  color: 'var(--aurora-danger)',
+                  background: 'var(--aurora-card)',
+                }}
+              >
+                {detailError}
+              </div>
+              {detailSelection && (
+                <Btn variant="secondary" onClick={() => void loadDetail(detailSelection)}>
+                  Retry
+                </Btn>
+              )}
+            </div>
+          ) : detail ? (
+            <div className="space-y-6">
+              {/* Header: who / when */}
+              <DetailList
+                columns={2}
+                items={[
+                  {
+                    label: 'Customer',
+                    value:
+                      detail.customerName ??
+                      detailSelection?.customerName ??
+                      detail.customerId,
+                  },
+                  {
+                    label: 'Company',
+                    value:
+                      companyMap.get(detail.companyId)?.name ?? detail.companyId,
+                  },
+                  { label: 'Currency', value: detail.currency },
+                  {
+                    label: 'Recipient email',
+                    value: detail.customerEmail ?? '—',
+                  },
+                  {
+                    label: 'Period',
+                    value: `${formatDate(detail.dateFrom)} – ${formatDate(detail.dateTo)}`,
+                    fullWidth: true,
+                  },
+                ]}
+              />
+
+              {/* Balance summary cards */}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <StatCard
+                  label="Opening balance"
+                  value={money(detail.openingBalance, detailCurrency)}
+                />
+                <StatCard label="Total debits" value={money(detail.totalDebits, detailCurrency)} />
+                <StatCard
+                  label="Total credits"
+                  value={money(detail.totalCredits, detailCurrency)}
+                />
+                <StatCard
+                  label="Closing balance"
+                  value={money(detail.closingBalance, detailCurrency)}
+                  variant="green"
+                />
+              </div>
+
+              {/* Ledger: opening -> lines (running balance) -> closing */}
+              <div>
+                <h3
+                  className="text-xs font-semibold uppercase tracking-wider mb-2"
+                  style={{ color: 'var(--aurora-text-muted)' }}
+                >
+                  Transactions
+                </h3>
+                <div
+                  className="overflow-x-auto rounded-lg border"
+                  style={{ borderColor: 'var(--aurora-border)' }}
+                >
+                  <table className="w-full text-sm" style={{ color: 'var(--aurora-text)' }}>
+                    <thead>
+                      <tr
+                        className="text-xs uppercase tracking-wider"
+                        style={{
+                          color: 'var(--aurora-text-muted)',
+                          borderBottom: '1px solid var(--aurora-border)',
+                        }}
+                      >
+                        <th className="px-3 py-2 text-left font-medium">Date</th>
+                        <th className="px-3 py-2 text-left font-medium">Type</th>
+                        <th className="px-3 py-2 text-left font-medium">Reference</th>
+                        <th className="px-3 py-2 text-right font-medium">Debit</th>
+                        <th className="px-3 py-2 text-right font-medium">Credit</th>
+                        <th className="px-3 py-2 text-right font-medium">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Opening balance row */}
+                      <tr
+                        style={{
+                          borderBottom: '1px solid var(--aurora-border)',
+                          background: 'var(--aurora-card-elevated)',
+                        }}
+                      >
+                        <td className="px-3 py-2">{formatDate(detail.dateFrom)}</td>
+                        <td
+                          className="px-3 py-2 font-medium"
+                          style={{ color: 'var(--aurora-text-muted)' }}
+                          colSpan={2}
+                        >
+                          Opening balance
+                        </td>
+                        <td className="px-3 py-2 text-right">—</td>
+                        <td className="px-3 py-2 text-right">—</td>
+                        <td className="px-3 py-2 text-right font-medium">
+                          {money(detail.openingBalance, detailCurrency)}
+                        </td>
+                      </tr>
+
+                      {detail.lines.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={6}
+                            className="px-3 py-6 text-center"
+                            style={{ color: 'var(--aurora-text-muted)' }}
+                          >
+                            No transactions in this period.
+                          </td>
+                        </tr>
+                      ) : (
+                        detail.lines.map((line, idx) => (
+                          <tr
+                            key={`${line.sourceId}-${idx}`}
+                            style={{ borderBottom: '1px solid var(--aurora-border)' }}
+                          >
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              {formatDate(line.date)}
+                            </td>
+                            <td className="px-3 py-2">
+                              <StatusBadge status={LINE_TYPE_LABEL[line.type] ?? line.type} />
+                            </td>
+                            <td className="px-3 py-2">
+                              <span className="font-mono text-xs">{line.reference}</span>
+                              {line.description && (
+                                <span
+                                  className="block text-xs"
+                                  style={{ color: 'var(--aurora-text-muted)' }}
+                                >
+                                  {line.description}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              {asNumber(line.debit) === 0
+                                ? '—'
+                                : money(line.debit, detailCurrency)}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              {asNumber(line.credit) === 0
+                                ? '—'
+                                : money(line.credit, detailCurrency)}
+                            </td>
+                            <td className="px-3 py-2 text-right font-medium">
+                              {money(line.balance, detailCurrency)}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+
+                      {/* Closing balance row */}
+                      <tr
+                        style={{
+                          background: 'var(--aurora-card-elevated)',
+                          borderTop: '2px solid var(--aurora-border)',
+                        }}
+                      >
+                        <td className="px-3 py-2">{formatDate(detail.dateTo)}</td>
+                        <td className="px-3 py-2 font-semibold" colSpan={2}>
+                          Closing balance
+                        </td>
+                        <td className="px-3 py-2 text-right font-medium">
+                          {money(detail.totalDebits, detailCurrency)}
+                        </td>
+                        <td className="px-3 py-2 text-right font-medium">
+                          {money(detail.totalCredits, detailCurrency)}
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold">
+                          {money(detail.closingBalance, detailCurrency)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Aging summary as of dateTo */}
+              <div>
+                <h3
+                  className="text-xs font-semibold uppercase tracking-wider mb-2"
+                  style={{ color: 'var(--aurora-text-muted)' }}
+                >
+                  Aging summary (as of {formatDate(detail.dateTo)})
+                </h3>
+                <DetailList
+                  columns={3}
+                  items={[
+                    { label: 'Current', value: money(detail.aging.current, detailCurrency) },
+                    { label: '1–30 days', value: money(detail.aging.days1_30, detailCurrency) },
+                    { label: '31–60 days', value: money(detail.aging.days31_60, detailCurrency) },
+                    { label: '61–90 days', value: money(detail.aging.days61_90, detailCurrency) },
+                    { label: 'Over 90 days', value: money(detail.aging.over90, detailCurrency) },
+                    {
+                      label: 'Total outstanding',
+                      value: money(detail.aging.total, detailCurrency),
+                    },
+                    {
+                      label: 'Oldest overdue',
+                      value:
+                        detail.aging.oldestDaysOverdue > 0
+                          ? `${detail.aging.oldestDaysOverdue} days`
+                          : 'None',
+                    },
+                  ]}
+                />
+              </div>
+
+              {/* Export / email actions */}
+              <div
+                className="flex flex-wrap gap-2 border-t pt-4"
+                style={{ borderColor: 'var(--aurora-border)' }}
+              >
+                <Btn
+                  variant="secondary"
+                  onClick={handleExportPdf}
+                  loading={exporting === 'pdf'}
+                  disabled={!!exporting && exporting !== 'pdf'}
+                >
+                  Download PDF
+                </Btn>
+                <Btn
+                  variant="secondary"
+                  onClick={handleExportExcel}
+                  loading={exporting === 'excel'}
+                  disabled={!!exporting && exporting !== 'excel'}
+                >
+                  Download Excel
+                </Btn>
+                {canGenerate && (
+                  <Btn
+                    variant="primary"
+                    onClick={handleEmail}
+                    loading={exporting === 'email'}
+                    disabled={!!exporting && exporting !== 'email'}
+                    title={
+                      detail.customerEmail
+                        ? `Email to ${detail.customerEmail}`
+                        : 'Customer has no email on file'
+                    }
+                  >
+                    Email to customer
+                  </Btn>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="py-16 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+              No statement to display.
+            </div>
+          )}
+        </Drawer>
       )}
     </div>
   );

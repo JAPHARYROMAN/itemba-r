@@ -95,6 +95,18 @@ export class CreateSalesOrderDto {
   notes?: string;
 
   /**
+   * Order-level (document) discount: a flat currency amount deducted from the
+   * whole order on top of any per-line discounts. Defaults to 0 (no effect).
+   * Must be >= 0 and cannot exceed the net-of-line-discount subtotal (enforced
+   * in the service). Treated as a pre-tax reduction of revenue; VAT is not
+   * recomputed, mirroring how per-line discounts are handled in this service.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  documentDiscount?: number;
+
+  /**
    * Optional FK to the employee credited as salesperson. Used by the
    * commission flow — confirming the order auto-creates a DRAFT
    * SalesCommission when the salesperson has a `defaultCommissionRate` set.

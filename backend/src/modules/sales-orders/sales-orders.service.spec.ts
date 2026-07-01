@@ -276,6 +276,187 @@ describe('SalesOrdersService per-unit discounts', () => {
   });
 });
 
+describe('SalesOrdersService document (order-level) discount', () => {
+  it('reduces the order total by the document discount and folds it into discountAmount (create)', async () => {
+    const { service, prisma } = makeService();
+    prisma.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-account-1',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      accountType: 'CASH_ON_HAND',
+    });
+    prisma.customer.findFirst.mockResolvedValue(null);
+
+    await service.create(
+      createDto({
+        salesType: 'CASH_SALE',
+        paymentMethod: 'CASH',
+        cashAccountId: 'cash-account-1',
+        documentDiscount: 30,
+        lines: [
+          {
+            productId: 'product-1',
+            description: 'Item',
+            quantity: 2,
+            unitId: 'unit-1',
+            unitPrice: 100,
+            discountAmount: 10, // per-unit => 20 line discount
+            taxAmount: 18, // caller-supplied VAT (not recomputed on discount)
+          },
+        ],
+      }),
+      user,
+    );
+
+    // subtotal 200, line discount 20, document discount 30 => aggregate discount 50.
+    // totalAmount = 200 - 20 + 18 - 30 = 168. VAT (18) is untouched by the doc discount.
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal: 200,
+          discountAmount: 50,
+          documentDiscount: 30,
+          taxAmount: 18,
+          totalAmount: 168,
+          outstandingAmount: 168,
+        }),
+      }),
+    );
+  });
+
+  it('defaults documentDiscount to 0 and leaves totals unchanged (backward-compatible)', async () => {
+    const { service, prisma } = makeService();
+    prisma.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-account-1',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      accountType: 'CASH_ON_HAND',
+    });
+    prisma.customer.findFirst.mockResolvedValue(null);
+
+    await service.create(
+      createDto({ salesType: 'CASH_SALE', paymentMethod: 'CASH', cashAccountId: 'cash-account-1' }),
+      user,
+    );
+
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal: 200,
+          discountAmount: 0,
+          documentDiscount: 0,
+          totalAmount: 200,
+        }),
+      }),
+    );
+  });
+
+  it('rejects a document discount larger than the net-of-line-discount subtotal', async () => {
+    const { service, prisma } = makeService();
+    prisma.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-account-1',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      accountType: 'CASH_ON_HAND',
+    });
+    prisma.customer.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.create(
+        createDto({
+          salesType: 'CASH_SALE',
+          paymentMethod: 'CASH',
+          cashAccountId: 'cash-account-1',
+          documentDiscount: 500, // > 200 gross line total
+        }),
+        user,
+      ),
+    ).rejects.toThrow('Document discount cannot exceed the order subtotal after line discounts');
+  });
+
+  it('posts a balanced JE and creates a receivable at the discounted total when confirming a credit sale', async () => {
+    const { service, prisma } = makeService();
+    // A DRAFT credit order that was created with a 30 document discount:
+    // subtotal 200, VAT 18, total 168 (revenue-side discount, VAT frozen).
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      persistedOrder({
+        status: 'DRAFT',
+        salesType: 'CREDIT_SALE',
+        paymentMethod: 'CREDIT',
+        cashAccountId: null,
+        customerId: 'customer-1',
+        customer: { id: 'customer-1', name: 'Aaron Town' },
+        subtotal: 200,
+        discountAmount: 50,
+        documentDiscount: 30,
+        taxAmount: 18,
+        totalAmount: 168,
+        paidAmount: 0,
+        outstandingAmount: 168,
+        paymentStatus: 'UNPAID',
+        lines: [
+          {
+            id: 'line-1',
+            productId: 'product-1',
+            description: 'Item',
+            quantity: 2,
+            unitId: 'unit-1',
+            unitPrice: 100,
+            discountAmount: 20,
+            taxAmount: 18,
+            lineTotal: 168,
+            batchId: null,
+          },
+        ],
+      }),
+    );
+    prisma.customer.findFirst.mockResolvedValue({
+      name: 'Aaron Town',
+      status: 'ACTIVE',
+      creditLimit: 0,
+      currentBalance: 0,
+    });
+    // Non-stock product => no COGS/inventory legs.
+    prisma.product.findUnique.mockResolvedValue({ id: 'product-1', trackInventory: false });
+    // Let the real postSalesOrderLedger run so we assert the actual JE lines.
+    (service as any).accountResolver.resolveMany.mockResolvedValue({
+      AR_CONTROL: { id: 'acct-ar' },
+      SALES_REVENUE: { id: 'acct-rev' },
+      TAX_VAT_PAYABLE: { id: 'acct-vat' },
+    });
+
+    await service.confirm('so-1', user);
+
+    // Receivable is raised for the DISCOUNTED total (168), not the gross.
+    expect(prisma.receivable.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          amount: 168,
+          outstandingAmount: 168,
+        }),
+      }),
+    );
+
+    // The posted journal entry reflects the discounted total: DR AR 168,
+    // CR Revenue 150 (168 - 18 VAT), CR VAT 18. It balances.
+    const jeCall = (service as any).postingEngine.postLines.mock.calls[0][0];
+    expect(jeCall.lines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ accountId: 'acct-ar', debit: 168, credit: 0 }),
+        expect.objectContaining({ accountId: 'acct-rev', debit: 0, credit: 150 }),
+        expect.objectContaining({ accountId: 'acct-vat', debit: 0, credit: 18 }),
+      ]),
+    );
+    const sumDebit = jeCall.lines.reduce((s: number, l: any) => s + l.debit, 0);
+    const sumCredit = jeCall.lines.reduce((s: number, l: any) => s + l.credit, 0);
+    expect(sumDebit).toBe(sumCredit);
+    expect(sumDebit).toBe(168);
+  });
+});
+
 describe('SalesOrdersService walk-in customer mastering', () => {
   it('creates and links a customer master for a named walk-in sales order customer', async () => {
     const { service, prisma } = makeService();

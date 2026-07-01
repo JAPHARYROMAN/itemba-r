@@ -197,6 +197,8 @@ import { DataIsolationIssuesModule } from './modules/data-isolation-issues/data-
 // ── UX Backend Wave 2 — Credit Notes & Refunds ──────────────────────────────
 import { CreditNotesModule } from './modules/credit-notes/credit-notes.module';
 import { RefundsModule } from './modules/refunds/refunds.module';
+// ── UX Backend Wave 2b — Customer Payments ───────────────────────────────────
+import { CustomerPaymentsModule } from './modules/customer-payments/customer-payments.module';
 
 // M16 - QA, Launch Readiness, Documentation, Training, Support
 
@@ -408,6 +410,8 @@ import { RolesGuard } from './common/guards/roles.guard';
     // ── UX Backend Wave 2 — Credit Notes & Refunds ────────────────────────────
     CreditNotesModule,
     RefundsModule,
+    // ── UX Backend Wave 2b — Customer Payments ─────────────────────────────────
+    CustomerPaymentsModule,
     // M16 - QA, Launch Readiness, Documentation, Training, Support
   ],
   controllers: [HealthController],
