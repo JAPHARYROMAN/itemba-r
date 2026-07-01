@@ -145,6 +145,103 @@ describe('ProfitService productSummary db aggregation', () => {
   });
 });
 
+describe('ProfitService customerSummary db aggregation', () => {
+  it('aggregates net revenue + WAC cogs per customer, sorts by profit desc, flags missing cost', async () => {
+    const { service, prisma } = makeService();
+    // Orders: o1 -> cust A (rev 300, cogs 100), o2 -> cust A (rev 100, cogs 40),
+    //         o3 -> cust B (rev 500, cogs 450, one stock line missing cost),
+    //         o4 -> null customer / walk-in (rev 80, cogs 30).
+    prisma.salesOrderLine = {
+      groupBy: jest.fn(async ({ where }: any) => {
+        if (where?.cogsAmount === null) {
+          // missing-cost stock-only groupBy: only o3 has an uncosted stock line (rev 120)
+          return [
+            { salesOrderId: 'o3', _sum: { lineTotal: 120, taxAmount: 0 }, _count: { _all: 1 } },
+          ];
+        }
+        return [
+          {
+            salesOrderId: 'o1',
+            _sum: { quantity: 3, lineTotal: 300, taxAmount: 0, cogsAmount: 100 },
+            _count: { _all: 2 },
+          },
+          {
+            salesOrderId: 'o2',
+            _sum: { quantity: 1, lineTotal: 100, taxAmount: 0, cogsAmount: 40 },
+            _count: { _all: 1 },
+          },
+          {
+            salesOrderId: 'o3',
+            _sum: { quantity: 5, lineTotal: 500, taxAmount: 0, cogsAmount: 450 },
+            _count: { _all: 3 },
+          },
+          {
+            salesOrderId: 'o4',
+            _sum: { quantity: 1, lineTotal: 80, taxAmount: 0, cogsAmount: 30 },
+            _count: { _all: 1 },
+          },
+        ];
+      }),
+    };
+    prisma.salesOrder = {
+      findMany: jest.fn(async () => [
+        { id: 'o1', customerId: 'A', customerName: 'Acme' },
+        { id: 'o2', customerId: 'A', customerName: 'Acme' },
+        { id: 'o3', customerId: 'B', customerName: 'Beta' },
+        { id: 'o4', customerId: null, customerName: null },
+      ]),
+    };
+    jest.spyOn(service as any, 'salesOrderWhere').mockResolvedValue({});
+
+    const result = await service.customerSummary({}, { id: 'u1' } as any);
+
+    // Totals: revenue 980, cogs 620, grossProfit 360
+    expect(result.summary.revenue).toBe(980);
+    expect(result.summary.cogs).toBe(620);
+    expect(result.summary.grossProfit).toBe(360);
+    expect(result.summary.customerCount).toBe(3);
+    expect(result.summary.linesMissingCost).toBe(1);
+    expect(result.summary.revenueMissingCost).toBe(120);
+
+    // Sorted by profit desc: A (profit 260) > walk-in (profit 50) > B (profit 50)
+    // A: rev 400 cogs 140 profit 260; B: rev 500 cogs 450 profit 50; walk-in: rev 80 cogs 30 profit 50
+    const byId = new Map(result.customers.map((c) => [c.customerId ?? '__null__', c]));
+    expect(byId.get('A')).toEqual(
+      expect.objectContaining({
+        customerName: 'Acme',
+        revenue: 400,
+        cogs: 140,
+        grossProfit: 260,
+        orderCount: 2,
+        lineCount: 3,
+        hasMissingCost: false,
+      }),
+    );
+    expect(byId.get('B')).toEqual(
+      expect.objectContaining({
+        customerName: 'Beta',
+        revenue: 500,
+        cogs: 450,
+        grossProfit: 50,
+        hasMissingCost: true,
+        linesMissingCost: 1,
+        revenueMissingCost: 120,
+      }),
+    );
+    const walkIn = byId.get('__null__');
+    expect(walkIn).toEqual(
+      expect.objectContaining({
+        customerId: null,
+        customerName: 'Unassigned / Walk-in',
+        revenue: 80,
+        grossProfit: 50,
+      }),
+    );
+    // Profit-desc ordering: A first
+    expect(result.customers[0].customerId).toBe('A');
+  });
+});
+
 describe('ProfitService fixCostGap (ITMB-AUDIT-28)', () => {
   function makeFixService({ balance = null }: { balance?: any } = {}) {
     const productUpdate = jest.fn().mockResolvedValue(undefined);

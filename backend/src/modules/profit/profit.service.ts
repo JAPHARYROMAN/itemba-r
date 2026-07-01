@@ -15,6 +15,8 @@ import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 const STOCK_EXEMPT_TYPES = new Set(['SERVICE', 'NON_STOCK_ITEM']);
+// Synthetic bucket key for sales orders with no customerId (walk-in / cash sales).
+const UNASSIGNED_KEY = '__UNASSIGNED__';
 const PROFIT_SALES_STATUSES = [
   SalesOrderStatus.CONFIRMED,
   SalesOrderStatus.PARTIALLY_PAID,
@@ -428,6 +430,162 @@ export class ProfitService {
         revenueMissingCost: roundMoney(revenueMissingCost),
       },
       products: rows,
+    };
+  }
+
+  /**
+   * Customer profitability: aggregates net revenue and COGS per customer over the
+   * same confirmed/partially-paid/paid sales orders that `productSummary` uses, so
+   * both reports agree on totals. COGS reuses the WAC-based `cogsAmount` snapshot
+   * frozen on each SalesOrderLine (BRANCH_AVERAGE_COST → DEFAULT_PURCHASE_PRICE),
+   * i.e. the identical cost basis as the product-level report — no new costing.
+   *
+   * Company scope: every DB read here flows through `salesOrderWhere` (which applies
+   * `companyWhereFor`), and the line groupBys filter via `salesOrder: salesOrderWhere`.
+   * No raw SQL is used, so there is no way for a line from another company to leak in.
+   *
+   * SalesOrder.customerId is nullable (walk-in cash sales); those orders are folded
+   * into a single synthetic "Unassigned / Walk-in" bucket keyed by UNASSIGNED_KEY.
+   */
+  async customerSummary(query: Record<string, string | undefined>, user: AuthUser) {
+    const salesOrderWhere = await this.salesOrderWhere(query, user);
+    const orderFilter: Prisma.SalesOrderWhereInput = {
+      ...salesOrderWhere,
+      ...(query.customerId ? { customerId: query.customerId } : {}),
+    };
+    const lineWhere: Prisma.SalesOrderLineWhereInput = { salesOrder: orderFilter };
+
+    // Aggregate in the DB: one row per order with net revenue (lineTotal - tax) and
+    // COGS summed from the frozen line snapshots. Grouping by salesOrderId keeps this
+    // bounded to the order count (same order of magnitude as listing orders) while
+    // never truncating, then we fold orders into their customer in JS.
+    const [grouped, missingGrouped] = await Promise.all([
+      this.prisma.salesOrderLine.groupBy({
+        by: ['salesOrderId'],
+        where: lineWhere,
+        _sum: { quantity: true, lineTotal: true, taxAmount: true, cogsAmount: true },
+        _count: { _all: true },
+      }),
+      // Stock lines with no snapshotted cost overstate profit; count/sum them so the
+      // per-customer rows can flag missing cost, exactly like productSummary does.
+      this.prisma.salesOrderLine.groupBy({
+        by: ['salesOrderId'],
+        where: { ...lineWhere, cogsAmount: null, product: STOCK_PRODUCT_WHERE },
+        _sum: { lineTotal: true, taxAmount: true },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const orderIds = grouped.map((group) => group.salesOrderId);
+    const orders = orderIds.length
+      ? await this.prisma.salesOrder.findMany({
+          // Re-scope by the same company-scoped filter (belt and braces: these ids all
+          // came from a company-scoped groupBy already) so no foreign order slips in.
+          where: { ...orderFilter, id: { in: orderIds } },
+          select: { id: true, customerId: true, customerName: true },
+        })
+      : [];
+    const orderById = new Map(orders.map((order) => [order.id, order]));
+    const missingByOrder = new Map(missingGrouped.map((group) => [group.salesOrderId, group]));
+
+    type CustomerBucket = {
+      customerId: string | null;
+      customerName: string | null;
+      revenue: number;
+      cogs: number;
+      quantity: number;
+      salesCount: number;
+      orderIds: Set<string>;
+      linesMissingCost: number;
+      revenueMissingCost: number;
+    };
+    const buckets = new Map<string, CustomerBucket>();
+
+    let revenue = 0;
+    let cogs = 0;
+    let linesMissingCost = 0;
+    let revenueMissingCost = 0;
+
+    for (const group of grouped) {
+      const order = orderById.get(group.salesOrderId);
+      const key = order?.customerId ?? UNASSIGNED_KEY;
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = {
+          customerId: order?.customerId ?? null,
+          customerName: order?.customerName ?? null,
+          revenue: 0,
+          cogs: 0,
+          quantity: 0,
+          salesCount: 0,
+          orderIds: new Set<string>(),
+          linesMissingCost: 0,
+          revenueMissingCost: 0,
+        };
+        buckets.set(key, bucket);
+      }
+      // Prefer a non-empty customerName if a later order supplies one (walk-in orders
+      // may carry a name even when customerId is null / inconsistent).
+      if (!bucket.customerName && order?.customerName) bucket.customerName = order.customerName;
+
+      const orderRevenue = Number(group._sum.lineTotal ?? 0) - Number(group._sum.taxAmount ?? 0);
+      const orderCogs = Number(group._sum.cogsAmount ?? 0);
+      bucket.revenue += orderRevenue;
+      bucket.cogs += orderCogs;
+      bucket.quantity += Number(group._sum.quantity ?? 0);
+      bucket.salesCount += group._count._all;
+      bucket.orderIds.add(group.salesOrderId);
+      revenue += orderRevenue;
+      cogs += orderCogs;
+
+      const missing = missingByOrder.get(group.salesOrderId);
+      if (missing) {
+        const missingRevenue =
+          Number(missing._sum.lineTotal ?? 0) - Number(missing._sum.taxAmount ?? 0);
+        bucket.linesMissingCost += missing._count._all;
+        bucket.revenueMissingCost += missingRevenue;
+        linesMissingCost += missing._count._all;
+        revenueMissingCost += missingRevenue;
+      }
+    }
+
+    const customers = [...buckets.values()].map((bucket) => {
+      const rowRevenue = roundMoney(bucket.revenue);
+      const rowCogs = roundMoney(bucket.cogs);
+      const rowGrossProfit = roundMoney(rowRevenue - rowCogs);
+      return {
+        customerId: bucket.customerId,
+        customerName:
+          bucket.customerName ?? (bucket.customerId ? null : 'Unassigned / Walk-in'),
+        revenue: rowRevenue,
+        cogs: rowCogs,
+        grossProfit: rowGrossProfit,
+        grossMarginPct: rowRevenue > 0 ? roundPercent((rowGrossProfit / rowRevenue) * 100) : 0,
+        quantity: bucket.quantity,
+        orderCount: bucket.orderIds.size,
+        lineCount: bucket.salesCount,
+        linesMissingCost: bucket.linesMissingCost,
+        revenueMissingCost: roundMoney(bucket.revenueMissingCost),
+        hasMissingCost: bucket.linesMissingCost > 0,
+      };
+    });
+    // Sort by profit desc (task requirement); tie-break on revenue desc for stability.
+    customers.sort((a, b) => b.grossProfit - a.grossProfit || b.revenue - a.revenue);
+
+    revenue = roundMoney(revenue);
+    cogs = roundMoney(cogs);
+    const grossProfit = roundMoney(revenue - cogs);
+    return {
+      summary: {
+        revenue,
+        cogs,
+        grossProfit,
+        grossMarginPct: revenue > 0 ? roundPercent((grossProfit / revenue) * 100) : 0,
+        customerCount: customers.length,
+        linesMissingCost,
+        revenueMissingCost: roundMoney(revenueMissingCost),
+      },
+      customers,
     };
   }
 
@@ -887,6 +1045,20 @@ export class ProfitService {
         message: row.message,
       }));
       fileName = 'below-cost-attempt-audit';
+    } else if (report === 'customer-summary') {
+      const payload = await this.customerSummary(query, user);
+      rows = payload.customers.map((row) => ({
+        customerName: row.customerName,
+        revenue: row.revenue,
+        cogs: row.cogs,
+        grossProfit: row.grossProfit,
+        grossMarginPct: row.grossMarginPct,
+        quantity: row.quantity,
+        orderCount: row.orderCount,
+        lineCount: row.lineCount,
+        linesMissingCost: row.linesMissingCost,
+      }));
+      fileName = 'customer-profitability';
     } else {
       const payload = await this.productSummary(query, user);
       rows = payload.products.map((row) => ({

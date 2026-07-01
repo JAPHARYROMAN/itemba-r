@@ -37,6 +37,31 @@ interface ProductProfitRow {
   hasMissingCost?: boolean;
 }
 
+interface CustomerProfitSummary {
+  revenue: number;
+  cogs: number;
+  grossProfit: number;
+  grossMarginPct: number;
+  customerCount: number;
+  linesMissingCost?: number;
+  revenueMissingCost?: number;
+}
+
+interface CustomerProfitRow {
+  customerId: string | null;
+  customerName: string | null;
+  revenue: number;
+  cogs: number;
+  grossProfit: number;
+  grossMarginPct: number;
+  quantity: number;
+  orderCount: number;
+  lineCount: number;
+  linesMissingCost?: number;
+  revenueMissingCost?: number;
+  hasMissingCost?: boolean;
+}
+
 interface CostGapRow {
   type: string;
   productId: string;
@@ -151,8 +176,12 @@ export default function OperationsProfitPage() {
     loading: scopeLoading,
   } = useOrgScope(companyId, { skipEmployees: true });
 
+  const [viewMode, setViewMode] = useState<'product' | 'customer'>('product');
   const [summary, setSummary] = useState<ProfitSummary | null>(null);
   const [products, setProducts] = useState<ProductProfitRow[]>([]);
+  const [customerSummary, setCustomerSummary] = useState<CustomerProfitSummary | null>(null);
+  const [customers, setCustomers] = useState<CustomerProfitRow[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
   const [gaps, setGaps] = useState<CostGapRow[]>([]);
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
   const [attempts, setAttempts] = useState<BelowCostAttemptRow[]>([]);
@@ -244,8 +273,49 @@ export default function OperationsProfitPage() {
     // query fields are intentionally expanded so ledger refreshes with filters.
   }, [query, selectedProduct]);
 
+  // Customer profitability is company-scoped by a path param, so the endpoint
+  // requires a specific company. Fetch lazily only when the customer view is
+  // active and a company is selected; the summary/rows come back sorted by
+  // gross profit desc from the backend.
+  useEffect(() => {
+    if (!canView || viewMode !== 'customer' || !companyId) {
+      setCustomerSummary(null);
+      setCustomers([]);
+      return;
+    }
+    let cancelled = false;
+    setCustomersLoading(true);
+    setError('');
+    // companyId is carried by the path segment; the remaining scope/date filters
+    // ride along in the query string, matching the product view's filters.
+    backendGet<unknown>(`/profit/customer-summary/${companyId}`, {
+      query: { divisionId, branchId, dateFrom, dateTo },
+    })
+      .then((payload) => {
+        if (cancelled) return;
+        const result = unwrapNested<{
+          summary?: CustomerProfitSummary;
+          customers?: CustomerProfitRow[];
+        }>(payload);
+        setCustomerSummary(result.summary ?? null);
+        setCustomers(safeRows(result.customers));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setCustomerSummary(null);
+        setCustomers([]);
+        setError(err instanceof Error ? err.message : 'Failed to load customer profitability');
+      })
+      .finally(() => {
+        if (!cancelled) setCustomersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canView, viewMode, companyId, divisionId, branchId, dateFrom, dateTo]);
+
   const downloadExport = async (
-    report: 'product-summary' | 'cost-gaps' | 'below-cost-attempts',
+    report: 'product-summary' | 'customer-summary' | 'cost-gaps' | 'below-cost-attempts',
   ) => {
     setActionLoading(true);
     setError('');
@@ -344,7 +414,7 @@ export default function OperationsProfitPage() {
     <div className="space-y-5">
       <PageHeader
         title="Profit"
-        subtitle="Product profitability, frozen COGS, margin control, and cost gaps."
+        subtitle="Product and customer profitability, frozen COGS, margin control, and cost gaps."
       />
 
       <Card>
@@ -408,13 +478,47 @@ export default function OperationsProfitPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <div
+              className="inline-flex overflow-hidden rounded-lg border"
+              style={{ borderColor: 'var(--aurora-border)' }}
+              role="tablist"
+              aria-label="Profitability view"
+            >
+              <Btn
+                variant={viewMode === 'product' ? 'primary' : 'ghost'}
+                size="sm"
+                className="rounded-none border-0"
+                role="tab"
+                aria-selected={viewMode === 'product'}
+                onClick={() => setViewMode('product')}
+              >
+                By Product
+              </Btn>
+              <Btn
+                variant={viewMode === 'customer' ? 'primary' : 'ghost'}
+                size="sm"
+                className="rounded-none border-0"
+                role="tab"
+                aria-selected={viewMode === 'customer'}
+                onClick={() => setViewMode('customer')}
+              >
+                By Customer
+              </Btn>
+            </div>
             <Btn
               variant="secondary"
               size="sm"
-              disabled={actionLoading}
-              onClick={() => void downloadExport('product-summary')}
+              disabled={
+                actionLoading ||
+                (viewMode === 'customer' && (!companyId || customers.length === 0))
+              }
+              onClick={() =>
+                void downloadExport(
+                  viewMode === 'customer' ? 'customer-summary' : 'product-summary',
+                )
+              }
             >
-              Export Profitability
+              {viewMode === 'customer' ? 'Export Customer Profit' : 'Export Profitability'}
             </Btn>
             <Btn
               variant="secondary"
@@ -519,6 +623,8 @@ export default function OperationsProfitPage() {
         <PageSpinner />
       ) : (
         <>
+          {viewMode === 'product' && (
+          <>
           {(summary?.linesMissingCost ?? 0) > 0 && (
             <div
               role="status"
@@ -749,6 +855,156 @@ export default function OperationsProfitPage() {
                 )}
               </Card>
             </div>
+          )}
+          </>
+          )}
+
+          {viewMode === 'customer' && (
+            <>
+              {!companyId ? (
+                <Card>
+                  <p className="text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                    Select a company above to view customer profitability.
+                  </p>
+                </Card>
+              ) : customersLoading ? (
+                <PageSpinner />
+              ) : (
+                <>
+                  {(customerSummary?.linesMissingCost ?? 0) > 0 && (
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+                    >
+                      <strong>Gross profit may be overstated.</strong>{' '}
+                      {customerSummary?.linesMissingCost} sales line
+                      {(customerSummary?.linesMissingCost ?? 0) === 1 ? '' : 's'} (
+                      {fmtMoney(customerSummary?.revenueMissingCost)} revenue) have no recorded cost,
+                      so their cost is counted as zero.
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-5">
+                    <StatCard
+                      label="Revenue"
+                      value={fmtMoney(customerSummary?.revenue)}
+                      hint={
+                        (customerSummary?.linesMissingCost ?? 0) > 0
+                          ? `${customerSummary?.linesMissingCost} line(s) without cost`
+                          : undefined
+                      }
+                      countUp={false}
+                    />
+                    <StatCard label="COGS" value={fmtMoney(customerSummary?.cogs)} countUp={false} />
+                    <StatCard
+                      label="Gross Profit"
+                      value={fmtMoney(customerSummary?.grossProfit)}
+                      variant={(customerSummary?.grossProfit ?? 0) >= 0 ? 'green' : 'red'}
+                      hint={
+                        (customerSummary?.linesMissingCost ?? 0) > 0 ? 'May be overstated' : undefined
+                      }
+                      countUp={false}
+                    />
+                    <StatCard
+                      label="Gross Margin"
+                      value={`${fmtNumber(customerSummary?.grossMarginPct)}%`}
+                      variant={(customerSummary?.grossMarginPct ?? 0) >= 0 ? 'green' : 'red'}
+                      countUp={false}
+                    />
+                    <StatCard label="Customers" value={customerSummary?.customerCount ?? 0} />
+                  </div>
+
+                  <Card padding="none" className="overflow-hidden">
+                    <div
+                      className="border-b px-4 py-3"
+                      style={{ borderColor: 'var(--aurora-border)' }}
+                    >
+                      <h2 className="text-sm font-semibold">Customer profitability</h2>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <caption className="sr-only">Customer profitability</caption>
+                        <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
+                          <tr
+                            className="text-left text-xs uppercase"
+                            style={{ color: 'var(--aurora-text-muted)' }}
+                          >
+                            <th scope="col" className="px-4 py-3">
+                              Customer
+                            </th>
+                            <th scope="col" className="px-4 py-3 text-right">
+                              Orders
+                            </th>
+                            <th scope="col" className="px-4 py-3 text-right">
+                              Revenue
+                            </th>
+                            <th scope="col" className="px-4 py-3 text-right">
+                              COGS
+                            </th>
+                            <th scope="col" className="px-4 py-3 text-right">
+                              Profit
+                            </th>
+                            <th scope="col" className="px-4 py-3 text-right">
+                              Margin
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {customers.length === 0 ? (
+                            <tr>
+                              <td
+                                className="px-4 py-8 text-center text-sm text-slate-500"
+                                colSpan={6}
+                              >
+                                No confirmed sales in this filter.
+                              </td>
+                            </tr>
+                          ) : (
+                            customers.map((row) => (
+                              <tr
+                                key={row.customerId ?? `unassigned-${row.customerName ?? ''}`}
+                                className="border-t"
+                                style={{ borderColor: 'var(--aurora-border)' }}
+                              >
+                                <td className="px-4 py-3">
+                                  <div className="font-medium">
+                                    {row.customerName ?? 'Unassigned / Walk-in'}
+                                  </div>
+                                  {row.hasMissingCost && (
+                                    <span className="mt-0.5 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                                      cost missing
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-right tabular-nums">
+                                  {fmtNumber(row.orderCount, 0)}
+                                </td>
+                                <td className="px-4 py-3 text-right tabular-nums">
+                                  {fmtMoney(row.revenue)}
+                                </td>
+                                <td className="px-4 py-3 text-right tabular-nums">
+                                  {fmtMoney(row.cogs)}
+                                </td>
+                                <td
+                                  className={`px-4 py-3 text-right tabular-nums ${
+                                    row.grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'
+                                  }`}
+                                >
+                                  {fmtMoney(row.grossProfit)}
+                                </td>
+                                <td className="px-4 py-3 text-right tabular-nums">
+                                  {fmtNumber(row.grossMarginPct)}%
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
+                </>
+              )}
+            </>
           )}
 
           <Card padding="none" className="overflow-hidden">

@@ -338,6 +338,18 @@ export const NAV: NavItem[] = [
         permission: 'receivables.view',
       },
       {
+        href: '/finance/credit-notes',
+        label: 'Credit Notes',
+        iconKey: 'fileText',
+        permission: 'receivables.view',
+      },
+      {
+        href: '/finance/refunds',
+        label: 'Refunds',
+        iconKey: 'creditCard',
+        permission: 'refunds.view',
+      },
+      {
         href: '/finance/payables',
         label: 'Payables',
         iconKey: 'scale',

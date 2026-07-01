@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services';
@@ -462,6 +462,113 @@ export class FinancialReportsService {
     }
     const rows = [...map.values()].sort((a, b) => b.total - a.total);
     return { companyId, rows, totals: this.sumAgingRows(rows) };
+  }
+
+  /**
+   * FULL per-customer A/R aging — every open receivable for ONE customer,
+   * bucketed by days past due server-side. The customer control-center caps
+   * `openReceivables` at take:10, so the FE cannot render true aging from it;
+   * this endpoint returns ALL open rows plus the bucket totals.
+   *
+   * Bucket boundaries are IDENTICAL to getReceivablesAging / getCustomerAging
+   * in this service: floor((asOf - dueDate) / day) with
+   *   days <= 0 -> current, <= 30 -> days1_30, <= 60 -> days31_60,
+   *   <= 90 -> days61_90, else -> over90. A null dueDate counts as current.
+   * Pass `asOf` to age against a historical date; defaults to now.
+   *
+   * Company-scoped exactly like the sibling aging endpoints (companyId filter
+   * + assertCanAccessCompany). customerId is also enforced in the where clause
+   * so no cross-customer rows can leak in.
+   */
+  async getCustomerAgingDetail(
+    companyId: string,
+    customerId: string,
+    asOf?: string,
+    user?: AuthUser,
+  ) {
+    if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
+    const asOfDate = asOf ? new Date(asOf) : new Date();
+    if (isNaN(asOfDate.getTime())) {
+      throw new BadRequestException('Invalid asOf date');
+    }
+    const receivables = await this.prisma.receivable.findMany({
+      where: {
+        companyId,
+        customerId,
+        deletedAt: null,
+        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+      },
+      select: {
+        id: true,
+        receivableNumber: true,
+        customerId: true,
+        customerName: true,
+        amount: true,
+        paidAmount: true,
+        outstandingAmount: true,
+        currency: true,
+        issueDate: true,
+        dueDate: true,
+        status: true,
+        journalEntryId: true,
+      },
+      orderBy: [{ dueDate: 'asc' }, { issueDate: 'asc' }],
+    });
+
+    const buckets = {
+      current: 0,
+      days1_30: 0,
+      days31_60: 0,
+      days61_90: 0,
+      over90: 0,
+      total: 0,
+    };
+    let oldestDaysOverdue = 0;
+    let customerName: string | null = null;
+
+    const receivablesOut = receivables.map((r) => {
+      if (customerName === null) customerName = r.customerName;
+      const amount = Number(r.outstandingAmount);
+      // Same day-diff logic as getCustomerAging (reused, not reinvented).
+      const days = r.dueDate
+        ? Math.floor((asOfDate.getTime() - r.dueDate.getTime()) / (1000 * 60 * 60 * 24))
+        : 0;
+      let bucket: keyof typeof buckets;
+      if (days <= 0) bucket = 'current';
+      else if (days <= 30) bucket = 'days1_30';
+      else if (days <= 60) bucket = 'days31_60';
+      else if (days <= 90) bucket = 'days61_90';
+      else bucket = 'over90';
+      buckets[bucket] += amount;
+      buckets.total += amount;
+      const daysOverdue = Math.max(0, days);
+      oldestDaysOverdue = Math.max(oldestDaysOverdue, daysOverdue);
+      return {
+        id: r.id,
+        receivableNumber: r.receivableNumber,
+        amount: Number(r.amount),
+        paidAmount: Number(r.paidAmount),
+        outstandingAmount: amount,
+        currency: r.currency,
+        issueDate: r.issueDate,
+        dueDate: r.dueDate,
+        status: r.status,
+        journalEntryId: r.journalEntryId,
+        daysOverdue,
+        bucket,
+      };
+    });
+
+    return {
+      companyId,
+      customerId,
+      customerName,
+      asOf: asOfDate,
+      ...buckets,
+      oldestDaysOverdue,
+      receivableCount: receivablesOut.length,
+      receivables: receivablesOut,
+    };
   }
 
   /**

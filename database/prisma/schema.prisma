@@ -381,6 +381,8 @@ model Company {
   expenses             Expense[]
   receivables          Receivable[]
   payables             Payable[]
+  creditNotes          CreditNote[]
+  refunds              Refund[]
   interCompanyTxFrom   InterCompanyTransaction[] @relation("InterCompanyTxFrom")
   interCompanyTxTo     InterCompanyTransaction[] @relation("InterCompanyTxTo")
   financialAttachments FinancialAttachment[]
@@ -727,6 +729,10 @@ model Division {
   payables               Payable[]
   supplierInvoices       SupplierInvoice[]
 
+  // UX Backend Wave 2
+  creditNotes CreditNote[]
+  refunds     Refund[]
+
   @@unique([companyId, code])
   @@index([companyId])
   @@index([type])
@@ -824,6 +830,10 @@ model Branch {
   payables               Payable[]
   supplierInvoices       SupplierInvoice[]
 
+  // UX Backend Wave 2
+  creditNotes CreditNote[]
+  refunds     Refund[]
+
   @@unique([divisionId, code])
   @@index([divisionId])
   @@map("branches")
@@ -889,6 +899,8 @@ model User {
   purchaseOrdersCreated    PurchaseOrder[]     @relation("PurchaseOrderCreatedBy")
   purchaseOrdersConfirmed  PurchaseOrder[]     @relation("PurchaseOrderConfirmedBy")
   purchaseOrdersReceived   PurchaseOrder[]     @relation("PurchaseOrderReceivedBy")
+  creditNotesCreated       CreditNote[]        @relation("CreditNoteCreatedBy")
+  refundsCreated           Refund[]            @relation("RefundCreatedBy")
 
   // Petroleum (Milestone 5)
   fuelShiftsOpened                 FuelShift[]               @relation("ShiftOpenedBy")
@@ -2005,6 +2017,8 @@ model JournalEntry {
   expensesPosted    Expense[]
   receivablesPosted Receivable[]
   payablesPosted    Payable[]
+  creditNotesPosted CreditNote[]
+  refundsPosted     Refund[]
   intercompanyFrom  InterCompanyTransaction[] @relation("InterCompanyFromJE")
   intercompanyTo    InterCompanyTransaction[] @relation("InterCompanyToJE")
 
@@ -2070,6 +2084,7 @@ model CashAccount {
   expenses             Expense[]
   fuelShiftCollections FuelShiftCollection[]
   salesOrders          SalesOrder[]          @relation("SalesOrderCashAccount")
+  refunds              Refund[]
 
   // Westsides (Milestone 6)
   bankReconciliations BankReconciliation[]
@@ -2186,6 +2201,8 @@ model Receivable {
   fuelCreditSales FuelCreditSale[]
   projectBillings ProjectBilling[] @relation("ProjectBillingReceivable")
   trips           Trip[]           @relation("TripReceivable")
+  creditNotes     CreditNote[]
+  refunds         Refund[]
 
   @@unique([companyId, receivableNumber])
   @@index([companyId])
@@ -2238,6 +2255,162 @@ model Payable {
   @@index([companyId, supplierId, dueDate, status])
   @@index([companyId, outstandingAmount, status])
   @@map("payables")
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// CREDIT NOTES & REFUNDS (UX Backend Wave 2)
+// ───────────────────────────────────────────────────────────────────────────────
+
+/// Lifecycle of a customer credit note.
+///   DRAFT  -> editable, not yet posted to the GL.
+///   ISSUED -> posted; a balanced reversing journal entry exists.
+///   VOID   -> issued then reversed; the GL impact has been unwound.
+enum CreditNoteStatus {
+  DRAFT
+  ISSUED
+  VOID
+}
+
+/// Lifecycle of a customer cash/bank refund.
+///   DRAFT -> PAID (pay/post)   PAID -> VOID (void/reverse)
+enum RefundStatus {
+  DRAFT
+  PAID
+  VOID
+}
+
+/// A customer-facing reversal of a prior sale (return, allowance, billing
+/// correction). Issuing posts a balanced reversing journal entry that unwinds
+/// revenue + output VAT + AR; voiding reverses that entry. Optionally applied
+/// against a linked receivable to reduce its outstanding balance.
+model CreditNote {
+  id               String           @id @default(uuid())
+  creditNoteNumber String
+  companyId        String
+  divisionId       String?
+  branchId         String?
+  customerId       String?
+  customerName     String
+  salesOrderId     String?
+  receivableId     String?
+  reason           String?
+  subtotal         Decimal          @db.Decimal(18, 2)
+  taxAmount        Decimal          @default(0) @db.Decimal(18, 2)
+  totalAmount      Decimal          @db.Decimal(18, 2)
+  appliedAmount    Decimal          @default(0) @db.Decimal(18, 2)
+  currency         CurrencyCode     @default(TZS)
+  issueDate        DateTime
+  status           CreditNoteStatus @default(DRAFT)
+  notes            String?
+  journalEntryId   String?
+  createdById      String?
+  deletedAt        DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division     Division?     @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch       Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer     Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  salesOrder   SalesOrder?   @relation(fields: [salesOrderId], references: [id], onDelete: SetNull)
+  receivable   Receivable?   @relation(fields: [receivableId], references: [id], onDelete: SetNull)
+  journalEntry JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  createdBy    User?         @relation("CreditNoteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  lines   CreditNoteLine[]
+  refunds Refund[]
+
+  @@unique([companyId, creditNoteNumber])
+  @@index([companyId])
+  @@index([divisionId])
+  @@index([branchId])
+  @@index([customerId])
+  @@index([salesOrderId])
+  @@index([receivableId])
+  @@index([status])
+  @@index([issueDate])
+  @@index([companyId, status, issueDate])
+  @@map("credit_notes")
+}
+
+model CreditNoteLine {
+  id           String   @id @default(uuid())
+  creditNoteId String
+  companyId    String
+  productId    String?
+  unitId       String?
+  description  String
+  quantity     Decimal  @db.Decimal(18, 4)
+  unitPrice    Decimal  @db.Decimal(18, 2)
+  netAmount    Decimal  @db.Decimal(18, 2)
+  taxAmount    Decimal  @default(0) @db.Decimal(18, 2)
+  lineTotal    Decimal  @db.Decimal(18, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  creditNote CreditNote     @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  product    Product?       @relation(fields: [productId], references: [id], onDelete: SetNull)
+  unit       UnitOfMeasure? @relation(fields: [unitId], references: [id], onDelete: SetNull)
+
+  @@index([creditNoteId])
+  @@index([creditNoteId, createdAt])
+  @@index([companyId])
+  @@index([productId])
+  @@map("credit_note_lines")
+}
+
+/// A cash/bank refund paid to a customer, backed by either an ISSUED credit
+/// note or a receivable-carried customer credit. Paying posts DR AR / CR
+/// Cash|Bank; voiding reverses that entry.
+model Refund {
+  id                      String       @id @default(uuid())
+  refundNumber            String
+  companyId               String
+  divisionId              String?
+  branchId                String?
+  customerId              String?
+  customerName            String?
+  creditNoteId            String?
+  receivableId            String?
+  cashAccountId           String
+  amount                  Decimal      @db.Decimal(18, 2)
+  currency                CurrencyCode @default(TZS)
+  refundDate              DateTime
+  status                  RefundStatus @default(DRAFT)
+  reason                  String?
+  notes                   String?
+  journalEntryId          String?
+  reversalJournalEntryId  String?
+  createdById             String?
+  postedById              String?
+  postedAt                DateTime?
+  voidedAt                DateTime?
+  deletedAt               DateTime?
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division     Division?     @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch       Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer     Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  creditNote   CreditNote?   @relation(fields: [creditNoteId], references: [id], onDelete: SetNull)
+  receivable   Receivable?   @relation(fields: [receivableId], references: [id], onDelete: SetNull)
+  cashAccount  CashAccount   @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
+  journalEntry JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  createdBy    User?         @relation("RefundCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, refundNumber])
+  @@index([companyId])
+  @@index([divisionId])
+  @@index([branchId])
+  @@index([customerId])
+  @@index([creditNoteId])
+  @@index([receivableId])
+  @@index([cashAccountId])
+  @@index([status])
+  @@index([refundDate])
+  @@index([companyId, status, refundDate])
+  @@map("refunds")
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -2501,6 +2674,8 @@ model Customer {
   salesOrders     SalesOrder[]
   fuelCreditSales FuelCreditSale[]
   receivables     Receivable[]
+  creditNotes     CreditNote[]
+  refunds         Refund[]
 
   // Westsides (Milestone 6)
   priceAgreements  CustomerPriceAgreement[]
@@ -2643,6 +2818,9 @@ model UnitOfMeasure {
   harvestUnits           HarvestRecord[]            @relation("HarvestUnit")
   boqUnits               BOQItem[]                  @relation("BOQUnit")
   materialIssueLineUnits ProjectMaterialIssueLine[] @relation("MaterialIssueLineUnit")
+
+  // UX Backend Wave 2
+  creditNoteLines CreditNoteLine[]
 
   @@index([unitType])
   @@map("units_of_measure")
@@ -2799,6 +2977,9 @@ model Product {
   // Milestone 8
   menuItems            MenuItem[]
   restaurantOrderLines RestaurantOrderLine[]
+
+  // UX Backend Wave 2
+  creditNoteLines CreditNoteLine[]
 
   @@unique([companyId, productCode])
   @@index([companyId])
@@ -2988,6 +3169,7 @@ model SalesOrder {
 
   lines           SalesOrderLine[]
   commissions     SalesCommission[]
+  creditNotes     CreditNote[]
   projectBillings ProjectBilling[]  @relation("ProjectBillingSalesOrder")
   trips           Trip[]            @relation("TripSalesOrder")
 

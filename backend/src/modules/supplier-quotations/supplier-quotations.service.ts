@@ -1,9 +1,18 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { AccessLevel } from '@prisma/client';
+import { AccessLevel, SupplierQuotationStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
+
+// Pre-decision statuses from which a supplier quotation may still be accepted or
+// rejected. Must stay in sync with the SupplierQuotationStatus enum in schema.prisma.
+// ACCEPTED/REJECTED/EXPIRED/CANCELLED are terminal and therefore not decidable.
+const DECIDABLE_STATUSES: SupplierQuotationStatus[] = [
+  SupplierQuotationStatus.DRAFT,
+  SupplierQuotationStatus.RECEIVED,
+  SupplierQuotationStatus.EVALUATED,
+];
 
 @Injectable()
 export class SupplierQuotationsService {
@@ -69,16 +78,16 @@ export class SupplierQuotationsService {
 
   async accept(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
-    if (!['DRAFT', 'SUBMITTED'].includes(existing.status)) throw new BadRequestException('Cannot accept in current status');
-    const updated = await this.prisma.supplierQuotation.update({ where: { id }, data: { status: 'ACCEPTED', acceptedAt: new Date(), acceptedById: user.id } });
+    if (!DECIDABLE_STATUSES.includes(existing.status)) throw new BadRequestException('Cannot accept in current status');
+    const updated = await this.prisma.supplierQuotation.update({ where: { id }, data: { status: SupplierQuotationStatus.ACCEPTED, acceptedAt: new Date(), acceptedById: user.id } });
     await this.auditLogs.log({ action: 'ACCEPT', entityType: 'SupplierQuotation', entityId: id, userId: user.id, companyId: existing.companyId });
     return updated;
   }
 
   async reject(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
-    if (!['DRAFT', 'SUBMITTED'].includes(existing.status)) throw new BadRequestException('Cannot reject in current status');
-    const updated = await this.prisma.supplierQuotation.update({ where: { id }, data: { status: 'REJECTED' as any } });
+    if (!DECIDABLE_STATUSES.includes(existing.status)) throw new BadRequestException('Cannot reject in current status');
+    const updated = await this.prisma.supplierQuotation.update({ where: { id }, data: { status: SupplierQuotationStatus.REJECTED } });
     await this.auditLogs.log({ action: 'REJECT', entityType: 'SupplierQuotation', entityId: id, userId: user.id, companyId: existing.companyId });
     return updated;
   }

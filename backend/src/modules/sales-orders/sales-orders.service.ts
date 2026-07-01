@@ -2427,6 +2427,27 @@ export class SalesOrdersService {
     if (!['DRAFT', 'CONFIRMED'].includes(existing.status as string)) {
       throw new BadRequestException('Only DRAFT or CONFIRMED sales orders can be cancelled');
     }
+    // Double-reversal guard (fail-closed): if an ISSUED credit note already
+    // exists against this order, revenue/VAT/AR have ALREADY been reversed by
+    // that credit note. Letting cancel() run its own confirmation reversal here
+    // would unwind the same amounts a second time and double-count the trial
+    // balance. Reject and require voiding the credit note first. This is purely
+    // additive — it changes nothing about the existing reversal / receivable
+    // zeroing behaviour below.
+    const issuedCreditNote = await this.prisma.creditNote.findFirst({
+      where: {
+        salesOrderId: id,
+        companyId: existing.companyId,
+        status: 'ISSUED',
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (issuedCreditNote) {
+      throw new ConflictException(
+        'Cannot cancel a sales order that has an issued credit note against it; void the credit note first.',
+      );
+    }
     // Money guard: a cash sale (paid at confirmation) or a partially/fully paid
     // credit order has collected cash. Cancelling here only reverses stock and
     // zeroes the receivable's outstanding — it posts NO reversing cash/journal

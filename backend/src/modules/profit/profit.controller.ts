@@ -16,6 +16,20 @@ export class ProfitController {
     return this.profit.productSummary(query, user);
   }
 
+  // Company-scoped via the path param, merged into the query object so it flows
+  // through the same companyWhereFor scoping as product-summary. companyScope still
+  // asserts the user can access this company, so the path param cannot be used to
+  // read another tenant's data.
+  @Get('customer-summary/:companyId')
+  @RequireAnyPermissions('profit.view', 'operations.reports.view')
+  customerSummary(
+    @Param('companyId') companyId: string,
+    @Query() query: Record<string, string | undefined>,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.profit.customerSummary({ ...query, companyId }, user);
+  }
+
   @Get('cost-gaps')
   @RequireAnyPermissions('profit.view', 'operations.reports.view')
   costGaps(@Query() query: Record<string, string | undefined>, @CurrentUser() user: AuthUser) {

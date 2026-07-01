@@ -185,6 +185,40 @@ interface CustomerControlCenter {
   };
 }
 
+// Server-side per-customer aging (GET /financial-reports/customer-aging-detail/
+// :companyId/:customerId). Unbounded + bucketed on the backend, so this is the
+// TRUE aging — the source of record for the A/R Aging card below.
+type ServerBucket = 'current' | 'days1_30' | 'days31_60' | 'days61_90' | 'over90';
+
+interface CustomerAgingDetail {
+  companyId: string;
+  customerId: string;
+  customerName: string | null;
+  asOf: string;
+  current: number;
+  days1_30: number;
+  days31_60: number;
+  days61_90: number;
+  over90: number;
+  total: number;
+  oldestDaysOverdue: number;
+  receivableCount: number;
+  receivables: Array<{
+    id: string;
+    receivableNumber: string;
+    amount: number;
+    paidAmount: number;
+    outstandingAmount: number;
+    currency: string;
+    issueDate: string;
+    dueDate: string | null;
+    status: string;
+    journalEntryId: string | null;
+    daysOverdue: number;
+    bucket: ServerBucket;
+  }>;
+}
+
 const TABS: Tab[] = [
   'Overview',
   'Sales',
@@ -258,6 +292,44 @@ interface AgingRow {
   count: number;
 }
 
+// Maps the backend's bucket keys to the display labels used by AGING_ORDER/TONE.
+const SERVER_BUCKET_LABEL: Record<ServerBucket, AgingKey> = {
+  current: 'Current',
+  days1_30: '1-30 days',
+  days31_60: '31-60 days',
+  days61_90: '61-90 days',
+  over90: '90+ days',
+};
+
+// Builds the aging rows from the TRUE server-side aging detail. Amounts come
+// straight from the backend bucket sums; per-bucket counts are derived from the
+// returned receivable list so we can still show "N invoices" per bucket.
+function buildServerAging(detail: CustomerAgingDetail): { rows: AgingRow[]; total: number } {
+  const amounts: Record<AgingKey, number> = {
+    Current: detail.current,
+    '1-30 days': detail.days1_30,
+    '31-60 days': detail.days31_60,
+    '61-90 days': detail.days61_90,
+    '90+ days': detail.over90,
+  };
+  const counts: Record<AgingKey, number> = {
+    Current: 0,
+    '1-30 days': 0,
+    '31-60 days': 0,
+    '61-90 days': 0,
+    '90+ days': 0,
+  };
+  for (const receivable of detail.receivables) {
+    const outstanding = Number(receivable.outstandingAmount ?? 0);
+    if (!Number.isFinite(outstanding) || outstanding <= 0) continue;
+    counts[SERVER_BUCKET_LABEL[receivable.bucket]] += 1;
+  }
+  return {
+    rows: AGING_ORDER.map((key) => ({ key, amount: Number(amounts[key] ?? 0), count: counts[key] })),
+    total: Number(detail.total ?? 0),
+  };
+}
+
 // Builds the current/1-30/31-60/61-90/90+ breakdown from the customer's
 // receivables. Receivables without a due date fall into "Current".
 function buildAging(receivables: Receivable[]): { rows: AgingRow[]; total: number } {
@@ -321,6 +393,7 @@ export default function CustomerDetailPage() {
   const customerId = Array.isArray(params.id) ? params.id[0] : params.id;
   const { hasPermission } = useAuth();
   const [data, setData] = useState<CustomerControlCenter | null>(null);
+  const [agingDetail, setAgingDetail] = useState<CustomerAgingDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<Tab>('Overview');
@@ -331,6 +404,7 @@ export default function CustomerDetailPage() {
   const [updatingStatus, setUpdatingStatus] = useState(false);
 
   const canView = hasPermission('customers.view');
+  const canViewFinanceReports = hasPermission('finance.reports.view');
   const canGenerateStatements = hasPermission('customer_statements.generate');
   const canManageCustomers = hasPermission('customers.manage');
   const canManageReceivables = hasPermission('receivables.manage');
@@ -345,6 +419,24 @@ export default function CustomerDetailPage() {
         `/customers/${customerId}/control-center`,
       );
       setData(record);
+
+      // Pull the TRUE, unbounded per-customer aging from financial-reports so the
+      // A/R Aging card reflects ALL open invoices (not the control-center's
+      // take:10 slice). Best-effort: gated on finance.reports.view, and a failure
+      // here must not blank the page — the card falls back to the client-side
+      // estimate built from the control-center receivables when detail is null.
+      if (canViewFinanceReports) {
+        try {
+          const detail = await backendGet<CustomerAgingDetail>(
+            `/financial-reports/customer-aging-detail/${record.customer.companyId}/${customerId}`,
+          );
+          setAgingDetail(detail);
+        } catch {
+          setAgingDetail(null);
+        }
+      } else {
+        setAgingDetail(null);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load customer';
       setError(message);
@@ -352,7 +444,7 @@ export default function CustomerDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [canView, customerId]);
+  }, [canView, canViewFinanceReports, customerId]);
 
   useEffect(() => {
     load();
@@ -415,25 +507,31 @@ export default function CustomerDetailPage() {
     return 'text-emerald-300';
   }, [data?.summary.creditUtilizationPct]);
 
-  // Prefer the full open-receivables list (with due dates) for aging; fall back
-  // to recentReceivables if the control-center payload omits openReceivables.
+  // A/R aging is driven by the TRUE server-side aging detail
+  // (financial-reports/customer-aging-detail) — unbounded and bucketed on the
+  // backend, so the per-bucket breakdown AND total cover every open invoice.
   //
-  // IMPORTANT: the backend control-center caps openReceivables at take:10
-  // (10 most-recent by issueDate), so the per-bucket breakdown only reflects the
-  // LISTED invoices — it is NOT the true aggregate. The headline "Total
-  // Outstanding" is therefore driven from summary.openReceivableBalance (an
-  // unbounded aggregate sum) instead of the bucket sum. A proper per-customer
-  // aging endpoint (unbounded, bucketed on the backend) is the correct fix and
-  // is tracked for Wave B.
+  // Fallback: if that endpoint is unavailable (no finance.reports.view, or a
+  // transient failure), fall back to a client-side estimate over the
+  // control-center receivables. That slice is capped (take:10), so the fallback
+  // is flagged partial via `isServer: false` and the card surfaces the caveat.
   const aging = useMemo(() => {
-    if (!data) return { rows: [] as AgingRow[], total: 0, listedCount: 0 };
+    if (agingDetail) {
+      const built = buildServerAging(agingDetail);
+      return {
+        ...built,
+        isServer: true,
+        listedCount: agingDetail.receivableCount,
+      };
+    }
+    if (!data) return { rows: [] as AgingRow[], total: 0, isServer: false, listedCount: 0 };
     const source =
       data.openReceivables && data.openReceivables.length > 0
         ? data.openReceivables
         : data.recentReceivables;
     const built = buildAging(source);
-    return { ...built, listedCount: source.length };
-  }, [data]);
+    return { ...built, isServer: false, listedCount: source.length };
+  }, [agingDetail, data]);
 
   if (!canView) {
     return (
@@ -578,14 +676,19 @@ export default function CustomerDetailPage() {
       </div>
 
       {(() => {
-        // Headline uses the TRUE aggregate (unbounded backend sum), not the
-        // capped bucket total, so exposure reconciles with the Open AR StatCard.
-        const totalOutstanding = summary.openReceivableBalance;
-        // The buckets only cover the listed (most-recent) invoices. If the true
-        // total exceeds the bucketed sum, older open invoices exist but were not
-        // returned by the control-center (take:10) — surface that gap.
+        // When the true server-side aging is available, the bucket total IS the
+        // complete outstanding balance (every open invoice). Otherwise we fall
+        // back to summary.openReceivableBalance (an unbounded aggregate sum) so
+        // the headline still reconciles with the Open AR StatCard even though the
+        // client-side buckets only cover the control-center's capped slice.
+        const totalOutstanding = aging.isServer
+          ? aging.total
+          : summary.openReceivableBalance;
+        // Only meaningful in the fallback path: if the true total exceeds the
+        // bucketed sum, older open invoices exist but weren't in the capped
+        // control-center slice. Never partial once server aging is in play.
         const unaccounted = Math.max(0, totalOutstanding - aging.total);
-        const isPartial = unaccounted > 0.005;
+        const isPartial = !aging.isServer && unaccounted > 0.005;
         const hasAnyOutstanding = totalOutstanding > 0 || aging.total > 0;
         return (
           <Card className="p-5">
@@ -615,8 +718,9 @@ export default function CustomerDetailPage() {
               <>
             <div className="mt-4 flex flex-wrap items-baseline justify-between gap-2">
               <p className="text-xs font-medium uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
-                Aging (latest {aging.listedCount}{' '}
-                {aging.listedCount === 1 ? 'invoice' : 'invoices'})
+                {aging.isServer
+                  ? `Aging (${aging.listedCount} ${aging.listedCount === 1 ? 'invoice' : 'invoices'})`
+                  : `Aging (latest ${aging.listedCount} ${aging.listedCount === 1 ? 'invoice' : 'invoices'})`}
               </p>
               {isPartial && (
                 <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>

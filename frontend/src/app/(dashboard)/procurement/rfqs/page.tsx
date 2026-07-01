@@ -148,13 +148,9 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
-// Backend RequestForQuotation.rfqNumber is required with no default and the
-// service does not generate one, so we mint a readable, reasonably-unique code
-// client-side (mirrors requisitions/page.tsx's requisitionCode()).
-function rfqCode() {
-  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  return `RFQ-${stamp}-${Date.now().toString(36).toUpperCase().slice(-4)}`;
-}
+// The backend server-generates a company-scoped, race-safe rfqNumber
+// (RFQ-{YYYY}-00001) via EntityCodeGeneratorService, so the client no longer
+// mints one — the server owns numbering.
 
 function CreateRfqModal({
   companies,
@@ -217,7 +213,7 @@ function CreateRfqModal({
     setError('');
     try {
       const body: Record<string, unknown> = {
-        rfqNumber: rfqCode(),
+        // rfqNumber is intentionally omitted — the backend server-generates it.
         companyId: form.companyId,
         title: form.title.trim(),
       };

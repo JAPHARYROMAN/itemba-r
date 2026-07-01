@@ -194,6 +194,10 @@ import { DataIsolationModule } from './modules/data-isolation/data-isolation.mod
 import { DataIsolationTestsModule } from './modules/data-isolation-tests/data-isolation-tests.module';
 import { DataIsolationIssuesModule } from './modules/data-isolation-issues/data-isolation-issues.module';
 
+// ── UX Backend Wave 2 — Credit Notes & Refunds ──────────────────────────────
+import { CreditNotesModule } from './modules/credit-notes/credit-notes.module';
+import { RefundsModule } from './modules/refunds/refunds.module';
+
 // M16 - QA, Launch Readiness, Documentation, Training, Support
 
 import { HealthController } from './common/health.controller';
@@ -401,6 +405,9 @@ import { RolesGuard } from './common/guards/roles.guard';
     DataIsolationModule,
     DataIsolationTestsModule,
     DataIsolationIssuesModule,
+    // ── UX Backend Wave 2 — Credit Notes & Refunds ────────────────────────────
+    CreditNotesModule,
+    RefundsModule,
     // M16 - QA, Launch Readiness, Documentation, Training, Support
   ],
   controllers: [HealthController],

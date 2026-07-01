@@ -110,6 +110,9 @@ function makeService() {
       findMany: jest.fn(),
       update: jest.fn(),
     },
+    creditNote: {
+      findFirst: jest.fn(async () => null),
+    },
   } as any;
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const inventoryMovements = { createMovement: jest.fn().mockResolvedValue(undefined) } as any;
@@ -569,6 +572,35 @@ describe('SalesOrdersService cancel money guard', () => {
     expect(prisma.salesOrder.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'CANCELLED' }) }),
     );
+  });
+
+  it('blocks cancelling when an ISSUED credit note references the order (double-reversal guard)', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      persistedOrder({
+        status: 'CONFIRMED',
+        paidAmount: 0,
+        outstandingAmount: 200,
+        paymentStatus: 'UNPAID',
+        receivableId: null,
+      }),
+    );
+    prisma.creditNote.findFirst.mockResolvedValue({ id: 'cn-1' });
+
+    await expect(service.cancel('so-1', user)).rejects.toThrow('issued credit note');
+    // Company-scoped, ISSUED-only lookup against this sales order.
+    expect(prisma.creditNote.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          salesOrderId: 'so-1',
+          companyId: 'company-1',
+          status: 'ISSUED',
+          deletedAt: null,
+        }),
+      }),
+    );
+    // No reversal / cancellation side effects run once the guard trips.
+    expect(prisma.salesOrder.update).not.toHaveBeenCalled();
   });
 });
 

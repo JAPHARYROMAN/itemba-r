@@ -142,6 +142,17 @@ export class FinancialReportsController {
     return this.service.getCustomerAging(companyId, user);
   }
 
+  @Get('customer-aging-detail/:companyId/:customerId')
+  @RequirePermissions('finance.reports.view')
+  getCustomerAgingDetail(
+    @Param('companyId') companyId: string,
+    @Param('customerId') customerId: string,
+    @Query() q: ReportQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.getCustomerAgingDetail(companyId, customerId, q.asOf, user);
+  }
+
   @Get('supplier-aging/:companyId')
   @RequirePermissions('finance.reports.view')
   getSupplierAging(@Param('companyId') companyId: string, @CurrentUser() user: AuthUser) {
