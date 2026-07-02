@@ -39,7 +39,20 @@ function makeHarness() {
     code: 'NEW',
     status: 'ACTIVE',
   };
+  const existingCompany = {
+    id: 'company-seeded',
+    groupId: 'group-1',
+    name: 'Seeded Company Ltd',
+    code: 'SEEDED',
+    status: 'ACTIVE',
+    industryType: 'Retail',
+  };
   const companyCreate = jest.fn().mockResolvedValue(createdCompany);
+  const companyFindFirst = jest.fn().mockResolvedValue(existingCompany);
+  const companyUpdate = jest.fn().mockResolvedValue({
+    ...existingCompany,
+    name: 'Updated Seeded Company Ltd',
+  });
   const accessUpsert = jest.fn().mockResolvedValue({
     userId: 'user-1',
     companyId: 'company-new',
@@ -52,18 +65,29 @@ function makeHarness() {
   const prisma = {
     company: {
       create: jest.fn(),
+      findFirst: companyFindFirst,
       findMany: companyFindMany,
       count: companyCount,
+      update: companyUpdate,
+    },
+    branch: {
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    division: {
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     userCompanyAccess: {
       findMany: jest.fn().mockResolvedValue([]),
     },
-    $transaction: jest.fn(async (cb: any) =>
-      cb({
-        company: { create: companyCreate },
-        userCompanyAccess: { upsert: accessUpsert },
-      }),
-    ),
+    $transaction: jest.fn(async (arg: any) => {
+      if (typeof arg === 'function') {
+        return arg({
+          company: { create: companyCreate },
+          userCompanyAccess: { upsert: accessUpsert },
+        });
+      }
+      return Promise.all(arg);
+    }),
   } as any;
 
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
@@ -82,8 +106,10 @@ function makeHarness() {
     permissionCache,
     companyCreate,
     accessUpsert,
+    companyFindFirst,
     companyFindMany,
     companyCount,
+    companyUpdate,
   };
 }
 
@@ -129,6 +155,72 @@ describe('CompaniesService.create', () => {
         severity: AuditSeverity.HIGH,
       }),
     );
+  });
+});
+
+describe('CompaniesService registry administration', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('allows a GROUP-scoped company administrator to update seeded companies without explicit company access', async () => {
+    const harness = makeHarness();
+    const user = groupUser({
+      companyId: null,
+      companyAccess: [],
+      permissions: ['companies.update'],
+    });
+
+    await expect(
+      harness.service.update('company-seeded', { name: 'Updated Seeded Company Ltd' }, user),
+    ).resolves.toEqual(expect.objectContaining({ id: 'company-seeded' }));
+
+    expect(harness.companyFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'company-seeded', deletedAt: null } }),
+    );
+    expect(harness.companyUpdate).toHaveBeenCalledWith({
+      where: { id: 'company-seeded' },
+      data: { name: 'Updated Seeded Company Ltd' },
+    });
+  });
+
+  it('allows a GROUP-scoped company administrator to delete seeded companies without explicit company access', async () => {
+    const harness = makeHarness();
+    const user = groupUser({
+      companyId: null,
+      companyAccess: [],
+      permissions: ['companies.delete'],
+    });
+
+    await expect(harness.service.remove('company-seeded', user)).resolves.toEqual(
+      expect.objectContaining({ id: 'company-seeded' }),
+    );
+
+    expect(harness.prisma.branch.updateMany).toHaveBeenCalledWith({
+      where: { deletedAt: null, division: { companyId: 'company-seeded' } },
+      data: expect.objectContaining({ isActive: false }),
+    });
+    expect(harness.prisma.division.updateMany).toHaveBeenCalledWith({
+      where: { companyId: 'company-seeded', deletedAt: null },
+      data: expect.objectContaining({ isActive: false }),
+    });
+    expect(harness.companyUpdate).toHaveBeenCalledWith({
+      where: { id: 'company-seeded' },
+      data: expect.objectContaining({ deletedAt: expect.any(Date) }),
+    });
+  });
+
+  it('still requires MANAGE access for non-group users', async () => {
+    const harness = makeHarness();
+    const user = companyUser({
+      companyId: null,
+      companyAccess: [{ companyId: 'company-seeded', accessLevel: AccessLevel.READ }],
+      permissions: ['companies.update'],
+    });
+
+    await expect(
+      harness.service.update('company-seeded', { name: 'Blocked Update Ltd' }, user),
+    ).rejects.toThrow();
+
+    expect(harness.companyUpdate).not.toHaveBeenCalled();
   });
 });
 

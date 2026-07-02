@@ -188,7 +188,8 @@ export class CompaniesService {
   }
 
   async update(id: string, dto: UpdateCompanyDto, user: AuthUser) {
-    const existing = await this.findOne(id, user, AccessLevel.MANAGE);
+    const existing = await this.findOne(id);
+    await this.assertCanAdministerRegistryCompany(user, existing.id);
     const company = await this.prisma.company.update({ where: { id }, data: dto });
     await this.auditLogs.log({
       action: 'COMPANY_UPDATED',
@@ -209,7 +210,8 @@ export class CompaniesService {
   }
 
   async remove(id: string, user: AuthUser) {
-    const existing = await this.findOne(id, user, AccessLevel.MANAGE);
+    const existing = await this.findOne(id);
+    await this.assertCanAdministerRegistryCompany(user, existing.id);
     const now = new Date();
     const [, , company] = await this.prisma.$transaction([
       this.prisma.branch.updateMany({
@@ -246,7 +248,8 @@ export class CompaniesService {
   }
 
   async upsertProfile(companyId: string, dto: UpsertCompanyProfileDto, user: AuthUser) {
-    await this.findOne(companyId, user, AccessLevel.MANAGE);
+    const existing = await this.findOne(companyId);
+    await this.assertCanAdministerRegistryCompany(user, existing.id);
     const data = {
       ...dto,
       incorporationDate: dto.incorporationDate ? new Date(dto.incorporationDate) : undefined,
@@ -257,5 +260,10 @@ export class CompaniesService {
       create: { companyId, ...data },
       update: data,
     });
+  }
+
+  private async assertCanAdministerRegistryCompany(user: AuthUser, companyId: string) {
+    if (this.companyScope.isGroupScoped(user)) return;
+    await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.MANAGE);
   }
 }
