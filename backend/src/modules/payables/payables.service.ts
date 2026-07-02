@@ -226,7 +226,7 @@ export class PayablesService {
           supplierName: scope.supplierName ?? dto.supplierName ?? existing.supplierName,
           ...(dto.supplierId !== undefined && { supplierId: dto.supplierId || null }),
           ...(dto.notes !== undefined && { notes: dto.notes }),
-          ...(dto.dueDate && { dueDate: new Date(dto.dueDate) }),
+          ...(dto.dueDate !== undefined && { dueDate: dto.dueDate ? new Date(dto.dueDate) : null }),
           ...(dto.issueDate && { issueDate: new Date(dto.issueDate) }),
         },
       });

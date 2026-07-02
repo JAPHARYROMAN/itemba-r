@@ -54,7 +54,7 @@ interface Payable {
   outstandingAmount: number | string;
   currency: string;
   issueDate: string;
-  dueDate: string;
+  dueDate?: string | null;
   status: 'OPEN' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE' | 'WRITTEN_OFF';
   notes?: string | null;
   companyId: string;
@@ -235,8 +235,16 @@ function payableSupplierName(payable: Payable) {
   return payable.supplier?.name?.trim() || payable.supplierName || 'Unknown supplier';
 }
 
-function agingBucket(dueDate: string): string {
-  const days = Math.floor((Date.now() - new Date(dueDate).getTime()) / 86400000);
+function dateInputValue(value?: string | null): string {
+  if (!value) return '';
+  return value.includes('T') ? value.split('T')[0] : value.slice(0, 10);
+}
+
+function agingBucket(dueDate?: string | null): string {
+  if (!dueDate) return '-';
+  const time = new Date(dueDate).getTime();
+  if (!Number.isFinite(time)) return '-';
+  const days = Math.floor((Date.now() - time) / 86400000);
   if (days <= 0) return 'Current';
   if (days <= 30) return '1-30 days';
   if (days <= 60) return '31-60 days';
@@ -800,8 +808,8 @@ function PayableModal({
           supplierName: initial.supplierName,
           amount: moneyNumber(initial.amount),
           currency: initial.currency,
-          issueDate: initial.issueDate.split('T')[0],
-          dueDate: initial.dueDate.split('T')[0],
+          issueDate: dateInputValue(initial.issueDate),
+          dueDate: dateInputValue(initial.dueDate),
           notes: initial.notes ?? '',
         }
       : { ...BLANK_FORM },
@@ -856,8 +864,8 @@ function PayableModal({
       setError('Valid amount is required');
       return;
     }
-    if (!form.issueDate || !form.dueDate) {
-      setError('Dates are required');
+    if (!form.issueDate) {
+      setError('Issue date is required');
       return;
     }
     setSaving(true);
@@ -867,6 +875,7 @@ function PayableModal({
         ...form,
         supplierId: form.supplierId || null,
         amount: Number(form.amount),
+        dueDate: form.dueDate || null,
         notes: form.notes || undefined,
       };
       const res = await fetch(
@@ -996,7 +1005,6 @@ function PayableModal({
           />
           <FormInput
             label="Due Date"
-            required
             type="date"
             value={form.dueDate}
             onChange={(e) => set('dueDate', e.target.value)}
