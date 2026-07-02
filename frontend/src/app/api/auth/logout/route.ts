@@ -5,7 +5,6 @@ const BACKEND = getBackendInternalUrl();
 const REFRESH_COOKIE = 'itemba_refresh';
 const BACKEND_REFRESH_COOKIE = 'itemba_backend_refresh';
 const AUTH_REFRESH_PATH = '/';
-const LEGACY_AUTH_REFRESH_PATH = '/api/auth/refresh';
 const BACKEND_REFRESH_PATH = '/api/backend';
 const COOKIE_OPTS = {
   httpOnly: true,
@@ -17,11 +16,6 @@ function clearRefreshCookies(res: NextResponse) {
   res.cookies.set(REFRESH_COOKIE, '', {
     ...COOKIE_OPTS,
     path: AUTH_REFRESH_PATH,
-    maxAge: 0,
-  });
-  res.cookies.set(REFRESH_COOKIE, '', {
-    ...COOKIE_OPTS,
-    path: LEGACY_AUTH_REFRESH_PATH,
     maxAge: 0,
   });
   res.cookies.set(BACKEND_REFRESH_COOKIE, '', {
