@@ -338,6 +338,12 @@ export const NAV: NavItem[] = [
         permission: 'receivables.view',
       },
       {
+        href: '/finance/payments',
+        label: 'Customer Payments',
+        iconKey: 'creditCard',
+        permission: 'customer-payments.view',
+      },
+      {
         href: '/finance/credit-notes',
         label: 'Credit Notes',
         iconKey: 'fileText',

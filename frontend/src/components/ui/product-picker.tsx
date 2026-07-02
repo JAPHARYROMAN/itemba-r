@@ -88,8 +88,6 @@ export function ProductPicker({
     return () => {
       cancelled = true;
     };
-    // resolvedForRef tracks which id the label is for; re-resolve on id change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   // Debounced search while the dropdown is open.

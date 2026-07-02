@@ -11,6 +11,7 @@
   "/hr/payroll-runs/[id]/payslips": "/hr/payroll-runs/e2e-payroll-run/payslips",
   "/hr/payslips/[id]": "/hr/payslips/e2e-payslip",
   "/operations/customers/[id]": "/operations/customers/e2e-customer",
+  "/operations/products/[id]": "/operations/products/e2e-product",
   "/operations/purchase-orders/[id]": "/operations/purchase-orders/e2e-purchase-order",
   "/operations/purchase-orders/[id]/print": "/operations/purchase-orders/e2e-purchase-order/print",
   "/operations/sales-orders/[id]": "/operations/sales-orders/e2e-sales-order",
