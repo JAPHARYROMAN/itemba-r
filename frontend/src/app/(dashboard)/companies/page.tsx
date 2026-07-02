@@ -93,6 +93,11 @@ export default function CompaniesPage() {
       return;
     }
 
+    const typedCode = prompt(`Type ${company.code} to confirm this registry delete.`);
+    if (typedCode?.trim() !== company.code) {
+      return;
+    }
+
     setDeletingCompanyId(company.id);
     setActionError(null);
 

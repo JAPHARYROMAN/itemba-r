@@ -219,6 +219,10 @@ export default function CompanyDetailPage() {
     ) {
       return;
     }
+    const typedCode = prompt(`Type ${targetCompany.code} to confirm this registry delete.`);
+    if (typedCode?.trim() !== targetCompany.code) {
+      return;
+    }
     setDeletingCompany(true);
     setDeleteError(null);
     try {
@@ -687,6 +691,10 @@ function DivisionsTab({
     ) {
       return;
     }
+    const typedCode = prompt(`Type ${division.code} to confirm this division delete.`);
+    if (typedCode?.trim() !== division.code) {
+      return;
+    }
     setBusyAction(`division:${division.id}:delete`);
     setActionError(null);
     try {
@@ -723,6 +731,10 @@ function DivisionsTab({
 
   async function archiveBranch(branch: Branch) {
     if (!confirm(`Delete branch/station ${branch.name} from the registry? Historical records remain intact.`)) return;
+    const typedCode = prompt(`Type ${branch.code} to confirm this branch/station delete.`);
+    if (typedCode?.trim() !== branch.code) {
+      return;
+    }
     setBusyAction(`branch:${branch.id}:delete`);
     setActionError(null);
     try {
