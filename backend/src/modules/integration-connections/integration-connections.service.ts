@@ -1,6 +1,9 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import * as dns from 'dns';
 import * as net from 'net';
+import * as http from 'http';
+import * as https from 'https';
+import { URL } from 'url';
 import { AccessLevel, AuditSeverity, IntegrationConnectionStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -283,43 +286,115 @@ export class IntegrationConnectionsService {
   private async probeConnection(connection: Awaited<ReturnType<typeof this.findOneWithProvider>>) {
     const config = this.asRecord(connection.publicConfig);
     const probe = this.resolveProbeTarget(connection, config);
-    // SSRF guard: reject private/loopback/link-local/metadata targets before
-    // any network request is made.
-    await this.assertPublicUrl(probe.url);
+    // SSRF guard: resolve the host once, assert every resolved address is
+    // public, and PIN a vetted IP for the actual request. The request below
+    // connects only to that pinned address (never re-resolving the hostname),
+    // which closes the DNS-rebinding TOCTOU: a host that passed validation
+    // cannot resolve to a private/metadata address at connect time.
+    const pinnedIp = await this.resolvePinnedPublicIp(probe.url);
     const startedAt = Date.now();
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), probe.timeoutMs);
 
-    try {
-      const response = await fetch(probe.url, {
-        method: probe.method,
-        headers: probe.headers,
-        signal: controller.signal,
-        // Do not follow redirects — a 3xx could otherwise bypass the SSRF
-        // pre-flight check and reach an internal target.
-        redirect: 'error',
-      });
-      const durationMs = Date.now() - startedAt;
-      if (!this.isExpectedStatus(response.status, probe.expectedStatuses)) {
-        const body = await response.text().catch(() => '');
-        throw new Error(
-          `HTTP ${response.status} from ${probe.url}${body ? `: ${body.slice(0, 200)}` : ''}`,
-        );
-      }
-      return {
-        url: probe.url,
-        method: probe.method,
-        status: response.status,
-        durationMs,
-      };
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`Timed out after ${probe.timeoutMs}ms probing ${probe.url}`);
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeout);
+    const response = await this.performPinnedRequest(probe, pinnedIp);
+    const durationMs = Date.now() - startedAt;
+    // Reject redirects instead of following them: a 3xx could otherwise point
+    // at an internal target that never went through the pre-flight SSRF check.
+    // (Only treat as a redirect-failure when the caller did not explicitly
+    // whitelist this status.)
+    if (
+      response.status >= 300 &&
+      response.status < 400 &&
+      !(probe.expectedStatuses && probe.expectedStatuses.has(response.status))
+    ) {
+      throw new Error(
+        `Refusing to follow redirect (HTTP ${response.status}) from ${probe.url}`,
+      );
     }
+    if (!this.isExpectedStatus(response.status, probe.expectedStatuses)) {
+      throw new Error(
+        `HTTP ${response.status} from ${probe.url}${
+          response.body ? `: ${response.body.slice(0, 200)}` : ''
+        }`,
+      );
+    }
+    return {
+      url: probe.url,
+      method: probe.method,
+      status: response.status,
+      durationMs,
+    };
+  }
+
+  /**
+   * Performs the probe request against a PINNED IP address. The request never
+   * re-resolves the hostname: a custom `lookup` always returns `pinnedIp`, so
+   * the socket connects to exactly the address that `resolvePinnedPublicIp`
+   * validated. TLS SNI / certificate verification still use the original
+   * hostname via `servername`. Redirects are NOT followed (a 3xx could
+   * otherwise reach an internal target that bypassed the pre-flight check).
+   */
+  private performPinnedRequest(
+    probe: {
+      url: string;
+      method: string;
+      headers: Record<string, any>;
+      timeoutMs: number;
+    },
+    pinnedIp: string,
+  ): Promise<{ status: number; body: string }> {
+    const target = new URL(probe.url);
+    const isHttps = target.protocol === 'https:';
+    const transport = this.httpTransport(isHttps);
+    const family = net.isIP(pinnedIp);
+
+    // Force every connection attempt for this request onto the vetted IP.
+    const lookup: net.LookupFunction = (_hostname, _options, callback) => {
+      // Signature tolerates both (err, address, family) and (err, addresses).
+      (callback as (err: NodeJS.ErrnoException | null, address: string, family: number) => void)(
+        null,
+        pinnedIp,
+        family,
+      );
+    };
+
+    const options: https.RequestOptions = {
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port || (isHttps ? 443 : 80),
+      path: `${target.pathname}${target.search}`,
+      method: probe.method,
+      headers: { host: target.host, ...probe.headers },
+      timeout: probe.timeoutMs,
+      lookup,
+      // Preserve TLS SNI + certificate hostname verification against the
+      // original hostname even though we connect to the pinned IP.
+      ...(isHttps ? { servername: target.hostname } : {}),
+    };
+
+    return new Promise((resolve, reject) => {
+      const req = transport.request(options, (res) => {
+        const status = res.statusCode ?? 0;
+        // Do not follow redirects; capture a small body snippet for diagnostics.
+        const chunks: Buffer[] = [];
+        let bytes = 0;
+        res.on('data', (chunk: Buffer) => {
+          if (bytes < 4096) {
+            chunks.push(chunk);
+            bytes += chunk.length;
+          }
+        });
+        res.on('end', () => {
+          const body = Buffer.concat(chunks).toString('utf8').slice(0, 2000);
+          resolve({ status, body });
+        });
+        res.on('error', reject);
+      });
+
+      req.on('timeout', () => {
+        req.destroy(new Error(`Timed out after ${probe.timeoutMs}ms probing ${probe.url}`));
+      });
+      req.on('error', reject);
+      req.end();
+    });
   }
 
   private resolveProbeTarget(
@@ -391,11 +466,28 @@ export class IntegrationConnectionsService {
   }
 
   /**
-   * SSRF guard. Rejects URLs whose host (literal IP, or any DNS-resolved
-   * address) falls in a private, loopback, link-local, unspecified or
-   * cloud-metadata range. Throws on rejection or DNS failure.
+   * Returns the Node transport module for the probe. Extracted into a seam so
+   * tests can substitute a stub without mutating the frozen `http`/`https`
+   * namespace objects.
    */
-  private async assertPublicUrl(rawUrl: string): Promise<void> {
+  private httpTransport(isHttps: boolean): {
+    request: typeof https.request | typeof http.request;
+  } {
+    return isHttps ? https : http;
+  }
+
+  /**
+   * SSRF guard. Resolves the URL's host (or accepts a literal IP), asserts that
+   * EVERY resolved address is a routable public address, and returns a single
+   * vetted IP to pin the outbound connection to. Rejecting requires all
+   * addresses to be public so a mixed public/private answer cannot be exploited
+   * by picking the public one. Throws on rejection or DNS failure.
+   *
+   * The returned IP is the address the request MUST connect to; because the
+   * request pins this IP (see performPinnedRequest) rather than re-resolving
+   * the hostname, a DNS-rebind between validation and connect is impossible.
+   */
+  private async resolvePinnedPublicIp(rawUrl: string): Promise<string> {
     const url = new URL(rawUrl);
     const host = url.hostname.replace(/^\[|\]$/g, '');
 
@@ -403,7 +495,7 @@ export class IntegrationConnectionsService {
       if (!this.isPublicIp(host)) {
         throw new Error('Refusing to probe a non-public address');
       }
-      return;
+      return host;
     }
 
     let addresses: Array<{ address: string }>;
@@ -420,6 +512,9 @@ export class IntegrationConnectionsService {
         throw new Error('Refusing to probe a non-public address');
       }
     }
+    // Every resolved address passed validation; pin the first one for the
+    // actual request so the socket cannot reach a re-resolved private target.
+    return addresses[0].address;
   }
 
   /** Returns true only if the literal IP is a routable, non-internal address. */

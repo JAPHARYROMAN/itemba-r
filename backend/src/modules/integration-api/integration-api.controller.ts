@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
+import { ExternalMessageStatus } from '@prisma/client';
 import { Public } from '../../common/decorators/public.decorator';
 import { ApiKeyAuthGuard } from '../../common/guards/api-key-auth.guard';
 import { RequireApiScope } from '../../common/decorators/require-api-scope.decorator';
@@ -19,6 +20,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ExternalPaymentsService } from '../external-payments/external-payments.service';
 import { ExternalMessagesService } from '../external-messages/external-messages.service';
 import { CreateExternalPaymentDto } from '../external-payments/dto/create-external-payment.dto';
+import { MessageDeliveryCallbackDto } from './dto/message-delivery-callback.dto';
+import { mapProviderStatus, isDeliveredStatus } from './message-delivery-status';
 
 /**
  * External integration API surface — protected by API-key authentication
@@ -101,20 +104,106 @@ export class IntegrationApiController {
 
   // ─── Messaging ─────────────────────────────────────────────────────────
 
+  /**
+   * Provider delivery-status callback.
+   *
+   * ITMB-AUDIT (missing-logic): this route previously returned
+   * `{ accepted: true }` unconditionally — the provider's delivery status was
+   * discarded and the ExternalMessage row was never marked delivered/failed, so
+   * delivery reporting was permanently stuck at the send-time status. It now:
+   *   - resolves the message within the API key's bound company (matched by id,
+   *     messageNumber, or externalReference) — cross-tenant isolation,
+   *   - maps the provider status string to an ExternalMessageStatus,
+   *   - persists status + deliveredAt/errorMessage/externalReference,
+   *   - is idempotent: replaying the same terminal callback is a no-op update.
+   *
+   * A message that cannot be resolved for this company yields 404 (fail-closed)
+   * so the provider does not treat the callback as applied when it was not.
+   */
   @Post('messages/delivery-callback')
   @RequireApiScope('messages.write')
-  async messageDeliveryCallback(@Body() dto: any, @Req() req: Request) {
-    const apiKey = (req as any).apiKey;
+  async messageDeliveryCallback(
+    @Body() dto: MessageDeliveryCallbackDto,
+    @Req() req: Request,
+  ) {
+    const { companyId } = this.requireBoundCompany(req);
     if (!dto?.messageId) throw new BadRequestException('messageId is required');
-    // Delegate to the external messages service if it exposes a callback method;
-    // otherwise this becomes the integration-side audit trail of the callback.
-    if (typeof (this.externalMessages as any).recordDeliveryCallback === 'function') {
-      return (this.externalMessages as any).recordDeliveryCallback(
-        dto,
-        apiKey.apiClientId ?? apiKey.id,
-      );
+
+    const mappedStatus = mapProviderStatus(dto.status);
+
+    // Resolve strictly within the key's company so a provider bound to tenant A
+    // cannot mutate tenant B's message by guessing an id.
+    const message = await this.prisma.externalMessage.findFirst({
+      where: {
+        companyId,
+        OR: [
+          { id: dto.messageId },
+          { messageNumber: dto.messageId },
+          { externalReference: dto.messageId },
+        ],
+      },
+      select: { id: true, status: true },
+    });
+    if (!message) throw new NotFoundException('External message not found');
+
+    // Unknown / non-terminal provider status: acknowledge without corrupting the
+    // stored status. We still record the provider reference if one was supplied.
+    if (!mappedStatus) {
+      if (dto.providerReference) {
+        await this.prisma.externalMessage.update({
+          where: { id: message.id },
+          data: { externalReference: dto.providerReference },
+        });
+      }
+      return {
+        accepted: true,
+        applied: false,
+        messageId: message.id,
+        status: message.status,
+        reason: `Unrecognised provider status "${dto.status}"; message status unchanged.`,
+      };
     }
-    return { accepted: true, messageId: dto.messageId };
+
+    const eventAt = this.parseCallbackTimestamp(dto.timestamp);
+
+    const data: {
+      status: ExternalMessageStatus;
+      deliveredAt?: Date;
+      errorMessage?: string | null;
+      externalReference?: string;
+    } = { status: mappedStatus };
+
+    if (isDeliveredStatus(mappedStatus)) {
+      data.deliveredAt = eventAt;
+      // Clear any stale error from an earlier failed attempt.
+      data.errorMessage = null;
+    } else if (mappedStatus === ExternalMessageStatus.FAILED) {
+      data.errorMessage = dto.failureReason ?? 'Delivery failed (provider callback)';
+    }
+    if (dto.providerReference) data.externalReference = dto.providerReference;
+
+    const updated = await this.prisma.externalMessage.update({
+      where: { id: message.id },
+      data,
+      select: {
+        id: true,
+        messageNumber: true,
+        status: true,
+        deliveredAt: true,
+        errorMessage: true,
+        externalReference: true,
+        updatedAt: true,
+      },
+    });
+
+    return { accepted: true, applied: true, message: updated };
+  }
+
+  /** Parse a provider-supplied ISO timestamp, defaulting to now() when absent/invalid. */
+  private parseCallbackTimestamp(raw?: string): Date {
+    if (!raw) return new Date();
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
   }
 
   // ─── Webhooks ──────────────────────────────────────────────────────────

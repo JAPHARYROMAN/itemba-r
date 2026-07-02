@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel } from '@prisma/client';
+import { AccessLevel, ScheduleFrequency } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services/company-scope.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -49,8 +49,17 @@ export class ScheduledReportsService {
 
   async create(dto: CreateScheduledReportDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId);
+    // A freshly-created row must arm nextRunAt from its frequency, otherwise the
+    // dispatch selector (nextRunAt: { not: null, lte: now }) never picks it up
+    // and the schedule silently never fires. Only arm active schedules; an
+    // inactive one is armed on activate().
+    const isActive = (dto as { isActive?: boolean }).isActive ?? true;
     const record = await this.prisma.scheduledReport.create({
-      data: { ...dto, createdById: user.id },
+      data: {
+        ...dto,
+        createdById: user.id,
+        nextRunAt: isActive ? this.computeNextRunAt(dto.frequency, new Date()) : null,
+      },
     });
     await this.audit.log({
       userId: user.id,
@@ -63,11 +72,18 @@ export class ScheduledReportsService {
   }
 
   async update(id: string, dto: Partial<CreateScheduledReportDto>, user: AuthUser) {
-    await this.findOne(id, user);
+    const existing = await this.findOne(id, user);
     if (dto.companyId !== undefined) {
       await this.companyScope.assertCanAccessCompany(user, dto.companyId);
     }
-    const record = await this.prisma.scheduledReport.update({ where: { id }, data: { ...dto } });
+    const data: Partial<CreateScheduledReportDto> & { nextRunAt?: Date } = { ...dto };
+    // If the cadence changes on an active schedule, re-derive nextRunAt from the
+    // new frequency so the next fire respects the updated cadence instead of a
+    // window computed from the old one.
+    if (dto.frequency !== undefined && dto.frequency !== existing.frequency && existing.isActive) {
+      data.nextRunAt = this.computeNextRunAt(dto.frequency, new Date());
+    }
+    const record = await this.prisma.scheduledReport.update({ where: { id }, data });
     await this.audit.log({
       userId: user.id,
       action: 'UPDATE',
@@ -80,11 +96,17 @@ export class ScheduledReportsService {
 
   async run(id: string, user: AuthUser) {
     const startedAt = Date.now();
+    // Fetch by id (not through companyWhereFor). companyWhereFor spreads a
+    // { companyId } / { id: { in: [...] } } filter that, for group-level reports
+    // (companyId=null) — and for a group-scoped principal with no explicit
+    // grants (the shape resolveReportPrincipal returns) — clobbers the id filter
+    // to { id: { in: [] } }, so the row can never be found and run() throws
+    // NotFound forever. Authorization is enforced below by assertCanAccessCompany,
+    // which correctly handles the group-level (companyId=null) case.
     const schedule = await this.prisma.scheduledReport.findFirst({
       where: {
         id,
         deletedAt: null,
-        ...((await this.companyScope.companyWhereFor(user)) as any),
       },
       include: {
         reportDefinition: true,
@@ -145,7 +167,21 @@ export class ScheduledReportsService {
       },
     });
 
-    await this.prisma.scheduledReport.update({ where: { id }, data: { lastRunAt: new Date() } });
+    // Stamp lastRunAt and advance nextRunAt. This is idempotent and safe for the
+    // two callers: the job-worker CAS-advances nextRunAt to a FUTURE value BEFORE
+    // invoking run(), so here we only re-arm when the row's nextRunAt is still
+    // null or already due (past) — that is the direct HTTP /run path. When the
+    // worker calls us, nextRunAt is already in the future and we leave it intact,
+    // preventing a double-advance that would skip a window.
+    const completedAt = new Date();
+    const advanceData: { lastRunAt: Date; nextRunAt?: Date } = { lastRunAt: completedAt };
+    if (schedule.isActive) {
+      const current = schedule.nextRunAt ? new Date(schedule.nextRunAt) : null;
+      if (!current || current.getTime() <= completedAt.getTime()) {
+        advanceData.nextRunAt = this.computeNextRunAt(schedule.frequency, completedAt);
+      }
+    }
+    await this.prisma.scheduledReport.update({ where: { id }, data: advanceData });
     await this.audit.log({
       userId: user.id,
       action: 'UPDATE',
@@ -167,17 +203,25 @@ export class ScheduledReportsService {
   }
 
   async activate(id: string, user: AuthUser) {
-    await this.findOne(id, user);
+    const existing = await this.findOne(id, user);
+    // Re-arm nextRunAt on (re)activation if it is missing or stale (in the past),
+    // so a report that was created inactive — or whose window lapsed while
+    // deactivated — becomes due again. An already-armed future window is kept.
+    const data: { isActive: true; nextRunAt?: Date } = { isActive: true };
+    const current = existing.nextRunAt ? new Date(existing.nextRunAt) : null;
+    if (!current || current.getTime() <= Date.now()) {
+      data.nextRunAt = this.computeNextRunAt(existing.frequency, new Date());
+    }
     const record = await this.prisma.scheduledReport.update({
       where: { id },
-      data: { isActive: true },
+      data,
     });
     await this.audit.log({
       userId: user.id,
       action: 'UPDATE',
       entityType: 'ScheduledReport',
       entityId: id,
-      newValue: { isActive: true } as any,
+      newValue: { isActive: true, nextRunAt: data.nextRunAt ?? null } as any,
     });
     return record;
   }
@@ -212,6 +256,35 @@ export class ScheduledReportsService {
       newValue: {} as any,
     });
     return record;
+  }
+
+  /**
+   * Advance a scheduled report's nextRunAt based on its frequency. Kept in lock
+   * step with JobWorkerService.computeNextScheduledReportRunAt so a schedule
+   * armed here and advanced by the dispatch worker use identical cadence math.
+   */
+  private computeNextRunAt(frequency: ScheduleFrequency | string, from: Date): Date {
+    const next = new Date(from);
+    switch (frequency) {
+      case ScheduleFrequency.DAILY:
+        next.setDate(next.getDate() + 1);
+        break;
+      case ScheduleFrequency.WEEKLY:
+        next.setDate(next.getDate() + 7);
+        break;
+      case ScheduleFrequency.QUARTERLY:
+        next.setMonth(next.getMonth() + 3);
+        break;
+      case ScheduleFrequency.ANNUAL:
+        next.setFullYear(next.getFullYear() + 1);
+        break;
+      case ScheduleFrequency.MONTHLY:
+      case ScheduleFrequency.CUSTOM:
+      default:
+        next.setMonth(next.getMonth() + 1);
+        break;
+    }
+    return next;
   }
 
   private buildSnapshotRows(schedule: {

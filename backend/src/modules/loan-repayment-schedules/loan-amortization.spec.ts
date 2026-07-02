@@ -56,3 +56,79 @@ describe('LoanRepaymentSchedulesService — amortization math', () => {
     }
   });
 });
+
+describe('LoanRepaymentSchedulesService — repayment frequency', () => {
+  const svc = new LoanRepaymentSchedulesService(
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
+
+  const amortize = (svc as any).amortize.bind(svc) as (
+    principal: number,
+    periodicRate: number,
+    n: number,
+  ) => Array<{ principal: number; interest: number }>;
+  const frequencyProfile = (svc as any).frequencyProfile.bind(svc) as (
+    frequency: string,
+  ) => { periodsPerYear: number; monthsPerPeriod: number; advance: (d: Date, p: number) => Date };
+  const computePeriodCount = (svc as any).computePeriodCount.bind(svc) as (
+    start: Date,
+    end: Date,
+    profile: { monthsPerPeriod: number },
+  ) => number;
+
+  it('maps each real RepaymentFrequency enum value to the right cadence', () => {
+    expect(frequencyProfile('MONTHLY')).toMatchObject({ periodsPerYear: 12, monthsPerPeriod: 1 });
+    expect(frequencyProfile('QUARTERLY')).toMatchObject({ periodsPerYear: 4, monthsPerPeriod: 3 });
+    expect(frequencyProfile('SEMI_ANNUALLY')).toMatchObject({ periodsPerYear: 2, monthsPerPeriod: 6 });
+    expect(frequencyProfile('ANNUALLY')).toMatchObject({ periodsPerYear: 1, monthsPerPeriod: 12 });
+  });
+
+  it('BULLET/OTHER/unknown fall back to a single balloon period', () => {
+    for (const f of ['BULLET', 'OTHER', 'SOMETHING_ELSE']) {
+      const p = frequencyProfile(f);
+      expect(p.monthsPerPeriod).toBe(0);
+      expect(p.periodsPerYear).toBe(1);
+    }
+  });
+
+  it('QUARTERLY advances due dates by 3 months per installment', () => {
+    const profile = frequencyProfile('QUARTERLY');
+    const start = new Date('2026-01-01T00:00:00.000Z');
+    const d1 = profile.advance(start, 1);
+    const d2 = profile.advance(start, 2);
+    // 3 months and 6 months after the start.
+    expect(d1.getMonth()).toBe(new Date('2026-04-01').getMonth());
+    expect(d2.getMonth()).toBe(new Date('2026-07-01').getMonth());
+  });
+
+  it('computes period count from tenure and cadence (not always monthly)', () => {
+    const start = new Date('2026-01-01T00:00:00.000Z');
+    const end = new Date('2027-01-01T00:00:00.000Z'); // 12 months
+    expect(computePeriodCount(start, end, frequencyProfile('MONTHLY'))).toBe(12);
+    expect(computePeriodCount(start, end, frequencyProfile('QUARTERLY'))).toBe(4);
+    expect(computePeriodCount(start, end, frequencyProfile('SEMI_ANNUALLY'))).toBe(2);
+    expect(computePeriodCount(start, end, frequencyProfile('ANNUALLY'))).toBe(1);
+    // BULLET → single period regardless of tenure.
+    expect(computePeriodCount(start, end, frequencyProfile('BULLET'))).toBe(1);
+  });
+
+  it('periodic rate differs by frequency: a quarterly loan uses annual/4, not annual/12', () => {
+    // A 12% annual loan quarterly should charge ~3% per period on the first
+    // installment, whereas the buggy monthly assumption charged ~1%.
+    const annualRate = 0.12;
+    const quarterly = frequencyProfile('QUARTERLY');
+    const quarterlyRate = annualRate / quarterly.periodsPerYear;
+    expect(quarterlyRate).toBeCloseTo(0.03, 6);
+
+    const firstInterest = amortize(100000, quarterlyRate, 4)[0].interest;
+    // First-period interest on 100k at 3% ≈ 3000; the old monthly (1%) path
+    // would have produced ≈ 1000.
+    expect(firstInterest).toBeGreaterThan(2500);
+  });
+});

@@ -12,11 +12,16 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 /**
  * Loan repayment scheduling and payment posting.
  *
- * Schedule generation: given a Loan (principal, annualInterestRate, tenureMonths),
- * produce an `installmentNumber`-ordered set of LoanRepaymentSchedule rows
- * using the standard French amortization formula:
+ * Schedule generation: given a Loan (principal, annualInterestRate,
+ * disbursement/maturity dates, repaymentFrequency), produce an
+ * `installmentNumber`-ordered set of LoanRepaymentSchedule rows using the
+ * standard French amortization formula:
  *   `EMI = P × r × (1+r)^n / ((1+r)^n - 1)`,
- * where r = monthly rate, n = tenure in months.
+ * where r = the *periodic* rate (annualRate ÷ periods-per-year) and n = the
+ * number of repayment periods over the loan tenure. The periodic rate and the
+ * due-date step both follow `loan.repaymentFrequency` (MONTHLY / QUARTERLY /
+ * SEMI_ANNUALLY / ANNUALLY), and BULLET/OTHER collapse to a single balloon
+ * installment due at maturity with interest accrued over the whole tenure.
  *
  * On `recordPayment`, the payment is split into principal/interest based on
  * the schedule row, the loan's outstanding balance is reduced, and a
@@ -127,17 +132,37 @@ export class LoanRepaymentSchedulesService {
 
     const principal = Number(loan.principalAmount);
     const annualRate = Number(loan.interestRate);
-    const tenureMonths = this.computeTenureMonths(loan.disbursementDate, loan.maturityDate, loan.repaymentFrequency);
-    if (tenureMonths <= 0) {
+    // Honor the loan's repayment cadence: the number of installments, the
+    // periodic interest rate and the due-date step must all follow
+    // repaymentFrequency, not a hard-coded month.
+    const profile = this.frequencyProfile(loan.repaymentFrequency);
+    const periodCount = this.computePeriodCount(
+      loan.disbursementDate,
+      loan.maturityDate,
+      profile,
+    );
+    if (periodCount <= 0) {
       throw new BadRequestException('Loan maturityDate must be after disbursementDate');
     }
-    const monthlyRate = annualRate / 12;
-    const installments = this.amortize(principal, monthlyRate, tenureMonths);
+    // For a single-balloon (BULLET/OTHER) schedule, interest accrues over the
+    // whole tenure, not a fixed 12 months, so scale the annual rate by the
+    // actual tenure in years. Regular cadences use the flat periodic rate.
+    const periodicRate =
+      profile.monthsPerPeriod > 0
+        ? annualRate / profile.periodsPerYear
+        : annualRate *
+          (this.tenureMonths(loan.disbursementDate, loan.maturityDate) / 12);
+    const installments = this.amortize(principal, periodicRate, periodCount);
 
     const companyId = loan.companyId;
     const created = await this.prisma.$transaction(async (tx) => {
       const rows = installments.map((row, idx) => {
-        const dueDate = this.addMonths(loan.disbursementDate, idx + 1);
+        // Regular cadences step from the disbursement date; a single-period
+        // (BULLET/OTHER) schedule falls due on the maturity date itself.
+        const dueDate =
+          profile.monthsPerPeriod > 0
+            ? profile.advance(loan.disbursementDate, idx + 1)
+            : new Date(loan.maturityDate);
         const total = row.principal + row.interest;
         return tx.loanRepaymentSchedule.create({
           data: {
@@ -164,7 +189,11 @@ export class LoanRepaymentSchedulesService {
       entityId: loanId,
       userId: user.id,
       companyId,
-      metadata: { installments: created.length, tenureMonths },
+      metadata: {
+        installments: created.length,
+        periodCount,
+        repaymentFrequency: loan.repaymentFrequency,
+      },
     });
 
     return { installments: created.length };
@@ -343,13 +372,16 @@ export class LoanRepaymentSchedulesService {
   // ─── Math helpers ────────────────────────────────────────────────────────
 
   /**
-   * French amortization: returns an array of {principal, interest} per month.
+   * French amortization: returns an array of {principal, interest} per period.
+   * `periodicRate` is the interest rate *for one repayment period* (e.g.
+   * annualRate/12 monthly, annualRate/4 quarterly) — the caller derives it from
+   * the loan's repayment frequency, so this method is cadence-agnostic.
    * Uses `EMI = P × r × (1+r)^n / ((1+r)^n - 1)`. Falls back to flat principal
    * split when r ≈ 0 to avoid divide-by-zero.
    */
-  private amortize(principal: number, monthlyRate: number, n: number): Array<{ principal: number; interest: number }> {
+  private amortize(principal: number, periodicRate: number, n: number): Array<{ principal: number; interest: number }> {
     const rounded = (x: number) => Math.round(x * 100) / 100;
-    if (monthlyRate < 1e-9) {
+    if (periodicRate < 1e-9) {
       const equal = rounded(principal / n);
       const result: Array<{ principal: number; interest: number }> = [];
       let remaining = principal;
@@ -360,12 +392,12 @@ export class LoanRepaymentSchedulesService {
       }
       return result;
     }
-    const factor = Math.pow(1 + monthlyRate, n);
-    const emi = (principal * monthlyRate * factor) / (factor - 1);
+    const factor = Math.pow(1 + periodicRate, n);
+    const emi = (principal * periodicRate * factor) / (factor - 1);
     let remaining = principal;
     const result: Array<{ principal: number; interest: number }> = [];
     for (let i = 0; i < n; i++) {
-      const interest = remaining * monthlyRate;
+      const interest = remaining * periodicRate;
       let principalPart = emi - interest;
       // Final installment absorbs rounding drift.
       if (i === n - 1) principalPart = remaining;
@@ -375,24 +407,78 @@ export class LoanRepaymentSchedulesService {
     return result;
   }
 
-  private computeTenureMonths(start: Date, end: Date, frequency: string): number {
-    const months =
-      (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+  /**
+   * Describe a repayment cadence: how many periods fall in a year (used both to
+   * split the annual rate into a periodic rate and to convert the loan tenure
+   * into an installment count) and how to advance a due date by whole periods.
+   *
+   * Enum values come from Prisma `RepaymentFrequency`
+   * (MONTHLY | QUARTERLY | SEMI_ANNUALLY | ANNUALLY | BULLET | OTHER).
+   * BULLET (single balloon repayment at maturity) and any unknown/OTHER value
+   * fall back to a single period so a schedule is still produced.
+   */
+  private frequencyProfile(frequency: string): {
+    periodsPerYear: number;
+    monthsPerPeriod: number;
+    advance: (date: Date, periods: number) => Date;
+  } {
     switch (frequency) {
-      case 'WEEKLY':
-        return Math.max(1, Math.round((months * 30) / 7));
-      case 'BIWEEKLY':
-        return Math.max(1, Math.round((months * 30) / 14));
       case 'QUARTERLY':
-        return Math.max(1, Math.floor(months / 3));
-      case 'SEMIANNUAL':
-        return Math.max(1, Math.floor(months / 6));
-      case 'ANNUAL':
-        return Math.max(1, Math.floor(months / 12));
+        return {
+          periodsPerYear: 4,
+          monthsPerPeriod: 3,
+          advance: (date, periods) => this.addMonths(date, periods * 3),
+        };
+      case 'SEMI_ANNUALLY':
+        return {
+          periodsPerYear: 2,
+          monthsPerPeriod: 6,
+          advance: (date, periods) => this.addMonths(date, periods * 6),
+        };
+      case 'ANNUALLY':
+        return {
+          periodsPerYear: 1,
+          monthsPerPeriod: 12,
+          advance: (date, periods) => this.addMonths(date, periods * 12),
+        };
       case 'MONTHLY':
+        return {
+          periodsPerYear: 12,
+          monthsPerPeriod: 1,
+          advance: (date, periods) => this.addMonths(date, periods),
+        };
+      case 'BULLET':
+      case 'OTHER':
       default:
-        return Math.max(1, months);
+        // Single lump-sum repayment at maturity: one period spanning the whole
+        // tenure. periodsPerYear=1 gives a full-tenure interest accrual and the
+        // one due date lands on the maturity date (see computePeriodCount → 1).
+        return {
+          periodsPerYear: 1,
+          monthsPerPeriod: 0,
+          advance: (date, periods) => this.addMonths(date, periods),
+        };
     }
+  }
+
+  /**
+   * Number of whole repayment periods between disbursement and maturity for the
+   * given cadence. BULLET/OTHER (monthsPerPeriod=0) collapse to a single period.
+   */
+  private computePeriodCount(
+    start: Date,
+    end: Date,
+    profile: { monthsPerPeriod: number },
+  ): number {
+    const months = this.tenureMonths(start, end);
+    if (months <= 0) return 0;
+    if (profile.monthsPerPeriod <= 0) return 1; // BULLET / OTHER → single balloon
+    return Math.max(1, Math.round(months / profile.monthsPerPeriod));
+  }
+
+  /** Whole calendar months between two dates (>= 0). */
+  private tenureMonths(start: Date, end: Date): number {
+    return (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
   }
 
   private addMonths(date: Date, n: number): Date {
