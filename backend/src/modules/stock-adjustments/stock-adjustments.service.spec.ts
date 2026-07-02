@@ -99,6 +99,43 @@ describe('StockAdjustmentsService aliases', () => {
       }),
     );
   });
+
+  it('persists unit cost on positive stock adjustment lines', async () => {
+    const { service, prisma } = makeService();
+
+    await service.create(
+      {
+        companyId: 'company-1',
+        branchId: 'branch-1',
+        reason: 'Opening stock capture',
+        lines: [
+          {
+            productId: 'product-1',
+            systemQty: 0,
+            countedQty: 20,
+            unitId: 'unit-1',
+            unitCost: 12500,
+          },
+        ],
+      } as any,
+      user,
+    );
+
+    expect(prisma.stockAdjustment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          lines: {
+            create: [
+              expect.objectContaining({
+                varianceQuantity: 20,
+                unitCost: 12500,
+              }),
+            ],
+          },
+        }),
+      }),
+    );
+  });
 });
 
 describe('StockAdjustmentsService approval revert', () => {

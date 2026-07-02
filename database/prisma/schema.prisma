@@ -3201,6 +3201,7 @@ model StockAdjustmentLine {
   countedQuantity   Decimal  @db.Decimal(18, 4)
   varianceQuantity  Decimal  @db.Decimal(18, 4)
   unitId            String
+  unitCost          Decimal? @db.Decimal(18, 4)
   reason            String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt

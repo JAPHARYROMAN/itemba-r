@@ -7,6 +7,8 @@ export interface ProductPickerOption {
   name: string;
   productCode?: string | null;
   sku?: string | null;
+  defaultUnitId?: string | null;
+  effectivePurchasePrice?: number | string | null;
 }
 
 interface ProductPickerProps {

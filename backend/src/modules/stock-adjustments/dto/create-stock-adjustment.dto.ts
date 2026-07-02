@@ -28,6 +28,7 @@ export class StockAdjustmentLineDto {
   @IsNumber()
   countedQty?: number;
   @IsNotEmpty() @IsString() unitId!: string;
+  @IsOptional() @IsNumber() unitCost?: number;
   @IsOptional() @IsString() reason?: string;
 }
 

@@ -51,6 +51,7 @@ interface AdjustmentLine {
   systemQty: number;
   countedQty: number;
   unitId: string;
+  unitCost: number | '';
   reason: string;
   // UI-only: system qty was prefilled from the live balance, so it is read-only.
   systemQtyLocked?: boolean;
@@ -78,6 +79,7 @@ interface AdjustmentDetailLine {
   systemQuantity: number | string;
   countedQuantity: number | string;
   varianceQuantity: number | string;
+  unitCost?: number | string | null;
   reason?: string | null;
   product?: { id: string; name: string; sku?: string | null } | null;
   unit?: { id: string; name: string; symbol: string } | null;
@@ -121,6 +123,7 @@ const BLANK_LINE = (): AdjustmentLine => ({
   systemQty: 0,
   countedQty: 0,
   unitId: '',
+  unitCost: '',
   reason: '',
 });
 const BLANK_FORM: AdjustmentForm = {
@@ -244,6 +247,15 @@ function CreateAdjustmentModal({
       setError('Each line needs product and unit');
       return;
     }
+    if (
+      form.lines.some((l) => {
+        const variance = (Number(l.countedQty) || 0) - (Number(l.systemQty) || 0);
+        return variance > 0 && (!l.unitCost || Number(l.unitCost) <= 0);
+      })
+    ) {
+      setError('Every positive stock addition must include a unit cost greater than zero');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
@@ -257,6 +269,7 @@ function CreateAdjustmentModal({
           systemQuantity: Number(l.systemQty) || 0,
           countedQuantity: Number(l.countedQty) || 0,
           unitId: l.unitId,
+          unitCost: l.unitCost ? Number(l.unitCost) : undefined,
           reason: l.reason || undefined,
         })),
       };
@@ -364,6 +377,7 @@ function CreateAdjustmentModal({
                   <th scope="col" className="px-3 py-2">Counted Qty</th>
                   <th scope="col" className="px-3 py-2">Variance</th>
                   <th scope="col" className="px-3 py-2">Unit</th>
+                  <th scope="col" className="px-3 py-2">Unit Cost</th>
                   <th scope="col" className="px-3 py-2">Reason</th>
                   <th scope="col" className="px-3 py-2">
                     <span className="sr-only">Actions</span>
@@ -384,8 +398,16 @@ function CreateAdjustmentModal({
                       <td className="px-2 py-1 min-w-[200px]">
                         <ProductPicker
                           value={line.productId}
-                          onChange={(pid) => {
-                            setLine(i, { productId: pid });
+                          onChange={(pid, product) => {
+                            const effectivePurchasePrice = Number(product?.effectivePurchasePrice ?? 0);
+                            setLine(i, {
+                              productId: pid,
+                              unitId: product?.defaultUnitId ?? line.unitId,
+                              unitCost:
+                                Number.isFinite(effectivePurchasePrice) && effectivePurchasePrice > 0
+                                  ? effectivePurchasePrice
+                                  : line.unitCost,
+                            });
                             void prefillSystemQty(i, pid);
                           }}
                           companyId={form.companyId}
@@ -453,6 +475,30 @@ function CreateAdjustmentModal({
                             </option>
                           ))}
                         </select>
+                      </td>
+                      <td className="px-2 py-1">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          aria-label={`Unit cost, line ${i + 1}`}
+                          value={line.unitCost}
+                          onChange={(e) =>
+                            setLine(i, {
+                              unitCost: e.target.value === '' ? '' : Number(e.target.value),
+                            })
+                          }
+                          className="w-28 text-xs border rounded px-2 py-1"
+                          style={{
+                            borderColor: variance > 0 && !line.unitCost
+                              ? 'var(--aurora-danger, #ef4444)'
+                              : 'var(--aurora-border)',
+                            background: 'var(--aurora-card)',
+                            color: 'var(--aurora-text)',
+                          }}
+                          placeholder={variance > 0 ? 'Required' : 'N/A'}
+                          disabled={variance <= 0}
+                        />
                       </td>
                       <td className="px-2 py-1">
                         <input
@@ -857,6 +903,7 @@ export default function StockAdjustmentsPage() {
                       <th scope="col" className="py-1.5 px-2 text-right">System</th>
                       <th scope="col" className="py-1.5 px-2 text-right">Counted</th>
                       <th scope="col" className="py-1.5 px-2 text-right">Variance</th>
+                      <th scope="col" className="py-1.5 px-2 text-right">Unit Cost</th>
                       <th scope="col" className="py-1.5 px-2">Unit</th>
                       <th scope="col" className="py-1.5 pl-2">Reason</th>
                     </tr>
@@ -883,6 +930,9 @@ export default function StockAdjustmentsPage() {
                           >
                             {variance > 0 ? '+' : ''}
                             {fmt(l.varianceQuantity)}
+                          </td>
+                          <td className="py-1.5 px-2 text-right tabular-nums">
+                            {l.unitCost ? `TZS ${fmt(l.unitCost)}` : '—'}
                           </td>
                           <td className="py-1.5 px-2">{l.unit?.symbol ?? l.unit?.name ?? '—'}</td>
                           <td className="py-1.5 pl-2">{l.reason ?? '—'}</td>

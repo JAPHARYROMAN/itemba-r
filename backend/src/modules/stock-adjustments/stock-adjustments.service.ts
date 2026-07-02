@@ -30,11 +30,17 @@ function normalizeAdjustmentLine(line: StockAdjustmentLineDto) {
   if (!Number.isFinite(systemQuantity) || !Number.isFinite(countedQuantity)) {
     throw new BadRequestException('Stock adjustment quantities must be valid numbers');
   }
+  const unitCost =
+    line.unitCost === undefined || line.unitCost === null ? undefined : Number(line.unitCost);
+  if (unitCost !== undefined && (!Number.isFinite(unitCost) || unitCost <= 0)) {
+    throw new BadRequestException('Stock adjustment unit cost must be greater than zero');
+  }
   return {
     ...line,
     systemQuantity,
     countedQuantity,
     varianceQuantity: countedQuantity - systemQuantity,
+    unitCost,
   };
 }
 
@@ -148,6 +154,7 @@ export class StockAdjustmentsService {
               countedQuantity: normalized.countedQuantity,
               varianceQuantity: normalized.varianceQuantity,
               unitId: normalized.unitId,
+              unitCost: normalized.unitCost,
               reason: normalized.reason,
             };
           }),
@@ -197,6 +204,7 @@ export class StockAdjustmentsService {
                 countedQuantity: normalized.countedQuantity,
                 varianceQuantity: normalized.varianceQuantity,
                 unitId: normalized.unitId,
+                unitCost: normalized.unitCost,
                 reason: normalized.reason,
               };
             }),
@@ -398,6 +406,7 @@ export class StockAdjustmentsService {
             },
             select: {
               id: true,
+              name: true,
               defaultPurchasePrice: true,
               productFamily: { select: { defaultPurchasePrice: true } },
             },
@@ -440,17 +449,27 @@ export class StockAdjustmentsService {
         // caller supplies no cost; inbound adjustments resolve one (WAC -> default).
         let unitCost: number | undefined;
         if (variance > 0) {
-          const wac = avgCostByProduct.get(line.productId) ?? 0;
-          if (wac > 0) {
-            unitCost = wac;
+          const lineUnitCost = line.unitCost != null ? Number(line.unitCost) : 0;
+          if (lineUnitCost > 0) {
+            unitCost = lineUnitCost;
           } else {
-            const product = costProductById.get(line.productId);
-            unitCost =
-              product?.defaultPurchasePrice != null
-                ? Number(product.defaultPurchasePrice)
-                : product?.productFamily?.defaultPurchasePrice != null
-                  ? Number(product.productFamily.defaultPurchasePrice)
-                  : undefined;
+            const wac = avgCostByProduct.get(line.productId) ?? 0;
+            if (wac > 0) {
+              unitCost = wac;
+            } else {
+              const product = costProductById.get(line.productId);
+              unitCost =
+                product?.defaultPurchasePrice != null
+                  ? Number(product.defaultPurchasePrice)
+                  : product?.productFamily?.defaultPurchasePrice != null
+                    ? Number(product.productFamily.defaultPurchasePrice)
+                    : undefined;
+              if (!unitCost || unitCost <= 0) {
+                throw new BadRequestException(
+                  `Stock add for ${product?.name ?? line.productId} must include a unit cost greater than zero`,
+                );
+              }
+            }
           }
         }
 
