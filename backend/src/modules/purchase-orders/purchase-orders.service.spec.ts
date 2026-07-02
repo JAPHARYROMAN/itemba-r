@@ -21,8 +21,10 @@ function makeService() {
       findFirst: jest.fn().mockResolvedValue(null),
     },
     payable: {
+      findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn(async ({ data }: any) => ({ id: 'payable-1', ...data })),
       update: jest.fn(async ({ data }: any) => ({ id: 'payable-1', ...data })),
+      aggregate: jest.fn().mockResolvedValue({ _sum: { outstandingAmount: 0 } }),
     },
     purchaseOrderLine: {
       deleteMany: jest.fn(),
@@ -38,6 +40,7 @@ function makeService() {
     },
     supplier: {
       findFirst: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     product: {
       findMany: jest.fn().mockResolvedValue([{ id: 'product-1', companyId: 'company-1' }]),
@@ -59,7 +62,11 @@ function makeService() {
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const inventoryMovements = { createMovement: jest.fn().mockResolvedValue(undefined) } as any;
   const taxAutoApply = { applyForPurchaseOrder: jest.fn().mockResolvedValue({}) } as any;
-  const codes = { next: jest.fn().mockResolvedValue('PO-2026-000001') } as any;
+  const codes = {
+    next: jest.fn(async ({ entityType }: any) =>
+      entityType === 'Payable' ? 'AP-2026-000001' : 'PO-2026-000001',
+    ),
+  } as any;
   const companyScope = {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
     companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-1' }),
@@ -367,7 +374,7 @@ describe('PurchaseOrdersService payment state', () => {
   });
 });
 
-describe('PurchaseOrdersService.receive AP ownership (findings #1, #7)', () => {
+describe('PurchaseOrdersService.receive credit purchase payable sync', () => {
   function creditOrder(extra: Record<string, unknown> = {}) {
     return {
       id: 'po-1',
@@ -398,7 +405,7 @@ describe('PurchaseOrdersService.receive AP ownership (findings #1, #7)', () => {
     };
   }
 
-  it('receives a credit purchase as inventory-only: no payable, no AP ledger', async () => {
+  it('creates a linked payable and AP ledger when receiving a credit purchase', async () => {
     const { service, prisma, postingEngine, inventoryMovements, codes } = makeService();
     prisma.product.findUnique.mockResolvedValue({ id: 'product-1', trackInventory: true });
     prisma.purchaseOrder.findFirst.mockResolvedValue(creditOrder());
@@ -414,17 +421,42 @@ describe('PurchaseOrdersService.receive AP ownership (findings #1, #7)', () => {
         referenceId: 'po-1',
       }),
     );
-    // No Payable is created — AP is owned by the supplier-invoice approve flow.
-    expect(prisma.payable.create).not.toHaveBeenCalled();
-    // No GL journal is posted on a credit receipt (no AP_CONTROL credit here).
-    expect(postingEngine.postLines).not.toHaveBeenCalled();
-    // No Payable code is requested for this PO.
-    expect(codes.next).not.toHaveBeenCalledWith(expect.objectContaining({ entityType: 'Payable' }));
-    // The PO row carries no journalEntryId from a credit receipt.
+    expect(codes.next).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: 'Payable', companyId: 'company-1' }),
+    );
+    expect(prisma.payable.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          payableNumber: 'AP-2026-000001',
+          companyId: 'company-1',
+          divisionId: 'division-1',
+          branchId: 'branch-1',
+          supplierId: 'supplier-1',
+          supplierName: 'Supplier Ltd',
+          sourceType: 'PurchaseOrder',
+          sourceId: 'po-1',
+          amount: expect.anything(),
+          outstandingAmount: expect.anything(),
+          status: 'OPEN',
+        }),
+      }),
+    );
+    expect(postingEngine.postLines).toHaveBeenCalledWith(
+      expect.objectContaining({
+        companyId: 'company-1',
+        referenceType: 'Payable',
+        referenceId: 'payable-1',
+        lines: expect.arrayContaining([
+          expect.objectContaining({ accountId: 'inventory-account', debit: expect.anything(), credit: 0 }),
+          expect.objectContaining({ accountId: 'ap-account', debit: 0, credit: expect.anything() }),
+        ]),
+      }),
+      prisma,
+    );
     const updateArg = prisma.purchaseOrder.update.mock.calls.at(-1)?.[0];
     expect(updateArg.data.status).toBe('RECEIVED');
-    expect(updateArg.data).not.toHaveProperty('journalEntryId');
-    expect(updateArg.data).not.toHaveProperty('payableId');
+    expect(updateArg.data.journalEntryId).toBe('je-1');
+    expect(updateArg.data.payableId).toBe('payable-1');
   });
 
   it('does not re-post AP or touch the linked payable when the PO already has one', async () => {

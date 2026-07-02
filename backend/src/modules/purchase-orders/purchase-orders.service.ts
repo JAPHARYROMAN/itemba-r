@@ -867,16 +867,13 @@ export class PurchaseOrdersService {
         tx,
       });
 
-      // AP OWNERSHIP (audit findings #1 + #7): this goods-received path posts the
-      // INVENTORY side only. Accounts Payable is owned exclusively by the
-      // supplier-invoice approve flow, which independently creates the Payable and
-      // credits AP_CONTROL at the full invoice amount. receive() must NOT create a
-      // Payable nor credit AP_CONTROL on a credit purchase, otherwise the liability
-      // (and inventory) is double-counted once the matching supplier invoice is
-      // approved. For a CASH purchase there is a genuine cash settlement at receipt
-      // that no supplier-invoice flow ever posts, so the inventory/cash ledger is
-      // PO-owned and still posted here.
+      // Operations is the primary purchase workflow for Itemba-R. A credit purchase
+      // received here must therefore create the AP subledger record immediately;
+      // otherwise Finance > Payables shows nothing even though stock was received
+      // on supplier credit. Supplier-invoice flows must link to this payable
+      // instead of creating a second one for the same purchase order.
       let journalEntry: { id: string } | null = null;
+      let payable: { id: string; journalEntryId: string | null } | null = null;
       if (existing.purchaseType === PurchaseType.CASH_PURCHASE) {
         journalEntry = await this.postPurchaseOrderCashReceiptLedger({
           order: existing as any,
@@ -884,6 +881,16 @@ export class PurchaseOrdersService {
           userId,
           tx,
         });
+      } else if (existing.purchaseType === PurchaseType.CREDIT_PURCHASE && !existing.payableId) {
+        payable = await this.createCreditPurchasePayable({
+          order: existing as any,
+          transactionDate: receivedAt,
+          userId,
+          tx,
+        });
+        if (payable.journalEntryId) {
+          journalEntry = { id: payable.journalEntryId };
+        }
       }
 
       return tx.purchaseOrder.update({
@@ -893,6 +900,7 @@ export class PurchaseOrdersService {
           receivedById: userId,
           receivedAt,
           ...(journalEntry ? { journalEntryId: journalEntry.id } : {}),
+          ...(payable ? { payableId: payable.id } : {}),
           ...(existing.purchaseType === PurchaseType.CASH_PURCHASE && {
             paidAmount: existing.totalAmount,
             outstandingAmount: 0,
@@ -1216,6 +1224,115 @@ export class PurchaseOrdersService {
       },
       input.tx,
     );
+  }
+
+  private async createCreditPurchasePayable(input: {
+    order: {
+      id: string;
+      purchaseOrderNumber: string;
+      companyId: string;
+      divisionId: string | null;
+      branchId: string | null;
+      supplierId: string | null;
+      supplierName: string | null;
+      purchaseType: PurchaseType;
+      totalAmount: Prisma.Decimal | number | string;
+      currency: string;
+      expectedDate: Date | null;
+    };
+    transactionDate: Date;
+    userId: string;
+    tx: Prisma.TransactionClient;
+  }) {
+    const amount = new Prisma.Decimal(input.order.totalAmount).toDecimalPlaces(2);
+    if (amount.lte(0)) {
+      throw new BadRequestException('Credit purchase total must be greater than zero to create a payable');
+    }
+
+    const existingPayable = await input.tx.payable.findFirst({
+      where: {
+        companyId: input.order.companyId,
+        sourceType: 'PurchaseOrder',
+        sourceId: input.order.id,
+        deletedAt: null,
+      },
+      select: { id: true, journalEntryId: true },
+    });
+    if (existingPayable) return existingPayable;
+
+    const supplierName = input.order.supplierName?.trim() || 'Unknown supplier';
+    const created = await input.tx.payable.create({
+      data: {
+        payableNumber: await this.codes.next({
+          entityType: 'Payable',
+          companyId: input.order.companyId,
+          tx: input.tx,
+        }),
+        companyId: input.order.companyId,
+        divisionId: input.order.divisionId,
+        branchId: input.order.branchId,
+        supplierId: input.order.supplierId,
+        supplierName,
+        sourceType: 'PurchaseOrder',
+        sourceId: input.order.id,
+        amount,
+        paidAmount: 0,
+        outstandingAmount: amount,
+        currency: input.order.currency as any,
+        issueDate: input.transactionDate,
+        dueDate: input.order.expectedDate ?? undefined,
+        status: 'OPEN',
+        notes: `Auto-created from credit purchase ${input.order.purchaseOrderNumber}`,
+      },
+    });
+
+    const debitRole = purchaseDebitRole(input.order.purchaseType);
+    const accounts = await this.accountResolver.resolveMany(
+      input.order.companyId,
+      [debitRole, 'AP_CONTROL'],
+      input.tx,
+    );
+    const journalEntry = await this.postingEngine.postLines(
+      {
+        companyId: input.order.companyId,
+        divisionId: input.order.divisionId,
+        branchId: input.order.branchId,
+        transactionDate: input.transactionDate,
+        description: `Credit purchase payable ${input.order.purchaseOrderNumber}`,
+        referenceType: 'Payable',
+        referenceId: created.id,
+        moduleName: 'purchase-orders',
+        userId: input.userId,
+        lines: [
+          {
+            accountId: accounts[debitRole].id,
+            description:
+              debitRole === 'INVENTORY_ASSET'
+                ? 'Inventory received on supplier credit'
+                : debitRole === 'FIXED_ASSET'
+                  ? 'Asset purchased on supplier credit'
+                  : 'Purchase expense on supplier credit',
+            debit: amount,
+            credit: 0,
+          },
+          {
+            accountId: accounts.AP_CONTROL.id,
+            description: `Accounts payable: ${supplierName}`,
+            debit: 0,
+            credit: amount,
+          },
+        ],
+      },
+      input.tx,
+    );
+
+    const updated = await input.tx.payable.update({
+      where: { id: created.id },
+      data: { journalEntryId: journalEntry.id },
+      select: { id: true, journalEntryId: true },
+    });
+    await this.syncSupplierBalance(input.tx, input.order.companyId, input.order.supplierId);
+    return updated;
   }
 
   async cancel(id: string, user: AuthUser) {
