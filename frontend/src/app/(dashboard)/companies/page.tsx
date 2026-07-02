@@ -62,6 +62,8 @@ export default function CompaniesPage() {
   const { hasPermission } = useAuth();
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [deletingCompanyId, setDeletingCompanyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Debounced search
   useEffect(() => {
@@ -81,6 +83,34 @@ export default function CompaniesPage() {
     '/companies',
     { query },
   );
+
+  async function deleteCompany(company: Company) {
+    if (
+      !confirm(
+        `Delete ${company.name} from the registry? This archives the company and its divisions and branches so historical records remain intact.`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingCompanyId(company.id);
+    setActionError(null);
+
+    try {
+      const res = await fetch(`/api/backend/companies/${company.id}`, { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(apiErrorMessage(json, res.status));
+      }
+
+      reload();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to delete company');
+    } finally {
+      setDeletingCompanyId(null);
+    }
+  }
 
   return (
     <>
@@ -138,6 +168,12 @@ export default function CompaniesPage() {
         </div>
 
         {/* Company Cards */}
+        {actionError && (
+          <Card className="mb-5 border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            {actionError}
+          </Card>
+        )}
+
         {loading && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             {[1, 2, 3].map((i) => (
@@ -184,7 +220,13 @@ export default function CompaniesPage() {
         {!loading && !error && companies.length > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             {companies.map((company) => (
-              <CompanyCard key={company.id} company={company} />
+              <CompanyCard
+                key={company.id}
+                company={company}
+                canDelete={hasPermission('companies.delete')}
+                deleting={deletingCompanyId === company.id}
+                onDelete={() => deleteCompany(company)}
+              />
             ))}
           </div>
         )}
@@ -195,7 +237,17 @@ export default function CompaniesPage() {
 
 // ── Company Card ──────────────────────────────────────────────────────────────
 
-function CompanyCard({ company }: { company: Company }) {
+function CompanyCard({
+  company,
+  canDelete,
+  deleting,
+  onDelete,
+}: {
+  company: Company;
+  canDelete: boolean;
+  deleting: boolean;
+  onDelete: () => void;
+}) {
   return (
     <Card className="p-5 hover:shadow-md transition-shadow flex flex-col gap-3">
       {/* Header */}
@@ -247,17 +299,38 @@ function CompanyCard({ company }: { company: Company }) {
       )}
 
       {/* Footer */}
-      <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
         {company.profile?.brelaRegNumber && (
           <div className="text-xs text-slate-400 font-mono">{company.profile.brelaRegNumber}</div>
         )}
-        <Link
-          href={`/companies/${company.id}`}
-          className="ml-auto text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors"
-        >
-          View Details →
-        </Link>
+        <div className="ml-auto flex items-center gap-3">
+          {canDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={deleting}
+              className="text-xs font-medium text-red-600 hover:text-red-800 disabled:opacity-50 transition-colors"
+            >
+              {deleting ? 'Deleting...' : 'Delete'}
+            </button>
+          )}
+          <Link
+            href={`/companies/${company.id}`}
+            className="text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors"
+          >
+            View Details →
+          </Link>
+        </div>
       </div>
     </Card>
   );
+}
+
+function apiErrorMessage(json: unknown, fallbackStatus: number) {
+  if (json && typeof json === 'object' && 'message' in json) {
+    const message = (json as { message?: unknown }).message;
+    if (Array.isArray(message)) return message.join(', ');
+    if (typeof message === 'string') return message;
+  }
+  return `Request failed with status ${fallbackStatus}`;
 }

@@ -212,7 +212,13 @@ export default function CompanyDetailPage() {
   async function deleteCompany() {
     const targetCompany = company;
     if (!targetCompany) return;
-    if (!confirm(`Archive company ${targetCompany.name}? Its divisions and branches/stations will also be archived.`)) return;
+    if (
+      !confirm(
+        `Delete ${targetCompany.name} from the registry? This archives its divisions and branches/stations so historical records remain intact.`,
+      )
+    ) {
+      return;
+    }
     setDeletingCompany(true);
     setDeleteError(null);
     try {
@@ -227,7 +233,7 @@ export default function CompanyDetailPage() {
       }
       router.push('/companies');
     } catch (e) {
-      setDeleteError(e instanceof Error ? e.message : 'Failed to archive company');
+      setDeleteError(e instanceof Error ? e.message : 'Failed to delete company');
     } finally {
       setDeletingCompany(false);
     }
@@ -275,7 +281,7 @@ export default function CompanyDetailPage() {
                 disabled={deletingCompany}
                 className="px-3 py-1.5 text-sm border border-red-200 rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
               >
-                {deletingCompany ? 'Archiving...' : 'Archive Company'}
+                {deletingCompany ? 'Deleting...' : 'Delete Company'}
               </button>
             )}
             {/* Link to Group Control for sensitive records */}
@@ -674,7 +680,13 @@ function DivisionsTab({
   }
 
   async function archiveDivision(division: Division) {
-    if (!confirm(`Archive division ${division.name}? Its branches/stations will also be archived.`)) return;
+    if (
+      !confirm(
+        `Delete division ${division.name} from the registry? This archives its branches/stations so historical records remain intact.`,
+      )
+    ) {
+      return;
+    }
     setBusyAction(`division:${division.id}:delete`);
     setActionError(null);
     try {
@@ -684,7 +696,7 @@ function DivisionsTab({
       if (selectedDivisionId === division.id) setSelectedDivisionId(null);
       onChanged();
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Failed to archive division');
+      setActionError(e instanceof Error ? e.message : 'Failed to delete division');
     } finally {
       setBusyAction(null);
     }
@@ -710,7 +722,7 @@ function DivisionsTab({
   }
 
   async function archiveBranch(branch: Branch) {
-    if (!confirm(`Archive branch/station ${branch.name}?`)) return;
+    if (!confirm(`Delete branch/station ${branch.name} from the registry? Historical records remain intact.`)) return;
     setBusyAction(`branch:${branch.id}:delete`);
     setActionError(null);
     try {
@@ -719,7 +731,7 @@ function DivisionsTab({
       if (!res.ok) throw new Error(apiErrorMessage(json, res.status));
       onChanged();
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Failed to archive branch');
+      setActionError(e instanceof Error ? e.message : 'Failed to delete branch');
     } finally {
       setBusyAction(null);
     }
@@ -827,7 +839,7 @@ function DivisionsTab({
                             disabled={busyAction === `division:${division.id}:delete`}
                             className="px-2.5 py-1 text-xs border border-red-200 rounded-md text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
                           >
-                            {busyAction === `division:${division.id}:delete` ? 'Archiving' : 'Archive'}
+                            {busyAction === `division:${division.id}:delete` ? 'Deleting' : 'Delete'}
                           </button>
                         )}
                       </div>
@@ -947,7 +959,7 @@ function DivisionsTab({
                                       disabled={busyAction === `branch:${branch.id}:delete`}
                                       className="text-xs text-red-600 hover:underline disabled:opacity-50"
                                     >
-                                      {busyAction === `branch:${branch.id}:delete` ? 'Archiving' : 'Archive'}
+                                      {busyAction === `branch:${branch.id}:delete` ? 'Deleting' : 'Delete'}
                                     </button>
                                   )}
                                 </div>
