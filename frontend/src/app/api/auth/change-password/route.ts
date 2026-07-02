@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
 
   let upstream: Response;
   try {
-    upstream = await fetch(`${BACKEND}/auth/login`, {
+    upstream = await fetch(`${BACKEND}/auth/change-password`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -72,10 +72,6 @@ export async function POST(req: NextRequest) {
   }
 
   const authData = data.data ?? data;
-  if (authData?.requiresPasswordChange || authData?.requires2FA) {
-    return NextResponse.json(authData);
-  }
-
   const { accessToken, refreshToken } = authData;
 
   if (!accessToken || !refreshToken) {
@@ -85,8 +81,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Backend login does not include the user profile — fetch it so the client
-  // can populate auth state in a single round-trip.
   let user: unknown = null;
   try {
     const meRes = await fetch(`${BACKEND}/auth/me`, {
@@ -97,19 +91,17 @@ export async function POST(req: NextRequest) {
       user = meJson.data ?? meJson;
     }
   } catch {
-    // Non-fatal: client will re-fetch via refreshUser()
+    // Client can re-fetch user profile after redirect.
   }
 
   const res = NextResponse.json({ user });
   const csrfToken = crypto.randomUUID();
 
-  // Store tokens in httpOnly cookies — never accessible to client JS
   res.cookies.set('itemba_access', accessToken, {
     ...COOKIE_OPTS,
     maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
   });
   setRefreshCookies(res, refreshToken);
-  // Non-httpOnly flag cookie for middleware route-protection check
   res.cookies.set('itemba_auth', '1', {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
