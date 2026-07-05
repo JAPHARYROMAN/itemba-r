@@ -7,6 +7,11 @@ export const BUSINESS_PDF_ENTITY_TYPES = [
   'PROFORMA_INVOICE',
   'DELIVERY_NOTE',
   'CUSTOMER_PROFILE',
+  'GOODS_RECEIVED_NOTE',
+  'SUPPLIER_INVOICE',
+  'PAYSLIP',
+  'CREDIT_NOTE',
+  'CUSTOMER_PAYMENT_RECEIPT',
 ] as const;
 
 export type BusinessPdfEntityType = (typeof BUSINESS_PDF_ENTITY_TYPES)[number];

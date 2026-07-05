@@ -7,6 +7,7 @@ import {
 import * as fs from 'fs';
 import * as path from 'path';
 import {
+  AccessLevel,
   DocumentCategory,
   DocumentOwnerType,
   DocumentTemplateFormat,
@@ -17,7 +18,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { DocumentsService } from '../documents/documents.service';
 import {
@@ -25,6 +26,7 @@ import {
   BusinessPdfEntityType,
   GenerateBusinessPdfDto,
 } from './dto/generate-business-pdf.dto';
+import { GenerateTablePdfDto } from './dto/generate-table-pdf.dto';
 import {
   BusinessPdfImage,
   BusinessPdfModel,
@@ -34,6 +36,8 @@ import {
 } from './pdf-builder';
 
 const DEFAULT_ITEMBA_LOGO_URL = '/brand/itemba-group-logo.png';
+const TABLE_PDF_ENTITY_TYPE = 'TABLE_EXPORT';
+const TABLE_PDF_MAX_CELL_LENGTH = 300;
 
 @Injectable()
 export class GeneratedDocumentsService {
@@ -41,6 +45,7 @@ export class GeneratedDocumentsService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly documents: DocumentsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
   async findAll(query: any, user?: any) {
@@ -102,6 +107,7 @@ export class GeneratedDocumentsService {
       },
       user,
       ipAddress,
+      AccessLevel.READ,
     );
 
     const generatedDocument = await this.prisma.generatedDocument.create({
@@ -146,6 +152,94 @@ export class GeneratedDocumentsService {
     });
 
     return { generatedDocument, document };
+  }
+
+  /**
+   * Branded PDF from an arbitrary client-supplied table (the PDF twin of the
+   * client-side CSV exports). Only a GeneratedDocument bookkeeping row is
+   * persisted — deliberately NO Document/file: arbitrary client-supplied
+   * tables are not worth storing as company documents. The PDF is streamed
+   * once and regenerated on demand.
+   */
+  async generateTablePdf(dto: GenerateTablePdfDto, user: AuthUser, ipAddress?: string) {
+    if (dto.companyId) {
+      await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.READ);
+    }
+    const companyId = dto.companyId ?? user.companyId ?? null;
+    const company = companyId
+      ? await this.prisma.company.findFirst({
+          where: { id: companyId, deletedAt: null },
+          select: companySelect().select,
+        })
+      : null;
+
+    const org = organization(company);
+    await this.attachLogoImage(org, user);
+
+    const generatedNumber = await this.generatedDocumentNumber(TABLE_PDF_ENTITY_TYPE);
+    const generatedAt = new Date();
+    const headers = dto.columns.map(truncateCell);
+    const rows = dto.rows.map((row) => row.map(truncateCell));
+
+    const buffer = buildBusinessPdf({
+      title: dto.title,
+      subtitle: dto.subtitle,
+      reference: generatedNumber,
+      organization: org,
+      generatedAt,
+      meta: (dto.meta ?? []).map((entry) => kv(entry.label, entry.value)),
+      sections: [
+        {
+          title: 'Data',
+          table: { headers, rows, numericColumns: dto.numericColumns },
+        },
+      ],
+    });
+
+    const template = await this.ensureSystemTemplate(TABLE_PDF_ENTITY_TYPE, companyId, user.id);
+    const fileStem = safeFileStem(dto.baseName ?? dto.title);
+    const fileName = `${fileStem}-${generatedAt.toISOString().slice(0, 10)}.pdf`;
+
+    const generatedDocument = await this.prisma.generatedDocument.create({
+      data: {
+        generatedDocumentNumber: generatedNumber,
+        companyId,
+        templateId: template.id,
+        entityType: TABLE_PDF_ENTITY_TYPE,
+        entityId: generatedNumber,
+        title: dto.title,
+        renderedContent: JSON.stringify({ title: dto.title, reference: generatedNumber }),
+        outputFormat: GeneratedDocumentFormat.PDF,
+        documentId: null,
+        generatedById: user.id,
+        status: GeneratedDocumentStatus.GENERATED,
+        metadata: {
+          fileName,
+          fileSizeBytes: buffer.byteLength,
+          rowCount: rows.length,
+          columnCount: headers.length,
+          companyId,
+        },
+      },
+    });
+
+    await this.auditLogs.log({
+      action: 'GENERATED_DOCUMENT_CREATE',
+      entityType: 'GeneratedDocument',
+      entityId: generatedDocument.id,
+      userId: user.id,
+      companyId: companyId ?? undefined,
+      ipAddress,
+      metadata: {
+        sourceEntityType: TABLE_PDF_ENTITY_TYPE,
+        generatedDocumentNumber: generatedDocument.generatedDocumentNumber,
+        fileName,
+        rowCount: rows.length,
+        columnCount: headers.length,
+      },
+    });
+
+    return { buffer, fileName, generatedDocumentId: generatedDocument.id };
   }
 
   async download(id: string, user: AuthUser, ipAddress?: string) {
@@ -217,6 +311,16 @@ export class GeneratedDocumentsService {
         return this.deliveryNotePdf(entityId, user);
       case 'CUSTOMER_PROFILE':
         return this.customerProfilePdf(entityId, user);
+      case 'GOODS_RECEIVED_NOTE':
+        return this.grnPdf(entityId, user);
+      case 'SUPPLIER_INVOICE':
+        return this.supplierInvoicePdf(entityId, user);
+      case 'PAYSLIP':
+        return this.payslipPdf(entityId, user);
+      case 'CREDIT_NOTE':
+        return this.creditNotePdf(entityId, user);
+      case 'CUSTOMER_PAYMENT_RECEIPT':
+        return this.customerPaymentReceiptPdf(entityId, user);
       default:
         throw new BadRequestException('Unsupported document entity type');
     }
@@ -631,6 +735,513 @@ export class GeneratedDocumentsService {
     );
   }
 
+  private async grnPdf(id: string, user: AuthUser): Promise<ResolvedBusinessPdfModel> {
+    const where: any = { id, deletedAt: null };
+    applyCompanyScopeWhere(where, user);
+    const record = await this.prisma.goodsReceivedNote.findFirst({
+      where,
+      include: {
+        company: companySelect(),
+        branch: branchSelect(),
+        receivedBy: { select: { fullName: true } },
+        approvedBy: { select: { fullName: true } },
+        lines: true,
+      },
+    });
+    if (!record) throw new NotFoundException('Goods received note not found');
+
+    // GoodsReceivedNote has no supplier/purchaseOrder relations and its lines
+    // have no product/unit relations — resolve display names with secondary
+    // lookups instead of includes.
+    const [supplier, purchaseOrder, lookups] = await Promise.all([
+      this.prisma.supplier.findFirst({
+        where: { id: record.supplierId },
+        select: supplierSelect().select,
+      }),
+      record.purchaseOrderId
+        ? this.prisma.purchaseOrder.findFirst({
+            where: { id: record.purchaseOrderId },
+            select: { purchaseOrderNumber: true },
+          })
+        : null,
+      this.productAndUnitMaps(
+        record.lines.map((line) => line.productId),
+        record.lines.map((line) => line.unitId),
+      ),
+    ]);
+
+    const reference = record.grnNumber ?? record.id.slice(0, 8);
+    const supplierName = supplier?.name ?? 'N/A';
+    const lineValue = (line: { acceptedQuantity: unknown; unitCost: unknown }) =>
+      Number(line.acceptedQuantity ?? 0) * Number(line.unitCost ?? 0);
+    const totalValue = record.lines.reduce((sum, line) => sum + lineValue(line), 0);
+    return this.wrapPdf(record.companyId, record.branchId, reference, DocumentCategory.OTHER, {
+      title: 'Goods Received Note',
+      subtitle: supplierName,
+      reference,
+      status: label(record.status),
+      organization: organization(record.company, record.branch),
+      generatedAt: new Date(),
+      meta: [
+        kv('GRN Number', reference),
+        kv('Received Date', date(record.receivedDate)),
+        kv('Purchase Order', value(purchaseOrder?.purchaseOrderNumber ?? record.purchaseOrderId)),
+        kv('Posted At', date(record.postedAt)),
+      ],
+      sections: [
+        supplierDetails(supplierName, supplier, [
+          kv('Received By', value(record.receivedBy?.fullName)),
+          kv('Approved By', value(record.approvedBy?.fullName)),
+        ]),
+        {
+          title: 'Line Items',
+          table: {
+            headers: [
+              'Item',
+              'SKU',
+              'Ordered',
+              'Received',
+              'Accepted',
+              'Rejected',
+              'Unit',
+              'Unit Cost',
+              'Line Value',
+            ],
+            numericColumns: [2, 3, 4, 5, 7, 8],
+            rows: record.lines.map((line) => {
+              const product = lookups.products.get(line.productId);
+              const unit = lookups.units.get(line.unitId);
+              return [
+                product?.name ?? 'N/A',
+                product?.sku ?? product?.productCode ?? 'N/A',
+                qty(line.orderedQuantity),
+                qty(line.receivedQuantity),
+                qty(line.acceptedQuantity),
+                qty(line.rejectedQuantity),
+                unit?.symbol ?? unit?.name ?? 'N/A',
+                money(line.unitCost),
+                money(lineValue(line)),
+              ];
+            }),
+          },
+          totals: [total('Total Value', totalValue, 'TZS', true)],
+        },
+        notesSection(record.notes),
+        { title: 'Acknowledgement', signatures: ['Received By', 'Inspected By', 'Approved By'] },
+      ].filter(Boolean) as BusinessPdfSection[],
+    });
+  }
+
+  private async supplierInvoicePdf(
+    id: string,
+    user: AuthUser,
+  ): Promise<ResolvedBusinessPdfModel> {
+    const where: any = { id, deletedAt: null };
+    applyCompanyScopeWhere(where, user);
+    const record = await this.prisma.supplierInvoice.findFirst({
+      where,
+      include: {
+        company: companySelect(),
+        branch: branchSelect(),
+        goodsReceivedNote: { select: { grnNumber: true } },
+        createdBy: { select: { fullName: true } },
+        approvedBy: { select: { fullName: true } },
+        lines: true,
+      },
+    });
+    if (!record) throw new NotFoundException('Supplier invoice not found');
+
+    // SupplierInvoice has no supplier relation and its lines have no
+    // product/unit relations — resolve display names with secondary lookups.
+    const [supplier, lookups] = await Promise.all([
+      this.prisma.supplier.findFirst({
+        where: { id: record.supplierId },
+        select: supplierSelect().select,
+      }),
+      this.productAndUnitMaps(
+        record.lines.map((line) => line.productId),
+        record.lines.map((line) => line.unitId),
+      ),
+    ]);
+
+    const reference = record.supplierInvoiceNumber ?? record.id.slice(0, 8);
+    const supplierName = supplier?.name ?? 'N/A';
+    return this.wrapPdf(record.companyId, record.branchId, reference, DocumentCategory.INVOICE, {
+      title: 'Supplier Invoice',
+      subtitle: supplierName,
+      reference,
+      status: label(record.status),
+      organization: organization(record.company, record.branch),
+      generatedAt: new Date(),
+      meta: [
+        kv('Invoice Number', reference),
+        kv('Invoice Date', date(record.invoiceDate)),
+        kv('Due Date', date(record.dueDate)),
+        kv('Supplier Reference', value(record.invoiceReference)),
+      ],
+      sections: [
+        supplierDetails(supplierName, supplier, [
+          kv('Goods Received Note', value(record.goodsReceivedNote?.grnNumber)),
+          kv('Prepared By', value(record.createdBy?.fullName)),
+          kv('Approved By', value(record.approvedBy?.fullName)),
+          kv('Approved At', date(record.approvedAt)),
+          kv('Currency', value(record.currency)),
+        ]),
+        lineSection(
+          record.lines.map((line) => {
+            const product = line.productId ? lookups.products.get(line.productId) : undefined;
+            const unit = line.unitId ? lookups.units.get(line.unitId) : undefined;
+            return [
+              line.description || product?.name || 'N/A',
+              product?.sku ?? product?.productCode ?? 'N/A',
+              qty(line.quantity),
+              unit?.symbol ?? unit?.name ?? 'N/A',
+              money(line.unitPrice, record.currency),
+              money(line.discountAmount, record.currency),
+              money(line.taxAmount, record.currency),
+              money(line.lineTotal, record.currency),
+            ];
+          }),
+          record.currency,
+          [
+            total('Subtotal', record.subtotal, record.currency),
+            total('Discount', record.discountAmount, record.currency),
+            total('Tax', record.taxAmount, record.currency),
+            total('Total', record.totalAmount, record.currency, true),
+            total('Paid', record.paidAmount, record.currency),
+            total('Outstanding', record.outstandingAmount, record.currency, true),
+          ],
+        ),
+        notesSection(record.notes),
+        { title: 'Authorization', signatures: ['Prepared By', 'Approved By', 'Supplier'] },
+      ].filter(Boolean) as BusinessPdfSection[],
+    });
+  }
+
+  private async payslipPdf(id: string, user: AuthUser): Promise<ResolvedBusinessPdfModel> {
+    const where: any = { id, deletedAt: null };
+    // Deliberately company-scoped: the hr/payslips read service queries the
+    // payroll entry without applyCompanyScopeWhere — do not copy that flaw.
+    applyCompanyScopeWhere(where, user);
+    const record = await this.prisma.payrollEntry.findFirst({
+      where,
+      include: {
+        company: companySelect(),
+        employee: {
+          select: {
+            fullName: true,
+            employeeCode: true,
+            tin: true,
+            nssfNumber: true,
+            nhifNumber: true,
+            bankName: true,
+            bankAccountNumber: true,
+            department: { select: { name: true } },
+            position: { select: { title: true } },
+            branch: branchSelect(),
+          },
+        },
+        payrollRun: {
+          select: {
+            payrollRunNumber: true,
+            runDate: true,
+            payrollPeriod: {
+              select: { name: true, startDate: true, endDate: true, paymentDate: true },
+            },
+          },
+        },
+        allowances: {
+          include: { allowanceType: { select: { name: true, code: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
+        deductions: {
+          include: { deductionType: { select: { name: true, code: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
+        statutoryLines: {
+          include: { taxType: { select: { name: true, taxTypeCode: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+    if (!record) throw new NotFoundException('Payslip not found');
+
+    const employee = record.employee;
+    const period = record.payrollRun?.payrollPeriod;
+    const runNumber = record.payrollRun?.payrollRunNumber ?? record.id.slice(0, 8);
+    const reference = `${runNumber}-${employee?.employeeCode ?? 'EMP'}`;
+    const employeeStatutory = record.statutoryLines.filter(
+      (line) => Number(line.employeeContribution) > 0,
+    );
+    const employerStatutory = record.statutoryLines.filter(
+      (line) => Number(line.employerContribution) > 0,
+    );
+    const employerTotal = employerStatutory.reduce(
+      (sum, line) => sum + Number(line.employerContribution),
+      0,
+    );
+
+    return this.wrapPdf(
+      record.companyId,
+      employee?.branch?.id ?? null,
+      reference,
+      DocumentCategory.PAYROLL_DOCUMENT,
+      {
+        title: 'Payslip',
+        subtitle: employee?.fullName ?? undefined,
+        reference,
+        status: label(record.status),
+        organization: organization(record.company, employee?.branch),
+        generatedAt: new Date(),
+        meta: [
+          kv('Payroll Run', value(record.payrollRun?.payrollRunNumber)),
+          kv('Pay Period', value(period?.name)),
+          kv('Period Dates', period ? `${date(period.startDate)} - ${date(period.endDate)}` : null),
+          kv('Payment Date', date(period?.paymentDate)),
+        ],
+        sections: [
+          {
+            title: 'Employee Details',
+            items: [
+              kv('Employee', employee?.fullName),
+              kv('Employee Code', employee?.employeeCode),
+              kv('Department', employee?.department?.name),
+              kv('Position', employee?.position?.title),
+              kv('TIN', employee?.tin),
+              kv('NSSF Number', employee?.nssfNumber),
+              kv('NHIF Number', employee?.nhifNumber),
+              kv('Bank', employee?.bankName),
+              kv('Bank Account', employee?.bankAccountNumber),
+            ],
+          },
+          {
+            title: 'Earnings',
+            table: {
+              headers: ['Earning', 'Amount'],
+              numericColumns: [1],
+              rows: [
+                ['Base Pay', money(record.basePay)],
+                ['Attendance Pay', money(record.attendancePay)],
+                ['Overtime Pay', money(record.overtimePay)],
+                ...record.allowances.map((allowance) => [
+                  allowance.allowanceType?.name ?? allowance.description ?? 'Allowance',
+                  money(allowance.amount),
+                ]),
+              ],
+            },
+            totals: [total('Gross Pay', record.grossPay, 'TZS', true)],
+          },
+          {
+            title: 'Deductions',
+            table: {
+              headers: ['Deduction', 'Amount'],
+              numericColumns: [1],
+              rows: [
+                ...employeeStatutory.map((line) => [
+                  line.taxType?.name ?? line.taxType?.taxTypeCode ?? 'Statutory deduction',
+                  money(line.employeeContribution),
+                ]),
+                ...record.deductions.map((deduction) => [
+                  deduction.deductionType?.name ?? deduction.description ?? 'Deduction',
+                  money(deduction.amount),
+                ]),
+              ],
+            },
+            totals: [
+              total('Total Deductions', record.totalDeductions, 'TZS', true),
+              total('Net Pay', record.netPay, 'TZS', true),
+            ],
+          },
+          employerStatutory.length
+            ? {
+                title: 'Employer Contributions',
+                table: {
+                  headers: ['Contribution', 'Amount'],
+                  numericColumns: [1],
+                  rows: employerStatutory.map((line) => [
+                    line.taxType?.name ?? line.taxType?.taxTypeCode ?? 'Statutory contribution',
+                    money(line.employerContribution),
+                  ]),
+                },
+                totals: [total('Total Employer Contributions', employerTotal, 'TZS', true)],
+              }
+            : null,
+          notesSection(record.notes),
+          { title: 'Authorization', signatures: ['Prepared By', 'Approved By', 'Employee'] },
+        ].filter(Boolean) as BusinessPdfSection[],
+      },
+    );
+  }
+
+  private async creditNotePdf(id: string, user: AuthUser): Promise<ResolvedBusinessPdfModel> {
+    const where: any = { id, deletedAt: null };
+    applyCompanyScopeWhere(where, user);
+    const record = await this.prisma.creditNote.findFirst({
+      where,
+      include: {
+        company: companySelect(),
+        branch: branchSelect(),
+        customer: customerSelect(),
+        salesOrder: { select: { salesOrderNumber: true } },
+        receivable: { select: { receivableNumber: true } },
+        createdBy: { select: { fullName: true } },
+        lines: {
+          include: {
+            product: { select: { name: true, sku: true, productCode: true } },
+            unit: { select: { name: true, symbol: true } },
+          },
+        },
+      },
+    });
+    if (!record) throw new NotFoundException('Credit note not found');
+
+    const reference = record.creditNoteNumber ?? record.id.slice(0, 8);
+    const customerName = record.customer?.name ?? record.customerName ?? 'N/A';
+    const unappliedAmount = Number(record.totalAmount ?? 0) - Number(record.appliedAmount ?? 0);
+    return this.wrapPdf(record.companyId, record.branchId, reference, DocumentCategory.OTHER, {
+      title: 'Credit Note',
+      subtitle: customerName,
+      reference,
+      status: label(record.status),
+      organization: organization(record.company, record.branch),
+      generatedAt: new Date(),
+      meta: [
+        kv('Credit Note Number', reference),
+        kv('Issue Date', date(record.issueDate)),
+        kv('Sales Order', value(record.salesOrder?.salesOrderNumber)),
+        kv('Receivable', value(record.receivable?.receivableNumber)),
+      ],
+      sections: [
+        customerDetails(customerName, record.customer, [
+          kv('Reason', value(record.reason)),
+          kv('Prepared By', value(record.createdBy?.fullName)),
+          kv('Currency', value(record.currency)),
+        ]),
+        {
+          title: 'Line Items',
+          table: {
+            headers: ['Item', 'SKU', 'Qty', 'Unit', 'Unit Price', 'Tax', 'Line Total'],
+            numericColumns: [2, 4, 5, 6],
+            rows: record.lines.map((line) => [
+              line.description || line.product?.name || 'N/A',
+              line.product?.sku ?? line.product?.productCode ?? 'N/A',
+              qty(line.quantity),
+              line.unit?.symbol ?? line.unit?.name ?? 'N/A',
+              money(line.unitPrice, record.currency),
+              money(line.taxAmount, record.currency),
+              money(line.lineTotal, record.currency),
+            ]),
+          },
+          totals: [
+            total('Subtotal', record.subtotal, record.currency),
+            total('Tax', record.taxAmount, record.currency),
+            total('Total', record.totalAmount, record.currency, true),
+            total('Applied', record.appliedAmount, record.currency),
+            total('Unapplied', unappliedAmount, record.currency, true),
+          ],
+        },
+        notesSection(record.notes),
+        { title: 'Authorization', signatures: ['Prepared By', 'Approved By', 'Customer'] },
+      ].filter(Boolean) as BusinessPdfSection[],
+    });
+  }
+
+  private async customerPaymentReceiptPdf(
+    id: string,
+    user: AuthUser,
+  ): Promise<ResolvedBusinessPdfModel> {
+    const where: any = { id, deletedAt: null };
+    applyCompanyScopeWhere(where, user);
+    const record = await this.prisma.customerPayment.findFirst({
+      where,
+      include: {
+        company: companySelect(),
+        branch: branchSelect(),
+        customer: customerSelect(),
+        cashAccount: { select: { accountName: true } },
+        createdBy: { select: { fullName: true } },
+        allocations: {
+          include: {
+            receivable: { select: { receivableNumber: true, dueDate: true, status: true } },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+    if (!record) throw new NotFoundException('Customer payment not found');
+
+    const reference = record.paymentNumber ?? record.id.slice(0, 8);
+    const customerName = record.customer?.name ?? 'N/A';
+    return this.wrapPdf(record.companyId, record.branchId, reference, DocumentCategory.RECEIPT, {
+      title: 'Payment Receipt',
+      subtitle: customerName,
+      reference,
+      status: label(record.status),
+      organization: organization(record.company, record.branch),
+      generatedAt: new Date(),
+      meta: [
+        kv('Receipt Number', reference),
+        kv('Payment Date', date(record.paymentDate)),
+        kv('Payment Method', label(record.method)),
+        kv('Reference', value(record.reference)),
+      ],
+      sections: [
+        customerDetails(customerName, record.customer, [
+          kv('Cash Account', value(record.cashAccount?.accountName)),
+          kv('Received By', value(record.createdBy?.fullName)),
+          kv('Currency', value(record.currency)),
+        ]),
+        {
+          title: 'Receivable Allocations',
+          table: {
+            headers: ['Receivable', 'Due Date', 'Status', 'Amount Applied'],
+            numericColumns: [3],
+            rows: record.allocations.map((allocation) => [
+              allocation.receivable?.receivableNumber ?? 'N/A',
+              date(allocation.receivable?.dueDate),
+              label(allocation.receivable?.status),
+              money(allocation.amount, record.currency),
+            ]),
+          },
+          totals: [
+            total('Amount Received', record.amount, record.currency, true),
+            total('Applied to Receivables', record.appliedAmount, record.currency),
+            total('Unapplied (On Account)', record.unappliedAmount, record.currency, true),
+          ],
+        },
+        notesSection(record.notes),
+        { title: 'Acknowledgement', signatures: ['Received By', 'Customer'] },
+      ].filter(Boolean) as BusinessPdfSection[],
+    });
+  }
+
+  /**
+   * GRN/SupplierInvoice lines carry scalar productId/unitId with no Prisma
+   * relations, so display names come from batched id→record lookup maps.
+   */
+  private async productAndUnitMaps(
+    productIds: Array<string | null | undefined>,
+    unitIds: Array<string | null | undefined>,
+  ) {
+    const productIdList = uniqueIds(productIds);
+    const unitIdList = uniqueIds(unitIds);
+    const [products, units] = await Promise.all([
+      productIdList.length
+        ? this.prisma.product.findMany({
+            where: { id: { in: productIdList } },
+            select: { id: true, name: true, sku: true, productCode: true },
+          })
+        : [],
+      unitIdList.length
+        ? this.prisma.unitOfMeasure.findMany({
+            where: { id: { in: unitIdList } },
+            select: { id: true, name: true, symbol: true },
+          })
+        : [],
+    ]);
+    return { products: mapById(products), units: mapById(units) };
+  }
+
   private wrapPdf(
     companyId: string | null | undefined,
     branchId: string | null | undefined,
@@ -649,11 +1260,7 @@ export class GeneratedDocumentsService {
     };
   }
 
-  private async ensureSystemTemplate(
-    entityType: BusinessPdfEntityType,
-    companyId: string | null,
-    userId: string,
-  ) {
+  private async ensureSystemTemplate(entityType: string, companyId: string | null, userId: string) {
     const templateType = templateTypeFor(entityType);
     const templateCode = `SYSTEM_${entityType}_PDF`;
     return this.prisma.documentTemplate.upsert({
@@ -676,7 +1283,7 @@ export class GeneratedDocumentsService {
     });
   }
 
-  private async generatedDocumentNumber(entityType: BusinessPdfEntityType) {
+  private async generatedDocumentNumber(entityType: string) {
     const stamp = Date.now().toString(36).toUpperCase();
     const suffix = Math.random().toString(36).slice(2, 7).toUpperCase();
     return `GD-${entityType.replace(/_/g, '-')}-${stamp}-${suffix}`;
@@ -787,6 +1394,14 @@ function firstPresent(...values: Array<string | null | undefined>) {
   return values.find((value) => String(value ?? '').trim().length > 0) ?? null;
 }
 
+function uniqueIds(ids: Array<string | null | undefined>) {
+  return Array.from(new Set(ids.filter((id): id is string => Boolean(id))));
+}
+
+function mapById<T extends { id: string }>(items: T[]) {
+  return new Map(items.map((item) => [item.id, item] as const));
+}
+
 function logoDocumentId(logoUrl?: string | null) {
   const text = String(logoUrl ?? '').trim();
   const match =
@@ -843,6 +1458,16 @@ function permissionForBusinessPdfEntity(entityType: BusinessPdfEntityType) {
       return 'delivery_notes.view';
     case 'CUSTOMER_PROFILE':
       return 'customers.view';
+    case 'GOODS_RECEIVED_NOTE':
+      return 'grn.view';
+    case 'SUPPLIER_INVOICE':
+      return 'supplier_invoices.view';
+    case 'PAYSLIP':
+      return 'payroll.view';
+    case 'CREDIT_NOTE':
+      return 'receivables.view';
+    case 'CUSTOMER_PAYMENT_RECEIPT':
+      return 'customer-payments.view';
     default:
       return 'documents.manage';
   }
@@ -973,6 +1598,12 @@ function label(raw: unknown) {
   return value(raw).replace(/_/g, ' ');
 }
 
+function truncateCell(cell: string) {
+  return cell.length > TABLE_PDF_MAX_CELL_LENGTH
+    ? `${cell.slice(0, TABLE_PDF_MAX_CELL_LENGTH - 3)}...`
+    : cell;
+}
+
 function safeFileStem(value: string) {
   return (
     value
@@ -984,7 +1615,7 @@ function safeFileStem(value: string) {
   );
 }
 
-function templateTypeFor(entityType: BusinessPdfEntityType): DocumentTemplateType {
+function templateTypeFor(entityType: string): DocumentTemplateType {
   switch (entityType) {
     case 'PURCHASE_ORDER':
       return DocumentTemplateType.PURCHASE_ORDER;
@@ -994,6 +1625,10 @@ function templateTypeFor(entityType: BusinessPdfEntityType): DocumentTemplateTyp
       return DocumentTemplateType.PROFORMA_INVOICE;
     case 'DELIVERY_NOTE':
       return DocumentTemplateType.DELIVERY_NOTE;
+    case 'PAYSLIP':
+      return DocumentTemplateType.PAYSLIP;
+    case 'CUSTOMER_PAYMENT_RECEIPT':
+      return DocumentTemplateType.RECEIPT;
     default:
       return DocumentTemplateType.OTHER;
   }

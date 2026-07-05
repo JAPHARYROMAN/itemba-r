@@ -156,8 +156,9 @@ export class DocumentsService {
     },
     user: AuthUser,
     ipAddress?: string,
+    accessLevel: AccessLevel = AccessLevel.WRITE,
   ) {
-    await this.companyScope.assertCanAccessCompany(user, input.companyId, AccessLevel.WRITE);
+    await this.companyScope.assertCanAccessCompany(user, input.companyId, accessLevel);
 
     const storageKey = `${Date.now()}-${safeStorageFileName(input.fileName)}`;
     const destPath = resolveStoragePath(storageKey);

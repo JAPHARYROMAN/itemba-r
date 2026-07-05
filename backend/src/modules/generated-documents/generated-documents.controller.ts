@@ -7,6 +7,7 @@ import {
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { GeneratedDocumentsService } from './generated-documents.service';
 import { GenerateBusinessPdfDto } from './dto/generate-business-pdf.dto';
+import { GenerateTablePdfDto } from './dto/generate-table-pdf.dto';
 
 const BUSINESS_PDF_SOURCE_PERMISSIONS = [
   'documents.manage',
@@ -16,6 +17,11 @@ const BUSINESS_PDF_SOURCE_PERMISSIONS = [
   'proformas.view',
   'delivery_notes.view',
   'customers.view',
+  'grn.view',
+  'supplier_invoices.view',
+  'payroll.view',
+  'receivables.view',
+  'customer-payments.view',
 ];
 
 const INLINE_SAFE_MIME_TYPES = new Set([
@@ -47,6 +53,34 @@ export class GeneratedDocumentsController {
     @Req() req: Request,
   ) {
     return this.service.generateBusinessPdf(dto, user, req.ip);
+  }
+
+  /**
+   * Deliberately NO permission decorator: authenticated-only (JwtAuthGuard is
+   * global and permissions.guard.ts allows undecorated endpoints). The rows
+   * come from the client and were already authorized at fetch time;
+   * letterhead/logo reads have their own scope checks; abuse is bounded by
+   * the DTO caps + the global ThrottlerGuard + the audit row.
+   *
+   * Non-passthrough @Res() so the binary bypasses the TransformInterceptor,
+   * same as customer-statements export/pdf.
+   */
+  @Post('table-pdf')
+  async generateTablePdf(
+    @Body() dto: GenerateTablePdfDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const result = await this.service.generateTablePdf(dto, user, req.ip);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${safeDispositionFileName(result.fileName)}"`,
+    );
+    res.setHeader('X-Generated-Document-Id', result.generatedDocumentId);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(result.buffer);
   }
 
   @Get(':id/download')

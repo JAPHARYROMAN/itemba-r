@@ -17,6 +17,10 @@ async function bootstrap() {
     logger: isProd ? ['error', 'warn', 'log'] : ['error', 'warn', 'log', 'debug'],
   });
 
+  // Table-PDF exports post the full row matrix (worst case ~3MB); the express
+  // default 100kb JSON limit would reject them.
+  app.useBodyParser('json', { limit: '4mb' });
+
   const config = app.get(ConfigService);
   const port = config.get<number>('PORT', 3001);
   const apiPrefix = config.get<string>('API_PREFIX', 'api/v1');

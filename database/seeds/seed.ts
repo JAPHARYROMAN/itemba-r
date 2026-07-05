@@ -200,6 +200,10 @@ const ALL_PERMISSIONS: PermDef[] = [
   ...perms('cash_accounts', ['view', 'manage']),
   ...perms('expenses', ['view', 'approve', 'pay']),
   ...perms('receivables', ['view', 'manage']),
+  // Codes enforced by customer-payments.controller.ts (@RequirePermissions
+  // 'customer-payments.view'/'customer-payments.manage') — granted wherever
+  // receivables view/manage is granted (via FINANCE_MODULES).
+  ...perms('customer-payments', ['view', 'manage']),
   ...perms('payables', ['view', 'manage']),
   ...perms('intercompany', ['view', 'manage', 'approve', 'post']),
 
@@ -766,7 +770,7 @@ const ALL_PERMISSIONS: PermDef[] = [
   ...perms('communication_logs', ['list', 'view', 'create', 'update']),
   ...perms('credit_profiles', ['list', 'view', 'create', 'update']),
   ...perms('supplier_performance', ['list', 'view', 'create', 'update']),
-  ...perms('customer_segments', ['list', 'view', 'create', 'update', 'manage_members']),
+  ...perms('customer_segments', ['list', 'view', 'create', 'update', 'delete', 'manage_members']),
   ...perms('customer_statements', ['list', 'view', 'generate']),
   ...perms('supplier_statements', ['list', 'view', 'generate']),
 
@@ -885,6 +889,7 @@ const FINANCE_MODULES = [
   'journal_entries',
   'cash_accounts',
   'receivables',
+  'customer-payments',
   'payables',
   'intercompany',
 ];
