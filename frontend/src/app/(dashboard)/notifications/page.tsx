@@ -1,6 +1,8 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { AppIcon, type AppIconName, SkeletonCardGrid } from '@/components/ui';
+import { useCallback, useEffect, useState } from 'react';
+import { AppIcon, type AppIconName, SkeletonCardGrid, Btn, ConfirmDialog, showToast } from '@/components/ui';
+import { backendPatch, backendDelete } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
 
 const TYPE_ICONS: Record<string, AppIconName> = {
   APPROVAL_REQUIRED: 'approved',
@@ -18,18 +20,37 @@ const PRIORITY_COLORS: Record<string, string> = {
   LOW: 'text-gray-400',
 };
 
-type Tab = 'all' | 'unread' | 'archived';
+type Tab = 'all' | 'unread' | 'archived' | 'dismissed';
+type RowAction = 'read' | 'dismiss';
+
+const ROW_ACTIONS: Record<string, { action: RowAction; label: string }[]> = {
+  UNREAD: [
+    { action: 'read', label: 'Mark Read' },
+    { action: 'dismiss', label: 'Dismiss' },
+  ],
+  READ: [{ action: 'dismiss', label: 'Dismiss' }],
+  ARCHIVED: [{ action: 'dismiss', label: 'Dismiss' }],
+  DISMISSED: [],
+};
 
 export default function NotificationsPage() {
+  const { hasPermission } = useAuth();
+  const canView = hasPermission('notifications.view');
+  const canManage = hasPermission('notifications.manage');
+
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('all');
   const [unreadCount, setUnreadCount] = useState(0);
+  const [actionLoading, setActionLoading] = useState('');
+  const [markingAll, setMarkingAll] = useState(false);
+  const [deleting, setDeleting] = useState<any | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     const params: Record<string, string> = {};
     if (activeTab === 'unread') params.status = 'UNREAD';
     if (activeTab === 'archived') params.status = 'ARCHIVED';
+    if (activeTab === 'dismissed') params.status = 'DISMISSED';
     setLoading(true);
     const qs = new URLSearchParams(params).toString();
     fetch(`/api/backend/notifications${qs ? '?' + qs : ''}`)
@@ -39,28 +60,76 @@ export default function NotificationsPage() {
         setNotifications(data);
         if (activeTab === 'all') {
           setUnreadCount(data.filter((n: any) => n.status === 'UNREAD').length);
+        } else if (activeTab === 'unread') {
+          setUnreadCount(data.length);
         }
       })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [activeTab]);
 
+  useEffect(() => { load(); }, [load]);
+
+  const doAction = async (id: string, action: RowAction) => {
+    setActionLoading(`${id}-${action}`);
+    try {
+      await backendPatch(`/notifications/${id}/${action}`);
+      load();
+    } catch (err) {
+      showToast('error', action === 'read' ? 'Failed to mark as read' : 'Failed to dismiss', err instanceof Error ? err.message : undefined);
+    } finally {
+      setActionLoading('');
+    }
+  };
+
+  const markAllRead = async () => {
+    setMarkingAll(true);
+    try {
+      await backendPatch('/notifications/mark-all-read');
+      load();
+    } catch (err) {
+      showToast('error', 'Failed to mark all as read', err instanceof Error ? err.message : undefined);
+    } finally {
+      setMarkingAll(false);
+    }
+  };
+
+  const doDelete = async () => {
+    if (!deleting) return;
+    try {
+      await backendDelete(`/notifications/${deleting.id}`);
+      load();
+    } catch (err) {
+      showToast('error', 'Failed to delete notification', err instanceof Error ? err.message : undefined);
+    } finally {
+      setDeleting(null);
+    }
+  };
+
   const tabs: { key: Tab; label: string }[] = [
     { key: 'all', label: 'All' },
     { key: 'unread', label: `Unread${unreadCount > 0 ? ` (${unreadCount})` : ''}` },
     { key: 'archived', label: 'Archived' },
+    { key: 'dismissed', label: 'Dismissed' },
   ];
 
   return (
     <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">
-          Notifications
-          {unreadCount > 0 && (
-            <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-medium bg-red-500 text-white">{unreadCount}</span>
-          )}
-        </h1>
-        <p className="text-gray-500 mt-1">Your notification centre</p>
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">
+            Notifications
+            {unreadCount > 0 && (
+              <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-medium bg-red-500 text-white">{unreadCount}</span>
+            )}
+          </h1>
+          <p className="text-gray-500 mt-1">Your notification centre</p>
+        </div>
+        {canView && unreadCount > 0 && (
+          <Btn variant="secondary" size="sm" onClick={markAllRead} loading={markingAll}>
+            Mark All Read
+          </Btn>
+        )}
       </div>
 
       <div className="flex gap-1 mb-4 border-b border-gray-200">
@@ -100,14 +169,28 @@ export default function NotificationsPage() {
                     <span className="ml-2 inline-block w-2 h-2 rounded-full bg-brand-500 align-middle" />
                   )}
                 </div>
-                <div className="text-xs text-gray-500 mt-0.5">{n.body}</div>
+                <div className="text-xs text-gray-500 mt-0.5">{n.message}</div>
                 <div className="text-xs text-gray-400 mt-1">{n.createdAt ? new Date(n.createdAt).toLocaleString() : ''}</div>
               </div>
               <div className="flex gap-2 flex-shrink-0">
-                {n.status === 'UNREAD' && (
-                  <button className="text-xs text-blue-600 hover:underline">Mark Read</button>
+                {canView && (ROW_ACTIONS[n.status] ?? []).map(a => (
+                  <button
+                    key={a.action}
+                    onClick={() => doAction(n.id, a.action)}
+                    disabled={actionLoading === `${n.id}-${a.action}`}
+                    className={`text-xs hover:underline disabled:opacity-50 ${a.action === 'read' ? 'text-blue-600' : 'text-gray-400'}`}
+                  >
+                    {actionLoading === `${n.id}-${a.action}` ? '…' : a.label}
+                  </button>
+                ))}
+                {canManage && (
+                  <button
+                    onClick={() => setDeleting(n)}
+                    className="text-xs text-red-500 hover:underline"
+                  >
+                    Delete
+                  </button>
                 )}
-                <button className="text-xs text-gray-400 hover:underline">Dismiss</button>
               </div>
             </div>
           ))}
@@ -116,6 +199,16 @@ export default function NotificationsPage() {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete Notification"
+        message={`Delete "${deleting?.title ?? 'this notification'}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={doDelete}
+        onCancel={() => setDeleting(null)}
+      />
     </div>
   );
 }

@@ -12,7 +12,9 @@ import {
   Modal,
   Btn,
   PageSpinner,
+  showToast,
 } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
 import { useOrgScope } from '@/hooks/use-org-scope';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
@@ -84,6 +86,7 @@ export default function SalesCommissionsPage() {
   const [rows, setRows] = useState<SalesCommission[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState<SalesCommission | null>(null);
   const [form, setForm] = useState<FormState>(empty);
   const [saving, setSaving] = useState(false);
   const [actionLoading, setActionLoading] = useState('');
@@ -95,6 +98,9 @@ export default function SalesCommissionsPage() {
     skipBranches: true,
     skipDivisions: true,
   });
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission('sales_orders.create');
+  const canApprove = hasPermission('sales_orders.confirm');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -135,19 +141,26 @@ export default function SalesCommissionsPage() {
     setError('');
     try {
       const body: Record<string, unknown> = {
-        companyId: form.companyId,
-        employeeId: form.employeeId,
-        salesOrderId: form.salesOrderId,
         basis: form.basis,
         rate: form.basis === 'FLAT' ? 0 : Number(form.rate),
-        notes: form.notes || undefined,
+        notes: editing ? form.notes : form.notes || undefined,
       };
       if (form.amount) body.amount = Number(form.amount);
-      const res = await fetch('/api/backend/sales-commissions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      if (!editing) {
+        body.companyId = form.companyId;
+        body.employeeId = form.employeeId;
+        body.salesOrderId = form.salesOrderId;
+      }
+      const res = await fetch(
+        editing
+          ? `/api/backend/sales-commissions/${editing.id}`
+          : '/api/backend/sales-commissions',
+        {
+          method: editing ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+      );
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(
@@ -155,6 +168,7 @@ export default function SalesCommissionsPage() {
         );
       }
       setShowModal(false);
+      setEditing(null);
       setForm(empty);
       load();
     } catch (err) {
@@ -166,19 +180,43 @@ export default function SalesCommissionsPage() {
 
   const doAction = async (id: string, action: 'approve' | 'cancel' | 'delete') => {
     setActionLoading(`${id}-${action}`);
+    let res: Response;
     if (action === 'delete') {
-      await fetch(`/api/backend/sales-commissions/${id}`, { method: 'DELETE' });
+      res = await fetch(`/api/backend/sales-commissions/${id}`, { method: 'DELETE' });
     } else if (action === 'cancel') {
-      await fetch(`/api/backend/sales-commissions/${id}/cancel`, {
+      res = await fetch(`/api/backend/sales-commissions/${id}/cancel`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
     } else {
-      await fetch(`/api/backend/sales-commissions/${id}/${action}`, { method: 'PATCH' });
+      res = await fetch(`/api/backend/sales-commissions/${id}/${action}`, { method: 'PATCH' });
+    }
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      showToast(
+        'error',
+        `Failed to ${action} commission`,
+        Array.isArray(j?.message) ? j.message.join(', ') : j?.message,
+      );
     }
     setActionLoading('');
     load();
+  };
+
+  const openEdit = (r: SalesCommission) => {
+    setEditing(r);
+    setForm({
+      companyId: r.companyId,
+      employeeId: r.employeeId,
+      salesOrderId: r.salesOrderId,
+      basis: r.basis,
+      rate: String(r.rate),
+      amount: r.basis === 'FLAT' ? String(r.amount) : '',
+      notes: r.notes ?? '',
+    });
+    setError('');
+    setShowModal(true);
   };
 
   const f =
@@ -257,16 +295,19 @@ export default function SalesCommissionsPage() {
           </>
         }
         actions={
-          <Btn
-            variant="primary"
-            onClick={() => {
-              setForm(empty);
-              setError('');
-              setShowModal(true);
-            }}
-          >
-            + New Commission
-          </Btn>
+          canManage && (
+            <Btn
+              variant="primary"
+              onClick={() => {
+                setEditing(null);
+                setForm(empty);
+                setError('');
+                setShowModal(true);
+              }}
+            >
+              + New Commission
+            </Btn>
+          )
         }
       />
 
@@ -321,17 +362,24 @@ export default function SalesCommissionsPage() {
                       <td className={tdCls}>{new Date(r.createdAt).toLocaleDateString('en-GB')}</td>
                       <td className={tdCls}>
                         <div className="flex flex-wrap gap-1">
-                          {(ACTIONS[r.status] ?? []).map((a) => (
-                            <Btn
-                              key={a.action}
-                              variant={a.variant}
-                              size="xs"
-                              onClick={() => doAction(r.id, a.action)}
-                              disabled={actionLoading === `${r.id}-${a.action}`}
-                            >
-                              {actionLoading === `${r.id}-${a.action}` ? '…' : a.label}
+                          {r.status === 'DRAFT' && canManage && (
+                            <Btn variant="secondary" size="xs" onClick={() => openEdit(r)}>
+                              Edit
                             </Btn>
-                          ))}
+                          )}
+                          {(ACTIONS[r.status] ?? [])
+                            .filter((a) => (a.action === 'approve' ? canApprove : canManage))
+                            .map((a) => (
+                              <Btn
+                                key={a.action}
+                                variant={a.variant}
+                                size="xs"
+                                onClick={() => doAction(r.id, a.action)}
+                                disabled={actionLoading === `${r.id}-${a.action}`}
+                              >
+                                {actionLoading === `${r.id}-${a.action}` ? '…' : a.label}
+                              </Btn>
+                            ))}
                         </div>
                       </td>
                     </tr>
@@ -357,11 +405,20 @@ export default function SalesCommissionsPage() {
 
       <Modal
         open={showModal}
-        onClose={() => setShowModal(false)}
-        title="Create commission"
+        onClose={() => {
+          setShowModal(false);
+          setEditing(null);
+        }}
+        title={editing ? 'Edit commission' : 'Create commission'}
         footer={
           <>
-            <Btn variant="secondary" onClick={() => setShowModal(false)}>
+            <Btn
+              variant="secondary"
+              onClick={() => {
+                setShowModal(false);
+                setEditing(null);
+              }}
+            >
               Cancel
             </Btn>
             <Btn variant="primary" type="submit" form="sales-commission-form" loading={saving}>
@@ -371,28 +428,41 @@ export default function SalesCommissionsPage() {
         }
       >
         <form id="sales-commission-form" onSubmit={handleSubmit} className="space-y-3">
-          <FormSelect
-            label="Company"
-            required
-            value={form.companyId}
-            onChange={(e) => setForm((p) => ({ ...p, companyId: e.target.value, employeeId: '' }))}
-            options={companyOptions}
-            placeholder="Select company"
-          />
-          <FormSelect
-            label="Salesperson"
-            required
-            value={form.employeeId}
-            onChange={f('employeeId')}
-            options={employeeOptions}
-            placeholder={form.companyId ? 'Select employee' : 'Select company first'}
-          />
-          <FormInput
-            label="Sales Order ID"
-            value={form.salesOrderId}
-            onChange={f('salesOrderId')}
-            required
-          />
+          {editing ? (
+            <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+              {editing.employee?.fullName ?? editing.employeeId} — order{' '}
+              <span className="font-mono text-xs">
+                {editing.salesOrder?.salesOrderNumber ?? editing.salesOrderId.slice(0, 8)}
+              </span>
+            </div>
+          ) : (
+            <>
+              <FormSelect
+                label="Company"
+                required
+                value={form.companyId}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, companyId: e.target.value, employeeId: '' }))
+                }
+                options={companyOptions}
+                placeholder="Select company"
+              />
+              <FormSelect
+                label="Salesperson"
+                required
+                value={form.employeeId}
+                onChange={f('employeeId')}
+                options={employeeOptions}
+                placeholder={form.companyId ? 'Select employee' : 'Select company first'}
+              />
+              <FormInput
+                label="Sales Order ID"
+                value={form.salesOrderId}
+                onChange={f('salesOrderId')}
+                required
+              />
+            </>
+          )}
           <FormSelect
             label="Basis"
             value={form.basis}

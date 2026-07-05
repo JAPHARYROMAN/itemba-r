@@ -1,6 +1,8 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { PageSpinner } from '@/components/ui';
+import { useState, useEffect, useCallback } from 'react';
+import { Btn, ConfirmDialog, PageSpinner, showToast } from '@/components/ui';
+import { backendPatch, ApiError } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
 
 const PRIORITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-100 text-red-700',
@@ -10,13 +12,39 @@ const PRIORITY_COLORS: Record<string, string> = {
 };
 
 type Tab = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
+type AlertAction = 'acknowledge' | 'resolve' | 'dismiss';
+
+const ACTIONS: Record<string, { action: AlertAction; label: string; variant: 'primary' | 'success' | 'secondary' }[]> = {
+  OPEN: [
+    { action: 'acknowledge', label: 'Acknowledge', variant: 'primary' },
+    { action: 'resolve', label: 'Resolve', variant: 'success' },
+    { action: 'dismiss', label: 'Dismiss', variant: 'secondary' },
+  ],
+  ACKNOWLEDGED: [
+    { action: 'resolve', label: 'Resolve', variant: 'success' },
+    { action: 'dismiss', label: 'Dismiss', variant: 'secondary' },
+  ],
+  RESOLVED: [
+    { action: 'dismiss', label: 'Dismiss', variant: 'secondary' },
+  ],
+  DISMISSED: [],
+};
+
+const ACTION_PERMISSIONS: Record<AlertAction, string> = {
+  acknowledge: 'alert_events.acknowledge',
+  resolve: 'alert_events.resolve',
+  dismiss: 'alert_events.dismiss',
+};
 
 export default function AlertEventsPage() {
+  const { hasPermission } = useAuth();
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('OPEN');
+  const [actionLoading, setActionLoading] = useState('');
+  const [dismissing, setDismissing] = useState<any | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     setLoading(true);
     fetch(`/api/backend/alert-events?status=${activeTab}`)
       .then(r => r.json())
@@ -24,6 +52,23 @@ export default function AlertEventsPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [activeTab]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const runAction = async (ev: any, action: AlertAction) => {
+    setActionLoading(`${ev.id}-${action}`);
+    try {
+      await backendPatch(`/alert-events/${ev.id}/${action}`, {});
+      showToast('success', `Alert ${action === 'acknowledge' ? 'acknowledged' : action === 'resolve' ? 'resolved' : 'dismissed'}`);
+      load();
+    } catch (err) {
+      showToast('error', err instanceof ApiError ? err.message : 'Action failed');
+    } finally {
+      setActionLoading('');
+    }
+  };
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'OPEN', label: 'Open' },
@@ -79,10 +124,23 @@ export default function AlertEventsPage() {
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-600">{ev.company?.name || '—'}</td>
                   <td className="px-6 py-4 text-sm text-gray-400">{ev.triggeredAt ? new Date(ev.triggeredAt).toLocaleString() : '—'}</td>
-                  <td className="px-6 py-4 text-sm space-x-2">
-                    {activeTab === 'OPEN' && <button className="text-blue-600 hover:underline">Acknowledge</button>}
-                    {activeTab !== 'RESOLVED' && <button className="text-green-600 hover:underline">Resolve</button>}
-                    <button className="text-gray-400 hover:underline">Dismiss</button>
+                  <td className="px-6 py-4 text-sm">
+                    <div className="flex flex-wrap gap-1">
+                      {(ACTIONS[ev.status ?? activeTab] ?? [])
+                        .filter(a => hasPermission(ACTION_PERMISSIONS[a.action]))
+                        .map(a => (
+                          <Btn
+                            key={a.action}
+                            variant={a.variant}
+                            size="xs"
+                            loading={actionLoading === `${ev.id}-${a.action}`}
+                            disabled={actionLoading !== ''}
+                            onClick={() => (a.action === 'dismiss' ? setDismissing(ev) : runAction(ev, a.action))}
+                          >
+                            {a.label}
+                          </Btn>
+                        ))}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -93,6 +151,20 @@ export default function AlertEventsPage() {
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!dismissing}
+        title="Dismiss Alert"
+        message={`Dismiss alert ${dismissing?.alertEventNumber || dismissing?.id || ''}? It will be removed from the active queues.`}
+        confirmLabel="Dismiss"
+        variant="warning"
+        onConfirm={async () => {
+          if (!dismissing) return;
+          await runAction(dismissing, 'dismiss');
+          setDismissing(null);
+        }}
+        onCancel={() => setDismissing(null)}
+      />
     </div>
   );
 }

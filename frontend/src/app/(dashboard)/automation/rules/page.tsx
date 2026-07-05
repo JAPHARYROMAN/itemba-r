@@ -7,6 +7,12 @@ import {
   StatCard,
   PermissionDeniedState,
   showToast,
+  Modal,
+  Btn,
+  ConfirmDialog,
+  FormInput,
+  FormSelect,
+  FormTextarea,
 } from '@/components/ui';
 import {
   ResponsiveDataTable,
@@ -15,13 +21,25 @@ import {
 import { StatusBadge } from '@/components/aurora/data-display/StatusBadge';
 import { AuroraButton } from '@/components/aurora/actions';
 import { useAuth } from '@/hooks/use-auth';
-import { backendGet, backendList, backendPost } from '@/lib/api-client';
+import {
+  ApiError,
+  backendDelete,
+  backendGet,
+  backendList,
+  backendPost,
+  backendPut,
+} from '@/lib/api-client';
 import type { StatusVariant } from '@/lib/design-system/status';
 
 // ─── Backend contract: automation-rules (backend/src/modules/automation-rules) ──
 // GET    /automation-rules              list { items, total, page, limit } — permission automation_rules.list
 //        query: companyId?, status?, page?, limit?
 // GET    /automation-rules/:id          view                               — permission automation_rules.view
+// POST   /automation-rules              create (status forced INACTIVE,    — permission automation_rules.create
+//        automationRuleCode required — the service does NOT auto-generate it)
+// PUT    /automation-rules/:id          update (dto passed straight to     — permission automation_rules.update
+//        prisma.update, so only send model fields)
+// DELETE /automation-rules/:id          soft delete                        — permission automation_rules.delete
 // POST   /automation-rules/:id/activate set status ACTIVE                  — permission automation_rules.activate
 // POST   /automation-rules/:id/pause    set status PAUSED                  — permission automation_rules.activate
 //
@@ -72,6 +90,22 @@ const PAGE_SIZE = 20;
 
 const STATUS_OPTIONS: AutomationRuleStatus[] = ['ACTIVE', 'INACTIVE', 'PAUSED', 'ERROR'];
 
+// Prisma enums AutomationType / AutomationTriggerType (database/prisma/schema.prisma).
+const AUTOMATION_TYPES = [
+  'RECURRING_INVOICE',
+  'RECURRING_EXPENSE',
+  'RENT_INVOICE_GENERATION',
+  'LOAN_REPAYMENT_REMINDER',
+  'DEPRECIATION_POSTING',
+  'STOCK_REORDER_SUGGESTION',
+  'COMPLIANCE_REMINDER',
+  'REPORT_DELIVERY',
+  'PAYROLL_REMINDER',
+  'CUSTOM',
+] as const;
+
+const TRIGGER_TYPES: AutomationTriggerType[] = ['SCHEDULE', 'EVENT', 'THRESHOLD', 'MANUAL'];
+
 const STATUS_VARIANT: Record<string, StatusVariant> = {
   ACTIVE: 'success',
   INACTIVE: 'muted',
@@ -116,11 +150,213 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+interface RuleForm {
+  automationRuleCode: string;
+  companyId: string;
+  name: string;
+  description: string;
+  automationType: string;
+  triggerType: string;
+  triggerConfig: string;
+  actionConfig: string;
+}
+
+const BLANK_FORM: RuleForm = {
+  automationRuleCode: '',
+  companyId: '',
+  name: '',
+  description: '',
+  automationType: 'CUSTOM',
+  triggerType: 'SCHEDULE',
+  triggerConfig: '{}',
+  actionConfig: '{}',
+};
+
+function RuleModal({
+  mode,
+  initial,
+  companies,
+  onClose,
+  onSaved,
+}: {
+  mode: 'create' | 'edit';
+  initial?: AutomationRule;
+  companies: Company[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState<RuleForm>(() =>
+    initial
+      ? {
+          automationRuleCode: initial.automationRuleCode,
+          companyId: initial.companyId ?? '',
+          name: initial.name,
+          description: initial.description ?? '',
+          automationType: String(initial.automationType),
+          triggerType: String(initial.triggerType),
+          triggerConfig: JSON.stringify(initial.triggerConfig ?? {}, null, 2),
+          actionConfig: JSON.stringify(initial.actionConfig ?? {}, null, 2),
+        }
+      : { ...BLANK_FORM },
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const set = (k: keyof RuleForm, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const submit = async () => {
+    if (!form.name.trim() || (mode === 'create' && !form.automationRuleCode.trim())) {
+      setError('Code and name are required');
+      return;
+    }
+    let triggerConfig: unknown;
+    let actionConfig: unknown;
+    try {
+      triggerConfig = form.triggerConfig.trim() ? JSON.parse(form.triggerConfig) : {};
+    } catch {
+      setError('Trigger config must be valid JSON');
+      return;
+    }
+    try {
+      actionConfig = form.actionConfig.trim() ? JSON.parse(form.actionConfig) : {};
+    } catch {
+      setError('Action config must be valid JSON');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const body = {
+        name: form.name.trim(),
+        description: form.description.trim() || null,
+        automationType: form.automationType,
+        triggerType: form.triggerType,
+        triggerConfig,
+        actionConfig,
+      };
+      if (mode === 'create') {
+        await backendPost('/automation-rules', {
+          ...body,
+          automationRuleCode: form.automationRuleCode.trim(),
+          companyId: form.companyId || undefined,
+        });
+      } else {
+        await backendPut(`/automation-rules/${initial!.id}`, body);
+      }
+      showToast('success', mode === 'create' ? 'Rule created' : 'Rule updated', form.name.trim());
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={mode === 'create' ? 'New Automation Rule' : 'Edit Automation Rule'}
+      size="lg"
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn variant="primary" onClick={submit} loading={saving}>Save</Btn>
+        </>
+      }
+    >
+      {error && (
+        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        <FormInput
+          label="Code"
+          required={mode === 'create'}
+          value={form.automationRuleCode}
+          onChange={(e) => set('automationRuleCode', e.target.value)}
+          disabled={mode === 'edit'}
+          hint={mode === 'create' ? 'Unique rule code, e.g. AUTO-RENT-001' : undefined}
+        />
+        <FormInput
+          label="Name"
+          required
+          value={form.name}
+          onChange={(e) => set('name', e.target.value)}
+        />
+        <FormSelect
+          label="Automation Type"
+          required
+          value={form.automationType}
+          onChange={(e) => set('automationType', e.target.value)}
+        >
+          {AUTOMATION_TYPES.map((t) => (
+            <option key={t} value={t}>{humanize(t)}</option>
+          ))}
+        </FormSelect>
+        <FormSelect
+          label="Trigger Type"
+          required
+          value={form.triggerType}
+          onChange={(e) => set('triggerType', e.target.value)}
+        >
+          {TRIGGER_TYPES.map((t) => (
+            <option key={t} value={t}>{humanize(t)}</option>
+          ))}
+        </FormSelect>
+        <FormSelect
+          label="Company"
+          value={form.companyId}
+          onChange={(e) => set('companyId', e.target.value)}
+          disabled={mode === 'edit'}
+          placeholder="All companies"
+        >
+          {companies.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.code ? `${c.code} — ${c.name}` : c.name}
+            </option>
+          ))}
+        </FormSelect>
+        <div className="col-span-2">
+          <FormTextarea
+            label="Description"
+            rows={2}
+            value={form.description}
+            onChange={(e) => set('description', e.target.value)}
+          />
+        </div>
+        <div className="col-span-2">
+          <FormTextarea
+            label="Trigger Config (JSON)"
+            rows={4}
+            className="font-mono"
+            value={form.triggerConfig}
+            onChange={(e) => set('triggerConfig', e.target.value)}
+            hint='e.g. {"cron": "0 6 1 * *"} for a SCHEDULE trigger'
+          />
+        </div>
+        <div className="col-span-2">
+          <FormTextarea
+            label="Action Config (JSON)"
+            rows={4}
+            className="font-mono"
+            value={form.actionConfig}
+            onChange={(e) => set('actionConfig', e.target.value)}
+          />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export default function AutomationRulesPage() {
   const { hasPermission } = useAuth();
   const canView = hasPermission('automation_rules.list');
   // The backend guards both activate + pause with automation_rules.activate.
   const canToggle = hasPermission('automation_rules.activate');
+  const canCreate = hasPermission('automation_rules.create');
+  const canUpdate = hasPermission('automation_rules.update');
+  const canDelete = hasPermission('automation_rules.delete');
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<RulePage | null>(null);
@@ -132,6 +368,9 @@ export default function AutomationRulesPage() {
   const [page, setPage] = useState(1);
 
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<AutomationRule | null>(null);
+  const [deleting, setDeleting] = useState<AutomationRule | null>(null);
 
   useEffect(() => {
     if (!canView) return;
@@ -214,6 +453,28 @@ export default function AutomationRulesPage() {
     }
   };
 
+  const onSaved = () => {
+    setCreating(false);
+    setEditing(null);
+    void load();
+  };
+
+  const doDelete = async () => {
+    if (!deleting) return;
+    try {
+      await backendDelete(`/automation-rules/${deleting.id}`);
+      showToast('success', 'Rule deleted', deleting.name);
+      setDeleting(null);
+      await load();
+    } catch (err) {
+      showToast(
+        'error',
+        'Could not delete rule',
+        err instanceof ApiError ? err.message : 'Please try again.',
+      );
+    }
+  };
+
   const columns = useMemo<ResponsiveColumn<AutomationRule>[]>(
     () => [
       {
@@ -287,7 +548,7 @@ export default function AutomationRulesPage() {
           </span>
         ),
       },
-      ...(canToggle
+      ...(canToggle || canUpdate || canDelete
         ? [
             {
               key: 'actions',
@@ -298,14 +559,28 @@ export default function AutomationRulesPage() {
                 const busy = pendingAction === row.id;
                 const activate = row.status !== 'ACTIVE';
                 return (
-                  <AuroraButton
-                    size="sm"
-                    variant={activate ? 'primary' : 'secondary'}
-                    loading={busy}
-                    onClick={() => toggle(row)}
-                  >
-                    {activate ? 'Enable' : 'Pause'}
-                  </AuroraButton>
+                  <div className="flex items-center gap-1.5">
+                    {canToggle && (
+                      <AuroraButton
+                        size="sm"
+                        variant={activate ? 'primary' : 'secondary'}
+                        loading={busy}
+                        onClick={() => toggle(row)}
+                      >
+                        {activate ? 'Enable' : 'Pause'}
+                      </AuroraButton>
+                    )}
+                    {canUpdate && (
+                      <AuroraButton size="sm" variant="ghost" onClick={() => setEditing(row)}>
+                        Edit
+                      </AuroraButton>
+                    )}
+                    {canDelete && (
+                      <AuroraButton size="sm" variant="ghost" onClick={() => setDeleting(row)}>
+                        Delete
+                      </AuroraButton>
+                    )}
+                  </div>
                 );
               },
             } as ResponsiveColumn<AutomationRule>,
@@ -313,7 +588,7 @@ export default function AutomationRulesPage() {
         : []),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canToggle, pendingAction],
+    [canToggle, canUpdate, canDelete, pendingAction],
   );
 
   if (!canView) {
@@ -424,6 +699,13 @@ export default function AutomationRulesPage() {
             </select>
           </>
         }
+        actions={
+          canCreate ? (
+            <AuroraButton variant="primary" size="sm" onClick={() => setCreating(true)}>
+              + New Rule
+            </AuroraButton>
+          ) : null
+        }
       />
 
       <ResponsiveDataTable<AutomationRule>
@@ -442,6 +724,33 @@ export default function AutomationRulesPage() {
           total,
           onPageChange: (p) => setPage(Math.min(Math.max(1, p), totalPages)),
         }}
+      />
+
+      {creating && (
+        <RuleModal
+          mode="create"
+          companies={companies}
+          onClose={() => setCreating(false)}
+          onSaved={onSaved}
+        />
+      )}
+      {editing && (
+        <RuleModal
+          mode="edit"
+          initial={editing}
+          companies={companies}
+          onClose={() => setEditing(null)}
+          onSaved={onSaved}
+        />
+      )}
+      <ConfirmDialog
+        open={deleting !== null}
+        title="Delete automation rule"
+        message={`Delete "${deleting?.name ?? ''}"? The rule will stop appearing here and will no longer be runnable.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={doDelete}
+        onCancel={() => setDeleting(null)}
       />
     </div>
   );

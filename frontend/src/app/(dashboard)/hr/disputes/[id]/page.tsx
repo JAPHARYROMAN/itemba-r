@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   Btn,
   Card,
+  ConfirmDialog,
   FormInput,
   FormSelect,
   Modal,
@@ -13,6 +14,8 @@ import {
   PageSpinner,
   StatusBadge,
 } from '@/components/ui';
+import { ApiError, backendDelete, backendPatch } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
 
 interface DisputeDetail {
   id: string;
@@ -56,6 +59,18 @@ interface DisputeDetail {
   }>;
 }
 
+const TYPE_OPTIONS = [
+  { value: 'GRIEVANCE', label: 'Grievance' },
+  { value: 'WAGE_DISPUTE', label: 'Wage dispute' },
+  { value: 'WORKING_CONDITIONS', label: 'Working conditions' },
+  { value: 'HARASSMENT', label: 'Harassment' },
+  { value: 'DISCRIMINATION', label: 'Discrimination' },
+  { value: 'UNFAIR_TERMINATION', label: 'Unfair termination' },
+  { value: 'CONSTRUCTIVE_DISMISSAL', label: 'Constructive dismissal' },
+  { value: 'CONTRACT_BREACH', label: 'Contract breach' },
+  { value: 'OTHER', label: 'Other' },
+];
+
 const RESOLUTION_OPTIONS = [
   { value: 'SETTLED_INTERNALLY', label: 'Settled internally' },
   { value: 'CMA_AWARD_FOR_EMPLOYEE', label: 'CMA award — for employee' },
@@ -77,6 +92,9 @@ function fmtDate(d?: string | null): string {
 export default function DisputeDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { hasPermission } = useAuth();
+  const canUpdate = hasPermission('employees.update');
+  const canDelete = hasPermission('employees.delete');
   const id = params.id as string;
   const [dispute, setDispute] = useState<DisputeDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -98,6 +116,17 @@ export default function DisputeDetailPage() {
     resolutionNotes: '',
   });
   const [working, setWorking] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState({
+    type: 'GRIEVANCE',
+    raisedAt: '',
+    summary: '',
+    initialPosition: '',
+    notes: '',
+  });
+  const [editError, setEditError] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -133,6 +162,62 @@ export default function DisputeDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed');
     } finally {
       setWorking(false);
+    }
+  };
+
+  const openEdit = () => {
+    if (!dispute) return;
+    setEditForm({
+      type: dispute.type,
+      raisedAt: dispute.raisedAt?.split('T')[0] ?? '',
+      summary: dispute.summary,
+      initialPosition: dispute.initialPosition ?? '',
+      notes: dispute.notes ?? '',
+    });
+    setEditError('');
+    setEditOpen(true);
+  };
+
+  const saveEdit = async () => {
+    if (!editForm.summary.trim()) {
+      setEditError('Summary is required');
+      return;
+    }
+    setEditSaving(true);
+    setEditError('');
+    try {
+      await backendPatch(`/hr/employment-disputes/${id}`, {
+        type: editForm.type,
+        raisedAt: editForm.raisedAt || undefined,
+        summary: editForm.summary.trim(),
+        initialPosition: editForm.initialPosition.trim() || null,
+        notes: editForm.notes.trim() || null,
+      });
+      setEditOpen(false);
+      load();
+    } catch (err: unknown) {
+      setEditError(
+        err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Save failed',
+      );
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const doDelete = async () => {
+    setError('');
+    try {
+      await backendDelete(`/hr/employment-disputes/${id}`);
+      router.push('/hr/disputes');
+    } catch (err: unknown) {
+      setDeleteOpen(false);
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Delete failed',
+      );
     }
   };
 
@@ -176,6 +261,11 @@ export default function DisputeDetailPage() {
             </div>
           </div>
           <div className="flex gap-2 flex-wrap">
+            {!isClosed && canUpdate && (
+              <Btn variant="secondary" size="sm" onClick={openEdit}>
+                Edit
+              </Btn>
+            )}
             {dispute.status === 'RAISED' && (
               <Btn variant="primary" size="sm" onClick={() => setMediateOpen(true)}>
                 Start internal mediation →
@@ -202,6 +292,11 @@ export default function DisputeDetailPage() {
                   Print CMA Form CMA-F1 →
                 </Btn>
               </Link>
+            )}
+            {canDelete && (
+              <Btn variant="danger" size="sm" onClick={() => setDeleteOpen(true)}>
+                Delete
+              </Btn>
             )}
           </div>
         </div>
@@ -459,6 +554,72 @@ export default function DisputeDetailPage() {
           />
         </div>
       </Modal>
+
+      {/* Edit modal */}
+      <Modal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title={`Edit dispute ${dispute.disputeNumber}`}
+        footer={
+          <>
+            <Btn variant="secondary" type="button" onClick={() => setEditOpen(false)}>
+              Cancel
+            </Btn>
+            <Btn variant="primary" loading={editSaving} onClick={saveEdit}>
+              Save changes
+            </Btn>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          {editError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
+              {editError}
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <FormSelect
+              label="Dispute type"
+              value={editForm.type}
+              onChange={(e) => setEditForm((p) => ({ ...p, type: e.target.value }))}
+              options={TYPE_OPTIONS}
+            />
+            <FormInput
+              label="Raised on"
+              type="date"
+              value={editForm.raisedAt}
+              onChange={(e) => setEditForm((p) => ({ ...p, raisedAt: e.target.value }))}
+            />
+          </div>
+          <FormInput
+            label="Summary *"
+            value={editForm.summary}
+            onChange={(e) => setEditForm((p) => ({ ...p, summary: e.target.value }))}
+            hint="One-line description of the dispute"
+          />
+          <FormInput
+            label="Initial position"
+            value={editForm.initialPosition}
+            onChange={(e) => setEditForm((p) => ({ ...p, initialPosition: e.target.value }))}
+            hint="Employee's claimed remedy or initial demand"
+          />
+          <FormInput
+            label="Notes"
+            value={editForm.notes}
+            onChange={(e) => setEditForm((p) => ({ ...p, notes: e.target.value }))}
+          />
+        </div>
+      </Modal>
+
+      <ConfirmDialog
+        open={deleteOpen}
+        title="Delete dispute"
+        message={`Delete dispute ${dispute.disputeNumber}? It will be removed from the disputes register.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={doDelete}
+        onCancel={() => setDeleteOpen(false)}
+      />
     </div>
   );
 }

@@ -51,7 +51,13 @@ export class AccountingLocksService {
     await this.assertNoOverlappingActiveLock(dto);
 
     const item = await this.prisma.accountingLock.create({
-      data: { ...dto, status: 'ACTIVE', createdById: user.id },
+      data: {
+        ...dto,
+        lockedFrom: dto.lockedFrom ? new Date(dto.lockedFrom) : undefined,
+        lockedTo: dto.lockedTo ? new Date(dto.lockedTo) : undefined,
+        status: 'ACTIVE',
+        createdById: user.id,
+      },
     });
     await this.auditLogs.log({
       action: 'CREATE',

@@ -4,15 +4,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Btn,
+  ConfirmDialog,
   FormInput,
   FormSelect,
   Modal,
   PageHeader,
   PageToolbar,
   StatusBadge,
+  showToast,
 } from '@/components/ui';
 import { ResponsiveDataTable } from '@/components/aurora';
 import type { ResponsiveColumn } from '@/components/aurora';
+import { ApiError, backendDelete } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
 
 interface Company {
   id: string;
@@ -151,12 +155,16 @@ const blank: FormState = {
 
 export default function EmployeesPage() {
   const router = useRouter();
+  const { hasPermission } = useAuth();
+  const canDelete = hasPermission('employees.delete');
   const [rows, setRows] = useState<EmployeeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState<FormState>(blank);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [deleting, setDeleting] = useState<EmployeeRow | null>(null);
+  const [deleteError, setDeleteError] = useState('');
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterCompanyId, setFilterCompanyId] = useState('');
@@ -347,6 +355,19 @@ export default function EmployeesPage() {
 
   const fullName = (e: EmployeeRow) => e.fullName ?? `${e.firstName} ${e.lastName}`;
 
+  const handleDelete = async () => {
+    if (!deleting) return;
+    setDeleteError('');
+    try {
+      await backendDelete(`/hr/employees/${deleting.id}`);
+      showToast('success', 'Employee deleted');
+      setDeleting(null);
+      load();
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : 'Failed to delete employee');
+    }
+  };
+
   const columns: ResponsiveColumn<EmployeeRow>[] = [
     {
       key: 'employeeCode',
@@ -399,6 +420,28 @@ export default function EmployeesPage() {
       priority: 1,
       accessor: (emp) => <StatusBadge status={emp.employmentStatus ?? emp.status ?? '—'} />,
     },
+    ...(canDelete
+      ? ([
+          {
+            key: 'actions',
+            header: '',
+            priority: 1,
+            accessor: (emp) => (
+              <Btn
+                variant="danger"
+                size="xs"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleteError('');
+                  setDeleting(emp);
+                }}
+              >
+                Delete
+              </Btn>
+            ),
+          },
+        ] as ResponsiveColumn<EmployeeRow>[])
+      : []),
   ];
 
   return (
@@ -473,6 +516,22 @@ export default function EmployeesPage() {
         onRowClick={(emp) => router.push(`/hr/employees/${emp.id}`)}
         emptyTitle="No employees found"
         emptyDescription="No employees match the current filters."
+      />
+
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete Employee"
+        variant="danger"
+        confirmLabel="Delete"
+        message={
+          deleteError ||
+          `Permanently delete ${deleting ? fullName(deleting) : 'this employee'} (${deleting?.employeeCode ?? ''})? Deletion is only for records created in error — to end a real employee's employment, use the termination workflow instead. Deletion is blocked while active allowances, deductions, open leave requests, unsettled salary advances, or payroll entries exist.`
+        }
+        onConfirm={handleDelete}
+        onCancel={() => {
+          setDeleting(null);
+          setDeleteError('');
+        }}
       />
 
       <Modal

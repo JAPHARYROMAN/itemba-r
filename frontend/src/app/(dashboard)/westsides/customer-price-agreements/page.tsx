@@ -1,12 +1,18 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader } from '@/components/ui';
+import { Card, PageHeader, PageToolbar, Modal, Btn, ConfirmDialog, FormInput, FormSelect, FormTextarea, showToast } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { backendPost, backendPatch, backendDelete, ApiError } from '@/lib/api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CustomerPriceAgreement {
   id: string;
+  companyId: string;
+  customerId: string;
+  priceListId?: string | null;
+  productId?: string | null;
   customerName?: string;
   priceListName?: string;
   productName?: string;
@@ -15,15 +21,17 @@ interface CustomerPriceAgreement {
   startDate: string;
   endDate?: string;
   status: string;
+  approvedAt?: string | null;
+  notes?: string | null;
 }
 
+interface Company { id: string; name: string }
+interface Customer { id: string; name: string }
 interface PriceList { id: string; name: string }
 interface Product { id: string; name: string; productCode: string }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const fieldCls = 'w-full text-sm border border-slate-200 rounded-md px-3 py-2 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300';
-const labelCls = 'block text-xs font-medium text-slate-600 mb-1';
 const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm text-slate-700';
 
@@ -55,121 +63,106 @@ function Spinner() {
   );
 }
 
-function CloseIcon() {
-  return <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
-}
-
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
-interface ModalProps { item: CustomerPriceAgreement | null; onClose: () => void; onSaved: () => void }
+interface ModalProps { mode: 'create' | 'edit'; item: CustomerPriceAgreement | null; onClose: () => void; onSaved: () => void }
 
-function AgreementModal({ item, onClose, onSaved }: ModalProps) {
-  const [customerId, setCustomerId] = useState('');
-  const [priceListId, setPriceListId] = useState('');
-  const [productId, setProductId] = useState('');
-  const [agreedPrice, setAgreedPrice] = useState<number | ''>(item?.agreedPrice ?? '');
-  const [discountPercent, setDiscountPercent] = useState<number | ''>(item?.discountPercent ?? 0);
+function AgreementModal({ mode, item, onClose, onSaved }: ModalProps) {
+  const [companyId, setCompanyId] = useState(item?.companyId ?? '');
+  const [customerId, setCustomerId] = useState(item?.customerId ?? '');
+  const [priceListId, setPriceListId] = useState(item?.priceListId ?? '');
+  const [productId, setProductId] = useState(item?.productId ?? '');
+  const [agreedPrice, setAgreedPrice] = useState(item?.agreedPrice != null ? String(item.agreedPrice) : '');
+  const [discountPercent, setDiscountPercent] = useState(item?.discountPercent != null ? String(item.discountPercent) : '0');
   const [startDate, setStartDate] = useState(item?.startDate?.slice(0, 10) ?? '');
   const [endDate, setEndDate] = useState(item?.endDate?.slice(0, 10) ?? '');
+  const [notes, setNotes] = useState(item?.notes ?? '');
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch('/api/backend/westsides/price-lists?limit=100').then(r => r.json()).then(j => setPriceLists(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
-    fetch('/api/backend/products?limit=200').then(r => r.json()).then(j => setProducts(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
+    fetch('/api/backend/companies?limit=100').then(r => r.json()).then(j => setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [])).catch(() => setCompanies([]));
+    fetch('/api/backend/westsides/price-lists?limit=100').then(r => r.json()).then(j => setPriceLists(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [])).catch(() => setPriceLists([]));
+    fetch('/api/backend/products?limit=200').then(r => r.json()).then(j => setProducts(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [])).catch(() => setProducts([]));
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (!companyId) { setCustomers([]); return; }
+    fetch(`/api/backend/customers?companyId=${encodeURIComponent(companyId)}&limit=500`).then(r => r.json()).then(j => setCustomers(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [])).catch(() => setCustomers([]));
+  }, [companyId]);
+
+  const submit = async () => {
+    if (mode === 'create' && !companyId) { setError('Company is required'); return; }
+    if (!customerId) { setError('Customer is required'); return; }
     if (!startDate) { setError('Start date is required'); return; }
     setSaving(true); setError('');
     try {
-      const body = {
-        customerId: customerId || undefined,
+      const body: Record<string, unknown> = {
+        customerId,
         priceListId: priceListId || undefined,
         productId: productId || undefined,
-        agreedPrice: Number(agreedPrice) || 0,
-        discountPercent: Number(discountPercent) || 0,
+        agreedPrice: agreedPrice === '' ? undefined : Number(agreedPrice),
+        discountPercent: discountPercent === '' ? undefined : Number(discountPercent),
         startDate,
         endDate: endDate || undefined,
+        notes: notes || undefined,
       };
-      const url = item ? `/api/backend/westsides/customer-price-agreements/${item.id}` : '/api/backend/westsides/customer-price-agreements';
-      const method = item ? 'PATCH' : 'POST';
-      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
+      if (mode === 'create') {
+        await backendPost('/westsides/customer-price-agreements', { ...body, companyId });
+      } else {
+        await backendPatch(`/westsides/customer-price-agreements/${item!.id}`, body);
+      }
       onSaved();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error saving');
+      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Error saving');
     } finally { setSaving(false); }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <h2 className="text-base font-semibold text-slate-900">{item ? 'Edit Agreement' : 'New Agreement'}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><CloseIcon /></button>
-        </div>
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-          {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className={labelCls}>Customer ID</label>
-              <input value={customerId} onChange={(e) => setCustomerId(e.target.value)} className={fieldCls} placeholder="Customer ID" />
-            </div>
-            <div>
-              <label className={labelCls}>Price List</label>
-              <select value={priceListId} onChange={(e) => setPriceListId(e.target.value)} className={fieldCls}>
-                <option value="">Select…</option>
-                {priceLists.map(pl => <option key={pl.id} value={pl.id}>{pl.name}</option>)}
-              </select>
-            </div>
-            <div className="col-span-2">
-              <label className={labelCls}>Product</label>
-              <select value={productId} onChange={(e) => setProductId(e.target.value)} className={fieldCls}>
-                <option value="">Select…</option>
-                {products.map(p => <option key={p.id} value={p.id}>{p.productCode} – {p.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>Agreed Price</label>
-              <input type="number" min={0} step="0.01" value={agreedPrice} onChange={(e) => setAgreedPrice(e.target.value === '' ? '' : Number(e.target.value))} className={fieldCls} placeholder="0.00" />
-            </div>
-            <div>
-              <label className={labelCls}>Discount %</label>
-              <input type="number" min={0} max={100} step="0.01" value={discountPercent} onChange={(e) => setDiscountPercent(e.target.value === '' ? '' : Number(e.target.value))} className={fieldCls} placeholder="0" />
-            </div>
-            <div>
-              <label className={labelCls}>Start Date *</label>
-              <input type="date" required value={startDate} onChange={(e) => setStartDate(e.target.value)} className={fieldCls} />
-            </div>
-            <div>
-              <label className={labelCls}>End Date</label>
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className={fieldCls} />
-            </div>
-          </div>
-        </form>
-        <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
-          <button onClick={onClose} className="text-sm text-slate-600 px-4 py-2 rounded-md border border-slate-200 hover:bg-slate-50">Cancel</button>
-          <button onClick={(e) => handleSubmit(e as unknown as React.FormEvent)} disabled={saving} className="text-sm bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-5 py-2 rounded-md font-medium">
-            {saving ? 'Saving…' : item ? 'Update' : 'Create'}
-          </button>
-        </div>
+    <Modal open onClose={onClose} title={mode === 'create' ? 'New Agreement' : 'Edit Agreement'} size="lg"
+      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>{mode === 'create' ? 'Create' : 'Update'}</Btn></>}>
+      {error && <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
+      <div className="grid grid-cols-2 gap-4">
+        <FormSelect label="Company" required value={companyId} onChange={(e) => { setCompanyId(e.target.value); setCustomerId(''); }} placeholder="Select…" disabled={mode === 'edit'}>
+          {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </FormSelect>
+        <FormSelect label="Customer" required value={customerId} onChange={(e) => setCustomerId(e.target.value)} placeholder="Select…" disabled={!companyId}>
+          {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </FormSelect>
+        <FormSelect label="Price List" value={priceListId ?? ''} onChange={(e) => setPriceListId(e.target.value)} placeholder="Select…">
+          {priceLists.map(pl => <option key={pl.id} value={pl.id}>{pl.name}</option>)}
+        </FormSelect>
+        <FormSelect label="Product" value={productId ?? ''} onChange={(e) => setProductId(e.target.value)} placeholder="Select…">
+          {products.map(p => <option key={p.id} value={p.id}>{p.productCode} – {p.name}</option>)}
+        </FormSelect>
+        <FormInput label="Agreed Price" type="number" min={0} step="0.01" value={agreedPrice} onChange={(e) => setAgreedPrice(e.target.value)} placeholder="0.00" />
+        <FormInput label="Discount %" type="number" min={0} max={100} step="0.01" value={discountPercent} onChange={(e) => setDiscountPercent(e.target.value)} placeholder="0" />
+        <FormInput label="Start Date" type="date" required value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        <FormInput label="End Date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        <div className="col-span-2"><FormTextarea label="Notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CustomerPriceAgreementsPage() {
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission('customer_price_agreements.manage');
+  const canApprove = hasPermission('customer_price_agreements.approve');
+
   const [items, setItems] = useState<CustomerPriceAgreement[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<CustomerPriceAgreement | null>(null);
+  const [deleting, setDeleting] = useState<CustomerPriceAgreement | null>(null);
+  const [actionLoading, setActionLoading] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -185,14 +178,41 @@ export default function CustomerPriceAgreementsPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  const doApprove = async (ag: CustomerPriceAgreement) => {
+    setActionLoading(`${ag.id}-approve`);
+    try {
+      await backendPatch(`/westsides/customer-price-agreements/${ag.id}/approve`);
+      showToast('success', 'Agreement approved');
+      load();
+    } catch (err: unknown) {
+      showToast('error', 'Approve failed', err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Unknown error');
+    } finally { setActionLoading(''); }
+  };
+
+  const doDelete = async () => {
+    if (!deleting) return;
+    try {
+      await backendDelete(`/westsides/customer-price-agreements/${deleting.id}`);
+      showToast('success', 'Agreement deleted');
+      setDeleting(null);
+      load();
+    } catch (err: unknown) {
+      showToast('error', 'Delete failed', err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Unknown error');
+      setDeleting(null);
+    }
+  };
+
+  const showActions = canManage || canApprove;
+
   return (
     <div className="p-6 space-y-5">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <PageHeader title="Customer Price Agreements" subtitle="Manage customer-specific pricing agreements" />
-        <button onClick={() => { setEditing(null); setModalOpen(true); }} className="text-sm bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md font-medium">
-          + New Agreement
-        </button>
-      </div>
+      <PageHeader title="Customer Price Agreements" subtitle="Manage customer-specific pricing agreements" />
+
+      <PageToolbar
+        actions={canManage ? (
+          <Btn variant="primary" onClick={() => { setEditing(null); setModalOpen(true); }}>+ New Agreement</Btn>
+        ) : null}
+      />
 
       {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
       {loading ? <Spinner /> : (
@@ -212,25 +232,40 @@ export default function CustomerPriceAgreementsPage() {
                     <th className={thCls}>Start Date</th>
                     <th className={thCls}>End Date</th>
                     <th className={thCls}>Status</th>
-                    <th className={thCls}></th>
+                    <th className={thCls}>Approved</th>
+                    {showActions && <th className={`${thCls} text-right`}>Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {items.map((ag) => (
-                    <tr key={ag.id} className="hover:bg-slate-50">
-                      <td className={`${tdCls} font-medium`}>{ag.customerName ?? '—'}</td>
-                      <td className={tdCls}>{ag.priceListName ?? '—'}</td>
-                      <td className={tdCls}>{ag.productName ?? '—'}</td>
-                      <td className={`${tdCls} text-right`}>{fmtCurrency(ag.agreedPrice)}</td>
-                      <td className={`${tdCls} text-right`}>{ag.discountPercent}%</td>
-                      <td className={tdCls}>{ag.startDate ? fmtDate(ag.startDate) : '—'}</td>
-                      <td className={tdCls}>{ag.endDate ? fmtDate(ag.endDate) : '—'}</td>
-                      <td className={tdCls}><Badge status={ag.status} /></td>
-                      <td className="px-4 py-2">
-                        <button onClick={() => { setEditing(ag); setModalOpen(true); }} className="text-xs text-indigo-600 hover:text-indigo-800">Edit</button>
-                      </td>
-                    </tr>
-                  ))}
+                  {items.map((ag) => {
+                    const pending = !ag.approvedAt;
+                    return (
+                      <tr key={ag.id} className="hover:bg-slate-50">
+                        <td className={`${tdCls} font-medium`}>{ag.customerName ?? '—'}</td>
+                        <td className={tdCls}>{ag.priceListName ?? '—'}</td>
+                        <td className={tdCls}>{ag.productName ?? '—'}</td>
+                        <td className={`${tdCls} text-right`}>{fmtCurrency(ag.agreedPrice)}</td>
+                        <td className={`${tdCls} text-right`}>{ag.discountPercent}%</td>
+                        <td className={tdCls}>{ag.startDate ? fmtDate(ag.startDate) : '—'}</td>
+                        <td className={tdCls}>{ag.endDate ? fmtDate(ag.endDate) : '—'}</td>
+                        <td className={tdCls}><Badge status={ag.status} /></td>
+                        <td className={tdCls}>{ag.approvedAt ? fmtDate(ag.approvedAt) : '—'}</td>
+                        {showActions && (
+                          <td className="px-4 py-2 text-right whitespace-nowrap">
+                            {canApprove && pending && (
+                              <Btn variant="ghost" size="xs" loading={actionLoading === `${ag.id}-approve`} onClick={() => doApprove(ag)}>Approve</Btn>
+                            )}
+                            {canManage && pending && (
+                              <>
+                                <Btn variant="ghost" size="xs" onClick={() => { setEditing(ag); setModalOpen(true); }}>Edit</Btn>
+                                <Btn variant="ghost" size="xs" onClick={() => setDeleting(ag)}>Delete</Btn>
+                              </>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -240,9 +275,22 @@ export default function CustomerPriceAgreementsPage() {
 
       {modalOpen && (
         <AgreementModal
+          mode={editing ? 'edit' : 'create'}
           item={editing}
           onClose={() => { setModalOpen(false); setEditing(null); }}
           onSaved={() => { setModalOpen(false); setEditing(null); load(); }}
+        />
+      )}
+
+      {deleting && (
+        <ConfirmDialog
+          open
+          title="Delete Agreement"
+          message={`Delete the price agreement for ${deleting.customerName ?? 'this customer'}? This cannot be undone.`}
+          confirmLabel="Delete"
+          variant="danger"
+          onConfirm={doDelete}
+          onCancel={() => setDeleting(null)}
         />
       )}
     </div>

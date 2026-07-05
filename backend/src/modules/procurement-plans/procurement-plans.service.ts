@@ -41,7 +41,12 @@ export class ProcurementPlansService {
 
   async update(id: string, dto: any, user: any) {
     const existing = await this.findOne(id);
-    const updated = await this.prisma.procurementPlan.update({ where: { id }, data: dto });
+    const data = { ...dto };
+    delete data.companyId;
+    delete data.status;
+    delete data.createdById;
+    delete data.lines;
+    const updated = await this.prisma.procurementPlan.update({ where: { id }, data });
     await this.auditLogs.log({ action: 'UPDATE', entityType: 'ProcurementPlan', entityId: id, userId: user.id, oldValue: existing, newValue: updated });
     return updated;
   }

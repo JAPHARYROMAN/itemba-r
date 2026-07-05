@@ -5,13 +5,17 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   Btn,
   Card,
+  ConfirmDialog,
   FormInput,
   FormSelect,
   Modal,
   PageHeader,
   PageSpinner,
   StatusBadge,
+  showToast,
 } from '@/components/ui';
+import { ApiError, backendDelete } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
 
 type Tab =
   | 'profile'
@@ -124,6 +128,8 @@ const PROVIDER_LABELS: Record<string, string> = {
 export default function EmployeeDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { hasPermission } = useAuth();
+  const canDelete = hasPermission('employees.delete');
   const id = params.id as string;
 
   const [emp, setEmp] = useState<Employee | null>(null);
@@ -139,6 +145,10 @@ export default function EmployeeDetailPage() {
   // Mobile money modal state
   const [showMmModal, setShowMmModal] = useState(false);
   const [editingMm, setEditingMm] = useState<MobileMoney | null>(null);
+
+  // Delete confirmation state
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -199,6 +209,17 @@ export default function EmployeeDetailPage() {
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       setForm((p) => ({ ...p, [k]: e.target.value }));
 
+  const handleDelete = async () => {
+    setDeleteError('');
+    try {
+      await backendDelete(`/hr/employees/${id}`);
+      showToast('success', 'Employee deleted');
+      router.push('/hr/employees');
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : 'Failed to delete employee');
+    }
+  };
+
   if (loading) return <PageSpinner />;
   if (!emp) return <div className="p-6 text-sm text-slate-500">Employee not found.</div>;
 
@@ -224,6 +245,17 @@ export default function EmployeeDetailPage() {
             {tab === 'statutory' && (
               <Btn variant="primary" onClick={() => setShowStatutoryEdit(true)}>
                 Edit Tax & Statutory
+              </Btn>
+            )}
+            {canDelete && (
+              <Btn
+                variant="danger"
+                onClick={() => {
+                  setDeleteError('');
+                  setConfirmingDelete(true);
+                }}
+              >
+                Delete
               </Btn>
             )}
             <Btn variant="secondary" onClick={() => router.back()}>
@@ -585,6 +617,22 @@ export default function EmployeeDetailPage() {
           linkHref="/hr/hr-documents"
         />
       )}
+
+      <ConfirmDialog
+        open={confirmingDelete}
+        title="Delete Employee"
+        variant="danger"
+        confirmLabel="Delete"
+        message={
+          deleteError ||
+          `Permanently delete ${fullName} (${emp.employeeCode})? Deletion is only for records created in error — to end a real employee's employment, use the termination workflow instead. Deletion is blocked while active allowances, deductions, open leave requests, unsettled salary advances, or payroll entries exist.`
+        }
+        onConfirm={handleDelete}
+        onCancel={() => {
+          setConfirmingDelete(false);
+          setDeleteError('');
+        }}
+      />
 
       {/* Profile edit modal */}
       <Modal

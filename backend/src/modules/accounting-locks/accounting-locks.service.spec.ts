@@ -77,6 +77,32 @@ describe('AccountingLocksService GL controls', () => {
     );
   });
 
+  it('converts date-string lock bounds to Date objects before persisting', async () => {
+    const prisma = makePrisma();
+    prisma.accountingLock.findFirst.mockResolvedValue(null);
+    const service = makeService(prisma);
+
+    await service.create(
+      {
+        lockCode: 'LOCK-3',
+        companyId: 'company-1',
+        lockType: 'CUSTOM',
+        lockedFrom: '2026-04-01',
+        lockedTo: '2026-04-30',
+      },
+      authUser(),
+    );
+
+    expect(prisma.accountingLock.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          lockedFrom: new Date('2026-04-01'),
+          lockedTo: new Date('2026-04-30'),
+        }),
+      }),
+    );
+  });
+
   it('rejects inverted lock date ranges', async () => {
     const prisma = makePrisma();
     const service = makeService(prisma);

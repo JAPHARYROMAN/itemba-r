@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Btn,
   Card,
+  ConfirmDialog,
   DateInput,
   PageHeader,
   SkeletonCardGrid,
@@ -13,7 +14,8 @@ import {
   showToast,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
-import { backendGet, backendPost } from '@/lib/api-client';
+import { backendDelete, backendGet, backendPost } from '@/lib/api-client';
+import { SupplierFormModal, type Company } from '../_components/SupplierFormModal';
 
 interface SupplierCategory {
   productCategory: { id: string; name: string; categoryType: string };
@@ -37,6 +39,7 @@ interface SupplierDetail {
   status: string;
   notes?: string | null;
   companyId: string;
+  divisionId?: string | null;
   company?: { id: string; name: string; code?: string | null } | null;
   division?: { id: string; name: string; code?: string | null } | null;
   branch?: { id: string; name: string; code?: string | null } | null;
@@ -260,8 +263,12 @@ export default function SupplierDetailPage() {
   const [statementStart, setStatementStart] = useState(isoDate(monthStart()));
   const [statementEnd, setStatementEnd] = useState(isoDate(new Date()));
   const [generating, setGenerating] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const canView = hasPermission('suppliers.view');
+  const canUpdate = hasPermission('suppliers.update');
+  const canDelete = hasPermission('suppliers.delete');
   const canGenerateStatements = hasPermission('supplier_statements.generate');
 
   const load = useCallback(async () => {
@@ -314,6 +321,27 @@ export default function SupplierDetailPage() {
     [data?.supplier.productCategories],
   );
 
+  const companyOptions = useMemo<Company[]>(() => {
+    const company = data?.supplier.company;
+    return company ? [{ id: company.id, name: company.name, code: company.code ?? '' }] : [];
+  }, [data?.supplier.company]);
+
+  const handleDelete = async () => {
+    if (!data) return;
+    try {
+      await backendDelete(`/suppliers/${data.supplier.id}`);
+      showToast('success', 'Supplier deleted', data.supplier.name);
+      setConfirmDelete(false);
+      router.push('/operations/suppliers');
+    } catch (err) {
+      showToast(
+        'error',
+        'Could not delete supplier',
+        err instanceof Error ? err.message : 'Failed',
+      );
+    }
+  };
+
   if (!canView) {
     return (
       <div className="p-6">
@@ -356,6 +384,28 @@ export default function SupplierDetailPage() {
 
   return (
     <div className="space-y-6 p-6">
+      {editing && (
+        <SupplierFormModal
+          mode="edit"
+          initial={supplier}
+          companies={companyOptions}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            load();
+          }}
+        />
+      )}
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete Supplier"
+        message={`Delete ${supplier.name}? Suppliers linked to historical purchases remain preserved in those documents, but this supplier will no longer be selectable.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDelete(false)}
+      />
+
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <PageHeader
           title={supplier.name}
@@ -373,6 +423,16 @@ export default function SupplierDetailPage() {
           >
             Supplier Reports
           </Btn>
+          {canUpdate && (
+            <Btn variant="primary" onClick={() => setEditing(true)}>
+              Edit
+            </Btn>
+          )}
+          {canDelete && (
+            <Btn variant="danger" onClick={() => setConfirmDelete(true)}>
+              Delete
+            </Btn>
+          )}
           <StatusBadge status={supplier.status} />
         </div>
       </div>

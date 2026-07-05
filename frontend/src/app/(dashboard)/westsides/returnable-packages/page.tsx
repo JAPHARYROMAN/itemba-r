@@ -1,9 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader } from '@/components/ui';
+import { Btn, Card, ConfirmDialog, FormInput, FormSelect, Modal, PageHeader, showToast } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { ApiError, backendDelete, backendPatch, backendPost } from '@/lib/api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+interface Company { id: string; name: string }
 
 interface ReturnablePackage {
   id: string;
@@ -26,15 +30,26 @@ interface PackageBalance {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const fieldCls = 'w-full text-sm border border-slate-200 rounded-md px-3 py-2 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300';
-const labelCls = 'block text-xs font-medium text-slate-600 mb-1';
 const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm text-slate-700';
+
+const PACKAGE_TYPES = [
+  { value: 'EMPTY_CRATE', label: 'Empty Crate' },
+  { value: 'EMPTY_BOTTLE', label: 'Empty Bottle' },
+  { value: 'KEG', label: 'Keg' },
+  { value: 'PALLET', label: 'Pallet' },
+  { value: 'CYLINDER', label: 'Cylinder' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+const STATUSES = [
+  { value: 'ACTIVE', label: 'Active' },
+  { value: 'INACTIVE', label: 'Inactive' },
+];
 
 const STATUS_CLR: Record<string, string> = {
   ACTIVE: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   INACTIVE: 'bg-zinc-100 text-zinc-500 border-zinc-200',
-  RETIRED: 'bg-zinc-100 text-zinc-500 border-zinc-200',
 };
 
 function Badge({ status }: { status: string }) {
@@ -57,93 +72,93 @@ function Spinner() {
   );
 }
 
-function CloseIcon() {
-  return <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
-}
-
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
-interface ModalProps { item: ReturnablePackage | null; onClose: () => void; onSaved: () => void }
+interface PackageForm { companyId: string; name: string; packageType: string; depositValue: string; status: string }
 
-function PackageModal({ item, onClose, onSaved }: ModalProps) {
-  const [packageCode, setPackageCode] = useState(item?.packageCode ?? '');
-  const [name, setName] = useState(item?.name ?? '');
-  const [packageType, setPackageType] = useState(item?.packageType ?? 'CRATE');
-  const [depositValue, setDepositValue] = useState<number | ''>(item?.depositValue ?? '');
+interface ModalProps {
+  mode: 'create' | 'edit';
+  initial?: ReturnablePackage;
+  companies: Company[];
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function PackageModal({ mode, initial, companies, onClose, onSaved }: ModalProps) {
+  const [form, setForm] = useState<PackageForm>(() => initial ? {
+    companyId: '',
+    name: initial.name,
+    packageType: initial.packageType,
+    depositValue: String(initial.depositValue ?? 0),
+    status: initial.status,
+  } : { companyId: '', name: '', packageType: 'EMPTY_CRATE', depositValue: '', status: 'ACTIVE' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const set = (k: keyof PackageForm, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!packageCode || !name) { setError('Package code and name are required'); return; }
+  const submit = async () => {
+    if (mode === 'create' && !form.companyId) { setError('Company is required'); return; }
+    if (!form.name.trim()) { setError('Name is required'); return; }
     setSaving(true); setError('');
     try {
-      const body = { packageCode, name, packageType, depositValue: Number(depositValue) || 0 };
-      const url = item ? `/api/backend/westsides/returnable-packages/${item.id}` : '/api/backend/westsides/returnable-packages';
-      const method = item ? 'PATCH' : 'POST';
-      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
+      if (mode === 'create') {
+        await backendPost('/westsides/returnable-packages', {
+          companyId: form.companyId,
+          name: form.name.trim(),
+          packageType: form.packageType,
+          depositValue: Number(form.depositValue) || 0,
+        });
+      } else {
+        await backendPatch(`/westsides/returnable-packages/${initial!.id}`, {
+          name: form.name.trim(),
+          packageType: form.packageType,
+          depositValue: Number(form.depositValue) || 0,
+          status: form.status,
+        });
+      }
       onSaved();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error saving');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Error saving');
     } finally { setSaving(false); }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <h2 className="text-base font-semibold text-slate-900">{item ? 'Edit Package' : 'New Returnable Package'}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><CloseIcon /></button>
-        </div>
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-          {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className={labelCls}>Package Code *</label>
-              <input required value={packageCode} onChange={(e) => setPackageCode(e.target.value)} className={fieldCls} placeholder="e.g. CRATE-20L" />
-            </div>
-            <div>
-              <label className={labelCls}>Name *</label>
-              <input required value={name} onChange={(e) => setName(e.target.value)} className={fieldCls} placeholder="e.g. 20L Crate" />
-            </div>
-            <div>
-              <label className={labelCls}>Type</label>
-              <select value={packageType} onChange={(e) => setPackageType(e.target.value)} className={fieldCls}>
-                <option value="CRATE">Crate</option>
-                <option value="BOTTLE">Bottle</option>
-                <option value="KEG">Keg</option>
-                <option value="DRUM">Drum</option>
-                <option value="OTHER">Other</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>Deposit Value (TZS)</label>
-              <input type="number" min={0} value={depositValue} onChange={(e) => setDepositValue(e.target.value === '' ? '' : Number(e.target.value))} className={fieldCls} placeholder="0" />
-            </div>
-          </div>
-        </form>
-        <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
-          <button onClick={onClose} className="text-sm text-slate-600 px-4 py-2 rounded-md border border-slate-200 hover:bg-slate-50">Cancel</button>
-          <button onClick={(e) => handleSubmit(e as unknown as React.FormEvent)} disabled={saving} className="text-sm bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-5 py-2 rounded-md font-medium">
-            {saving ? 'Saving…' : item ? 'Update' : 'Create'}
-          </button>
-        </div>
+    <Modal open onClose={onClose} title={mode === 'create' ? 'New Returnable Package' : 'Edit Package'}
+      subtitle={mode === 'edit' ? initial!.packageCode : undefined}
+      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>{mode === 'create' ? 'Create' : 'Update'}</Btn></>}>
+      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      <div className="grid grid-cols-2 gap-3">
+        {mode === 'create' && (
+          <FormSelect label="Company" required value={form.companyId} onChange={(e) => set('companyId', e.target.value)} placeholder="Select…" className="col-span-2">
+            {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </FormSelect>
+        )}
+        <FormInput label="Name" required value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. 20L Crate" />
+        <FormSelect label="Type" value={form.packageType} onChange={(e) => set('packageType', e.target.value)} options={PACKAGE_TYPES} />
+        <FormInput label="Deposit Value (TZS)" type="number" min={0} value={form.depositValue} onChange={(e) => set('depositValue', e.target.value)} placeholder="0" />
+        {mode === 'edit' && (
+          <FormSelect label="Status" value={form.status} onChange={(e) => set('status', e.target.value)} options={STATUSES} />
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ReturnablePackagesPage() {
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission('returnable_packages.manage');
+
   const [items, setItems] = useState<ReturnablePackage[]>([]);
   const [balances, setBalances] = useState<PackageBalance[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(false);
   const [balLoading, setBalLoading] = useState(false);
   const [error, setError] = useState('');
-  const [modalOpen, setModalOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ReturnablePackage | null>(null);
+  const [deleting, setDeleting] = useState<ReturnablePackage | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -163,18 +178,38 @@ export default function ReturnablePackagesPage() {
       const res = await fetch('/api/backend/westsides/returnable-packages/balances?limit=100');
       const json = await res.json();
       setBalances(json.data?.data ?? json.data ?? []);
+    } catch {
+      setBalances([]);
     } finally { setBalLoading(false); }
   }, []);
 
   useEffect(() => { load(); loadBalances(); }, [load, loadBalances]);
 
+  useEffect(() => {
+    if (!canManage) return;
+    fetch('/api/backend/companies?limit=100').then((r) => r.json()).then((j) => setCompanies(j.data?.data ?? j.data ?? [])).catch(() => {});
+  }, [canManage]);
+
+  const onSaved = () => { setCreating(false); setEditing(null); load(); loadBalances(); };
+
+  const doDelete = async () => {
+    if (!deleting) return;
+    try {
+      await backendDelete(`/westsides/returnable-packages/${deleting.id}`);
+      showToast('success', 'Package deleted', deleting.packageCode);
+      setDeleting(null);
+      load(); loadBalances();
+    } catch (err) {
+      setDeleting(null);
+      showToast('error', 'Delete failed', err instanceof ApiError ? err.message : undefined);
+    }
+  };
+
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <PageHeader title="Returnable Packages" subtitle="Manage returnable packaging — crates, bottles, kegs" />
-        <button onClick={() => { setEditing(null); setModalOpen(true); }} className="text-sm bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md font-medium">
-          + New Package
-        </button>
+        {canManage && <Btn variant="primary" onClick={() => setCreating(true)}>+ New Package</Btn>}
       </div>
 
       {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
@@ -192,7 +227,7 @@ export default function ReturnablePackagesPage() {
                     <th className={thCls}>Type</th>
                     <th className={`${thCls} text-right`}>Deposit Value</th>
                     <th className={thCls}>Status</th>
-                    <th className={thCls}></th>
+                    {canManage && <th className={`${thCls} text-right`}></th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -200,12 +235,15 @@ export default function ReturnablePackagesPage() {
                     <tr key={pkg.id} className="hover:bg-slate-50">
                       <td className={`${tdCls} font-medium`}>{pkg.packageCode}</td>
                       <td className={tdCls}>{pkg.name}</td>
-                      <td className={tdCls}>{pkg.packageType}</td>
+                      <td className={tdCls}>{pkg.packageType.replace(/_/g, ' ')}</td>
                       <td className={`${tdCls} text-right`}>{fmtCurrency(pkg.depositValue)}</td>
                       <td className={tdCls}><Badge status={pkg.status} /></td>
-                      <td className="px-4 py-2">
-                        <button onClick={() => { setEditing(pkg); setModalOpen(true); }} className="text-xs text-indigo-600 hover:text-indigo-800">Edit</button>
-                      </td>
+                      {canManage && (
+                        <td className="px-4 py-2 text-right whitespace-nowrap">
+                          <Btn variant="ghost" size="xs" onClick={() => setEditing(pkg)}>Edit</Btn>
+                          <Btn variant="ghost" size="xs" onClick={() => setDeleting(pkg)}>Delete</Btn>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -240,7 +278,7 @@ export default function ReturnablePackagesPage() {
                       <tr key={b.id} className="hover:bg-slate-50">
                         <td className={`${tdCls} font-medium`}>{b.customerName ?? '—'}</td>
                         <td className={tdCls}>{b.packageName ?? '—'}</td>
-                        <td className={tdCls}>{b.packageType ?? '—'}</td>
+                        <td className={tdCls}>{b.packageType?.replace(/_/g, ' ') ?? '—'}</td>
                         <td className={`${tdCls} text-right`}>{fmtNum(b.quantityOwedByCustomer)}</td>
                         <td className={`${tdCls} text-right`}>{fmtNum(b.quantityOwedToCustomer)}</td>
                         <td className={`${tdCls} text-right font-semibold ${b.depositBalance > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{fmtCurrency(b.depositBalance)}</td>
@@ -254,13 +292,17 @@ export default function ReturnablePackagesPage() {
         )}
       </div>
 
-      {modalOpen && (
-        <PackageModal
-          item={editing}
-          onClose={() => { setModalOpen(false); setEditing(null); }}
-          onSaved={() => { setModalOpen(false); setEditing(null); load(); loadBalances(); }}
-        />
-      )}
+      {creating && <PackageModal mode="create" companies={companies} onClose={() => setCreating(false)} onSaved={onSaved} />}
+      {editing && <PackageModal mode="edit" initial={editing} companies={companies} onClose={() => setEditing(null)} onSaved={onSaved} />}
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete Package"
+        message={deleting ? `Delete ${deleting.name} (${deleting.packageCode})? This cannot be undone.` : ''}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={doDelete}
+        onCancel={() => setDeleting(null)}
+      />
     </div>
   );
 }

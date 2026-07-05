@@ -1,14 +1,124 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { PageSpinner } from '@/components/ui';
+import { useCallback, useEffect, useState } from 'react';
+import { PageSpinner, Modal, ConfirmDialog, Btn, FormInput, FormSelect, FormTextarea, showToast } from '@/components/ui';
+import { backendPost, backendPatch, backendDelete, ApiError } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
+
+interface Company { id: string; name: string }
+
+interface Workflow {
+  id: string;
+  workflowCode: string;
+  name: string;
+  entityType: string;
+  description?: string | null;
+  workflowScope?: string | null;
+  triggerAction?: string | null;
+  companyId?: string | null;
+  priority: number;
+  isActive: boolean;
+}
+
+const SCOPES = ['GROUP', 'COMPANY', 'DIVISION', 'BRANCH', 'BUSINESS_UNIT', 'GLOBAL'];
+const TRIGGER_ACTIONS = ['CREATE', 'UPDATE', 'DELETE', 'SUBMIT', 'POST', 'PAY', 'EXPORT', 'APPROVE', 'STATUS_CHANGE', 'OTHER'];
+
+interface WorkflowForm {
+  workflowCode: string; name: string; entityType: string; description: string;
+  workflowScope: string; triggerAction: string; companyId: string; priority: string; isActive: string;
+}
+const BLANK: WorkflowForm = { workflowCode: '', name: '', entityType: '', description: '', workflowScope: '', triggerAction: '', companyId: '', priority: '0', isActive: 'true' };
+
+function WorkflowModal({ mode, initial, companies, onClose, onSaved }: { mode: 'create' | 'edit'; initial?: Workflow; companies: Company[]; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState<WorkflowForm>(() => initial ? {
+    workflowCode: initial.workflowCode,
+    name: initial.name,
+    entityType: initial.entityType,
+    description: initial.description ?? '',
+    workflowScope: initial.workflowScope ?? '',
+    triggerAction: initial.triggerAction ?? '',
+    companyId: initial.companyId ?? '',
+    priority: String(initial.priority ?? 0),
+    isActive: initial.isActive ? 'true' : 'false',
+  } : { ...BLANK });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const set = (k: keyof WorkflowForm, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const submit = async () => {
+    if (!form.name || !form.entityType) { setError('Name and entity type are required'); return; }
+    setSaving(true); setError('');
+    try {
+      const body: Record<string, unknown> = {
+        name: form.name,
+        entityType: form.entityType,
+        description: form.description || undefined,
+        workflowScope: form.workflowScope || undefined,
+        triggerAction: form.triggerAction || undefined,
+        priority: Number(form.priority) || 0,
+        isActive: form.isActive === 'true',
+      };
+      if (mode === 'create') {
+        await backendPost('/approvals/workflows', {
+          ...body,
+          workflowCode: form.workflowCode || undefined,
+          companyId: form.companyId || undefined,
+        });
+      } else {
+        await backendPatch(`/approvals/workflows/${initial!.id}`, body);
+      }
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Save failed');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal open onClose={onClose} title={mode === 'create' ? 'New Workflow' : 'Edit Workflow'} size="lg"
+      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
+      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      <div className="grid grid-cols-2 gap-3">
+        {mode === 'create' && (
+          <FormInput label="Workflow Code" value={form.workflowCode} onChange={(e) => set('workflowCode', e.target.value)} hint="Leave blank to auto-generate" />
+        )}
+        <FormInput label="Name" required value={form.name} onChange={(e) => set('name', e.target.value)} />
+        <FormInput label="Entity Type" required value={form.entityType} onChange={(e) => set('entityType', e.target.value)} hint="e.g. PurchaseOrder" />
+        <FormSelect label="Scope" value={form.workflowScope} onChange={(e) => set('workflowScope', e.target.value)} placeholder="Select…">
+          {SCOPES.map((s) => <option key={s} value={s}>{s}</option>)}
+        </FormSelect>
+        <FormSelect label="Trigger Action" value={form.triggerAction} onChange={(e) => set('triggerAction', e.target.value)} placeholder="Select…">
+          {TRIGGER_ACTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+        </FormSelect>
+        {mode === 'create' && (
+          <FormSelect label="Company" value={form.companyId} onChange={(e) => set('companyId', e.target.value)} placeholder="Select…">
+            {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </FormSelect>
+        )}
+        <FormInput label="Priority" type="number" value={form.priority} onChange={(e) => set('priority', e.target.value)} />
+        <FormSelect label="Status" value={form.isActive} onChange={(e) => set('isActive', e.target.value)}>
+          <option value="true">Active</option>
+          <option value="false">Inactive</option>
+        </FormSelect>
+        <div className="col-span-2"><FormTextarea label="Description" rows={2} value={form.description} onChange={(e) => set('description', e.target.value)} /></div>
+      </div>
+    </Modal>
+  );
+}
 
 export default function ApprovalWorkflowsPage() {
-  const [workflows, setWorkflows] = useState<any[]>([]);
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission('approval_workflows.manage');
+
+  const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterEntityType, setFilterEntityType] = useState('');
   const [filterActive, setFilterActive] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<Workflow | null>(null);
+  const [deleting, setDeleting] = useState<Workflow | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     const params: Record<string, string> = {};
     if (filterEntityType) params.entityType = filterEntityType;
     if (filterActive !== '') params.isActive = filterActive;
@@ -20,6 +130,40 @@ export default function ApprovalWorkflowsPage() {
       .finally(() => setLoading(false));
   }, [filterEntityType, filterActive]);
 
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!canManage) return;
+    fetch('/api/backend/companies?limit=100')
+      .then(r => r.json())
+      .then((j: any) => setCompanies(j.data?.data ?? j.data ?? []))
+      .catch(console.error);
+  }, [canManage]);
+
+  const onSaved = () => { setCreating(false); setEditing(null); load(); };
+
+  const doToggle = async (wf: Workflow) => {
+    setActionLoading(wf.id);
+    try {
+      await backendPatch(`/approvals/workflows/${wf.id}/${wf.isActive ? 'deactivate' : 'activate'}`);
+      showToast('success', wf.isActive ? 'Workflow deactivated' : 'Workflow activated');
+      load();
+    } catch (err) {
+      showToast('error', 'Action failed', err instanceof ApiError ? err.message : 'Unexpected error');
+    } finally { setActionLoading(null); }
+  };
+
+  const doDelete = async () => {
+    if (!deleting) return;
+    try {
+      await backendDelete(`/approvals/workflows/${deleting.id}`);
+      showToast('success', 'Workflow deleted');
+      load();
+    } catch (err) {
+      showToast('error', 'Delete failed', err instanceof ApiError ? err.message : 'Unexpected error');
+    } finally { setDeleting(null); }
+  };
+
   return (
     <div className="p-6">
       <div className="mb-6 flex items-center justify-between">
@@ -27,9 +171,11 @@ export default function ApprovalWorkflowsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Approval Workflows</h1>
           <p className="text-gray-500 mt-1">Define and manage approval workflow rules</p>
         </div>
-        <button className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors">
-          + New Workflow
-        </button>
+        {canManage && (
+          <button onClick={() => setCreating(true)} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors">
+            + New Workflow
+          </button>
+        )}
       </div>
 
       <div className="flex gap-3 mb-4">
@@ -78,9 +224,17 @@ export default function ApprovalWorkflowsPage() {
                     </span>
                   </td>
                   <td className="px-6 py-4 text-sm space-x-2">
-                    <button className="text-blue-600 hover:underline">Edit</button>
-                    <button className="text-gray-500 hover:underline">{wf.isActive ? 'Deactivate' : 'Activate'}</button>
-                    <button className="text-red-500 hover:underline">Delete</button>
+                    {canManage ? (
+                      <>
+                        <button onClick={() => setEditing(wf)} className="text-blue-600 hover:underline">Edit</button>
+                        <button onClick={() => doToggle(wf)} disabled={actionLoading === wf.id} className="text-gray-500 hover:underline disabled:opacity-50">
+                          {actionLoading === wf.id ? '…' : wf.isActive ? 'Deactivate' : 'Activate'}
+                        </button>
+                        <button onClick={() => setDeleting(wf)} className="text-red-500 hover:underline">Delete</button>
+                      </>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -91,6 +245,18 @@ export default function ApprovalWorkflowsPage() {
           </table>
         </div>
       )}
+
+      {creating && <WorkflowModal mode="create" companies={companies} onClose={() => setCreating(false)} onSaved={onSaved} />}
+      {editing && <WorkflowModal mode="edit" initial={editing} companies={companies} onClose={() => setEditing(null)} onSaved={onSaved} />}
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete Workflow"
+        message={`Delete workflow "${deleting?.name ?? ''}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={doDelete}
+        onCancel={() => setDeleting(null)}
+      />
     </div>
   );
 }

@@ -1,13 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { PageSpinner } from '@/components/ui';
+import { useCallback, useEffect, useState } from 'react';
+import { PageSpinner, Modal, Btn, ConfirmDialog, FormInput, FormSelect, FormTextarea, showToast } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { backendPost, ApiError } from '@/lib/api-client';
 
 interface Company {
   id: string;
   name: string;
   code?: string | null;
 }
+
+const LOCK_TYPES = ['PERIOD_LOCK', 'FISCAL_YEAR_LOCK', 'MODULE_LOCK', 'CUSTOM'];
 
 function unwrapList<T>(json: any): T[] {
   const payload = json?.data ?? json;
@@ -17,11 +21,89 @@ function unwrapList<T>(json: any): T[] {
   return [];
 }
 
+interface LockForm {
+  lockCode: string;
+  companyId: string;
+  lockType: string;
+  moduleName: string;
+  lockedFrom: string;
+  lockedTo: string;
+  reason: string;
+}
+
+function LockModal({ companies, defaultCompanyId, onClose, onSaved }: { companies: Company[]; defaultCompanyId: string; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState<LockForm>({
+    lockCode: '',
+    companyId: defaultCompanyId,
+    lockType: 'PERIOD_LOCK',
+    moduleName: '',
+    lockedFrom: '',
+    lockedTo: '',
+    reason: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const set = (k: keyof LockForm, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const submit = async () => {
+    if (!form.lockCode || !form.companyId || !form.lockType) {
+      setError('Lock code, company and lock type are required');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await backendPost('/accounting-locks', {
+        lockCode: form.lockCode,
+        companyId: form.companyId,
+        lockType: form.lockType,
+        moduleName: form.moduleName || undefined,
+        lockedFrom: form.lockedFrom || undefined,
+        lockedTo: form.lockedTo || undefined,
+        reason: form.reason || undefined,
+      });
+      showToast('success', 'Accounting lock created');
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to create lock');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="New Accounting Lock" size="lg"
+      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Create Lock</Btn></>}>
+      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      <div className="grid grid-cols-2 gap-3">
+        <FormInput label="Lock Code" required value={form.lockCode} onChange={(e) => set('lockCode', e.target.value)} />
+        <FormSelect label="Company" required value={form.companyId} onChange={(e) => set('companyId', e.target.value)} placeholder="Select…">
+          {companies.map((c) => <option key={c.id} value={c.id}>{c.code ? `${c.code} - ${c.name}` : c.name}</option>)}
+        </FormSelect>
+        <FormSelect label="Lock Type" required value={form.lockType} onChange={(e) => set('lockType', e.target.value)}>
+          {LOCK_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+        </FormSelect>
+        <FormInput label="Module Name" value={form.moduleName} onChange={(e) => set('moduleName', e.target.value)} hint="For module locks" />
+        <FormInput label="Locked From" type="date" value={form.lockedFrom} onChange={(e) => set('lockedFrom', e.target.value)} />
+        <FormInput label="Locked To" type="date" value={form.lockedTo} onChange={(e) => set('lockedTo', e.target.value)} />
+        <div className="col-span-2"><FormTextarea label="Reason" rows={2} value={form.reason} onChange={(e) => set('reason', e.target.value)} /></div>
+      </div>
+    </Modal>
+  );
+}
+
 export default function AccountingLocksPage() {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('accounting_locks.create');
+  const canRelease = hasPermission('accounting_locks.release');
+
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [releasing, setReleasing] = useState<any | null>(null);
+  const [releaseBusy, setReleaseBusy] = useState(false);
 
   useEffect(() => {
     fetch('/api/backend/companies?limit=100')
@@ -34,7 +116,7 @@ export default function AccountingLocksPage() {
       .catch(() => setCompanies([]));
   }, []);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!companyId) {
       setData([]);
       setLoading(false);
@@ -52,13 +134,32 @@ export default function AccountingLocksPage() {
       .finally(() => setLoading(false));
   }, [companyId]);
 
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const doRelease = async () => {
+    if (!releasing) return;
+    setReleaseBusy(true);
+    try {
+      await backendPost(`/accounting-locks/${releasing.id}/release`);
+      showToast('success', 'Lock released');
+      setReleasing(null);
+      load();
+    } catch (err) {
+      showToast('error', 'Release failed', err instanceof ApiError ? err.message : 'Unexpected error');
+    } finally {
+      setReleaseBusy(false);
+    }
+  };
+
   return (
     <div className="p-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Accounting Locks</h1>
         <p className="text-gray-500 mt-1">Manage accounting period and entity locks</p>
       </div>
-      <div className="mb-4">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <select
           value={companyId}
           onChange={(e) => setCompanyId(e.target.value)}
@@ -70,6 +171,7 @@ export default function AccountingLocksPage() {
             </option>
           ))}
         </select>
+        {canCreate && <Btn variant="primary" onClick={() => setCreating(true)}>+ New Lock</Btn>}
       </div>
 
       {loading ? (
@@ -85,12 +187,13 @@ export default function AccountingLocksPage() {
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Locked From</th>
                 <th className="px-4 py-3">Locked To</th>
+                {canRelease && <th className="px-4 py-3 text-right">Actions</th>}
               </tr>
             </thead>
             <tbody>
               {data.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={canRelease ? 7 : 6} className="px-4 py-8 text-center text-gray-400">
                     No records found
                   </td>
                 </tr>
@@ -113,6 +216,13 @@ export default function AccountingLocksPage() {
                     <td className="px-4 py-3 text-gray-500">
                       {row.lockedTo ? new Date(row.lockedTo).toLocaleDateString() : '—'}
                     </td>
+                    {canRelease && (
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                        {row.status === 'ACTIVE' && (
+                          <Btn variant="ghost" size="xs" onClick={() => setReleasing(row)}>Release</Btn>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))
               )}
@@ -120,6 +230,25 @@ export default function AccountingLocksPage() {
           </table>
         </div>
       )}
+
+      {creating && (
+        <LockModal
+          companies={companies}
+          defaultCompanyId={companyId}
+          onClose={() => setCreating(false)}
+          onSaved={() => { setCreating(false); load(); }}
+        />
+      )}
+      <ConfirmDialog
+        open={!!releasing}
+        title="Release Lock"
+        message={`Release lock ${releasing?.lockCode ?? ''}? Transactions in the locked scope will become editable again.`}
+        confirmLabel="Release"
+        variant="danger"
+        loading={releaseBusy}
+        onConfirm={doRelease}
+        onCancel={() => setReleasing(null)}
+      />
     </div>
   );
 }

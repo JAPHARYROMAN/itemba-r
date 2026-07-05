@@ -144,7 +144,9 @@ export class SalesCommissionsService {
     }
 
     let nextAmount: number | undefined = dto.amount;
-    if (dto.basis !== undefined || dto.rate !== undefined) {
+    const basisChanged = dto.basis !== undefined && dto.basis !== existing.basis;
+    const rateChanged = dto.rate !== undefined && dto.rate !== Number(existing.rate);
+    if (basisChanged || rateChanged) {
       const basis = dto.basis ?? (existing.basis as SalesCommissionBasisDto);
       const rate = dto.rate ?? Number(existing.rate);
       if (dto.amount === undefined) {
