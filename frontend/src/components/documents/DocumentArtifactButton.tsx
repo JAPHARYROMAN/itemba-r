@@ -9,7 +9,12 @@ export type DocumentEntityType =
   | 'QUOTATION'
   | 'PROFORMA_INVOICE'
   | 'DELIVERY_NOTE'
-  | 'CUSTOMER_PROFILE';
+  | 'CUSTOMER_PROFILE'
+  | 'GOODS_RECEIVED_NOTE'
+  | 'SUPPLIER_INVOICE'
+  | 'PAYSLIP'
+  | 'CREDIT_NOTE'
+  | 'CUSTOMER_PAYMENT_RECEIPT';
 
 interface GeneratedDocumentResponse {
   generatedDocument?: {

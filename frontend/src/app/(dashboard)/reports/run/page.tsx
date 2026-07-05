@@ -13,6 +13,7 @@ import {
   pickPrimaryTable,
   toCsv,
 } from '@/lib/report-export';
+import { downloadReportPdf } from '@/lib/export-download';
 
 interface CatalogEntry {
   id: string;
@@ -842,6 +843,32 @@ function ReportRunContent() {
     URL.revokeObjectURL(url);
   };
 
+  const downloadPdf = async () => {
+    if (!primary.rows.length || !data) return;
+    await recordExport('PDF');
+    setExporting('PDF');
+    try {
+      const filterSummary = [
+        companyId ? companies.find((c) => c.id === companyId)?.name : '',
+        divisionId ? divisions.find((d) => d.id === divisionId)?.name : '',
+        dateFrom || dateTo ? `${dateFrom || '…'} – ${dateTo || '…'}` : '',
+        asOf ? `As of ${asOf}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      await downloadReportPdf(data, entry?.id ?? 'report', {
+        title: entry?.name ?? 'Report',
+        subtitle: filterSummary || undefined,
+        companyId: companyId || undefined,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to export PDF';
+      showToast('error', 'PDF export failed', message);
+    } finally {
+      setExporting('');
+    }
+  };
+
   const printPage = async () => {
     await recordExport('PDF');
     window.print();
@@ -938,6 +965,13 @@ function ReportRunContent() {
               className="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-md bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               {exporting === 'CSV' ? 'Auditing...' : 'Export CSV'}
+            </button>
+            <button
+              onClick={downloadPdf}
+              disabled={!primary.rows.length || exporting === 'PDF'}
+              className="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-md bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {exporting === 'PDF' ? 'Exporting...' : 'Export PDF'}
             </button>
             <button
               onClick={printPage}

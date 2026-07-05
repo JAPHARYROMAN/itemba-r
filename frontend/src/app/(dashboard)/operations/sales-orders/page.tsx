@@ -27,7 +27,8 @@ import {
   backendPatch,
   backendPost,
 } from '@/lib/api-client';
-import { downloadTextFile, formatDateOnly, rowsToCsv } from '@/lib/report-export';
+import { cellToString, downloadTextFile, formatDateOnly, rowsToCsv } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
 import { useAuth } from '@/hooks/use-auth';
 import {
   SALES_TYPES,
@@ -1276,7 +1277,7 @@ export default function SalesOrdersPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
   const [loadError, setLoadError] = useState('');
-  const [exporting, setExporting] = useState(false);
+  const [exporting, setExporting] = useState<false | 'csv' | 'pdf'>(false);
 
   const canView = hasPermission('sales.view');
   const canCreate = hasPermission('sales.create');
@@ -1348,10 +1349,10 @@ export default function SalesOrdersPage() {
     load();
   }, [load]);
 
-  // Export the FULL filtered register (not just the visible page) to CSV.
-  const exportCsv = useCallback(async () => {
+  // Export the FULL filtered register (not just the visible page) to CSV/PDF.
+  const exportRegister = useCallback(async (format: 'csv' | 'pdf') => {
     if (!canView) return;
-    setExporting(true);
+    setExporting(format);
     try {
       const query: Record<string, string | number> = {};
       if (filterSearch.trim()) query.search = filterSearch.trim();
@@ -1398,11 +1399,32 @@ export default function SalesOrdersPage() {
         'Total',
         'Outstanding',
       ];
-      downloadTextFile(
-        `sales-orders-${new Date().toISOString().slice(0, 10)}.csv`,
-        'text/csv;charset=utf-8',
-        rowsToCsv(rows, columns),
-      );
+      if (format === 'pdf') {
+        const filterParts = [
+          filterCompany ? companies.find((c) => c.id === filterCompany)?.name : '',
+          filterType.replace(/_/g, ' '),
+          filterStatus.replace(/_/g, ' '),
+          filterPayment.replace(/_/g, ' '),
+          filterDateFrom || filterDateTo
+            ? `${filterDateFrom || 'start'} to ${filterDateTo || 'today'}`
+            : '',
+        ].filter(Boolean);
+        await downloadTablePdf({
+          title: 'Sales Orders',
+          subtitle: filterParts.length ? filterParts.join(' · ') : undefined,
+          companyId: filterCompany || undefined,
+          columns,
+          rows: rows.map((r) => columns.map((c) => cellToString(r[c as keyof typeof r]))),
+          numericColumns: [9, 10],
+          baseName: 'sales-orders',
+        });
+      } else {
+        downloadTextFile(
+          `sales-orders-${new Date().toISOString().slice(0, 10)}.csv`,
+          'text/csv;charset=utf-8',
+          rowsToCsv(rows, columns),
+        );
+      }
       if (result.total > orders.length) {
         showToast(
           'warning',
@@ -1421,6 +1443,7 @@ export default function SalesOrdersPage() {
     }
   }, [
     canView,
+    companies,
     filterSearch,
     filterCompany,
     filterType,
@@ -1689,8 +1712,21 @@ export default function SalesOrdersPage() {
         }
         actions={
           <>
-            <Btn variant="secondary" onClick={exportCsv} loading={exporting}>
+            <Btn
+              variant="secondary"
+              onClick={() => exportRegister('csv')}
+              loading={exporting === 'csv'}
+              disabled={!!exporting}
+            >
               Export CSV
+            </Btn>
+            <Btn
+              variant="secondary"
+              onClick={() => exportRegister('pdf')}
+              loading={exporting === 'pdf'}
+              disabled={!!exporting}
+            >
+              Export PDF
             </Btn>
             {canCreate ? (
               <Btn variant="primary" onClick={() => setCreating(true)}>

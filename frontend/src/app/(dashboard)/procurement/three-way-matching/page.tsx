@@ -16,6 +16,7 @@ import {
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendList, backendPost } from '@/lib/api-client';
+import { downloadTablePdf } from '@/lib/export-download';
 import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
 
 interface Company { id: string; name: string; code?: string | null }
@@ -105,6 +106,7 @@ export default function ThreeWayMatchingPage() {
   const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState({
     matchNumber: '',
@@ -191,8 +193,8 @@ export default function ThreeWayMatchingPage() {
     setCreating(true);
   };
 
-  const exportCsv = () => {
-    const data = rows.map((row) => ({
+  const buildExportRows = () =>
+    rows.map((row) => ({
       'Match Number': row.matchNumber,
       'Match Date': new Date(row.matchDate).toLocaleDateString('en-GB'),
       'Purchase Order': poById.get(row.purchaseOrderId)?.purchaseOrderNumber ?? row.purchaseOrderId,
@@ -204,9 +206,37 @@ export default function ThreeWayMatchingPage() {
       Status: row.matchStatus,
       Approved: row.approvedAt ? 'Yes' : 'No',
     }));
-    const csv = rowsToCsv(data);
+
+  const exportCsv = () => {
+    const csv = rowsToCsv(buildExportRows());
     if (!csv) return;
     downloadTextFile(`three-way-matching-${today}.csv`, 'text/csv;charset=utf-8', csv);
+  };
+
+  const exportPdf = async () => {
+    const data = buildExportRows();
+    if (data.length === 0) return;
+    setExportingPdf(true);
+    setError('');
+    try {
+      const filters = [
+        companyId ? (companies.find((company) => company.id === companyId)?.name ?? '') : '',
+        status,
+      ].filter(Boolean).join(' · ');
+      await downloadTablePdf({
+        title: 'Three-Way Matching',
+        subtitle: filters || undefined,
+        companyId: companyId || undefined,
+        columns: Object.keys(data[0]),
+        rows: data.map((row) => Object.values(row).map(String)),
+        numericColumns: [4, 5],
+        baseName: 'three-way-matching',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'PDF export failed');
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   const filteredGrns = form.purchaseOrderId
@@ -289,7 +319,7 @@ export default function ThreeWayMatchingPage() {
       </div>
 
       <Card className="p-4">
-        <div className="grid md:grid-cols-[1fr_190px_auto_auto] gap-3 items-end">
+        <div className="grid md:grid-cols-[1fr_190px_auto_auto_auto] gap-3 items-end">
           <FormSelect label="Company" value={companyId} onChange={(e) => setCompanyId(e.target.value)} placeholder="All companies">
             {companies.map((company) => <option key={company.id} value={company.id}>{optionLabel(company)}</option>)}
           </FormSelect>
@@ -297,6 +327,7 @@ export default function ThreeWayMatchingPage() {
             {MATCH_STATUSES.map((item) => <option key={item} value={item}>{item}</option>)}
           </FormSelect>
           <Btn variant="secondary" onClick={exportCsv} disabled={rows.length === 0} aria-label="Export matches to CSV">Export CSV</Btn>
+          <Btn variant="secondary" onClick={exportPdf} disabled={rows.length === 0 || exportingPdf} aria-label="Export matches to PDF">Export PDF</Btn>
           {canCreate && <Btn onClick={openCreate}>New Match</Btn>}
         </div>
       </Card>

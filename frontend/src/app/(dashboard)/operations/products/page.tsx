@@ -18,7 +18,8 @@ import {
   showToast,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
-import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
+import { rowsToCsv, cellToString, downloadTextFile } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
 import {
   backendDelete,
   backendList,
@@ -1134,6 +1135,7 @@ export default function ProductsPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [deleting, setDeleting] = useState<Product | null>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const canView = hasPermission('products.view');
   const canCreate = hasPermission('products.create');
@@ -1283,13 +1285,8 @@ export default function ProductsPage() {
     load();
   }, [load]);
 
-  const handleExportCsv = () => {
-    const rows = data?.data ?? [];
-    if (!rows.length) {
-      showToast('error', 'Nothing to export', 'No products match the current filters');
-      return;
-    }
-    const csvRows = rows.map((p) => ({
+  const buildExportRows = () =>
+    (data?.data ?? []).map((p) => ({
       Code: p.productCode ?? '',
       Name: p.name,
       Family: p.productFamily
@@ -1315,9 +1312,52 @@ export default function ProductsPage() {
         : {}),
       Status: p.status,
     }));
+
+  const handleExportCsv = () => {
+    const csvRows = buildExportRows();
+    if (!csvRows.length) {
+      showToast('error', 'Nothing to export', 'No products match the current filters');
+      return;
+    }
     const csv = rowsToCsv(csvRows as Record<string, unknown>[]);
     const stamp = new Date().toISOString().slice(0, 10);
     downloadTextFile(`products-${stamp}.csv`, 'text/csv;charset=utf-8', csv);
+  };
+
+  const handleExportPdf = async () => {
+    const exportRows = buildExportRows() as Record<string, unknown>[];
+    if (!exportRows.length) {
+      showToast('error', 'Nothing to export', 'No products match the current filters');
+      return;
+    }
+    setExportingPdf(true);
+    try {
+      const columns = Object.keys(exportRows[0]);
+      const numericNames = ['Selling', 'Purchase', 'On hand', 'Available'];
+      const filterParts = [
+        companyId ? companies.find((c) => c.id === companyId)?.name : '',
+        categoryId ? categories.find((c) => c.id === categoryId)?.name : '',
+        productType ? productType.replace(/_/g, ' ') : '',
+        status,
+        branchId ? branches.find((b) => b.id === branchId)?.name : '',
+      ].filter(Boolean);
+      await downloadTablePdf({
+        title: 'Products',
+        subtitle: filterParts.length ? filterParts.join(' · ') : undefined,
+        companyId: companyId || undefined,
+        columns,
+        rows: exportRows.map((r) => columns.map((c) => cellToString(r[c]))),
+        numericColumns: columns
+          .map((c, i) => (numericNames.includes(c) ? i : -1))
+          .filter((i) => i >= 0),
+        baseName: 'products',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed';
+      showToast('error', 'Could not export PDF', message);
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   if (!canView) {
@@ -1536,6 +1576,13 @@ export default function ProductsPage() {
               disabled={loading || !data?.data.length}
             >
               Export CSV
+            </Btn>
+            <Btn
+              variant="secondary"
+              onClick={handleExportPdf}
+              disabled={loading || exportingPdf || !data?.data.length}
+            >
+              Export PDF
             </Btn>
             {canCreate && (
               <Btn variant="primary" onClick={() => setCreating(true)}>

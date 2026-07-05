@@ -13,6 +13,7 @@ import {
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { downloadReportCsv } from '@/lib/report-export';
+import { downloadReportPdf } from '@/lib/export-download';
 
 interface Company { id: string; name: string; code?: string | null }
 interface Division { id: string; name: string; code?: string | null }
@@ -97,6 +98,8 @@ export default function FinanceReportsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [report, setReport] = useState<any>(null);
+  const [loadedCompanyId, setLoadedCompanyId] = useState('');
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const canView = hasPermission('finance.reports.view');
   const currentTab = TABS.find((tab) => tab.key === activeTab)!;
@@ -170,6 +173,7 @@ export default function FinanceReportsPage() {
       const json = await response.json();
       if (!response.ok) throw new Error(json.message ?? 'Failed to load report');
       setReport(json.data ?? json);
+      setLoadedCompanyId(currentTab.company ? companyId : '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Load failed');
     } finally {
@@ -186,6 +190,24 @@ export default function FinanceReportsPage() {
       showToast('info', 'Nothing to export', 'This report has no tabular rows to write to CSV.');
     }
   }, [report, activeTab]);
+
+  const exportPdf = useCallback(async () => {
+    if (!report) return;
+    setExportingPdf(true);
+    try {
+      const exported = await downloadReportPdf(report, `finance-${activeTab}`, {
+        title: currentTab.label,
+        companyId: loadedCompanyId || undefined,
+      });
+      if (!exported) {
+        showToast('info', 'Nothing to export', 'This report has no tabular rows to write to PDF.');
+      }
+    } catch (err) {
+      showToast('error', 'Export failed', err instanceof Error ? err.message : 'PDF export failed');
+    } finally {
+      setExportingPdf(false);
+    }
+  }, [report, activeTab, currentTab, loadedCompanyId]);
 
   if (!canView) {
     return (
@@ -274,7 +296,10 @@ export default function FinanceReportsPage() {
         <Card className="p-5">
           <div className="mb-4 flex items-center justify-between gap-3">
             <span className="text-sm font-semibold text-slate-700">{currentTab.label}</span>
-            <Btn variant="secondary" onClick={exportCsv} disabled={!report}>Export CSV</Btn>
+            <div className="flex items-center gap-2">
+              <Btn variant="secondary" onClick={exportCsv} disabled={!report}>Export CSV</Btn>
+              <Btn variant="secondary" onClick={exportPdf} disabled={!report || exportingPdf}>Export PDF</Btn>
+            </div>
           </div>
           {activeTab === 'trial-balance' && <TrialBalanceView rows={report.rows ?? []} totalDebit={report.totalDebit} totalCredit={report.totalCredit} />}
           {(activeTab === 'pnl' || activeTab === 'consolidated-pnl') && <StatementView title={currentTab.label} rows={report.statementLines ?? []} totals={[['Gross Profit', report.grossProfit], ['Net Income', report.netIncome]]} />}

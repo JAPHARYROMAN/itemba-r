@@ -16,9 +16,11 @@ import {
   StatCard,
   StatusBadge,
 } from '@/components/ui';
+import { DocumentArtifactButton } from '@/components/documents';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList, backendPage, backendPost, backendPut } from '@/lib/api-client';
 import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
 
 interface Company {
   id: string;
@@ -250,6 +252,7 @@ function InvoiceModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { hasPermission } = useAuth();
   const [form, setForm] = useState<InvoiceForm>(() =>
     initial
       ? {
@@ -478,6 +481,11 @@ function InvoiceModal({
       size="xl"
       footer={
         <>
+          {mode === 'edit' && initial && hasPermission('supplier_invoices.view') && (
+            <div className="mr-auto">
+              <DocumentArtifactButton entityType="SUPPLIER_INVOICE" entityId={initial.id} />
+            </div>
+          )}
           <Btn variant="secondary" onClick={onClose}>
             Cancel
           </Btn>
@@ -822,6 +830,7 @@ export default function SupplierInvoicesPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<SupplierInvoice | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const canView =
     hasPermission('supplier_invoices.list') || hasPermission('supplier_invoices.view');
@@ -919,8 +928,8 @@ export default function SupplierInvoicesPage() {
     (sum, invoice) => sum + asNumber(invoice.outstandingAmount),
     0,
   );
-  const exportCsv = () => {
-    const rows = invoices.map((invoice) => ({
+  const buildExportRows = () =>
+    invoices.map((invoice) => ({
       'Tax Invoice #': invoice.supplierInvoiceNumber,
       Supplier: invoice.supplier?.name ?? invoice.supplierId,
       Company: invoice.company?.name ?? invoice.companyId,
@@ -934,12 +943,40 @@ export default function SupplierInvoicesPage() {
       Match: invoice.latestMatch?.matchStatus ?? '',
       Payable: invoice.payable?.payableNumber ?? '',
     }));
+  const exportCsv = () => {
     const stamp = new Date().toISOString().slice(0, 10);
     downloadTextFile(
       `supplier-invoices-${stamp}.csv`,
       'text/csv;charset=utf-8',
-      rowsToCsv(rows),
+      rowsToCsv(buildExportRows()),
     );
+  };
+  const exportPdf = async () => {
+    const rows = buildExportRows();
+    if (!rows.length) return;
+    setExportingPdf(true);
+    try {
+      const filters = [
+        companyId ? companies.find((company) => company.id === companyId)?.name : '',
+        status ? status.replace(/_/g, ' ') : '',
+        search.trim() ? `Search: ${search.trim()}` : '',
+      ]
+        .filter(Boolean)
+        .join(' | ');
+      await downloadTablePdf({
+        title: 'Supplier Invoices',
+        subtitle: filters || undefined,
+        companyId: companyId || undefined,
+        columns: Object.keys(rows[0]),
+        rows: rows.map((row) => Object.values(row)),
+        numericColumns: [7, 8],
+        baseName: 'supplier-invoices',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export PDF');
+    } finally {
+      setExportingPdf(false);
+    }
   };
   const filterSelectCls =
     'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
@@ -1033,6 +1070,14 @@ export default function SupplierInvoicesPage() {
           <>
             <Btn variant="secondary" onClick={exportCsv} disabled={!invoices.length}>
               Export CSV
+            </Btn>
+            <Btn
+              variant="secondary"
+              onClick={exportPdf}
+              disabled={!invoices.length || exportingPdf}
+              loading={exportingPdf}
+            >
+              Export PDF
             </Btn>
             {canCreate ? (
               <Btn variant="primary" onClick={() => setCreating(true)}>

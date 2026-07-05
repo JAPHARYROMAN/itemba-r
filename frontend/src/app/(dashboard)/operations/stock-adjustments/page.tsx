@@ -18,7 +18,8 @@ import {
   SkeletonTable,
   EmptyState,
 } from '@/components/ui';
-import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
+import { rowsToCsv, downloadTextFile, cellToString } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
 import {
   backendDelete,
   backendGet,
@@ -667,6 +668,7 @@ export default function StockAdjustmentsPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
   const [loadError, setLoadError] = useState('');
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [detail, setDetail] = useState<AdjustmentDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -742,8 +744,9 @@ export default function StockAdjustmentsPage() {
     load();
   }, [load]);
 
-  const exportCsv = () => {
-    const rows = (data?.data ?? []).map((a) => ({
+  const exportColumns = ['Number', 'Company', 'Branch', 'Reason', 'Lines', 'Status', 'Created'];
+  const buildExportRows = () =>
+    (data?.data ?? []).map((a) => ({
       Number: a.adjustmentNumber ?? a.id,
       Company: a.company?.name ?? '',
       Branch: a.branch?.name ?? a.location?.name ?? '',
@@ -752,21 +755,46 @@ export default function StockAdjustmentsPage() {
       Status: a.status,
       Created: a.createdAt,
     }));
+
+  const exportCsv = () => {
+    const rows = buildExportRows();
     if (!rows.length) return;
-    const csv = rowsToCsv(rows, [
-      'Number',
-      'Company',
-      'Branch',
-      'Reason',
-      'Lines',
-      'Status',
-      'Created',
-    ]);
+    const csv = rowsToCsv(rows, exportColumns);
     downloadTextFile(
       `stock-adjustments-${new Date().toISOString().slice(0, 10)}.csv`,
       'text/csv;charset=utf-8',
       csv,
     );
+  };
+
+  const exportPdf = async () => {
+    const rows = buildExportRows();
+    if (!rows.length) return;
+    setExportingPdf(true);
+    setActionError('');
+    try {
+      const filters = [
+        companyId ? companies.find((c) => c.id === companyId)?.name : '',
+        status,
+        dateFrom ? `From ${dateFrom}` : '',
+        dateTo ? `To ${dateTo}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      await downloadTablePdf({
+        title: 'Stock Adjustments',
+        subtitle: filters || undefined,
+        companyId: companyId || undefined,
+        columns: exportColumns,
+        rows: rows.map((r) => exportColumns.map((c) => cellToString(r[c as keyof typeof r]))),
+        numericColumns: [4],
+        baseName: 'stock-adjustments',
+      });
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Failed to export PDF');
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   const doAction = async (id: string, action: 'submit' | 'approve' | 'post' | 'revert') => {
@@ -1046,6 +1074,13 @@ export default function StockAdjustmentsPage() {
               disabled={!data?.data.length}
             >
               Export CSV
+            </Btn>
+            <Btn
+              variant="secondary"
+              onClick={exportPdf}
+              disabled={!data?.data.length || exportingPdf}
+            >
+              {exportingPdf ? 'Exporting…' : 'Export PDF'}
             </Btn>
             {canCreate ? (
               <Btn variant="primary" onClick={() => setCreating(true)}>

@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, StatCard, SkeletonTable, EmptyState } from '@/components/ui';
+import { Card, PageHeader, StatCard, SkeletonTable, EmptyState, showToast } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList, backendPage } from '@/lib/api-client';
 import { toFiniteNumber } from '@/lib/design-system/formatters';
 import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
 
 interface Company {
   id: string;
@@ -93,6 +94,7 @@ export default function InventoryOverviewPage() {
   const [pending, setPending] = useState(0);
   const [recent, setRecent] = useState<RecentMovement[]>([]);
   const [loading, setLoading] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   useEffect(() => {
     if (!canView) return;
@@ -131,21 +133,47 @@ export default function InventoryOverviewPage() {
     load();
   }, [load]);
 
+  const buildExportRows = useCallback(
+    () =>
+      recent.map((m) => ({
+        date: fmtDate(m.movementDate),
+        product: m.product ? `${m.product.productCode ?? ''} ${m.product.name}`.trim() : '',
+        type: m.movementType.replace(/_/g, ' '),
+        quantity: (INBOUND.has(m.movementType) ? 1 : -1) * toFiniteNumber(m.quantity),
+      })),
+    [recent],
+  );
+
   const exportRecent = useCallback(() => {
     if (!recent.length) return;
-    const rows = recent.map((m) => ({
-      date: fmtDate(m.movementDate),
-      product: m.product ? `${m.product.productCode ?? ''} ${m.product.name}`.trim() : '',
-      type: m.movementType.replace(/_/g, ' '),
-      quantity: (INBOUND.has(m.movementType) ? 1 : -1) * toFiniteNumber(m.quantity),
-    }));
-    const csv = rowsToCsv(rows, ['date', 'product', 'type', 'quantity']);
+    const csv = rowsToCsv(buildExportRows(), ['date', 'product', 'type', 'quantity']);
     downloadTextFile(
       `recent-movements-${new Date().toISOString().slice(0, 10)}.csv`,
       'text/csv;charset=utf-8',
       csv,
     );
-  }, [recent]);
+  }, [recent, buildExportRows]);
+
+  const exportRecentPdf = useCallback(async () => {
+    if (!recent.length || exportingPdf) return;
+    setExportingPdf(true);
+    try {
+      const companyName = companies.find((c) => c.id === companyId)?.name;
+      await downloadTablePdf({
+        title: 'Inventory Overview',
+        subtitle: companyName ? `Recent movements — ${companyName}` : 'Recent movements',
+        companyId: companyId || undefined,
+        columns: ['Date', 'Product', 'Type', 'Quantity'],
+        rows: buildExportRows().map((r) => [r.date, r.product, r.type, String(r.quantity)]),
+        numericColumns: [3],
+        baseName: 'recent-movements',
+      });
+    } catch (e) {
+      showToast('error', 'Could not export PDF', e instanceof Error ? e.message : undefined);
+    } finally {
+      setExportingPdf(false);
+    }
+  }, [recent, exportingPdf, companies, companyId, buildExportRows]);
 
   if (!canView) {
     return (
@@ -241,6 +269,14 @@ export default function InventoryOverviewPage() {
                   className="text-xs text-blue-600 hover:underline disabled:opacity-40 disabled:hover:no-underline"
                 >
                   Export CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={exportRecentPdf}
+                  disabled={!recent.length || exportingPdf}
+                  className="text-xs text-blue-600 hover:underline disabled:opacity-40 disabled:hover:no-underline"
+                >
+                  {exportingPdf ? 'Exporting…' : 'Export PDF'}
                 </button>
                 <Link
                   href={`/operations/inventory-movements${scoped}`}

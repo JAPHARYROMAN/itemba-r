@@ -1,7 +1,9 @@
 'use client';
 import React, { useState, useMemo } from 'react';
 import { ErrorState } from '../feedback/ErrorState';
-import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
+import { showToast } from '../feedback/Toast';
+import { rowsToCsv, downloadTextFile, cellToString } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
 
 export interface Column<T> {
   key: string;
@@ -62,6 +64,20 @@ interface DataTableProps<T> {
   onExport?: (rows: T[]) => void;
   /** Base filename (no extension) for the auto CSV export. */
   exportFileName?: string;
+  /**
+   * When set (truthy), the toolbar renders compact "CSV" and "PDF" buttons in
+   * place of the single "Export" button. The PDF button posts the current
+   * (filtered/sorted) rows to the generic table-PDF endpoint. Pass an object to
+   * customize the PDF document title/subtitle or brand it with a company's
+   * letterhead. When absent, rendering is unchanged.
+   */
+  exportPdf?: boolean | { title?: string; subtitle?: string; companyId?: string };
+  /**
+   * Custom PDF export handler. Receives the rows currently displayed (after
+   * local search/sort). When omitted and `exportPdf` is set, the rows are sent
+   * to the generic table-PDF endpoint automatically.
+   */
+  onExportPdf?: (rows: T[]) => void;
   /** Make the header stick to the top of the scroll container (default false; opt-in). */
   stickyHeader?: boolean;
 }
@@ -101,11 +117,14 @@ export function DataTable<T extends Record<string, unknown>>({
   exportable = false,
   onExport,
   exportFileName = 'export',
+  exportPdf,
+  onExportPdf,
   stickyHeader = false,
 }: DataTableProps<T>) {
   const [localSearch, setLocalSearch] = useState('');
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [pdfExporting, setPdfExporting] = useState(false);
 
   const query = onSearch ? searchValue : localSearch;
 
@@ -145,19 +164,18 @@ export function DataTable<T extends Record<string, unknown>>({
   }, [sortedData, query, onSearch]);
 
   const hasError = Boolean(error);
+  const hasPdfExport = Boolean(exportPdf);
+  const exportDisabled = hasError || loading || filteredData.length === 0;
   const errorDescription = typeof error === 'string'
     ? error
     : error instanceof Error
       ? error.message
       : undefined;
 
-  function handleExport() {
-    if (onExport) {
-      onExport(filteredData);
-      return;
-    }
+  /** Build the export matrix from the displayed rows, skipping exportExclude columns. */
+  function buildExportMatrix() {
     const exportColumns = columns.filter(c => !c.exportExclude);
-    const rows: Record<string, unknown>[] = filteredData.map(row => {
+    const records: Record<string, unknown>[] = filteredData.map(row => {
       const rec: Record<string, unknown> = {};
       for (const col of exportColumns) {
         const value = row[col.key];
@@ -166,10 +184,52 @@ export function DataTable<T extends Record<string, unknown>>({
       return rec;
     });
     const headers = exportColumns.map(c => c.header);
-    const csv = rowsToCsv(rows, headers);
+    return { exportColumns, headers, records };
+  }
+
+  function handleExport() {
+    if (onExport) {
+      onExport(filteredData);
+      return;
+    }
+    const { headers, records } = buildExportMatrix();
+    const csv = rowsToCsv(records, headers);
     if (csv) {
       const stamp = new Date().toISOString().slice(0, 10);
       downloadTextFile(`${exportFileName}-${stamp}.csv`, 'text/csv;charset=utf-8', csv);
+    }
+  }
+
+  async function handleExportPdf() {
+    if (onExportPdf) {
+      onExportPdf(filteredData);
+      return;
+    }
+    const cfg = typeof exportPdf === 'object' && exportPdf !== null ? exportPdf : {};
+    const { exportColumns, headers, records } = buildExportMatrix();
+    const rows = records.map(rec => headers.map(h => cellToString(rec[h])));
+    const numericColumns = exportColumns
+      .map((c, i) => (c.align === 'right' ? i : -1))
+      .filter(i => i >= 0);
+    setPdfExporting(true);
+    try {
+      await downloadTablePdf({
+        title: cfg.title ?? exportFileName,
+        subtitle: cfg.subtitle,
+        companyId: cfg.companyId,
+        columns: headers,
+        rows,
+        numericColumns: numericColumns.length ? numericColumns : undefined,
+        baseName: exportFileName,
+      });
+    } catch (err) {
+      showToast(
+        'error',
+        'Could not export PDF',
+        err instanceof Error ? err.message : 'Please try again.',
+      );
+    } finally {
+      setPdfExporting(false);
     }
   }
 
@@ -184,7 +244,7 @@ export function DataTable<T extends Record<string, unknown>>({
       style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)', boxShadow: 'var(--aurora-shadow-sm)' }}>
 
       {/* Toolbar */}
-      {(searchable || actions || filters || exportable) && (
+      {(searchable || actions || filters || exportable || hasPdfExport) && (
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-3 border-b"
           style={{ borderColor: 'var(--aurora-border)' }}>
           <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -206,10 +266,41 @@ export function DataTable<T extends Record<string, unknown>>({
             )}
             {filters}
           </div>
-          {(actions || exportable) && (
+          {(actions || exportable || hasPdfExport) && (
             <div className="flex items-center gap-2 flex-shrink-0">
               {actions}
-              {exportable && (
+              {hasPdfExport ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleExport}
+                    disabled={exportDisabled}
+                    className="flex items-center gap-1.5 text-sm font-medium px-3 rounded-lg transition-colors disabled:opacity-40"
+                    style={{ height: '36px', border: '1px solid var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text-secondary)' }}
+                    aria-label="Export to CSV"
+                    title="Export to CSV"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                    </svg>
+                    CSV
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExportPdf}
+                    disabled={exportDisabled || pdfExporting}
+                    className="flex items-center gap-1.5 text-sm font-medium px-3 rounded-lg transition-colors disabled:opacity-40"
+                    style={{ height: '36px', border: '1px solid var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text-secondary)' }}
+                    aria-label="Export to PDF"
+                    title="Export to PDF"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                    </svg>
+                    {pdfExporting ? 'PDF…' : 'PDF'}
+                  </button>
+                </>
+              ) : exportable ? (
                 <button
                   type="button"
                   onClick={handleExport}
@@ -224,7 +315,7 @@ export function DataTable<T extends Record<string, unknown>>({
                   </svg>
                   Export
                 </button>
-              )}
+              ) : null}
             </div>
           )}
         </div>

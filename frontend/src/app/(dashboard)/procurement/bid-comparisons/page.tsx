@@ -15,6 +15,7 @@ import {
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList, backendPost } from '@/lib/api-client';
+import { downloadTablePdf } from '@/lib/export-download';
 import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
 
 interface Company {
@@ -150,6 +151,8 @@ export default function BidComparisonsPage() {
   const [selected, setSelected] = useState<BidComparison | null>(null);
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingMatrixPdf, setExportingMatrixPdf] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -265,8 +268,8 @@ export default function BidComparisonsPage() {
     return { columns, itemRows, cheapestTotal };
   }, [selected, quotationById, supplierById]);
 
-  const exportCsv = () => {
-    const data = rows.map((row) => {
+  const buildListRows = () =>
+    rows.map((row) => {
       const recommended = row.recommendedSupplierId
         ? supplierLabel(supplierById.get(row.recommendedSupplierId), row.recommendedSupplierId)
         : '';
@@ -284,7 +287,13 @@ export default function BidComparisonsPage() {
         Approved: row.approvedAt ? 'Yes' : 'No',
       };
     });
-    const csv = rowsToCsv(data);
+
+  const filterSummary = () =>
+    [companyId ? companyLabel(companyById.get(companyId)) : '', status].filter(Boolean).join(' · ') ||
+    undefined;
+
+  const exportCsv = () => {
+    const csv = rowsToCsv(buildListRows());
     if (!csv) {
       showToast('error', 'Nothing to export');
       return;
@@ -293,8 +302,33 @@ export default function BidComparisonsPage() {
     showToast('success', 'CSV exported');
   };
 
-  const exportMatrixCsv = () => {
-    if (!selected || !matrix || matrix.columns.length === 0) return;
+  const exportPdf = async () => {
+    const data = buildListRows();
+    if (data.length === 0) {
+      showToast('error', 'Nothing to export');
+      return;
+    }
+    setExportingPdf(true);
+    try {
+      await downloadTablePdf({
+        title: 'Bid Comparisons',
+        subtitle: filterSummary(),
+        companyId: companyId || undefined,
+        columns: Object.keys(data[0]),
+        rows: data.map((row) => Object.values(row).map(String)),
+        numericColumns: [4],
+        baseName: 'bid-comparisons',
+      });
+      showToast('success', 'PDF exported');
+    } catch (err) {
+      showToast('error', 'PDF export failed', err instanceof Error ? err.message : undefined);
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
+  const buildMatrixTable = () => {
+    if (!selected || !matrix || matrix.columns.length === 0) return null;
     const header = ['Line Item', ...matrix.columns.map((c) => supplierLabel(c.supplier, c.supplierId))];
     const body: string[][] = [];
     for (const item of matrix.itemRows) {
@@ -309,10 +343,38 @@ export default function BidComparisonsPage() {
     body.push(['Delivery Score', ...matrix.columns.map((c) => fmtScore(c.line.deliveryScore))]);
     body.push(['Quality Score', ...matrix.columns.map((c) => fmtScore(c.line.qualityScore))]);
     body.push(['Overall Score', ...matrix.columns.map((c) => fmtScore(c.line.overallScore))]);
+    return { header, body };
+  };
+
+  const exportMatrixCsv = () => {
+    const table = buildMatrixTable();
+    if (!selected || !table) return;
     const escape = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-    const csv = [header, ...body].map((r) => r.map(escape).join(',')).join('\n');
+    const csv = [table.header, ...table.body].map((r) => r.map(escape).join(',')).join('\n');
     downloadTextFile(`bid-comparison-matrix-${selected.comparisonNumber}.csv`, 'text/csv;charset=utf-8', csv);
     showToast('success', 'Matrix exported');
+  };
+
+  const exportMatrixPdf = async () => {
+    const table = buildMatrixTable();
+    if (!selected || !table) return;
+    setExportingMatrixPdf(true);
+    try {
+      await downloadTablePdf({
+        title: `Bid Comparison — ${rfqLabel(rfqById.get(selected.rfqId), selected.rfqId)}`,
+        subtitle: `${selected.comparisonNumber} · ${selected.title}`,
+        companyId: selected.companyId,
+        columns: table.header,
+        rows: table.body,
+        numericColumns: table.header.slice(1).map((_, idx) => idx + 1),
+        baseName: `bid-comparison-matrix-${selected.comparisonNumber}`,
+      });
+      showToast('success', 'PDF exported');
+    } catch (err) {
+      showToast('error', 'PDF export failed', err instanceof Error ? err.message : undefined);
+    } finally {
+      setExportingMatrixPdf(false);
+    }
   };
 
   const approve = async (row: BidComparison) => {
@@ -355,7 +417,7 @@ export default function BidComparisonsPage() {
       </div>
 
       <Card className="p-4">
-        <div className="grid md:grid-cols-[1fr_190px_auto] gap-3 items-end">
+        <div className="grid md:grid-cols-[1fr_190px_auto_auto] gap-3 items-end">
           <FormSelect label="Company" value={companyId} onChange={(e) => setCompanyId(e.target.value)} placeholder="All companies">
             {companies.map((company) => (
               <option key={company.id} value={company.id}>{companyLabel(company)}</option>
@@ -368,6 +430,15 @@ export default function BidComparisonsPage() {
           </FormSelect>
           <Btn variant="secondary" onClick={exportCsv} disabled={rows.length === 0} aria-label="Export comparisons to CSV">
             Export CSV
+          </Btn>
+          <Btn
+            variant="secondary"
+            onClick={exportPdf}
+            loading={exportingPdf}
+            disabled={rows.length === 0}
+            aria-label="Export comparisons to PDF"
+          >
+            Export PDF
           </Btn>
         </div>
       </Card>
@@ -552,6 +623,16 @@ export default function BidComparisonsPage() {
                   aria-label="Export comparison matrix to CSV"
                 >
                   Export Matrix
+                </Btn>
+                <Btn
+                  variant="secondary"
+                  size="sm"
+                  onClick={exportMatrixPdf}
+                  loading={exportingMatrixPdf}
+                  disabled={!matrix || matrix.columns.length === 0}
+                  aria-label="Export comparison matrix to PDF"
+                >
+                  Export PDF
                 </Btn>
                 {canApprove && (
                   <Btn

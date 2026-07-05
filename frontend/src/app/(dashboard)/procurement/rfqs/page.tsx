@@ -27,7 +27,8 @@ import {
   backendPost,
   backendPut,
 } from '@/lib/api-client';
-import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
+import { cellToString, downloadTextFile, rowsToCsv } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,18 @@ const RFQ_STATUSES = [
 ] as const;
 
 const PAGE_LIMIT = 20;
+
+const EXPORT_HEADERS = [
+  'RFQ #',
+  'Title',
+  'Description',
+  'Company',
+  'Suppliers',
+  'Status',
+  'RFQ Date',
+  'Closing Date',
+  'Created By',
+];
 
 // Status → StatusBadge variant. Left unspecified statuses fall through to the
 // design-system default resolver.
@@ -772,9 +785,9 @@ export default function RFQsPage() {
     [companyName, userName, canSend, canUpdate],
   );
 
-  const handleExport = useCallback(
-    (exportRows: RFQ[]) => {
-      const records = exportRows.map((r) => ({
+  const buildExportRecords = useCallback(
+    (exportRows: RFQ[]): Record<string, unknown>[] =>
+      exportRows.map((r) => ({
         'RFQ #': r.rfqNumber,
         Title: r.title,
         Description: r.description ?? '',
@@ -784,18 +797,13 @@ export default function RFQsPage() {
         'RFQ Date': fmtDate(r.rfqDate),
         'Closing Date': fmtDate(r.closingDate),
         'Created By': r.createdById ? userName.get(r.createdById) ?? r.createdById : '',
-      }));
-      const csv = rowsToCsv(records, [
-        'RFQ #',
-        'Title',
-        'Description',
-        'Company',
-        'Suppliers',
-        'Status',
-        'RFQ Date',
-        'Closing Date',
-        'Created By',
-      ]);
+      })),
+    [companyName, userName],
+  );
+
+  const handleExport = useCallback(
+    (exportRows: RFQ[]) => {
+      const csv = rowsToCsv(buildExportRecords(exportRows), EXPORT_HEADERS);
       if (!csv) {
         showToast('info', 'Nothing to export', 'No RFQs match the current filters.');
         return;
@@ -803,7 +811,38 @@ export default function RFQsPage() {
       const stamp = new Date().toISOString().slice(0, 10);
       downloadTextFile(`rfqs-${stamp}.csv`, 'text/csv;charset=utf-8', csv);
     },
-    [companyName, userName],
+    [buildExportRecords],
+  );
+
+  const handleExportPdf = useCallback(
+    async (exportRows: RFQ[]) => {
+      const records = buildExportRecords(exportRows);
+      if (!records.length) {
+        showToast('info', 'Nothing to export', 'No RFQs match the current filters.');
+        return;
+      }
+      try {
+        await downloadTablePdf({
+          title: 'Requests for Quotation',
+          subtitle: [
+            companyId ? companyName.get(companyId) ?? 'Selected company' : 'All companies',
+            status ? humanize(status) : 'All statuses',
+          ].join(' · '),
+          companyId: companyId || undefined,
+          columns: EXPORT_HEADERS,
+          rows: records.map((rec) => EXPORT_HEADERS.map((h) => cellToString(rec[h]))),
+          numericColumns: [4],
+          baseName: 'rfqs',
+        });
+      } catch (err) {
+        showToast(
+          'error',
+          'Could not export PDF',
+          err instanceof Error ? err.message : 'Please try again.',
+        );
+      }
+    },
+    [buildExportRecords, companyId, companyName, status],
   );
 
   if (!canView) {
@@ -942,6 +981,8 @@ export default function RFQsPage() {
           emptyDescription="Create a request for quotation or adjust your filters."
           exportable
           onExport={(exportRows) => handleExport(exportRows as RFQ[])}
+          exportPdf
+          onExportPdf={(exportRows) => handleExportPdf(exportRows as RFQ[])}
           exportFileName="rfqs"
         />
       </Card>

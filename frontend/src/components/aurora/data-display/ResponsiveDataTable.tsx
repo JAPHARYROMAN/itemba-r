@@ -75,6 +75,10 @@ interface ResponsiveDataTableProps<T> {
   onExport?: (rows: T[]) => void;
   /** Base filename (no extension) for the auto CSV export. */
   exportFileName?: string;
+  /** Render CSV + PDF export buttons (see DataTable.exportPdf). */
+  exportPdf?: boolean | { title?: string; subtitle?: string; companyId?: string };
+  /** Custom PDF export handler receiving the displayed rows. */
+  onExportPdf?: (rows: T[]) => void;
   /** Make the header stick to the top on scroll (default true). */
   stickyHeader?: boolean;
   /**

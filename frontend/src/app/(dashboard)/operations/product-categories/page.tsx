@@ -28,6 +28,7 @@ import {
   normalizePaginated,
 } from '@/lib/api-client';
 import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
 
 interface Company {
   id: string;
@@ -578,6 +579,7 @@ export default function ProductCategoriesPage() {
   const [familyExceptions, setFamilyExceptions] = useState<ProductPriceException[]>([]);
   const [exceptionsLoading, setExceptionsLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState('');
 
   const canView = hasPermission('product_categories.view');
@@ -707,15 +709,42 @@ export default function ProductCategoriesPage() {
     load();
   }, [load]);
 
-  const handleExportCsv = () => {
-    const rows = (data?.data ?? []).map((cat) => ({
+  const buildExportRows = () =>
+    (data?.data ?? []).map((cat) => ({
       Name: cat.name,
       Type: cat.categoryType.replace(/_/g, ' '),
       Parent: cat.parentCategory?.name ?? '',
       Company: cat.company?.name ?? '',
       Status: cat.isActive ? 'Active' : 'Inactive',
     }));
-    downloadTextFile('product-categories.csv', 'text/csv', rowsToCsv(rows));
+
+  const handleExportCsv = () => {
+    downloadTextFile('product-categories.csv', 'text/csv', rowsToCsv(buildExportRows()));
+  };
+
+  const handleExportPdf = async () => {
+    setExportingPdf(true);
+    try {
+      const subtitle = [
+        companyId ? companies.find((c) => c.id === companyId)?.name : '',
+        categoryType ? categoryType.replace(/_/g, ' ') : '',
+        activeFilter ? (activeFilter === 'true' ? 'Active' : 'Inactive') : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      await downloadTablePdf({
+        title: 'Product Categories',
+        subtitle: subtitle || undefined,
+        companyId: companyId || undefined,
+        columns: ['Name', 'Type', 'Parent', 'Company', 'Status'],
+        rows: buildExportRows().map((row) => Object.values(row)),
+        baseName: 'product-categories',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export PDF');
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -962,6 +991,14 @@ export default function ProductCategoriesPage() {
               disabled={!data?.data.length}
             >
               Export CSV
+            </Btn>
+            <Btn
+              variant="secondary"
+              onClick={() => void handleExportPdf()}
+              disabled={!data?.data.length}
+              loading={exportingPdf}
+            >
+              Export PDF
             </Btn>
             {canCreate && (
               <Btn variant="primary" onClick={() => setCreating(true)}>

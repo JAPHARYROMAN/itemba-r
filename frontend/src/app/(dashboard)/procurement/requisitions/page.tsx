@@ -22,7 +22,8 @@ import {
 } from '@/components/aurora/data-display/ResponsiveDataTable';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList, backendPost } from '@/lib/api-client';
-import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
+import { cellToString, downloadTextFile, rowsToCsv } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -480,27 +481,65 @@ export default function PurchaseRequisitionsPage() {
     }
   };
 
-  // ── CSV export ───────────────────────────────────────────────────────────────
+  // ── CSV / PDF export ─────────────────────────────────────────────────────────
+
+  const buildExportRows = useCallback(
+    () =>
+      visibleRows.map((req) => ({
+        'Requisition #': req.requisitionNumber,
+        Company: companyLabel(req),
+        'Requested By': requesterLabel(req),
+        Priority: req.priority,
+        Status: req.status,
+        'Estimated Amount': toNumber(req.totalEstimatedAmount),
+        Currency: req.currency ?? 'TZS',
+        'Request Date': formatDate(req.requestDate),
+        'Needed By': formatDate(req.neededByDate),
+        Purpose: req.purpose ?? '',
+      })),
+    [visibleRows, companyLabel, requesterLabel],
+  );
 
   const exportCsv = () => {
-    const data = visibleRows.map((req) => ({
-      'Requisition #': req.requisitionNumber,
-      Company: companyLabel(req),
-      'Requested By': requesterLabel(req),
-      Priority: req.priority,
-      Status: req.status,
-      'Estimated Amount': toNumber(req.totalEstimatedAmount),
-      Currency: req.currency ?? 'TZS',
-      'Request Date': formatDate(req.requestDate),
-      'Needed By': formatDate(req.neededByDate),
-      Purpose: req.purpose ?? '',
-    }));
-    const csv = rowsToCsv(data);
+    const csv = rowsToCsv(buildExportRows());
     if (!csv) {
       showToast('info', 'Nothing to export');
       return;
     }
     downloadTextFile(`purchase-requisitions-${today}.csv`, 'text/csv;charset=utf-8', csv);
+  };
+
+  const [exportingPdf, setExportingPdf] = useState(false);
+
+  const exportPdf = async () => {
+    const data = buildExportRows();
+    if (!data.length) {
+      showToast('info', 'Nothing to export');
+      return;
+    }
+    const exportColumns = Object.keys(data[0]);
+    setExportingPdf(true);
+    try {
+      await downloadTablePdf({
+        title: 'Purchase Requisitions',
+        subtitle:
+          [
+            companyId ? companyNameById.get(companyId) ?? companyId : 'All Companies',
+            status ? status.replace(/_/g, ' ') : 'All Statuses',
+          ].join(' · '),
+        companyId: companyId || undefined,
+        columns: exportColumns,
+        rows: data.map((row) =>
+          exportColumns.map((col) => cellToString(row[col as keyof typeof row])),
+        ),
+        numericColumns: [5],
+        baseName: 'purchase-requisitions',
+      });
+    } catch (err) {
+      showToast('error', err instanceof Error ? err.message : 'PDF export failed');
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   // ── Columns ──────────────────────────────────────────────────────────────────
@@ -714,9 +753,18 @@ export default function PurchaseRequisitionsPage() {
           </>
         }
         actions={
-          <Btn variant="secondary" onClick={exportCsv} disabled={visibleRows.length === 0}>
-            Export CSV
-          </Btn>
+          <>
+            <Btn variant="secondary" onClick={exportCsv} disabled={visibleRows.length === 0}>
+              Export CSV
+            </Btn>
+            <Btn
+              variant="secondary"
+              onClick={() => void exportPdf()}
+              disabled={visibleRows.length === 0 || exportingPdf}
+            >
+              Export PDF
+            </Btn>
+          </>
         }
         pagination={{
           page,

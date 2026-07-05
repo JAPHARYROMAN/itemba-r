@@ -24,6 +24,7 @@ import {
   FormActions,
 } from '@/components/aurora/forms';
 import { useAuth } from '@/hooks/use-auth';
+import { DocumentArtifactButton } from '@/components/documents';
 import { backendGet, backendList, backendPatch, backendPost } from '@/lib/api-client';
 
 // ─── Types (shapes mirror the credit-notes controller / service includes) ─────
@@ -752,6 +753,7 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
 }
 
 function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
+  const { hasPermission } = useAuth();
   const [detail, setDetail] = useState<CreditNote | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -989,9 +991,14 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
         ) : null}
       </div>
       <div
-        className="flex justify-end border-t px-5 py-3"
+        className="flex flex-wrap items-center justify-between gap-2 border-t px-5 py-3"
         style={{ borderColor: 'var(--aurora-border)' }}
       >
+        {hasPermission('receivables.view') ? (
+          <DocumentArtifactButton entityType="CREDIT_NOTE" entityId={id} />
+        ) : (
+          <span />
+        )}
         <Btn variant="secondary" onClick={onClose}>
           Close
         </Btn>
@@ -1337,6 +1344,7 @@ export default function CreditNotesPage() {
         }
         exportable
         exportFileName="credit-notes"
+        exportPdf={{ title: 'Credit Notes', companyId: companyId || undefined }}
         pagination={{
           page,
           limit: PAGE_SIZE,

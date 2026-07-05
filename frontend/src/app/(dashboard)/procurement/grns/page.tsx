@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Btn,
   Card,
@@ -16,8 +16,10 @@ import {
   showToast,
 } from '@/components/ui';
 import { Stepper } from '@/components/aurora/overlays/Stepper';
+import { DocumentArtifactButton } from '@/components/documents';
 import { useAuth } from '@/hooks/use-auth';
-import { ApiError, backendGet, backendList, backendPage, backendPost } from '@/lib/api-client';
+import { ApiError, backendGet, backendList, backendPage, backendPost, backendPut } from '@/lib/api-client';
+import { downloadTablePdf } from '@/lib/export-download';
 import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
 
 interface Company {
@@ -45,6 +47,26 @@ interface Grn {
   division?: NamedRef | null;
   company?: { name?: string | null; code?: string | null } | null;
   supplier?: { name?: string | null; supplierCode?: string | null } | null;
+}
+
+/** GRN line as returned by GET /goods-received-notes/:id (raw ids, Decimal strings). */
+interface GrnLine {
+  id: string;
+  productId: string;
+  unitId: string;
+  orderedQuantity?: number | string | null;
+  receivedQuantity?: number | string | null;
+  acceptedQuantity?: number | string | null;
+  rejectedQuantity?: number | string | null;
+  unitCost?: number | string | null;
+  condition?: string | null;
+  notes?: string | null;
+}
+
+interface GrnDetail extends Grn {
+  purchaseOrderId?: string | null;
+  notes?: string | null;
+  lines: GrnLine[];
 }
 
 interface Paginated<T> {
@@ -833,9 +855,550 @@ function ReceiveGoodsWizard({
   );
 }
 
+/* ─── GRN detail & edit modals ──────────────────────────────────────────────── */
+
+interface GrnLineLabels {
+  byProduct: Record<string, string>;
+  byUnit: Record<string, string>;
+}
+
+/**
+ * Loads a GRN with its lines. Line rows only carry product/unit ids, so the
+ * linked purchase order (when present) supplies human-readable labels — the
+ * same source the receive wizard uses.
+ */
+function useGrnDetail(grnId: string | null) {
+  const [detail, setDetail] = useState<GrnDetail | null>(null);
+  const [labels, setLabels] = useState<GrnLineLabels>({ byProduct: {}, byUnit: {} });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!grnId) {
+      setDetail(null);
+      setLabels({ byProduct: {}, byUnit: {} });
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setDetail(null);
+    backendGet<GrnDetail>(`/goods-received-notes/${grnId}`)
+      .then(async (item) => {
+        const byProduct: Record<string, string> = {};
+        const byUnit: Record<string, string> = {};
+        if (item.purchaseOrderId) {
+          try {
+            const po = await backendGet<PoDetail>(`/purchase-orders/${item.purchaseOrderId}`);
+            for (const line of po.lines ?? []) {
+              byProduct[line.productId] = poLineLabel(line);
+              const unitLabel = line.unit?.symbol || line.unit?.name;
+              if (unitLabel) byUnit[line.unitId] = unitLabel;
+            }
+          } catch {
+            // Labels are cosmetic — fall back to raw ids if the PO is unreadable.
+          }
+        }
+        if (cancelled) return;
+        setDetail(item);
+        setLabels({ byProduct, byUnit });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to load goods received note');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [grnId]);
+
+  return { detail, labels, loading, error };
+}
+
+interface GrnDetailModalProps {
+  grn: Grn | null;
+  onClose: () => void;
+  companyLabel: (grn: Grn) => string;
+  /** grn.view — mirrors the backend permission on POST /generated-documents/pdf sources. */
+  canGeneratePdf: boolean;
+}
+
+function GrnDetailModal({ grn, onClose, companyLabel, canGeneratePdf }: GrnDetailModalProps) {
+  const { detail, labels, loading, error } = useGrnDetail(grn?.id ?? null);
+  const lines = detail?.lines ?? [];
+
+  const field = (label: string, value: ReactNode) => (
+    <div>
+      <span className="mb-1 block text-xs font-medium" style={{ color: 'var(--aurora-text-muted)' }}>
+        {label}
+      </span>
+      <div className="text-sm">{value}</div>
+    </div>
+  );
+
+  return (
+    <Modal
+      open={grn !== null}
+      onClose={onClose}
+      title={grn ? `GRN ${grn.grnNumber}` : 'Goods Received Note'}
+      size="2xl"
+      footer={
+        <>
+          {grn && canGeneratePdf && (
+            <div className="mr-auto">
+              <DocumentArtifactButton entityType="GOODS_RECEIVED_NOTE" entityId={grn.id} />
+            </div>
+          )}
+          <Btn variant="secondary" onClick={onClose}>
+            Close
+          </Btn>
+        </>
+      }
+    >
+      {error ? (
+        <ErrorState message={error} />
+      ) : loading || !grn || !detail ? (
+        <SkeletonTable rows={4} cols={4} />
+      ) : (
+        <div className="space-y-5">
+          <div className="grid gap-3 sm:grid-cols-3">
+            {field('Status', <StatusBadge status={detail.status} />)}
+            {field('Company', companyLabel(grn))}
+            {field('Supplier', grn.supplier?.name ?? grn.supplierId ?? '—')}
+            {field('Branch / Location', detail.branch?.name ?? '—')}
+            {field('Received date', formatDate(detail.receivedDate))}
+            {field('Posted at', formatDate(detail.postedAt))}
+          </div>
+
+          {detail.notes && (
+            <div>
+              <span
+                className="mb-1 block text-xs font-medium"
+                style={{ color: 'var(--aurora-text-muted)' }}
+              >
+                Notes
+              </span>
+              <p className="whitespace-pre-wrap text-sm">{detail.notes}</p>
+            </div>
+          )}
+
+          {lines.length === 0 ? (
+            <EmptyState
+              title="No line items"
+              description="This goods received note has no lines."
+            />
+          ) : (
+            <div
+              className="overflow-hidden rounded-lg border"
+              style={{ borderColor: 'var(--aurora-border)' }}
+            >
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px] text-sm">
+                  <caption className="sr-only">Goods received note lines</caption>
+                  <thead>
+                    <tr
+                      className="text-left text-xs uppercase"
+                      style={{ color: 'var(--aurora-text-muted)' }}
+                    >
+                      <th scope="col" className="px-3 py-2">
+                        Product
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-right">
+                        Ordered
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-right">
+                        Received
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-right">
+                        Accepted
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-right">
+                        Rejected
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-right">
+                        Unit cost (TZS)
+                      </th>
+                      <th scope="col" className="px-3 py-2">
+                        Condition
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {lines.map((line) => (
+                      <tr key={line.id}>
+                        <td className="px-3 py-2">
+                          <div className="font-medium">
+                            {labels.byProduct[line.productId] ?? line.productId}
+                          </div>
+                          {labels.byUnit[line.unitId] && (
+                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              Unit: {labels.byUnit[line.unitId]}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {line.orderedQuantity != null ? toNum(line.orderedQuantity) : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {toNum(line.receivedQuantity)}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {toNum(line.acceptedQuantity)}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {toNum(line.rejectedQuantity)}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {line.unitCost != null ? toNum(line.unitCost).toLocaleString() : '—'}
+                        </td>
+                        <td className="px-3 py-2">{line.condition ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/** Editable per-line state for the DRAFT edit modal (raw input strings, like the wizard). */
+interface EditLineState {
+  key: string;
+  productId: string;
+  unitId: string;
+  orderedQuantity?: number;
+  productLabel: string;
+  unitLabel: string;
+  received: string;
+  rejected: string;
+  unitCost: string;
+  condition: string;
+  notes: string | null;
+}
+
+interface GrnEditModalProps {
+  grn: Grn | null;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function GrnEditModal({ grn, onClose, onSaved }: GrnEditModalProps) {
+  const { detail, labels, loading, error } = useGrnDetail(grn?.id ?? null);
+  const [receivedDate, setReceivedDate] = useState('');
+  const [notes, setNotes] = useState('');
+  const [lines, setLines] = useState<EditLineState[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // Seed the form whenever a (re)loaded GRN arrives.
+  useEffect(() => {
+    setFormError(null);
+    setReceivedDate(detail?.receivedDate ? detail.receivedDate.slice(0, 10) : '');
+    setNotes(detail?.notes ?? '');
+    setLines(
+      (detail?.lines ?? []).map((line) => ({
+        key: line.id,
+        productId: line.productId,
+        unitId: line.unitId,
+        orderedQuantity: line.orderedQuantity != null ? toNum(line.orderedQuantity) : undefined,
+        productLabel: labels.byProduct[line.productId] ?? line.productId,
+        unitLabel: labels.byUnit[line.unitId] ?? '',
+        received: String(toNum(line.receivedQuantity)),
+        rejected: toNum(line.rejectedQuantity) ? String(toNum(line.rejectedQuantity)) : '',
+        unitCost: line.unitCost != null ? String(toNum(line.unitCost)) : '',
+        condition: line.condition ?? '',
+        notes: line.notes ?? null,
+      })),
+    );
+  }, [detail, labels]);
+
+  const updateLine = useCallback((key: string, patch: Partial<EditLineState>) => {
+    setLines((prev) => prev.map((line) => (line.key === key ? { ...line, ...patch } : line)));
+  }, []);
+
+  const hasQtyError = useMemo(
+    () =>
+      lines.some((line) => {
+        const received = toNum(line.received);
+        const rejected = toNum(line.rejected);
+        return received < 0 || rejected < 0 || rejected > received || toNum(line.unitCost) < 0;
+      }),
+    [lines],
+  );
+
+  // Mirrors the service guard: only DRAFT GRNs can be edited.
+  const editable = detail?.status === 'DRAFT';
+
+  const submit = useCallback(async () => {
+    if (!grn || !detail) return;
+    if (hasQtyError) {
+      setFormError(
+        'Check the quantities — rejected cannot exceed received and values must be positive',
+      );
+      return;
+    }
+    setSaving(true);
+    setFormError(null);
+    try {
+      await backendPut(`/goods-received-notes/${grn.id}`, {
+        receivedDate: receivedDate ? new Date(receivedDate).toISOString() : undefined,
+        notes: notes.trim() ? notes.trim() : null,
+        // The backend replaces lines wholesale, so every line is sent back with
+        // its product/unit unchanged (products come from the linked PO).
+        lines: lines.map((line) => {
+          const received = toNum(line.received);
+          const rejected = Math.min(received, Math.max(0, toNum(line.rejected)));
+          return {
+            productId: line.productId,
+            unitId: line.unitId,
+            orderedQuantity: line.orderedQuantity,
+            receivedQuantity: received,
+            acceptedQuantity: Math.max(0, received - rejected),
+            rejectedQuantity: rejected,
+            unitCost: line.unitCost.trim() === '' ? undefined : toNum(line.unitCost),
+            condition: line.condition.trim() || undefined,
+            notes: line.notes ?? undefined,
+          };
+        }),
+      });
+      showToast('success', 'Goods received note updated', `Draft ${grn.grnNumber} saved.`);
+      onSaved();
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to update goods received note';
+      setFormError(message);
+    } finally {
+      setSaving(false);
+    }
+  }, [detail, grn, hasQtyError, lines, notes, onSaved, receivedDate]);
+
+  return (
+    <Modal
+      open={grn !== null}
+      onClose={onClose}
+      title={grn ? `Edit GRN ${grn.grnNumber}` : 'Edit Goods Received Note'}
+      size="3xl"
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </Btn>
+          <Btn
+            variant="primary"
+            onClick={() => void submit()}
+            loading={saving}
+            disabled={loading || !detail || !editable || hasQtyError}
+          >
+            Save Changes
+          </Btn>
+        </>
+      }
+    >
+      {error ? (
+        <ErrorState message={error} />
+      ) : loading || !detail ? (
+        <SkeletonTable rows={4} cols={4} />
+      ) : (
+        <div className="space-y-4">
+          {formError && <ErrorState message={formError} />}
+          {!editable && <ErrorState message="Only DRAFT goods received notes can be edited." />}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span
+                className="mb-1 block text-xs font-medium"
+                style={{ color: 'var(--aurora-text-muted)' }}
+              >
+                Received date
+              </span>
+              <input
+                type="date"
+                value={receivedDate}
+                onChange={(event) => setReceivedDate(event.target.value)}
+                className={inputCls}
+                style={inputStyle}
+                disabled={!editable}
+              />
+            </label>
+            <label className="block">
+              <span
+                className="mb-1 block text-xs font-medium"
+                style={{ color: 'var(--aurora-text-muted)' }}
+              >
+                Notes (optional)
+              </span>
+              <textarea
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                rows={2}
+                placeholder="Delivery reference, inspector remarks…"
+                className={inputCls}
+                style={inputStyle}
+                disabled={!editable}
+              />
+            </label>
+          </div>
+
+          {lines.length === 0 ? (
+            <EmptyState
+              title="No line items"
+              description="This goods received note has no lines."
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[820px] text-sm">
+                <caption className="sr-only">Goods received note lines</caption>
+                <thead>
+                  <tr
+                    className="text-left text-xs uppercase"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
+                    <th scope="col" className="px-2 py-2">
+                      Product
+                    </th>
+                    <th scope="col" className="px-2 py-2 text-right">
+                      Ordered
+                    </th>
+                    <th scope="col" className="px-2 py-2 text-right">
+                      Received
+                    </th>
+                    <th scope="col" className="px-2 py-2 text-right">
+                      Rejected
+                    </th>
+                    <th scope="col" className="px-2 py-2 text-right">
+                      Accepted
+                    </th>
+                    <th scope="col" className="px-2 py-2 text-right">
+                      Unit cost (TZS)
+                    </th>
+                    <th scope="col" className="px-2 py-2">
+                      Condition
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {lines.map((line) => {
+                    const received = toNum(line.received);
+                    const rejected = toNum(line.rejected);
+                    const rejectInvalid = rejected > received || rejected < 0;
+                    return (
+                      <tr key={line.key}>
+                        <td className="px-2 py-2">
+                          <div className="font-medium">{line.productLabel}</div>
+                          {line.unitLabel && (
+                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              Unit: {line.unitLabel}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums">
+                          {line.orderedQuantity ?? '—'}
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="number"
+                            min={0}
+                            step="any"
+                            inputMode="decimal"
+                            aria-label={`Received quantity for ${line.productLabel}`}
+                            value={line.received}
+                            onChange={(event) =>
+                              updateLine(line.key, { received: event.target.value })
+                            }
+                            className={`${inputCls} text-right`}
+                            style={inputStyle}
+                            disabled={!editable}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="number"
+                            min={0}
+                            step="any"
+                            inputMode="decimal"
+                            aria-label={`Rejected quantity for ${line.productLabel}`}
+                            value={line.rejected}
+                            onChange={(event) =>
+                              updateLine(line.key, { rejected: event.target.value })
+                            }
+                            className={`${inputCls} text-right`}
+                            style={{
+                              ...inputStyle,
+                              borderColor: rejectInvalid
+                                ? 'var(--aurora-danger, #dc2626)'
+                                : 'var(--aurora-border)',
+                            }}
+                            disabled={!editable}
+                          />
+                        </td>
+                        <td className="px-2 py-2 text-right font-medium tabular-nums">
+                          {Math.max(0, received - rejected)}
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="number"
+                            min={0}
+                            step="any"
+                            inputMode="decimal"
+                            aria-label={`Unit cost for ${line.productLabel}`}
+                            value={line.unitCost}
+                            onChange={(event) =>
+                              updateLine(line.key, { unitCost: event.target.value })
+                            }
+                            className={`${inputCls} text-right`}
+                            style={inputStyle}
+                            disabled={!editable}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="text"
+                            aria-label={`Condition for ${line.productLabel}`}
+                            value={line.condition}
+                            placeholder="Good"
+                            onChange={(event) =>
+                              updateLine(line.key, { condition: event.target.value })
+                            }
+                            className={inputCls}
+                            style={inputStyle}
+                            disabled={!editable}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+            Accepted is received minus rejected. Line products come from the linked purchase order
+            and cannot be changed here.
+          </p>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export default function GRNsPage() {
   const { hasPermission } = useAuth();
   const canView = hasPermission('grn.list');
+  // Permission codes mirror goods-received-notes.controller.ts (grn.view / grn.update).
+  const canViewDetail = hasPermission('grn.view');
+  const canUpdate = hasPermission('grn.update');
   const canApprove = hasPermission('grn.approve');
   const canPost = hasPermission('grn.post');
   const canCreate = hasPermission('grn.create');
@@ -852,6 +1415,9 @@ export default function GRNsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pending, setPending] = useState<{ grn: Grn; action: 'approve' | 'post' } | null>(null);
   const [receiveOpen, setReceiveOpen] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [detailGrn, setDetailGrn] = useState<Grn | null>(null);
+  const [editGrn, setEditGrn] = useState<Grn | null>(null);
 
   const companyNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -953,8 +1519,8 @@ export default function GRNsPage() {
   const approvedCount = grns.filter((grn) => grn.status === 'APPROVED').length;
   const postedCount = grns.filter((grn) => grn.status === 'POSTED').length;
 
-  const exportCsv = () => {
-    const rows = grns.map((grn) => ({
+  const buildExportRows = () =>
+    grns.map((grn) => ({
       'GRN #': grn.grnNumber,
       Company: grn.company?.name ?? companyNameById.get(grn.companyId) ?? grn.companyId,
       Supplier: grn.supplier?.name ?? grn.supplierId ?? '',
@@ -963,8 +1529,42 @@ export default function GRNsPage() {
       Status: grn.status,
       'Posted At': formatDate(grn.postedAt),
     }));
+
+  const exportCsv = () => {
     const stamp = new Date().toISOString().slice(0, 10);
-    downloadTextFile(`goods-received-notes-${stamp}.csv`, 'text/csv;charset=utf-8', rowsToCsv(rows));
+    downloadTextFile(
+      `goods-received-notes-${stamp}.csv`,
+      'text/csv;charset=utf-8',
+      rowsToCsv(buildExportRows()),
+    );
+  };
+
+  const exportPdf = async () => {
+    setExportingPdf(true);
+    try {
+      const rows = buildExportRows();
+      const filters = [
+        companyId ? companyNameById.get(companyId) ?? companyId : 'All companies',
+        status ? status.replace(/_/g, ' ') : 'All statuses',
+        search.trim() ? `Search: ${search.trim()}` : null,
+      ].filter(Boolean);
+      await downloadTablePdf({
+        title: 'Goods Received Notes',
+        subtitle: filters.join(' · '),
+        companyId: companyId || undefined,
+        columns: Object.keys(rows[0] ?? {}),
+        rows: rows.map((row) => Object.values(row)),
+        baseName: 'goods-received-notes',
+      });
+    } catch (err) {
+      showToast(
+        'error',
+        'PDF export failed',
+        err instanceof Error ? err.message : 'PDF export failed',
+      );
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   const filterSelectCls =
@@ -989,6 +1589,24 @@ export default function GRNsPage() {
           companies={companies}
           defaultCompanyId={companyId || undefined}
           onCreated={() => void load()}
+        />
+      )}
+
+      <GrnDetailModal
+        grn={detailGrn}
+        onClose={() => setDetailGrn(null)}
+        companyLabel={companyLabel}
+        canGeneratePdf={canViewDetail}
+      />
+
+      {canUpdate && (
+        <GrnEditModal
+          grn={editGrn}
+          onClose={() => setEditGrn(null)}
+          onSaved={() => {
+            setEditGrn(null);
+            void load();
+          }}
         />
       )}
 
@@ -1067,6 +1685,14 @@ export default function GRNsPage() {
           <>
             <Btn variant="secondary" onClick={exportCsv} disabled={!grns.length}>
               Export CSV
+            </Btn>
+            <Btn
+              variant="secondary"
+              onClick={() => void exportPdf()}
+              disabled={!grns.length}
+              loading={exportingPdf}
+            >
+              Export PDF
             </Btn>
             {canCreate && (
               <Btn variant="primary" onClick={() => setReceiveOpen(true)}>
@@ -1148,6 +1774,16 @@ export default function GRNsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">
+                        {canViewDetail && (
+                          <Btn variant="ghost" size="xs" onClick={() => setDetailGrn(grn)}>
+                            View
+                          </Btn>
+                        )}
+                        {canUpdate && grn.status === 'DRAFT' && (
+                          <Btn variant="secondary" size="xs" onClick={() => setEditGrn(grn)}>
+                            Edit
+                          </Btn>
+                        )}
                         {canApprove && grn.status === 'DRAFT' && (
                           <Btn
                             variant="secondary"

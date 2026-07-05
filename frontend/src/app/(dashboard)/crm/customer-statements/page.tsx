@@ -26,17 +26,11 @@ import {
 } from '@/components/aurora/forms';
 import { useAuth } from '@/hooks/use-auth';
 import { backendList, backendPage, backendPost, backendGet } from '@/lib/api-client';
+import { downloadBinaryExport } from '@/lib/export-download';
 
 // The generate service uses the literal 'ALL' sentinel for a company-wide run
 // (no specific customer). Surface it as a friendly label instead of a raw id.
 const ALL_CUSTOMERS = 'ALL';
-
-// The backend proxy the professional-statement PDF/Excel endpoints live behind.
-// These return binary blobs (not JSON), so they cannot go through the JSON
-// api-client helpers — we raw-fetch the proxy directly. The global
-// CsrfFetchProvider automatically attaches the CSRF token to POST /api/backend
-// requests, so no manual CSRF handling is required here.
-const BACKEND_PROXY = '/api/backend';
 
 interface Company {
   id: string;
@@ -169,46 +163,6 @@ const LINE_TYPE_LABEL: Record<StatementLineType, string> = {
   REFUND: 'Refund',
   ADJUSTMENT: 'Adjustment',
 };
-
-/**
- * Download a binary export (PDF / Excel) produced by a POST endpoint. The proxy
- * streams the file back with a Content-Disposition filename; we honour it when
- * present and fall back to the supplied name otherwise. Throws with the server
- * error message on a non-2xx so callers can surface it via showToast.
- */
-async function downloadExport(
-  path: string,
-  body: unknown,
-  fallbackName: string,
-): Promise<void> {
-  const res = await fetch(`${BACKEND_PROXY}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    let message = `Export failed (${res.status})`;
-    try {
-      const j = await res.json();
-      if (j?.message) message = Array.isArray(j.message) ? j.message.join(', ') : j.message;
-    } catch {
-      // Non-JSON error body — keep the status-based fallback message.
-    }
-    throw new Error(message);
-  }
-  const disposition = res.headers.get('Content-Disposition') ?? '';
-  const match = /filename="?([^"]+)"?/i.exec(disposition);
-  const filename = match?.[1] ?? fallbackName;
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
 
 interface EmailStatementResponse {
   emailed: boolean;
@@ -517,7 +471,7 @@ export default function CustomerStatementsPage() {
     if (!payload) return;
     setExporting('pdf');
     try {
-      await downloadExport('/customer-statements/export/pdf', payload, 'statement.pdf');
+      await downloadBinaryExport('/customer-statements/export/pdf', payload, 'statement.pdf');
       showToast('success', 'PDF downloaded', 'The statement PDF has been downloaded.');
     } catch (err) {
       showToast(
@@ -535,7 +489,7 @@ export default function CustomerStatementsPage() {
     if (!payload) return;
     setExporting('excel');
     try {
-      await downloadExport('/customer-statements/export/excel', payload, 'statement.xlsx');
+      await downloadBinaryExport('/customer-statements/export/excel', payload, 'statement.xlsx');
       showToast('success', 'Excel downloaded', 'The statement spreadsheet has been downloaded.');
     } catch (err) {
       showToast(
@@ -796,6 +750,7 @@ export default function CustomerStatementsPage() {
         }
         exportable
         exportFileName="customer-statements"
+        exportPdf={{ title: 'Customer Statements', companyId: companyId || undefined }}
         pagination={{
           page,
           limit: PAGE_SIZE,

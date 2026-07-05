@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import { Card, PageHeader, StatCard, showToast } from '@/components/ui';
+import { downloadTablePdf } from '@/lib/export-download';
 import { useOrgScope } from '@/hooks/use-org-scope';
 
 type QueryMode = 'range' | 'daily-close';
@@ -17,11 +18,22 @@ interface ReportDef {
   columns?: string[];
 }
 
+interface ReportScope {
+  companyId: string;
+  companyLabel?: string;
+  branchLabel?: string;
+  dailyClose: boolean;
+  date: string;
+  dateFrom: string;
+  dateTo: string;
+}
+
 interface NormalizedReport {
   rows: Record<string, unknown>[];
   raw: unknown;
   summary?: Record<string, unknown>;
   generatedAt?: string;
+  scope?: ReportScope;
 }
 
 const REPORTS: ReportDef[] = [
@@ -723,6 +735,7 @@ export default function WestsideReportsPage() {
   const [hydrated, setHydrated] = useState(false);
   const [reportResult, setReportResult] = useState<NormalizedReport>({ rows: [], raw: null });
   const [loading, setLoading] = useState(false);
+  const [pdfExporting, setPdfExporting] = useState(false);
   const [error, setError] = useState('');
 
   const {
@@ -814,8 +827,10 @@ export default function WestsideReportsPage() {
     try {
       const params = new URLSearchParams({ companyId });
       if (branchId) params.set('branchId', branchId);
-      if (activeReport.queryMode === 'daily-close') {
-        params.set('date', dateTo || dateFrom || new Date().toISOString().slice(0, 10));
+      const dailyClose = activeReport.queryMode === 'daily-close';
+      const closeDate = dateTo || dateFrom || new Date().toISOString().slice(0, 10);
+      if (dailyClose) {
+        params.set('date', closeDate);
       } else {
         if (dateFrom) params.set('dateFrom', dateFrom);
         if (dateTo) params.set('dateTo', dateTo);
@@ -823,7 +838,18 @@ export default function WestsideReportsPage() {
       const response = await fetch(`${activeReport.endpoint}?${params.toString()}`);
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorMessage(json, `HTTP ${response.status}`));
-      setReportResult(normalizePayload(json, activeReport));
+      setReportResult({
+        ...normalizePayload(json, activeReport),
+        scope: {
+          companyId,
+          companyLabel: currentCompanyLabel,
+          branchLabel: currentBranchLabel,
+          dailyClose,
+          date: closeDate,
+          dateFrom,
+          dateTo,
+        },
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error loading report';
       setError(message);
@@ -831,7 +857,7 @@ export default function WestsideReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeReport, branchId, companyId, dateFrom, dateTo]);
+  }, [activeReport, branchId, companyId, currentBranchLabel, currentCompanyLabel, dateFrom, dateTo]);
 
   useEffect(() => {
     if (!companyId || !hydrated) return;
@@ -846,6 +872,40 @@ export default function WestsideReportsPage() {
       ...reportResult.rows.map((row) => columns.map((column) => csvEscape(row[column])).join(',')),
     ];
     downloadText(`${reportFilename(activeReport)}.csv`, 'text/csv;charset=utf-8', lines.join('\n'));
+  }
+
+  async function exportPdf() {
+    if (reportResult.rows.length === 0) return;
+    setPdfExporting(true);
+    try {
+      const scope = reportResult.scope;
+      await downloadTablePdf({
+        title: activeReport.title,
+        subtitle: `${scope?.companyLabel ?? 'ITEMBA Group'} | ${scope?.branchLabel ?? 'All branches'}`,
+        companyId: scope?.companyId || undefined,
+        columns: columns.map(formatHeading),
+        rows: reportResult.rows.map((row) =>
+          columns.map((column) => formatValue(column, row[column])),
+        ),
+        meta: scope?.dailyClose
+          ? [
+              { label: 'Mode', value: 'Daily close' },
+              { label: 'Date', value: scope.date },
+            ]
+          : [
+              { label: 'Mode', value: 'Range' },
+              { label: 'Date From', value: scope?.dateFrom || 'Open' },
+              { label: 'Date To', value: scope?.dateTo || 'Open' },
+            ],
+        numericColumns: columns.flatMap((column, index) => (MONEY_RE.test(column) ? [index] : [])),
+        baseName: reportFilename(activeReport),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error exporting PDF';
+      showToast('error', 'PDF export failed', message);
+    } finally {
+      setPdfExporting(false);
+    }
   }
 
   function exportJson() {
@@ -1081,6 +1141,15 @@ export default function WestsideReportsPage() {
               disabled={reportResult.rows.length === 0}
             >
               CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => void exportPdf()}
+              className="rounded-lg border px-3 py-2 text-xs font-semibold"
+              style={controlStyle}
+              disabled={pdfExporting || reportResult.rows.length === 0}
+            >
+              {pdfExporting ? 'Exporting...' : 'Export PDF'}
             </button>
             <button
               type="button"

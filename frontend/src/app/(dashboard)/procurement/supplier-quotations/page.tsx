@@ -18,6 +18,7 @@ import { backendGet, backendList, backendPost } from '@/lib/api-client';
 // returns { items, total, ... } rather than the { data, ... } shape that
 // backendPage/normalizePaginated read from.
 import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
 
 interface Company {
   id: string;
@@ -139,6 +140,7 @@ export default function SupplierQuotationsPage() {
 
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pdfExporting, setPdfExporting] = useState(false);
 
   // Name-resolution lookups: the list endpoint returns raw FK ids only.
   const companyMap = useMemo(() => {
@@ -281,9 +283,8 @@ export default function SupplierQuotationsPage() {
     return { accepted, pendingReview, acceptedValue };
   }, [quotations]);
 
-  const exportCsv = () => {
-    if (!quotations.length) return;
-    const rows = quotations.map((q) => ({
+  const buildExportRows = (): Record<string, string>[] =>
+    quotations.map((q) => ({
       'Quotation #': q.supplierQuotationNumber,
       Company: companyName(q),
       Supplier: supplierName(q),
@@ -297,8 +298,45 @@ export default function SupplierQuotationsPage() {
       Currency: q.currency,
       Status: q.status,
     }));
+
+  const exportCsv = () => {
+    if (!quotations.length) return;
     const stamp = new Date().toISOString().slice(0, 10);
-    downloadTextFile(`supplier-quotations-${stamp}.csv`, 'text/csv;charset=utf-8', rowsToCsv(rows));
+    downloadTextFile(
+      `supplier-quotations-${stamp}.csv`,
+      'text/csv;charset=utf-8',
+      rowsToCsv(buildExportRows()),
+    );
+  };
+
+  const exportPdf = async () => {
+    if (!quotations.length) return;
+    const rows = buildExportRows();
+    const headers = Object.keys(rows[0]);
+    const subtitle = [
+      companyId ? `Company: ${companyMap.get(companyId)?.name ?? companyId}` : '',
+      supplierId ? `Supplier: ${supplierMap.get(supplierId)?.name ?? supplierId}` : '',
+      status ? `Status: ${status}` : '',
+      search.trim() ? `Search: ${search.trim()}` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    setPdfExporting(true);
+    try {
+      await downloadTablePdf({
+        title: 'Supplier Quotations',
+        subtitle: subtitle || undefined,
+        companyId: companyId || undefined,
+        columns: headers,
+        rows: rows.map((row) => headers.map((h) => row[h] ?? '')),
+        numericColumns: [6, 7, 8, 9],
+        baseName: 'supplier-quotations',
+      });
+    } catch (err) {
+      showToast('error', err instanceof Error ? err.message : 'Failed to export PDF');
+    } finally {
+      setPdfExporting(false);
+    }
   };
 
   const columns: ResponsiveColumn<SupplierQuotation>[] = [
@@ -496,9 +534,18 @@ export default function SupplierQuotationsPage() {
           </>
         }
         actions={
-          <Btn variant="secondary" onClick={exportCsv} disabled={!quotations.length}>
-            Export CSV
-          </Btn>
+          <>
+            <Btn variant="secondary" onClick={exportCsv} disabled={!quotations.length}>
+              Export CSV
+            </Btn>
+            <Btn
+              variant="secondary"
+              onClick={() => void exportPdf()}
+              disabled={!quotations.length || pdfExporting}
+            >
+              Export PDF
+            </Btn>
+          </>
         }
       />
 
@@ -515,6 +562,8 @@ export default function SupplierQuotationsPage() {
         exportable
         onExport={exportCsv}
         exportFileName="supplier-quotations"
+        exportPdf={{ title: 'Supplier Quotations', companyId: companyId || undefined }}
+        onExportPdf={() => void exportPdf()}
         pagination={{
           page,
           limit: PAGE_SIZE,

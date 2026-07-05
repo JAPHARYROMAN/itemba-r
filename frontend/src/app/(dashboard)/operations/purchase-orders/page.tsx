@@ -26,7 +26,8 @@ import {
   backendPatch,
   backendPost,
 } from '@/lib/api-client';
-import { downloadTextFile, formatDateOnly, rowsToCsv } from '@/lib/report-export';
+import { cellToString, downloadTextFile, formatDateOnly, rowsToCsv } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
 import { useAuth } from '@/hooks/use-auth';
 import { OrderLineEditor, mergeOrderProductOptions } from '../_components/order-line-editor';
 
@@ -160,6 +161,18 @@ const PURCHASE_STATUSES = [
 ];
 const PAYMENT_STATUSES = ['UNPAID', 'PARTIALLY_PAID', 'PAID'];
 const CURRENCIES = ['TZS', 'USD', 'EUR'];
+const EXPORT_COLUMNS = [
+  'PO #',
+  'Date',
+  'Expected',
+  'Supplier',
+  'Type',
+  'Status',
+  'Payment',
+  'Currency',
+  'Total',
+  'Outstanding',
+];
 
 const BLANK_LINE = (): PurchaseOrderLine => ({
   productId: '',
@@ -810,6 +823,7 @@ export default function PurchaseOrdersPage() {
   const [actionError, setActionError] = useState('');
   const [loadError, setLoadError] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const canView = hasPermission('purchases.view');
   const canCreate = hasPermission('purchases.create');
@@ -881,64 +895,67 @@ export default function PurchaseOrdersPage() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  // Export the FULL filtered register (not just the visible page) to CSV.
+  // Fetch the FULL filtered register (not just the visible page) as export rows.
+  const fetchExportRows = useCallback(async () => {
+    const query: Record<string, string | number> = {};
+    if (filterSearch.trim()) query.search = filterSearch.trim();
+    if (filterCompany) query.companyId = filterCompany;
+    if (filterType) query.purchaseType = filterType;
+    if (filterStatus) query.status = filterStatus;
+    if (filterPayment) query.paymentStatus = filterPayment;
+    if (filterDateFrom) query.dateFrom = filterDateFrom;
+    if (filterDateTo) query.dateTo = filterDateTo;
+
+    const CAP = 5000;
+    const result = await backendPage<PurchaseOrder>('/purchase-orders', {
+      query: { ...query, page: 1, limit: CAP },
+    });
+    const orders = (result.data ?? []).slice(0, CAP);
+    if (!orders.length) {
+      showToast('info', 'Nothing to export', 'No purchase orders match the current filters.');
+      return null;
+    }
+
+    const rows = orders.map((o) => ({
+      'PO #': o.purchaseOrderNumber ?? o.id,
+      Date: formatDateOnly(o.orderDate),
+      Expected: formatDateOnly(o.expectedDate),
+      Supplier: o.supplier?.name ?? o.supplierName ?? 'Supplier',
+      Type: o.purchaseType,
+      Status: o.status,
+      Payment: o.paymentStatus,
+      Currency: o.currency,
+      Total: o.totalAmount,
+      Outstanding: o.outstandingAmount,
+    }));
+    if (result.total > orders.length) {
+      showToast(
+        'warning',
+        'Export truncated',
+        `Exported the first ${orders.length} of ${result.total} matching orders.`,
+      );
+    }
+    return rows;
+  }, [
+    filterSearch,
+    filterCompany,
+    filterType,
+    filterStatus,
+    filterPayment,
+    filterDateFrom,
+    filterDateTo,
+  ]);
+
   const exportCsv = useCallback(async () => {
     if (!canView) return;
     setExporting(true);
     try {
-      const query: Record<string, string | number> = {};
-      if (filterSearch.trim()) query.search = filterSearch.trim();
-      if (filterCompany) query.companyId = filterCompany;
-      if (filterType) query.purchaseType = filterType;
-      if (filterStatus) query.status = filterStatus;
-      if (filterPayment) query.paymentStatus = filterPayment;
-      if (filterDateFrom) query.dateFrom = filterDateFrom;
-      if (filterDateTo) query.dateTo = filterDateTo;
-
-      const CAP = 5000;
-      const result = await backendPage<PurchaseOrder>('/purchase-orders', {
-        query: { ...query, page: 1, limit: CAP },
-      });
-      const orders = (result.data ?? []).slice(0, CAP);
-      if (!orders.length) {
-        showToast('info', 'Nothing to export', 'No purchase orders match the current filters.');
-        return;
-      }
-
-      const rows = orders.map((o) => ({
-        'PO #': o.purchaseOrderNumber ?? o.id,
-        Date: formatDateOnly(o.orderDate),
-        Expected: formatDateOnly(o.expectedDate),
-        Supplier: o.supplier?.name ?? o.supplierName ?? 'Supplier',
-        Type: o.purchaseType,
-        Status: o.status,
-        Payment: o.paymentStatus,
-        Currency: o.currency,
-        Total: o.totalAmount,
-        Outstanding: o.outstandingAmount,
-      }));
-      const columns = [
-        'PO #',
-        'Date',
-        'Expected',
-        'Supplier',
-        'Type',
-        'Status',
-        'Payment',
-        'Currency',
-        'Total',
-        'Outstanding',
-      ];
-      downloadTextFile(
-        `purchase-orders-${new Date().toISOString().slice(0, 10)}.csv`,
-        'text/csv;charset=utf-8',
-        rowsToCsv(rows, columns),
-      );
-      if (result.total > orders.length) {
-        showToast(
-          'warning',
-          'Export truncated',
-          `Exported the first ${orders.length} of ${result.total} matching orders.`,
+      const rows = await fetchExportRows();
+      if (rows) {
+        downloadTextFile(
+          `purchase-orders-${new Date().toISOString().slice(0, 10)}.csv`,
+          'text/csv;charset=utf-8',
+          rowsToCsv(rows, EXPORT_COLUMNS),
         );
       }
     } catch (err) {
@@ -950,8 +967,49 @@ export default function PurchaseOrdersPage() {
     } finally {
       setExporting(false);
     }
+  }, [canView, fetchExportRows]);
+
+  const exportPdf = useCallback(async () => {
+    if (!canView) return;
+    setExportingPdf(true);
+    try {
+      const rows = await fetchExportRows();
+      if (rows) {
+        const filters = [
+          filterCompany ? companies.find((c) => c.id === filterCompany)?.name : '',
+          filterType,
+          filterStatus,
+          filterPayment,
+          filterDateFrom || filterDateTo
+            ? `${filterDateFrom || '...'} to ${filterDateTo || '...'}`
+            : '',
+          filterSearch.trim() ? `search: ${filterSearch.trim()}` : '',
+        ].filter(Boolean);
+        await downloadTablePdf({
+          title: 'Purchase Orders',
+          subtitle: filters.length ? filters.join(' | ') : undefined,
+          companyId: filterCompany || undefined,
+          columns: EXPORT_COLUMNS,
+          rows: rows.map((r) =>
+            EXPORT_COLUMNS.map((c) => cellToString((r as Record<string, unknown>)[c])),
+          ),
+          numericColumns: [8, 9],
+          baseName: 'purchase-orders',
+        });
+      }
+    } catch (err) {
+      showToast(
+        'error',
+        'Export failed',
+        err instanceof Error ? err.message : 'Could not export purchase orders.',
+      );
+    } finally {
+      setExportingPdf(false);
+    }
   }, [
     canView,
+    fetchExportRows,
+    companies,
     filterSearch,
     filterCompany,
     filterType,
@@ -1228,6 +1286,9 @@ export default function PurchaseOrdersPage() {
           <>
             <Btn variant="secondary" onClick={exportCsv} loading={exporting}>
               Export CSV
+            </Btn>
+            <Btn variant="secondary" onClick={exportPdf} loading={exportingPdf}>
+              Export PDF
             </Btn>
             {canCreate ? (
               <Btn variant="primary" onClick={() => setCreating(true)}>

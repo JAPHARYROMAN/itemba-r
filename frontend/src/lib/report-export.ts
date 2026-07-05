@@ -59,8 +59,8 @@ export function pickPrimaryTable(data: unknown): {
   return { key: null, rows: [] };
 }
 
-/** Convert a single cell value to a CSV-safe string: finite numbers only, valid dates as ISO. */
-function cellToString(val: unknown): string {
+/** Convert a single cell value to an export-safe string: finite numbers only, valid dates as ISO. */
+export function cellToString(val: unknown): string {
   if (val === null || val === undefined) return '';
   if (val instanceof Date) return Number.isNaN(val.getTime()) ? '' : val.toISOString();
   if (typeof val === 'number') return Number.isFinite(val) ? String(val) : '';
@@ -124,6 +124,19 @@ export function downloadTextFile(filename: string, mimeType: string, contents: s
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Turn an arbitrary report response into an ordered column/row string matrix
+ * (auto-detecting its primary table). Returns null when there is no tabular
+ * data. Shared by the CSV and table-PDF export paths so both render the same
+ * table for the same response.
+ */
+export function reportToTable(data: unknown): { columns: string[]; rows: string[][] } | null {
+  const primary = pickPrimaryTable(data);
+  if (!primary.rows.length) return null;
+  const { columns, data: rows } = flattenForCsv(primary.rows);
+  return { columns, rows };
 }
 
 /**

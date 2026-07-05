@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Btn, PageSpinner } from '@/components/ui';
+import { DocumentArtifactButton } from '@/components/documents';
+import { useAuth } from '@/hooks/use-auth';
 
 /**
  * Bilingual (English / Swahili) printable payslip. Uses CSS print styles so
@@ -89,6 +91,7 @@ function fmtDate(d?: string): string {
 export default function PayslipPage() {
   const params = useParams();
   const router = useRouter();
+  const { hasPermission } = useAuth();
   const id = params.id as string;
   const [data, setData] = useState<PayslipPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -151,6 +154,7 @@ export default function PayslipPage() {
             <Btn variant="secondary" size="sm" onClick={() => router.back()}>← Back</Btn>
           </div>
           <div className="flex gap-2">
+            {hasPermission('payroll.view') && <DocumentArtifactButton entityType="PAYSLIP" entityId={id} />}
             <Btn variant="primary" size="sm" onClick={() => window.print()}>Print / Save as PDF</Btn>
           </div>
         </div>

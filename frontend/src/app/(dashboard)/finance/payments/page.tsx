@@ -16,6 +16,7 @@ import {
   type ResponsiveColumn,
 } from '@/components/aurora/data-display/ResponsiveDataTable';
 import { FormShell, FormSection, FormInput, FormSelect, FormTextarea, FormActions } from '@/components/aurora/forms';
+import { DocumentArtifactButton } from '@/components/documents';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList, backendPage, backendPatch, backendPost } from '@/lib/api-client';
 
@@ -700,6 +701,7 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
 }
 
 function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
+  const { hasPermission } = useAuth();
   const [detail, setDetail] = useState<CustomerPayment | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -899,9 +901,15 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
         ) : null}
       </div>
       <div
-        className="flex justify-end border-t px-5 py-3"
+        className="flex items-center justify-between gap-2 border-t px-5 py-3"
         style={{ borderColor: 'var(--aurora-border)' }}
       >
+        {/* Payment receipt PDF (server-generated artifact) */}
+        {detail && hasPermission('customer-payments.view') ? (
+          <DocumentArtifactButton entityType="CUSTOMER_PAYMENT_RECEIPT" entityId={detail.id} />
+        ) : (
+          <span />
+        )}
         <Btn variant="secondary" onClick={onClose}>
           Close
         </Btn>
@@ -1245,6 +1253,7 @@ export default function CustomerPaymentsPage() {
         }
         exportable
         exportFileName="customer-payments"
+        exportPdf={{ title: 'Customer Payments', companyId: companyId || undefined }}
         pagination={{
           page,
           limit: PAGE_SIZE,

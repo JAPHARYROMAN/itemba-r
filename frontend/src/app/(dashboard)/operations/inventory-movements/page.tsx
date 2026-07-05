@@ -15,6 +15,7 @@ import {
 import { useAuth } from '@/hooks/use-auth';
 import { backendList, backendPage } from '@/lib/api-client';
 import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -221,6 +222,7 @@ export default function InventoryMovementsPage() {
   const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
   const [error, setError] = useState('');
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const canView = hasPermission('inventory.movements.view');
 
@@ -339,8 +341,8 @@ export default function InventoryMovementsPage() {
   const rows = data?.data ?? [];
   const totalCost = rows.reduce((s, r) => s + (Number(r.totalCost ?? 0) || 0), 0);
 
-  const exportCsv = () => {
-    const csvRows = rows.map((mov) => ({
+  const buildExportRows = (): Record<string, string>[] =>
+    rows.map((mov) => ({
       'Movement #': mov.movementNumber ?? mov.id.slice(0, 8),
       Date: fmtDate(mov.movementDate),
       'Product Code': mov.product?.productCode ?? '',
@@ -359,10 +361,46 @@ export default function InventoryMovementsPage() {
       By: mov.createdBy?.fullName ?? '',
       Notes: mov.notes ?? '',
     }));
-    const csv = rowsToCsv(csvRows);
+
+  const exportCsv = () => {
+    const csv = rowsToCsv(buildExportRows());
     if (!csv) return;
     const stamp = new Date().toISOString().slice(0, 10);
     downloadTextFile(`inventory-movements-${stamp}.csv`, 'text/csv;charset=utf-8', csv);
+  };
+
+  const exportPdf = async () => {
+    const exportRows = buildExportRows();
+    if (!exportRows.length) return;
+    const columns = Object.keys(exportRows[0]);
+    const subtitle =
+      [
+        companyId ? companies.find((c) => c.id === companyId)?.name : '',
+        locationId
+          ? branches.find((b) => b.id === locationId)?.name ?? ''
+          : '',
+        movementType ? movementType.replace(/_/g, ' ') : '',
+        dateFrom ? `From ${dateFrom}` : '',
+        dateTo ? `To ${dateTo}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ') || undefined;
+    setExportingPdf(true);
+    try {
+      await downloadTablePdf({
+        title: 'Inventory Movements',
+        subtitle,
+        companyId: companyId || undefined,
+        columns,
+        rows: exportRows.map((r) => columns.map((c) => r[c] ?? '')),
+        numericColumns: [6, 7, 8],
+        baseName: 'inventory-movements',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export PDF');
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   return (
@@ -405,6 +443,15 @@ export default function InventoryMovementsPage() {
               aria-label="Export filtered movements to CSV"
             >
               Export CSV
+            </Btn>
+            <Btn
+              variant="secondary"
+              size="xs"
+              onClick={exportPdf}
+              disabled={rows.length === 0 || exportingPdf}
+              aria-label="Export filtered movements to PDF"
+            >
+              {exportingPdf ? 'Exporting…' : 'Export PDF'}
             </Btn>
           </div>
         }

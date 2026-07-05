@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList, backendPage } from '@/lib/api-client';
 import { toFiniteNumber } from '@/lib/design-system/formatters';
 import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -139,6 +140,7 @@ export default function InventoryBalancesPage() {
   const [lowStock, setLowStock] = useState(false);
   const [page, setPage] = useState(1);
   const [error, setError] = useState('');
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const canView = hasPermission('inventory.view');
 
@@ -220,8 +222,8 @@ export default function InventoryBalancesPage() {
     setPage(1);
   };
 
-  const exportCsv = () => {
-    const exportRows = (data?.data ?? []).map((bal) => ({
+  const buildExportRows = (): Record<string, string>[] =>
+    (data?.data ?? []).map((bal) => ({
       'Product Code': bal.product?.productCode ?? '',
       'Product Name': bal.product?.name ?? '',
       'Branch / Location': bal.branch
@@ -238,10 +240,40 @@ export default function InventoryBalancesPage() {
       'Total Value': fmtNum(bal.totalValue),
       'Last Movement': fmtDate(bal.lastMovementAt),
     }));
-    const csv = rowsToCsv(exportRows as Record<string, unknown>[]);
+
+  const exportCsv = () => {
+    const csv = rowsToCsv(buildExportRows() as Record<string, unknown>[]);
     if (!csv) return;
     const stamp = new Date().toISOString().slice(0, 10);
     downloadTextFile(`inventory-balances-${stamp}.csv`, 'text/csv;charset=utf-8', csv);
+  };
+
+  const exportPdf = async () => {
+    const exportRows = buildExportRows();
+    if (!exportRows.length) return;
+    const columns = Object.keys(exportRows[0]);
+    setExportingPdf(true);
+    try {
+      await downloadTablePdf({
+        title: 'Inventory Balances',
+        subtitle:
+          [
+            companies.find((c) => c.id === companyId)?.name,
+            lowStock ? 'Low stock only' : undefined,
+          ]
+            .filter(Boolean)
+            .join(' · ') || undefined,
+        companyId: companyId || undefined,
+        columns,
+        rows: exportRows.map((r) => columns.map((c) => r[c] ?? '')),
+        numericColumns: [5, 6, 7, 8, 9],
+        baseName: 'inventory-balances',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export PDF');
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   if (!canView) {
@@ -304,6 +336,15 @@ export default function InventoryBalancesPage() {
               aria-label="Export filtered inventory balances to CSV"
             >
               Export CSV
+            </Btn>
+            <Btn
+              variant="secondary"
+              size="xs"
+              onClick={exportPdf}
+              disabled={!rows.length || exportingPdf}
+              aria-label="Export filtered inventory balances to PDF"
+            >
+              {exportingPdf ? 'Exporting…' : 'Export PDF'}
             </Btn>
           </div>
         }

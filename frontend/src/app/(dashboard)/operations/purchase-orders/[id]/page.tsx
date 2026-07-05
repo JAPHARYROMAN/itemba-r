@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { useParams, useRouter } from 'next/navigation';
 import { Btn, Card, PageHeader, SkeletonTable, StatCard, StatusBadge } from '@/components/ui';
 import { backendGet, backendPage } from '@/lib/api-client';
+import { downloadTablePdf } from '@/lib/export-download';
 import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
 import { useAuth } from '@/hooks/use-auth';
 
@@ -143,14 +144,14 @@ export default function PurchaseOrderDetailPage() {
 
   // Export the rows behind the active data tab. Each tab maps to a flat row
   // shape so the shared CSV builder produces stable, human-readable columns.
-  const exportCsv = useCallback(() => {
-    const stamp = new Date().toISOString().slice(0, 10);
-    const base = order?.purchaseOrderNumber ?? id;
+  const buildExportRows = useCallback(() => {
     let rows: Record<string, unknown>[] = [];
     let suffix = '';
+    let numericColumns: number[] = [];
 
     if (activeTab === 'Line Items') {
       suffix = 'line-items';
+      numericColumns = [2, 4, 5, 6, 7];
       rows = (lines as AnyRecord[]).map((line) => ({
         product: `${line.product?.productCode ? `${line.product.productCode} - ` : ''}${
           line.product?.name ?? ''
@@ -165,6 +166,7 @@ export default function PurchaseOrderDetailPage() {
       }));
     } else if (activeTab === 'Goods Receipts') {
       suffix = 'goods-receipts';
+      numericColumns = [2];
       rows = grns.map((grn) => ({
         grnNumber: grn.grnNumber ?? '',
         receivedDate: date(grn.receivedDate),
@@ -174,6 +176,7 @@ export default function PurchaseOrderDetailPage() {
       }));
     } else if (activeTab === 'Supplier Invoice') {
       suffix = 'supplier-invoices';
+      numericColumns = [4, 5, 6];
       rows = invoices.map((inv) => ({
         invoiceNumber: inv.supplierInvoiceNumber ?? '',
         reference: inv.invoiceReference ?? '',
@@ -186,6 +189,7 @@ export default function PurchaseOrderDetailPage() {
       }));
     } else if (activeTab === 'Three-Way Match') {
       suffix = 'three-way-match';
+      numericColumns = [2, 3];
       rows = matches.map((match) => ({
         matchNumber: match.matchNumber ?? '',
         matchDate: date(match.matchDate),
@@ -195,9 +199,40 @@ export default function PurchaseOrderDetailPage() {
       }));
     }
 
+    return { rows, suffix, numericColumns };
+  }, [activeTab, lines, grns, invoices, matches, currency]);
+
+  const exportCsv = useCallback(() => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    const base = order?.purchaseOrderNumber ?? id;
+    const { rows, suffix } = buildExportRows();
     if (!rows.length) return;
     downloadTextFile(`${base}-${suffix}-${stamp}.csv`, 'text/csv;charset=utf-8', rowsToCsv(rows));
-  }, [activeTab, order?.purchaseOrderNumber, id, lines, grns, invoices, matches, currency]);
+  }, [buildExportRows, order?.purchaseOrderNumber, id]);
+
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const exportPdf = useCallback(async () => {
+    const base = order?.purchaseOrderNumber ?? id;
+    const { rows, suffix, numericColumns } = buildExportRows();
+    if (!rows.length) return;
+    setExportingPdf(true);
+    try {
+      const columns = Object.keys(rows[0]);
+      await downloadTablePdf({
+        title: base,
+        subtitle: activeTab,
+        companyId: order?.companyId,
+        columns,
+        rows: rows.map((row) => columns.map((col) => String(row[col] ?? ''))),
+        numericColumns,
+        baseName: `${base}-${suffix}`,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export PDF');
+    } finally {
+      setExportingPdf(false);
+    }
+  }, [buildExportRows, activeTab, order, id]);
 
   const canExportActiveTab =
     (activeTab === 'Line Items' && lines.length > 0) ||
@@ -265,6 +300,11 @@ export default function PurchaseOrderDetailPage() {
             {canExportActiveTab && (
               <Btn variant="secondary" onClick={exportCsv}>
                 Export CSV
+              </Btn>
+            )}
+            {canExportActiveTab && (
+              <Btn variant="secondary" onClick={exportPdf} disabled={exportingPdf}>
+                {exportingPdf ? 'Exporting…' : 'Export PDF'}
               </Btn>
             )}
             {order.supplier?.id && (

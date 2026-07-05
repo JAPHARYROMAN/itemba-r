@@ -23,7 +23,8 @@ import {
   backendPatch,
   backendPost,
 } from '@/lib/api-client';
-import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
+import { rowsToCsv, downloadTextFile, cellToString } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
 
 interface Company {
   id: string;
@@ -472,6 +473,7 @@ export default function UnitsPage() {
   const [deletingUnit, setDeletingUnit] = useState<Unit | null>(null);
   const [deletingConv, setDeletingConv] = useState<UnitConversion | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState<'units' | 'conversions' | null>(null);
 
   const canView = hasPermission('units.view');
   const canCreate = hasPermission('units.manage');
@@ -589,8 +591,8 @@ export default function UnitsPage() {
     }
   };
 
-  const exportUnits = () => {
-    const rows = (units?.data ?? []).map((u) => ({
+  const buildUnitRows = () =>
+    (units?.data ?? []).map((u) => ({
       Name: u.name,
       Symbol: u.symbol,
       Type: u.unitType,
@@ -602,18 +604,46 @@ export default function UnitsPage() {
       Base: u.isBaseUnit ? 'Yes' : 'No',
       Status: u.status,
     }));
-    downloadTextFile('units.csv', 'text/csv', rowsToCsv(rows));
-  };
 
-  const exportConversions = () => {
-    const rows = (conversions?.data ?? []).map((c) => ({
+  const buildConversionRows = () =>
+    (conversions?.data ?? []).map((c) => ({
       From: `${c.fromUnit?.name ?? ''} (${c.fromUnit?.symbol ?? ''})`,
       To: `${c.toUnit?.name ?? ''} (${c.toUnit?.symbol ?? ''})`,
       Factor: c.conversionFactor,
       Description: c.description ?? '',
       Status: c.isActive ? 'ACTIVE' : 'INACTIVE',
     }));
-    downloadTextFile('unit-conversions.csv', 'text/csv', rowsToCsv(rows));
+
+  const exportUnits = () => {
+    downloadTextFile('units.csv', 'text/csv', rowsToCsv(buildUnitRows()));
+  };
+
+  const exportConversions = () => {
+    downloadTextFile('unit-conversions.csv', 'text/csv', rowsToCsv(buildConversionRows()));
+  };
+
+  const exportPdf = async (which: 'units' | 'conversions') => {
+    setPdfBusy(which);
+    setError('');
+    try {
+      const rows = which === 'units' ? buildUnitRows() : buildConversionRows();
+      const columns = Object.keys(rows[0] ?? {});
+      await downloadTablePdf({
+        title: which === 'units' ? 'Units' : 'Unit Conversions',
+        subtitle:
+          which === 'units' && debouncedUnitSearch.trim()
+            ? `Search: ${debouncedUnitSearch.trim()}`
+            : undefined,
+        columns,
+        rows: rows.map((r) => columns.map((c) => cellToString((r as Record<string, unknown>)[c]))),
+        numericColumns: which === 'conversions' ? [2] : undefined,
+        baseName: which === 'units' ? 'units' : 'unit-conversions',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export PDF');
+    } finally {
+      setPdfBusy(null);
+    }
   };
 
   if (!canView) {
@@ -752,6 +782,14 @@ export default function UnitsPage() {
               disabled={!units?.data.length}
             >
               Export CSV
+            </Btn>
+            <Btn
+              variant="secondary"
+              size="sm"
+              onClick={() => exportPdf('units')}
+              disabled={!units?.data.length || pdfBusy === 'units'}
+            >
+              Export PDF
             </Btn>
             {canCreate && (
               <Btn variant="primary" size="sm" onClick={() => setCreatingUnit(true)}>
@@ -897,6 +935,14 @@ export default function UnitsPage() {
               disabled={!conversions?.data.length}
             >
               Export CSV
+            </Btn>
+            <Btn
+              variant="secondary"
+              size="sm"
+              onClick={() => exportPdf('conversions')}
+              disabled={!conversions?.data.length || pdfBusy === 'conversions'}
+            >
+              Export PDF
             </Btn>
             {canCreate && (
               <Btn variant="primary" size="sm" onClick={() => setCreatingConv(true)}>
