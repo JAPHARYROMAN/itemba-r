@@ -539,6 +539,12 @@ export const NAV: NavItem[] = [
         permission: 'hr.leave.view',
       },
       {
+        href: '/hr/leave-balances',
+        label: 'Leave Balances',
+        iconKey: 'barChart',
+        permission: 'leave_balances.view',
+      },
+      {
         href: '/hr/allowance-types',
         label: 'Allowance Types',
         iconKey: 'scale',
