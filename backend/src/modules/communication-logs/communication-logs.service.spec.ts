@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CommunicationLogsService } from './communication-logs.service';
 
@@ -182,6 +182,32 @@ describe('CommunicationLogsService', () => {
       expect(data).toEqual({ summary: 'new', status: 'CLOSED' });
       expect(data.companyId).toBeUndefined();
       expect(data.entityType).toBeUndefined();
+    });
+  });
+
+  describe('close', () => {
+    it('throws BadRequest when the log is already closed', async () => {
+      const { service, prisma, auditLogs } = makeService({
+        existing: { id: 'log-1', companyId: 'company-1', status: 'CLOSED' },
+      });
+      await expect(service.close('log-1', user)).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.communicationLog.update).not.toHaveBeenCalled();
+      expect(auditLogs.log).not.toHaveBeenCalled();
+    });
+
+    it('closes an OPEN log and writes an audit entry', async () => {
+      const { service, prisma, auditLogs } = makeService({
+        existing: { id: 'log-1', companyId: 'company-1', status: 'OPEN' },
+      });
+      const result = await service.close('log-1', user);
+      expect(prisma.communicationLog.update).toHaveBeenCalledWith({
+        where: { id: 'log-1' },
+        data: { status: 'CLOSED' },
+      });
+      expect(auditLogs.log).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'CLOSE', entityType: 'CommunicationLog', entityId: 'log-1' }),
+      );
+      expect((result as any).status).toBe('CLOSED');
     });
   });
 });

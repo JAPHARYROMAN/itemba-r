@@ -1,9 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { applyCompanyScopeWhere } from '../../common/services';
+
+const OPEN_TASK_STATUSES = ['TODO', 'IN_PROGRESS', 'OVERDUE'];
 
 @Injectable()
 export class TasksService {
@@ -77,7 +79,10 @@ export class TasksService {
   }
 
   async complete(id: string, user: any) {
-    await this.findOne(id, user);
+    const existing = await this.findOne(id, user);
+    if (!OPEN_TASK_STATUSES.includes(existing.status)) {
+      throw new BadRequestException('Only open tasks (TODO, IN_PROGRESS, OVERDUE) can be completed');
+    }
     const record = await this.prisma.task.update({
       where: { id },
       data: { status: 'COMPLETED', completedById: user.id, completedAt: new Date() },
@@ -87,7 +92,10 @@ export class TasksService {
   }
 
   async cancel(id: string, user: any) {
-    await this.findOne(id, user);
+    const existing = await this.findOne(id, user);
+    if (!OPEN_TASK_STATUSES.includes(existing.status)) {
+      throw new BadRequestException('Only open tasks (TODO, IN_PROGRESS, OVERDUE) can be cancelled');
+    }
     const record = await this.prisma.task.update({ where: { id }, data: { status: 'CANCELLED' } });
     await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'Task', entityId: id, newValue: { status: 'CANCELLED' } });
     return record;

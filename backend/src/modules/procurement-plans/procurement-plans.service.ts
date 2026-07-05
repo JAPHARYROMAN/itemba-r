@@ -41,6 +41,7 @@ export class ProcurementPlansService {
 
   async update(id: string, dto: any, user: any) {
     const existing = await this.findOne(id);
+    if (existing.status !== 'DRAFT') throw new BadRequestException('Only DRAFT plans can be edited');
     const data = { ...dto };
     delete data.companyId;
     delete data.status;

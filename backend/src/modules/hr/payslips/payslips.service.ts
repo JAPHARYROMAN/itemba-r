@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { applyCompanyScopeWhere } from '../../../common/services';
+import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
 /**
  * Aggregates everything a printable Tanzanian payslip needs. Pure read service —
@@ -14,9 +16,13 @@ import { PrismaService } from '../../../prisma/prisma.service';
 export class PayslipsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getPayslip(payrollEntryId: string) {
+  async getPayslip(payrollEntryId: string, user: AuthUser) {
+    const where: any = { id: payrollEntryId, deletedAt: null };
+    // Company-scoped: a payroll.view holder must not read another company's
+    // payslip by id. Mirrors generated-documents.service.ts's payslipPdf builder.
+    applyCompanyScopeWhere(where, user);
     const entry = await this.prisma.payrollEntry.findFirst({
-      where: { id: payrollEntryId, deletedAt: null },
+      where,
       include: {
         employee: {
           select: {
@@ -146,13 +152,15 @@ export class PayslipsService {
     };
   }
 
-  async getPayslipsForRun(payrollRunId: string) {
+  async getPayslipsForRun(payrollRunId: string, user: AuthUser) {
+    const where: any = { payrollRunId, deletedAt: null };
+    applyCompanyScopeWhere(where, user);
     const entries = await this.prisma.payrollEntry.findMany({
-      where: { payrollRunId, deletedAt: null },
+      where,
       select: { id: true },
       orderBy: { createdAt: 'asc' },
     });
-    return Promise.all(entries.map((e) => this.getPayslip(e.id)));
+    return Promise.all(entries.map((e) => this.getPayslip(e.id, user)));
   }
 }
 

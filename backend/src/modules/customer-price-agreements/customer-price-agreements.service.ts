@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateCustomerPriceAgreementDto } from './dto/create-customer-price-agreement.dto';
@@ -63,6 +63,9 @@ export class CustomerPriceAgreementsService {
 
   async update(id: string, dto: UpdateCustomerPriceAgreementDto, userId: string) {
     const existing = await this.findOne(id);
+    if (existing.approvedAt) {
+      throw new BadRequestException('Approved customer price agreements cannot be edited');
+    }
     const record = await this.prisma.customerPriceAgreement.update({
       where: { id },
       data: {
@@ -91,6 +94,9 @@ export class CustomerPriceAgreementsService {
 
   async remove(id: string, userId: string) {
     const existing = await this.findOne(id);
+    if (existing.approvedAt) {
+      throw new BadRequestException('Approved customer price agreements cannot be deleted');
+    }
     await this.prisma.customerPriceAgreement.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.auditLogs.log({
       action: 'CUSTOMER_PRICE_AGREEMENT_DELETE',

@@ -146,9 +146,8 @@ export default function TasksPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    const params: Record<string, string> = activeTab === 'my' ? { assignedToMe: 'true' } : {};
-    const qs = new URLSearchParams(params).toString();
-    fetch(`/api/backend/tasks${qs ? '?' + qs : ''}`)
+    const endpoint = activeTab === 'my' ? '/api/backend/tasks/my-tasks' : '/api/backend/tasks';
+    fetch(endpoint)
       .then(r => r.json())
       .then((res: any) => setTasks(res.data?.data ?? []))
       .catch(console.error)

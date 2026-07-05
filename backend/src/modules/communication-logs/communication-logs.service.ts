@@ -115,7 +115,10 @@ export class CommunicationLogsService {
   }
 
   async close(id: string, user: any) {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
+    if (existing.status === 'CLOSED') {
+      throw new BadRequestException('Log is already closed');
+    }
     const updated = await this.prisma.communicationLog.update({ where: { id }, data: { status: 'CLOSED' as any } });
     await this.auditLogs.log({ action: 'CLOSE', entityType: 'CommunicationLog', entityId: id, userId: user.id });
     return updated;

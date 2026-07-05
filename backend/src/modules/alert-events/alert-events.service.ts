@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AlertType, NotificationPriority } from '@prisma/client';
@@ -64,7 +64,12 @@ export class AlertEventsService {
   }
 
   async acknowledge(id: string, body: { comment?: string }, user: any) {
-    await this.findOne(id, user);
+    const existing = await this.findOne(id, user);
+    if (existing.status !== 'OPEN') {
+      throw new BadRequestException(
+        `Only OPEN alert events can be acknowledged (current status: ${existing.status})`,
+      );
+    }
     const record = await this.prisma.alertEvent.update({
       where: { id },
       data: { status: 'ACKNOWLEDGED', acknowledgedById: user.id, acknowledgedAt: new Date() },
@@ -74,7 +79,12 @@ export class AlertEventsService {
   }
 
   async resolve(id: string, body: { comment?: string }, user: any) {
-    await this.findOne(id, user);
+    const existing = await this.findOne(id, user);
+    if (!['OPEN', 'ACKNOWLEDGED'].includes(existing.status)) {
+      throw new BadRequestException(
+        `Only OPEN or ACKNOWLEDGED alert events can be resolved (current status: ${existing.status})`,
+      );
+    }
     const record = await this.prisma.alertEvent.update({
       where: { id },
       data: { status: 'RESOLVED', resolvedById: user.id, resolvedAt: new Date() },
@@ -84,7 +94,12 @@ export class AlertEventsService {
   }
 
   async dismiss(id: string, body: { comment?: string }, user: any) {
-    await this.findOne(id, user);
+    const existing = await this.findOne(id, user);
+    if (existing.status === 'DISMISSED') {
+      throw new BadRequestException(
+        `Alert event is already dismissed (current status: ${existing.status})`,
+      );
+    }
     const record = await this.prisma.alertEvent.update({
       where: { id },
       data: { status: 'DISMISSED', dismissedById: user.id, dismissedAt: new Date() },
