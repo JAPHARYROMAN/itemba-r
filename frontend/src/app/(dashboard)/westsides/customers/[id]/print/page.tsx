@@ -9,6 +9,8 @@ import {
   DocumentShell,
   DocumentStatGrid,
   DocumentTable,
+  DocumentTd,
+  DocumentTh,
   EmptyDocumentState,
   documentOrganization,
 } from '@/components/documents';
@@ -244,27 +246,27 @@ export default function CustomerPrintPage() {
       <DocumentSection title="Recent Orders" description="Last 10 orders">
         {recentOrders.length > 0 ? (
           <DocumentTable>
-            <thead className="bg-slate-50">
+            <thead>
               <tr>
-                <Th>Order</Th>
-                <Th>Date</Th>
-                <Th>Salesperson</Th>
-                <Th align="right">Total</Th>
-                <Th align="right">Outstanding</Th>
-                <Th>Status</Th>
+                <DocumentTh>Order</DocumentTh>
+                <DocumentTh>Date</DocumentTh>
+                <DocumentTh>Salesperson</DocumentTh>
+                <DocumentTh align="right">Total</DocumentTh>
+                <DocumentTh align="right">Outstanding</DocumentTh>
+                <DocumentTh>Status</DocumentTh>
               </tr>
             </thead>
             <tbody>
               {recentOrders.map((order) => (
-                <tr key={order.id} className="border-t border-slate-200">
-                  <Td mono>{order.salesOrderNumber}</Td>
-                  <Td>{formatDate(order.orderDate)}</Td>
-                  <Td>{order.salesperson?.fullName ?? order.salesperson?.employeeCode ?? 'N/A'}</Td>
-                  <Td align="right">{fmt(order.totalAmount)}</Td>
-                  <Td align="right">
+                <tr key={order.id}>
+                  <DocumentTd mono>{order.salesOrderNumber}</DocumentTd>
+                  <DocumentTd>{formatDate(order.orderDate)}</DocumentTd>
+                  <DocumentTd>{order.salesperson?.fullName ?? order.salesperson?.employeeCode ?? 'N/A'}</DocumentTd>
+                  <DocumentTd align="right">{fmt(order.totalAmount)}</DocumentTd>
+                  <DocumentTd align="right">
                     {Number(order.outstandingAmount) > 0 ? fmt(order.outstandingAmount) : 'N/A'}
-                  </Td>
-                  <Td>{label(order.status)}</Td>
+                  </DocumentTd>
+                  <DocumentTd>{label(order.status)}</DocumentTd>
                 </tr>
               ))}
             </tbody>
@@ -277,21 +279,21 @@ export default function CustomerPrintPage() {
       <DocumentSection title="Recent Payments" description="Last 10 settled receivables">
         {recentPayments.length > 0 ? (
           <DocumentTable>
-            <thead className="bg-slate-50">
+            <thead>
               <tr>
-                <Th>Receivable</Th>
-                <Th>Settled</Th>
-                <Th align="right">Amount</Th>
-                <Th align="right">Paid</Th>
+                <DocumentTh>Receivable</DocumentTh>
+                <DocumentTh>Settled</DocumentTh>
+                <DocumentTh align="right">Amount</DocumentTh>
+                <DocumentTh align="right">Paid</DocumentTh>
               </tr>
             </thead>
             <tbody>
               {recentPayments.map((payment) => (
-                <tr key={payment.id} className="border-t border-slate-200">
-                  <Td mono>{payment.receivableNumber}</Td>
-                  <Td>{formatDate(payment.updatedAt)}</Td>
-                  <Td align="right">{fmt(payment.amount)}</Td>
-                  <Td align="right">{fmt(payment.paidAmount)}</Td>
+                <tr key={payment.id}>
+                  <DocumentTd mono>{payment.receivableNumber}</DocumentTd>
+                  <DocumentTd>{formatDate(payment.updatedAt)}</DocumentTd>
+                  <DocumentTd align="right">{fmt(payment.amount)}</DocumentTd>
+                  <DocumentTd align="right">{fmt(payment.paidAmount)}</DocumentTd>
                 </tr>
               ))}
             </tbody>
@@ -306,21 +308,21 @@ export default function CustomerPrintPage() {
       <DocumentSection title="Top Products" description="Last 90 days">
         {topProducts.length > 0 ? (
           <DocumentTable>
-            <thead className="bg-slate-50">
+            <thead>
               <tr>
-                <Th>Product</Th>
-                <Th>SKU</Th>
-                <Th align="right">Quantity</Th>
-                <Th align="right">Spend</Th>
+                <DocumentTh>Product</DocumentTh>
+                <DocumentTh>SKU</DocumentTh>
+                <DocumentTh align="right">Quantity</DocumentTh>
+                <DocumentTh align="right">Spend</DocumentTh>
               </tr>
             </thead>
             <tbody>
               {topProducts.map((product) => (
-                <tr key={product.productId} className="border-t border-slate-200">
-                  <Td>{product.productName}</Td>
-                  <Td mono>{product.sku ?? 'N/A'}</Td>
-                  <Td align="right">{product.totalQuantity.toLocaleString('en-GB')}</Td>
-                  <Td align="right">{fmt(product.totalSpend)}</Td>
+                <tr key={product.productId}>
+                  <DocumentTd>{product.productName}</DocumentTd>
+                  <DocumentTd mono>{product.sku ?? 'N/A'}</DocumentTd>
+                  <DocumentTd align="right">{product.totalQuantity.toLocaleString('en-GB')}</DocumentTd>
+                  <DocumentTd align="right">{fmt(product.totalSpend)}</DocumentTd>
                 </tr>
               ))}
             </tbody>
@@ -332,36 +334,6 @@ export default function CustomerPrintPage() {
         )}
       </DocumentSection>
     </DocumentShell>
-  );
-}
-
-function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {
-  const alignClass = align === 'right' ? 'text-right' : 'text-left';
-  return (
-    <th
-      className={`px-3 py-2 ${alignClass} text-[10px] font-bold uppercase tracking-wide text-slate-600`}
-    >
-      {children}
-    </th>
-  );
-}
-
-function Td({
-  children,
-  align = 'left',
-  mono = false,
-}: {
-  children: React.ReactNode;
-  align?: 'left' | 'right';
-  mono?: boolean;
-}) {
-  const alignClass = align === 'right' ? 'text-right' : 'text-left';
-  return (
-    <td
-      className={`px-3 py-2 ${alignClass} align-top text-xs text-slate-800 ${mono ? 'font-mono' : ''}`}
-    >
-      {children}
-    </td>
   );
 }
 

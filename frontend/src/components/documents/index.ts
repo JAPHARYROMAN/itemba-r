@@ -8,6 +8,7 @@ export {
   DocumentTd,
   DocumentTh,
   DocumentTotals,
+  DocumentNotePanel,
   EmptyDocumentState,
 } from './DocumentShell';
 export type {

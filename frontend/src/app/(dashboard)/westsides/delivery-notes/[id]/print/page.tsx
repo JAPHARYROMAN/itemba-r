@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import {
   DocumentActions,
   DocumentKeyValueGrid,
+  DocumentNotePanel,
   DocumentSection,
   DocumentShell,
   DocumentSignatureGrid,
@@ -142,7 +143,7 @@ export default function DeliveryNotePrintPage() {
       <DocumentSection title="Line Items">
         {lines.length > 0 ? (
           <DocumentTable>
-            <thead className="bg-slate-50">
+            <thead>
               <tr>
                 <DocumentTh>Item</DocumentTh>
                 <DocumentTh>SKU</DocumentTh>
@@ -153,7 +154,7 @@ export default function DeliveryNotePrintPage() {
             </thead>
             <tbody>
               {lines.map((line) => (
-                <tr key={line.id} className="border-t border-slate-200">
+                <tr key={line.id}>
                   <DocumentTd>{line.description || line.product?.name || 'N/A'}</DocumentTd>
                   <DocumentTd mono>
                     {line.product?.sku ?? line.product?.productCode ?? 'N/A'}
@@ -172,7 +173,7 @@ export default function DeliveryNotePrintPage() {
 
       {record.notes && (
         <DocumentSection title="Notes">
-          <p className="text-sm leading-6 text-slate-700">{record.notes}</p>
+          <DocumentNotePanel>{record.notes}</DocumentNotePanel>
         </DocumentSection>
       )}
 

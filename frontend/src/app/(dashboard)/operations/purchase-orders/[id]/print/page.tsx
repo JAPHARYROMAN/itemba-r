@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import {
   DocumentActions,
   DocumentKeyValueGrid,
+  DocumentNotePanel,
   DocumentSection,
   DocumentShell,
   DocumentSignatureGrid,
@@ -161,7 +162,7 @@ export default function PurchaseOrderPrintPage() {
         {lines.length > 0 ? (
           <>
             <DocumentTable>
-              <thead className="bg-slate-50">
+              <thead>
                 <tr>
                   <DocumentTh>Item</DocumentTh>
                   <DocumentTh>SKU</DocumentTh>
@@ -175,7 +176,7 @@ export default function PurchaseOrderPrintPage() {
               </thead>
               <tbody>
                 {lines.map((line) => (
-                  <tr key={line.id} className="border-t border-slate-200">
+                  <tr key={line.id}>
                     <DocumentTd>{line.description || line.product?.name || 'N/A'}</DocumentTd>
                     <DocumentTd mono>
                       {line.product?.sku ?? line.product?.productCode ?? 'N/A'}
@@ -215,7 +216,7 @@ export default function PurchaseOrderPrintPage() {
                 {
                   label: 'Outstanding',
                   value: formatDocumentMoney(record.outstandingAmount, record.currency),
-                  emphasis: true,
+                  tone: Number(record.outstandingAmount ?? 0) > 0 ? ('danger' as const) : undefined,
                 },
               ]}
             />
@@ -229,7 +230,7 @@ export default function PurchaseOrderPrintPage() {
 
       {record.notes && (
         <DocumentSection title="Notes">
-          <p className="text-sm leading-6 text-slate-700">{record.notes}</p>
+          <DocumentNotePanel>{record.notes}</DocumentNotePanel>
         </DocumentSection>
       )}
 

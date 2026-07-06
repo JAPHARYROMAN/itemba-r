@@ -867,6 +867,8 @@ html.motion-reduced *::after {
 .document-print-root .document-page {
   background: #ffffff !important;
   color: #0f172a !important;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
 }
 
 .document-print-root .document-page .text-slate-950,
@@ -890,6 +892,95 @@ html.motion-reduced *::after {
 
 .document-print-root .document-page .bg-slate-50 {
   background: #f8fafc !important;
+}
+
+.document-print-root .document-page .text-brand-600 {
+  color: #2563eb !important;
+}
+
+.document-print-root .document-page .text-brand-700 {
+  color: #1d4ed8 !important;
+}
+
+.document-print-root .document-page .bg-brand-50 {
+  background: #eff6ff !important;
+}
+
+.document-print-root .document-page .border-brand-600 {
+  border-color: #2563eb !important;
+}
+
+.document-print-root .document-page .border-brand-100 {
+  border-color: #dbeafe !important;
+}
+
+.document-print-root .document-page .text-red-600 {
+  color: #dc2626 !important;
+}
+
+/* Status-pill + stat tones (pin against dark theme) */
+.document-print-root .document-page .bg-emerald-50 {
+  background: #ecfdf5 !important;
+}
+
+.document-print-root .document-page .text-emerald-700 {
+  color: #047857 !important;
+}
+
+.document-print-root .document-page .bg-amber-50 {
+  background: #fffbeb !important;
+}
+
+.document-print-root .document-page .text-amber-700 {
+  color: #b45309 !important;
+}
+
+.document-print-root .document-page .bg-red-50 {
+  background: #fef2f2 !important;
+}
+
+.document-print-root .document-page .text-red-700 {
+  color: #b91c1c !important;
+}
+
+.document-print-root .document-page .bg-blue-50 {
+  background: #eff6ff !important;
+}
+
+.document-print-root .document-page .text-blue-700 {
+  color: #1d4ed8 !important;
+}
+
+.document-print-root .document-page .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+.document-print-root .document-page .border-slate-400 {
+  border-color: #94a3b8 !important;
+}
+
+.document-print-root .document-page .border-slate-200 {
+  border-color: #e2e8f0 !important;
+}
+
+.document-print-root .document-page .border-slate-100 {
+  border-color: #f1f5f9 !important;
+}
+
+.document-print-root .document-page .border-emerald-200 {
+  border-color: #a7f3d0 !important;
+}
+
+.document-print-root .document-page .border-amber-200 {
+  border-color: #fde68a !important;
+}
+
+.document-print-root .document-page .border-red-200 {
+  border-color: #fecaca !important;
+}
+
+.document-print-root .document-page .border-blue-200 {
+  border-color: #bfdbfe !important;
 }
 
 .document-print-root .document-table th,
@@ -934,6 +1025,8 @@ html.motion-reduced *::after {
     padding: 0 !important;
     box-shadow: none !important;
     --tw-ring-shadow: 0 0 #0000 !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 
   .document-section {

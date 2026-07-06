@@ -35,6 +35,7 @@ export interface DocumentTotalItem {
   label: string;
   value: React.ReactNode;
   emphasis?: boolean;
+  tone?: 'default' | 'danger';
 }
 
 interface DocumentShellProps {
@@ -59,11 +60,11 @@ const statusToneClasses = {
   info: 'border-blue-200 bg-blue-50 text-blue-700',
 };
 
-const statToneClasses = {
-  neutral: 'border-slate-200 bg-slate-50',
-  success: 'border-emerald-200 bg-emerald-50',
-  warning: 'border-amber-200 bg-amber-50',
-  danger: 'border-red-200 bg-red-50',
+const statValueTone = {
+  neutral: 'text-slate-950',
+  success: 'text-emerald-700',
+  warning: 'text-amber-700',
+  danger: 'text-red-700',
 };
 
 export function DocumentShell({
@@ -84,15 +85,20 @@ export function DocumentShell({
   const branchName = organization.branchName;
   const tin = organization.tin ?? organization.taxId;
 
-  const contactLine = [
-    organization.phone ? `Tel: ${organization.phone}` : null,
-    organization.email ? `Email: ${organization.email}` : null,
+  const branchLine = [branchName, organization.code].filter(Boolean).join(' · ');
+  const contactLine = [organization.address, organization.phone, organization.email]
+    .filter(Boolean)
+    .join(' • ');
+  const taxLine = [
+    tin ? `TIN: ${tin}` : null,
+    organization.vrn ? `VRN: ${organization.vrn}` : null,
+    organization.registrationNumber ? `Reg: ${organization.registrationNumber}` : null,
   ]
     .filter(Boolean)
-    .join(' | ');
-  const taxLine = [tin ? `TIN: ${tin}` : null, organization.vrn ? `VRN: ${organization.vrn}` : null]
+    .join(' • ');
+  const footerContactLine = [organization.website, organization.email, organization.phone]
     .filter(Boolean)
-    .join(' | ');
+    .join(' • ');
 
   return (
     <div className="document-print-root min-h-full bg-slate-100 px-4 py-5 text-slate-900 sm:px-6 lg:px-8">
@@ -102,97 +108,64 @@ export function DocumentShell({
         </div>
       )}
 
-      <article className="document-page mx-auto min-h-[297mm] w-full max-w-[210mm] bg-white px-8 py-8 text-slate-900 shadow-sm ring-1 ring-slate-200 sm:px-10">
-        <div className="flex flex-col gap-5 border-b-2 border-slate-900 pb-5 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex min-w-0 gap-4">
-            <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center border-2 border-slate-900 bg-white p-1 text-sm font-bold uppercase text-slate-900">
+      <article className="document-page mx-auto min-h-[297mm] w-full max-w-[210mm] border-t-[3px] border-brand-600 bg-white px-8 py-8 text-slate-900 shadow-sm ring-1 ring-slate-200 sm:px-10">
+        <header className="flex flex-col gap-5 border-b border-slate-200 pb-5 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 items-start gap-4">
+            <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center">
               {organization.logoUrl ? (
                 <Image
                   src={organization.logoUrl}
                   alt={`${groupName} logo`}
-                  width={64}
-                  height={64}
+                  width={56}
+                  height={56}
                   className="h-full w-full object-contain"
                   unoptimized
                 />
               ) : (
-                (organization.logoText ?? initials(groupName))
+                <span className="text-2xl font-extrabold text-brand-600">
+                  {organization.logoText ?? initials(groupName)}
+                </span>
               )}
             </div>
             <div className="min-w-0">
-              <div className="text-lg font-extrabold uppercase leading-tight text-slate-950">
+              <div className="text-base font-extrabold uppercase tracking-wide text-slate-950">
                 {groupName}
               </div>
-              <div className="mt-0.5 text-sm font-bold leading-tight text-slate-900">
-                {companyName}
-              </div>
-              {branchName && (
-                <div className="mt-0.5 text-sm leading-tight text-slate-700">{branchName}</div>
-              )}
-              {organization.code && (
-                <div className="mt-0.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {organization.code}
-                </div>
-              )}
-              {organization.address && (
-                <div className="mt-2 text-xs leading-5 text-slate-600">
-                  Address: {organization.address}
-                </div>
-              )}
+              <div className="mt-0.5 text-sm text-slate-800">{companyName}</div>
+              {branchLine && <div className="mt-0.5 text-xs text-slate-500">{branchLine}</div>}
               {contactLine && (
-                <div className="mt-1 text-xs leading-5 text-slate-600">{contactLine}</div>
+                <div className="mt-2 text-[11px] leading-5 text-slate-500">{contactLine}</div>
               )}
-              {taxLine && <div className="mt-1 text-xs leading-5 text-slate-600">{taxLine}</div>}
-              {organization.registrationNumber && (
-                <div className="mt-1 text-xs leading-5 text-slate-600">
-                  Reg: {organization.registrationNumber}
-                </div>
-              )}
-              {organization.website && (
-                <div className="mt-1 text-xs leading-5 text-slate-600">
-                  Website: {organization.website}
-                </div>
-              )}
+              {taxLine && <div className="text-[11px] leading-5 text-slate-500">{taxLine}</div>}
             </div>
           </div>
 
-          <div className="text-left sm:text-right">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-              Document
+          <div className="flex-shrink-0 text-left sm:text-right">
+            <div className="text-2xl font-extrabold uppercase leading-none tracking-tight text-slate-950">
+              {title}
             </div>
-            <div className="mt-1 text-sm font-semibold text-slate-900">{reference ?? title}</div>
+            {reference && (
+              <div className="mt-1.5 text-sm font-semibold text-brand-600">{reference}</div>
+            )}
             {status && (
-              <div
-                className={`mt-2 inline-flex rounded border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${statusToneClasses[statusTone]}`}
+              <span
+                className={`mt-2 inline-flex rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusToneClasses[statusTone]}`}
               >
                 {status}
-              </div>
+              </span>
             )}
+            {subtitle && <div className="mt-2 text-xs text-slate-500">{subtitle}</div>}
           </div>
-        </div>
-
-        <div className="mt-6 flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-              Record View
-            </div>
-            <h1 className="mt-1 text-2xl font-bold leading-tight text-slate-950">{title}</h1>
-            {subtitle && <p className="mt-1 text-sm leading-6 text-slate-600">{subtitle}</p>}
-          </div>
-          <div className="text-xs leading-5 text-slate-500 sm:text-right">
-            <div>Generated</div>
-            <div className="font-medium text-slate-800">{formatDateTime(generatedAt)}</div>
-          </div>
-        </div>
+        </header>
 
         {meta.length > 0 && (
-          <dl className="mt-5 grid grid-cols-1 gap-px overflow-hidden border border-slate-200 bg-slate-200 sm:grid-cols-2 lg:grid-cols-4">
+          <dl className="mt-5 flex flex-wrap gap-x-10 gap-y-3 border-y border-slate-200 py-3">
             {meta.map((item) => (
-              <div key={item.label} className="bg-white px-3 py-2">
-                <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              <div key={item.label}>
+                <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                   {item.label}
                 </dt>
-                <dd className="mt-1 text-sm font-medium text-slate-900">{item.value}</dd>
+                <dd className="mt-0.5 text-sm font-semibold text-slate-900">{item.value}</dd>
               </div>
             ))}
           </dl>
@@ -200,12 +173,18 @@ export function DocumentShell({
 
         <div className="mt-6">{children}</div>
 
-        <div className="mt-10 border-t border-slate-200 pt-4 text-[11px] leading-5 text-slate-500">
-          <div>{footerNote ?? 'This document was generated from ITEMBA-R system records.'}</div>
-          <div className="mt-1">
-            Printed copies are uncontrolled unless signed or issued by an authorized user.
+        <footer className="mt-10">
+          <div className="text-[11px] leading-5 text-slate-500">
+            <div>{footerNote ?? 'This document was generated from ITEMBA-R system records.'}</div>
+            <div className="mt-0.5">
+              Printed copies are uncontrolled unless signed or issued by an authorized user.
+            </div>
           </div>
-        </div>
+          <div className="mt-3 flex items-center justify-between gap-4 border-t border-slate-200 pt-2.5 text-[10px] text-slate-500">
+            <span>{footerContactLine}</span>
+            <span>Generated {formatDateTime(generatedAt)}</span>
+          </div>
+        </footer>
       </article>
     </div>
   );
@@ -223,7 +202,9 @@ export function DocumentSection({
   return (
     <section className="document-section mt-7 first:mt-0">
       <div className="mb-3 flex flex-col gap-1 border-b border-slate-200 pb-2 sm:flex-row sm:items-end sm:justify-between">
-        <h2 className="text-sm font-bold uppercase tracking-[0.12em] text-slate-800">{title}</h2>
+        <h2 className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">
+          {title}
+        </h2>
         {description && <div className="text-xs text-slate-500">{description}</div>}
       </div>
       {children}
@@ -236,7 +217,7 @@ export function DocumentKeyValueGrid({ items }: { items: DocumentMetaItem[] }) {
     <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
       {items.map((item) => (
         <div key={item.label} className="border-b border-slate-100 pb-2">
-          <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+          <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
             {item.label}
           </dt>
           <dd className="mt-1 break-words text-sm text-slate-900">{item.value}</dd>
@@ -248,18 +229,17 @@ export function DocumentKeyValueGrid({ items }: { items: DocumentMetaItem[] }) {
 
 export function DocumentStatGrid({ items }: { items: DocumentStatItem[] }) {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-x-8 gap-y-4 border-y border-slate-200 py-4 lg:grid-cols-4">
       {items.map((item) => (
-        <div
-          key={item.label}
-          className={`border px-3 py-3 ${statToneClasses[item.tone ?? 'neutral']}`}
-        >
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <div key={item.label}>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
             {item.label}
           </div>
-          <div className="mt-1 text-lg font-bold text-slate-950">{item.value}</div>
+          <div className={`mt-1 text-lg font-bold ${statValueTone[item.tone ?? 'neutral']}`}>
+            {item.value}
+          </div>
           {item.hint && (
-            <div className="mt-1 text-[11px] leading-4 text-slate-600">{item.hint}</div>
+            <div className="mt-0.5 text-[11px] leading-4 text-slate-500">{item.hint}</div>
           )}
         </div>
       ))}
@@ -269,8 +249,10 @@ export function DocumentStatGrid({ items }: { items: DocumentStatItem[] }) {
 
 export function DocumentTable({ children }: { children: React.ReactNode }) {
   return (
-    <div className="overflow-x-auto border border-slate-200">
-      <table className="document-table w-full border-collapse text-sm">{children}</table>
+    <div className="overflow-x-auto">
+      <table className="document-table w-full border-collapse text-sm [&_thead_tr]:border-b [&_thead_tr]:border-brand-100 [&_thead_tr]:bg-brand-50 [&_tbody_tr]:border-b [&_tbody_tr]:border-slate-200 [&_tbody_tr:last-child]:border-b-0">
+        {children}
+      </table>
     </div>
   );
 }
@@ -286,7 +268,7 @@ export function DocumentTh({
     align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left';
   return (
     <th
-      className={`px-3 py-2 ${alignClass} text-[10px] font-bold uppercase tracking-wide text-slate-600`}
+      className={`px-3 py-2.5 ${alignClass} text-[10px] font-bold uppercase tracking-[0.1em] text-brand-700`}
     >
       {children}
     </th>
@@ -306,7 +288,7 @@ export function DocumentTd({
     align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left';
   return (
     <td
-      className={`px-3 py-2 ${alignClass} align-top text-xs text-slate-800 ${mono ? 'font-mono' : ''}`}
+      className={`px-3 py-2.5 ${alignClass} align-top ${mono ? 'font-mono text-[11px] text-slate-500' : 'text-xs text-slate-800'}`}
     >
       {children}
     </td>
@@ -315,13 +297,15 @@ export function DocumentTd({
 
 export function DocumentTotals({ items }: { items: DocumentTotalItem[] }) {
   return (
-    <dl className="ml-auto mt-4 w-full max-w-xs border border-slate-200">
+    <dl className="ml-auto mt-4 w-full max-w-xs">
       {items.map((item) => (
         <div
           key={item.label}
-          className={`flex items-center justify-between gap-4 border-b border-slate-200 px-3 py-2 last:border-b-0 ${item.emphasis ? 'bg-slate-50 font-bold text-slate-950' : 'text-slate-700'}`}
+          className={`flex items-center justify-between gap-4 border-b border-slate-200 px-3 py-2 last:border-b-0 ${
+            item.emphasis ? 'bg-brand-50 font-bold text-slate-950' : 'text-slate-700'
+          } ${item.tone === 'danger' ? 'font-semibold text-red-600' : ''}`}
         >
-          <dt className="text-xs">{item.label}</dt>
+          <dt className="text-xs uppercase tracking-wide">{item.label}</dt>
           <dd className="text-right text-sm tabular-nums">{item.value}</dd>
         </div>
       ))}
@@ -331,23 +315,31 @@ export function DocumentTotals({ items }: { items: DocumentTotalItem[] }) {
 
 export function DocumentSignatureGrid({ labels }: { labels: string[] }) {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+    <div className="grid grid-cols-1 gap-8 pt-6 sm:grid-cols-3">
       {labels.map((label) => (
-        <div key={label} className="min-h-24 border border-slate-200 px-3 py-3">
-          <div className="h-12 border-b border-slate-300" />
-          <div className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <div key={label}>
+          <div className="h-12 border-b border-slate-400" />
+          <div className="mt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
             {label}
           </div>
-          <div className="mt-1 text-[10px] text-slate-500">Name, signature, date</div>
+          <div className="mt-0.5 text-[10px] text-slate-400">Name, signature, date</div>
         </div>
       ))}
     </div>
   );
 }
 
+export function DocumentNotePanel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-sm bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
+      {children}
+    </div>
+  );
+}
+
 export function EmptyDocumentState({ children }: { children: React.ReactNode }) {
   return (
-    <div className="border border-dashed border-slate-200 px-4 py-5 text-center text-sm italic text-slate-500">
+    <div className="rounded-sm bg-slate-50 px-4 py-5 text-center text-sm italic text-slate-500">
       {children}
     </div>
   );
