@@ -88,7 +88,7 @@ export function StatCard({
             {label}
           </p>
           <p
-            className={`aurora-display mt-2 text-2xl ${VALUE_COLOR[variant]}`}
+            className={`aurora-display mt-2 break-words text-xl leading-tight sm:text-2xl ${VALUE_COLOR[variant]}`}
             style={variant === 'default' ? { color: 'var(--aurora-text)' } : undefined}
           >
             {isNumeric ? <AnimatedNumber target={value} enabled={countUp} /> : value}

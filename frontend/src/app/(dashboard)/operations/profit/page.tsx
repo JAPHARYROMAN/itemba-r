@@ -411,14 +411,14 @@ export default function OperationsProfitPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       <PageHeader
         title="Profit"
         subtitle="Product and customer profitability, frozen COGS, margin control, and cost gaps."
       />
 
       <Card>
-        <div className="grid gap-3 lg:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <FormSelect
             label="Company"
             value={companyId}
@@ -477,7 +477,7 @@ export default function OperationsProfitPage() {
               gaps.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex w-full flex-wrap gap-2 lg:w-auto lg:justify-end">
             <div
               className="inline-flex overflow-hidden rounded-lg border"
               style={{ borderColor: 'var(--aurora-border)' }}
@@ -638,7 +638,7 @@ export default function OperationsProfitPage() {
               is counted as zero. Resolve the cost gaps below for an accurate figure.
             </div>
           )}
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <StatCard
               label="Revenue"
               value={fmtMoney(summary?.revenue)}
@@ -675,7 +675,7 @@ export default function OperationsProfitPage() {
               <h2 className="text-sm font-semibold">Product profitability</h2>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="min-w-[920px] w-full text-sm">
                 <caption className="sr-only">Product profitability</caption>
                 <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                   <tr
@@ -788,7 +788,7 @@ export default function OperationsProfitPage() {
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="min-w-[900px] w-full text-sm">
                       <caption className="sr-only">{`${selectedProduct.productName} sales ledger`}</caption>
                       <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                         <tr
@@ -884,7 +884,7 @@ export default function OperationsProfitPage() {
                       so their cost is counted as zero.
                     </div>
                   )}
-                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-5">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
                     <StatCard
                       label="Revenue"
                       value={fmtMoney(customerSummary?.revenue)}
@@ -922,7 +922,7 @@ export default function OperationsProfitPage() {
                       <h2 className="text-sm font-semibold">Customer profitability</h2>
                     </div>
                     <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
+                      <table className="min-w-[860px] w-full text-sm">
                         <caption className="sr-only">Customer profitability</caption>
                         <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                           <tr
@@ -1012,7 +1012,7 @@ export default function OperationsProfitPage() {
               <h2 className="text-sm font-semibold">Cost gaps blocking sales</h2>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="min-w-[1040px] w-full text-sm">
                 <caption className="sr-only">Cost gaps blocking sales</caption>
                 <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                   <tr
@@ -1106,7 +1106,7 @@ export default function OperationsProfitPage() {
                 </p>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="min-w-[820px] w-full text-sm">
                   <caption className="sr-only">Below-cost attempt audit</caption>
                   <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                     <tr
