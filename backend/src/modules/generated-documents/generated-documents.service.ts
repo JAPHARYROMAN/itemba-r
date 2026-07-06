@@ -630,6 +630,7 @@ export class GeneratedDocumentsService {
           table: {
             headers: ['Item', 'SKU', 'Ordered', 'Delivered', 'Unit'],
             numericColumns: [2, 3],
+            mutedColumns: [1],
             rows: record.lines.map((line) => [
               line.description || line.product?.name || 'N/A',
               line.product?.sku ?? line.product?.productCode ?? 'N/A',
@@ -808,6 +809,7 @@ export class GeneratedDocumentsService {
               'Line Value',
             ],
             numericColumns: [2, 3, 4, 5, 7, 8],
+            mutedColumns: [1],
             rows: record.lines.map((line) => {
               const product = lookups.products.get(line.productId);
               const unit = lookups.units.get(line.unitId);
@@ -1122,6 +1124,7 @@ export class GeneratedDocumentsService {
           table: {
             headers: ['Item', 'SKU', 'Qty', 'Unit', 'Unit Price', 'Tax', 'Line Total'],
             numericColumns: [2, 4, 5, 6],
+            mutedColumns: [1],
             rows: record.lines.map((line) => [
               line.description || line.product?.name || 'N/A',
               line.product?.sku ?? line.product?.productCode ?? 'N/A',
@@ -1554,6 +1557,7 @@ function lineSection(
     table: {
       headers: ['Item', 'SKU', 'Qty', 'Unit', 'Unit Price', 'Discount', 'Tax', 'Line Total'],
       numericColumns: [2, 4, 5, 6, 7],
+      mutedColumns: [1],
       rows,
     },
     totals,

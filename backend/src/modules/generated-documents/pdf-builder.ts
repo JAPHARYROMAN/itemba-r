@@ -27,6 +27,8 @@ export interface BusinessPdfTable {
   headers: string[];
   rows: string[][];
   numericColumns?: number[];
+  /** Column indexes rendered in muted text (e.g. SKU/code columns). */
+  mutedColumns?: number[];
 }
 
 export interface BusinessPdfSection {
@@ -51,10 +53,78 @@ export interface BusinessPdfModel {
 
 type FontName = 'F1' | 'F2';
 
+type Rgb = readonly [number, number, number];
+
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
 const MARGIN = 42;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+
+// Design tokens — PDF mirror (0-1 RGB) of the frontend Tailwind palette used
+// by the document print pages. Keep in sync with frontend/tailwind.config.ts.
+const BRAND: Rgb = [0.145, 0.388, 0.922]; // brand-600 #2563eb
+const BRAND_TINT: Rgb = [0.937, 0.965, 1.0]; // brand-50 #eff6ff
+const BRAND_TINT_STRONG: Rgb = [0.859, 0.918, 0.996]; // brand-100 #dbeafe
+const TEXT_DARK: Rgb = [0.059, 0.09, 0.165]; // slate-900 #0f172a
+const TEXT_MUTED: Rgb = [0.392, 0.455, 0.545]; // slate-500 #64748b
+const HAIRLINE: Rgb = [0.886, 0.91, 0.941]; // slate-200 #e2e8f0
+const PANEL: Rgb = [0.973, 0.98, 0.988]; // slate-50 #f8fafc
+const SIGNATURE_LINE: Rgb = [0.58, 0.639, 0.722]; // slate-400 #94a3b8
+
+// Conservative average glyph-width factor (em) for Helvetica-Bold uppercase —
+// used to size the header title and status pill so they never overhang the
+// right margin (the generic 0.48 factor in text() underestimates bold caps).
+const TITLE_WIDTH_FACTOR = 0.56;
+
+type StatusToneName = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
+
+// Status pill tones: *-700 text on *-50 fill, mirroring the frontend
+// statusToneClasses palette used by DocumentShell.
+const STATUS_TONES: Record<StatusToneName, { text: Rgb; fill: Rgb }> = {
+  success: { text: [0.016, 0.471, 0.341], fill: [0.925, 0.992, 0.961] }, // emerald-700 / emerald-50
+  warning: { text: [0.706, 0.325, 0.035], fill: [1.0, 0.984, 0.922] }, // amber-700 / amber-50
+  danger: { text: [0.725, 0.11, 0.11], fill: [0.996, 0.949, 0.949] }, // red-700 / red-50
+  info: { text: [0.114, 0.306, 0.847], fill: [0.937, 0.965, 1.0] }, // blue-700 / blue-50
+  neutral: { text: [0.2, 0.255, 0.333], fill: [0.973, 0.98, 0.988] }, // slate-700 / slate-50
+};
+
+// Line-for-line port of documentStatusTone() in
+// frontend/src/components/documents/document-utils.ts — that file is the
+// source of truth for this keyword mapping; keep the two in sync.
+function statusTone(status: string | null | undefined): StatusToneName {
+  const normalized = String(status ?? '').toLowerCase();
+  if (
+    normalized.includes('paid') ||
+    normalized.includes('accepted') ||
+    normalized.includes('delivered') ||
+    normalized.includes('closed')
+  ) {
+    return 'success';
+  }
+  if (
+    normalized.includes('draft') ||
+    normalized.includes('sent') ||
+    normalized.includes('confirmed') ||
+    normalized.includes('transit')
+  ) {
+    return 'info';
+  }
+  if (
+    normalized.includes('partial') ||
+    normalized.includes('pending') ||
+    normalized.includes('expired')
+  ) {
+    return 'warning';
+  }
+  if (
+    normalized.includes('cancel') ||
+    normalized.includes('reject') ||
+    normalized.includes('void')
+  ) {
+    return 'danger';
+  }
+  return 'neutral';
+}
 
 interface ParsedPdfImage {
   width: number;
@@ -77,7 +147,7 @@ export function buildBusinessPdf(model: BusinessPdfModel): Buffer {
   const pdf = new SimplePdf();
   pdf.addHeader(model);
   for (const section of model.sections) pdf.addSection(section);
-  pdf.addFooter();
+  pdf.addFooter(model);
   return pdf.toBuffer();
 }
 
@@ -87,6 +157,7 @@ class SimplePdf {
   private y = MARGIN;
 
   addHeader(model: BusinessPdfModel) {
+    this.brandRule();
     const headerTop = this.y;
     const org = model.organization;
     const groupName = valueOrNull(org.groupName) ?? 'ITEMBA GROUP';
@@ -94,21 +165,22 @@ class SimplePdf {
     const branchName = valueOrNull(org.branchName);
     const logoText = valueOrNull(org.logoText) ?? initials(groupName);
 
-    this.rect(MARGIN, headerTop - 2, 54, 54, false, 0);
     const imageDrawn = org.logoImage
-      ? this.image(org.logoImage, MARGIN + 4, headerTop + 2, 46, 46)
+      ? this.image(org.logoImage, MARGIN, headerTop, 48, 48)
       : false;
-    if (!imageDrawn) this.text(logoText, MARGIN + 13, headerTop + 31, 13, 'F2', 28, 'center');
+    if (!imageDrawn) this.text(logoText, MARGIN, headerTop + 30, 20, 'F2', 48, 'center', BRAND);
 
-    const orgX = MARGIN + 66;
-    const orgWidth = 304;
+    const orgX = MARGIN + 60;
+    const orgWidth = 290;
     let orgY = headerTop;
-    orgY = this.wrappedText(groupName.toUpperCase(), orgX, orgY, 12, orgWidth, 'F2') + 1;
-    orgY = this.wrappedText(companyName, orgX, orgY, 10, orgWidth, 'F2') + 1;
-    if (branchName) orgY = this.wrappedText(branchName, orgX, orgY, 9, orgWidth, 'F1') + 2;
+    orgY = this.wrappedText(groupName.toUpperCase(), orgX, orgY, 12, orgWidth, 'F2', TEXT_DARK) + 1;
+    orgY = this.wrappedText(companyName, orgX, orgY, 9.5, orgWidth, 'F2', TEXT_DARK) + 1;
+    if (branchName)
+      orgY = this.wrappedText(branchName, orgX, orgY, 8.5, orgWidth, 'F1', TEXT_MUTED) + 2;
 
     const address = valueOrNull(org.address);
-    if (address) orgY = this.wrappedText(`Address: ${address}`, orgX, orgY, 8, orgWidth, 'F1') + 1;
+    if (address)
+      orgY = this.wrappedText(`Address: ${address}`, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) + 1;
 
     const contactLine = [
       valueOrNull(org.phone) ? `Tel: ${valueOrNull(org.phone)}` : null,
@@ -116,7 +188,8 @@ class SimplePdf {
     ]
       .filter(Boolean)
       .join(' | ');
-    if (contactLine) orgY = this.wrappedText(contactLine, orgX, orgY, 8, orgWidth, 'F1') + 1;
+    if (contactLine)
+      orgY = this.wrappedText(contactLine, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) + 1;
 
     const taxLine = [
       valueOrNull(org.tin) ? `TIN: ${valueOrNull(org.tin)}` : null,
@@ -124,42 +197,97 @@ class SimplePdf {
     ]
       .filter(Boolean)
       .join(' | ');
-    if (taxLine) orgY = this.wrappedText(taxLine, orgX, orgY, 8, orgWidth, 'F1') + 1;
+    if (taxLine) orgY = this.wrappedText(taxLine, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) + 1;
 
     const registrationNumber = valueOrNull(org.registrationNumber);
     if (registrationNumber)
-      orgY = this.wrappedText(`Reg: ${registrationNumber}`, orgX, orgY, 8, orgWidth, 'F1') + 1;
+      orgY =
+        this.wrappedText(`Reg: ${registrationNumber}`, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) +
+        1;
 
-    const rightX = PAGE_WIDTH - MARGIN - 160;
-    this.text('DOCUMENT', rightX, headerTop + 2, 8, 'F2', 160, 'right');
-    this.text(model.reference, rightX, headerTop + 16, 11, 'F2', 160, 'right');
-    if (model.status) this.text(model.status, rightX, headerTop + 31, 8, 'F1', 160, 'right');
+    // Right block: document type (large caps), number in brand color, status pill.
+    const rightWidth = 210;
+    const rightX = PAGE_WIDTH - MARGIN - rightWidth;
+    const docTitle = cleanText(model.title).toUpperCase();
+    const titleSize = docTitle.length * 17 * TITLE_WIDTH_FACTOR > rightWidth ? 14 : 17;
+    const titleWidth = Math.min(rightWidth, docTitle.length * titleSize * TITLE_WIDTH_FACTOR);
+    this.text(
+      docTitle,
+      PAGE_WIDTH - MARGIN - titleWidth,
+      headerTop + 12,
+      titleSize,
+      'F2',
+      undefined,
+      'left',
+      TEXT_DARK,
+    );
+    this.text(model.reference, rightX, headerTop + 26, 10.5, 'F2', rightWidth, 'right', BRAND);
+    if (model.status) {
+      const statusText = cleanText(model.status).toUpperCase();
+      const tone = STATUS_TONES[statusTone(model.status)];
+      const pillWidth = statusText.length * 7 * TITLE_WIDTH_FACTOR + 14;
+      const pillX = PAGE_WIDTH - MARGIN - pillWidth;
+      const pillTop = headerTop + 33;
+      this.rect(pillX, pillTop, pillWidth, 14, true, tone.fill);
+      this.text(statusText, pillX + 7, pillTop + 10, 7, 'F2', undefined, 'left', tone.text);
+    }
 
     this.y = Math.max(orgY, headerTop + 62);
-    this.line(MARGIN, this.y, PAGE_WIDTH - MARGIN, this.y);
-    this.y += 22;
-
-    this.text(model.title.toUpperCase(), MARGIN, this.y, 20, 'F2');
-    this.text(model.reference, PAGE_WIDTH - MARGIN - 180, this.y + 1, 12, 'F2', 180, 'right');
-    this.y += 18;
+    this.line(MARGIN, this.y, PAGE_WIDTH - MARGIN, this.y, 0.7, HAIRLINE);
+    this.y += 14;
 
     if (model.subtitle) {
-      this.text(model.subtitle, MARGIN, this.y, 11, 'F1', 300);
+      this.text(model.subtitle, MARGIN, this.y, 9.5, 'F1', 320, 'left', TEXT_MUTED);
+      this.y += 16;
     }
-    this.y += 22;
 
-    const generated = formatDateTime(model.generatedAt);
-    const meta = [...model.meta, { label: 'Generated', value: generated }];
-    this.keyValues(meta, 2);
+    this.metaStrip(model.meta);
     this.y += 8;
+  }
+
+  /** Full-bleed 3pt brand accent bar at the very top of the page (chrome only — never moves this.y). */
+  private brandRule() {
+    this.rect(0, 0, PAGE_WIDTH, 3, true, BRAND);
+  }
+
+  /** Whitespace-separated label-over-value pairs between two hairlines, up to 4 columns per band. */
+  private metaStrip(items: Array<{ label: string; value: string }>) {
+    if (!items.length) return;
+    const columns = Math.min(items.length, 4);
+    const colWidth = CONTENT_WIDTH / columns;
+    this.ensureSpace(40);
+    this.line(MARGIN, this.y, PAGE_WIDTH - MARGIN, this.y, 0.7, HAIRLINE);
+    this.y += 11;
+    for (let i = 0; i < items.length; i += columns) {
+      this.ensureSpace(26);
+      const band = items.slice(i, i + columns);
+      const startY = this.y;
+      let bandHeight = 0;
+      band.forEach((item, index) => {
+        const x = MARGIN + index * colWidth;
+        this.text(item.label.toUpperCase(), x, startY, 6.5, 'F2', colWidth - 10, 'left', TEXT_MUTED);
+        const bottom = this.wrappedText(
+          item.value || 'N/A',
+          x,
+          startY + 11,
+          9,
+          colWidth - 10,
+          'F1',
+          TEXT_DARK,
+        );
+        bandHeight = Math.max(bandHeight, bottom - startY);
+      });
+      this.y += Math.max(bandHeight, 24);
+    }
+    this.line(MARGIN, this.y - 6, PAGE_WIDTH - MARGIN, this.y - 6, 0.7, HAIRLINE);
   }
 
   addSection(section: BusinessPdfSection) {
     this.ensureSpace(42);
     this.y += 8;
-    this.text(section.title, MARGIN, this.y, 12, 'F2');
-    this.y += 12;
-    this.line(MARGIN, this.y, PAGE_WIDTH - MARGIN, this.y, 0.5);
+    this.text(section.title.toUpperCase(), MARGIN, this.y, 9, 'F2', undefined, 'left', TEXT_MUTED);
+    this.y += 8;
+    this.line(MARGIN, this.y, PAGE_WIDTH - MARGIN, this.y, 0.7, HAIRLINE);
     this.y += 12;
 
     if (section.items?.length) {
@@ -167,8 +295,18 @@ class SimplePdf {
       this.y += 4;
     }
 
-    for (const paragraph of section.paragraphs ?? []) {
-      this.y = this.wrappedText(paragraph, MARGIN, this.y, 9, CONTENT_WIDTH, 'F1') + 8;
+    const isNotesPanel =
+      !!section.paragraphs?.length &&
+      !section.items?.length &&
+      !section.table &&
+      !section.totals?.length &&
+      !section.signatures?.length;
+    if (isNotesPanel) {
+      this.notesPanel(section.paragraphs ?? []);
+    } else {
+      for (const paragraph of section.paragraphs ?? []) {
+        this.y = this.wrappedText(paragraph, MARGIN, this.y, 9, CONTENT_WIDTH, 'F1', TEXT_DARK) + 8;
+      }
     }
 
     if (section.table) {
@@ -186,22 +324,76 @@ class SimplePdf {
     }
   }
 
-  addFooter() {
+  addFooter(model: BusinessPdfModel) {
     const pageCount = this.pages.length;
+    const org = model.organization;
+    const contactLine = [valueOrNull(org.website), valueOrNull(org.email), valueOrNull(org.phone)]
+      .filter(Boolean)
+      .join('  |  ');
+    const generated = `Generated ${formatDateTime(model.generatedAt)}`;
     for (let i = 0; i < pageCount; i += 1) {
       const previous = this.pages;
       this.pages = [previous[i]];
+      this.line(MARGIN, PAGE_HEIGHT - 34, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 34, 0.7, HAIRLINE);
+      if (contactLine) {
+        this.text(
+          contactLine,
+          MARGIN,
+          PAGE_HEIGHT - 24,
+          7,
+          'F1',
+          CONTENT_WIDTH - 270,
+          'left',
+          TEXT_MUTED,
+        );
+      }
       this.text(
-        `Page ${i + 1} of ${pageCount}`,
-        PAGE_WIDTH - MARGIN - 120,
+        `${generated}  |  Page ${i + 1} of ${pageCount}`,
+        PAGE_WIDTH - MARGIN - 260,
         PAGE_HEIGHT - 24,
-        8,
+        7,
         'F1',
-        120,
+        260,
         'right',
+        TEXT_MUTED,
       );
       this.pages = previous;
     }
+  }
+
+  /** Notes/terms rendered on a light panel; falls back to plain paragraphs when too tall for one page. */
+  private notesPanel(paragraphs: string[]) {
+    const inset = 10;
+    const lineHeight = 12; // 9pt text + 3pt leading, matching wrappedText
+    const blocks = paragraphs.map((paragraph) => wrapText(paragraph, CONTENT_WIDTH - inset * 2, 9));
+    const totalLines = blocks.reduce((count, lines) => count + lines.length, 0);
+    const panelHeight = totalLines * lineHeight + (blocks.length - 1) * 8 + inset * 2 - 2;
+    if (panelHeight > PAGE_HEIGHT - MARGIN * 2) {
+      for (const paragraph of paragraphs) {
+        this.y = this.wrappedText(paragraph, MARGIN, this.y, 9, CONTENT_WIDTH, 'F1', TEXT_DARK) + 8;
+      }
+      return;
+    }
+    this.ensureSpace(panelHeight + 8);
+    const panelTop = this.y - 2;
+    this.rect(MARGIN, panelTop, CONTENT_WIDTH, panelHeight, true, PANEL);
+    let baseline = panelTop + inset + 7;
+    for (const lines of blocks) {
+      lines.forEach((line, index) => {
+        this.text(
+          line,
+          MARGIN + inset,
+          baseline + index * lineHeight,
+          9,
+          'F1',
+          CONTENT_WIDTH - inset * 2,
+          'left',
+          TEXT_DARK,
+        );
+      });
+      baseline += lines.length * lineHeight + 8;
+    }
+    this.y = panelTop + panelHeight + 10;
   }
 
   toBuffer(): Buffer {
@@ -268,7 +460,7 @@ class SimplePdf {
       let rowHeight = 0;
       row.forEach((item, index) => {
         const x = MARGIN + index * colWidth;
-        this.text(item.label.toUpperCase(), x, startY, 7, 'F2', colWidth - 12);
+        this.text(item.label.toUpperCase(), x, startY, 7, 'F2', colWidth - 12, 'left', TEXT_MUTED);
         const bottom = this.wrappedText(
           item.value || 'N/A',
           x,
@@ -276,6 +468,7 @@ class SimplePdf {
           9,
           colWidth - 12,
           'F1',
+          TEXT_DARK,
         );
         rowHeight = Math.max(rowHeight, bottom - startY);
       });
@@ -290,29 +483,38 @@ class SimplePdf {
     for (const row of table.rows) {
       const rowLines = row.map((cell, index) => wrapText(cell, colWidths[index] - 8, 8));
       const lineCount = Math.max(...rowLines.map((lines) => lines.length), 1);
-      const rowHeight = Math.max(18, lineCount * 10 + 8);
+      const rowHeight = Math.max(20, lineCount * 10 + 10);
       if (!this.hasSpace(rowHeight + 12)) this.newPageWithTableHeader(table.headers, colWidths);
 
       const top = this.y;
-      this.rect(MARGIN, top - 2, CONTENT_WIDTH, rowHeight, false, 0.85);
       rowLines.forEach((lines, index) => {
         const x = MARGIN + sum(colWidths.slice(0, index)) + 4;
         const align = table.numericColumns?.includes(index) ? 'right' : 'left';
+        const color = table.mutedColumns?.includes(index) ? TEXT_MUTED : TEXT_DARK;
         lines.forEach((line, lineIndex) => {
-          this.text(line, x, top + 9 + lineIndex * 10, 8, 'F1', colWidths[index] - 8, align);
+          this.text(line, x, top + 10 + lineIndex * 10, 8, 'F1', colWidths[index] - 8, align, color);
         });
       });
+      this.line(
+        MARGIN,
+        top + rowHeight - 2,
+        PAGE_WIDTH - MARGIN,
+        top + rowHeight - 2,
+        0.6,
+        HAIRLINE,
+      );
       this.y += rowHeight;
     }
   }
 
   private tableHeader(headers: string[], colWidths: number[]) {
     this.ensureSpace(28);
-    this.rect(MARGIN, this.y - 2, CONTENT_WIDTH, 20, true, 0.94);
+    this.rect(MARGIN, this.y - 2, CONTENT_WIDTH, 20, true, BRAND_TINT);
     headers.forEach((header, index) => {
       const x = MARGIN + sum(colWidths.slice(0, index)) + 4;
-      this.text(header.toUpperCase(), x, this.y + 10, 7, 'F2', colWidths[index] - 8);
+      this.text(header.toUpperCase(), x, this.y + 10, 7, 'F2', colWidths[index] - 8, 'left', BRAND);
     });
+    this.line(MARGIN, this.y + 18, PAGE_WIDTH - MARGIN, this.y + 18, 0.7, HAIRLINE);
     this.y += 22;
   }
 
@@ -322,24 +524,31 @@ class SimplePdf {
   }
 
   private totals(items: Array<{ label: string; value: string; emphasis?: boolean }>) {
-    const width = 210;
+    const width = 220;
     const x = PAGE_WIDTH - MARGIN - width;
     for (const item of items) {
       this.ensureSpace(18);
-      if (item.emphasis) this.rect(x, this.y - 3, width, 17, true, 0.95);
-      this.text(item.label, x + 6, this.y + 8, 8, item.emphasis ? 'F2' : 'F1', 90);
-      this.text(item.value, x + 96, this.y + 8, 8, item.emphasis ? 'F2' : 'F1', 108, 'right');
+      if (item.emphasis) {
+        this.rect(x, this.y - 3, width, 18, true, BRAND_TINT_STRONG);
+        this.text(item.label, x + 8, this.y + 8, 8.5, 'F2', 100, 'left', TEXT_DARK);
+        this.text(item.value, x + 100, this.y + 8, 8.5, 'F2', width - 108, 'right', TEXT_DARK);
+      } else {
+        this.text(item.label, x + 8, this.y + 8, 8, 'F1', 100, 'left', TEXT_MUTED);
+        this.text(item.value, x + 100, this.y + 8, 8, 'F1', width - 108, 'right', TEXT_DARK);
+        this.line(x, this.y + 13, x + width, this.y + 13, 0.6, HAIRLINE);
+      }
       this.y += 18;
     }
   }
 
   private signatures(labels: string[]) {
     const colWidth = CONTENT_WIDTH / labels.length;
-    this.ensureSpace(52);
+    this.ensureSpace(62);
+    this.y += 10;
     labels.forEach((label, index) => {
       const x = MARGIN + index * colWidth;
-      this.line(x, this.y + 28, x + colWidth - 18, this.y + 28, 0.5);
-      this.text(label, x, this.y + 42, 8, 'F1', colWidth - 18);
+      this.line(x, this.y + 30, x + colWidth - 18, this.y + 30, 0.8, SIGNATURE_LINE);
+      this.text(label, x, this.y + 42, 8, 'F1', colWidth - 18, 'left', TEXT_MUTED);
     });
     this.y += 56;
   }
@@ -351,9 +560,12 @@ class SimplePdf {
     size: number,
     width: number,
     font: FontName,
+    color?: Rgb,
   ) {
     const lines = wrapText(value, width, size);
-    lines.forEach((line, index) => this.text(line, x, y + index * (size + 3), size, font, width));
+    lines.forEach((line, index) =>
+      this.text(line, x, y + index * (size + 3), size, font, width, 'left', color),
+    );
     return y + lines.length * (size + 3);
   }
 
@@ -365,6 +577,7 @@ class SimplePdf {
     font: FontName,
     width?: number,
     align: 'left' | 'right' | 'center' = 'left',
+    color?: Rgb,
   ) {
     const clean = cleanText(value);
     const approxWidth = clean.length * size * 0.48;
@@ -374,21 +587,35 @@ class SimplePdf {
         : align === 'center' && width
           ? Math.max(0, (width - approxWidth) / 2)
           : 0;
+    const fill = color ? `${num(color[0])} ${num(color[1])} ${num(color[2])} rg` : '0 g';
     this.current().push(
-      `BT /${font} ${size} Tf 0 g 1 0 0 1 ${num(x + offset)} ${num(PAGE_HEIGHT - y)} Tm (${escapePdf(clean)}) Tj ET`,
+      `BT /${font} ${size} Tf ${fill} 1 0 0 1 ${num(x + offset)} ${num(PAGE_HEIGHT - y)} Tm (${escapePdf(clean)}) Tj ET`,
     );
   }
 
-  private line(x1: number, y1: number, x2: number, y2: number, width = 0.8) {
+  private line(x1: number, y1: number, x2: number, y2: number, width = 0.8, color?: Rgb) {
+    const stroke = color ? `${num(color[0])} ${num(color[1])} ${num(color[2])} RG ` : '';
+    const reset = color ? ' 0 G' : '';
     this.current().push(
-      `${num(width)} w ${num(x1)} ${num(PAGE_HEIGHT - y1)} m ${num(x2)} ${num(PAGE_HEIGHT - y2)} l S`,
+      `${stroke}${num(width)} w ${num(x1)} ${num(PAGE_HEIGHT - y1)} m ${num(x2)} ${num(PAGE_HEIGHT - y2)} l S${reset}`,
     );
   }
 
-  private rect(x: number, y: number, width: number, height: number, fill: boolean, gray: number) {
-    this.current().push(
-      `${num(gray)} g ${num(x)} ${num(PAGE_HEIGHT - y - height)} ${num(width)} ${num(height)} re ${fill ? 'f' : 'S'} 0 g`,
-    );
+  private rect(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    fill: boolean,
+    shade: number | Rgb,
+  ) {
+    const box = `${num(x)} ${num(PAGE_HEIGHT - y - height)} ${num(width)} ${num(height)} re`;
+    if (typeof shade === 'number') {
+      this.current().push(`${num(shade)} g ${box} ${fill ? 'f' : 'S'} 0 g`);
+      return;
+    }
+    const color = `${num(shade[0])} ${num(shade[1])} ${num(shade[2])}`;
+    this.current().push(fill ? `${color} rg ${box} f 0 g` : `${color} RG ${box} S 0 G`);
   }
 
   private image(image: BusinessPdfImage, x: number, y: number, width: number, height: number) {
@@ -422,6 +649,7 @@ class SimplePdf {
   private newPage() {
     this.pages.push([]);
     this.y = MARGIN;
+    this.brandRule();
   }
 
   private current() {
