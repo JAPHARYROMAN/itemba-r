@@ -26,36 +26,9 @@ export class PayablesService {
   ) {}
 
   async findAll(query: QueryPayableDto, user: AuthUser) {
-    const {
-      page = 1,
-      limit = 20,
-      companyId,
-      divisionId,
-      branchId,
-      status,
-      supplierId,
-      dateFrom,
-      dateTo,
-    } = query;
+    const { page = 1, limit = 20 } = query;
     const paging = pagination({ page, limit });
-
-    const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
-    const where: Prisma.PayableWhereInput = { deletedAt: null };
-    if (companyId) {
-      await this.companyScope.assertCanAccessCompany(user, companyId);
-      where.companyId = companyId;
-    } else if (accessibleIds !== null) {
-      where.companyId = { in: accessibleIds };
-    }
-    if (divisionId) where.divisionId = divisionId;
-    if (branchId) where.branchId = branchId;
-    if (status) where.status = status;
-    if (supplierId) where.supplierId = supplierId;
-    if (dateFrom || dateTo) {
-      where.issueDate = {};
-      if (dateFrom) where.issueDate.gte = dateRangeStart(dateFrom);
-      if (dateTo) where.issueDate.lte = dateRangeEnd(dateTo);
-    }
+    const where = await this.buildPayableWhere(query, user);
 
     const [data, total] = await Promise.all([
       this.prisma.payable.findMany({
@@ -74,6 +47,142 @@ export class PayablesService {
       page: paging.page,
       limit: paging.limit,
       totalPages: Math.ceil(total / paging.limit),
+    };
+  }
+
+  async findAccounts(query: QueryPayableDto, user: AuthUser) {
+    const { page = 1, limit = 20 } = query;
+    const paging = pagination({ page, limit });
+    const where = await this.buildPayableWhere(query, user);
+
+    const records = await this.prisma.payable.findMany({
+      where,
+      include: this.includeListScope(),
+      orderBy: [{ companyId: 'asc' }, { supplierName: 'asc' }, { issueDate: 'desc' }],
+    });
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const accounts = new Map<
+      string,
+      {
+        accountKey: string;
+        companyId: string;
+        supplierId: string | null;
+        supplierName: string;
+        supplierCode: string | null;
+        company: { id: string; name: string; code: string } | null;
+        currency: string;
+        documentCount: number;
+        openDocumentCount: number;
+        amount: number;
+        paidAmount: number;
+        outstandingAmount: number;
+        overdueAmount: number;
+        overdueCount: number;
+        oldestIssueDate: Date | null;
+        nextDueDate: Date | null;
+        lastIssueDate: Date | null;
+        status: string;
+        documents: typeof records;
+      }
+    >();
+
+    for (const raw of records) {
+      const record = this.withResolvedSupplierName(raw);
+      const supplierName = this.cleanAccountName(record.supplier?.name || record.supplierName);
+      const currency = record.currency || 'TZS';
+      const supplierKey = record.supplierId
+        ? `SUPPLIER:${record.companyId}:${record.supplierId}`
+        : `UNLINKED:${record.companyId}:${this.normaliseAccountName(supplierName)}`;
+      const accountKey = `${supplierKey}:${currency}`;
+      const amount = this.toNumber(record.amount);
+      const paidAmount = this.toNumber(record.paidAmount);
+      const outstandingAmount = this.toNumber(record.outstandingAmount);
+      const isOpen =
+        outstandingAmount > 0.005 && !['PAID', 'WRITTEN_OFF', 'CANCELLED'].includes(record.status);
+      const dueDate = record.dueDate ? new Date(record.dueDate) : null;
+      const isOverdue = isOpen && !!dueDate && dueDate < today;
+      const issueDate = record.issueDate ? new Date(record.issueDate) : null;
+
+      let account = accounts.get(accountKey);
+      if (!account) {
+        account = {
+          accountKey,
+          companyId: record.companyId,
+          supplierId: record.supplierId ?? null,
+          supplierName,
+          supplierCode: record.supplier?.supplierCode ?? null,
+          company: record.company ?? null,
+          currency,
+          documentCount: 0,
+          openDocumentCount: 0,
+          amount: 0,
+          paidAmount: 0,
+          outstandingAmount: 0,
+          overdueAmount: 0,
+          overdueCount: 0,
+          oldestIssueDate: null,
+          nextDueDate: null,
+          lastIssueDate: null,
+          status: 'PAID',
+          documents: [],
+        };
+        accounts.set(accountKey, account);
+      }
+
+      account.documentCount += 1;
+      account.amount += amount;
+      account.paidAmount += paidAmount;
+      account.outstandingAmount += outstandingAmount;
+      if (isOpen) account.openDocumentCount += 1;
+      if (isOverdue) {
+        account.overdueAmount += outstandingAmount;
+        account.overdueCount += 1;
+      }
+      if (issueDate && (!account.oldestIssueDate || issueDate < account.oldestIssueDate)) {
+        account.oldestIssueDate = issueDate;
+      }
+      if (issueDate && (!account.lastIssueDate || issueDate > account.lastIssueDate)) {
+        account.lastIssueDate = issueDate;
+      }
+      if (dueDate && isOpen && (!account.nextDueDate || dueDate < account.nextDueDate)) {
+        account.nextDueDate = dueDate;
+      }
+      account.documents.push(record);
+    }
+
+    const data = Array.from(accounts.values())
+      .map((account) => ({
+        ...account,
+        status:
+          account.outstandingAmount <= 0.005
+            ? 'PAID'
+            : account.overdueAmount > 0.005
+              ? 'OVERDUE'
+              : account.paidAmount > 0.005
+                ? 'PARTIALLY_PAID'
+                : 'OPEN',
+        amount: this.roundMoney(account.amount),
+        paidAmount: this.roundMoney(account.paidAmount),
+        outstandingAmount: this.roundMoney(account.outstandingAmount),
+        overdueAmount: this.roundMoney(account.overdueAmount),
+      }))
+      .sort((a, b) => {
+        const byOutstanding = b.outstandingAmount - a.outstandingAmount;
+        if (byOutstanding !== 0) return byOutstanding;
+        return a.supplierName.localeCompare(b.supplierName);
+      });
+
+    const pageData = data.slice(paging.skip, paging.skip + paging.limit);
+
+    return {
+      data: pageData,
+      total: data.length,
+      page: paging.page,
+      limit: paging.limit,
+      totalPages: Math.ceil(data.length / paging.limit),
     };
   }
 
@@ -558,11 +667,7 @@ export class PayablesService {
    */
   private async resolveWriteOffIncomeAccount(companyId: string, tx: Prisma.TransactionClient) {
     try {
-      return await this.accountResolver.resolve(
-        companyId,
-        'LIABILITY_WRITEOFF_INCOME' as any,
-        tx,
-      );
+      return await this.accountResolver.resolve(companyId, 'LIABILITY_WRITEOFF_INCOME' as any, tx);
     } catch {
       throw new BadRequestException(
         `Cannot write off this payable: no "liabilities written off / other income" account is ` +
@@ -591,6 +696,48 @@ export class PayablesService {
     });
 
     return { success: true };
+  }
+
+  private async buildPayableWhere(query: QueryPayableDto, user: AuthUser) {
+    const { companyId, divisionId, branchId, status, supplierId, dateFrom, dateTo } = query;
+    const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
+    const where: Prisma.PayableWhereInput = { deletedAt: null };
+
+    if (companyId) {
+      await this.companyScope.assertCanAccessCompany(user, companyId);
+      where.companyId = companyId;
+    } else if (accessibleIds !== null) {
+      where.companyId = { in: accessibleIds };
+    }
+    if (divisionId) where.divisionId = divisionId;
+    if (branchId) where.branchId = branchId;
+    if (status) where.status = status;
+    if (supplierId) where.supplierId = supplierId;
+    if (dateFrom || dateTo) {
+      where.issueDate = {};
+      if (dateFrom) where.issueDate.gte = dateRangeStart(dateFrom);
+      if (dateTo) where.issueDate.lte = dateRangeEnd(dateTo);
+    }
+
+    return where;
+  }
+
+  private toNumber(value: Prisma.Decimal | number | string | null | undefined) {
+    const parsed = Number(value ?? 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  private roundMoney(value: number) {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private cleanAccountName(value?: string | null) {
+    const name = value?.trim();
+    return name && name.length > 0 ? name : 'Unknown supplier';
+  }
+
+  private normaliseAccountName(value: string) {
+    return value.trim().toLowerCase().replace(/\s+/g, ' ');
   }
 
   private includeListScope() {

@@ -1,13 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Body,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { ReceivablesService } from './receivables.service';
 import { CreateReceivableDto } from './dto/create-receivable.dto';
 import { UpdateReceivableDto } from './dto/update-receivable.dto';
@@ -25,6 +16,12 @@ export class ReceivablesController {
   @RequirePermissions('receivables.view')
   findAll(@Query() query: QueryReceivableDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
+  }
+
+  @Get('accounts')
+  @RequirePermissions('receivables.view')
+  findAccounts(@Query() query: QueryReceivableDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAccounts(query, user);
   }
 
   @Get(':id')
@@ -57,7 +54,11 @@ export class ReceivablesController {
 
   @Patch(':id/write-off')
   @RequirePermissions('receivables.manage')
-  writeOff(@Param('id') id: string, @Body() dto: WriteOffReceivableDto, @CurrentUser() user: AuthUser) {
+  writeOff(
+    @Param('id') id: string,
+    @Body() dto: WriteOffReceivableDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.writeOff(id, dto, user);
   }
 

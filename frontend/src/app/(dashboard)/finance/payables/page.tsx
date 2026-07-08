@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import {
   Card,
   PageHeader,
@@ -171,6 +171,28 @@ interface Paginated<T> {
   total: number;
   page: number;
   totalPages: number;
+}
+
+interface PayableAccount {
+  accountKey: string;
+  companyId: string;
+  supplierId?: string | null;
+  supplierName: string;
+  supplierCode?: string | null;
+  company?: { id: string; name: string; code: string } | null;
+  currency: string;
+  documentCount: number;
+  openDocumentCount: number;
+  amount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  overdueAmount: number;
+  overdueCount: number;
+  oldestIssueDate?: string | null;
+  nextDueDate?: string | null;
+  lastIssueDate?: string | null;
+  status: Payable['status'];
+  documents: Payable[];
 }
 
 interface PayableForm {
@@ -1066,7 +1088,10 @@ export default function PayablesPage() {
   const { hasPermission } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<Payable> | null>(null);
+  const [accounts, setAccounts] = useState<Paginated<PayableAccount> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'accounts' | 'documents'>('accounts');
+  const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
   const [companyId, setCompanyId] = useState('');
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
@@ -1097,13 +1122,19 @@ export default function PayablesPage() {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
       if (companyId) params.set('companyId', companyId);
       if (status) params.set('status', status);
-      const res = await fetch(`/api/backend/payables?${params}`);
+      const endpoint =
+        viewMode === 'accounts' ? '/api/backend/payables/accounts' : '/api/backend/payables';
+      const res = await fetch(`${endpoint}?${params}`);
       const json = await res.json();
-      setData(json.data ?? null);
+      if (viewMode === 'accounts') {
+        setAccounts(json.data ?? null);
+      } else {
+        setData(json.data ?? null);
+      }
     } finally {
       setLoading(false);
     }
-  }, [canView, page, companyId, status]);
+  }, [canView, page, companyId, status, viewMode]);
 
   useEffect(() => {
     load();
@@ -1112,13 +1143,31 @@ export default function PayablesPage() {
   const reset = (setter: (v: string) => void) => (v: string) => {
     setter(v);
     setPage(1);
+    setExpandedAccounts({});
   };
 
-  const totalOutstanding = data?.data.reduce((s, p) => s + payableOutstandingAmount(p), 0) ?? 0;
+  const switchViewMode = (mode: 'accounts' | 'documents') => {
+    setViewMode(mode);
+    setPage(1);
+    setExpandedAccounts({});
+  };
+
+  const totalOutstanding =
+    viewMode === 'accounts'
+      ? (accounts?.data.reduce((s, account) => s + account.outstandingAmount, 0) ?? 0)
+      : (data?.data.reduce((s, p) => s + payableOutstandingAmount(p), 0) ?? 0);
   const totalOverdue =
-    data?.data
-      .filter((p) => p.status === 'OVERDUE')
-      .reduce((s, p) => s + payableOutstandingAmount(p), 0) ?? 0;
+    viewMode === 'accounts'
+      ? (accounts?.data.reduce((s, account) => s + account.overdueAmount, 0) ?? 0)
+      : (data?.data
+          .filter((p) => p.status === 'OVERDUE')
+          .reduce((s, p) => s + payableOutstandingAmount(p), 0) ?? 0);
+  const totalRecords = viewMode === 'accounts' ? (accounts?.total ?? 0) : (data?.total ?? 0);
+  const openRecords =
+    viewMode === 'accounts'
+      ? (accounts?.data.filter((account) => account.outstandingAmount > 0).length ?? 0)
+      : (data?.data.filter((p) => p.status === 'OPEN').length ?? 0);
+  const paginated = viewMode === 'accounts' ? accounts : data;
 
   if (!canView) {
     return (
@@ -1199,8 +1248,11 @@ export default function PayablesPage() {
       <PageHeader title="Payables" subtitle="Accounts payable management (AP)" />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Total" value={data?.total ?? 0} />
-        <StatCard label="Open" value={data?.data.filter((p) => p.status === 'OPEN').length ?? 0} />
+        <StatCard
+          label={viewMode === 'accounts' ? 'Supplier Accounts' : 'Documents'}
+          value={totalRecords}
+        />
+        <StatCard label="Open" value={openRecords} />
         <StatCard label="Outstanding" value={fmtTZS(totalOutstanding)} />
         <StatCard label="Overdue" value={fmtTZS(totalOverdue)} hint="Past due date" />
       </div>
@@ -1237,158 +1289,407 @@ export default function PayablesPage() {
           </>
         }
         actions={
-          canManage ? (
-            <Btn variant="primary" onClick={() => setCreating(true)}>
-              + New AP
+          <div className="flex flex-wrap items-center gap-2">
+            <Btn
+              variant={viewMode === 'accounts' ? 'primary' : 'secondary'}
+              onClick={() => switchViewMode('accounts')}
+            >
+              Supplier Accounts
             </Btn>
-          ) : null
+            <Btn
+              variant={viewMode === 'documents' ? 'primary' : 'secondary'}
+              onClick={() => switchViewMode('documents')}
+            >
+              AP Documents
+            </Btn>
+            {canManage ? (
+              <Btn variant="primary" onClick={() => setCreating(true)}>
+                + New AP
+              </Btn>
+            ) : null}
+          </div>
         }
       />
 
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[900px]">
-            <thead>
-              <tr
-                className="text-left text-xs uppercase bg-gray-50"
-                style={{ color: 'var(--aurora-text-muted)' }}
-              >
-                <th className="px-4 py-3">AP #</th>
-                <th className="px-4 py-3">Supplier</th>
-                <th className="px-4 py-3 text-right">Amount</th>
-                <th className="px-4 py-3 text-right">Paid</th>
-                <th className="px-4 py-3 text-right">Outstanding</th>
-                <th className="px-4 py-3">Issue Date</th>
-                <th className="px-4 py-3">Due Date</th>
-                <th className="px-4 py-3">Aging</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={10}>
-                    <PageSpinner />
-                  </td>
+      {viewMode === 'accounts' ? (
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[980px]">
+              <thead>
+                <tr
+                  className="text-left text-xs uppercase bg-gray-50"
+                  style={{ color: 'var(--aurora-text-muted)' }}
+                >
+                  <th className="px-4 py-3">Supplier Account</th>
+                  <th className="px-4 py-3">Company</th>
+                  <th className="px-4 py-3 text-right">Documents</th>
+                  <th className="px-4 py-3 text-right">Total Credit</th>
+                  <th className="px-4 py-3 text-right">Paid</th>
+                  <th className="px-4 py-3 text-right">Outstanding</th>
+                  <th className="px-4 py-3 text-right">Overdue</th>
+                  <th className="px-4 py-3">Next Due</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
-              ) : !data?.data.length ? (
-                <tr>
-                  <td
-                    colSpan={10}
-                    className="px-4 py-10 text-center text-sm"
-                    style={{ color: 'var(--aurora-text-muted)' }}
-                  >
-                    No payables found
-                  </td>
-                </tr>
-              ) : (
-                data.data.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-mono text-xs">
-                      <div className="space-y-1">
-                        <div>{p.payableNumber ?? p.id.slice(0, 8)}</div>
-                        <button
-                          type="button"
-                          onClick={() => setViewing(p)}
-                          className="font-sans text-[11px] font-semibold hover:underline"
-                          style={{ color: 'var(--aurora-primary-text)' }}
-                        >
-                          View details
-                        </button>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 font-medium">{payableSupplierName(p)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{fmtTZS(p.amount)}</td>
-                    <td className="px-4 py-3 text-right font-mono text-green-700">
-                      {fmtTZS(payablePaidAmount(p))}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono font-semibold">
-                      {fmtTZS(payableOutstandingAmount(p))}
-                    </td>
-                    <td className="px-4 py-3">{fmtDate(p.issueDate)}</td>
-                    <td className="px-4 py-3">{fmtDate(p.dueDate)}</td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                        {agingBucket(p.dueDate)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={p.status} />
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Btn variant="secondary" size="xs" onClick={() => setViewing(p)}>
-                          View
-                        </Btn>
-                        {canManage && (
-                          <>
-                            {(p.status === 'OPEN' ||
-                              p.status === 'PARTIALLY_PAID' ||
-                              p.status === 'OVERDUE') && (
-                              <Btn
-                                variant="success"
-                                size="xs"
-                                onClick={() => setRecordingPayment(p)}
-                              >
-                                Pay
-                              </Btn>
-                            )}
-                            {(p.status === 'OPEN' || p.status === 'OVERDUE') && (
-                              <Btn variant="warning" size="xs" onClick={() => setWritingOff(p)}>
-                                Write Off
-                              </Btn>
-                            )}
-                            {p.status === 'OPEN' && (
-                              <Btn variant="ghost" size="xs" onClick={() => setEditing(p)}>
-                                Edit
-                              </Btn>
-                            )}
-                            {p.status === 'OPEN' && (
-                              <Btn variant="danger" size="xs" onClick={() => setDeleting(p)}>
-                                Delete
-                              </Btn>
-                            )}
-                          </>
-                        )}
-                      </div>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan={10}>
+                      <PageSpinner />
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {data && data.totalPages > 1 && (
-          <div
-            className="px-5 py-3 border-t flex items-center justify-between"
-            style={{ borderColor: 'var(--aurora-border)' }}
-          >
-            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-              Page {data.page} of {data.totalPages} · {data.total} total
-            </span>
-            <div className="flex gap-2">
-              <Btn
-                variant="secondary"
-                size="xs"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                Previous
-              </Btn>
-              <Btn
-                variant="secondary"
-                size="xs"
-                disabled={page >= data.totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                Next
-              </Btn>
-            </div>
+                ) : !accounts?.data.length ? (
+                  <tr>
+                    <td
+                      colSpan={10}
+                      className="px-4 py-10 text-center text-sm"
+                      style={{ color: 'var(--aurora-text-muted)' }}
+                    >
+                      No supplier accounts found
+                    </td>
+                  </tr>
+                ) : (
+                  accounts.data.map((account) => {
+                    const expanded = expandedAccounts[account.accountKey];
+                    return (
+                      <Fragment key={account.accountKey}>
+                        <tr className="hover:bg-slate-50">
+                          <td className="px-4 py-3">
+                            <div className="font-semibold">{account.supplierName}</div>
+                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              {account.supplierCode ?? 'Unlinked supplier'} · {account.currency}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">{account.company?.name ?? '-'}</td>
+                          <td className="px-4 py-3 text-right font-mono">
+                            {account.documentCount}
+                            {account.openDocumentCount > 0 ? (
+                              <span style={{ color: 'var(--aurora-text-muted)' }}>
+                                {' '}
+                                ({account.openDocumentCount} open)
+                              </span>
+                            ) : null}
+                          </td>
+                          <td className="px-4 py-3 text-right font-mono">
+                            {fmtTZS(account.amount)}
+                          </td>
+                          <td className="px-4 py-3 text-right font-mono text-green-700">
+                            {fmtTZS(account.paidAmount)}
+                          </td>
+                          <td className="px-4 py-3 text-right font-mono font-semibold">
+                            {fmtTZS(account.outstandingAmount)}
+                          </td>
+                          <td className="px-4 py-3 text-right font-mono">
+                            {fmtTZS(account.overdueAmount)}
+                          </td>
+                          <td className="px-4 py-3">{fmtDate(account.nextDueDate)}</td>
+                          <td className="px-4 py-3">
+                            <StatusBadge status={account.status} />
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Btn
+                              variant="secondary"
+                              size="xs"
+                              onClick={() =>
+                                setExpandedAccounts((prev) => ({
+                                  ...prev,
+                                  [account.accountKey]: !expanded,
+                                }))
+                              }
+                            >
+                              {expanded ? 'Hide Details' : 'View Details'}
+                            </Btn>
+                          </td>
+                        </tr>
+                        {expanded && (
+                          <tr>
+                            <td colSpan={10} className="px-4 py-4">
+                              <div
+                                className="rounded-lg border overflow-hidden"
+                                style={{ borderColor: 'var(--aurora-border)' }}
+                              >
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr
+                                      className="text-left uppercase"
+                                      style={{
+                                        color: 'var(--aurora-text-muted)',
+                                        background: 'var(--aurora-bg-subtle)',
+                                      }}
+                                    >
+                                      <th className="px-3 py-2">AP #</th>
+                                      <th className="px-3 py-2">Issue</th>
+                                      <th className="px-3 py-2">Due</th>
+                                      <th className="px-3 py-2 text-right">Amount</th>
+                                      <th className="px-3 py-2 text-right">Paid</th>
+                                      <th className="px-3 py-2 text-right">Outstanding</th>
+                                      <th className="px-3 py-2">Status</th>
+                                      <th className="px-3 py-2 text-right">Actions</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {account.documents.map((p) => (
+                                      <tr key={p.id}>
+                                        <td className="px-3 py-2 font-mono">
+                                          {p.payableNumber ?? p.id.slice(0, 8)}
+                                        </td>
+                                        <td className="px-3 py-2">{fmtDate(p.issueDate)}</td>
+                                        <td className="px-3 py-2">{fmtDate(p.dueDate)}</td>
+                                        <td className="px-3 py-2 text-right font-mono">
+                                          {fmtTZS(p.amount)}
+                                        </td>
+                                        <td className="px-3 py-2 text-right font-mono text-green-700">
+                                          {fmtTZS(payablePaidAmount(p))}
+                                        </td>
+                                        <td className="px-3 py-2 text-right font-mono font-semibold">
+                                          {fmtTZS(payableOutstandingAmount(p))}
+                                        </td>
+                                        <td className="px-3 py-2">
+                                          <StatusBadge status={p.status} />
+                                        </td>
+                                        <td className="px-3 py-2">
+                                          <div className="flex items-center justify-end gap-1.5">
+                                            <Btn
+                                              variant="secondary"
+                                              size="xs"
+                                              onClick={() => setViewing(p)}
+                                            >
+                                              View
+                                            </Btn>
+                                            {canManage && (
+                                              <>
+                                                {(p.status === 'OPEN' ||
+                                                  p.status === 'PARTIALLY_PAID' ||
+                                                  p.status === 'OVERDUE') && (
+                                                  <Btn
+                                                    variant="success"
+                                                    size="xs"
+                                                    onClick={() => setRecordingPayment(p)}
+                                                  >
+                                                    Pay
+                                                  </Btn>
+                                                )}
+                                                {(p.status === 'OPEN' ||
+                                                  p.status === 'OVERDUE') && (
+                                                  <Btn
+                                                    variant="warning"
+                                                    size="xs"
+                                                    onClick={() => setWritingOff(p)}
+                                                  >
+                                                    Write Off
+                                                  </Btn>
+                                                )}
+                                                {p.status === 'OPEN' && (
+                                                  <Btn
+                                                    variant="ghost"
+                                                    size="xs"
+                                                    onClick={() => setEditing(p)}
+                                                  >
+                                                    Edit
+                                                  </Btn>
+                                                )}
+                                                {p.status === 'OPEN' && (
+                                                  <Btn
+                                                    variant="danger"
+                                                    size="xs"
+                                                    onClick={() => setDeleting(p)}
+                                                  >
+                                                    Delete
+                                                  </Btn>
+                                                )}
+                                              </>
+                                            )}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
-        )}
-      </Card>
+        </Card>
+      ) : (
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[900px]">
+              <thead>
+                <tr
+                  className="text-left text-xs uppercase bg-gray-50"
+                  style={{ color: 'var(--aurora-text-muted)' }}
+                >
+                  <th className="px-4 py-3">AP #</th>
+                  <th className="px-4 py-3">Supplier</th>
+                  <th className="px-4 py-3 text-right">Amount</th>
+                  <th className="px-4 py-3 text-right">Paid</th>
+                  <th className="px-4 py-3 text-right">Outstanding</th>
+                  <th className="px-4 py-3">Issue Date</th>
+                  <th className="px-4 py-3">Due Date</th>
+                  <th className="px-4 py-3">Aging</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan={10}>
+                      <PageSpinner />
+                    </td>
+                  </tr>
+                ) : !data?.data.length ? (
+                  <tr>
+                    <td
+                      colSpan={10}
+                      className="px-4 py-10 text-center text-sm"
+                      style={{ color: 'var(--aurora-text-muted)' }}
+                    >
+                      No payables found
+                    </td>
+                  </tr>
+                ) : (
+                  data.data.map((p) => (
+                    <tr key={p.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-mono text-xs">
+                        <div className="space-y-1">
+                          <div>{p.payableNumber ?? p.id.slice(0, 8)}</div>
+                          <button
+                            type="button"
+                            onClick={() => setViewing(p)}
+                            className="font-sans text-[11px] font-semibold hover:underline"
+                            style={{ color: 'var(--aurora-primary-text)' }}
+                          >
+                            View details
+                          </button>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 font-medium">{payableSupplierName(p)}</td>
+                      <td className="px-4 py-3 text-right font-mono">{fmtTZS(p.amount)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-green-700">
+                        {fmtTZS(payablePaidAmount(p))}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono font-semibold">
+                        {fmtTZS(payableOutstandingAmount(p))}
+                      </td>
+                      <td className="px-4 py-3">{fmtDate(p.issueDate)}</td>
+                      <td className="px-4 py-3">{fmtDate(p.dueDate)}</td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                          {agingBucket(p.dueDate)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={p.status} />
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <Btn variant="secondary" size="xs" onClick={() => setViewing(p)}>
+                            View
+                          </Btn>
+                          {canManage && (
+                            <>
+                              {(p.status === 'OPEN' ||
+                                p.status === 'PARTIALLY_PAID' ||
+                                p.status === 'OVERDUE') && (
+                                <Btn
+                                  variant="success"
+                                  size="xs"
+                                  onClick={() => setRecordingPayment(p)}
+                                >
+                                  Pay
+                                </Btn>
+                              )}
+                              {(p.status === 'OPEN' || p.status === 'OVERDUE') && (
+                                <Btn variant="warning" size="xs" onClick={() => setWritingOff(p)}>
+                                  Write Off
+                                </Btn>
+                              )}
+                              {p.status === 'OPEN' && (
+                                <Btn variant="ghost" size="xs" onClick={() => setEditing(p)}>
+                                  Edit
+                                </Btn>
+                              )}
+                              {p.status === 'OPEN' && (
+                                <Btn variant="danger" size="xs" onClick={() => setDeleting(p)}>
+                                  Delete
+                                </Btn>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {data && data.totalPages > 1 && (
+            <div
+              className="px-5 py-3 border-t flex items-center justify-between"
+              style={{ borderColor: 'var(--aurora-border)' }}
+            >
+              <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                Page {data.page} of {data.totalPages} · {data.total} total
+              </span>
+              <div className="flex gap-2">
+                <Btn
+                  variant="secondary"
+                  size="xs"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => p - 1)}
+                >
+                  Previous
+                </Btn>
+                <Btn
+                  variant="secondary"
+                  size="xs"
+                  disabled={page >= data.totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Btn>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {paginated && paginated.totalPages > 1 && viewMode === 'accounts' && (
+        <div className="flex items-center justify-between">
+          <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+            Page {paginated.page} of {paginated.totalPages} · {paginated.total} total
+          </span>
+          <div className="flex gap-2">
+            <Btn
+              variant="secondary"
+              size="xs"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+            >
+              Previous
+            </Btn>
+            <Btn
+              variant="secondary"
+              size="xs"
+              disabled={page >= paginated.totalPages}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Next
+            </Btn>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

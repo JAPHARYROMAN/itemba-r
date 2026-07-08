@@ -1,13 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Body,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { PayablesService } from './payables.service';
 import { CreatePayableDto } from './dto/create-payable.dto';
 import { UpdatePayableDto } from './dto/update-payable.dto';
@@ -25,6 +16,12 @@ export class PayablesController {
   @RequirePermissions('payables.view')
   findAll(@Query() query: QueryPayableDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
+  }
+
+  @Get('accounts')
+  @RequirePermissions('payables.view')
+  findAccounts(@Query() query: QueryPayableDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAccounts(query, user);
   }
 
   @Get(':id')
@@ -57,7 +54,11 @@ export class PayablesController {
 
   @Patch(':id/write-off')
   @RequirePermissions('payables.manage')
-  writeOff(@Param('id') id: string, @Body() dto: WriteOffPayableDto, @CurrentUser() user: AuthUser) {
+  writeOff(
+    @Param('id') id: string,
+    @Body() dto: WriteOffPayableDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.writeOff(id, dto, user);
   }
 
