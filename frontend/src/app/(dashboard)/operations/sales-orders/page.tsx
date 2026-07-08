@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { DocumentPreviewLink } from '@/components/documents';
 import {
@@ -208,6 +208,45 @@ interface WorkbenchSummary {
   blockedFailedActionCount: number;
 }
 
+interface CustomerDaySummaryOrder {
+  id: string;
+  salesOrderNumber?: string | null;
+  orderNumber?: string | null;
+  orderDate: string;
+  customerName: string;
+  company?: { id: string; name: string; code?: string | null } | null;
+  division?: { id: string; name: string; code?: string | null } | null;
+  branch?: { id: string; name: string; code?: string | null } | null;
+  salesperson?: SalesOrder['salesperson'];
+  salesType: string;
+  status: string;
+  paymentStatus: string;
+  paymentMethod?: string | null;
+  currency: string;
+  totalAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+}
+
+interface CustomerDaySummary {
+  id: string;
+  date: string;
+  currency: string;
+  customer: {
+    id?: string | null;
+    name: string;
+    customerCode?: string | null;
+    isWalkIn: boolean;
+  };
+  orderCount: number;
+  totalAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  statusCounts: Record<string, number>;
+  paymentStatusCounts: Record<string, number>;
+  orders: CustomerDaySummaryOrder[];
+}
+
 interface SalesOrderForm {
   companyId: string;
   divisionId: string;
@@ -398,6 +437,30 @@ function addDaysToDate(isoDate: string, days: number): string {
 function fmtMoney(n: number | string | null | undefined, ccy = 'TZS') {
   const value = Number(n ?? 0);
   return `${ccy} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0)}`;
+}
+
+function localDateString(date = new Date()) {
+  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return shifted.toISOString().slice(0, 10);
+}
+
+function dateDaysFromToday(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return localDateString(date);
+}
+
+function monthStartString() {
+  const date = new Date();
+  date.setDate(1);
+  return localDateString(date);
+}
+
+function compactCounts(counts: Record<string, number>) {
+  return Object.entries(counts)
+    .filter(([, count]) => count > 0)
+    .map(([key, count]) => `${key.replace(/_/g, ' ')}: ${count}`)
+    .join(' · ');
 }
 
 function employeeLabel(employee?: Employee | SalesOrder['salesperson'] | null) {
@@ -1259,6 +1322,9 @@ export default function SalesOrdersPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState<WorkbenchSummary>(blankSummary);
   const [data, setData] = useState<Paginated<SalesOrder> | null>(null);
+  const [customerDayData, setCustomerDayData] = useState<Paginated<CustomerDaySummary> | null>(null);
+  const [viewMode, setViewMode] = useState<'summary' | 'orders'>('summary');
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState('');
   const [filterSearch, setFilterSearch] = useState('');
@@ -1266,8 +1332,8 @@ export default function SalesOrdersPage() {
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterPayment, setFilterPayment] = useState('');
-  const [filterDateFrom, setFilterDateFrom] = useState('');
-  const [filterDateTo, setFilterDateTo] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState(() => localDateString());
+  const [filterDateTo, setFilterDateTo] = useState(() => localDateString());
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<SalesOrder | null>(null);
@@ -1321,13 +1387,22 @@ export default function SalesOrdersPage() {
       if (filterDateFrom) query.dateFrom = filterDateFrom;
       if (filterDateTo) query.dateTo = filterDateTo;
       const [pageResult, summaryResult] = await Promise.all([
-        backendPage<SalesOrder>('/sales-orders', { query: { ...query, page, limit: 20 } }),
+        viewMode === 'summary'
+          ? backendPage<CustomerDaySummary>('/sales-orders/customer-day-summary', {
+              query: { ...query, page, limit: 20 },
+            })
+          : backendPage<SalesOrder>('/sales-orders', { query: { ...query, page, limit: 20 } }),
         backendGet<WorkbenchSummary>('/sales-orders/workbench-summary', { query }),
       ]);
-      setData(pageResult);
+      if (viewMode === 'summary') {
+        setCustomerDayData(pageResult as Paginated<CustomerDaySummary>);
+      } else {
+        setData(pageResult as Paginated<SalesOrder>);
+      }
       setSummary(summaryResult);
     } catch (err: unknown) {
       setData(emptyPaginated<SalesOrder>());
+      setCustomerDayData(emptyPaginated<CustomerDaySummary>());
       setSummary(blankSummary());
       setLoadError(err instanceof Error ? err.message : 'Failed to load sales orders');
     } finally {
@@ -1343,6 +1418,7 @@ export default function SalesOrdersPage() {
     filterPayment,
     filterDateFrom,
     filterDateTo,
+    viewMode,
   ]);
 
   useEffect(() => {
@@ -1364,6 +1440,68 @@ export default function SalesOrdersPage() {
       if (filterDateTo) query.dateTo = filterDateTo;
 
       const CAP = 5000;
+      if (viewMode === 'summary') {
+        const result = await backendPage<CustomerDaySummary>('/sales-orders/customer-day-summary', {
+          query: { ...query, page: 1, limit: CAP },
+        });
+        const groups = (result.data ?? []).slice(0, CAP);
+        if (!groups.length) {
+          showToast('info', 'Nothing to export', 'No customer summaries match the current filters.');
+          return;
+        }
+        const rows = groups.map((group) => ({
+          Date: group.date,
+          Customer: group.customer.name,
+          Currency: group.currency,
+          Orders: group.orderCount,
+          Total: group.totalAmount,
+          Paid: group.paidAmount,
+          Outstanding: group.outstandingAmount,
+          Statuses: compactCounts(group.statusCounts),
+          Payments: compactCounts(group.paymentStatusCounts),
+          'Order Numbers': group.orders
+            .map((order) => order.salesOrderNumber ?? order.orderNumber ?? order.id)
+            .join(', '),
+        }));
+        const columns = [
+          'Date',
+          'Customer',
+          'Currency',
+          'Orders',
+          'Total',
+          'Paid',
+          'Outstanding',
+          'Statuses',
+          'Payments',
+          'Order Numbers',
+        ];
+        if (format === 'pdf') {
+          await downloadTablePdf({
+            title: 'Sales by Customer and Day',
+            subtitle: `${filterDateFrom || 'start'} to ${filterDateTo || 'today'}`,
+            companyId: filterCompany || undefined,
+            columns,
+            rows: rows.map((r) => columns.map((c) => cellToString(r[c as keyof typeof r]))),
+            numericColumns: [3, 4, 5, 6],
+            baseName: 'sales-customer-day-summary',
+          });
+        } else {
+          downloadTextFile(
+            `sales-customer-day-summary-${new Date().toISOString().slice(0, 10)}.csv`,
+            'text/csv;charset=utf-8',
+            rowsToCsv(rows, columns),
+          );
+        }
+        if (result.total > groups.length) {
+          showToast(
+            'warning',
+            'Export truncated',
+            `Exported the first ${groups.length} of ${result.total} matching customer-day rows.`,
+          );
+        }
+        return;
+      }
+
       const result = await backendPage<SalesOrder>('/sales-orders', {
         query: { ...query, page: 1, limit: CAP },
       });
@@ -1451,6 +1589,7 @@ export default function SalesOrdersPage() {
     filterPayment,
     filterDateFrom,
     filterDateTo,
+    viewMode,
   ]);
 
   useEffect(() => {
@@ -1464,6 +1603,10 @@ export default function SalesOrdersPage() {
     if (paymentStatus && PAYMENT_STATUSES.includes(paymentStatus)) setFilterPayment(paymentStatus);
     const salesType = params.get('salesType');
     if (salesType) setFilterType(salesType);
+    const dateFrom = params.get('dateFrom');
+    const dateTo = params.get('dateTo');
+    if (dateFrom) setFilterDateFrom(dateFrom);
+    if (dateTo) setFilterDateTo(dateTo);
   }, []);
 
   useEffect(() => {
@@ -1510,6 +1653,27 @@ export default function SalesOrdersPage() {
     await doAction(pendingAction.id, pendingAction.action);
     setPendingAction(null);
   };
+
+  const applyDatePreset = (preset: 'today' | 'yesterday' | 'month' | 'all') => {
+    if (preset === 'today') {
+      const today = localDateString();
+      setFilterDateFrom(today);
+      setFilterDateTo(today);
+    } else if (preset === 'yesterday') {
+      const yesterday = dateDaysFromToday(-1);
+      setFilterDateFrom(yesterday);
+      setFilterDateTo(yesterday);
+    } else if (preset === 'month') {
+      setFilterDateFrom(monthStartString());
+      setFilterDateTo(localDateString());
+    } else {
+      setFilterDateFrom('');
+      setFilterDateTo('');
+    }
+    setPage(1);
+  };
+
+  const activePage = viewMode === 'summary' ? customerDayData : data;
 
   if (!canView) {
     return (
@@ -1708,10 +1872,49 @@ export default function SalesOrdersPage() {
               className={filterSelectCls}
               style={filterStyle}
             />
+            <div className="flex flex-wrap gap-1">
+              <Btn variant="secondary" size="xs" onClick={() => applyDatePreset('today')}>
+                Today
+              </Btn>
+              <Btn variant="secondary" size="xs" onClick={() => applyDatePreset('yesterday')}>
+                Yesterday
+              </Btn>
+              <Btn variant="secondary" size="xs" onClick={() => applyDatePreset('month')}>
+                This Month
+              </Btn>
+              <Btn variant="ghost" size="xs" onClick={() => applyDatePreset('all')}>
+                All Time
+              </Btn>
+            </div>
           </>
         }
         actions={
           <>
+            <div
+              className="inline-flex rounded-lg border p-1"
+              style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)' }}
+            >
+              <Btn
+                variant={viewMode === 'summary' ? 'primary' : 'ghost'}
+                size="xs"
+                onClick={() => {
+                  setViewMode('summary');
+                  setPage(1);
+                }}
+              >
+                Customer Summary
+              </Btn>
+              <Btn
+                variant={viewMode === 'orders' ? 'primary' : 'ghost'}
+                size="xs"
+                onClick={() => {
+                  setViewMode('orders');
+                  setPage(1);
+                }}
+              >
+                Order List
+              </Btn>
+            </div>
             <Btn
               variant="secondary"
               onClick={() => exportRegister('csv')}
@@ -1739,6 +1942,133 @@ export default function SalesOrdersPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
+          {viewMode === 'summary' ? (
+          <table className="w-full text-sm min-w-[1100px]" aria-label="Sales by customer and day">
+            <caption className="sr-only">Sales by customer and day</caption>
+            <thead>
+              <tr
+                className="text-left text-xs uppercase bg-gray-50"
+                style={{ color: 'var(--aurora-text-muted)' }}
+              >
+                <th scope="col" className="px-4 py-3">Date</th>
+                <th scope="col" className="px-4 py-3">Customer</th>
+                <th scope="col" className="px-4 py-3 text-right">Orders</th>
+                <th scope="col" className="px-4 py-3 text-right">Total</th>
+                <th scope="col" className="px-4 py-3 text-right">Paid</th>
+                <th scope="col" className="px-4 py-3 text-right">Outstanding</th>
+                <th scope="col" className="px-4 py-3">Status Mix</th>
+                <th scope="col" className="px-4 py-3">Payment Mix</th>
+                <th scope="col" className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {loading ? (
+                <tr>
+                  <td colSpan={9}>
+                    <SkeletonTable rows={6} cols={9} />
+                  </td>
+                </tr>
+              ) : !customerDayData?.data.length ? (
+                <tr>
+                  <td colSpan={9}>
+                    <EmptyState
+                      title="No sales for this view"
+                      description="No customer-day sales groups match the current filters."
+                    />
+                  </td>
+                </tr>
+              ) : (
+                customerDayData.data.map((group) => {
+                  const expanded = !!expandedGroups[group.id];
+                  return (
+                    <Fragment key={group.id}>
+                      <tr className="hover:bg-slate-50">
+                        <td className="px-4 py-3 text-xs">{formatDateOnly(group.date)}</td>
+                        <td className="px-4 py-3">
+                          <div className="font-medium">{group.customer.name}</div>
+                          <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                            {group.customer.customerCode ?? (group.customer.isWalkIn ? 'Walk-in/manual' : '')}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">{group.orderCount}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {fmtMoney(group.totalAmount, group.currency)}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {fmtMoney(group.paidAmount, group.currency)}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {fmtMoney(group.outstandingAmount, group.currency)}
+                        </td>
+                        <td className="px-4 py-3 text-xs">{compactCounts(group.statusCounts) || '—'}</td>
+                        <td className="px-4 py-3 text-xs">{compactCounts(group.paymentStatusCounts) || '—'}</td>
+                        <td className="px-4 py-3 text-right">
+                          <Btn
+                            variant="secondary"
+                            size="xs"
+                            onClick={() =>
+                              setExpandedGroups((prev) => ({ ...prev, [group.id]: !expanded }))
+                            }
+                          >
+                            {expanded ? 'Hide Orders' : 'View Orders'}
+                          </Btn>
+                        </td>
+                      </tr>
+                      {expanded && (
+                        <tr key={`${group.id}:orders`}>
+                          <td colSpan={9} className="px-4 py-3 bg-slate-950/5">
+                            <div className="space-y-2">
+                              {group.orders.map((order) => {
+                                const orderRef =
+                                  order.salesOrderNumber ?? order.orderNumber ?? order.id.slice(0, 8);
+                                return (
+                                  <div
+                                    key={order.id}
+                                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                                    style={{ borderColor: 'var(--aurora-border)' }}
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="font-mono text-xs">{orderRef}</div>
+                                      <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                                        {order.branch?.name ?? 'No branch'} · {order.salesType.replace(/_/g, ' ')}
+                                      </div>
+                                    </div>
+                                    <div className="text-right tabular-nums">
+                                      <div>{fmtMoney(order.totalAmount, order.currency)}</div>
+                                      <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                                        Outstanding {fmtMoney(order.outstandingAmount, order.currency)}
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      <StatusBadge value={order.status} />
+                                      <StatusBadge value={order.paymentStatus} />
+                                      <Btn
+                                        variant="secondary"
+                                        size="xs"
+                                        aria-label={`View order ${orderRef}`}
+                                        onClick={() => router.push(`/operations/sales-orders/${order.id}`)}
+                                      >
+                                        View
+                                      </Btn>
+                                      <DocumentPreviewLink
+                                        href={`/operations/sales-orders/${order.id}/print`}
+                                        label={`View / Print / PDF order ${orderRef}`}
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+          ) : (
           <table className="w-full text-sm min-w-[1100px]" aria-label="Sales orders">
             <caption className="sr-only">Sales orders</caption>
             <thead>
@@ -1865,14 +2195,15 @@ export default function SalesOrdersPage() {
               )}
             </tbody>
           </table>
+          )}
         </div>
-        {data && data.totalPages > 1 && (
+        {activePage && activePage.totalPages > 1 && (
           <div
             className="px-5 py-3 border-t flex items-center justify-between"
             style={{ borderColor: 'var(--aurora-border)' }}
           >
             <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-              Page {data.page} of {data.totalPages} · {data.total} total
+              Page {activePage.page} of {activePage.totalPages} · {activePage.total} total
             </span>
             <div className="flex gap-2">
               <Btn
@@ -1886,7 +2217,7 @@ export default function SalesOrdersPage() {
               <Btn
                 variant="secondary"
                 size="xs"
-                disabled={page >= data.totalPages}
+                disabled={page >= activePage.totalPages}
                 onClick={() => setPage((p) => p + 1)}
               >
                 Next

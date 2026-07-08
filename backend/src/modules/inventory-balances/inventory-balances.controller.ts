@@ -14,6 +14,12 @@ export class InventoryBalancesController {
     return this.service.findAll(query, user);
   }
 
+  @Get('summary')
+  @RequirePermissions('inventory.view')
+  summary(@Query() query: QueryInventoryBalanceDto, @CurrentUser() user: AuthUser) {
+    return this.service.summary(query, user);
+  }
+
   /** Live stock heatmap — per-location grouping with OUT/LOW/OK counts. */
   @Get('live')
   @RequirePermissions('inventory.view')

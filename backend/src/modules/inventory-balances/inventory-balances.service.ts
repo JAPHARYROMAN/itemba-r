@@ -32,51 +32,207 @@ export class InventoryBalancesService {
   ) {}
 
   async findAll(query: QueryInventoryBalanceDto, user?: any) {
-    const { page = 1, limit = 20, companyId, productId, locationId, lowStock } = query;
+    const { page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
 
+    if (this.useLegacyLowStockPath(query)) {
+      return this.findLegacyLowStock(query, user);
+    }
+
+    const rows = await this.filteredRows(query, user);
+    const total = rows.length;
+    const data = rows.slice(skip, skip + limit);
+
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) || 1 };
+  }
+
+  private useLegacyLowStockPath(query: QueryInventoryBalanceDto) {
+    return (
+      !!query.lowStock &&
+      !query.divisionId &&
+      !query.branchId &&
+      !query.categoryId &&
+      !query.productFamilyId &&
+      !query.search &&
+      !query.stockStatus &&
+      !query.costStatus &&
+      !query.staleDays
+    );
+  }
+
+  private async findLegacyLowStock(query: QueryInventoryBalanceDto, user?: any) {
+    const { page = 1, limit = 20, companyId, productId, locationId } = query;
+    const skip = (page - 1) * limit;
     const where: any = {};
     applyCompanyScopeWhere(where, user, companyId);
     if (productId) where.productId = productId;
     if (locationId) where.branchId = locationId;
 
-    const include = {
+    const ids = await this.lowStockBalanceIds(where);
+    const total = ids.length;
+    const pageIds = ids.slice(skip, skip + limit);
+    const rows = pageIds.length
+      ? await this.prisma.inventoryBalance.findMany({
+          where: { id: { in: pageIds } },
+          include: this.balanceInclude(),
+        })
+      : [];
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const data = pageIds
+      .map((id) => byId.get(id))
+      .filter((row): row is (typeof rows)[number] => !!row)
+      .map((row) => this.annotateBalance(row, query.staleDays));
+
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) || 1 };
+  }
+
+  async summary(query: QueryInventoryBalanceDto, user: AuthUser) {
+    const rows = await this.filteredRows(query, user);
+
+    return rows.reduce(
+      (acc, row) => {
+        acc.totalSkus += 1;
+        acc.totalValue = Number((acc.totalValue + row.totalValue).toFixed(2));
+        if (row.stockStatus === 'OUT_OF_STOCK') acc.outOfStock += 1;
+        if (row.stockStatus === 'LOW_STOCK') acc.lowStock += 1;
+        if (row.stockStatus === 'OVERSOLD') acc.oversold += 1;
+        if (row.costStatus === 'MISSING_COST') acc.missingCost += 1;
+        if (row.isStale) acc.staleStock += 1;
+        return acc;
+      },
+      {
+        totalSkus: 0,
+        totalValue: 0,
+        outOfStock: 0,
+        lowStock: 0,
+        oversold: 0,
+        missingCost: 0,
+        staleStock: 0,
+      },
+    );
+  }
+
+  private async filteredRows(query: QueryInventoryBalanceDto, user?: any) {
+    const where = this.balanceWhere(query, user);
+    const rows = await this.prisma.inventoryBalance.findMany({
+      where,
+      include: this.balanceInclude(),
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    return rows
+      .map((row) => this.annotateBalance(row, query.staleDays))
+      .filter((row) => {
+        if (query.lowStock && row.stockStatus !== 'LOW_STOCK') return false;
+        if (query.stockStatus && row.stockStatus !== query.stockStatus) return false;
+        return true;
+      });
+  }
+
+  private balanceWhere(query: QueryInventoryBalanceDto, user?: any): any {
+    const {
+      companyId,
+      divisionId,
+      branchId,
+      productId,
+      locationId,
+      categoryId,
+      productFamilyId,
+      search,
+      costStatus,
+      staleDays,
+    } = query;
+
+    const where: any = {};
+    applyCompanyScopeWhere(where, user, companyId);
+    if (productId) where.productId = productId;
+    if (divisionId) where.divisionId = divisionId;
+    if (branchId || locationId) where.branchId = branchId || locationId;
+
+    const productWhere: any = {};
+    if (categoryId) productWhere.categoryId = categoryId;
+    if (productFamilyId) productWhere.productFamilyId = productFamilyId;
+    if (search?.trim()) {
+      const term = search.trim();
+      productWhere.OR = [
+        { name: { contains: term, mode: 'insensitive' } },
+        { productCode: { contains: term, mode: 'insensitive' } },
+        { sku: { contains: term, mode: 'insensitive' } },
+        { barcode: { contains: term, mode: 'insensitive' } },
+      ];
+    }
+    if (Object.keys(productWhere).length > 0) where.product = productWhere;
+
+    const and: any[] = [];
+    if (costStatus === 'HAS_COST') and.push({ averageCost: { gt: 0 } });
+    if (costStatus === 'MISSING_COST') and.push({ averageCost: { lte: 0 } });
+    if (staleDays) {
+      const cutoff = new Date(Date.now() - staleDays * 24 * 60 * 60 * 1000);
+      and.push({ OR: [{ lastMovementAt: { lte: cutoff } }, { lastMovementAt: null }] });
+    }
+    if (and.length) where.AND = [...(where.AND ?? []), ...and];
+
+    return where;
+  }
+
+  private balanceInclude() {
+    return {
       company: { select: { id: true, name: true, code: true } },
-      product: { select: { id: true, name: true, sku: true } },
+      division: { select: { id: true, name: true, code: true } },
+      product: {
+        select: {
+          id: true,
+          name: true,
+          productCode: true,
+          sku: true,
+          barcode: true,
+          reorderLevel: true,
+          minimumStockLevel: true,
+          category: { select: { id: true, name: true, categoryType: true } },
+          productFamily: { select: { id: true, name: true, brand: true } },
+        },
+      },
       branch: { select: { id: true, name: true, code: true } },
     };
+  }
 
-    // Low-stock = a row that still has stock on hand (> 0) but is at or below its
-    // per-product reorder threshold (reorderLevel ?? minimumStockLevel ?? 10), so
-    // reorder alerts fire before a SKU is fully depleted. Prisma cannot compare a
-    // column to a related column in `where`, so we resolve matching balance IDs
-    // via a raw join against products and then findMany by those ids.
-    if (lowStock) {
-      const ids = await this.lowStockBalanceIds(where);
-      const total = ids.length;
-      const pageIds = ids.slice(skip, skip + limit);
-      const rows = pageIds.length
-        ? await this.prisma.inventoryBalance.findMany({ where: { id: { in: pageIds } }, include })
-        : [];
-      // findMany does not honour the order of an `id in` list, so re-sort the
-      // page back into the raw query's updatedAt-desc order.
-      const byId = new Map(rows.map((r) => [r.id, r]));
-      const data = pageIds.map((id) => byId.get(id)).filter((r): r is (typeof rows)[number] => !!r);
-      return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
-    }
+  private annotateBalance(row: any, staleDays?: number) {
+    const quantityOnHand = Number(row.quantityOnHand ?? 0);
+    const quantityReserved = Number(row.quantityReserved ?? 0);
+    const quantityAvailable = quantityOnHand - quantityReserved;
+    const reorderLevel = Number(
+      row.product?.reorderLevel ?? row.product?.minimumStockLevel ?? 10,
+    );
+    const averageCost = Number(row.averageCost ?? 0);
+    const totalValue = Number(row.totalValue ?? 0);
+    const daysSinceMovement = row.lastMovementAt
+      ? Math.floor((Date.now() - row.lastMovementAt.getTime()) / (24 * 60 * 60 * 1000))
+      : null;
+    const stockStatus =
+      quantityAvailable < 0
+        ? 'OVERSOLD'
+        : quantityOnHand <= 0
+          ? 'OUT_OF_STOCK'
+          : quantityOnHand <= reorderLevel
+            ? 'LOW_STOCK'
+            : 'IN_STOCK';
+    const costStatus = averageCost > 0 ? 'HAS_COST' : 'MISSING_COST';
+    const isStale =
+      !!staleDays && (daysSinceMovement == null || daysSinceMovement >= staleDays);
 
-    const [data, total] = await Promise.all([
-      this.prisma.inventoryBalance.findMany({
-        where,
-        include,
-        orderBy: { updatedAt: 'desc' },
-        skip,
-        take: limit,
-      }),
-      this.prisma.inventoryBalance.count({ where }),
-    ]);
-
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return {
+      ...row,
+      quantityOnHand,
+      quantityReserved,
+      quantityAvailable,
+      reorderLevel,
+      averageCost,
+      totalValue,
+      stockStatus,
+      costStatus,
+      isStale,
+      daysSinceMovement,
+    };
   }
 
   /**

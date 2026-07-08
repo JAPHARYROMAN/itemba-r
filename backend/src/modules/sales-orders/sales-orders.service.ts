@@ -628,6 +628,125 @@ export class SalesOrdersService {
     };
   }
 
+  async customerDaySummary(query: QuerySalesOrderDto, user: AuthUser) {
+    const { page = 1, limit = 20 } = query;
+    const skip = (page - 1) * limit;
+    const where = await this.salesOrderWhere(query, user);
+
+    const orders = await this.prisma.salesOrder.findMany({
+      where,
+      include: {
+        company: { select: { id: true, name: true, code: true } },
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
+        customer: { select: { id: true, name: true, customerCode: true } },
+        salesperson: {
+          select: { id: true, employeeCode: true, firstName: true, lastName: true },
+        },
+        receivable: {
+          select: {
+            id: true,
+            receivableNumber: true,
+            sourceId: true,
+            paidAmount: true,
+            outstandingAmount: true,
+            status: true,
+          },
+        },
+      },
+      orderBy: [{ orderDate: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    const sourceReceivables = await this.findSalesOrderSourceReceivables(
+      orders.map((order) => order.id),
+    );
+    const groups = new Map<string, any>();
+
+    for (const rawOrder of orders) {
+      const order: any = this.withReceivablePaymentSnapshot(
+        rawOrder,
+        sourceReceivables.get(rawOrder.id),
+      );
+      const day = dateKey(order.orderDate) ?? 'unknown-date';
+      const manualName = normalizeCustomerName(order.customerName);
+      const customerName = order.customer?.name
+        ?? (manualName && !isGenericWalkInName(manualName) ? manualName : 'Walk-in Customer');
+      const customerKey = order.customerId
+        ? `customer:${order.customerId}`
+        : `manual:${customerName.toLowerCase()}`;
+      const currency = String(order.currency ?? 'TZS');
+      const key = `${day}:${customerKey}:${currency}`;
+
+      if (!groups.has(key)) {
+        groups.set(key, {
+          id: key,
+          date: day,
+          currency,
+          customer: {
+            id: order.customerId ?? null,
+            name: customerName,
+            customerCode: order.customer?.customerCode ?? null,
+            isWalkIn: !order.customerId,
+          },
+          orderCount: 0,
+          totalAmount: 0,
+          paidAmount: 0,
+          outstandingAmount: 0,
+          statusCounts: {},
+          paymentStatusCounts: {},
+          orders: [],
+        });
+      }
+
+      const group = groups.get(key);
+      const status = String(order.status ?? 'UNKNOWN');
+      const paymentStatus = String(order.paymentStatus ?? 'UNKNOWN');
+      group.orderCount += 1;
+      group.totalAmount = roundMoney(group.totalAmount + moneyValue(order.totalAmount));
+      group.paidAmount = roundMoney(group.paidAmount + moneyValue(order.paidAmount));
+      group.outstandingAmount = roundMoney(
+        group.outstandingAmount + moneyValue(order.outstandingAmount),
+      );
+      group.statusCounts[status] = (group.statusCounts[status] ?? 0) + 1;
+      group.paymentStatusCounts[paymentStatus] =
+        (group.paymentStatusCounts[paymentStatus] ?? 0) + 1;
+      group.orders.push({
+        id: order.id,
+        salesOrderNumber: order.salesOrderNumber,
+        orderNumber: order.orderNumber,
+        orderDate: order.orderDate,
+        customerName,
+        company: order.company,
+        division: order.division,
+        branch: order.branch,
+        salesperson: order.salesperson,
+        salesType: order.salesType,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        paymentMethod: order.paymentMethod,
+        currency,
+        totalAmount: moneyValue(order.totalAmount),
+        paidAmount: moneyValue(order.paidAmount),
+        outstandingAmount: moneyValue(order.outstandingAmount),
+      });
+    }
+
+    const data = Array.from(groups.values()).sort((left, right) => {
+      const dayCompare = String(right.date).localeCompare(String(left.date));
+      if (dayCompare !== 0) return dayCompare;
+      return String(left.customer.name).localeCompare(String(right.customer.name));
+    });
+    const total = data.length;
+
+    return {
+      data: data.slice(skip, skip + limit),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    };
+  }
+
   private async loadControlCenterOrder(
     id: string,
     user: AuthUser,

@@ -25,6 +25,12 @@ export class SalesOrdersController {
     return this.service.workbenchSummary(query, user);
   }
 
+  @Get('customer-day-summary')
+  @RequirePermissions('sales.view')
+  customerDaySummary(@Query() query: QuerySalesOrderDto, @CurrentUser() user: AuthUser) {
+    return this.service.customerDaySummary(query, user);
+  }
+
   @Get('receipt-accounts')
   @RequireAnyPermissions('pos.create', 'sales.create')
   findReceiptAccounts(@Query() query: any, @CurrentUser() user: AuthUser) {
