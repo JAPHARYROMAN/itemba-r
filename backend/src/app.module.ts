@@ -56,6 +56,7 @@ import { SalesOrdersModule } from './modules/sales-orders/sales-orders.module';
 import { SalesCommissionsModule } from './modules/sales-commissions/sales-commissions.module';
 import { PurchaseOrdersModule } from './modules/purchase-orders/purchase-orders.module';
 import { ProfitModule } from './modules/profit/profit.module';
+import { RecordBookModule } from './modules/record-book/record-book.module';
 import { OperationsDashboardModule } from './modules/operations-dashboard/operations-dashboard.module';
 import { OperationsReportsModule } from './modules/operations-reports/operations-reports.module';
 import { WestsidesModule } from './modules/westsides/westsides.module';
@@ -275,6 +276,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     SalesCommissionsModule,
     PurchaseOrdersModule,
     ProfitModule,
+    RecordBookModule,
     OperationsDashboardModule,
     OperationsReportsModule,
     WestsidesModule,

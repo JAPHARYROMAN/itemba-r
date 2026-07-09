@@ -272,6 +272,7 @@ const ALL_PERMISSIONS: PermDef[] = [
     isGroupControl: false,
   },
   ...perms('profit', ['view', 'manage_costs', 'audit']),
+  ...perms('record_book', ['view', 'create', 'update', 'finalize', 'void', 'admin', 'export']),
 
   // ── Petroleum Operations (Milestone 5) ──────────────────────────────────────
   ...perms('petroleum', ['setup.view', 'setup.manage', 'reports.view', 'dashboard.view']),
@@ -1627,6 +1628,7 @@ const ROLES: RoleDef[] = [
     filter: combine(
       inModules(
         'expenses',
+        'record_book',
         'reports',
         'documents',
         'audit-logs',
@@ -1658,6 +1660,8 @@ const ROLES: RoleDef[] = [
     filter: (p) =>
       (p.module === 'sales' && ['read', 'create', 'view'].includes(p.action)) ||
       (p.module === 'expenses' && ['read', 'create', 'view'].includes(p.action)) ||
+      (p.module === 'record_book' &&
+        ['view', 'create', 'update', 'finalize', 'export'].includes(p.action)) ||
       (p.module === 'cash_accounts' && p.action === 'view') ||
       (p.module === 'customers' && ['view', 'create'].includes(p.action)) ||
       (p.module === 'operations' && p.action === 'dashboard.view') ||
@@ -2371,6 +2375,10 @@ async function main() {
   // ── 6. Finance Foundation seed (Milestone 3) ──────────────────────────────
   console.log('  ▸ Finance foundation (COA, fiscal years, periods, cash, categories)...');
   await seedFinance();
+
+  // ── 6b. Manual Records Book seed ──────────────────────────────────────────
+  console.log('  ▸ Records Book defaults (manual expense categories)...');
+  await seedRecordBook();
 
   // ── 7. Operations Foundation seed (Milestone 4) ────────────────────────────
   console.log('  ▸ Operations foundation (units, categories, locations, products)...');
@@ -4364,6 +4372,18 @@ const DEFAULT_EXPENSE_CATEGORIES = [
   { name: 'General & Administrative', linkedAccountCode: '6900' },
 ];
 
+const DEFAULT_RECORD_BOOK_EXPENSE_CATEGORIES = [
+  { name: 'Food', description: 'Meals, refreshments, and staff food outflows' },
+  { name: 'Labour', description: 'Casual labour and daily wage outflows' },
+  { name: 'Transport', description: 'Local transport and delivery outflows' },
+  { name: 'Utilities', description: 'Electricity, water, and communication outflows' },
+  { name: 'Fuel', description: 'Fuel and lubricant outflows' },
+  { name: 'Repairs', description: 'Repairs and small maintenance outflows' },
+  { name: 'Rent', description: 'Rent and premises-related outflows' },
+  { name: 'Supplies', description: 'Consumables and operating supplies' },
+  { name: 'Other', description: 'Other manual money-out records' },
+];
+
 async function seedFinance() {
   const companies = await prisma.company.findMany({ where: { deletedAt: null } });
   const currentYear = new Date().getFullYear();
@@ -4468,6 +4488,29 @@ async function seedFinance() {
     }
   }
   console.log(`      Finance seeded for ${companies.length} companies`);
+}
+
+async function seedRecordBook() {
+  const companies = await prisma.company.findMany({ where: { deletedAt: null } });
+  for (const company of companies) {
+    for (const category of DEFAULT_RECORD_BOOK_EXPENSE_CATEGORIES) {
+      await prisma.recordBookExpenseCategory.upsert({
+        where: { companyId_name: { companyId: company.id, name: category.name } },
+        update: {
+          description: category.description,
+          isActive: true,
+          deletedAt: null,
+        },
+        create: {
+          companyId: company.id,
+          name: category.name,
+          description: category.description,
+          isActive: true,
+        },
+      });
+    }
+  }
+  console.log(`      Records Book categories seeded for ${companies.length} companies`);
 }
 
 // ─── Operations seed helpers (Milestone 4) ───────────────────────────────────

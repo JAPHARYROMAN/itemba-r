@@ -135,6 +135,37 @@ export function isGroup(item: NavItem): item is NavGroup {
 export const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', iconKey: 'dashboard' },
   {
+    label: 'Records Book',
+    iconKey: 'clipboardList',
+    permission: 'record_book.view',
+    children: [
+      {
+        href: '/record-book',
+        label: 'Dashboard',
+        iconKey: 'barChart',
+        permission: 'record_book.view',
+      },
+      {
+        href: '/record-book/daily-sales',
+        label: 'Daily Sales',
+        iconKey: 'creditCard',
+        permission: 'record_book.view',
+      },
+      {
+        href: '/record-book/expenses',
+        label: 'Money Out',
+        iconKey: 'creditCard',
+        permission: 'record_book.view',
+      },
+      {
+        href: '/record-book/categories',
+        label: 'Categories',
+        iconKey: 'clipboardList',
+        permission: 'record_book.view',
+      },
+    ],
+  },
+  {
     label: 'Group Control',
     iconKey: 'lock',
     permission: 'group-control.view',

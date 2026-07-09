@@ -92,6 +92,7 @@ export class GlobalSearchService {
       this.searchCashAccounts(query, user, companyWhere, limit),
       this.searchEmployees(query, user, companyWhere, limit),
       this.searchWestsidesDocuments(query, user, companyWhere, limit),
+      this.searchRecordBook(query, user, companyWhere, limit),
       this.searchReports(query, user, limit),
     ]);
 
@@ -865,6 +866,102 @@ export class GlobalSearchService {
       badge: row.status,
       date: dateOnly(row.deliveryDate),
     }));
+  }
+
+  private async searchRecordBook(
+    query: string,
+    user: AuthUser,
+    companyWhere: CompanyScopedWhere,
+    limit: number,
+  ): Promise<SearchBucket> {
+    if (!hasAnyPermission(user, ['record_book.view'])) {
+      return this.empty('record-book', 'Records Book');
+    }
+
+    const [sales, expenses] = await Promise.all([
+      this.prisma.recordBookDailySale.findMany({
+        where: {
+          deletedAt: null,
+          ...companyWhere,
+          OR: [
+            { notes: contains(query) },
+            { receipts: { some: { label: contains(query) } } },
+            { receipts: { some: { reference: contains(query) } } },
+          ],
+        },
+        select: {
+          id: true,
+          recordDate: true,
+          totalSalesAmount: true,
+          currency: true,
+          status: true,
+          company: { select: { name: true, code: true } },
+          branch: { select: { name: true, code: true } },
+        },
+        orderBy: { recordDate: 'desc' },
+        take: limit,
+      }),
+      this.prisma.recordBookExpense.findMany({
+        where: {
+          deletedAt: null,
+          ...companyWhere,
+          OR: [
+            { description: contains(query) },
+            { paidTo: contains(query) },
+            { paymentLabel: contains(query) },
+            { reference: contains(query) },
+            { notes: contains(query) },
+            { expenseCategory: { name: contains(query) } },
+          ],
+        },
+        select: {
+          id: true,
+          recordDate: true,
+          amount: true,
+          currency: true,
+          status: true,
+          description: true,
+          paidTo: true,
+          company: { select: { name: true, code: true } },
+          branch: { select: { name: true, code: true } },
+          expenseCategory: { select: { name: true } },
+        },
+        orderBy: { recordDate: 'desc' },
+        take: limit,
+      }),
+    ]);
+
+    const results: GlobalSearchResult[] = [
+      ...sales.map((row) => ({
+        id: row.id,
+        type: 'record-book-sale',
+        module: 'Records Book',
+        title: `Daily sales - ${row.currency} ${row.totalSalesAmount}`,
+        subtitle: compactSubtitle([row.company.code, row.branch?.code, dateOnly(row.recordDate)]),
+        href: '/record-book/daily-sales',
+        badge: row.status,
+        date: dateOnly(row.recordDate),
+      })),
+      ...expenses.map((row) => ({
+        id: row.id,
+        type: 'record-book-expense',
+        module: 'Records Book',
+        title: row.description,
+        subtitle: compactSubtitle([
+          row.expenseCategory.name,
+          row.paidTo,
+          `${row.currency} ${row.amount}`,
+          dateOnly(row.recordDate),
+        ]),
+        href: '/record-book/expenses',
+        badge: row.status,
+        date: dateOnly(row.recordDate),
+      })),
+    ]
+      .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')))
+      .slice(0, limit);
+
+    return { key: 'record-book', label: 'Records Book', results };
   }
 
   private async searchReports(query: string, user: AuthUser, limit: number): Promise<SearchBucket> {
