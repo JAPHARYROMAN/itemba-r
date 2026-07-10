@@ -714,7 +714,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
 
   if (!canView) {
     return (
-      <div>
+      <div className="mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
         <PageHeader title="Records Book" subtitle="Manual daily sales and money-out records" />
         <Card><EmptyState title="Permission required" description="You need record_book.view to use Records Book." /></Card>
       </div>
@@ -724,7 +724,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   const activeType = initialTab === 'expenses' ? 'expenses' : initialTab === 'daily-sales' ? 'sales' : 'combined';
 
   return (
-    <div>
+    <div className="mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
       <PageHeader
         title="Records Book"
         subtitle="Manual day-end sales and money-out records. Independent from accounting and operations."
@@ -774,9 +774,9 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
             <option value="VOIDED">Voided</option>
           </FormSelect>
         </div>
-        <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-end">
+        <div className="mt-3 flex flex-col gap-3 xl:flex-row xl:items-end">
           <FormInput className="flex-1" label="Search" value={filters.search} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))} placeholder="Receipt label, reference, paid to, description..." />
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Btn variant="secondary" onClick={() => setFilters((f) => ({ ...f, dateFrom: today, dateTo: today }))}>Today</Btn>
             <Btn variant="secondary" onClick={() => setFilters((f) => ({ ...f, dateFrom: '', dateTo: '' }))}>All Time</Btn>
             <Btn variant="ghost" onClick={() => setFilters({ ...BLANK_FILTERS, companyId: filters.companyId })}>Reset</Btn>
@@ -830,7 +830,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
               {!sales?.data.length ? (
                 <EmptyState title="No daily sales recorded" description="Create a day-end sales summary and split it by cash, M-Pesa, Lipa Namba, bank, or other receipts." />
               ) : (
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto rounded-lg border border-slate-800/80">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-900/70 text-left text-slate-400">
                       <tr>
@@ -881,7 +881,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
               {!expenses?.data.length ? (
                 <EmptyState title="No money-out records" description="Record food, labour, transport, utilities, and other manual outflows here." />
               ) : (
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto rounded-lg border border-slate-800/80">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-900/70 text-left text-slate-400">
                       <tr>
@@ -931,7 +931,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
               {!categoryPage?.data.length ? (
                 <EmptyState title="No categories" description="Create manual money-out categories such as Food, Labour, Repairs, or Supplies." />
               ) : (
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto rounded-lg border border-slate-800/80">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-900/70 text-left text-slate-400">
                       <tr>
