@@ -272,7 +272,7 @@ const ALL_PERMISSIONS: PermDef[] = [
     isGroupControl: false,
   },
   ...perms('profit', ['view', 'manage_costs', 'audit']),
-  ...perms('record_book', ['view', 'create', 'update', 'finalize', 'void', 'admin', 'export']),
+  ...perms('record_book', ['view', 'create', 'update', 'delete', 'finalize', 'void', 'admin', 'export']),
 
   // ── Petroleum Operations (Milestone 5) ──────────────────────────────────────
   ...perms('petroleum', ['setup.view', 'setup.manage', 'reports.view', 'dashboard.view']),

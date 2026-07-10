@@ -23,6 +23,7 @@ export type ReportSector =
   | 'AGRICULTURE'
   | 'CONSTRUCTION'
   | 'LOGISTICS'
+  | 'RECORDS_BOOK'
   | 'BI';
 
 export type ReportScope = 'GROUP' | 'COMPANY' | 'DIVISION';
@@ -85,6 +86,7 @@ const SECTOR_OWNERS: Record<ReportSector, string> = {
   AGRICULTURE: 'Agriculture Operations',
   CONSTRUCTION: 'Construction Operations',
   LOGISTICS: 'Logistics Operations',
+  RECORDS_BOOK: 'Records Book Control',
   BI: 'Data and Analytics',
 };
 
@@ -119,7 +121,7 @@ function inferLifecycleStatus(entry: CatalogEntry, reportType: ReportType): Repo
 function inferSecurity(entry: CatalogEntry, reportType: ReportType): SecurityClassification {
   if (reportType === 'AUDIT' || reportType === 'COMPLIANCE') return 'RESTRICTED';
   if (entry.sector === 'HR' || entry.sector === 'FINANCE') return 'SENSITIVE';
-  if (entry.sector === 'BI') return 'CONFIDENTIAL';
+  if (entry.sector === 'BI' || entry.sector === 'RECORDS_BOOK') return 'CONFIDENTIAL';
   return 'INTERNAL';
 }
 
@@ -174,6 +176,7 @@ function inferDrillPaths(entry: CatalogEntry, reportType: ReportType): string[] 
   if (entry.sector === 'OPERATIONS') return ['Summary', 'Branch or location', 'Product or order', 'Source transaction'];
   if (entry.sector === 'WESTSIDES') return ['Summary', 'Customer or product', 'Invoice or order', 'Payment or delivery'];
   if (entry.sector === 'PETROLEUM') return ['Summary', 'Station or shift', 'Tank or sale', 'Reconciliation record'];
+  if (entry.sector === 'RECORDS_BOOK') return ['Summary', 'Date or grouping', 'Manual source record'];
   if (reportType === 'AUDIT' || reportType === 'COMPLIANCE') return ['Finding', 'Entity', 'User action', 'Evidence'];
   return ['Summary', 'Dimension', 'Record', 'Audit trail'];
 }
@@ -639,6 +642,85 @@ export const REPORTS_CATALOG: CatalogEntry[] = [
     permission: 'profit.audit',
     apiPath: '/profit/below-cost-attempts',
     frontendPath: '/operations/profit',
+  },
+
+  // ── RECORDS BOOK ─────────────────────────────────────────────────────────
+  {
+    id: 'record-book.daily-sales',
+    sector: 'RECORDS_BOOK',
+    category: 'Sales',
+    name: 'Daily Sales Report',
+    description: 'Manual day-end sales totals with their receipt-method split.',
+    scopes: ['COMPANY', 'DIVISION'],
+    permission: 'record_book.view',
+    apiPath: '/record-book/reports/daily-sales',
+    frontendPath: '/record-book/reports?report=daily-sales',
+  },
+  {
+    id: 'record-book.receipt-methods',
+    sector: 'RECORDS_BOOK',
+    category: 'Sales',
+    name: 'Sales by Receipt Method',
+    description: 'Manual sales grouped by cash, mobile money, bank, card, and other receipts.',
+    scopes: ['COMPANY', 'DIVISION'],
+    permission: 'record_book.view',
+    apiPath: '/record-book/reports/receipt-methods',
+    frontendPath: '/record-book/reports?report=receipt-methods',
+  },
+  {
+    id: 'record-book.expenses-by-category',
+    sector: 'RECORDS_BOOK',
+    category: 'Money Out',
+    name: 'Expenses by Category',
+    description: 'Manual money-out totals grouped by Records Book category.',
+    scopes: ['COMPANY', 'DIVISION'],
+    permission: 'record_book.view',
+    apiPath: '/record-book/reports/expenses-by-category',
+    frontendPath: '/record-book/reports?report=expenses-by-category',
+  },
+  {
+    id: 'record-book.expenses-by-payee',
+    sector: 'RECORDS_BOOK',
+    category: 'Money Out',
+    name: 'Expenses by Payee',
+    description: 'Manual money-out totals grouped by the person or organization paid.',
+    scopes: ['COMPANY', 'DIVISION'],
+    permission: 'record_book.view',
+    apiPath: '/record-book/reports/expenses-by-payee',
+    frontendPath: '/record-book/reports?report=expenses-by-payee',
+  },
+  {
+    id: 'record-book.net-movement',
+    sector: 'RECORDS_BOOK',
+    category: 'Movement',
+    name: 'Daily Net Movement',
+    description: 'Manual daily sales less manual money out.',
+    scopes: ['COMPANY', 'DIVISION'],
+    permission: 'record_book.view',
+    apiPath: '/record-book/reports/net-movement',
+    frontendPath: '/record-book/reports?report=net-movement',
+  },
+  {
+    id: 'record-book.branch-comparison',
+    sector: 'RECORDS_BOOK',
+    category: 'Movement',
+    name: 'Records Book Branch Comparison',
+    description: 'Manual recorded sales, expenses, and net movement compared by branch.',
+    scopes: ['COMPANY', 'DIVISION'],
+    permission: 'record_book.view',
+    apiPath: '/record-book/reports/branch-comparison',
+    frontendPath: '/record-book/reports?report=branch-comparison',
+  },
+  {
+    id: 'record-book.monthly-trend',
+    sector: 'RECORDS_BOOK',
+    category: 'Trend',
+    name: 'Monthly Sales and Expense Trend',
+    description: 'Monthly movement of manual recorded sales, expenses, and net position.',
+    scopes: ['COMPANY', 'DIVISION'],
+    permission: 'record_book.view',
+    apiPath: '/record-book/reports/monthly-trend',
+    frontendPath: '/record-book/reports?report=monthly-trend',
   },
 
   // ── PETROLEUM ────────────────────────────────────────────────────────────

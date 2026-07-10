@@ -33,6 +33,7 @@ import {
 } from './dto/record-book.dto';
 
 const EPSILON = 0.005;
+const EXPORT_LIMIT = 50_000;
 
 function toNumber(value: Prisma.Decimal | number | string | null | undefined) {
   if (value === null || value === undefined) return 0;
@@ -156,6 +157,13 @@ export class RecordBookService {
 
   async findDailySale(id: string, user: AuthUser) {
     const record = await this.getDailySale(id, user, AccessLevel.READ);
+    await this.auditLogs.log({
+      action: 'RECORD_BOOK_DAILY_SALE_VIEW',
+      entityType: 'RecordBookDailySale',
+      entityId: record.id,
+      userId: user.id,
+      companyId: record.companyId,
+    });
     return this.serializeDailySale(record);
   }
 
@@ -262,6 +270,56 @@ export class RecordBookService {
     return this.serializeDailySale(record);
   }
 
+  async removeDailySale(id: string, user: AuthUser) {
+    const existing = await this.getDailySale(id, user, AccessLevel.WRITE);
+    if (existing.status !== RecordBookStatus.DRAFT) {
+      throw new BadRequestException('Only draft daily sales can be deleted');
+    }
+    await this.prisma.recordBookDailySale.update({
+      where: { id },
+      data: { deletedAt: new Date(), updatedById: user.id },
+    });
+    await this.auditLogs.log({
+      action: 'RECORD_BOOK_DAILY_SALE_DELETE',
+      entityType: 'RecordBookDailySale',
+      entityId: id,
+      userId: user.id,
+      companyId: existing.companyId,
+      oldValue: existing as any,
+      severity: 'HIGH' as any,
+    });
+    return { success: true };
+  }
+
+  async restoreDailySale(id: string, user: AuthUser) {
+    const existing = await this.getDailySale(id, user, AccessLevel.WRITE, true);
+    if (existing.status !== RecordBookStatus.DRAFT) {
+      throw new BadRequestException('Only deleted draft daily sales can be restored');
+    }
+    await this.assertNoDuplicateDailySale({
+      companyId: existing.companyId,
+      branchId: existing.branchId,
+      recordDate: existing.recordDate,
+      currency: existing.currency,
+      ignoreId: existing.id,
+    });
+    const record = await this.prisma.recordBookDailySale.update({
+      where: { id },
+      data: { deletedAt: null, updatedById: user.id },
+      include: this.dailySaleInclude(),
+    });
+    await this.auditLogs.log({
+      action: 'RECORD_BOOK_DAILY_SALE_RESTORE',
+      entityType: 'RecordBookDailySale',
+      entityId: id,
+      userId: user.id,
+      companyId: record.companyId,
+      newValue: record as any,
+      severity: 'HIGH' as any,
+    });
+    return this.serializeDailySale(record);
+  }
+
   async finalizeDailySale(id: string, user: AuthUser) {
     const existing = await this.getDailySale(id, user, AccessLevel.WRITE);
     if (existing.status !== RecordBookStatus.DRAFT) {
@@ -359,6 +417,13 @@ export class RecordBookService {
 
   async findExpense(id: string, user: AuthUser) {
     const record = await this.getExpense(id, user, AccessLevel.READ);
+    await this.auditLogs.log({
+      action: 'RECORD_BOOK_EXPENSE_VIEW',
+      entityType: 'RecordBookExpense',
+      entityId: record.id,
+      userId: user.id,
+      companyId: record.companyId,
+    });
     return this.serializeExpense(record);
   }
 
@@ -442,6 +507,46 @@ export class RecordBookService {
     return this.serializeExpense(record);
   }
 
+  async removeExpense(id: string, user: AuthUser) {
+    const existing = await this.getExpense(id, user, AccessLevel.WRITE);
+    if (existing.status !== RecordBookStatus.DRAFT) {
+      throw new BadRequestException('Only draft money-out records can be deleted');
+    }
+    await this.prisma.recordBookExpense.update({
+      where: { id },
+      data: { deletedAt: new Date(), updatedById: user.id },
+    });
+    await this.auditLogs.log({
+      action: 'RECORD_BOOK_EXPENSE_DELETE',
+      entityType: 'RecordBookExpense',
+      entityId: id,
+      userId: user.id,
+      companyId: existing.companyId,
+      oldValue: existing as any,
+      severity: 'HIGH' as any,
+    });
+    return { success: true };
+  }
+
+  async restoreExpense(id: string, user: AuthUser) {
+    const existing = await this.getExpense(id, user, AccessLevel.WRITE, true);
+    const record = await this.prisma.recordBookExpense.update({
+      where: { id },
+      data: { deletedAt: null, updatedById: user.id },
+      include: this.expenseInclude(),
+    });
+    await this.auditLogs.log({
+      action: 'RECORD_BOOK_EXPENSE_RESTORE',
+      entityType: 'RecordBookExpense',
+      entityId: id,
+      userId: user.id,
+      companyId: record.companyId,
+      newValue: record as any,
+      severity: 'HIGH' as any,
+    });
+    return this.serializeExpense(record);
+  }
+
   async finalizeExpense(id: string, user: AuthUser) {
     const existing = await this.getExpense(id, user, AccessLevel.WRITE);
     if (existing.status !== RecordBookStatus.DRAFT) {
@@ -518,7 +623,7 @@ export class RecordBookService {
     const { page = 1, limit = 100, companyId, search } = query;
     const skip = (page - 1) * limit;
     const where: Prisma.RecordBookExpenseCategoryWhereInput = {
-      deletedAt: null,
+      deletedAt: query.recordState === 'DELETED' ? { not: null } : null,
       ...(await this.companyScope.companyWhereFor(user, companyId)),
     };
     if (search) {
@@ -535,6 +640,18 @@ export class RecordBookService {
       this.prisma.recordBookExpenseCategory.count({ where }),
     ]);
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  async findCategory(id: string, user: AuthUser) {
+    const record = await this.getCategory(id, user, AccessLevel.READ);
+    await this.auditLogs.log({
+      action: 'RECORD_BOOK_CATEGORY_VIEW',
+      entityType: 'RecordBookExpenseCategory',
+      entityId: record.id,
+      userId: user.id,
+      companyId: record.companyId,
+    });
+    return record;
   }
 
   async createCategory(dto: CreateRecordBookCategoryDto, user: AuthUser) {
@@ -611,12 +728,54 @@ export class RecordBookService {
     return { success: true };
   }
 
+  async restoreCategory(id: string, user: AuthUser) {
+    const existing = await this.getCategory(id, user, AccessLevel.WRITE, true);
+    const record = await this.prisma.recordBookExpenseCategory.update({
+      where: { id },
+      data: { deletedAt: null, isActive: true },
+    });
+    await this.auditLogs.log({
+      action: 'RECORD_BOOK_CATEGORY_RESTORE',
+      entityType: 'RecordBookExpenseCategory',
+      entityId: record.id,
+      userId: user.id,
+      companyId: record.companyId,
+      oldValue: existing as any,
+      newValue: record as any,
+      severity: 'HIGH' as any,
+    });
+    return record;
+  }
+
   async export(query: ExportRecordBookDto, user: AuthUser, res: Response) {
     const format = query.format ?? 'json';
     const type = query.type ?? 'combined';
     const rows = await this.exportRows(type, query, user);
     const stamp = new Date().toISOString().slice(0, 10);
     const fileStem = safeFileStem(`record-book-${type}-${stamp}`);
+
+    await this.auditLogs.log({
+      action: 'RECORD_BOOK_EXPORT',
+      entityType: 'RecordBookExport',
+      entityId: type,
+      userId: user.id,
+      companyId: query.companyId,
+      newValue: {
+        type,
+        format,
+        rowCount: rows.length,
+        filters: {
+          companyId: query.companyId,
+          divisionId: query.divisionId,
+          branchId: query.branchId,
+          dateFrom: query.dateFrom,
+          dateTo: query.dateTo,
+          status: query.status,
+          currency: query.currency,
+        },
+      } as any,
+      severity: 'MEDIUM' as any,
+    });
 
     if (format === 'json') {
       res.setHeader('Content-Type', 'application/json');
@@ -661,10 +820,12 @@ export class RecordBookService {
       this.salesExportRows(query, user),
       this.expenseExportRows(query, user),
     ]);
-    return [
+    const rows = [
       ...sales.map((row) => ({ recordType: 'SALE_RECEIPT', ...row, moneyIn: row.receiptAmount, moneyOut: '' })),
       ...expenses.map((row) => ({ recordType: 'EXPENSE', ...row, moneyIn: '', moneyOut: row.amount })),
     ].sort((a, b) => String(b.recordDate).localeCompare(String(a.recordDate)));
+    if (rows.length > EXPORT_LIMIT) this.throwExportLimit();
+    return rows;
   }
 
   private async salesExportRows(query: QueryRecordBookDto, user: AuthUser) {
@@ -673,9 +834,9 @@ export class RecordBookService {
       where,
       include: this.dailySaleInclude(),
       orderBy: [{ recordDate: 'desc' }, { createdAt: 'desc' }],
-      take: 5000,
+      take: EXPORT_LIMIT + 1,
     });
-    return rows.flatMap((sale) =>
+    const exportRows = rows.flatMap((sale) =>
       sale.receipts.map((receipt) => ({
         recordDate: sale.recordDate.toISOString().slice(0, 10),
         company: sale.company.name,
@@ -691,6 +852,8 @@ export class RecordBookService {
         notes: receipt.notes ?? sale.notes ?? '',
       })),
     );
+    if (exportRows.length > EXPORT_LIMIT) this.throwExportLimit();
+    return exportRows;
   }
 
   private async expenseExportRows(query: QueryRecordBookDto, user: AuthUser) {
@@ -699,8 +862,9 @@ export class RecordBookService {
       where,
       include: this.expenseInclude(),
       orderBy: [{ recordDate: 'desc' }, { createdAt: 'desc' }],
-      take: 5000,
+      take: EXPORT_LIMIT + 1,
     });
+    if (rows.length > EXPORT_LIMIT) this.throwExportLimit();
     return rows.map((expense) => ({
       recordDate: expense.recordDate.toISOString().slice(0, 10),
       company: expense.company.name,
@@ -725,7 +889,7 @@ export class RecordBookService {
     opts: { excludeVoidedByDefault?: boolean } = {},
   ): Promise<Prisma.RecordBookDailySaleWhereInput> {
     const where: Prisma.RecordBookDailySaleWhereInput = {
-      deletedAt: null,
+      deletedAt: query.recordState === 'DELETED' ? { not: null } : null,
       ...(await this.companyScope.companyWhereFor(user, query.companyId)),
     };
     if (query.divisionId) where.divisionId = query.divisionId;
@@ -738,6 +902,7 @@ export class RecordBookService {
       if (query.dateFrom) where.recordDate.gte = dateRangeStart(query.dateFrom);
       if (query.dateTo) where.recordDate.lte = dateRangeEnd(query.dateTo);
     }
+    if (query.receiptType) where.receipts = { some: { receiptType: query.receiptType } };
     if (query.search) {
       where.OR = [
         { notes: { contains: query.search, mode: 'insensitive' } },
@@ -754,13 +919,14 @@ export class RecordBookService {
     opts: { excludeVoidedByDefault?: boolean } = {},
   ): Promise<Prisma.RecordBookExpenseWhereInput> {
     const where: Prisma.RecordBookExpenseWhereInput = {
-      deletedAt: null,
+      deletedAt: query.recordState === 'DELETED' ? { not: null } : null,
       ...(await this.companyScope.companyWhereFor(user, query.companyId)),
     };
     if (query.divisionId) where.divisionId = query.divisionId;
     if (query.branchId) where.branchId = query.branchId;
     if (query.expenseCategoryId) where.expenseCategoryId = query.expenseCategoryId;
     if (query.currency) where.currency = query.currency;
+    if (query.paymentMethod) where.paymentMethod = query.paymentMethod;
     if (query.status) where.status = query.status;
     else if (opts.excludeVoidedByDefault) where.status = { not: RecordBookStatus.VOIDED };
     if (query.dateFrom || query.dateTo) {
@@ -848,6 +1014,12 @@ export class RecordBookService {
     }
   }
 
+  private throwExportLimit(): never {
+    throw new BadRequestException(
+      `This export matches more than ${EXPORT_LIMIT.toLocaleString()} rows. Narrow the date or scope filters.`,
+    );
+  }
+
   private async assertNoDuplicateDailySale(input: {
     companyId: string;
     branchId?: string | null;
@@ -904,9 +1076,14 @@ export class RecordBookService {
     }
   }
 
-  private async getDailySale(id: string, user: AuthUser, minimum: AccessLevel) {
+  private async getDailySale(
+    id: string,
+    user: AuthUser,
+    minimum: AccessLevel,
+    deleted = false,
+  ) {
     const record = await this.prisma.recordBookDailySale.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: deleted ? { not: null } : null },
       include: this.dailySaleInclude(),
     });
     if (!record) throw new NotFoundException('Records Book daily sale not found');
@@ -914,9 +1091,14 @@ export class RecordBookService {
     return record;
   }
 
-  private async getExpense(id: string, user: AuthUser, minimum: AccessLevel) {
+  private async getExpense(
+    id: string,
+    user: AuthUser,
+    minimum: AccessLevel,
+    deleted = false,
+  ) {
     const record = await this.prisma.recordBookExpense.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: deleted ? { not: null } : null },
       include: this.expenseInclude(),
     });
     if (!record) throw new NotFoundException('Records Book expense not found');
@@ -924,9 +1106,14 @@ export class RecordBookService {
     return record;
   }
 
-  private async getCategory(id: string, user: AuthUser, minimum: AccessLevel) {
+  private async getCategory(
+    id: string,
+    user: AuthUser,
+    minimum: AccessLevel,
+    deleted = false,
+  ) {
     const record = await this.prisma.recordBookExpenseCategory.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: deleted ? { not: null } : null },
     });
     if (!record) throw new NotFoundException('Records Book category not found');
     await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);

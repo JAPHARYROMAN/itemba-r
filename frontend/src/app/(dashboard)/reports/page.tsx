@@ -17,7 +17,7 @@ import {
 import { Card, PageHeader, SkeletonCardGrid, showToast } from '@/components/ui';
 import { backendGet } from '@/lib/api-client';
 
-type ReportSector = 'FINANCE' | 'HR' | 'OPERATIONS' | 'WESTSIDES' | 'COMPLIANCE';
+type ReportSector = 'FINANCE' | 'HR' | 'OPERATIONS' | 'WESTSIDES' | 'COMPLIANCE' | 'RECORDS_BOOK';
 
 type ReportScope = 'GROUP' | 'COMPANY' | 'DIVISION';
 type ReportType =
@@ -71,6 +71,7 @@ const SECTOR_LABELS: Record<ReportSector, string> = {
   OPERATIONS: 'Operations',
   WESTSIDES: 'Westsides',
   COMPLIANCE: 'Compliance',
+  RECORDS_BOOK: 'Records Book',
 };
 
 const REPORT_TYPE_LABELS: Record<ReportType, string> = {

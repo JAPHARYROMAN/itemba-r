@@ -28,6 +28,12 @@ import {
 } from '@/lib/api-client';
 import { cellToString, downloadTextFile, rowsToCsv } from '@/lib/report-export';
 import { downloadTablePdf } from '@/lib/export-download';
+import {
+  type ConfirmAction,
+  RecordBookConfirmDialog,
+  RecordBookNav,
+  RecordBookPagination,
+} from './record-book-ui';
 
 type Tab = 'dashboard' | 'daily-sales' | 'expenses' | 'categories';
 type Status = 'DRAFT' | 'FINALIZED' | 'VOIDED';
@@ -191,13 +197,6 @@ function StatusPill({ status }: { status: Status }) {
       {status}
     </span>
   );
-}
-
-function pagePath(tab: Tab) {
-  if (tab === 'dashboard') return '/record-book';
-  if (tab === 'daily-sales') return '/record-book/daily-sales';
-  if (tab === 'expenses') return '/record-book/expenses';
-  return '/record-book/categories';
 }
 
 function buildFilterQuery(filters: Filters, extras?: Record<string, string | number | undefined>) {
@@ -577,6 +576,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   const canView = hasPermission('record_book.view');
   const canCreate = hasPermission('record_book.create');
   const canUpdate = hasPermission('record_book.update') || canCreate;
+  const canDelete = hasPermission('record_book.delete');
   const canFinalize = hasPermission('record_book.finalize');
   const canVoid = hasPermission('record_book.void');
   const canAdmin = hasPermission('record_book.admin');
@@ -597,6 +597,12 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   const [expenseModal, setExpenseModal] = useState<RecordExpense | null | 'new'>(null);
   const [categoryModal, setCategoryModal] = useState<Category | null | 'new'>(null);
   const [exporting, setExporting] = useState('');
+  const [salesPage, setSalesPage] = useState(1);
+  const [expensePage, setExpensePage] = useState(1);
+  const [categoryPageNumber, setCategoryPageNumber] = useState(1);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
+  const [confirmReason, setConfirmReason] = useState('');
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   const scopedDivisions = useMemo(
     () => divisions.filter((d) => !filters.companyId || d.companyId === filters.companyId),
@@ -624,26 +630,38 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
     setLoading(true);
     setError('');
     try {
-      const query = buildFilterQuery(filters, { limit: 100 });
-      const [summaryData, salesData, expenseData, categoryData] = await Promise.all([
+      const query = buildFilterQuery(filters);
+      const [summaryData, salesData, expenseData, categoryData, categoryOptions] = await Promise.all([
         backendGet<Summary>('/record-book/summary', { query }),
-        backendPage<DailySale>('/record-book/daily-sales', { query }),
-        backendPage<RecordExpense>('/record-book/expenses', { query }),
+        backendPage<DailySale>('/record-book/daily-sales', {
+          query: { ...query, page: salesPage, limit: 20 },
+        }),
+        backendPage<RecordExpense>('/record-book/expenses', {
+          query: { ...query, page: expensePage, limit: 20 },
+        }),
         backendPage<Category>('/record-book/expense-categories', {
-          query: { companyId: filters.companyId, search: filters.search, limit: 500 },
+          query: {
+            companyId: filters.companyId,
+            search: filters.search,
+            page: categoryPageNumber,
+            limit: 20,
+          },
+        }),
+        backendList<Category>('/record-book/expense-categories', {
+          query: { companyId: filters.companyId, limit: 500 },
         }),
       ]);
       setSummary(summaryData);
       setSales(salesData);
       setExpenses(expenseData);
       setCategoryPage(categoryData);
-      setCategories(categoryData.data);
+      setCategories(categoryOptions);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load Records Book');
     } finally {
       setLoading(false);
     }
-  }, [canView, filters]);
+  }, [canView, categoryPageNumber, expensePage, filters, salesPage]);
 
   useEffect(() => {
     loadRefs().catch((err) => setError(err instanceof Error ? err.message : 'Could not load scope data'));
@@ -653,6 +671,12 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    setSalesPage(1);
+    setExpensePage(1);
+    setCategoryPageNumber(1);
+  }, [filters.companyId, filters.divisionId, filters.branchId, filters.dateFrom, filters.dateTo, filters.status, filters.search]);
+
   const refreshAfterModal = async () => {
     setSaleModal(null);
     setExpenseModal(null);
@@ -660,15 +684,25 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
     await loadData();
   };
 
-  const patchAction = async (path: string, body?: unknown) => {
-    await backendPatch(path, body ?? {});
-    await loadData();
-  };
-
-  const handleVoid = async (path: string) => {
-    const reason = window.prompt('Reason for voiding this record');
-    if (reason === null) return;
-    await patchAction(path, { reason });
+  const requestAction = (action: Omit<ConfirmAction, 'onConfirm'> & { execute: (reason?: string) => Promise<unknown> }) => {
+    setConfirmReason('');
+    setConfirmAction({
+      ...action,
+      onConfirm: async (reason) => {
+        setConfirmBusy(true);
+        setError('');
+        try {
+          await action.execute(reason);
+          await loadData();
+          setConfirmAction(null);
+          setConfirmReason('');
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Action failed');
+        } finally {
+          setConfirmBusy(false);
+        }
+      },
+    });
   };
 
   const exportRowsForPdf = async (type: 'sales' | 'expenses' | 'combined') => {
@@ -696,6 +730,16 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
           columns,
           rows: rows.map((row) => columns.map((column) => cellToString(row[column]))),
           baseName: `record-book-${type}`,
+        });
+        await backendPost('/record-book/export-audit', {
+          scope: 'raw',
+          format: 'pdf',
+          rowCount: rows.length,
+          companyId: filters.companyId || undefined,
+          divisionId: filters.divisionId || undefined,
+          branchId: filters.branchId || undefined,
+          dateFrom: filters.dateFrom || undefined,
+          dateTo: filters.dateTo || undefined,
         });
       } else if (format === 'json') {
         const rows = await exportRowsForPdf(type);
@@ -736,24 +780,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
         }
       />
 
-      <div className="mb-5 flex flex-wrap gap-2">
-        {([
-          ['dashboard', 'Dashboard'],
-          ['daily-sales', 'Daily Sales'],
-          ['expenses', 'Money Out'],
-          ['categories', 'Categories'],
-        ] as Array<[Tab, string]>).map(([tab, label]) => (
-          <Link
-            key={tab}
-            href={pagePath(tab)}
-            className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
-              initialTab === tab ? 'border-blue-500 bg-blue-600 text-white' : 'border-slate-700 text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            {label}
-          </Link>
-        ))}
-      </div>
+      <RecordBookNav />
 
       <Card className="mb-5">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
@@ -857,10 +884,12 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                           <td className="px-3 py-3"><StatusPill status={sale.status} /></td>
                           <td className="px-3 py-3">
                             <div className="flex justify-end gap-2">
+                              <Link href={`/record-book/daily-sales/${sale.id}`} className="inline-flex items-center rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800">View</Link>
                               {canUpdate && sale.status === 'DRAFT' && <Btn size="xs" variant="secondary" onClick={() => setSaleModal(sale)}>Edit</Btn>}
-                              {canFinalize && sale.status === 'DRAFT' && <Btn size="xs" variant="success" onClick={() => patchAction(`/record-book/daily-sales/${sale.id}/finalize`)}>Finalize</Btn>}
-                              {canAdmin && sale.status === 'FINALIZED' && <Btn size="xs" variant="warning" onClick={() => patchAction(`/record-book/daily-sales/${sale.id}/reopen`)}>Reopen</Btn>}
-                              {canVoid && sale.status !== 'VOIDED' && <Btn size="xs" variant="danger" onClick={() => handleVoid(`/record-book/daily-sales/${sale.id}/void`)}>Void</Btn>}
+                              {canFinalize && sale.status === 'DRAFT' && <Btn size="xs" variant="success" onClick={() => requestAction({ title: 'Finalize daily sales', description: 'Finalized records become read-only until an administrator reopens them.', confirmLabel: 'Finalize', tone: 'success', execute: () => backendPatch(`/record-book/daily-sales/${sale.id}/finalize`, {}) })}>Finalize</Btn>}
+                              {canAdmin && sale.status === 'FINALIZED' && <Btn size="xs" variant="warning" onClick={() => requestAction({ title: 'Reopen daily sales', description: 'This returns the record to Draft so it can be corrected.', confirmLabel: 'Reopen', tone: 'warning', execute: () => backendPatch(`/record-book/daily-sales/${sale.id}/reopen`, {}) })}>Reopen</Btn>}
+                              {canVoid && sale.status !== 'VOIDED' && <Btn size="xs" variant="danger" onClick={() => requestAction({ title: 'Void daily sales', description: 'The record remains in the audit history but is excluded from active totals.', confirmLabel: 'Void record', tone: 'danger', requireReason: true, execute: (reason) => backendPatch(`/record-book/daily-sales/${sale.id}/void`, { reason }) })}>Void</Btn>}
+                              {canDelete && sale.status === 'DRAFT' && <Btn size="xs" variant="danger" onClick={() => requestAction({ title: 'Delete draft daily sales', description: 'The draft will move to Trash and can be restored by an administrator.', confirmLabel: 'Move to Trash', tone: 'danger', execute: () => backendDelete(`/record-book/daily-sales/${sale.id}`) })}>Delete</Btn>}
                             </div>
                           </td>
                         </tr>
@@ -869,6 +898,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                   </table>
                 </div>
               )}
+              {sales && <RecordBookPagination page={sales.page} totalPages={sales.totalPages} total={sales.total} onPageChange={setSalesPage} />}
             </Card>
           )}
 
@@ -907,10 +937,12 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                           <td className="px-3 py-3"><StatusPill status={expense.status} /></td>
                           <td className="px-3 py-3">
                             <div className="flex justify-end gap-2">
+                              <Link href={`/record-book/expenses/${expense.id}`} className="inline-flex items-center rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800">View</Link>
                               {canUpdate && expense.status === 'DRAFT' && <Btn size="xs" variant="secondary" onClick={() => setExpenseModal(expense)}>Edit</Btn>}
-                              {canFinalize && expense.status === 'DRAFT' && <Btn size="xs" variant="success" onClick={() => patchAction(`/record-book/expenses/${expense.id}/finalize`)}>Finalize</Btn>}
-                              {canAdmin && expense.status === 'FINALIZED' && <Btn size="xs" variant="warning" onClick={() => patchAction(`/record-book/expenses/${expense.id}/reopen`)}>Reopen</Btn>}
-                              {canVoid && expense.status !== 'VOIDED' && <Btn size="xs" variant="danger" onClick={() => handleVoid(`/record-book/expenses/${expense.id}/void`)}>Void</Btn>}
+                              {canFinalize && expense.status === 'DRAFT' && <Btn size="xs" variant="success" onClick={() => requestAction({ title: 'Finalize money out', description: 'Finalized records become read-only until an administrator reopens them.', confirmLabel: 'Finalize', tone: 'success', execute: () => backendPatch(`/record-book/expenses/${expense.id}/finalize`, {}) })}>Finalize</Btn>}
+                              {canAdmin && expense.status === 'FINALIZED' && <Btn size="xs" variant="warning" onClick={() => requestAction({ title: 'Reopen money out', description: 'This returns the record to Draft so it can be corrected.', confirmLabel: 'Reopen', tone: 'warning', execute: () => backendPatch(`/record-book/expenses/${expense.id}/reopen`, {}) })}>Reopen</Btn>}
+                              {canVoid && expense.status !== 'VOIDED' && <Btn size="xs" variant="danger" onClick={() => requestAction({ title: 'Void money-out record', description: 'The record remains in the audit history but is excluded from active totals.', confirmLabel: 'Void record', tone: 'danger', requireReason: true, execute: (reason) => backendPatch(`/record-book/expenses/${expense.id}/void`, { reason }) })}>Void</Btn>}
+                              {canDelete && expense.status === 'DRAFT' && <Btn size="xs" variant="danger" onClick={() => requestAction({ title: 'Delete draft money out', description: 'The draft will move to Trash and can be restored by an administrator.', confirmLabel: 'Move to Trash', tone: 'danger', execute: () => backendDelete(`/record-book/expenses/${expense.id}`) })}>Delete</Btn>}
                             </div>
                           </td>
                         </tr>
@@ -919,6 +951,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                   </table>
                 </div>
               )}
+              {expenses && <RecordBookPagination page={expenses.page} totalPages={expenses.totalPages} total={expenses.total} onPageChange={setExpensePage} />}
             </Card>
           )}
 
@@ -954,7 +987,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                           <td className="px-3 py-3">
                             <div className="flex justify-end gap-2">
                               {canUpdate && <Btn size="xs" variant="secondary" onClick={() => setCategoryModal(category)}>Edit</Btn>}
-                              {canUpdate && <Btn size="xs" variant="danger" onClick={async () => { await backendDelete(`/record-book/expense-categories/${category.id}`); await loadData(); }}>Delete</Btn>}
+                              {canDelete && <Btn size="xs" variant="danger" onClick={() => requestAction({ title: 'Delete category', description: 'The category moves to Trash. Existing expense history keeps its category name.', confirmLabel: 'Move to Trash', tone: 'danger', execute: () => backendDelete(`/record-book/expense-categories/${category.id}`) })}>Delete</Btn>}
                             </div>
                           </td>
                         </tr>
@@ -963,6 +996,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                   </table>
                 </div>
               )}
+              {categoryPage && <RecordBookPagination page={categoryPage.page} totalPages={categoryPage.totalPages} total={categoryPage.total} onPageChange={setCategoryPageNumber} />}
             </Card>
           )}
         </>
@@ -1000,6 +1034,16 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
           onSaved={refreshAfterModal}
         />
       )}
+      <RecordBookConfirmDialog
+        action={confirmAction}
+        reason={confirmReason}
+        onReasonChange={setConfirmReason}
+        busy={confirmBusy}
+        onClose={() => {
+          setConfirmAction(null);
+          setConfirmReason('');
+        }}
+      />
     </div>
   );
 }

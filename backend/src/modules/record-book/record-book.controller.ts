@@ -6,12 +6,16 @@ import {
 } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { RecordBookService } from './record-book.service';
+import { RecordBookReportsService } from './record-book-reports.service';
 import {
   CreateDailySaleDto,
   CreateRecordBookCategoryDto,
   CreateRecordBookExpenseDto,
   ExportRecordBookDto,
+  ExportRecordBookReportDto,
   QueryRecordBookDto,
+  QueryRecordBookReportDto,
+  RecordBookExportAuditDto,
   UpdateDailySaleDto,
   UpdateRecordBookCategoryDto,
   UpdateRecordBookExpenseDto,
@@ -20,7 +24,10 @@ import {
 
 @Controller('record-book')
 export class RecordBookController {
-  constructor(private readonly service: RecordBookService) {}
+  constructor(
+    private readonly service: RecordBookService,
+    private readonly reports: RecordBookReportsService,
+  ) {}
 
   @Get('summary')
   @RequirePermissions('record_book.view')
@@ -36,6 +43,33 @@ export class RecordBookController {
     @Res() res: Response,
   ) {
     return this.service.export(query, user, res);
+  }
+
+  @Post('export-audit')
+  @RequirePermissions('record_book.export')
+  auditExport(@Body() dto: RecordBookExportAuditDto, @CurrentUser() user: AuthUser) {
+    return this.reports.auditExport(dto, user);
+  }
+
+  @Get('reports/:reportKey/export')
+  @RequirePermissions('record_book.export')
+  exportReport(
+    @Param('reportKey') reportKey: string,
+    @Query() query: ExportRecordBookReportDto,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    return this.reports.export(reportKey, query, user, res);
+  }
+
+  @Get('reports/:reportKey')
+  @RequirePermissions('record_book.view')
+  runReport(
+    @Param('reportKey') reportKey: string,
+    @Query() query: QueryRecordBookReportDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.reports.run(reportKey, query, user);
   }
 
   @Get('daily-sales')
@@ -64,6 +98,18 @@ export class RecordBookController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.updateDailySale(id, dto, user);
+  }
+
+  @Delete('daily-sales/:id')
+  @RequirePermissions('record_book.delete')
+  removeDailySale(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.removeDailySale(id, user);
+  }
+
+  @Patch('daily-sales/:id/restore')
+  @RequirePermissions('record_book.admin')
+  restoreDailySale(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.restoreDailySale(id, user);
   }
 
   @Patch('daily-sales/:id/finalize')
@@ -116,6 +162,18 @@ export class RecordBookController {
     return this.service.updateExpense(id, dto, user);
   }
 
+  @Delete('expenses/:id')
+  @RequirePermissions('record_book.delete')
+  removeExpense(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.removeExpense(id, user);
+  }
+
+  @Patch('expenses/:id/restore')
+  @RequirePermissions('record_book.admin')
+  restoreExpense(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.restoreExpense(id, user);
+  }
+
   @Patch('expenses/:id/finalize')
   @RequirePermissions('record_book.finalize')
   finalizeExpense(@Param('id') id: string, @CurrentUser() user: AuthUser) {
@@ -144,6 +202,12 @@ export class RecordBookController {
     return this.service.findCategories(query, user);
   }
 
+  @Get('expense-categories/:id')
+  @RequirePermissions('record_book.view')
+  findCategory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findCategory(id, user);
+  }
+
   @Post('expense-categories')
   @RequirePermissions('record_book.create')
   createCategory(@Body() dto: CreateRecordBookCategoryDto, @CurrentUser() user: AuthUser) {
@@ -164,5 +228,11 @@ export class RecordBookController {
   @RequirePermissions('record_book.update')
   removeCategory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.removeCategory(id, user);
+  }
+
+  @Patch('expense-categories/:id/restore')
+  @RequirePermissions('record_book.admin')
+  restoreCategory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.restoreCategory(id, user);
   }
 }

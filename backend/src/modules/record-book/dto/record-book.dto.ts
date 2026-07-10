@@ -32,8 +32,58 @@ export class QueryRecordBookDto {
   @IsOptional() @IsString() search?: string;
   @IsOptional() @IsString() dateFrom?: string;
   @IsOptional() @IsString() dateTo?: string;
+  @IsOptional() @IsIn(['ACTIVE', 'DELETED']) recordState?: 'ACTIVE' | 'DELETED';
+  @IsOptional() @IsEnum(RecordBookReceiptType) receiptType?: RecordBookReceiptType;
+  @IsOptional() @IsEnum(RecordBookPaymentMethod) paymentMethod?: RecordBookPaymentMethod;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number = 1;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5000) limit?: number = 20;
+}
+
+export const RECORD_BOOK_REPORT_KEYS = [
+  'daily-sales',
+  'receipt-methods',
+  'expenses-by-category',
+  'expenses-by-payee',
+  'net-movement',
+  'branch-comparison',
+  'monthly-trend',
+] as const;
+
+export type RecordBookReportKey = (typeof RECORD_BOOK_REPORT_KEYS)[number];
+
+export class QueryRecordBookReportDto extends QueryRecordBookDto {
+  @IsOptional()
+  @IsIn(['FINALIZED', 'DRAFT', 'VOIDED', 'ACTIVE', 'ALL'])
+  reportStatus?: 'FINALIZED' | 'DRAFT' | 'VOIDED' | 'ACTIVE' | 'ALL';
+}
+
+export class ExportRecordBookReportDto extends QueryRecordBookReportDto {
+  @IsOptional()
+  @IsIn(['pdf', 'json', 'csv', 'xlsx'])
+  format?: 'pdf' | 'json' | 'csv' | 'xlsx';
+}
+
+export class RecordBookExportAuditDto {
+  @IsIn(['raw', 'report'])
+  scope!: 'raw' | 'report';
+
+  @IsOptional()
+  @IsIn(RECORD_BOOK_REPORT_KEYS)
+  reportKey?: RecordBookReportKey;
+
+  @IsIn(['pdf', 'print', 'json', 'csv', 'xlsx'])
+  format!: 'pdf' | 'print' | 'json' | 'csv' | 'xlsx';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  rowCount!: number;
+
+  @IsOptional() @IsString() companyId?: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
+  @IsOptional() @IsString() dateFrom?: string;
+  @IsOptional() @IsString() dateTo?: string;
 }
 
 export class RecordBookReceiptDto {

@@ -114,4 +114,63 @@ describe('RecordBookService', () => {
     expect(result.receipts[0].amount).toBe(1000);
     expect(auditLogs.log).toHaveBeenCalledWith(expect.objectContaining({ action: 'RECORD_BOOK_DAILY_SALE_CREATE' }));
   });
+
+  it('soft-deletes draft daily sales and keeps the audit record', async () => {
+    const update = jest.fn().mockResolvedValue({ id: 'sale-1' });
+    const record = {
+      id: 'sale-1',
+      companyId: 'company-1',
+      status: RecordBookStatus.DRAFT,
+      receipts: [],
+    };
+    const { service, auditLogs } = makeService({
+      recordBookDailySale: {
+        findFirst: jest.fn().mockResolvedValue(record),
+        update,
+      },
+    });
+
+    await expect(service.removeDailySale('sale-1', user)).resolves.toEqual({ success: true });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'sale-1' },
+      data: expect.objectContaining({ deletedAt: expect.any(Date), updatedById: user.id }),
+    }));
+    expect(auditLogs.log).toHaveBeenCalledWith(expect.objectContaining({ action: 'RECORD_BOOK_DAILY_SALE_DELETE' }));
+  });
+
+  it('does not delete finalized daily sales', async () => {
+    const { service } = makeService({
+      recordBookDailySale: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'sale-1',
+          companyId: 'company-1',
+          status: RecordBookStatus.FINALIZED,
+          receipts: [],
+        }),
+        update: jest.fn(),
+      },
+    });
+
+    await expect(service.removeDailySale('sale-1', user)).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects restoring a daily sale when its active date key is already occupied', async () => {
+    const findFirst = jest
+      .fn()
+      .mockResolvedValueOnce({
+        id: 'sale-1',
+        companyId: 'company-1',
+        branchId: 'branch-1',
+        recordDate: new Date('2026-07-09T00:00:00.000Z'),
+        currency: CurrencyCode.TZS,
+        status: RecordBookStatus.DRAFT,
+        receipts: [],
+      })
+      .mockResolvedValueOnce({ id: 'replacement-sale' });
+    const { service } = makeService({
+      recordBookDailySale: { findFirst, update: jest.fn() },
+    });
+
+    await expect(service.restoreDailySale('sale-1', user)).rejects.toBeInstanceOf(ConflictException);
+  });
 });

@@ -163,6 +163,18 @@ export const NAV: NavItem[] = [
         iconKey: 'clipboardList',
         permission: 'record_book.view',
       },
+      {
+        href: '/record-book/reports',
+        label: 'Reports',
+        iconKey: 'barChart',
+        permission: 'record_book.view',
+      },
+      {
+        href: '/record-book/trash',
+        label: 'Trash',
+        iconKey: 'clipboardList',
+        permission: 'record_book.view',
+      },
     ],
   },
   {

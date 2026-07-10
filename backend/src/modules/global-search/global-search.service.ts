@@ -931,14 +931,35 @@ export class GlobalSearchService {
       }),
     ]);
 
+    const reportPages: GlobalSearchResult[] = [
+      ['daily-sales', 'Daily Sales Report', 'Day-end sales and receipt splits'],
+      ['receipt-methods', 'Sales by Receipt Method', 'Cash, mobile money, bank, card, and other receipts'],
+      ['expenses-by-category', 'Expenses by Category', 'Money out grouped by category'],
+      ['expenses-by-payee', 'Expenses by Payee', 'Money out grouped by recipient'],
+      ['net-movement', 'Daily Net Movement', 'Recorded sales less money out'],
+      ['branch-comparison', 'Records Book Branch Comparison', 'Manual movement compared by branch'],
+      ['monthly-trend', 'Monthly Sales and Expense Trend', 'Monthly manual sales and money-out movement'],
+    ]
+      .filter(([, title, subtitle]) => `${title} ${subtitle}`.toLowerCase().includes(query.toLowerCase()))
+      .map(([key, title, subtitle]) => ({
+        id: `record-book-report-${key}`,
+        type: 'record-book-report',
+        module: 'Records Book',
+        title,
+        subtitle,
+        href: `/record-book/reports?report=${key}`,
+        badge: 'REPORT',
+      }));
+
     const results: GlobalSearchResult[] = [
+      ...reportPages,
       ...sales.map((row) => ({
         id: row.id,
         type: 'record-book-sale',
         module: 'Records Book',
         title: `Daily sales - ${row.currency} ${row.totalSalesAmount}`,
         subtitle: compactSubtitle([row.company.code, row.branch?.code, dateOnly(row.recordDate)]),
-        href: '/record-book/daily-sales',
+        href: `/record-book/daily-sales/${row.id}`,
         badge: row.status,
         date: dateOnly(row.recordDate),
       })),
@@ -953,7 +974,7 @@ export class GlobalSearchService {
           `${row.currency} ${row.amount}`,
           dateOnly(row.recordDate),
         ]),
-        href: '/record-book/expenses',
+        href: `/record-book/expenses/${row.id}`,
         badge: row.status,
         date: dateOnly(row.recordDate),
       })),

@@ -10,6 +10,8 @@
   "/hr/employees/[id]": "/hr/employees/e2e-employee",
   "/hr/payroll-runs/[id]/payslips": "/hr/payroll-runs/e2e-payroll-run/payslips",
   "/hr/payslips/[id]": "/hr/payslips/e2e-payslip",
+  "/record-book/daily-sales/[id]": "/record-book/daily-sales/e2e-daily-sale",
+  "/record-book/expenses/[id]": "/record-book/expenses/e2e-expense",
   "/operations/customers/[id]": "/operations/customers/e2e-customer",
   "/operations/products/[id]": "/operations/products/e2e-product",
   "/operations/purchase-orders/[id]": "/operations/purchase-orders/e2e-purchase-order",
