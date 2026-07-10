@@ -1328,6 +1328,7 @@ const ROLES: RoleDef[] = [
     scope: RoleScope.GROUP,
     filter: combine(
       readExport,
+      (p) => p.module === 'record_book' && readExport(p),
       inModules('companies', 'company-profiles', 'divisions', 'branches'),
       inModules(...ALL_ITEMBA_MODULES),
       inModules(
@@ -1397,7 +1398,7 @@ const ROLES: RoleDef[] = [
     filter: combine(
       groupCtrl,
       inModules('companies', 'divisions', 'branches', 'documents', 'reports', 'audit-logs'),
-      inModules(...FINANCE_MODULES, 'expenses'),
+      inModules(...FINANCE_MODULES, 'expenses', 'record_book'),
       inModules(...ACCOUNTING_ENGINE_MODULES, ...PROCUREMENT_MODULES),
       (p) => inModules(...OPERATIONS_MODULES)(p) && readExport(p),
       (p) => p.code === 'payroll.approve.finance',
