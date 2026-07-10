@@ -32,7 +32,7 @@ export class SalesOrdersController {
   }
 
   @Get('receipt-accounts')
-  @RequireAnyPermissions('pos.create', 'sales.create')
+  @RequireAnyPermissions('pos.create', 'sales.create', 'receivables.manage')
   findReceiptAccounts(@Query() query: any, @CurrentUser() user: AuthUser) {
     return this.service.findReceiptAccounts(query, user);
   }

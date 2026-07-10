@@ -30,6 +30,7 @@ import {
 import { cellToString, downloadTextFile, formatDateOnly, rowsToCsv } from '@/lib/report-export';
 import { downloadTablePdf } from '@/lib/export-download';
 import { useAuth } from '@/hooks/use-auth';
+import { RecordSalesOrderPaymentModal } from '../_components/record-sales-order-payment-modal';
 import {
   SALES_TYPES,
   CURRENCIES,
@@ -145,6 +146,7 @@ interface SalesOrder {
   dueDate?: string | null;
   customerId?: string | null;
   customerName?: string | null;
+  receivableId?: string | null;
   salesType: string;
   totalAmount: number;
   documentDiscount?: number | string | null;
@@ -214,6 +216,10 @@ interface CustomerDaySummaryOrder {
   orderNumber?: string | null;
   orderDate: string;
   customerName: string;
+  receivableId?: string | null;
+  companyId: string;
+  divisionId?: string | null;
+  branchId?: string | null;
   company?: { id: string; name: string; code?: string | null } | null;
   division?: { id: string; name: string; code?: string | null } | null;
   branch?: { id: string; name: string; code?: string | null } | null;
@@ -264,6 +270,18 @@ interface SalesOrderForm {
   paymentReference: string;
   documentDiscount: number;
   lines: SalesOrderLine[];
+}
+
+interface SalesOrderPaymentTarget {
+  id: string;
+  salesOrderNumber?: string | null;
+  orderNumber?: string | null;
+  receivableId?: string | null;
+  companyId: string;
+  divisionId?: string | null;
+  branchId?: string | null;
+  currency: string;
+  outstandingAmount: number | string;
 }
 
 interface Division {
@@ -1338,6 +1356,7 @@ export default function SalesOrdersPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<SalesOrder | null>(null);
   const [deleting, setDeleting] = useState<SalesOrder | null>(null);
+  const [recordingPayment, setRecordingPayment] = useState<SalesOrderPaymentTarget | null>(null);
   const [requestedEditId, setRequestedEditId] = useState('');
   const [handledEditId, setHandledEditId] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -1349,6 +1368,7 @@ export default function SalesOrdersPage() {
   const canCreate = hasPermission('sales.create');
   const canConfirm = hasPermission('sales.confirm');
   const canCancel = hasPermission('sales.cancel');
+  const canRecordPayment = hasPermission('receivables.manage');
 
   useEffect(() => {
     let cancelled = false;
@@ -1674,6 +1694,8 @@ export default function SalesOrdersPage() {
   };
 
   const activePage = viewMode === 'summary' ? customerDayData : data;
+  const recordingPaymentReceivableId = recordingPayment?.receivableId ?? null;
+  const recordingPaymentOutstanding = Number(recordingPayment?.outstandingAmount ?? 0);
 
   if (!canView) {
     return (
@@ -1725,6 +1747,26 @@ export default function SalesOrdersPage() {
           onClose={() => setDeleting(null)}
           onConfirmed={() => {
             setDeleting(null);
+            load();
+          }}
+        />
+      )}
+      {recordingPayment && recordingPaymentReceivableId && recordingPaymentOutstanding > 0 && (
+        <RecordSalesOrderPaymentModal
+          receivableId={recordingPaymentReceivableId}
+          companyId={recordingPayment.companyId}
+          divisionId={recordingPayment.divisionId}
+          branchId={recordingPayment.branchId}
+          currency={recordingPayment.currency}
+          outstanding={recordingPaymentOutstanding}
+          orderLabel={
+            recordingPayment.salesOrderNumber ??
+            recordingPayment.orderNumber ??
+            recordingPayment.id
+          }
+          onClose={() => setRecordingPayment(null)}
+          onSaved={() => {
+            setRecordingPayment(null);
             load();
           }}
         />
@@ -2042,6 +2084,19 @@ export default function SalesOrdersPage() {
                                     <div className="flex flex-wrap items-center gap-1">
                                       <StatusBadge value={order.status} />
                                       <StatusBadge value={order.paymentStatus} />
+                                      {canRecordPayment &&
+                                        order.receivableId &&
+                                        Number(order.outstandingAmount ?? 0) > 0 &&
+                                        ['CONFIRMED', 'PARTIALLY_PAID'].includes(order.status) && (
+                                          <Btn
+                                            variant="primary"
+                                            size="xs"
+                                            aria-label={`Record payment for order ${orderRef}`}
+                                            onClick={() => setRecordingPayment(order)}
+                                          >
+                                            Pay
+                                          </Btn>
+                                        )}
                                       <Btn
                                         variant="secondary"
                                         size="xs"
@@ -2146,6 +2201,31 @@ export default function SalesOrdersPage() {
                         href={`/operations/sales-orders/${o.id}/print`}
                         label={`View / Print / PDF order ${orderRef}`}
                       />
+                      {canRecordPayment &&
+                        (o.receivableId ?? o.receivable?.id) &&
+                        Number(o.outstandingAmount ?? 0) > 0 &&
+                        ['CONFIRMED', 'PARTIALLY_PAID'].includes(o.status) && (
+                          <Btn
+                            variant="primary"
+                            size="xs"
+                            aria-label={`Record payment for order ${orderRef}`}
+                            onClick={() =>
+                              setRecordingPayment({
+                                id: o.id,
+                                salesOrderNumber: o.salesOrderNumber,
+                                orderNumber: o.orderNumber,
+                                receivableId: o.receivableId ?? o.receivable?.id ?? null,
+                                companyId: o.companyId,
+                                divisionId: o.divisionId,
+                                branchId: o.branchId,
+                                currency: o.currency,
+                                outstandingAmount: o.outstandingAmount,
+                              })
+                            }
+                          >
+                            Pay
+                          </Btn>
+                        )}
                       {o.status === 'DRAFT' && canCreate && (
                         <Btn
                           variant="ghost"

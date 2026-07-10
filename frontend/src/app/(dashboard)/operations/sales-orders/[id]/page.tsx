@@ -7,9 +7,6 @@ import {
   Card,
   EmptyState,
   ErrorState,
-  FormInput,
-  FormTextarea,
-  Modal,
   PageHeader,
   SkeletonTable,
   StatCard,
@@ -18,6 +15,7 @@ import {
 } from '@/components/ui';
 import { backendGet, backendPatch } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { RecordSalesOrderPaymentModal } from '../../_components/record-sales-order-payment-modal';
 import {
   ApprovalTimeline,
   AuditTimeline,
@@ -110,112 +108,6 @@ function InfoRow({ label, value }: { label: string; value: ReactNode }) {
         {value || '-'}
       </div>
     </div>
-  );
-}
-
-function RecordPaymentModal({
-  receivableId,
-  currency,
-  outstanding,
-  onClose,
-  onSaved,
-}: {
-  receivableId: string;
-  currency: string;
-  outstanding: number;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [amount, setAmount] = useState(String(outstanding || ''));
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
-  const [notes, setNotes] = useState('');
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  const submit = async () => {
-    const numericAmount = Number(amount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      setError('Enter a valid payment amount');
-      return;
-    }
-    if (numericAmount > outstanding + 0.005) {
-      setError(
-        `Amount exceeds outstanding balance of ${money(outstanding, currency)}`,
-      );
-      return;
-    }
-    setSaving(true);
-    setError('');
-    try {
-      await backendPatch(`/receivables/${receivableId}/record-payment`, {
-        amount: numericAmount,
-        paymentDate,
-        notes: notes.trim() || undefined,
-      });
-      const prevOutstanding = outstanding;
-      const newOutstanding = Math.max(0, prevOutstanding - numericAmount);
-      showToast(
-        'success',
-        'Payment recorded',
-        `${money(numericAmount, currency)} · Balance ${money(prevOutstanding, currency)} → ${money(
-          newOutstanding,
-          currency,
-        )}`,
-      );
-      onSaved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not record payment');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title="Record Payment"
-      size="md"
-      footer={
-        <>
-          <Btn variant="secondary" onClick={onClose}>
-            Cancel
-          </Btn>
-          <Btn variant="primary" loading={saving} onClick={submit}>
-            Record Payment
-          </Btn>
-        </>
-      }
-    >
-      {error && (
-        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
-          {error}
-        </div>
-      )}
-      <div className="space-y-3">
-        <p className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
-          Outstanding: {money(outstanding, currency)}
-        </p>
-        <FormInput
-          label="Amount"
-          required
-          value={amount}
-          onChange={(event) => setAmount(event.target.value)}
-        />
-        <FormInput
-          label="Payment Date"
-          type="date"
-          value={paymentDate}
-          onChange={(event) => setPaymentDate(event.target.value)}
-        />
-        <FormTextarea
-          label="Notes"
-          rows={3}
-          value={notes}
-          onChange={(event) => setNotes(event.target.value)}
-        />
-      </div>
-    </Modal>
   );
 }
 
@@ -439,10 +331,14 @@ export default function SalesOrderDetailPage() {
   return (
     <div className="p-6 space-y-6">
       {recordingPayment && receivableId && (
-        <RecordPaymentModal
+        <RecordSalesOrderPaymentModal
           receivableId={receivableId}
+          companyId={order.companyId}
+          divisionId={order.divisionId}
+          branchId={order.branchId}
           currency={currency}
           outstanding={outstanding}
+          orderLabel={order.salesOrderNumber ?? order.orderNumber ?? order.id}
           onClose={() => setRecordingPayment(false)}
           onSaved={() => {
             setRecordingPayment(false);
