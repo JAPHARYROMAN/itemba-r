@@ -1,10 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import ExcelJS from 'exceljs';
-import {
-  AccessLevel,
-  Prisma,
-  RecordBookStatus,
-} from '@prisma/client';
+import { AccessLevel, Prisma, RecordBookStatus } from '@prisma/client';
 import type { Response } from 'express';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
@@ -22,10 +18,7 @@ import {
 
 const EXPORT_LIMIT = 50_000;
 
-const REPORT_DEFINITIONS: Record<
-  RecordBookReportKey,
-  { title: string; description: string }
-> = {
+const REPORT_DEFINITIONS: Record<RecordBookReportKey, { title: string; description: string }> = {
   'daily-sales': {
     title: 'Daily Sales Report',
     description: 'Day-end sales totals with their complete receipt-method split.',
@@ -170,12 +163,7 @@ export class RecordBookReportsService {
     return payload;
   }
 
-  async export(
-    reportKey: string,
-    query: ExportRecordBookReportDto,
-    user: AuthUser,
-    res: Response,
-  ) {
+  async export(reportKey: string, query: ExportRecordBookReportDto, user: AuthUser, res: Response) {
     const result = await this.run(reportKey, query, user);
     const format = query.format ?? 'json';
     const fileStem = `record-book-${result.key}-${new Date().toISOString().slice(0, 10)}`;
@@ -209,26 +197,59 @@ export class RecordBookReportsService {
     }
 
     if (format === 'pdf') {
+      const pdfColumns = result.columns.filter((column) => {
+        if (query.companyId && column.key === 'company') return false;
+        if (query.currency && column.key === 'currency') return false;
+        if (!['ACTIVE', 'ALL'].includes(result.reportStatus) && column.key === 'status') {
+          return false;
+        }
+        return true;
+      });
+      const periodLabel = `${query.dateFrom || 'First record'} to ${query.dateTo || 'Latest record'}`;
+      const summary = result.summaryByCurrency.flatMap((currency) => [
+        {
+          label: `Recorded Sales (${currency.currency})`,
+          value: this.displayMoney(currency.recordedSales, currency.currency),
+        },
+        {
+          label: `Money Out (${currency.currency})`,
+          value: this.displayMoney(currency.expenses, currency.currency),
+        },
+        {
+          label: `Net Movement (${currency.currency})`,
+          value: this.displayMoney(currency.netMovement, currency.currency),
+        },
+        {
+          label: `Source Records (${currency.currency})`,
+          value: String(currency.salesCount + currency.expenseCount),
+        },
+      ]);
       const generated = await this.generatedDocuments.generateTablePdf(
         {
           title: result.title,
-          subtitle: `${query.dateFrom || 'All dates'} to ${query.dateTo || 'All dates'} | ${result.reportStatus}`,
+          subtitle: 'Records Book | Independent daily sales and money-out control report',
+          status: result.reportStatus,
+          orientation: pdfColumns.length >= 6 ? 'landscape' : 'portrait',
           companyId: query.companyId,
-          columns: result.columns.map((column) => column.label),
+          columns: pdfColumns.map((column) => column.label),
           rows: result.rows.map((row) =>
-            result.columns.map((column) =>
-              this.displayCell(row[column.key], column.type, row.currency),
-            ),
+            pdfColumns.map((column) => this.displayCell(row[column.key], column.type)),
           ),
-          numericColumns: result.columns
+          numericColumns: pdfColumns
             .map((column, index) => (column.align === 'right' ? index : -1))
             .filter((index) => index >= 0),
+          columnWeights: this.pdfColumnWeights(pdfColumns),
+          stripedRows: true,
+          sectionTitle: 'Report Detail',
+          summary,
+          note: 'This document contains independent manual Records Book entries. It does not post to Accounting, Sales Orders, Inventory, Receivables, Payables, or Cash Accounts.',
           meta: [
-            { label: 'Status', value: result.reportStatus },
+            { label: 'Reporting Period', value: periodLabel },
+            { label: 'Currency', value: query.currency || 'Separated by currency' },
             { label: 'Source records', value: String(result.sourceRecordCount) },
-            { label: 'Generated', value: new Date(result.generatedAt).toLocaleString() },
+            { label: 'Report rows', value: String(result.rowCount) },
           ],
-          baseName: fileStem,
+          baseName: `record-book-${result.key}`,
         },
         user,
       );
@@ -252,7 +273,10 @@ export class RecordBookReportsService {
     sheet.views = [{ state: 'frozen', ySplit: 1 }];
     sheet.autoFilter = { from: 'A1', to: `${this.excelColumn(result.columns.length)}1` };
     const buffer = await workbook.xlsx.writeBuffer();
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
     res.setHeader('Content-Disposition', `attachment; filename="${fileStem}.xlsx"`);
     return res.send(Buffer.from(buffer));
   }
@@ -359,7 +383,9 @@ export class RecordBookReportsService {
     const rows = Array.from(grouped.values()).map(({ saleIds, ...row }) => ({
       ...row,
       recordCount: saleIds.size,
-      percentage: totals.get(row.currency) ? (Number(row.amount) / totals.get(row.currency)!) * 100 : 0,
+      percentage: totals.get(row.currency)
+        ? (Number(row.amount) / totals.get(row.currency)!) * 100
+        : 0,
       sourceIds: Array.from(new Set(row.sourceIds)),
     })) as ReportRow[];
     rows.sort((a, b) => Number(b.amount) - Number(a.amount));
@@ -418,7 +444,9 @@ export class RecordBookReportsService {
     const rows = Array.from(grouped.values()).map((row) => ({
       ...row,
       averageAmount: Number(row.recordCount) ? Number(row.amount) / Number(row.recordCount) : 0,
-      percentage: totals.get(row.currency) ? (Number(row.amount) / totals.get(row.currency)!) * 100 : 0,
+      percentage: totals.get(row.currency)
+        ? (Number(row.amount) / totals.get(row.currency)!) * 100
+        : 0,
     })) as ReportRow[];
     rows.sort((a, b) => Number(b.amount) - Number(a.amount));
     return {
@@ -535,7 +563,14 @@ export class RecordBookReportsService {
   private currencySummary(sales: any[], expenses: any[]) {
     const grouped = new Map<
       string,
-      { currency: string; recordedSales: number; expenses: number; netMovement: number; salesCount: number; expenseCount: number }
+      {
+        currency: string;
+        recordedSales: number;
+        expenses: number;
+        netMovement: number;
+        salesCount: number;
+        expenseCount: number;
+      }
     >();
     for (const sale of sales) {
       const current = grouped.get(sale.currency) ?? {
@@ -597,9 +632,7 @@ export class RecordBookReportsService {
         company: { select: { id: true, name: true, code: true } },
         division: { select: { id: true, name: true, code: true } },
         branch: { select: { id: true, name: true, code: true } },
-        receipts: query.receiptType
-          ? { where: { receiptType: query.receiptType } }
-          : true,
+        receipts: query.receiptType ? { where: { receiptType: query.receiptType } } : true,
       },
       orderBy: [{ recordDate: 'asc' }, { createdAt: 'asc' }],
       take: EXPORT_LIMIT + 1,
@@ -678,15 +711,36 @@ export class RecordBookReportsService {
     return result || 'A';
   }
 
-  private displayCell(value: unknown, type: ColumnType, currency: string) {
+  private displayCell(value: unknown, type: ColumnType) {
     if (type === 'currency') {
-      return `${currency} ${Number(value ?? 0).toLocaleString(undefined, {
+      return Number(value ?? 0).toLocaleString(undefined, {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
-      })}`;
+      });
     }
     if (type === 'percent') return `${Number(value ?? 0).toFixed(2)}%`;
     if (type === 'number') return Number(value ?? 0).toLocaleString();
     return value == null || value === '' ? '-' : String(value);
+  }
+
+  private displayMoney(value: number, currency: string) {
+    return `${currency} ${Number(value ?? 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+
+  private pdfColumnWeights(columns: ReportColumn[]) {
+    return columns.map((column) => {
+      if (column.key === 'company') return 1.8;
+      if (column.key === 'division' || column.key === 'branch') return 1.5;
+      if (column.key === 'group' || column.key === 'label') return 1.7;
+      if (column.key === 'currency') return 0.7;
+      if (column.key === 'status') return 0.9;
+      if (column.type === 'date') return 1;
+      if (column.type === 'currency') return 1.25;
+      if (column.type === 'number' || column.type === 'percent') return 0.85;
+      return 1.15;
+    });
   }
 }

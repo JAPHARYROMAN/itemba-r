@@ -180,20 +180,40 @@ export class GeneratedDocumentsService {
     const generatedAt = new Date();
     const headers = dto.columns.map(truncateCell);
     const rows = dto.rows.map((row) => row.map(truncateCell));
+    const sections: BusinessPdfSection[] = [];
+
+    if (dto.summary?.length) {
+      sections.push({
+        title: 'Report Summary',
+        items: dto.summary.map((entry) => kv(entry.label, entry.value)),
+      });
+    }
+
+    sections.push({
+      title: dto.sectionTitle ?? 'Report Detail',
+      table: {
+        headers,
+        rows,
+        numericColumns: dto.numericColumns,
+        columnWeights: dto.columnWeights,
+        stripedRows: dto.stripedRows,
+      },
+    });
+
+    if (dto.note) {
+      sections.push({ title: 'Report Note', paragraphs: [dto.note] });
+    }
 
     const buffer = buildBusinessPdf({
       title: dto.title,
       subtitle: dto.subtitle,
+      status: dto.status,
+      orientation: dto.orientation,
       reference: generatedNumber,
       organization: org,
       generatedAt,
       meta: (dto.meta ?? []).map((entry) => kv(entry.label, entry.value)),
-      sections: [
-        {
-          title: 'Data',
-          table: { headers, rows, numericColumns: dto.numericColumns },
-        },
-      ],
+      sections,
     });
 
     const template = await this.ensureSystemTemplate(TABLE_PDF_ENTITY_TYPE, companyId, user.id);
@@ -834,10 +854,7 @@ export class GeneratedDocumentsService {
     });
   }
 
-  private async supplierInvoicePdf(
-    id: string,
-    user: AuthUser,
-  ): Promise<ResolvedBusinessPdfModel> {
+  private async supplierInvoicePdf(id: string, user: AuthUser): Promise<ResolvedBusinessPdfModel> {
     const where: any = { id, deletedAt: null };
     applyCompanyScopeWhere(where, user);
     const record = await this.prisma.supplierInvoice.findFirst({

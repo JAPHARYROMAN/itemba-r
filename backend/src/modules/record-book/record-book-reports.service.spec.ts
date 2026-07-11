@@ -18,7 +18,12 @@ function makeReportsService(sales: any[] = [], expenses: any[] = []) {
     companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-1' }),
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
   };
-  const generatedDocuments = { generateTablePdf: jest.fn() };
+  const generatedDocuments = {
+    generateTablePdf: jest.fn().mockResolvedValue({
+      buffer: Buffer.from('%PDF-report'),
+      fileName: 'record-book-report.pdf',
+    }),
+  };
   return {
     service: new RecordBookReportsService(
       prisma,
@@ -28,6 +33,7 @@ function makeReportsService(sales: any[] = [], expenses: any[] = []) {
     ),
     prisma,
     auditLogs,
+    generatedDocuments,
   };
 }
 
@@ -60,15 +66,26 @@ describe('RecordBookReportsService', () => {
 
     const result = await service.run('receipt-methods', { companyId: 'company-1' }, user);
 
-    expect(prisma.recordBookDailySale.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ status: RecordBookStatus.FINALIZED }),
-    }));
+    expect(prisma.recordBookDailySale.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: RecordBookStatus.FINALIZED }),
+      }),
+    );
     expect(result.reportStatus).toBe('FINALIZED');
-    expect(result.rows).toEqual(expect.arrayContaining([
-      expect.objectContaining({ method: 'CASH', amount: 700, recordCount: 2, currency: CurrencyCode.TZS }),
-      expect.objectContaining({ method: 'BANK', amount: 300, currency: CurrencyCode.TZS }),
-    ]));
-    expect(auditLogs.log).toHaveBeenCalledWith(expect.objectContaining({ action: 'RECORD_BOOK_REPORT_RUN' }));
+    expect(result.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          method: 'CASH',
+          amount: 700,
+          recordCount: 2,
+          currency: CurrencyCode.TZS,
+        }),
+        expect.objectContaining({ method: 'BANK', amount: 300, currency: CurrencyCode.TZS }),
+      ]),
+    );
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'RECORD_BOOK_REPORT_RUN' }),
+    );
   });
 
   it('keeps different currencies in separate report summaries', async () => {
@@ -79,10 +96,12 @@ describe('RecordBookReportsService', () => {
 
     const result = await service.run('daily-sales', {}, user);
 
-    expect(result.summaryByCurrency).toEqual(expect.arrayContaining([
-      expect.objectContaining({ currency: CurrencyCode.TZS, recordedSales: 1000 }),
-      expect.objectContaining({ currency: CurrencyCode.USD, recordedSales: 10 }),
-    ]));
+    expect(result.summaryByCurrency).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ currency: CurrencyCode.TZS, recordedSales: 1000 }),
+        expect.objectContaining({ currency: CurrencyCode.USD, recordedSales: 10 }),
+      ]),
+    );
   });
 
   it('builds daily net movement from independent sales and expenses', async () => {
@@ -105,7 +124,49 @@ describe('RecordBookReportsService', () => {
     const result = await service.run('net-movement', {}, user);
 
     expect(result.rows).toEqual([
-      expect.objectContaining({ period: '2026-07-09', sales: 1000, expenses: 250, netMovement: 750 }),
+      expect.objectContaining({
+        period: '2026-07-09',
+        sales: 1000,
+        expenses: 250,
+        netMovement: 750,
+      }),
     ]);
+  });
+
+  it('exports dense reports with the readable Records Book PDF layout', async () => {
+    const { service, generatedDocuments } = makeReportsService([
+      sale('sale-1', CurrencyCode.TZS, 1000, 500),
+    ]);
+    const response = {
+      setHeader: jest.fn(),
+      send: jest.fn((value) => value),
+      json: jest.fn((value) => value),
+    } as any;
+
+    await service.export(
+      'daily-sales',
+      {
+        companyId: 'company-1',
+        dateFrom: '2026-07-01',
+        dateTo: '2026-07-31',
+        format: 'pdf',
+      },
+      user,
+      response,
+    );
+
+    expect(generatedDocuments.generateTablePdf).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orientation: 'landscape',
+        status: 'FINALIZED',
+        stripedRows: true,
+        sectionTitle: 'Report Detail',
+        columnWeights: expect.arrayContaining([expect.any(Number)]),
+        summary: expect.arrayContaining([
+          expect.objectContaining({ label: 'Recorded Sales (TZS)' }),
+        ]),
+      }),
+      user,
+    );
   });
 });

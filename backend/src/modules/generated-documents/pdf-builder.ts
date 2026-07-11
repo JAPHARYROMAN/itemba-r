@@ -27,6 +27,10 @@ export interface BusinessPdfTable {
   headers: string[];
   rows: string[][];
   numericColumns?: number[];
+  /** Relative widths for each column. Invalid/missing weights fall back to equal columns. */
+  columnWeights?: number[];
+  /** Alternating row tint for dense analytical reports. */
+  stripedRows?: boolean;
   /** Column indexes rendered in muted text (e.g. SKU/code columns). */
   mutedColumns?: number[];
 }
@@ -45,6 +49,7 @@ export interface BusinessPdfModel {
   subtitle?: string;
   reference: string;
   status?: string;
+  orientation?: 'portrait' | 'landscape';
   organization: BusinessPdfOrganization;
   generatedAt: Date;
   meta: Array<{ label: string; value: string }>;
@@ -55,10 +60,9 @@ type FontName = 'F1' | 'F2';
 
 type Rgb = readonly [number, number, number];
 
-const PAGE_WIDTH = 595.28;
-const PAGE_HEIGHT = 841.89;
+const PORTRAIT_WIDTH = 595.28;
+const PORTRAIT_HEIGHT = 841.89;
 const MARGIN = 42;
-const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 
 // Design tokens — PDF mirror (0-1 RGB) of the frontend Tailwind palette used
 // by the document print pages. Keep in sync with frontend/tailwind.config.ts.
@@ -144,7 +148,7 @@ interface RegisteredImage {
 }
 
 export function buildBusinessPdf(model: BusinessPdfModel): Buffer {
-  const pdf = new SimplePdf();
+  const pdf = new SimplePdf(model.orientation);
   pdf.addHeader(model);
   for (const section of model.sections) pdf.addSection(section);
   pdf.addFooter(model);
@@ -155,8 +159,21 @@ class SimplePdf {
   private pages: string[][] = [[]];
   private images: RegisteredImage[] = [];
   private y = MARGIN;
+  private readonly pageWidth: number;
+  private readonly pageHeight: number;
+  private readonly contentWidth: number;
+  private documentTitle = '';
+  private documentReference = '';
+
+  constructor(orientation: BusinessPdfModel['orientation'] = 'portrait') {
+    this.pageWidth = orientation === 'landscape' ? PORTRAIT_HEIGHT : PORTRAIT_WIDTH;
+    this.pageHeight = orientation === 'landscape' ? PORTRAIT_WIDTH : PORTRAIT_HEIGHT;
+    this.contentWidth = this.pageWidth - MARGIN * 2;
+  }
 
   addHeader(model: BusinessPdfModel) {
+    this.documentTitle = cleanText(model.title).toUpperCase();
+    this.documentReference = cleanText(model.reference);
     this.brandRule();
     const headerTop = this.y;
     const org = model.organization;
@@ -165,13 +182,12 @@ class SimplePdf {
     const branchName = valueOrNull(org.branchName);
     const logoText = valueOrNull(org.logoText) ?? initials(groupName);
 
-    const imageDrawn = org.logoImage
-      ? this.image(org.logoImage, MARGIN, headerTop, 48, 48)
-      : false;
+    const imageDrawn = org.logoImage ? this.image(org.logoImage, MARGIN, headerTop, 48, 48) : false;
     if (!imageDrawn) this.text(logoText, MARGIN, headerTop + 30, 20, 'F2', 48, 'center', BRAND);
 
     const orgX = MARGIN + 60;
-    const orgWidth = 290;
+    const rightWidth = Math.min(240, this.contentWidth * 0.4);
+    const orgWidth = Math.max(140, this.contentWidth - 60 - rightWidth - 18);
     let orgY = headerTop;
     orgY = this.wrappedText(groupName.toUpperCase(), orgX, orgY, 12, orgWidth, 'F2', TEXT_DARK) + 1;
     orgY = this.wrappedText(companyName, orgX, orgY, 9.5, orgWidth, 'F2', TEXT_DARK) + 1;
@@ -180,7 +196,8 @@ class SimplePdf {
 
     const address = valueOrNull(org.address);
     if (address)
-      orgY = this.wrappedText(`Address: ${address}`, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) + 1;
+      orgY =
+        this.wrappedText(`Address: ${address}`, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) + 1;
 
     const contactLine = [
       valueOrNull(org.phone) ? `Tel: ${valueOrNull(org.phone)}` : null,
@@ -202,18 +219,24 @@ class SimplePdf {
     const registrationNumber = valueOrNull(org.registrationNumber);
     if (registrationNumber)
       orgY =
-        this.wrappedText(`Reg: ${registrationNumber}`, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) +
-        1;
+        this.wrappedText(
+          `Reg: ${registrationNumber}`,
+          orgX,
+          orgY,
+          7.5,
+          orgWidth,
+          'F1',
+          TEXT_MUTED,
+        ) + 1;
 
     // Right block: document type (large caps), number in brand color, status pill.
-    const rightWidth = 210;
-    const rightX = PAGE_WIDTH - MARGIN - rightWidth;
+    const rightX = this.pageWidth - MARGIN - rightWidth;
     const docTitle = cleanText(model.title).toUpperCase();
     const titleSize = docTitle.length * 17 * TITLE_WIDTH_FACTOR > rightWidth ? 14 : 17;
     const titleWidth = Math.min(rightWidth, docTitle.length * titleSize * TITLE_WIDTH_FACTOR);
     this.text(
       docTitle,
-      PAGE_WIDTH - MARGIN - titleWidth,
+      this.pageWidth - MARGIN - titleWidth,
       headerTop + 12,
       titleSize,
       'F2',
@@ -226,14 +249,14 @@ class SimplePdf {
       const statusText = cleanText(model.status).toUpperCase();
       const tone = STATUS_TONES[statusTone(model.status)];
       const pillWidth = statusText.length * 7 * TITLE_WIDTH_FACTOR + 14;
-      const pillX = PAGE_WIDTH - MARGIN - pillWidth;
+      const pillX = this.pageWidth - MARGIN - pillWidth;
       const pillTop = headerTop + 33;
       this.rect(pillX, pillTop, pillWidth, 14, true, tone.fill);
       this.text(statusText, pillX + 7, pillTop + 10, 7, 'F2', undefined, 'left', tone.text);
     }
 
     this.y = Math.max(orgY, headerTop + 62);
-    this.line(MARGIN, this.y, PAGE_WIDTH - MARGIN, this.y, 0.7, HAIRLINE);
+    this.line(MARGIN, this.y, this.pageWidth - MARGIN, this.y, 0.7, HAIRLINE);
     this.y += 14;
 
     if (model.subtitle) {
@@ -247,16 +270,16 @@ class SimplePdf {
 
   /** Full-bleed 3pt brand accent bar at the very top of the page (chrome only — never moves this.y). */
   private brandRule() {
-    this.rect(0, 0, PAGE_WIDTH, 3, true, BRAND);
+    this.rect(0, 0, this.pageWidth, 3, true, BRAND);
   }
 
   /** Whitespace-separated label-over-value pairs between two hairlines, up to 4 columns per band. */
   private metaStrip(items: Array<{ label: string; value: string }>) {
     if (!items.length) return;
     const columns = Math.min(items.length, 4);
-    const colWidth = CONTENT_WIDTH / columns;
+    const colWidth = this.contentWidth / columns;
     this.ensureSpace(40);
-    this.line(MARGIN, this.y, PAGE_WIDTH - MARGIN, this.y, 0.7, HAIRLINE);
+    this.line(MARGIN, this.y, this.pageWidth - MARGIN, this.y, 0.7, HAIRLINE);
     this.y += 11;
     for (let i = 0; i < items.length; i += columns) {
       this.ensureSpace(26);
@@ -265,7 +288,16 @@ class SimplePdf {
       let bandHeight = 0;
       band.forEach((item, index) => {
         const x = MARGIN + index * colWidth;
-        this.text(item.label.toUpperCase(), x, startY, 6.5, 'F2', colWidth - 10, 'left', TEXT_MUTED);
+        this.text(
+          item.label.toUpperCase(),
+          x,
+          startY,
+          6.5,
+          'F2',
+          colWidth - 10,
+          'left',
+          TEXT_MUTED,
+        );
         const bottom = this.wrappedText(
           item.value || 'N/A',
           x,
@@ -279,7 +311,7 @@ class SimplePdf {
       });
       this.y += Math.max(bandHeight, 24);
     }
-    this.line(MARGIN, this.y - 6, PAGE_WIDTH - MARGIN, this.y - 6, 0.7, HAIRLINE);
+    this.line(MARGIN, this.y - 6, this.pageWidth - MARGIN, this.y - 6, 0.7, HAIRLINE);
   }
 
   addSection(section: BusinessPdfSection) {
@@ -287,7 +319,7 @@ class SimplePdf {
     this.y += 8;
     this.text(section.title.toUpperCase(), MARGIN, this.y, 9, 'F2', undefined, 'left', TEXT_MUTED);
     this.y += 8;
-    this.line(MARGIN, this.y, PAGE_WIDTH - MARGIN, this.y, 0.7, HAIRLINE);
+    this.line(MARGIN, this.y, this.pageWidth - MARGIN, this.y, 0.7, HAIRLINE);
     this.y += 12;
 
     if (section.items?.length) {
@@ -305,7 +337,8 @@ class SimplePdf {
       this.notesPanel(section.paragraphs ?? []);
     } else {
       for (const paragraph of section.paragraphs ?? []) {
-        this.y = this.wrappedText(paragraph, MARGIN, this.y, 9, CONTENT_WIDTH, 'F1', TEXT_DARK) + 8;
+        this.y =
+          this.wrappedText(paragraph, MARGIN, this.y, 9, this.contentWidth, 'F1', TEXT_DARK) + 8;
       }
     }
 
@@ -334,23 +367,30 @@ class SimplePdf {
     for (let i = 0; i < pageCount; i += 1) {
       const previous = this.pages;
       this.pages = [previous[i]];
-      this.line(MARGIN, PAGE_HEIGHT - 34, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 34, 0.7, HAIRLINE);
+      this.line(
+        MARGIN,
+        this.pageHeight - 34,
+        this.pageWidth - MARGIN,
+        this.pageHeight - 34,
+        0.7,
+        HAIRLINE,
+      );
       if (contactLine) {
         this.text(
           contactLine,
           MARGIN,
-          PAGE_HEIGHT - 24,
+          this.pageHeight - 24,
           7,
           'F1',
-          CONTENT_WIDTH - 270,
+          this.contentWidth - 270,
           'left',
           TEXT_MUTED,
         );
       }
       this.text(
         `${generated}  |  Page ${i + 1} of ${pageCount}`,
-        PAGE_WIDTH - MARGIN - 260,
-        PAGE_HEIGHT - 24,
+        this.pageWidth - MARGIN - 260,
+        this.pageHeight - 24,
         7,
         'F1',
         260,
@@ -365,18 +405,21 @@ class SimplePdf {
   private notesPanel(paragraphs: string[]) {
     const inset = 10;
     const lineHeight = 12; // 9pt text + 3pt leading, matching wrappedText
-    const blocks = paragraphs.map((paragraph) => wrapText(paragraph, CONTENT_WIDTH - inset * 2, 9));
+    const blocks = paragraphs.map((paragraph) =>
+      wrapText(paragraph, this.contentWidth - inset * 2, 9),
+    );
     const totalLines = blocks.reduce((count, lines) => count + lines.length, 0);
     const panelHeight = totalLines * lineHeight + (blocks.length - 1) * 8 + inset * 2 - 2;
-    if (panelHeight > PAGE_HEIGHT - MARGIN * 2) {
+    if (panelHeight > this.pageHeight - MARGIN * 2) {
       for (const paragraph of paragraphs) {
-        this.y = this.wrappedText(paragraph, MARGIN, this.y, 9, CONTENT_WIDTH, 'F1', TEXT_DARK) + 8;
+        this.y =
+          this.wrappedText(paragraph, MARGIN, this.y, 9, this.contentWidth, 'F1', TEXT_DARK) + 8;
       }
       return;
     }
     this.ensureSpace(panelHeight + 8);
     const panelTop = this.y - 2;
-    this.rect(MARGIN, panelTop, CONTENT_WIDTH, panelHeight, true, PANEL);
+    this.rect(MARGIN, panelTop, this.contentWidth, panelHeight, true, PANEL);
     let baseline = panelTop + inset + 7;
     for (const lines of blocks) {
       lines.forEach((line, index) => {
@@ -386,7 +429,7 @@ class SimplePdf {
           baseline + index * lineHeight,
           9,
           'F1',
-          CONTENT_WIDTH - inset * 2,
+          this.contentWidth - inset * 2,
           'left',
           TEXT_DARK,
         );
@@ -426,7 +469,7 @@ class SimplePdf {
         `<< /Length ${Buffer.byteLength(stream, 'binary')} >>\nstream\n${stream}\nendstream`,
       );
       const pageId = addObject(
-        `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] ` +
+        `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${this.pageWidth} ${this.pageHeight}] ` +
           `/Resources << /Font << /F1 ${fontRegularId} 0 R /F2 ${fontBoldId} 0 R >> ${xObjectResources}>> ` +
           `/Contents ${contentId} 0 R >>`,
       );
@@ -452,7 +495,7 @@ class SimplePdf {
   }
 
   private keyValues(items: Array<{ label: string; value: string }>, columns: 1 | 2) {
-    const colWidth = CONTENT_WIDTH / columns;
+    const colWidth = this.contentWidth / columns;
     for (let i = 0; i < items.length; i += columns) {
       this.ensureSpace(22);
       const row = items.slice(i, i + columns);
@@ -477,28 +520,50 @@ class SimplePdf {
   }
 
   private table(table: BusinessPdfTable) {
-    const colWidths = distributeColumns(table.headers.length);
-    this.tableHeader(table.headers, colWidths);
+    const colWidths = distributeColumns(
+      table.headers.length,
+      this.contentWidth,
+      table.columnWeights,
+    );
+    this.tableHeader(table.headers, colWidths, table.numericColumns);
 
-    for (const row of table.rows) {
+    for (const [rowIndex, row] of table.rows.entries()) {
       const rowLines = row.map((cell, index) => wrapText(cell, colWidths[index] - 8, 8));
       const lineCount = Math.max(...rowLines.map((lines) => lines.length), 1);
       const rowHeight = Math.max(20, lineCount * 10 + 10);
-      if (!this.hasSpace(rowHeight + 12)) this.newPageWithTableHeader(table.headers, colWidths);
+      if (!this.hasSpace(rowHeight + 12)) {
+        this.newPageWithTableHeader(table.headers, colWidths, table.numericColumns);
+      }
 
       const top = this.y;
+      if (table.stripedRows && rowIndex % 2 === 1) {
+        this.rect(MARGIN, top - 2, this.contentWidth, rowHeight, true, PANEL);
+      }
+      for (let index = 1; index < colWidths.length; index += 1) {
+        const separatorX = MARGIN + sum(colWidths.slice(0, index));
+        this.line(separatorX, top - 2, separatorX, top + rowHeight - 2, 0.35, HAIRLINE);
+      }
       rowLines.forEach((lines, index) => {
         const x = MARGIN + sum(colWidths.slice(0, index)) + 4;
         const align = table.numericColumns?.includes(index) ? 'right' : 'left';
         const color = table.mutedColumns?.includes(index) ? TEXT_MUTED : TEXT_DARK;
         lines.forEach((line, lineIndex) => {
-          this.text(line, x, top + 10 + lineIndex * 10, 8, 'F1', colWidths[index] - 8, align, color);
+          this.text(
+            line,
+            x,
+            top + 10 + lineIndex * 10,
+            8,
+            'F1',
+            colWidths[index] - 8,
+            align,
+            color,
+          );
         });
       });
       this.line(
         MARGIN,
         top + rowHeight - 2,
-        PAGE_WIDTH - MARGIN,
+        this.pageWidth - MARGIN,
         top + rowHeight - 2,
         0.6,
         HAIRLINE,
@@ -507,25 +572,48 @@ class SimplePdf {
     }
   }
 
-  private tableHeader(headers: string[], colWidths: number[]) {
-    this.ensureSpace(28);
-    this.rect(MARGIN, this.y - 2, CONTENT_WIDTH, 20, true, BRAND_TINT);
-    headers.forEach((header, index) => {
+  private tableHeader(headers: string[], colWidths: number[], numericColumns?: number[]) {
+    const wrappedHeaders = headers.map((header, index) =>
+      wrapText(header.toUpperCase(), colWidths[index] - 8, 7),
+    );
+    const lineCount = Math.max(...wrappedHeaders.map((lines) => lines.length), 1);
+    const headerHeight = Math.max(20, lineCount * 8 + 8);
+    this.ensureSpace(headerHeight + 8);
+    this.rect(MARGIN, this.y - 2, this.contentWidth, headerHeight, true, BRAND_TINT);
+    for (let index = 1; index < colWidths.length; index += 1) {
+      const separatorX = MARGIN + sum(colWidths.slice(0, index));
+      this.line(separatorX, this.y - 2, separatorX, this.y + headerHeight - 2, 0.4, HAIRLINE);
+    }
+    wrappedHeaders.forEach((lines, index) => {
       const x = MARGIN + sum(colWidths.slice(0, index)) + 4;
-      this.text(header.toUpperCase(), x, this.y + 10, 7, 'F2', colWidths[index] - 8, 'left', BRAND);
+      const align = numericColumns?.includes(index) ? 'right' : 'left';
+      lines.forEach((line, lineIndex) => {
+        this.text(line, x, this.y + 9 + lineIndex * 8, 7, 'F2', colWidths[index] - 8, align, BRAND);
+      });
     });
-    this.line(MARGIN, this.y + 18, PAGE_WIDTH - MARGIN, this.y + 18, 0.7, HAIRLINE);
-    this.y += 22;
+    this.line(
+      MARGIN,
+      this.y + headerHeight - 2,
+      this.pageWidth - MARGIN,
+      this.y + headerHeight - 2,
+      0.7,
+      HAIRLINE,
+    );
+    this.y += headerHeight + 2;
   }
 
-  private newPageWithTableHeader(headers: string[], colWidths: number[]) {
+  private newPageWithTableHeader(
+    headers: string[],
+    colWidths: number[],
+    numericColumns?: number[],
+  ) {
     this.newPage();
-    this.tableHeader(headers, colWidths);
+    this.tableHeader(headers, colWidths, numericColumns);
   }
 
   private totals(items: Array<{ label: string; value: string; emphasis?: boolean }>) {
     const width = 220;
-    const x = PAGE_WIDTH - MARGIN - width;
+    const x = this.pageWidth - MARGIN - width;
     for (const item of items) {
       this.ensureSpace(18);
       if (item.emphasis) {
@@ -542,7 +630,7 @@ class SimplePdf {
   }
 
   private signatures(labels: string[]) {
-    const colWidth = CONTENT_WIDTH / labels.length;
+    const colWidth = this.contentWidth / labels.length;
     this.ensureSpace(62);
     this.y += 10;
     labels.forEach((label, index) => {
@@ -580,7 +668,7 @@ class SimplePdf {
     color?: Rgb,
   ) {
     const clean = cleanText(value);
-    const approxWidth = clean.length * size * 0.48;
+    const approxWidth = clean.length * size * (font === 'F2' ? 0.58 : 0.55);
     const offset =
       align === 'right' && width
         ? Math.max(0, width - approxWidth)
@@ -589,7 +677,7 @@ class SimplePdf {
           : 0;
     const fill = color ? `${num(color[0])} ${num(color[1])} ${num(color[2])} rg` : '0 g';
     this.current().push(
-      `BT /${font} ${size} Tf ${fill} 1 0 0 1 ${num(x + offset)} ${num(PAGE_HEIGHT - y)} Tm (${escapePdf(clean)}) Tj ET`,
+      `BT /${font} ${size} Tf ${fill} 1 0 0 1 ${num(x + offset)} ${num(this.pageHeight - y)} Tm (${escapePdf(clean)}) Tj ET`,
     );
   }
 
@@ -597,7 +685,7 @@ class SimplePdf {
     const stroke = color ? `${num(color[0])} ${num(color[1])} ${num(color[2])} RG ` : '';
     const reset = color ? ' 0 G' : '';
     this.current().push(
-      `${stroke}${num(width)} w ${num(x1)} ${num(PAGE_HEIGHT - y1)} m ${num(x2)} ${num(PAGE_HEIGHT - y2)} l S${reset}`,
+      `${stroke}${num(width)} w ${num(x1)} ${num(this.pageHeight - y1)} m ${num(x2)} ${num(this.pageHeight - y2)} l S${reset}`,
     );
   }
 
@@ -609,7 +697,7 @@ class SimplePdf {
     fill: boolean,
     shade: number | Rgb,
   ) {
-    const box = `${num(x)} ${num(PAGE_HEIGHT - y - height)} ${num(width)} ${num(height)} re`;
+    const box = `${num(x)} ${num(this.pageHeight - y - height)} ${num(width)} ${num(height)} re`;
     if (typeof shade === 'number') {
       this.current().push(`${num(shade)} g ${box} ${fill ? 'f' : 'S'} 0 g`);
       return;
@@ -630,7 +718,7 @@ class SimplePdf {
       const drawX = x + (width - drawWidth) / 2;
       const drawY = y + (height - drawHeight) / 2;
       this.current().push(
-        `q ${num(drawWidth)} 0 0 ${num(drawHeight)} ${num(drawX)} ${num(PAGE_HEIGHT - drawY - drawHeight)} cm /${name} Do Q`,
+        `q ${num(drawWidth)} 0 0 ${num(drawHeight)} ${num(drawX)} ${num(this.pageHeight - drawY - drawHeight)} cm /${name} Do Q`,
       );
       return true;
     } catch {
@@ -643,13 +731,38 @@ class SimplePdf {
   }
 
   private hasSpace(height: number) {
-    return this.y + height <= PAGE_HEIGHT - MARGIN;
+    return this.y + height <= this.pageHeight - MARGIN;
   }
 
   private newPage() {
     this.pages.push([]);
     this.y = MARGIN;
     this.brandRule();
+    if (this.documentTitle) {
+      this.text(
+        this.documentTitle,
+        MARGIN,
+        this.y + 8,
+        8,
+        'F2',
+        this.contentWidth - 250,
+        'left',
+        TEXT_DARK,
+      );
+      this.text(
+        `${this.documentReference} | CONTINUED`,
+        this.pageWidth - MARGIN - 240,
+        this.y + 8,
+        7.5,
+        'F1',
+        240,
+        'right',
+        TEXT_MUTED,
+      );
+      this.y += 17;
+      this.line(MARGIN, this.y, this.pageWidth - MARGIN, this.y, 0.7, HAIRLINE);
+      this.y += 10;
+    }
   }
 
   private current() {
@@ -948,10 +1061,18 @@ function pngPixelsToImage(
 }
 
 function wrapText(value: string, width: number, size: number): string[] {
-  const maxChars = Math.max(8, Math.floor(width / (size * 0.48)));
+  const maxChars = Math.max(8, Math.floor(width / (size * 0.58)));
   const words = cleanText(value || 'N/A')
     .split(/\s+/)
-    .filter(Boolean);
+    .filter(Boolean)
+    .flatMap((word) => {
+      if (word.length <= maxChars) return [word];
+      const chunks: string[] = [];
+      for (let offset = 0; offset < word.length; offset += maxChars) {
+        chunks.push(word.slice(offset, offset + maxChars));
+      }
+      return chunks;
+    });
   const lines: string[] = [];
   let line = '';
   for (const word of words) {
@@ -968,10 +1089,14 @@ function wrapText(value: string, width: number, size: number): string[] {
   return lines.length ? lines : ['N/A'];
 }
 
-function distributeColumns(count: number) {
+function distributeColumns(count: number, contentWidth: number, weights?: number[]) {
   if (count <= 0) return [];
-  const base = CONTENT_WIDTH / count;
-  return Array.from({ length: count }, () => base);
+  const usableWeights =
+    weights?.length === count && weights.every((weight) => Number.isFinite(weight) && weight > 0)
+      ? weights
+      : Array.from({ length: count }, () => 1);
+  const weightTotal = sum(usableWeights);
+  return usableWeights.map((weight) => (contentWidth * weight) / weightTotal);
 }
 
 function cleanText(value: string) {

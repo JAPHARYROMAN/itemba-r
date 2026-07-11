@@ -3,7 +3,10 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
+  IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   MaxLength,
@@ -31,9 +34,7 @@ export class TablePdfRowsMatchColumnsConstraint implements ValidatorConstraintIn
     const width = dto.columns.length;
     return rows.every(
       (row) =>
-        Array.isArray(row) &&
-        row.length === width &&
-        row.every((cell) => typeof cell === 'string'),
+        Array.isArray(row) && row.length === width && row.every((cell) => typeof cell === 'string'),
     );
   }
 
@@ -64,6 +65,15 @@ export class GenerateTablePdfDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(40)
+  status?: string;
+
+  @IsOptional()
+  @IsIn(['portrait', 'landscape'])
+  orientation?: 'portrait' | 'landscape';
+
+  @IsOptional()
+  @IsString()
   companyId?: string;
 
   @IsArray()
@@ -90,6 +100,34 @@ export class GenerateTablePdfDto {
   @IsInt({ each: true })
   @Min(0, { each: true })
   numericColumns?: number[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(TABLE_PDF_MAX_COLUMNS)
+  @IsNumber({}, { each: true })
+  @Min(0.1, { each: true })
+  columnWeights?: number[];
+
+  @IsOptional()
+  @IsBoolean()
+  stripedRows?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  sectionTitle?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(16)
+  @ValidateNested({ each: true })
+  @Type(() => TablePdfMetaEntryDto)
+  summary?: TablePdfMetaEntryDto[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
 
   @IsOptional()
   @IsString()

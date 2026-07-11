@@ -65,6 +65,7 @@ const BRAND_FILL_OP = '0.14 0.39 0.92 rg';
 const BRAND_TINT_FILL_OP = '0.94 0.96 1 rg';
 const BRAND_TINT_STRONG_FILL_OP = '0.86 0.92 1 rg';
 const TEXT_MUTED_FILL_OP = '0.39 0.46 0.55 rg';
+const PANEL_FILL_OP = '0.97 0.98 0.99 rg';
 const BRAND_RULE_OP = `${BRAND_FILL_OP} 0 838.89 595.28 3 re f`;
 
 describe('buildBusinessPdf rendering', () => {
@@ -147,5 +148,35 @@ describe('buildBusinessPdf rendering', () => {
     for (let page = 1; page <= pageCount; page += 1) {
       expect(raw).toContain(`Page ${page} of ${pageCount}`);
     }
+  });
+
+  it('supports landscape reports with weighted columns and wrapped table headings', () => {
+    const buffer = buildBusinessPdf(
+      sampleModel({
+        orientation: 'landscape',
+        title: 'Daily Sales Report',
+        sections: [
+          {
+            title: 'Report Detail',
+            table: {
+              headers: ['Recorded Sales', 'Description'],
+              columnWeights: [0.2, 5],
+              numericColumns: [0],
+              stripedRows: true,
+              rows: [
+                ['1,200,000.00', 'Daily close for the main branch'],
+                ['900,000.00', 'Daily close for the second branch'],
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    const raw = buffer.toString('latin1');
+
+    expect(raw).toContain('/MediaBox [0 0 841.89 595.28]');
+    expect(raw).toContain('(RECORDED) Tj');
+    expect(raw).toContain('(SALES) Tj');
+    expect(raw).toContain(PANEL_FILL_OP);
   });
 });
