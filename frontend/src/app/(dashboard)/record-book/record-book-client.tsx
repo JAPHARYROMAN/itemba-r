@@ -2,38 +2,13 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Btn,
-  Card,
-  EmptyState,
-  FormInput,
-  FormSelect,
-  FormTextarea,
-  Modal,
-  PageHeader,
-  SkeletonTable,
-  StatCard,
-} from '@/components/ui';
+import { Btn, Card, EmptyState, FormInput, FormSelect, FormTextarea, Modal, PageHeader, SkeletonTable, StatCard } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
-import {
-  BACKEND_PROXY_URL,
-  backendDelete,
-  backendGet,
-  backendList,
-  backendPage,
-  backendPatch,
-  backendPost,
-  buildQuery,
-  type PaginatedResult,
-} from '@/lib/api-client';
-import { cellToString, downloadTextFile, rowsToCsv } from '@/lib/report-export';
+import { BACKEND_PROXY_URL, backendDelete, backendGet, backendList, backendPage, backendPatch, backendPost, buildQuery, type PaginatedResult } from '@/lib/api-client';
+import { downloadTextFile } from '@/lib/report-export';
 import { downloadTablePdf } from '@/lib/export-download';
-import {
-  type ConfirmAction,
-  RecordBookConfirmDialog,
-  RecordBookNav,
-  RecordBookPagination,
-} from './record-book-ui';
+import { buildRecordBookPdfRequest } from './record-book-export';
+import { type ConfirmAction, RecordBookConfirmDialog, RecordBookNav, RecordBookPagination } from './record-book-ui';
 
 type Tab = 'dashboard' | 'daily-sales' | 'expenses' | 'categories';
 type Status = 'DRAFT' | 'FINALIZED' | 'VOIDED';
@@ -192,11 +167,7 @@ function statusClass(status: Status) {
 }
 
 function StatusPill({ status }: { status: Status }) {
-  return (
-    <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${statusClass(status)}`}>
-      {status}
-    </span>
-  );
+  return <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${statusClass(status)}`}>{status}</span>;
 }
 
 function buildFilterQuery(filters: Filters, extras?: Record<string, string | number | undefined>) {
@@ -325,7 +296,9 @@ function SaleModal({
       size="xl"
       footer={
         <>
-          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
           <Btn variant="primary" onClick={submit} loading={saving} disabled={!canSave}>
             Save Draft
           </Btn>
@@ -335,33 +308,53 @@ function SaleModal({
       {error && <div className="mb-3 rounded-lg border border-red-700 bg-red-950/40 px-3 py-2 text-sm text-red-200">{error}</div>}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <FormSelect label="Company" required value={form.companyId} onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value, divisionId: '', branchId: '' }))} placeholder="Select company">
-          {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+          {companies.map((company) => (
+            <option key={company.id} value={company.id}>
+              {company.name}
+            </option>
+          ))}
         </FormSelect>
         <FormSelect label="Division" value={form.divisionId ?? ''} onChange={(e) => setForm((f) => ({ ...f, divisionId: e.target.value, branchId: '' }))} placeholder="All divisions">
-          {scopedDivisions.map((division) => <option key={division.id} value={division.id}>{division.code} - {division.name}</option>)}
+          {scopedDivisions.map((division) => (
+            <option key={division.id} value={division.id}>
+              {division.code} - {division.name}
+            </option>
+          ))}
         </FormSelect>
         <FormSelect label="Branch" value={form.branchId ?? ''} onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))} placeholder="All branches">
-          {scopedBranches.map((branch) => <option key={branch.id} value={branch.id}>{branch.code} - {branch.name}</option>)}
+          {scopedBranches.map((branch) => (
+            <option key={branch.id} value={branch.id}>
+              {branch.code} - {branch.name}
+            </option>
+          ))}
         </FormSelect>
         <FormInput label="Record Date" required type="date" value={form.recordDate} onChange={(e) => setForm((f) => ({ ...f, recordDate: e.target.value }))} />
         <FormSelect label="Currency" value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value as Currency }))}>
-          {CURRENCIES.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
+          {CURRENCIES.map((currency) => (
+            <option key={currency} value={currency}>
+              {currency}
+            </option>
+          ))}
         </FormSelect>
         <FormInput label="Total Sales" required type="number" min="0" step="0.01" value={form.totalSalesAmount} onChange={(e) => setForm((f) => ({ ...f, totalSalesAmount: e.target.value }))} />
       </div>
 
       <div className="mt-5">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>Receipt split</h3>
-          <span className={`text-sm font-semibold ${Math.abs(difference) < 0.005 ? 'text-emerald-300' : 'text-amber-300'}`}>
-            Difference: {money(difference, form.currency)}
-          </span>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+            Receipt split
+          </h3>
+          <span className={`text-sm font-semibold ${Math.abs(difference) < 0.005 ? 'text-emerald-300' : 'text-amber-300'}`}>Difference: {money(difference, form.currency)}</span>
         </div>
         <div className="space-y-2">
           {form.receipts.map((receipt, index) => (
             <div key={`${receipt.receiptType}-${index}`} className="grid grid-cols-1 gap-2 rounded-lg border border-slate-700/80 p-3 md:grid-cols-4">
               <FormSelect label="Method" value={receipt.receiptType} onChange={(e) => setReceipt(index, { receiptType: e.target.value as ReceiptType })}>
-                {Object.keys(RECEIPT_LABELS).map((type) => <option key={type} value={type}>{RECEIPT_LABELS[type as ReceiptType]}</option>)}
+                {Object.keys(RECEIPT_LABELS).map((type) => (
+                  <option key={type} value={type}>
+                    {RECEIPT_LABELS[type as ReceiptType]}
+                  </option>
+                ))}
               </FormSelect>
               <FormInput label="Label / Account" value={receipt.label ?? ''} onChange={(e) => setReceipt(index, { label: e.target.value })} placeholder="CRDB Bank, M-Pesa, cash drawer" />
               <FormInput label="Amount" type="number" min="0" step="0.01" value={String(receipt.amount ?? 0)} onChange={(e) => setReceipt(index, { amount: Number(e.target.value) })} />
@@ -458,32 +451,74 @@ function ExpenseModal({
       size="xl"
       footer={
         <>
-          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={submit} loading={saving} disabled={!canSave}>Save Draft</Btn>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn variant="primary" onClick={submit} loading={saving} disabled={!canSave}>
+            Save Draft
+          </Btn>
         </>
       }
     >
       {error && <div className="mb-3 rounded-lg border border-red-700 bg-red-950/40 px-3 py-2 text-sm text-red-200">{error}</div>}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <FormSelect label="Company" required value={form.companyId} onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value, divisionId: '', branchId: '', expenseCategoryId: '' }))} placeholder="Select company">
-          {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+        <FormSelect
+          label="Company"
+          required
+          value={form.companyId}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              companyId: e.target.value,
+              divisionId: '',
+              branchId: '',
+              expenseCategoryId: '',
+            }))
+          }
+          placeholder="Select company"
+        >
+          {companies.map((company) => (
+            <option key={company.id} value={company.id}>
+              {company.name}
+            </option>
+          ))}
         </FormSelect>
         <FormSelect label="Division" value={form.divisionId ?? ''} onChange={(e) => setForm((f) => ({ ...f, divisionId: e.target.value, branchId: '' }))} placeholder="All divisions">
-          {scopedDivisions.map((division) => <option key={division.id} value={division.id}>{division.code} - {division.name}</option>)}
+          {scopedDivisions.map((division) => (
+            <option key={division.id} value={division.id}>
+              {division.code} - {division.name}
+            </option>
+          ))}
         </FormSelect>
         <FormSelect label="Branch" value={form.branchId ?? ''} onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))} placeholder="All branches">
-          {scopedBranches.map((branch) => <option key={branch.id} value={branch.id}>{branch.code} - {branch.name}</option>)}
+          {scopedBranches.map((branch) => (
+            <option key={branch.id} value={branch.id}>
+              {branch.code} - {branch.name}
+            </option>
+          ))}
         </FormSelect>
         <FormInput label="Record Date" required type="date" value={form.recordDate} onChange={(e) => setForm((f) => ({ ...f, recordDate: e.target.value }))} />
         <FormSelect label="Category" required value={form.expenseCategoryId} onChange={(e) => setForm((f) => ({ ...f, expenseCategoryId: e.target.value }))} placeholder="Select category">
-          {scopedCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+          {scopedCategories.map((category) => (
+            <option key={category.id} value={category.id}>
+              {category.name}
+            </option>
+          ))}
         </FormSelect>
         <FormInput label="Amount" required type="number" min="0" step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} />
         <FormSelect label="Currency" value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value as Currency }))}>
-          {CURRENCIES.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
+          {CURRENCIES.map((currency) => (
+            <option key={currency} value={currency}>
+              {currency}
+            </option>
+          ))}
         </FormSelect>
         <FormSelect label="Payment Method" value={form.paymentMethod} onChange={(e) => setForm((f) => ({ ...f, paymentMethod: e.target.value as PaymentMethod }))}>
-          {PAYMENT_METHODS.map((method) => <option key={method} value={method}>{method.replace('_', ' ')}</option>)}
+          {PAYMENT_METHODS.map((method) => (
+            <option key={method} value={method}>
+              {method.replace('_', ' ')}
+            </option>
+          ))}
         </FormSelect>
         <FormInput label="Payment Label" value={form.paymentLabel} onChange={(e) => setForm((f) => ({ ...f, paymentLabel: e.target.value }))} placeholder="Cash, M-Pesa, CRDB Bank" />
         <FormInput label="Paid To" value={form.paidTo} onChange={(e) => setForm((f) => ({ ...f, paidTo: e.target.value }))} />
@@ -495,19 +530,7 @@ function ExpenseModal({
   );
 }
 
-function CategoryModal({
-  initial,
-  filters,
-  companies,
-  onClose,
-  onSaved,
-}: {
-  initial?: Category | null;
-  filters: Filters;
-  companies: Company[];
-  onClose: () => void;
-  onSaved: () => void;
-}) {
+function CategoryModal({ initial, filters, companies, onClose, onSaved }: { initial?: Category | null; filters: Filters; companies: Company[]; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState(() => ({
     companyId: initial?.companyId ?? filters.companyId,
     name: initial?.name ?? '',
@@ -550,15 +573,23 @@ function CategoryModal({
       size="md"
       footer={
         <>
-          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={submit} loading={saving} disabled={!canSave}>Save Category</Btn>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn variant="primary" onClick={submit} loading={saving} disabled={!canSave}>
+            Save Category
+          </Btn>
         </>
       }
     >
       {error && <div className="mb-3 rounded-lg border border-red-700 bg-red-950/40 px-3 py-2 text-sm text-red-200">{error}</div>}
       <div className="space-y-3">
         <FormSelect label="Company" required value={form.companyId} disabled={Boolean(initial)} onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value }))} placeholder="Select company">
-          {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+          {companies.map((company) => (
+            <option key={company.id} value={company.id}>
+              {company.name}
+            </option>
+          ))}
         </FormSelect>
         <FormInput label="Category Name" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
         <FormTextarea label="Description" value={form.description ?? ''} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
@@ -604,14 +635,8 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   const [confirmReason, setConfirmReason] = useState('');
   const [confirmBusy, setConfirmBusy] = useState(false);
 
-  const scopedDivisions = useMemo(
-    () => divisions.filter((d) => !filters.companyId || d.companyId === filters.companyId),
-    [divisions, filters.companyId],
-  );
-  const scopedBranches = useMemo(
-    () => branches.filter((b) => !filters.divisionId || b.divisionId === filters.divisionId),
-    [branches, filters.divisionId],
-  );
+  const scopedDivisions = useMemo(() => divisions.filter((d) => !filters.companyId || d.companyId === filters.companyId), [divisions, filters.companyId]);
+  const scopedBranches = useMemo(() => branches.filter((b) => !filters.divisionId || b.divisionId === filters.divisionId), [branches, filters.divisionId]);
 
   const loadRefs = useCallback(async () => {
     const [companyRows, divisionRows, branchRows] = await Promise.all([
@@ -622,7 +647,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
     setCompanies(companyRows);
     setDivisions(divisionRows);
     setBranches(branchRows);
-    setFilters((current) => current.companyId || !companyRows[0] ? current : { ...current, companyId: companyRows[0].id });
+    setFilters((current) => (current.companyId || !companyRows[0] ? current : { ...current, companyId: companyRows[0].id }));
   }, []);
 
   const loadData = useCallback(async () => {
@@ -719,18 +744,19 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
       if (format === 'pdf') {
         const rows = await exportRowsForPdf(type);
         if (!rows.length) throw new Error('No rows to export');
-        const columns = Array.from(rows.reduce((set, row) => {
-          Object.keys(row).forEach((key) => set.add(key));
-          return set;
-        }, new Set<string>()));
-        await downloadTablePdf({
-          title: `Records Book - ${type}`,
-          subtitle: `${filters.dateFrom || 'All'} to ${filters.dateTo || 'All'}`,
-          companyId: filters.companyId || undefined,
-          columns,
-          rows: rows.map((row) => columns.map((column) => cellToString(row[column]))),
-          baseName: `record-book-${type}`,
-        });
+        await downloadTablePdf(
+          buildRecordBookPdfRequest(type, rows, {
+            companyId: filters.companyId || undefined,
+            companyName: companies.find((company) => company.id === filters.companyId)?.name,
+            divisionId: filters.divisionId || undefined,
+            divisionName: divisions.find((division) => division.id === filters.divisionId)?.name,
+            branchId: filters.branchId || undefined,
+            branchName: branches.find((branch) => branch.id === filters.branchId)?.name,
+            dateFrom: filters.dateFrom || undefined,
+            dateTo: filters.dateTo || undefined,
+            status: filters.status || undefined,
+          }),
+        );
         await backendPost('/record-book/export-audit', {
           scope: 'raw',
           format: 'pdf',
@@ -760,7 +786,9 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
     return (
       <div className="mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
         <PageHeader title="Records Book" subtitle="Manual daily sales and money-out records" />
-        <Card><EmptyState title="Permission required" description="You need record_book.view to use Records Book." /></Card>
+        <Card>
+          <EmptyState title="Permission required" description="You need record_book.view to use Records Book." />
+        </Card>
       </div>
     );
   }
@@ -774,8 +802,16 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
         subtitle="Manual day-end sales and money-out records. Independent from accounting and operations."
         actions={
           <div className="flex flex-wrap gap-2">
-            {canCreate && <Btn variant="secondary" onClick={() => setExpenseModal('new')}>+ Money Out</Btn>}
-            {canCreate && <Btn variant="primary" onClick={() => setSaleModal('new')}>+ Daily Sales</Btn>}
+            {canCreate && (
+              <Btn variant="secondary" onClick={() => setExpenseModal('new')}>
+                + Money Out
+              </Btn>
+            )}
+            {canCreate && (
+              <Btn variant="primary" onClick={() => setSaleModal('new')}>
+                + Daily Sales
+              </Btn>
+            )}
           </div>
         }
       />
@@ -785,13 +821,25 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
       <Card className="mb-5">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
           <FormSelect label="Company" value={filters.companyId} onChange={(e) => setFilters((f) => ({ ...f, companyId: e.target.value, divisionId: '', branchId: '' }))} placeholder="All companies">
-            {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+            {companies.map((company) => (
+              <option key={company.id} value={company.id}>
+                {company.name}
+              </option>
+            ))}
           </FormSelect>
           <FormSelect label="Division" value={filters.divisionId} onChange={(e) => setFilters((f) => ({ ...f, divisionId: e.target.value, branchId: '' }))} placeholder="All divisions">
-            {scopedDivisions.map((division) => <option key={division.id} value={division.id}>{division.code} - {division.name}</option>)}
+            {scopedDivisions.map((division) => (
+              <option key={division.id} value={division.id}>
+                {division.code} - {division.name}
+              </option>
+            ))}
           </FormSelect>
           <FormSelect label="Branch" value={filters.branchId} onChange={(e) => setFilters((f) => ({ ...f, branchId: e.target.value }))} placeholder="All branches">
-            {scopedBranches.map((branch) => <option key={branch.id} value={branch.id}>{branch.code} - {branch.name}</option>)}
+            {scopedBranches.map((branch) => (
+              <option key={branch.id} value={branch.id}>
+                {branch.code} - {branch.name}
+              </option>
+            ))}
           </FormSelect>
           <FormInput label="From" type="date" value={filters.dateFrom} onChange={(e) => setFilters((f) => ({ ...f, dateFrom: e.target.value }))} />
           <FormInput label="To" type="date" value={filters.dateTo} onChange={(e) => setFilters((f) => ({ ...f, dateTo: e.target.value }))} />
@@ -804,9 +852,15 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
         <div className="mt-3 flex flex-col gap-3 xl:flex-row xl:items-end">
           <FormInput className="flex-1" label="Search" value={filters.search} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))} placeholder="Receipt label, reference, paid to, description..." />
           <div className="flex flex-wrap gap-2">
-            <Btn variant="secondary" onClick={() => setFilters((f) => ({ ...f, dateFrom: today, dateTo: today }))}>Today</Btn>
-            <Btn variant="secondary" onClick={() => setFilters((f) => ({ ...f, dateFrom: '', dateTo: '' }))}>All Time</Btn>
-            <Btn variant="ghost" onClick={() => setFilters({ ...BLANK_FILTERS, companyId: filters.companyId })}>Reset</Btn>
+            <Btn variant="secondary" onClick={() => setFilters((f) => ({ ...f, dateFrom: today, dateTo: today }))}>
+              Today
+            </Btn>
+            <Btn variant="secondary" onClick={() => setFilters((f) => ({ ...f, dateFrom: '', dateTo: '' }))}>
+              All Time
+            </Btn>
+            <Btn variant="ghost" onClick={() => setFilters({ ...BLANK_FILTERS, companyId: filters.companyId })}>
+              Reset
+            </Btn>
           </div>
         </div>
       </Card>
@@ -814,17 +868,12 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
       {error && <div className="mb-4 rounded-lg border border-red-700 bg-red-950/40 px-4 py-3 text-sm text-red-200">{error}</div>}
 
       <div className="mb-5 flex flex-wrap gap-2">
-        {canExport && (['pdf', 'csv', 'json', 'xlsx'] as const).map((format) => (
-          <Btn
-            key={format}
-            variant="secondary"
-            size="sm"
-            loading={exporting === `${activeType}-${format}`}
-            onClick={() => handleExport(activeType as 'sales' | 'expenses' | 'combined', format)}
-          >
-            Export {format.toUpperCase()}
-          </Btn>
-        ))}
+        {canExport &&
+          (['pdf', 'csv', 'json', 'xlsx'] as const).map((format) => (
+            <Btn key={format} variant="secondary" size="sm" loading={exporting === `${activeType}-${format}`} onClick={() => handleExport(activeType as 'sales' | 'expenses' | 'combined', format)}>
+              Export {format.toUpperCase()}
+            </Btn>
+          ))}
       </div>
 
       {loading ? (
@@ -851,8 +900,14 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
           {(initialTab === 'dashboard' || initialTab === 'daily-sales') && (
             <Card className="mb-5">
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-lg font-semibold" style={{ color: 'var(--aurora-text)' }}>Daily Sales</h2>
-                {canCreate && <Btn size="sm" onClick={() => setSaleModal('new')}>+ Daily Sales</Btn>}
+                <h2 className="text-lg font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                  Daily Sales
+                </h2>
+                {canCreate && (
+                  <Btn size="sm" onClick={() => setSaleModal('new')}>
+                    + Daily Sales
+                  </Btn>
+                )}
               </div>
               {!sales?.data.length ? (
                 <EmptyState title="No daily sales recorded" description="Create a day-end sales summary and split it by cash, M-Pesa, Lipa Namba, bank, or other receipts." />
@@ -878,18 +933,92 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                             <div className="text-xs text-slate-400">{sale.branch?.name ?? sale.division?.name ?? 'All branches'}</div>
                           </td>
                           <td className="px-3 py-3 text-right font-semibold">{money(sale.totalSalesAmount, sale.currency)}</td>
-                          <td className="px-3 py-3 text-xs text-slate-300">
-                            {sale.receipts.map((r) => `${r.label || RECEIPT_LABELS[r.receiptType]}: ${money(r.amount, sale.currency)}`).join(' | ')}
+                          <td className="px-3 py-3 text-xs text-slate-300">{sale.receipts.map((r) => `${r.label || RECEIPT_LABELS[r.receiptType]}: ${money(r.amount, sale.currency)}`).join(' | ')}</td>
+                          <td className="px-3 py-3">
+                            <StatusPill status={sale.status} />
                           </td>
-                          <td className="px-3 py-3"><StatusPill status={sale.status} /></td>
                           <td className="px-3 py-3">
                             <div className="flex justify-end gap-2">
-                              <Link href={`/record-book/daily-sales/${sale.id}`} className="inline-flex items-center rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800">View</Link>
-                              {canUpdate && sale.status === 'DRAFT' && <Btn size="xs" variant="secondary" onClick={() => setSaleModal(sale)}>Edit</Btn>}
-                              {canFinalize && sale.status === 'DRAFT' && <Btn size="xs" variant="success" onClick={() => requestAction({ title: 'Finalize daily sales', description: 'Finalized records become read-only until an administrator reopens them.', confirmLabel: 'Finalize', tone: 'success', execute: () => backendPatch(`/record-book/daily-sales/${sale.id}/finalize`, {}) })}>Finalize</Btn>}
-                              {canAdmin && sale.status === 'FINALIZED' && <Btn size="xs" variant="warning" onClick={() => requestAction({ title: 'Reopen daily sales', description: 'This returns the record to Draft so it can be corrected.', confirmLabel: 'Reopen', tone: 'warning', execute: () => backendPatch(`/record-book/daily-sales/${sale.id}/reopen`, {}) })}>Reopen</Btn>}
-                              {canVoid && sale.status !== 'VOIDED' && <Btn size="xs" variant="danger" onClick={() => requestAction({ title: 'Void daily sales', description: 'The record remains in the audit history but is excluded from active totals.', confirmLabel: 'Void record', tone: 'danger', requireReason: true, execute: (reason) => backendPatch(`/record-book/daily-sales/${sale.id}/void`, { reason }) })}>Void</Btn>}
-                              {canDelete && sale.status === 'DRAFT' && <Btn size="xs" variant="danger" onClick={() => requestAction({ title: 'Delete draft daily sales', description: 'The draft will move to Trash and can be restored by an administrator.', confirmLabel: 'Move to Trash', tone: 'danger', execute: () => backendDelete(`/record-book/daily-sales/${sale.id}`) })}>Delete</Btn>}
+                              <Link href={`/record-book/daily-sales/${sale.id}`} className="inline-flex items-center rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800">
+                                View
+                              </Link>
+                              {canUpdate && sale.status === 'DRAFT' && (
+                                <Btn size="xs" variant="secondary" onClick={() => setSaleModal(sale)}>
+                                  Edit
+                                </Btn>
+                              )}
+                              {canFinalize && sale.status === 'DRAFT' && (
+                                <Btn
+                                  size="xs"
+                                  variant="success"
+                                  onClick={() =>
+                                    requestAction({
+                                      title: 'Finalize daily sales',
+                                      description: 'Finalized records become read-only until an administrator reopens them.',
+                                      confirmLabel: 'Finalize',
+                                      tone: 'success',
+                                      execute: () => backendPatch(`/record-book/daily-sales/${sale.id}/finalize`, {}),
+                                    })
+                                  }
+                                >
+                                  Finalize
+                                </Btn>
+                              )}
+                              {canAdmin && sale.status === 'FINALIZED' && (
+                                <Btn
+                                  size="xs"
+                                  variant="warning"
+                                  onClick={() =>
+                                    requestAction({
+                                      title: 'Reopen daily sales',
+                                      description: 'This returns the record to Draft so it can be corrected.',
+                                      confirmLabel: 'Reopen',
+                                      tone: 'warning',
+                                      execute: () => backendPatch(`/record-book/daily-sales/${sale.id}/reopen`, {}),
+                                    })
+                                  }
+                                >
+                                  Reopen
+                                </Btn>
+                              )}
+                              {canVoid && sale.status !== 'VOIDED' && (
+                                <Btn
+                                  size="xs"
+                                  variant="danger"
+                                  onClick={() =>
+                                    requestAction({
+                                      title: 'Void daily sales',
+                                      description: 'The record remains in the audit history but is excluded from active totals.',
+                                      confirmLabel: 'Void record',
+                                      tone: 'danger',
+                                      requireReason: true,
+                                      execute: (reason) =>
+                                        backendPatch(`/record-book/daily-sales/${sale.id}/void`, {
+                                          reason,
+                                        }),
+                                    })
+                                  }
+                                >
+                                  Void
+                                </Btn>
+                              )}
+                              {canDelete && sale.status === 'DRAFT' && (
+                                <Btn
+                                  size="xs"
+                                  variant="danger"
+                                  onClick={() =>
+                                    requestAction({
+                                      title: 'Delete draft daily sales',
+                                      description: 'The draft will move to Trash and can be restored by an administrator.',
+                                      confirmLabel: 'Move to Trash',
+                                      tone: 'danger',
+                                      execute: () => backendDelete(`/record-book/daily-sales/${sale.id}`),
+                                    })
+                                  }
+                                >
+                                  Delete
+                                </Btn>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -905,8 +1034,14 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
           {(initialTab === 'dashboard' || initialTab === 'expenses') && (
             <Card className="mb-5">
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-lg font-semibold" style={{ color: 'var(--aurora-text)' }}>Money Out</h2>
-                {canCreate && <Btn size="sm" onClick={() => setExpenseModal('new')}>+ Money Out</Btn>}
+                <h2 className="text-lg font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                  Money Out
+                </h2>
+                {canCreate && (
+                  <Btn size="sm" onClick={() => setExpenseModal('new')}>
+                    + Money Out
+                  </Btn>
+                )}
               </div>
               {!expenses?.data.length ? (
                 <EmptyState title="No money-out records" description="Record food, labour, transport, utilities, and other manual outflows here." />
@@ -934,15 +1069,91 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                           <td className="px-3 py-3">{expense.paidTo || '-'}</td>
                           <td className="px-3 py-3 text-right font-semibold">{money(expense.amount, expense.currency)}</td>
                           <td className="px-3 py-3">{expense.paymentLabel || expense.paymentMethod.replace('_', ' ')}</td>
-                          <td className="px-3 py-3"><StatusPill status={expense.status} /></td>
+                          <td className="px-3 py-3">
+                            <StatusPill status={expense.status} />
+                          </td>
                           <td className="px-3 py-3">
                             <div className="flex justify-end gap-2">
-                              <Link href={`/record-book/expenses/${expense.id}`} className="inline-flex items-center rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800">View</Link>
-                              {canUpdate && expense.status === 'DRAFT' && <Btn size="xs" variant="secondary" onClick={() => setExpenseModal(expense)}>Edit</Btn>}
-                              {canFinalize && expense.status === 'DRAFT' && <Btn size="xs" variant="success" onClick={() => requestAction({ title: 'Finalize money out', description: 'Finalized records become read-only until an administrator reopens them.', confirmLabel: 'Finalize', tone: 'success', execute: () => backendPatch(`/record-book/expenses/${expense.id}/finalize`, {}) })}>Finalize</Btn>}
-                              {canAdmin && expense.status === 'FINALIZED' && <Btn size="xs" variant="warning" onClick={() => requestAction({ title: 'Reopen money out', description: 'This returns the record to Draft so it can be corrected.', confirmLabel: 'Reopen', tone: 'warning', execute: () => backendPatch(`/record-book/expenses/${expense.id}/reopen`, {}) })}>Reopen</Btn>}
-                              {canVoid && expense.status !== 'VOIDED' && <Btn size="xs" variant="danger" onClick={() => requestAction({ title: 'Void money-out record', description: 'The record remains in the audit history but is excluded from active totals.', confirmLabel: 'Void record', tone: 'danger', requireReason: true, execute: (reason) => backendPatch(`/record-book/expenses/${expense.id}/void`, { reason }) })}>Void</Btn>}
-                              {canDelete && expense.status === 'DRAFT' && <Btn size="xs" variant="danger" onClick={() => requestAction({ title: 'Delete draft money out', description: 'The draft will move to Trash and can be restored by an administrator.', confirmLabel: 'Move to Trash', tone: 'danger', execute: () => backendDelete(`/record-book/expenses/${expense.id}`) })}>Delete</Btn>}
+                              <Link href={`/record-book/expenses/${expense.id}`} className="inline-flex items-center rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800">
+                                View
+                              </Link>
+                              {canUpdate && expense.status === 'DRAFT' && (
+                                <Btn size="xs" variant="secondary" onClick={() => setExpenseModal(expense)}>
+                                  Edit
+                                </Btn>
+                              )}
+                              {canFinalize && expense.status === 'DRAFT' && (
+                                <Btn
+                                  size="xs"
+                                  variant="success"
+                                  onClick={() =>
+                                    requestAction({
+                                      title: 'Finalize money out',
+                                      description: 'Finalized records become read-only until an administrator reopens them.',
+                                      confirmLabel: 'Finalize',
+                                      tone: 'success',
+                                      execute: () => backendPatch(`/record-book/expenses/${expense.id}/finalize`, {}),
+                                    })
+                                  }
+                                >
+                                  Finalize
+                                </Btn>
+                              )}
+                              {canAdmin && expense.status === 'FINALIZED' && (
+                                <Btn
+                                  size="xs"
+                                  variant="warning"
+                                  onClick={() =>
+                                    requestAction({
+                                      title: 'Reopen money out',
+                                      description: 'This returns the record to Draft so it can be corrected.',
+                                      confirmLabel: 'Reopen',
+                                      tone: 'warning',
+                                      execute: () => backendPatch(`/record-book/expenses/${expense.id}/reopen`, {}),
+                                    })
+                                  }
+                                >
+                                  Reopen
+                                </Btn>
+                              )}
+                              {canVoid && expense.status !== 'VOIDED' && (
+                                <Btn
+                                  size="xs"
+                                  variant="danger"
+                                  onClick={() =>
+                                    requestAction({
+                                      title: 'Void money-out record',
+                                      description: 'The record remains in the audit history but is excluded from active totals.',
+                                      confirmLabel: 'Void record',
+                                      tone: 'danger',
+                                      requireReason: true,
+                                      execute: (reason) =>
+                                        backendPatch(`/record-book/expenses/${expense.id}/void`, {
+                                          reason,
+                                        }),
+                                    })
+                                  }
+                                >
+                                  Void
+                                </Btn>
+                              )}
+                              {canDelete && expense.status === 'DRAFT' && (
+                                <Btn
+                                  size="xs"
+                                  variant="danger"
+                                  onClick={() =>
+                                    requestAction({
+                                      title: 'Delete draft money out',
+                                      description: 'The draft will move to Trash and can be restored by an administrator.',
+                                      confirmLabel: 'Move to Trash',
+                                      tone: 'danger',
+                                      execute: () => backendDelete(`/record-book/expenses/${expense.id}`),
+                                    })
+                                  }
+                                >
+                                  Delete
+                                </Btn>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -958,8 +1169,14 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
           {initialTab === 'categories' && (
             <Card>
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-lg font-semibold" style={{ color: 'var(--aurora-text)' }}>Records Book Categories</h2>
-                {canCreate && <Btn size="sm" onClick={() => setCategoryModal('new')}>+ Category</Btn>}
+                <h2 className="text-lg font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                  Records Book Categories
+                </h2>
+                {canCreate && (
+                  <Btn size="sm" onClick={() => setCategoryModal('new')}>
+                    + Category
+                  </Btn>
+                )}
               </div>
               {!categoryPage?.data.length ? (
                 <EmptyState title="No categories" description="Create manual money-out categories such as Food, Labour, Repairs, or Supplies." />
@@ -986,8 +1203,28 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                           <td className="px-3 py-3">{category.isActive ? 'Active' : 'Inactive'}</td>
                           <td className="px-3 py-3">
                             <div className="flex justify-end gap-2">
-                              {canUpdate && <Btn size="xs" variant="secondary" onClick={() => setCategoryModal(category)}>Edit</Btn>}
-                              {canDelete && <Btn size="xs" variant="danger" onClick={() => requestAction({ title: 'Delete category', description: 'The category moves to Trash. Existing expense history keeps its category name.', confirmLabel: 'Move to Trash', tone: 'danger', execute: () => backendDelete(`/record-book/expense-categories/${category.id}`) })}>Delete</Btn>}
+                              {canUpdate && (
+                                <Btn size="xs" variant="secondary" onClick={() => setCategoryModal(category)}>
+                                  Edit
+                                </Btn>
+                              )}
+                              {canDelete && (
+                                <Btn
+                                  size="xs"
+                                  variant="danger"
+                                  onClick={() =>
+                                    requestAction({
+                                      title: 'Delete category',
+                                      description: 'The category moves to Trash. Existing expense history keeps its category name.',
+                                      confirmLabel: 'Move to Trash',
+                                      tone: 'danger',
+                                      execute: () => backendDelete(`/record-book/expense-categories/${category.id}`),
+                                    })
+                                  }
+                                >
+                                  Delete
+                                </Btn>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -1002,17 +1239,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
         </>
       )}
 
-      {saleModal && (
-        <SaleModal
-          initial={saleModal === 'new' ? null : saleModal}
-          filters={filters}
-          companies={companies}
-          divisions={divisions}
-          branches={branches}
-          onClose={() => setSaleModal(null)}
-          onSaved={refreshAfterModal}
-        />
-      )}
+      {saleModal && <SaleModal initial={saleModal === 'new' ? null : saleModal} filters={filters} companies={companies} divisions={divisions} branches={branches} onClose={() => setSaleModal(null)} onSaved={refreshAfterModal} />}
       {expenseModal && (
         <ExpenseModal
           initial={expenseModal === 'new' ? null : expenseModal}
@@ -1025,15 +1252,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
           onSaved={refreshAfterModal}
         />
       )}
-      {categoryModal && (
-        <CategoryModal
-          initial={categoryModal === 'new' ? null : categoryModal}
-          filters={filters}
-          companies={companies}
-          onClose={() => setCategoryModal(null)}
-          onSaved={refreshAfterModal}
-        />
-      )}
+      {categoryModal && <CategoryModal initial={categoryModal === 'new' ? null : categoryModal} filters={filters} companies={companies} onClose={() => setCategoryModal(null)} onSaved={refreshAfterModal} />}
       <RecordBookConfirmDialog
         action={confirmAction}
         reason={confirmReason}

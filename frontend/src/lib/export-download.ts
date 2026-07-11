@@ -74,6 +74,10 @@ export interface TablePdfRequest {
   title: string;
   /** Optional sub-heading, e.g. the active filters (≤160 chars). */
   subtitle?: string;
+  /** Optional status pill displayed in the document heading. */
+  status?: string;
+  /** Wide reports can explicitly request A4 landscape. */
+  orientation?: 'portrait' | 'landscape';
   /** Company whose letterhead/logo brands the PDF (defaults server-side). */
   companyId?: string;
   /** Column headers (1–40). */
@@ -84,6 +88,16 @@ export interface TablePdfRequest {
   meta?: Array<{ label: string; value: string }>;
   /** Indices of columns to right-align as numeric. */
   numericColumns?: number[];
+  /** Relative width of every column; must match the column count. */
+  columnWeights?: number[];
+  /** Alternate row backgrounds for dense registers. */
+  stripedRows?: boolean;
+  /** Heading above the table. */
+  sectionTitle?: string;
+  /** Optional report summary pairs (≤16). */
+  summary?: Array<{ label: string; value: string }>;
+  /** Optional explanatory note below the table. */
+  note?: string;
   /** Base filename (no extension) for the generated PDF (≤80 chars). */
   baseName?: string;
 }
@@ -111,8 +125,14 @@ export async function downloadTablePdf(req: TablePdfRequest): Promise<void> {
     ...req,
     title: clamp(req.title, 120),
     subtitle: req.subtitle === undefined ? undefined : clamp(req.subtitle, 160),
+    status: req.status === undefined ? undefined : clamp(req.status, 40),
     rows: truncated ? req.rows.slice(0, TABLE_PDF_MAX_ROWS) : req.rows,
     meta: meta.length > 0 ? meta : undefined,
+    summary: req.summary
+      ?.slice(0, 16)
+      .map((entry) => ({ label: clamp(entry.label, 60), value: clamp(entry.value, 200) })),
+    sectionTitle: req.sectionTitle === undefined ? undefined : clamp(req.sectionTitle, 80),
+    note: req.note === undefined ? undefined : clamp(req.note, 500),
     baseName: req.baseName === undefined ? undefined : clamp(req.baseName, 80),
   };
   const stamp = new Date().toISOString().slice(0, 10);

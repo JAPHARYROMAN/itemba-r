@@ -118,9 +118,7 @@ describe('export-download', () => {
         }),
       );
 
-      await expect(downloadTablePdf(request)).rejects.toThrow(
-        'title is required, rows too long',
-      );
+      await expect(downloadTablePdf(request)).rejects.toThrow('title is required, rows too long');
     });
 
     it('uses a status-based message when the error body is not JSON', async () => {
@@ -173,6 +171,36 @@ describe('export-download', () => {
       expect(body.meta?.[0].value).toHaveLength(200);
     });
 
+    it('forwards and clamps the structured report layout options', async () => {
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(pdfResponse());
+
+      await downloadTablePdf({
+        title: 'Daily Sales',
+        status: 'S'.repeat(60),
+        orientation: 'landscape',
+        columns: ['Date', 'Amount'],
+        rows: [['11/07/2026', '1,000.00']],
+        columnWeights: [1, 1.2],
+        stripedRows: true,
+        sectionTitle: 'R'.repeat(100),
+        summary: Array.from({ length: 18 }, (_, index) => ({
+          label: `Summary ${index}`,
+          value: 'V'.repeat(220),
+        })),
+        note: 'N'.repeat(600),
+      });
+
+      const body = sentBody(fetchMock);
+      expect(body.orientation).toBe('landscape');
+      expect(body.columnWeights).toEqual([1, 1.2]);
+      expect(body.stripedRows).toBe(true);
+      expect(body.status).toHaveLength(40);
+      expect(body.sectionTitle).toHaveLength(80);
+      expect(body.summary).toHaveLength(16);
+      expect(body.summary?.[0].value).toHaveLength(200);
+      expect(body.note).toHaveLength(500);
+    });
+
     it('keeps meta at no more than 12 entries when the truncation note is added', async () => {
       const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(pdfResponse());
       const rows = Array.from({ length: TABLE_PDF_MAX_ROWS + 1 }, () => ['Widget', '1']);
@@ -193,11 +221,10 @@ describe('export-download', () => {
         .spyOn(globalThis, 'fetch')
         .mockResolvedValue(pdfResponse('attachment; filename="finance-tax-2026-07-05.pdf"'));
 
-      const ok = await downloadReportPdf(
-        { items: [{ name: 'VAT', amount: 100 }] },
-        'finance-tax',
-        { title: 'Tax report', companyId: 'c1' },
-      );
+      const ok = await downloadReportPdf({ items: [{ name: 'VAT', amount: 100 }] }, 'finance-tax', {
+        title: 'Tax report',
+        companyId: 'c1',
+      });
 
       expect(ok).toBe(true);
       expect(fetchMock).toHaveBeenCalledWith(
@@ -226,7 +253,12 @@ describe('export-download', () => {
 
   describe('reportToTable', () => {
     it('converts an array of flat objects into a column/row matrix', () => {
-      expect(reportToTable([{ name: 'A', qty: 1 }, { name: 'B', qty: 2 }])).toEqual({
+      expect(
+        reportToTable([
+          { name: 'A', qty: 1 },
+          { name: 'B', qty: 2 },
+        ]),
+      ).toEqual({
         columns: ['name', 'qty'],
         rows: [
           ['A', '1'],
