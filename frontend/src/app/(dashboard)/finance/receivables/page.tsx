@@ -15,6 +15,7 @@ import {
   FormTextarea,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { DocumentArtifactButton } from '@/components/documents';
 import {
   DetailGrid,
   DetailItem,
@@ -1450,18 +1451,28 @@ export default function ReceivablesPage() {
                             <StatusBadge status={account.status} />
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <Btn
-                              variant="secondary"
-                              size="xs"
-                              onClick={() =>
-                                setExpandedAccounts((prev) => ({
-                                  ...prev,
-                                  [account.accountKey]: !expanded,
-                                }))
-                              }
-                            >
-                              {expanded ? 'Hide Details' : 'View Details'}
-                            </Btn>
+                            <div className="flex flex-wrap items-center justify-end gap-1.5">
+                              {account.outstandingAmount > 0.005 ? (
+                                <DocumentArtifactButton
+                                  entityType="CUSTOMER_DEBT_STATEMENT"
+                                  entityId={account.accountKey}
+                                  buttonLabel="Export Debt PDF"
+                                  compact
+                                />
+                              ) : null}
+                              <Btn
+                                variant="secondary"
+                                size="xs"
+                                onClick={() =>
+                                  setExpandedAccounts((prev) => ({
+                                    ...prev,
+                                    [account.accountKey]: !expanded,
+                                  }))
+                                }
+                              >
+                                {expanded ? 'Hide Details' : 'View Details'}
+                              </Btn>
+                            </div>
                           </td>
                         </tr>
                         {expanded && (

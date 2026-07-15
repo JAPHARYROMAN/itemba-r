@@ -179,4 +179,34 @@ describe('buildBusinessPdf rendering', () => {
     expect(raw).toContain('(SALES) Tj');
     expect(raw).toContain(PANEL_FILL_OP);
   });
+
+  it('starts requested detail sections on a clean continuation page', () => {
+    const buffer = buildBusinessPdf(
+      sampleModel({
+        sections: [
+          {
+            title: 'Consolidated Debt Schedule',
+            paragraphs: ['Summary of all active customer debts.'],
+          },
+          {
+            title: 'Debt Detail - REC-2026-000001',
+            pageBreakBefore: true,
+            paragraphs: ['First debt detail.'],
+          },
+          {
+            title: 'Debt Detail - REC-2026-000002',
+            pageBreakBefore: true,
+            paragraphs: ['Second debt detail.'],
+          },
+        ],
+      }),
+    );
+    const raw = buffer.toString('latin1');
+
+    expect(raw).toContain('/Count 3');
+    expect(raw).toContain('(CONSOLIDATED DEBT SCHEDULE) Tj');
+    expect(raw).toContain('(DEBT DETAIL - REC-2026-000001) Tj');
+    expect(raw).toContain('(DEBT DETAIL - REC-2026-000002) Tj');
+    expect(occurrences(raw, BRAND_RULE_OP)).toBe(3);
+  });
 });

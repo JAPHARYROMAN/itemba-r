@@ -29,7 +29,10 @@ function makeService() {
     supplierInvoice: { findFirst: jest.fn(async () => null) },
     payrollEntry: { findFirst: jest.fn(async () => null) },
     creditNote: { findFirst: jest.fn(async () => null) },
+    customer: { findFirst: jest.fn(async () => null) },
     customerPayment: { findFirst: jest.fn(async () => null) },
+    receivable: { findMany: jest.fn(async () => []) },
+    journalEntry: { findMany: jest.fn(async () => []) },
     supplier: { findFirst: jest.fn(async () => null) },
     purchaseOrder: { findFirst: jest.fn(async () => null) },
     product: { findMany: jest.fn(async () => []) },
@@ -178,7 +181,9 @@ describe('GeneratedDocumentsService.generateBusinessPdf (document-type builders)
       .spyOn(pdfBuilder, 'buildBusinessPdf')
       .mockReturnValue(Buffer.from('%PDF-stub'));
     await service.generateBusinessPdf({ entityType, entityId }, actor);
-    return buildSpy.mock.calls[0][0];
+    const model = buildSpy.mock.calls[0][0];
+    buildSpy.mockRestore();
+    return model;
   }
 
   function sectionByTitle(model: pdfBuilder.BusinessPdfModel, title: string) {
@@ -556,6 +561,238 @@ describe('GeneratedDocumentsService.generateBusinessPdf (document-type builders)
       value: 'TZS 200.00',
       emphasis: true,
     });
+  });
+
+  it('CUSTOMER_DEBT_STATEMENT: consolidates all active debts with products and payments', async () => {
+    const { service, prisma, companyScope } = makeService();
+    prisma.company.findFirst.mockResolvedValue({
+      id: 'company-1',
+      name: 'Westsides Company Ltd',
+      code: 'WEST',
+      phone: '+255 700 000 000',
+      email: 'accounts@example.com',
+      website: 'example.com',
+      logoUrl: null,
+      group: null,
+      profile: null,
+    });
+    prisma.customer.findFirst.mockResolvedValue({
+      id: 'cust-1',
+      customerCode: 'CUST-001',
+      name: 'Alpha Traders Ltd',
+      legalName: 'Alpha Traders Limited',
+      customerType: 'BUSINESS',
+      tin: '123-456-789',
+      vrn: '40-123456-A',
+      phone: '+255 755 100 200',
+      email: 'finance@alpha.example',
+      address: 'Mbeya, Tanzania',
+      contactPerson: 'Amina Salim',
+      creditLimit: 2000000,
+      paymentTerms: 'Net 30',
+      status: 'ACTIVE',
+    });
+    prisma.receivable.findMany.mockResolvedValue([
+      {
+        id: 'rec-1',
+        receivableNumber: 'REC-2026-000101',
+        companyId: 'company-1',
+        customerId: 'cust-1',
+        customerName: 'Alpha Traders Ltd',
+        sourceType: 'SALES_ORDER',
+        sourceId: 'so-1',
+        amount: 500000,
+        paidAmount: 100000,
+        outstandingAmount: 350000,
+        currency: 'TZS',
+        issueDate: new Date('2026-06-01'),
+        dueDate: new Date('2026-06-30'),
+        status: 'PARTIALLY_PAID',
+        notes: 'First delivery',
+        branch: { id: 'branch-1', code: 'TDM-001', name: 'Kisimani Main Branch' },
+        salesOrders: [
+          {
+            id: 'so-1',
+            salesOrderNumber: 'SO-2026-000101',
+            customerName: 'Alpha Traders Ltd',
+            orderDate: new Date('2026-06-01'),
+            dueDate: new Date('2026-06-30'),
+            salesType: 'CREDIT_SALE',
+            paymentMethod: 'CREDIT',
+            paymentReference: null,
+            subtotal: 500000,
+            discountAmount: 0,
+            documentDiscount: 0,
+            taxAmount: 0,
+            totalAmount: 500000,
+            notes: null,
+            lines: [
+              {
+                id: 'line-1',
+                description: 'Coral Hi-Gloss Paint Black 4L',
+                quantity: 5,
+                unitPrice: 100000,
+                discountAmount: 0,
+                taxAmount: 0,
+                lineTotal: 500000,
+                product: {
+                  name: 'Coral Hi-Gloss Paint Black 4L',
+                  sku: 'PAINT-4L',
+                  productCode: 'P-1',
+                },
+                unit: { name: 'Tin', symbol: 'tin' },
+              },
+            ],
+          },
+        ],
+        fuelCreditSales: [],
+        projectBillings: [],
+        trips: [],
+        paymentAllocations: [
+          {
+            amount: 100000,
+            createdAt: new Date('2026-06-15'),
+            customerPayment: {
+              paymentNumber: 'CP-2026-000011',
+              paymentDate: new Date('2026-06-15'),
+              amount: 150000,
+              method: 'BANK_TRANSFER',
+              reference: 'CRDB-7788',
+              status: 'COMPLETED',
+              notes: null,
+            },
+          },
+        ],
+        creditNotes: [
+          {
+            creditNoteNumber: 'CN-2026-000003',
+            issueDate: new Date('2026-06-20'),
+            reason: 'Returned damaged tin',
+            totalAmount: 50000,
+            appliedAmount: 50000,
+          },
+        ],
+      },
+      {
+        id: 'rec-2',
+        receivableNumber: 'REC-2026-000119',
+        companyId: 'company-1',
+        customerId: 'cust-1',
+        customerName: 'Alpha Traders Ltd',
+        sourceType: 'SALES_ORDER',
+        sourceId: 'so-2',
+        amount: 300000,
+        paidAmount: 0,
+        outstandingAmount: 300000,
+        currency: 'TZS',
+        issueDate: new Date('2026-07-01'),
+        dueDate: new Date('2026-07-31'),
+        status: 'OPEN',
+        notes: null,
+        branch: { id: 'branch-1', code: 'TDM-001', name: 'Kisimani Main Branch' },
+        salesOrders: [
+          {
+            id: 'so-2',
+            salesOrderNumber: 'SO-2026-000119',
+            customerName: 'Alpha Traders Ltd',
+            orderDate: new Date('2026-07-01'),
+            dueDate: new Date('2026-07-31'),
+            salesType: 'CREDIT_SALE',
+            paymentMethod: 'CREDIT',
+            paymentReference: null,
+            subtotal: 300000,
+            discountAmount: 0,
+            documentDiscount: 0,
+            taxAmount: 0,
+            totalAmount: 300000,
+            notes: null,
+            lines: [
+              {
+                id: 'line-2',
+                description: 'Roofing sheets',
+                quantity: 10,
+                unitPrice: 30000,
+                discountAmount: 0,
+                taxAmount: 0,
+                lineTotal: 300000,
+                product: { name: 'Roofing sheets', sku: 'ROOF-01', productCode: 'P-2' },
+                unit: { name: 'Piece', symbol: 'pcs' },
+              },
+            ],
+          },
+        ],
+        fuelCreditSales: [],
+        projectBillings: [],
+        trips: [],
+        paymentAllocations: [],
+        creditNotes: [],
+      },
+    ]);
+
+    const actor = user({ permissions: ['receivables.view'] });
+    const model = await generateModel(
+      service,
+      'CUSTOMER_DEBT_STATEMENT',
+      'CUSTOMER:company-1:cust-1:TZS',
+      actor,
+    );
+
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+      actor,
+      'company-1',
+      AccessLevel.READ,
+    );
+    expect(model.title).toBe('Customer Debt Statement');
+    expect(model.orientation).toBe('landscape');
+    expect(model.subtitle).toContain('Alpha Traders Ltd');
+
+    const summary = sectionByTitle(model, 'Balance Summary');
+    expect(summary.totals).toEqual(
+      expect.arrayContaining([
+        { label: 'Original Debt', value: 'TZS 800,000.00', emphasis: false },
+        { label: 'Payments Received', value: 'TZS 100,000.00', emphasis: false },
+        { label: 'Credits / Adjustments', value: 'TZS 50,000.00', emphasis: false },
+        { label: 'Current Outstanding', value: 'TZS 650,000.00', emphasis: true },
+      ]),
+    );
+    expect(sectionByTitle(model, 'Consolidated Debt Schedule').table!.rows).toHaveLength(2);
+    expect(sectionByTitle(model, 'Products and Charges - REC-2026-000101').table!.rows[0]).toEqual(
+      expect.arrayContaining(['SO-2026-000101', 'Coral Hi-Gloss Paint Black 4L', 'PAINT-4L']),
+    );
+    const settlements = sectionByTitle(model, 'Payments and Adjustments - REC-2026-000101').table!
+      .rows;
+    expect(settlements[0]).toEqual(
+      expect.arrayContaining([
+        'CP-2026-000011',
+        'Payment - BANK TRANSFER',
+        'CRDB-7788',
+        'TZS 150,000.00',
+        'TZS 100,000.00',
+      ]),
+    );
+    expect(settlements[1]).toEqual(
+      expect.arrayContaining([
+        'CN-2026-000003',
+        'Credit note',
+        'Returned damaged tin',
+        'TZS 50,000.00',
+      ]),
+    );
+  });
+
+  it('CUSTOMER_DEBT_STATEMENT: rejects users without receivables access', async () => {
+    const { service, prisma } = makeService();
+
+    await expect(
+      service.generateBusinessPdf(
+        {
+          entityType: 'CUSTOMER_DEBT_STATEMENT',
+          entityId: 'CUSTOMER:company-1:cust-1:TZS',
+        },
+        user({ permissions: ['generated_documents.view'] }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.receivable.findMany).not.toHaveBeenCalled();
   });
 
   it('persists the Document with READ access so view-only users can generate PDFs', async () => {

@@ -10,6 +10,7 @@ export type DocumentEntityType =
   | 'PROFORMA_INVOICE'
   | 'DELIVERY_NOTE'
   | 'CUSTOMER_PROFILE'
+  | 'CUSTOMER_DEBT_STATEMENT'
   | 'GOODS_RECEIVED_NOTE'
   | 'SUPPLIER_INVOICE'
   | 'PAYSLIP'
@@ -29,9 +30,13 @@ interface GeneratedDocumentResponse {
 export function DocumentArtifactButton({
   entityType,
   entityId,
+  buttonLabel = 'Generate PDF',
+  compact = false,
 }: {
   entityType: DocumentEntityType;
   entityId: string;
+  buttonLabel?: string;
+  compact?: boolean;
 }) {
   const [downloadHref, setDownloadHref] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,16 +68,20 @@ export function DocumentArtifactButton({
         type="button"
         onClick={generate}
         disabled={busy}
-        className="inline-flex items-center justify-center rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+        className={`inline-flex items-center justify-center rounded-lg border border-zinc-900 bg-zinc-900 font-medium text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60 ${
+          compact ? 'px-2.5 py-1 text-[11px]' : 'px-3 py-1.5 text-[12px]'
+        }`}
       >
-        {busy ? 'Generating...' : 'Generate PDF'}
+        {busy ? 'Generating...' : buttonLabel}
       </button>
       {downloadHref && (
         <a
           href={downloadHref}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[12px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
+          className={`inline-flex items-center justify-center rounded-lg border border-zinc-200 bg-white font-medium text-zinc-700 transition-colors hover:bg-zinc-50 ${
+            compact ? 'px-2.5 py-1 text-[11px]' : 'px-3 py-1.5 text-[12px]'
+          }`}
         >
           Open PDF
         </a>

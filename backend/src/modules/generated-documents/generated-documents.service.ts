@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   AccessLevel,
+  CurrencyCode,
   DocumentCategory,
   DocumentOwnerType,
   DocumentTemplateFormat,
@@ -15,6 +16,7 @@ import {
   DocumentTemplateType,
   GeneratedDocumentFormat,
   GeneratedDocumentStatus,
+  ReceivableStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -331,6 +333,8 @@ export class GeneratedDocumentsService {
         return this.deliveryNotePdf(entityId, user);
       case 'CUSTOMER_PROFILE':
         return this.customerProfilePdf(entityId, user);
+      case 'CUSTOMER_DEBT_STATEMENT':
+        return this.customerDebtStatementPdf(entityId, user);
       case 'GOODS_RECEIVED_NOTE':
         return this.grnPdf(entityId, user);
       case 'SUPPLIER_INVOICE':
@@ -754,6 +758,535 @@ export class GeneratedDocumentsService {
         ],
       },
     );
+  }
+
+  /**
+   * Customer-facing consolidated debt statement for the account rows exposed
+   * by Finance > Receivables. `accountKey` is generated server-side by the
+   * receivables account workbench and identifies one company/customer/currency
+   * account (or one named unlinked account). Only active debts are included;
+   * paid, written-off and cancelled documents are deliberately excluded.
+   */
+  private async customerDebtStatementPdf(
+    accountKey: string,
+    user: AuthUser,
+  ): Promise<ResolvedBusinessPdfModel> {
+    const selector = parseReceivableAccountKey(accountKey);
+    await this.companyScope.assertCanAccessCompany(user, selector.companyId, AccessLevel.READ);
+
+    const [company, customer] = await Promise.all([
+      this.prisma.company.findFirst({
+        where: { id: selector.companyId, deletedAt: null },
+        select: companySelect().select,
+      }),
+      selector.kind === 'customer'
+        ? this.prisma.customer.findFirst({
+            where: {
+              id: selector.customerId,
+              companyId: selector.companyId,
+              deletedAt: null,
+            },
+            select: {
+              id: true,
+              customerCode: true,
+              name: true,
+              legalName: true,
+              customerType: true,
+              tin: true,
+              vrn: true,
+              phone: true,
+              email: true,
+              address: true,
+              contactPerson: true,
+              creditLimit: true,
+              paymentTerms: true,
+              status: true,
+            },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    if (!company) throw new NotFoundException('Company not found');
+    if (selector.kind === 'customer' && !customer) {
+      throw new NotFoundException('Customer account not found');
+    }
+
+    const activeStatuses: ReceivableStatus[] = [
+      ReceivableStatus.OPEN,
+      ReceivableStatus.PARTIALLY_PAID,
+      ReceivableStatus.OVERDUE,
+    ];
+    let receivables = await this.prisma.receivable.findMany({
+      where: {
+        companyId: selector.companyId,
+        currency: selector.currency,
+        deletedAt: null,
+        outstandingAmount: { gt: 0 },
+        status: { in: activeStatuses },
+        customerId: selector.kind === 'customer' ? selector.customerId : null,
+      },
+      include: {
+        branch: { select: { id: true, name: true, code: true } },
+        salesOrders: {
+          where: { deletedAt: null },
+          orderBy: { orderDate: 'asc' },
+          select: {
+            id: true,
+            salesOrderNumber: true,
+            customerName: true,
+            orderDate: true,
+            dueDate: true,
+            salesType: true,
+            paymentMethod: true,
+            paymentReference: true,
+            subtotal: true,
+            discountAmount: true,
+            documentDiscount: true,
+            taxAmount: true,
+            totalAmount: true,
+            notes: true,
+            lines: {
+              orderBy: { createdAt: 'asc' },
+              select: {
+                id: true,
+                description: true,
+                quantity: true,
+                unitPrice: true,
+                discountAmount: true,
+                taxAmount: true,
+                lineTotal: true,
+                product: { select: { name: true, sku: true, productCode: true } },
+                unit: { select: { name: true, symbol: true } },
+              },
+            },
+          },
+        },
+        fuelCreditSales: {
+          where: { deletedAt: null },
+          orderBy: { saleDate: 'asc' },
+          select: {
+            creditSaleNumber: true,
+            saleDate: true,
+            litres: true,
+            pricePerLitre: true,
+            totalAmount: true,
+            vehicleNumber: true,
+            driverName: true,
+            product: { select: { name: true, sku: true, productCode: true } },
+          },
+        },
+        projectBillings: {
+          where: { deletedAt: null },
+          orderBy: { billingDate: 'asc' },
+          select: {
+            billingNumber: true,
+            billingDate: true,
+            description: true,
+            amount: true,
+            status: true,
+          },
+        },
+        trips: {
+          where: { deletedAt: null },
+          orderBy: { tripDate: 'asc' },
+          select: {
+            tripNumber: true,
+            tripDate: true,
+            origin: true,
+            destination: true,
+            revenueAmount: true,
+            status: true,
+          },
+        },
+        paymentAllocations: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            customerPayment: {
+              select: {
+                paymentNumber: true,
+                paymentDate: true,
+                amount: true,
+                method: true,
+                reference: true,
+                status: true,
+                notes: true,
+              },
+            },
+          },
+        },
+        creditNotes: {
+          where: { deletedAt: null, status: 'ISSUED' },
+          orderBy: { issueDate: 'asc' },
+          select: {
+            creditNoteNumber: true,
+            issueDate: true,
+            reason: true,
+            totalAmount: true,
+            appliedAmount: true,
+          },
+        },
+      },
+      orderBy: [{ issueDate: 'asc' }, { receivableNumber: 'asc' }],
+    });
+
+    if (selector.kind === 'unlinked') {
+      receivables = receivables.filter((record) => {
+        const sourceName = record.salesOrders.find((order) =>
+          order.customerName?.trim(),
+        )?.customerName;
+        return normaliseAccountName(sourceName ?? record.customerName) === selector.accountName;
+      });
+    }
+
+    if (receivables.length === 0) {
+      throw new NotFoundException('No active debts were found for this customer account');
+    }
+
+    const settlementEntries = await this.prisma.journalEntry.findMany({
+      where: {
+        companyId: selector.companyId,
+        referenceType: 'Receivable',
+        referenceId: { in: receivables.map((record) => record.id) },
+        description: { startsWith: 'Receivable settlement' },
+        status: 'POSTED',
+        deletedAt: null,
+      },
+      select: {
+        journalNumber: true,
+        referenceId: true,
+        transactionDate: true,
+        totalDebit: true,
+        description: true,
+      },
+      orderBy: { transactionDate: 'asc' },
+    });
+
+    const generatedAt = new Date();
+    const asOf = startOfDay(generatedAt);
+    const customerName =
+      customer?.name ??
+      receivables
+        .find((record) => record.salesOrders.some((order) => order.customerName?.trim()))
+        ?.salesOrders.find((order) => order.customerName?.trim())?.customerName ??
+      receivables[0].customerName;
+    const originalDebt = sumNumbers(receivables.map((record) => record.amount));
+    const paid = sumNumbers(receivables.map((record) => record.paidAmount));
+    const outstanding = sumNumbers(receivables.map((record) => record.outstandingAmount));
+    const adjustments = Math.max(0, originalDebt - paid - outstanding);
+    const overdue = sumNumbers(
+      receivables
+        .filter((record) => daysPastDue(record.dueDate, asOf) > 0)
+        .map((record) => record.outstandingAmount),
+    );
+    const aging = debtAging(receivables, asOf);
+    const reference = `DEBT-${safeFileStem(customer?.customerCode ?? customerName).slice(0, 30)}-${isoDate(generatedAt).replace(/-/g, '')}`;
+
+    const sections: BusinessPdfSection[] = [
+      {
+        title: 'Customer Account',
+        items: [
+          kv('Customer', customerName),
+          kv('Customer Code', customer?.customerCode),
+          kv('Legal Name', customer?.legalName),
+          kv('Customer Type', customer?.customerType),
+          kv('Contact Person', customer?.contactPerson),
+          kv('Phone', customer?.phone),
+          kv('Email', customer?.email),
+          kv('Address', customer?.address),
+          kv('TIN', customer?.tin),
+          kv('VRN', customer?.vrn),
+          kv('Payment Terms', customer?.paymentTerms),
+          kv('Currency', selector.currency),
+        ],
+      },
+      {
+        title: 'Balance Summary',
+        items: [
+          kv('Active Debt Documents', receivables.length),
+          kv(
+            'Overdue Documents',
+            receivables.filter((r) => daysPastDue(r.dueDate, asOf) > 0).length,
+          ),
+          kv('Oldest Debt Date', date(receivables[0].issueDate)),
+          kv('Statement Date', date(generatedAt)),
+        ],
+        totals: [
+          total('Original Debt', originalDebt, selector.currency),
+          total('Payments Received', paid, selector.currency),
+          total('Credits / Adjustments', adjustments, selector.currency),
+          total('Current Outstanding', outstanding, selector.currency, true),
+          total('Amount Overdue', overdue, selector.currency, true),
+        ],
+      },
+      {
+        title: 'Outstanding Aging',
+        table: {
+          headers: ['Age Band', 'Outstanding'],
+          rows: [
+            ['Current / Not Yet Due', money(aging.current, selector.currency)],
+            ['1-30 Days Overdue', money(aging.days1To30, selector.currency)],
+            ['31-60 Days Overdue', money(aging.days31To60, selector.currency)],
+            ['61-90 Days Overdue', money(aging.days61To90, selector.currency)],
+            ['Over 90 Days', money(aging.over90, selector.currency)],
+          ],
+          numericColumns: [1],
+          columnWeights: [2, 1],
+          stripedRows: true,
+        },
+        totals: [total('Total Outstanding', outstanding, selector.currency, true)],
+      },
+      {
+        title: 'Consolidated Debt Schedule',
+        table: {
+          headers: [
+            'Debt No.',
+            'Source',
+            'Issue Date',
+            'Due Date',
+            'Age',
+            'Original',
+            'Paid',
+            'Adjustments',
+            'Balance',
+          ],
+          rows: receivables.map((record) => {
+            const recordAmount = Number(record.amount);
+            const recordPaid = Number(record.paidAmount);
+            const recordOutstanding = Number(record.outstandingAmount);
+            const recordAdjustments = Math.max(0, recordAmount - recordPaid - recordOutstanding);
+            const overdueDays = daysPastDue(record.dueDate, asOf);
+            return [
+              record.receivableNumber,
+              receivableSourceReference(record),
+              date(record.issueDate),
+              date(record.dueDate),
+              overdueDays > 0 ? `${overdueDays} days` : 'Current',
+              money(recordAmount, selector.currency),
+              money(recordPaid, selector.currency),
+              money(recordAdjustments, selector.currency),
+              money(recordOutstanding, selector.currency),
+            ];
+          }),
+          numericColumns: [5, 6, 7, 8],
+          columnWeights: [1.25, 1.25, 0.85, 0.85, 0.7, 1, 1, 1, 1],
+          mutedColumns: [1],
+          stripedRows: true,
+        },
+      },
+    ];
+
+    for (const record of receivables) {
+      const recordAmount = Number(record.amount);
+      const recordPaid = Number(record.paidAmount);
+      const recordOutstanding = Number(record.outstandingAmount);
+      const recordAdjustments = Math.max(0, recordAmount - recordPaid - recordOutstanding);
+      const overdueDays = daysPastDue(record.dueDate, asOf);
+      const salesOrderRefs = record.salesOrders.map((order) => order.salesOrderNumber).join(', ');
+
+      sections.push({
+        title: `Debt Detail - ${record.receivableNumber}`,
+        pageBreakBefore: true,
+        items: [
+          kv('Debt Number', record.receivableNumber),
+          kv('Source Type', label(record.sourceType)),
+          kv('Source Reference', receivableSourceReference(record)),
+          kv('Sales Order', salesOrderRefs || null),
+          kv('Branch', record.branch ? `${record.branch.code} - ${record.branch.name}` : null),
+          kv('Issue Date', date(record.issueDate)),
+          kv('Due Date', date(record.dueDate)),
+          kv('Days Overdue', overdueDays > 0 ? overdueDays : 0),
+          kv('Status', overdueDays > 0 ? 'OVERDUE' : label(record.status)),
+          kv('Notes', record.notes),
+        ],
+        totals: [
+          total('Original Amount', recordAmount, selector.currency),
+          total('Paid to Date', recordPaid, selector.currency),
+          total('Credits / Adjustments', recordAdjustments, selector.currency),
+          total('Outstanding Balance', recordOutstanding, selector.currency, true),
+        ],
+      });
+
+      const orderLineRows = record.salesOrders.flatMap((order) =>
+        order.lines.map((line) => [
+          order.salesOrderNumber,
+          line.description || line.product?.name || 'N/A',
+          line.product?.sku ?? line.product?.productCode ?? 'N/A',
+          qty(line.quantity),
+          line.unit?.symbol ?? line.unit?.name ?? 'N/A',
+          money(line.unitPrice, selector.currency),
+          money(line.discountAmount, selector.currency),
+          money(line.taxAmount, selector.currency),
+          money(line.lineTotal, selector.currency),
+        ]),
+      );
+      if (orderLineRows.length) {
+        sections.push({
+          title: `Products and Charges - ${record.receivableNumber}`,
+          table: {
+            headers: [
+              'Sales Order',
+              'Product / Description',
+              'Code / SKU',
+              'Qty',
+              'Unit',
+              'Unit Price',
+              'Discount',
+              'Tax',
+              'Line Total',
+            ],
+            rows: orderLineRows,
+            numericColumns: [3, 5, 6, 7, 8],
+            columnWeights: [1.1, 1.8, 1, 0.65, 0.65, 1, 0.9, 0.9, 1],
+            mutedColumns: [0, 2],
+            stripedRows: true,
+          },
+        });
+      }
+
+      const otherSourceRows = [
+        ...record.fuelCreditSales.map((sale) => [
+          sale.creditSaleNumber,
+          'Fuel credit sale',
+          sale.product?.name ?? 'Fuel',
+          `${qty(sale.litres)} L`,
+          sale.vehicleNumber ?? sale.driverName ?? 'N/A',
+          money(sale.totalAmount, selector.currency),
+        ]),
+        ...record.projectBillings.map((billing) => [
+          billing.billingNumber,
+          'Project billing',
+          billing.description ?? 'Project billing',
+          date(billing.billingDate),
+          label(billing.status),
+          money(billing.amount, selector.currency),
+        ]),
+        ...record.trips.map((trip) => [
+          trip.tripNumber,
+          'Trip',
+          `${trip.origin} to ${trip.destination}`,
+          date(trip.tripDate),
+          label(trip.status),
+          money(trip.revenueAmount, selector.currency),
+        ]),
+      ];
+      if (otherSourceRows.length) {
+        sections.push({
+          title: `Other Source Detail - ${record.receivableNumber}`,
+          table: {
+            headers: ['Reference', 'Source', 'Description', 'Quantity / Date', 'Detail', 'Amount'],
+            rows: otherSourceRows,
+            numericColumns: [5],
+            columnWeights: [1.1, 1, 1.8, 1, 1.2, 1],
+            stripedRows: true,
+          },
+        });
+      }
+
+      const allocationPayments = record.paymentAllocations
+        .filter((allocation) => allocation.customerPayment.status === 'COMPLETED')
+        .map((allocation) => ({
+          date: allocation.customerPayment.paymentDate,
+          number: allocation.customerPayment.paymentNumber,
+          method: label(allocation.customerPayment.method),
+          reference: allocation.customerPayment.reference ?? 'N/A',
+          documentAmount: Number(allocation.customerPayment.amount),
+          amount: Number(allocation.amount),
+        }));
+      const legacyPayments = settlementEntries
+        .filter((entry) => entry.referenceId === record.id)
+        .map((entry) => ({
+          date: entry.transactionDate,
+          number: entry.journalNumber,
+          method: 'Recorded payment',
+          reference: entry.description,
+          documentAmount: Number(entry.totalDebit),
+          amount: Number(entry.totalDebit),
+        }));
+      const settlementRows = [...allocationPayments, ...legacyPayments]
+        .sort((a, b) => a.date.getTime() - b.date.getTime())
+        .map((payment) => [
+          date(payment.date),
+          payment.number,
+          `Payment - ${payment.method}`,
+          payment.reference,
+          money(payment.documentAmount, selector.currency),
+          money(payment.amount, selector.currency),
+        ]);
+      const itemizedPayments = sumNumbers([
+        ...allocationPayments.map((payment) => payment.amount),
+        ...legacyPayments.map((payment) => payment.amount),
+      ]);
+      if (recordPaid - itemizedPayments > 0.005) {
+        settlementRows.push([
+          'N/A',
+          'Brought forward',
+          'Payment - Historical',
+          'Payment detail predates itemized receipts',
+          money(recordPaid - itemizedPayments, selector.currency),
+          money(recordPaid - itemizedPayments, selector.currency),
+        ]);
+      }
+      settlementRows.push(
+        ...record.creditNotes.map((creditNote) => [
+          date(creditNote.issueDate),
+          creditNote.creditNoteNumber,
+          'Credit note',
+          creditNote.reason ?? 'Customer credit adjustment',
+          money(creditNote.totalAmount, selector.currency),
+          money(creditNote.appliedAmount, selector.currency),
+        ]),
+      );
+      if (settlementRows.length) {
+        sections.push({
+          title: `Payments and Adjustments - ${record.receivableNumber}`,
+          table: {
+            headers: [
+              'Date',
+              'Receipt / Credit Note',
+              'Activity',
+              'Reference / Reason',
+              'Document Total',
+              'Applied to Debt',
+            ],
+            rows: settlementRows,
+            numericColumns: [4, 5],
+            columnWeights: [0.75, 1.05, 1, 1.7, 1, 1],
+            stripedRows: true,
+          },
+          totals: [
+            total('Paid to Date', recordPaid, selector.currency),
+            total('Credits / Adjustments', recordAdjustments, selector.currency, true),
+          ],
+        });
+      }
+    }
+
+    sections.push(
+      {
+        title: 'Statement Note',
+        paragraphs: [
+          `This statement consolidates every active debt currently recorded for ${customerName} in ${selector.currency}. Fully paid, cancelled and written-off documents are excluded. Please quote the debt number or source reference when making payment or raising a query.`,
+        ],
+      },
+      { title: 'Acknowledgement', signatures: ['Prepared By', 'Customer / Authorized Signatory'] },
+    );
+
+    return this.wrapPdf(selector.companyId, null, reference, DocumentCategory.DEBT_DOCUMENT, {
+      title: 'Customer Debt Statement',
+      subtitle: `${customerName} - consolidated active debts`,
+      reference,
+      status: overdue > 0 ? 'OVERDUE' : 'OUTSTANDING',
+      orientation: 'landscape',
+      organization: organization(company),
+      generatedAt,
+      meta: [
+        kv('Statement Date', date(generatedAt)),
+        kv('Customer', customerName),
+        kv('Currency', selector.currency),
+        kv('Active Debts', receivables.length),
+      ],
+      sections,
+    });
   }
 
   private async grnPdf(id: string, user: AuthUser): Promise<ResolvedBusinessPdfModel> {
@@ -1464,6 +1997,137 @@ function isBusinessPdfEntityType(value: string): value is BusinessPdfEntityType 
   return (BUSINESS_PDF_ENTITY_TYPES as readonly string[]).includes(value);
 }
 
+type ReceivableAccountSelector =
+  | {
+      kind: 'customer';
+      companyId: string;
+      customerId: string;
+      currency: CurrencyCode;
+    }
+  | {
+      kind: 'unlinked';
+      companyId: string;
+      accountName: string;
+      currency: CurrencyCode;
+    };
+
+function parseReceivableAccountKey(accountKey: string): ReceivableAccountSelector {
+  const parts = String(accountKey ?? '').split(':');
+  const kind = parts.shift()?.trim().toUpperCase();
+  const companyId = parts.shift()?.trim();
+  const currencyValue = parts.pop()?.trim().toUpperCase();
+
+  if (
+    !companyId ||
+    !currencyValue ||
+    !Object.values(CurrencyCode).includes(currencyValue as CurrencyCode)
+  ) {
+    throw new BadRequestException('Invalid receivable account key');
+  }
+
+  if (kind === 'CUSTOMER') {
+    const customerId = parts.join(':').trim();
+    if (!customerId) throw new BadRequestException('Invalid customer account key');
+    return {
+      kind: 'customer',
+      companyId,
+      customerId,
+      currency: currencyValue as CurrencyCode,
+    };
+  }
+
+  if (kind === 'UNLINKED') {
+    const accountName = normaliseAccountName(parts.join(':'));
+    if (!accountName) throw new BadRequestException('Invalid unlinked customer account key');
+    return {
+      kind: 'unlinked',
+      companyId,
+      accountName,
+      currency: currencyValue as CurrencyCode,
+    };
+  }
+
+  throw new BadRequestException('Invalid receivable account key');
+}
+
+function normaliseAccountName(raw: unknown) {
+  return String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function startOfDay(raw: Date) {
+  const value = new Date(raw);
+  value.setHours(0, 0, 0, 0);
+  return value;
+}
+
+function isoDate(raw: Date) {
+  const year = raw.getFullYear();
+  const month = String(raw.getMonth() + 1).padStart(2, '0');
+  const day = String(raw.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function daysPastDue(rawDueDate: Date | null | undefined, asOf: Date) {
+  if (!rawDueDate) return 0;
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+  return Math.max(
+    0,
+    Math.floor(
+      (startOfDay(asOf).getTime() - startOfDay(rawDueDate).getTime()) / millisecondsPerDay,
+    ),
+  );
+}
+
+function sumNumbers(values: unknown[]) {
+  const sum = values.reduce<number>((total, raw) => {
+    const parsed = Number(raw ?? 0);
+    return total + (Number.isFinite(parsed) ? parsed : 0);
+  }, 0);
+  return Math.round(sum * 100) / 100;
+}
+
+function debtAging(
+  records: Array<{ dueDate: Date | null; outstandingAmount: unknown }>,
+  asOf: Date,
+) {
+  const buckets = {
+    current: 0,
+    days1To30: 0,
+    days31To60: 0,
+    days61To90: 0,
+    over90: 0,
+  };
+
+  for (const record of records) {
+    const amount = Number(record.outstandingAmount ?? 0);
+    const overdueDays = daysPastDue(record.dueDate, asOf);
+    if (overdueDays <= 0) buckets.current += amount;
+    else if (overdueDays <= 30) buckets.days1To30 += amount;
+    else if (overdueDays <= 60) buckets.days31To60 += amount;
+    else if (overdueDays <= 90) buckets.days61To90 += amount;
+    else buckets.over90 += amount;
+  }
+
+  return buckets;
+}
+
+function receivableSourceReference(record: any) {
+  const references = [
+    ...(record.salesOrders ?? []).map((item: any) => item.salesOrderNumber),
+    ...(record.fuelCreditSales ?? []).map((item: any) => item.creditSaleNumber),
+    ...(record.projectBillings ?? []).map((item: any) => item.billingNumber),
+    ...(record.trips ?? []).map((item: any) => item.tripNumber),
+  ].filter(Boolean);
+
+  if (references.length) return Array.from(new Set(references)).join(', ');
+  if (record.sourceType && record.sourceId) return `${label(record.sourceType)} ${record.sourceId}`;
+  if (record.sourceType) return label(record.sourceType);
+  return 'Manual receivable';
+}
+
 function permissionForBusinessPdfEntity(entityType: BusinessPdfEntityType) {
   switch (entityType) {
     case 'SALES_ORDER':
@@ -1485,6 +2149,8 @@ function permissionForBusinessPdfEntity(entityType: BusinessPdfEntityType) {
     case 'PAYSLIP':
       return 'payroll.view';
     case 'CREDIT_NOTE':
+      return 'receivables.view';
+    case 'CUSTOMER_DEBT_STATEMENT':
       return 'receivables.view';
     case 'CUSTOMER_PAYMENT_RECEIPT':
       return 'customer-payments.view';

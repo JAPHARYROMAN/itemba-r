@@ -37,6 +37,8 @@ export interface BusinessPdfTable {
 
 export interface BusinessPdfSection {
   title: string;
+  /** Starts this section on a clean continuation page. */
+  pageBreakBefore?: boolean;
   items?: Array<{ label: string; value: string }>;
   paragraphs?: string[];
   table?: BusinessPdfTable;
@@ -315,6 +317,7 @@ class SimplePdf {
   }
 
   addSection(section: BusinessPdfSection) {
+    if (section.pageBreakBefore) this.newPage();
     this.ensureSpace(42);
     this.y += 8;
     this.text(section.title.toUpperCase(), MARGIN, this.y, 9, 'F2', undefined, 'left', TEXT_MUTED);
@@ -614,8 +617,8 @@ class SimplePdf {
   private totals(items: Array<{ label: string; value: string; emphasis?: boolean }>) {
     const width = 220;
     const x = this.pageWidth - MARGIN - width;
+    this.ensureSpace(items.length * 18);
     for (const item of items) {
-      this.ensureSpace(18);
       if (item.emphasis) {
         this.rect(x, this.y - 3, width, 18, true, BRAND_TINT_STRONG);
         this.text(item.label, x + 8, this.y + 8, 8.5, 'F2', 100, 'left', TEXT_DARK);
