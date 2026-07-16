@@ -8,6 +8,7 @@ export interface DocumentOrganization {
   code?: string | null;
   branchName?: string | null;
   address?: string | null;
+  telephone?: string | null;
   phone?: string | null;
   email?: string | null;
   website?: string | null;
@@ -86,17 +87,27 @@ export function DocumentShell({
   const tin = organization.tin ?? organization.taxId;
 
   const branchLine = [branchName, organization.code].filter(Boolean).join(' · ');
-  const contactLine = [organization.address, organization.phone, organization.email]
+  const addressLine = organization.address ? `Address: ${organization.address}` : '';
+  const phoneLine = [
+    organization.telephone ? `Tel: ${organization.telephone}` : null,
+    organization.phone ? `Phone: ${organization.phone}` : null,
+  ]
     .filter(Boolean)
-    .join(' • ');
+    .join(' | ');
+  const emailLine = organization.email ? `Email: ${organization.email}` : '';
   const taxLine = [
     tin ? `TIN: ${tin}` : null,
     organization.vrn ? `VRN: ${organization.vrn}` : null,
-    organization.registrationNumber ? `Reg: ${organization.registrationNumber}` : null,
+    organization.registrationNumber ? `Reg No: ${organization.registrationNumber}` : null,
   ]
     .filter(Boolean)
     .join(' • ');
-  const footerContactLine = [organization.website, organization.email, organization.phone]
+  const footerContactLine = [
+    organization.website,
+    organization.email,
+    organization.telephone ? `Tel: ${organization.telephone}` : null,
+    organization.phone ? `Phone: ${organization.phone}` : null,
+  ]
     .filter(Boolean)
     .join(' • ');
 
@@ -109,7 +120,7 @@ export function DocumentShell({
       )}
 
       <article className="document-page mx-auto min-h-[297mm] w-full max-w-[210mm] border-t-[3px] border-brand-600 bg-white px-8 py-8 text-slate-900 shadow-sm ring-1 ring-slate-200 sm:px-10">
-        <header className="flex flex-col gap-5 border-b border-slate-200 pb-5 sm:flex-row sm:items-start sm:justify-between">
+        <header className="document-letterhead flex flex-col gap-5 border-b border-slate-200 pb-5 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-start gap-4">
             <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center">
               {organization.logoUrl ? (
@@ -133,9 +144,11 @@ export function DocumentShell({
               </div>
               <div className="mt-0.5 text-sm text-slate-800">{companyName}</div>
               {branchLine && <div className="mt-0.5 text-xs text-slate-500">{branchLine}</div>}
-              {contactLine && (
-                <div className="mt-2 text-[11px] leading-5 text-slate-500">{contactLine}</div>
+              {addressLine && (
+                <div className="mt-2 text-[11px] leading-4 text-slate-500">{addressLine}</div>
               )}
+              {phoneLine && <div className="text-[11px] leading-4 text-slate-500">{phoneLine}</div>}
+              {emailLine && <div className="text-[11px] leading-4 text-slate-500">{emailLine}</div>}
               {taxLine && <div className="text-[11px] leading-5 text-slate-500">{taxLine}</div>}
             </div>
           </div>
@@ -159,7 +172,7 @@ export function DocumentShell({
         </header>
 
         {meta.length > 0 && (
-          <dl className="mt-5 flex flex-wrap gap-x-10 gap-y-3 border-y border-slate-200 py-3">
+          <dl className="document-meta mt-5 flex flex-wrap gap-x-10 gap-y-3 border-y border-slate-200 py-3">
             {meta.map((item) => (
               <div key={item.label}>
                 <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
@@ -171,9 +184,9 @@ export function DocumentShell({
           </dl>
         )}
 
-        <div className="mt-6">{children}</div>
+        <div className="document-body mt-6">{children}</div>
 
-        <footer className="mt-10">
+        <footer className="document-footer mt-10">
           <div className="text-[11px] leading-5 text-slate-500">
             <div>{footerNote ?? 'This document was generated from ITEMBA-R system records.'}</div>
             <div className="mt-0.5">
@@ -201,7 +214,7 @@ export function DocumentSection({
 }) {
   return (
     <section className="document-section mt-7 first:mt-0">
-      <div className="mb-3 flex flex-col gap-1 border-b border-slate-200 pb-2 sm:flex-row sm:items-end sm:justify-between">
+      <div className="document-section-heading mb-3 flex flex-col gap-1 border-b border-slate-200 pb-2 sm:flex-row sm:items-end sm:justify-between">
         <h2 className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">
           {title}
         </h2>
@@ -297,7 +310,7 @@ export function DocumentTd({
 
 export function DocumentTotals({ items }: { items: DocumentTotalItem[] }) {
   return (
-    <dl className="ml-auto mt-4 w-full max-w-xs">
+    <dl className="document-totals ml-auto mt-4 w-full max-w-xs">
       {items.map((item) => (
         <div
           key={item.label}
@@ -315,10 +328,10 @@ export function DocumentTotals({ items }: { items: DocumentTotalItem[] }) {
 
 export function DocumentSignatureGrid({ labels }: { labels: string[] }) {
   return (
-    <div className="grid grid-cols-1 gap-8 pt-6 sm:grid-cols-3">
+    <div className="document-signature-grid grid grid-cols-1 gap-8 pt-6 sm:grid-cols-3">
       {labels.map((label) => (
         <div key={label}>
-          <div className="h-12 border-b border-slate-400" />
+          <div className="document-signature-line h-12 border-b border-slate-400" />
           <div className="mt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
             {label}
           </div>
@@ -331,7 +344,7 @@ export function DocumentSignatureGrid({ labels }: { labels: string[] }) {
 
 export function DocumentNotePanel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-sm bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
+    <div className="document-note-panel rounded-sm bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
       {children}
     </div>
   );

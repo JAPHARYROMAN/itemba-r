@@ -10,6 +10,7 @@ import {
   DocumentTotals,
   type DocumentOrganization,
 } from './DocumentShell';
+import { documentOrganization } from './document-utils';
 
 // next/image requires the Next.js runtime; render a plain img in jsdom instead.
 vi.mock('next/image', () => ({
@@ -25,10 +26,13 @@ const organization: DocumentOrganization = {
   branchName: 'Dar es Salaam',
   code: 'WST-01',
   address: '12 Uhuru Street',
-  phone: '+255 700 000 001',
+  telephone: '+255758793511',
+  phone: '+255764601358',
   email: 'sales@westside.co.tz',
   website: 'www.westside.co.tz',
   tin: '123-456-789',
+  vrn: '40-030602-Q',
+  registrationNumber: '135764',
 };
 
 function renderShell(overrides: Partial<React.ComponentProps<typeof DocumentShell>> = {}) {
@@ -67,18 +71,22 @@ describe('DocumentShell', () => {
     expect(pill).toHaveClass('rounded-full', 'bg-emerald-50', 'text-emerald-700');
   });
 
-  it('joins organization contact details with bullets', () => {
+  it('renders the complete labelled organization letterhead', () => {
     renderShell();
+    expect(screen.getByText('Address: 12 Uhuru Street')).toBeInTheDocument();
+    expect(screen.getByText('Tel: +255758793511 | Phone: +255764601358')).toBeInTheDocument();
+    expect(screen.getByText('Email: sales@westside.co.tz')).toBeInTheDocument();
     expect(
-      screen.getByText('12 Uhuru Street • +255 700 000 001 • sales@westside.co.tz'),
+      screen.getByText('TIN: 123-456-789 • VRN: 40-030602-Q • Reg No: 135764'),
     ).toBeInTheDocument();
-    expect(screen.getByText('TIN: 123-456-789')).toBeInTheDocument();
   });
 
   it('renders the footer with website/email/phone line and the generated timestamp', () => {
     renderShell();
     expect(
-      screen.getByText('www.westside.co.tz • sales@westside.co.tz • +255 700 000 001'),
+      screen.getByText(
+        'www.westside.co.tz • sales@westside.co.tz • Tel: +255758793511 • Phone: +255764601358',
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText(/^Generated /)).toBeInTheDocument();
   });
@@ -159,5 +167,23 @@ describe('DocumentNotePanel', () => {
     render(<DocumentNotePanel>Deliver before Friday.</DocumentNotePanel>);
     const panel = screen.getByText('Deliver before Friday.');
     expect(panel).toHaveClass('bg-slate-50', 'rounded-sm');
+  });
+});
+
+describe('documentOrganization', () => {
+  it('uses the standard Itemba letterhead when the company profile is incomplete', () => {
+    const result = documentOrganization({ name: 'WESTSIDES COMPANY LTD' });
+
+    expect(result).toMatchObject({
+      groupName: 'ITEMBA GROUP',
+      name: 'WESTSIDES COMPANY LTD',
+      address: 'Kisimani Area, Tunduma Town Centre',
+      telephone: '+255758793511',
+      phone: '+255764601358',
+      email: 'info@itembagrouptz.com',
+      tin: '136-065-580',
+      vrn: '40-030602-Q',
+      registrationNumber: '135764',
+    });
   });
 });

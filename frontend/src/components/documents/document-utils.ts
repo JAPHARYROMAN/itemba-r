@@ -1,5 +1,6 @@
 import type { DocumentOrganization } from './DocumentShell';
 import { toFiniteNumber } from '@/lib/design-system/formatters';
+import { ITEMBA_DOCUMENT_LETTERHEAD } from '@/lib/document-letterhead';
 
 interface CompanyLike {
   name?: string | null;
@@ -105,7 +106,7 @@ export function documentOrganization(
 ): DocumentOrganization {
   const profile = company?.profile;
   const group = company?.group;
-  const groupName = firstPresent(group?.name, 'ITEMBA GROUP') ?? 'ITEMBA GROUP';
+  const groupName = ITEMBA_DOCUMENT_LETTERHEAD.groupName;
   const companyName =
     firstPresent(profile?.registeredName, company?.name, 'ITEMBA-R Group') ?? 'ITEMBA-R Group';
 
@@ -116,18 +117,23 @@ export function documentOrganization(
     code: company?.code,
     branchName: branch?.name,
     address: firstPresent(
-      branch?.address,
-      branch?.location,
       profile?.registeredAddress,
       profile?.postalAddress,
+      branch?.address,
+      branch?.location,
       group?.address,
+      ITEMBA_DOCUMENT_LETTERHEAD.address,
     ),
-    phone: firstPresent(branch?.phone, company?.phone, group?.phone),
-    email: firstPresent(company?.email, group?.email, 'info@itembagrouptz.com'),
-    website: firstPresent(company?.website, group?.website, 'itembagrouptz.com'),
-    tin: profile?.tin,
-    vrn: profile?.vrn,
-    registrationNumber: profile?.brelaRegNumber,
+    telephone: firstPresent(company?.phone, group?.phone, ITEMBA_DOCUMENT_LETTERHEAD.telephone),
+    phone: firstPresent(branch?.phone, ITEMBA_DOCUMENT_LETTERHEAD.phone),
+    email: firstPresent(company?.email, group?.email, ITEMBA_DOCUMENT_LETTERHEAD.email),
+    website: firstPresent(company?.website, group?.website, ITEMBA_DOCUMENT_LETTERHEAD.website),
+    tin: firstPresent(profile?.tin, ITEMBA_DOCUMENT_LETTERHEAD.tin),
+    vrn: firstPresent(profile?.vrn, ITEMBA_DOCUMENT_LETTERHEAD.vrn),
+    registrationNumber: firstPresent(
+      profile?.brelaRegNumber,
+      ITEMBA_DOCUMENT_LETTERHEAD.registrationNumber,
+    ),
     logoUrl: firstPresent(company?.logoUrl, DEFAULT_DOCUMENT_LOGO_URL),
   };
 }

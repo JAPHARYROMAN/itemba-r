@@ -157,7 +157,7 @@ describe('RecordBookReportsService', () => {
 
     expect(generatedDocuments.generateTablePdf).toHaveBeenCalledWith(
       expect.objectContaining({
-        orientation: 'landscape',
+        orientation: 'portrait',
         status: 'FINALIZED',
         stripedRows: true,
         sectionTitle: 'Report Detail',

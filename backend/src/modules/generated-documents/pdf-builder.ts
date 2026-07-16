@@ -12,6 +12,7 @@ export interface BusinessPdfOrganization {
   code?: string | null;
   branchName?: string | null;
   address?: string | null;
+  telephone?: string | null;
   phone?: string | null;
   email?: string | null;
   website?: string | null;
@@ -201,14 +202,18 @@ class SimplePdf {
       orgY =
         this.wrappedText(`Address: ${address}`, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) + 1;
 
-    const contactLine = [
-      valueOrNull(org.phone) ? `Tel: ${valueOrNull(org.phone)}` : null,
-      valueOrNull(org.email) ? `Email: ${valueOrNull(org.email)}` : null,
+    const phoneLine = [
+      valueOrNull(org.telephone) ? `Tel: ${valueOrNull(org.telephone)}` : null,
+      valueOrNull(org.phone) ? `Phone: ${valueOrNull(org.phone)}` : null,
     ]
       .filter(Boolean)
       .join(' | ');
-    if (contactLine)
-      orgY = this.wrappedText(contactLine, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) + 1;
+    if (phoneLine)
+      orgY = this.wrappedText(phoneLine, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) + 1;
+
+    const email = valueOrNull(org.email);
+    if (email)
+      orgY = this.wrappedText(`Email: ${email}`, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) + 1;
 
     const taxLine = [
       valueOrNull(org.tin) ? `TIN: ${valueOrNull(org.tin)}` : null,
@@ -222,7 +227,7 @@ class SimplePdf {
     if (registrationNumber)
       orgY =
         this.wrappedText(
-          `Reg: ${registrationNumber}`,
+          `Reg No: ${registrationNumber}`,
           orgX,
           orgY,
           7.5,
@@ -318,12 +323,18 @@ class SimplePdf {
 
   addSection(section: BusinessPdfSection) {
     if (section.pageBreakBefore) this.newPage();
-    this.ensureSpace(42);
-    this.y += 8;
+    const signatureOnly =
+      !!section.signatures?.length &&
+      !section.items?.length &&
+      !section.paragraphs?.length &&
+      !section.table &&
+      !section.totals?.length;
+    this.ensureSpace(signatureOnly ? 70 : 36);
+    this.y += 5;
     this.text(section.title.toUpperCase(), MARGIN, this.y, 9, 'F2', undefined, 'left', TEXT_MUTED);
-    this.y += 8;
+    this.y += 7;
     this.line(MARGIN, this.y, this.pageWidth - MARGIN, this.y, 0.7, HAIRLINE);
-    this.y += 12;
+    this.y += 9;
 
     if (section.items?.length) {
       this.keyValues(section.items, 2);
@@ -347,12 +358,12 @@ class SimplePdf {
 
     if (section.table) {
       this.table(section.table);
-      this.y += 8;
+      this.y += 5;
     }
 
     if (section.totals?.length) {
       this.totals(section.totals);
-      this.y += 8;
+      this.y += 5;
     }
 
     if (section.signatures?.length) {
@@ -363,7 +374,12 @@ class SimplePdf {
   addFooter(model: BusinessPdfModel) {
     const pageCount = this.pages.length;
     const org = model.organization;
-    const contactLine = [valueOrNull(org.website), valueOrNull(org.email), valueOrNull(org.phone)]
+    const contactLine = [
+      valueOrNull(org.website),
+      valueOrNull(org.email),
+      valueOrNull(org.telephone) ? `Tel: ${valueOrNull(org.telephone)}` : null,
+      valueOrNull(org.phone) ? `Phone: ${valueOrNull(org.phone)}` : null,
+    ]
       .filter(Boolean)
       .join('  |  ');
     const generated = `Generated ${formatDateTime(model.generatedAt)}`;
@@ -383,20 +399,20 @@ class SimplePdf {
           contactLine,
           MARGIN,
           this.pageHeight - 24,
-          7,
+          5.8,
           'F1',
-          this.contentWidth - 270,
+          this.contentWidth - 205,
           'left',
           TEXT_MUTED,
         );
       }
       this.text(
         `${generated}  |  Page ${i + 1} of ${pageCount}`,
-        this.pageWidth - MARGIN - 260,
+        this.pageWidth - MARGIN - 200,
         this.pageHeight - 24,
-        7,
+        6.2,
         'F1',
-        260,
+        200,
         'right',
         TEXT_MUTED,
       );
@@ -533,8 +549,8 @@ class SimplePdf {
     for (const [rowIndex, row] of table.rows.entries()) {
       const rowLines = row.map((cell, index) => wrapText(cell, colWidths[index] - 8, 8));
       const lineCount = Math.max(...rowLines.map((lines) => lines.length), 1);
-      const rowHeight = Math.max(20, lineCount * 10 + 10);
-      if (!this.hasSpace(rowHeight + 12)) {
+      const rowHeight = Math.max(18, lineCount * 10 + 8);
+      if (!this.hasSpace(rowHeight + 4)) {
         this.newPageWithTableHeader(table.headers, colWidths, table.numericColumns);
       }
 
@@ -634,14 +650,14 @@ class SimplePdf {
 
   private signatures(labels: string[]) {
     const colWidth = this.contentWidth / labels.length;
-    this.ensureSpace(62);
-    this.y += 10;
+    this.ensureSpace(42);
+    this.y += 4;
     labels.forEach((label, index) => {
       const x = MARGIN + index * colWidth;
-      this.line(x, this.y + 30, x + colWidth - 18, this.y + 30, 0.8, SIGNATURE_LINE);
-      this.text(label, x, this.y + 42, 8, 'F1', colWidth - 18, 'left', TEXT_MUTED);
+      this.line(x, this.y + 18, x + colWidth - 18, this.y + 18, 0.8, SIGNATURE_LINE);
+      this.text(label, x, this.y + 29, 8, 'F1', colWidth - 18, 'left', TEXT_MUTED);
     });
-    this.y += 56;
+    this.y += 38;
   }
 
   private wrappedText(

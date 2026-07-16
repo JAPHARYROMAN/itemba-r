@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { Card, PageHeader, StatCard, showToast } from '@/components/ui';
 import { downloadTablePdf } from '@/lib/export-download';
 import { useOrgScope } from '@/hooks/use-org-scope';
+import { ITEMBA_DOCUMENT_LETTERHEAD } from '@/lib/document-letterhead';
 
 type QueryMode = 'range' | 'daily-close';
 
@@ -623,8 +624,8 @@ function PrintStyles() {
       }
       @media print {
         @page {
-          size: A4 landscape;
-          margin: 10mm;
+          size: A4 portrait;
+          margin: 9mm;
         }
         html,
         body {
@@ -662,16 +663,42 @@ function PrintStyles() {
         }
         .print-letterhead {
           display: flex !important;
-          align-items: center;
-          gap: 16px;
+          align-items: flex-start;
+          gap: 12px;
           border-bottom: 2px solid #111827;
-          padding-bottom: 12px;
-          margin-bottom: 14px;
+          padding: 0 0 8px !important;
+          margin-bottom: 10px;
         }
         .print-letterhead img {
-          width: 78px;
-          height: 78px;
+          width: 54px;
+          height: 54px;
           object-fit: contain;
+        }
+        .print-letterhead-copy {
+          min-width: 0;
+          font-size: 8px;
+          line-height: 1.35;
+        }
+        .print-letterhead-group,
+        .print-letterhead-company {
+          font-weight: 700;
+        }
+        .print-letterhead-group {
+          font-size: 11px;
+        }
+        .print-letterhead-company {
+          font-size: 10px;
+        }
+        .print-letterhead-report {
+          margin-left: auto;
+          max-width: 190px;
+          text-align: right;
+          font-size: 8px;
+          line-height: 1.35;
+        }
+        .print-letterhead-report strong {
+          display: block;
+          font-size: 12px;
         }
         .print-summary {
           display: grid !important;
@@ -857,7 +884,15 @@ export default function WestsideReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeReport, branchId, companyId, currentBranchLabel, currentCompanyLabel, dateFrom, dateTo]);
+  }, [
+    activeReport,
+    branchId,
+    companyId,
+    currentBranchLabel,
+    currentCompanyLabel,
+    dateFrom,
+    dateTo,
+  ]);
 
   useEffect(() => {
     if (!companyId || !hydrated) return;
@@ -930,7 +965,12 @@ export default function WestsideReportsPage() {
       )
       .join('');
     const html = `<!doctype html><html><head><meta charset="utf-8" /></head><body>
-      <h2>${escapeHtml(currentCompanyLabel ?? 'ITEMBA Group')}</h2>
+      <h1>${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.groupName)}</h1>
+      <h2>${escapeHtml(currentCompanyLabel ?? 'ITEMBA-R Group')}</h2>
+      <p>Address: ${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.address)}<br />
+      Tel: ${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.telephone)} | Phone: ${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.phone)}<br />
+      Email: ${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.email)}<br />
+      TIN: ${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.tin)} | VRN: ${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.vrn)} | Reg No: ${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.registrationNumber)}</p>
       <h3>${escapeHtml(activeReport.title)}</h3>
       <p>${escapeHtml(currentBranchLabel ?? 'All branches')} | ${escapeHtml(dateFrom || 'Open')} to ${escapeHtml(dateTo || 'Open')}</p>
       <table border="1"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>
@@ -1084,18 +1124,34 @@ export default function WestsideReportsPage() {
           <Image
             src="/brand/itemba-group-logo.png"
             alt="ITEMBA Group logo"
-            width={72}
-            height={72}
+            width={54}
+            height={54}
             className="object-contain"
             unoptimized
           />
-          <div>
-            <div className="text-xl font-bold">{currentCompanyLabel ?? 'ITEMBA Group'}</div>
-            <div className="text-sm">{activeReport.title}</div>
-            <div className="text-xs">
-              {currentBranchLabel ?? 'All branches'} | {dateFrom || 'Open'} to {dateTo || 'Open'}
+          <div className="print-letterhead-copy">
+            <div className="print-letterhead-group">{ITEMBA_DOCUMENT_LETTERHEAD.groupName}</div>
+            <div className="print-letterhead-company">
+              {currentCompanyLabel ?? 'ITEMBA-R Group'}
             </div>
-            <div className="text-xs">Generated {new Date().toLocaleString('en-GB')}</div>
+            <div>Address: {ITEMBA_DOCUMENT_LETTERHEAD.address}</div>
+            <div>
+              Tel: {ITEMBA_DOCUMENT_LETTERHEAD.telephone} | Phone:{' '}
+              {ITEMBA_DOCUMENT_LETTERHEAD.phone}
+            </div>
+            <div>Email: {ITEMBA_DOCUMENT_LETTERHEAD.email}</div>
+            <div>
+              TIN: {ITEMBA_DOCUMENT_LETTERHEAD.tin} | VRN: {ITEMBA_DOCUMENT_LETTERHEAD.vrn} | Reg
+              No: {ITEMBA_DOCUMENT_LETTERHEAD.registrationNumber}
+            </div>
+          </div>
+          <div className="print-letterhead-report">
+            <strong>{activeReport.title}</strong>
+            <div>{currentBranchLabel ?? 'All branches'}</div>
+            <div>
+              {dateFrom || 'Open'} to {dateTo || 'Open'}
+            </div>
+            <div>Generated {new Date().toLocaleString('en-GB')}</div>
           </div>
         </div>
 

@@ -40,6 +40,17 @@ import {
 const DEFAULT_ITEMBA_LOGO_URL = '/brand/itemba-group-logo.png';
 const TABLE_PDF_ENTITY_TYPE = 'TABLE_EXPORT';
 const TABLE_PDF_MAX_CELL_LENGTH = 300;
+const ITEMBA_DOCUMENT_LETTERHEAD = Object.freeze({
+  groupName: 'ITEMBA GROUP',
+  address: 'Kisimani Area, Tunduma Town Centre',
+  telephone: '+255758793511',
+  phone: '+255764601358',
+  email: 'info@itembagrouptz.com',
+  website: 'itembagrouptz.com',
+  tin: '136-065-580',
+  vrn: '40-030602-Q',
+  registrationNumber: '135764',
+});
 
 @Injectable()
 export class GeneratedDocumentsService {
@@ -1276,7 +1287,6 @@ export class GeneratedDocumentsService {
       subtitle: `${customerName} - consolidated active debts`,
       reference,
       status: overdue > 0 ? 'OVERDUE' : 'OUTSTANDING',
-      orientation: 'landscape',
       organization: organization(company),
       generatedAt,
       meta: [
@@ -1917,7 +1927,7 @@ function supplierSelect() {
 function organization(company: any, branch?: any): BusinessPdfOrganization {
   const profile = company?.profile;
   const group = company?.group;
-  const groupName = value(group?.name) !== 'N/A' ? value(group?.name) : 'ITEMBA GROUP';
+  const groupName = ITEMBA_DOCUMENT_LETTERHEAD.groupName;
   const companyName =
     value(profile?.registeredName) !== 'N/A'
       ? value(profile?.registeredName)
@@ -1931,14 +1941,23 @@ function organization(company: any, branch?: any): BusinessPdfOrganization {
     companyName: company?.name,
     code: company?.code,
     branchName: branch?.name,
-    address:
-      branch?.address ?? profile?.registeredAddress ?? profile?.postalAddress ?? group?.address,
-    phone: branch?.phone ?? company?.phone ?? group?.phone,
-    email: company?.email ?? group?.email ?? 'info@itembagrouptz.com',
-    website: company?.website ?? group?.website ?? 'itembagrouptz.com',
-    tin: profile?.tin,
-    vrn: profile?.vrn,
-    registrationNumber: profile?.brelaRegNumber,
+    address: firstPresent(
+      profile?.registeredAddress,
+      profile?.postalAddress,
+      branch?.address,
+      group?.address,
+      ITEMBA_DOCUMENT_LETTERHEAD.address,
+    ),
+    telephone: firstPresent(company?.phone, group?.phone, ITEMBA_DOCUMENT_LETTERHEAD.telephone),
+    phone: firstPresent(branch?.phone, ITEMBA_DOCUMENT_LETTERHEAD.phone),
+    email: firstPresent(company?.email, group?.email, ITEMBA_DOCUMENT_LETTERHEAD.email),
+    website: firstPresent(company?.website, group?.website, ITEMBA_DOCUMENT_LETTERHEAD.website),
+    tin: firstPresent(profile?.tin, ITEMBA_DOCUMENT_LETTERHEAD.tin),
+    vrn: firstPresent(profile?.vrn, ITEMBA_DOCUMENT_LETTERHEAD.vrn),
+    registrationNumber: firstPresent(
+      profile?.brelaRegNumber,
+      ITEMBA_DOCUMENT_LETTERHEAD.registrationNumber,
+    ),
     logoUrl: firstPresent(company?.logoUrl, DEFAULT_ITEMBA_LOGO_URL),
   };
 }

@@ -23,6 +23,7 @@ import {
 } from '@/lib/api-client';
 import { filenameFromDisposition } from '@/lib/export-download';
 import { downloadTextFile } from '@/lib/report-export';
+import { ITEMBA_DOCUMENT_LETTERHEAD } from '@/lib/document-letterhead';
 import { RecordBookNav, recordBookMoney } from './record-book-ui';
 
 export type ReportKey =
@@ -357,8 +358,8 @@ export function RecordBookReportsClient({
         }
         @media print {
           @page {
-            size: A4 landscape;
-            margin: 11mm 10mm 13mm;
+            size: A4 portrait;
+            margin: 9mm 9mm 11mm;
           }
           html,
           body {
@@ -396,15 +397,15 @@ export function RecordBookReportsClient({
           }
           .record-book-print-letterhead {
             display: grid !important;
-            grid-template-columns: 52px minmax(0, 1fr) auto !important;
-            align-items: center !important;
-            gap: 12px !important;
-            padding: 0 0 10px !important;
+            grid-template-columns: 48px minmax(0, 1fr) 165px !important;
+            align-items: start !important;
+            gap: 10px !important;
+            padding: 0 0 8px !important;
             border-bottom: 2px solid #2563eb !important;
           }
           .record-book-print-logo {
-            width: 48px !important;
-            height: 48px !important;
+            width: 44px !important;
+            height: 44px !important;
             object-fit: contain !important;
           }
           .record-book-print-company {
@@ -418,8 +419,13 @@ export function RecordBookReportsClient({
             color: #64748b !important;
             font-size: 7.5pt !important;
           }
+          .record-book-print-contact {
+            color: #475569 !important;
+            font-size: 6.5pt !important;
+            line-height: 1.35 !important;
+          }
           .record-book-print-title {
-            max-width: 280px !important;
+            max-width: 165px !important;
             text-align: right !important;
           }
           .record-book-print-title h1 {
@@ -808,13 +814,29 @@ export function RecordBookReportsClient({
                 height={48}
               />
               <div>
-                <div className="record-book-print-group">ITEMBA GROUP</div>
+                <div className="record-book-print-group">
+                  {ITEMBA_DOCUMENT_LETTERHEAD.groupName}
+                </div>
                 <div className="record-book-print-company">
                   {selectedCompany?.name ?? 'All Accessible Companies'}
                 </div>
                 <div className="record-book-print-muted">
                   {selectedCompany?.code ? `${selectedCompany.code} | ` : ''}
                   Records Book - independent manual control records
+                </div>
+                <div className="record-book-print-contact">
+                  Address: {ITEMBA_DOCUMENT_LETTERHEAD.address}
+                </div>
+                <div className="record-book-print-contact">
+                  Tel: {ITEMBA_DOCUMENT_LETTERHEAD.telephone} | Phone:{' '}
+                  {ITEMBA_DOCUMENT_LETTERHEAD.phone}
+                </div>
+                <div className="record-book-print-contact">
+                  Email: {ITEMBA_DOCUMENT_LETTERHEAD.email}
+                </div>
+                <div className="record-book-print-contact">
+                  TIN: {ITEMBA_DOCUMENT_LETTERHEAD.tin} | VRN: {ITEMBA_DOCUMENT_LETTERHEAD.vrn} |
+                  Reg No: {ITEMBA_DOCUMENT_LETTERHEAD.registrationNumber}
                 </div>
               </div>
               <div className="record-book-print-title">

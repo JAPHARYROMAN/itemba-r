@@ -73,7 +73,7 @@ describe('buildRecordBookPdfRequest', () => {
       status: 'FINALIZED',
     });
 
-    expect(request.orientation).toBe('landscape');
+    expect(request.orientation).toBe('portrait');
     expect(request.columns).toEqual([
       'Date',
       'Total Sales',

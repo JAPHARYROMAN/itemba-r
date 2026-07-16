@@ -989,7 +989,7 @@ html.motion-reduced *::after {
 }
 
 @page {
-  size: A4;
+  size: A4 portrait;
   margin: 12mm;
 }
 
@@ -1030,7 +1030,56 @@ html.motion-reduced *::after {
   }
 
   .document-section {
+    break-inside: auto;
+    page-break-inside: auto;
+    margin-top: 4mm !important;
+  }
+
+  .document-letterhead {
+    gap: 3mm !important;
+    padding-bottom: 3mm !important;
+  }
+
+  .document-meta {
+    gap: 2mm 8mm !important;
+    margin-top: 3mm !important;
+    padding: 2mm 0 !important;
+  }
+
+  .document-body {
+    margin-top: 4mm !important;
+  }
+
+  .document-section-heading {
+    break-after: avoid-page;
+    page-break-after: avoid;
+    margin-bottom: 2mm !important;
+    padding-bottom: 1.5mm !important;
+  }
+
+  .document-table th,
+  .document-table td {
+    padding: 1.5mm 2mm !important;
+  }
+
+  .document-totals,
+  .document-note-panel,
+  .document-signature-grid {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  .document-signature-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 5mm !important;
+    padding-top: 2mm !important;
+  }
+
+  .document-signature-line {
+    height: 8mm !important;
+  }
+
+  .document-footer {
+    margin-top: 5mm !important;
   }
 }

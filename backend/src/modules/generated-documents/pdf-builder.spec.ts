@@ -10,11 +10,14 @@ function sampleModel(overrides: Partial<BusinessPdfModel> = {}): BusinessPdfMode
       name: 'Itemba Distribution Ltd',
       groupName: 'ITEMBA GROUP',
       branchName: 'Dar es Salaam HQ',
-      address: '12 Nyerere Road, Dar es Salaam',
-      phone: '+255 700 000 001',
+      address: 'Kisimani Area, Tunduma Town Centre',
+      telephone: '+255758793511',
+      phone: '+255764601358',
       email: 'info@itembagrouptz.com',
       website: 'itembagrouptz.com',
-      tin: '123-456-789',
+      tin: '136-065-580',
+      vrn: '40-030602-Q',
+      registrationNumber: '135764',
     },
     generatedAt: new Date('2026-07-06T10:00:00Z'),
     meta: [
@@ -75,6 +78,8 @@ describe('buildBusinessPdf rendering', () => {
 
     expect(raw.startsWith('%PDF-')).toBe(true);
     expect(raw.trimEnd().endsWith('%%EOF')).toBe(true);
+    expect(raw).toContain('/MediaBox [0 0 595.28 841.89]');
+    expect(raw).toContain('/Count 1');
 
     // Document type replaces the old 'DOCUMENT' literal in the letterhead.
     expect(raw).toContain('(SALES ORDER) Tj');
@@ -94,7 +99,14 @@ describe('buildBusinessPdf rendering', () => {
 
     // Footer: contact line left, generated stamp + page counter right.
     expect(raw).toContain('Page 1 of');
-    expect(raw).toContain('itembagrouptz.com | info@itembagrouptz.com | +255 700 000 001');
+    expect(raw).toContain('(Address: Kisimani Area, Tunduma Town Centre) Tj');
+    expect(raw).toContain('(Tel: +255758793511 | Phone: +255764601358) Tj');
+    expect(raw).toContain('(Email: info@itembagrouptz.com) Tj');
+    expect(raw).toContain('(TIN: 136-065-580 | VRN: 40-030602-Q) Tj');
+    expect(raw).toContain('(Reg No: 135764) Tj');
+    expect(raw).toContain(
+      'itembagrouptz.com | info@itembagrouptz.com | Tel: +255758793511 | Phone: +255764601358',
+    );
     expect(raw).toContain('Generated ');
   });
 
@@ -148,6 +160,38 @@ describe('buildBusinessPdf rendering', () => {
     for (let page = 1; page <= pageCount; page += 1) {
       expect(raw).toContain(`Page ${page} of ${pageCount}`);
     }
+  });
+
+  it('keeps a compact 28-row portrait report on one page', () => {
+    const rows = Array.from({ length: 28 }, (_, index) => [
+      `${String(index + 1).padStart(2, '0')}/07/2026`,
+      `Customer ${index + 1}`,
+      `Product ${index + 1}`,
+      String((index % 8) + 1),
+      'pcs',
+      `${25_000 + index * 1_000}.00`,
+      `${(index % 8) + 1}.00`,
+    ]);
+    const buffer = buildBusinessPdf(
+      sampleModel({
+        title: 'Daily Sales Report',
+        subtitle: undefined,
+        sections: [
+          {
+            title: 'Report Detail',
+            table: {
+              headers: ['Date', 'Customer', 'Product', 'Qty', 'Unit', 'Unit Price', 'Amount'],
+              numericColumns: [3, 5, 6],
+              columnWeights: [0.8, 1.5, 1.6, 0.5, 0.55, 1, 1.1],
+              stripedRows: true,
+              rows,
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(buffer.toString('latin1')).toContain('/Count 1');
   });
 
   it('supports landscape reports with weighted columns and wrapped table headings', () => {

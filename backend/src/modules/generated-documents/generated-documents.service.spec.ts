@@ -743,7 +743,7 @@ describe('GeneratedDocumentsService.generateBusinessPdf (document-type builders)
       AccessLevel.READ,
     );
     expect(model.title).toBe('Customer Debt Statement');
-    expect(model.orientation).toBe('landscape');
+    expect(model.orientation).toBeUndefined();
     expect(model.subtitle).toContain('Alpha Traders Ltd');
 
     const summary = sectionByTitle(model, 'Balance Summary');

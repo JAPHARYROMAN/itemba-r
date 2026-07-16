@@ -87,7 +87,7 @@ function common(
     title,
     subtitle: 'Records Book | Independent manual control register',
     status: context.status || 'ACTIVE RECORDS',
-    orientation: 'landscape',
+    orientation: 'portrait',
     companyId: context.companyId,
     meta: [
       { label: 'Reporting Period', value: period(context) },

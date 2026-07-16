@@ -229,7 +229,7 @@ export class RecordBookReportsService {
           title: result.title,
           subtitle: 'Records Book | Independent daily sales and money-out control report',
           status: result.reportStatus,
-          orientation: pdfColumns.length >= 6 ? 'landscape' : 'portrait',
+          orientation: 'portrait',
           companyId: query.companyId,
           columns: pdfColumns.map((column) => column.label),
           rows: result.rows.map((row) =>
