@@ -124,7 +124,7 @@ export default function ProformaInvoicePrintPage() {
   return (
     <DocumentShell
       title="PROFORMA INVOICE"
-      subtitle={`Prepared for ${customerName}`}
+      subtitle={customerName}
       reference={record.proformaNumber}
       status={labelDocumentValue(record.status)}
       statusTone={documentStatusTone(record.status)}

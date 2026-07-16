@@ -53,29 +53,33 @@ function renderShell(overrides: Partial<React.ComponentProps<typeof DocumentShel
 }
 
 describe('DocumentShell', () => {
-  it('renders the document title as the uppercase right-side letterhead heading', () => {
+  it('renders the document title in the title block', () => {
     renderShell();
     const title = screen.getByText('Sales Order');
-    expect(title).toHaveClass('uppercase', 'text-2xl', 'font-extrabold');
-    expect(title.parentElement).toHaveClass('sm:text-right');
+    expect(title).toHaveClass('document-title', 'uppercase', 'font-extrabold');
+    expect(title.parentElement).toHaveClass('min-w-0');
   });
 
-  it('renders the reference in brand color', () => {
+  it('renders the document reference in both letterhead positions', () => {
     renderShell();
-    expect(screen.getByText('SO-2026-0001')).toHaveClass('text-brand-600');
+    const references = screen.getAllByText('SO-2026-0001');
+    expect(references).toHaveLength(2);
+    expect(references[0]).toHaveClass('document-reference', 'font-extrabold');
   });
 
-  it('renders the status pill with the tone classes', () => {
+  it('renders the document status in the letterhead marker', () => {
     renderShell();
     const pill = screen.getByText('Confirmed');
-    expect(pill).toHaveClass('rounded-full', 'bg-emerald-50', 'text-emerald-700');
+    expect(pill).toHaveClass('document-status', 'uppercase');
   });
 
   it('renders the complete labelled organization letterhead', () => {
     renderShell();
     expect(screen.getByText('Address: 12 Uhuru Street')).toBeInTheDocument();
-    expect(screen.getByText('Tel: +255758793511 | Phone: +255764601358')).toBeInTheDocument();
-    expect(screen.getByText('Email: sales@westside.co.tz')).toBeInTheDocument();
+    expect(
+      screen.getByText('Tel: +255758793511 | Email: sales@westside.co.tz'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Phone: +255764601358')).toBeInTheDocument();
     expect(
       screen.getByText('TIN: 123-456-789 • VRN: 40-030602-Q • Reg No: 135764'),
     ).toBeInTheDocument();
@@ -91,17 +95,18 @@ describe('DocumentShell', () => {
     expect(screen.getByText(/^Generated /)).toBeInTheDocument();
   });
 
-  it('applies the brand accent rule to the document page article', () => {
+  it('uses a clean white document page for the reference letterhead', () => {
     const { container } = renderShell();
     const article = container.querySelector('article.document-page');
     expect(article).not.toBeNull();
-    expect(article).toHaveClass('border-t-[3px]', 'border-brand-600');
+    expect(article).toHaveClass('bg-white', 'text-slate-950');
   });
 
-  it('renders the fallback initials in brand color when no logo is set', () => {
+  it('renders the fallback initials inside the bordered logo block', () => {
     renderShell();
     const initials = screen.getByText('IG');
-    expect(initials).toHaveClass('text-brand-600', 'font-extrabold');
+    expect(initials).toHaveClass('text-slate-950', 'font-extrabold');
+    expect(initials.parentElement).toHaveClass('document-logo-box', 'border-2');
   });
 });
 

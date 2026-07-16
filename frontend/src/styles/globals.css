@@ -1040,6 +1040,44 @@ html.motion-reduced *::after {
     padding-bottom: 3mm !important;
   }
 
+  .document-logo-box {
+    width: 17mm !important;
+    height: 17mm !important;
+    padding: 1.5mm !important;
+  }
+
+  .document-group-name {
+    font-size: 13pt !important;
+  }
+
+  .document-company-name {
+    font-size: 10.5pt !important;
+  }
+
+  .document-branch-name {
+    font-size: 8.5pt !important;
+  }
+
+  .document-reference-label {
+    font-size: 7.5pt !important;
+  }
+
+  .document-reference {
+    font-size: 12pt !important;
+  }
+
+  .document-status {
+    font-size: 8.5pt !important;
+  }
+
+  .document-title {
+    font-size: 22pt !important;
+  }
+
+  .document-subtitle {
+    font-size: 13pt !important;
+  }
+
   .document-meta {
     gap: 2mm 8mm !important;
     margin-top: 3mm !important;

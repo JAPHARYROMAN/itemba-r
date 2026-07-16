@@ -53,14 +53,6 @@ interface DocumentShellProps {
   children: React.ReactNode;
 }
 
-const statusToneClasses = {
-  neutral: 'border-slate-200 bg-slate-50 text-slate-700',
-  success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  warning: 'border-amber-200 bg-amber-50 text-amber-700',
-  danger: 'border-red-200 bg-red-50 text-red-700',
-  info: 'border-blue-200 bg-blue-50 text-blue-700',
-};
-
 const statValueTone = {
   neutral: 'text-slate-950',
   success: 'text-emerald-700',
@@ -73,7 +65,6 @@ export function DocumentShell({
   subtitle,
   reference,
   status,
-  statusTone = 'neutral',
   organization,
   meta = [],
   actions,
@@ -86,15 +77,15 @@ export function DocumentShell({
   const branchName = organization.branchName;
   const tin = organization.tin ?? organization.taxId;
 
-  const branchLine = [branchName, organization.code].filter(Boolean).join(' · ');
+  const branchLine = [branchName, organization.code].filter(Boolean).join(' - ');
   const addressLine = organization.address ? `Address: ${organization.address}` : '';
-  const phoneLine = [
+  const primaryContactLine = [
     organization.telephone ? `Tel: ${organization.telephone}` : null,
-    organization.phone ? `Phone: ${organization.phone}` : null,
+    organization.email ? `Email: ${organization.email}` : null,
   ]
     .filter(Boolean)
     .join(' | ');
-  const emailLine = organization.email ? `Email: ${organization.email}` : '';
+  const secondaryPhoneLine = organization.phone ? `Phone: ${organization.phone}` : '';
   const taxLine = [
     tin ? `TIN: ${tin}` : null,
     organization.vrn ? `VRN: ${organization.vrn}` : null,
@@ -119,60 +110,83 @@ export function DocumentShell({
         </div>
       )}
 
-      <article className="document-page mx-auto min-h-[297mm] w-full max-w-[210mm] border-t-[3px] border-brand-600 bg-white px-8 py-8 text-slate-900 shadow-sm ring-1 ring-slate-200 sm:px-10">
-        <header className="document-letterhead flex flex-col gap-5 border-b border-slate-200 pb-5 sm:flex-row sm:items-start sm:justify-between">
+      <article className="document-page mx-auto min-h-[297mm] w-full max-w-[210mm] bg-white px-8 py-8 text-slate-950 shadow-sm ring-1 ring-slate-200 sm:px-10">
+        <header className="document-letterhead flex flex-col gap-5 border-b border-slate-950 pb-5 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-start gap-4">
-            <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center">
+            <div className="document-logo-box flex h-20 w-20 flex-shrink-0 items-center justify-center border-2 border-slate-950 p-2">
               {organization.logoUrl ? (
                 <Image
                   src={organization.logoUrl}
                   alt={`${groupName} logo`}
-                  width={56}
-                  height={56}
+                  width={64}
+                  height={64}
                   className="h-full w-full object-contain"
                   unoptimized
                 />
               ) : (
-                <span className="text-2xl font-extrabold text-brand-600">
+                <span className="text-2xl font-extrabold text-slate-950">
                   {organization.logoText ?? initials(groupName)}
                 </span>
               )}
             </div>
             <div className="min-w-0">
-              <div className="text-base font-extrabold uppercase tracking-wide text-slate-950">
+              <div className="document-group-name text-lg font-extrabold uppercase leading-tight text-slate-950">
                 {groupName}
               </div>
-              <div className="mt-0.5 text-sm text-slate-800">{companyName}</div>
-              {branchLine && <div className="mt-0.5 text-xs text-slate-500">{branchLine}</div>}
-              {addressLine && (
-                <div className="mt-2 text-[11px] leading-4 text-slate-500">{addressLine}</div>
+              <div className="document-company-name mt-0.5 text-base font-bold uppercase leading-tight text-slate-950">
+                {companyName}
+              </div>
+              {branchLine && (
+                <div className="document-branch-name mt-0.5 text-sm uppercase leading-tight text-slate-900">
+                  {branchLine}
+                </div>
               )}
-              {phoneLine && <div className="text-[11px] leading-4 text-slate-500">{phoneLine}</div>}
-              {emailLine && <div className="text-[11px] leading-4 text-slate-500">{emailLine}</div>}
-              {taxLine && <div className="text-[11px] leading-5 text-slate-500">{taxLine}</div>}
+              {addressLine && (
+                <div className="mt-2 text-[11px] leading-4 text-slate-900">{addressLine}</div>
+              )}
+              {primaryContactLine && (
+                <div className="text-[11px] leading-4 text-slate-900">{primaryContactLine}</div>
+              )}
+              {secondaryPhoneLine && (
+                <div className="text-[11px] leading-4 text-slate-900">{secondaryPhoneLine}</div>
+              )}
+              {taxLine && <div className="text-[11px] leading-5 text-slate-900">{taxLine}</div>}
             </div>
           </div>
 
-          <div className="flex-shrink-0 text-left sm:text-right">
-            <div className="text-2xl font-extrabold uppercase leading-none tracking-tight text-slate-950">
-              {title}
+          <div className="document-reference-block flex-shrink-0 text-left sm:text-right">
+            <div className="document-reference-label text-[10px] font-extrabold uppercase text-slate-950">
+              Document
             </div>
             {reference && (
-              <div className="mt-1.5 text-sm font-semibold text-brand-600">{reference}</div>
+              <div className="document-reference mt-1 text-lg font-extrabold text-slate-950">
+                {reference}
+              </div>
             )}
             {status && (
-              <span
-                className={`mt-2 inline-flex rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusToneClasses[statusTone]}`}
-              >
-                {status}
-              </span>
+              <div className="document-status mt-2 text-sm uppercase text-slate-900">{status}</div>
             )}
-            {subtitle && <div className="mt-2 text-xs text-slate-500">{subtitle}</div>}
           </div>
         </header>
 
+        <div className="document-title-block mt-3 flex items-start justify-between gap-6">
+          <div className="min-w-0">
+            <h1 className="document-title text-3xl font-extrabold uppercase leading-none text-slate-950">
+              {title}
+            </h1>
+            {subtitle && (
+              <div className="document-subtitle mt-2 text-lg leading-tight text-slate-950">
+                {subtitle}
+              </div>
+            )}
+          </div>
+          {reference && (
+            <div className="flex-shrink-0 text-xl font-extrabold text-slate-950">{reference}</div>
+          )}
+        </div>
+
         {meta.length > 0 && (
-          <dl className="document-meta mt-5 flex flex-wrap gap-x-10 gap-y-3 border-y border-slate-200 py-3">
+          <dl className="document-meta mt-5 flex flex-wrap gap-x-10 gap-y-3 py-1">
             {meta.map((item) => (
               <div key={item.label}>
                 <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">

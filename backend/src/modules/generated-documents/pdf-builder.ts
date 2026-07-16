@@ -78,60 +78,8 @@ const HAIRLINE: Rgb = [0.886, 0.91, 0.941]; // slate-200 #e2e8f0
 const PANEL: Rgb = [0.973, 0.98, 0.988]; // slate-50 #f8fafc
 const SIGNATURE_LINE: Rgb = [0.58, 0.639, 0.722]; // slate-400 #94a3b8
 
-// Conservative average glyph-width factor (em) for Helvetica-Bold uppercase —
-// used to size the header title and status pill so they never overhang the
-// right margin (the generic 0.48 factor in text() underestimates bold caps).
+// Conservative average glyph-width factor (em) for Helvetica-Bold uppercase.
 const TITLE_WIDTH_FACTOR = 0.56;
-
-type StatusToneName = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
-
-// Status pill tones: *-700 text on *-50 fill, mirroring the frontend
-// statusToneClasses palette used by DocumentShell.
-const STATUS_TONES: Record<StatusToneName, { text: Rgb; fill: Rgb }> = {
-  success: { text: [0.016, 0.471, 0.341], fill: [0.925, 0.992, 0.961] }, // emerald-700 / emerald-50
-  warning: { text: [0.706, 0.325, 0.035], fill: [1.0, 0.984, 0.922] }, // amber-700 / amber-50
-  danger: { text: [0.725, 0.11, 0.11], fill: [0.996, 0.949, 0.949] }, // red-700 / red-50
-  info: { text: [0.114, 0.306, 0.847], fill: [0.937, 0.965, 1.0] }, // blue-700 / blue-50
-  neutral: { text: [0.2, 0.255, 0.333], fill: [0.973, 0.98, 0.988] }, // slate-700 / slate-50
-};
-
-// Line-for-line port of documentStatusTone() in
-// frontend/src/components/documents/document-utils.ts — that file is the
-// source of truth for this keyword mapping; keep the two in sync.
-function statusTone(status: string | null | undefined): StatusToneName {
-  const normalized = String(status ?? '').toLowerCase();
-  if (
-    normalized.includes('paid') ||
-    normalized.includes('accepted') ||
-    normalized.includes('delivered') ||
-    normalized.includes('closed')
-  ) {
-    return 'success';
-  }
-  if (
-    normalized.includes('draft') ||
-    normalized.includes('sent') ||
-    normalized.includes('confirmed') ||
-    normalized.includes('transit')
-  ) {
-    return 'info';
-  }
-  if (
-    normalized.includes('partial') ||
-    normalized.includes('pending') ||
-    normalized.includes('expired')
-  ) {
-    return 'warning';
-  }
-  if (
-    normalized.includes('cancel') ||
-    normalized.includes('reject') ||
-    normalized.includes('void')
-  ) {
-    return 'danger';
-  }
-  return 'neutral';
-}
 
 interface ParsedPdfImage {
   width: number;
@@ -177,7 +125,6 @@ class SimplePdf {
   addHeader(model: BusinessPdfModel) {
     this.documentTitle = cleanText(model.title).toUpperCase();
     this.documentReference = cleanText(model.reference);
-    this.brandRule();
     const headerTop = this.y;
     const org = model.organization;
     const groupName = valueOrNull(org.groupName) ?? 'ITEMBA GROUP';
@@ -185,35 +132,47 @@ class SimplePdf {
     const branchName = valueOrNull(org.branchName);
     const logoText = valueOrNull(org.logoText) ?? initials(groupName);
 
-    const imageDrawn = org.logoImage ? this.image(org.logoImage, MARGIN, headerTop, 48, 48) : false;
-    if (!imageDrawn) this.text(logoText, MARGIN, headerTop + 30, 20, 'F2', 48, 'center', BRAND);
+    const logoBoxSize = 56;
+    this.rect(MARGIN, headerTop, logoBoxSize, logoBoxSize, false, TEXT_DARK);
+    const imageDrawn = org.logoImage
+      ? this.image(org.logoImage, MARGIN + 6, headerTop + 6, logoBoxSize - 12, logoBoxSize - 12)
+      : false;
+    if (!imageDrawn)
+      this.text(logoText, MARGIN, headerTop + 34, 18, 'F2', logoBoxSize, 'center', TEXT_DARK);
 
-    const orgX = MARGIN + 60;
-    const rightWidth = Math.min(240, this.contentWidth * 0.4);
-    const orgWidth = Math.max(140, this.contentWidth - 60 - rightWidth - 18);
+    const orgX = MARGIN + 68;
+    const rightWidth = Math.min(165, this.contentWidth * 0.32);
+    const orgWidth = Math.max(180, this.contentWidth - 68 - rightWidth - 16);
     let orgY = headerTop;
-    orgY = this.wrappedText(groupName.toUpperCase(), orgX, orgY, 12, orgWidth, 'F2', TEXT_DARK) + 1;
-    orgY = this.wrappedText(companyName, orgX, orgY, 9.5, orgWidth, 'F2', TEXT_DARK) + 1;
+    orgY = this.wrappedText(groupName.toUpperCase(), orgX, orgY, 13, orgWidth, 'F2', TEXT_DARK);
+    orgY = this.wrappedText(companyName.toUpperCase(), orgX, orgY, 10.5, orgWidth, 'F2', TEXT_DARK);
     if (branchName)
-      orgY = this.wrappedText(branchName, orgX, orgY, 8.5, orgWidth, 'F1', TEXT_MUTED) + 2;
+      orgY = this.wrappedText(branchName.toUpperCase(), orgX, orgY, 8.5, orgWidth, 'F1', TEXT_DARK);
 
     const address = valueOrNull(org.address);
     if (address)
-      orgY =
-        this.wrappedText(`Address: ${address}`, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) + 1;
+      orgY = this.wrappedText(`Address: ${address}`, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_DARK);
 
-    const phoneLine = [
+    const primaryContactLine = [
       valueOrNull(org.telephone) ? `Tel: ${valueOrNull(org.telephone)}` : null,
-      valueOrNull(org.phone) ? `Phone: ${valueOrNull(org.phone)}` : null,
+      valueOrNull(org.email) ? `Email: ${valueOrNull(org.email)}` : null,
     ]
       .filter(Boolean)
       .join(' | ');
-    if (phoneLine)
-      orgY = this.wrappedText(phoneLine, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) + 1;
+    if (primaryContactLine)
+      orgY = this.wrappedText(primaryContactLine, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_DARK);
 
-    const email = valueOrNull(org.email);
-    if (email)
-      orgY = this.wrappedText(`Email: ${email}`, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) + 1;
+    const secondaryPhone = valueOrNull(org.phone);
+    if (secondaryPhone)
+      orgY = this.wrappedText(
+        `Phone: ${secondaryPhone}`,
+        orgX,
+        orgY,
+        7.5,
+        orgWidth,
+        'F1',
+        TEXT_DARK,
+      );
 
     const taxLine = [
       valueOrNull(org.tin) ? `TIN: ${valueOrNull(org.tin)}` : null,
@@ -221,7 +180,7 @@ class SimplePdf {
     ]
       .filter(Boolean)
       .join(' | ');
-    if (taxLine) orgY = this.wrappedText(taxLine, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_MUTED) + 1;
+    if (taxLine) orgY = this.wrappedText(taxLine, orgX, orgY, 7.5, orgWidth, 'F1', TEXT_DARK);
 
     const registrationNumber = valueOrNull(org.registrationNumber);
     if (registrationNumber)
@@ -233,51 +192,51 @@ class SimplePdf {
           7.5,
           orgWidth,
           'F1',
-          TEXT_MUTED,
-        ) + 1;
+          TEXT_DARK,
+        );
 
-    // Right block: document type (large caps), number in brand color, status pill.
+    // Restore the original restrained document marker used on the legacy letterhead.
     const rightX = this.pageWidth - MARGIN - rightWidth;
     const docTitle = cleanText(model.title).toUpperCase();
-    const titleSize = docTitle.length * 17 * TITLE_WIDTH_FACTOR > rightWidth ? 14 : 17;
-    const titleWidth = Math.min(rightWidth, docTitle.length * titleSize * TITLE_WIDTH_FACTOR);
+    this.text('DOCUMENT', rightX, headerTop + 7, 7.5, 'F2', rightWidth, 'right', TEXT_DARK);
+    this.text(model.reference, rightX, headerTop + 23, 12, 'F2', rightWidth, 'right', TEXT_DARK);
+    if (model.status)
+      this.text(
+        cleanText(model.status).toUpperCase(),
+        rightX,
+        headerTop + 39,
+        8.5,
+        'F1',
+        rightWidth,
+        'right',
+        TEXT_DARK,
+      );
+
+    this.y = Math.max(orgY + 2, headerTop + 70);
+    this.line(MARGIN, this.y, this.pageWidth - MARGIN, this.y, 0.9, TEXT_DARK);
+
+    const titleWidth = this.contentWidth - 175;
+    const titleSize = docTitle.length * 22 * TITLE_WIDTH_FACTOR > titleWidth ? 18 : 22;
+    const titleBaseline = this.y + 23;
+    this.text(docTitle, MARGIN, titleBaseline, titleSize, 'F2', titleWidth, 'left', TEXT_DARK);
     this.text(
-      docTitle,
-      this.pageWidth - MARGIN - titleWidth,
-      headerTop + 12,
-      titleSize,
+      model.reference,
+      this.pageWidth - MARGIN - 165,
+      titleBaseline,
+      13,
       'F2',
-      undefined,
-      'left',
+      165,
+      'right',
       TEXT_DARK,
     );
-    this.text(model.reference, rightX, headerTop + 26, 10.5, 'F2', rightWidth, 'right', BRAND);
-    if (model.status) {
-      const statusText = cleanText(model.status).toUpperCase();
-      const tone = STATUS_TONES[statusTone(model.status)];
-      const pillWidth = statusText.length * 7 * TITLE_WIDTH_FACTOR + 14;
-      const pillX = this.pageWidth - MARGIN - pillWidth;
-      const pillTop = headerTop + 33;
-      this.rect(pillX, pillTop, pillWidth, 14, true, tone.fill);
-      this.text(statusText, pillX + 7, pillTop + 10, 7, 'F2', undefined, 'left', tone.text);
-    }
-
-    this.y = Math.max(orgY, headerTop + 62);
-    this.line(MARGIN, this.y, this.pageWidth - MARGIN, this.y, 0.7, HAIRLINE);
-    this.y += 14;
+    this.y = titleBaseline + 18;
 
     if (model.subtitle) {
-      this.text(model.subtitle, MARGIN, this.y, 9.5, 'F1', 320, 'left', TEXT_MUTED);
-      this.y += 16;
+      this.y = this.wrappedText(model.subtitle, MARGIN, this.y, 13, titleWidth, 'F1', TEXT_DARK) + 3;
     }
 
     this.metaStrip(model.meta);
-    this.y += 8;
-  }
-
-  /** Full-bleed 3pt brand accent bar at the very top of the page (chrome only — never moves this.y). */
-  private brandRule() {
-    this.rect(0, 0, this.pageWidth, 3, true, BRAND);
+    this.y += 5;
   }
 
   /** Whitespace-separated label-over-value pairs between two hairlines, up to 4 columns per band. */
@@ -285,9 +244,8 @@ class SimplePdf {
     if (!items.length) return;
     const columns = Math.min(items.length, 4);
     const colWidth = this.contentWidth / columns;
-    this.ensureSpace(40);
-    this.line(MARGIN, this.y, this.pageWidth - MARGIN, this.y, 0.7, HAIRLINE);
-    this.y += 11;
+    this.ensureSpace(32);
+    this.y += 5;
     for (let i = 0; i < items.length; i += columns) {
       this.ensureSpace(26);
       const band = items.slice(i, i + columns);
@@ -318,7 +276,6 @@ class SimplePdf {
       });
       this.y += Math.max(bandHeight, 24);
     }
-    this.line(MARGIN, this.y - 6, this.pageWidth - MARGIN, this.y - 6, 0.7, HAIRLINE);
   }
 
   addSection(section: BusinessPdfSection) {
@@ -756,7 +713,6 @@ class SimplePdf {
   private newPage() {
     this.pages.push([]);
     this.y = MARGIN;
-    this.brandRule();
     if (this.documentTitle) {
       this.text(
         this.documentTitle,
