@@ -11,7 +11,7 @@ import { backendGet, backendPost } from '@/lib/api-client';
 import { ITEMBA_DOCUMENT_LETTERHEAD } from '@/lib/document-letterhead';
 import type { SupplierOrderDraft } from '../../../_components/supplier-order-draft-types';
 import { dateOnly, money } from '../../../_components/supplier-order-draft-types';
-import { shareSupplierOrderDraftPdf } from '../../../_components/share-supplier-order-draft-pdf';
+import { SupplierOrderDraftShareDialog } from '../../../_components/SupplierOrderDraftShareDialog';
 
 function text(...values: Array<string | null | undefined>) {
   return values.find((value) => value?.trim()) ?? '';
@@ -21,6 +21,7 @@ export default function SupplierOrderDraftPrintPage() {
   const params = useParams<{ id: string }>();
   const [draft, setDraft] = useState<SupplierOrderDraft | null>(null);
   const [error, setError] = useState('');
+  const [sharing, setSharing] = useState(false);
 
   const load = useCallback(async () => {
     try { setDraft(await backendGet<SupplierOrderDraft>(`/supplier-order-drafts/${params.id}`)); }
@@ -31,20 +32,6 @@ export default function SupplierOrderDraftPrintPage() {
   async function printDocument() {
     await backendPost(`/supplier-order-drafts/${params.id}/export-audit`, { format: 'PRINT' }).catch(() => undefined);
     window.print();
-  }
-
-  async function share() {
-    if (!draft) return;
-    try {
-      await shareSupplierOrderDraftPdf({
-        id: draft.id,
-        draftNumber: draft.draftNumber,
-        supplierName: draft.supplierName,
-      });
-    } catch (cause) {
-      if (cause instanceof DOMException && cause.name === 'AbortError') return;
-      setError(cause instanceof Error ? cause.message : 'Could not share supplier order draft');
-    }
   }
 
   if (error) return <div className="p-8 text-red-700">{error}</div>;
@@ -60,9 +47,10 @@ export default function SupplierOrderDraftPrintPage() {
 
   return (
     <div className="document-print-root supplier-order-draft-print-root min-h-screen bg-slate-100 px-4 py-5 text-slate-950">
+      <SupplierOrderDraftShareDialog open={sharing} draft={draft} onClose={() => setSharing(false)} />
       <div className="document-no-print mx-auto mb-4 flex w-full max-w-[210mm] flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
         <Link href={`/operations/purchase-orders/order-drafts/${draft.id}`} className="text-sm font-medium text-brand-600">Back to draft</Link>
-        <div className="flex flex-wrap gap-2"><Btn size="sm" variant="secondary" icon={<Share2 className="h-3.5 w-3.5" />} onClick={share}>Share</Btn><DocumentArtifactButton entityType="SUPPLIER_ORDER_DRAFT" entityId={draft.id} buttonLabel="Generate PDF" compact /><Btn size="sm" icon={<Printer className="h-3.5 w-3.5" />} onClick={printDocument}>Print / Save PDF</Btn></div>
+        <div className="flex flex-wrap gap-2"><Btn size="sm" variant="secondary" icon={<Share2 className="h-3.5 w-3.5" />} onClick={() => setSharing(true)}>Share</Btn><DocumentArtifactButton entityType="SUPPLIER_ORDER_DRAFT" entityId={draft.id} buttonLabel="Generate PDF" compact /><Btn size="sm" icon={<Printer className="h-3.5 w-3.5" />} onClick={printDocument}>Print / Save PDF</Btn></div>
       </div>
 
       <article className="document-page supplier-order-draft-document mx-auto min-h-[297mm] w-full max-w-[210mm] bg-white px-[12mm] py-[12mm] shadow-sm ring-1 ring-slate-200">

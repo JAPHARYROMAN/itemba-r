@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsDateString,
@@ -164,6 +165,28 @@ export class QuerySupplierOrderDraftDto {
 }
 
 export class SupplierOrderDraftExportAuditDto {
-  @IsIn(['PDF', 'PRINT'])
-  format!: 'PDF' | 'PRINT';
+  @IsIn(['PDF', 'PRINT', 'DOWNLOAD', 'NATIVE_SHARE', 'WHATSAPP', 'EMAIL'])
+  format!: 'PDF' | 'PRINT' | 'DOWNLOAD' | 'NATIVE_SHARE' | 'WHATSAPP' | 'EMAIL';
+}
+
+export class SupplierOrderDraftEmailDto {
+  @IsEmail()
+  @MaxLength(250)
+  to!: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsEmail({}, { each: true })
+  cc?: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  subject?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  message?: string;
 }

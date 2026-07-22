@@ -10,9 +10,9 @@ import { backendGet, backendList, backendPatch, backendPost } from '@/lib/api-cl
 import { useAuth } from '@/hooks/use-auth';
 import { PurchaseOrderTabs } from '../../_components/PurchaseOrderTabs';
 import { SupplierOrderDraftForm } from '../../_components/SupplierOrderDraftForm';
+import { SupplierOrderDraftShareDialog } from '../../_components/SupplierOrderDraftShareDialog';
 import type { CompanyOption, SupplierOrderDraft } from '../../_components/supplier-order-draft-types';
 import { dateOnly, money } from '../../_components/supplier-order-draft-types';
-import { shareSupplierOrderDraftPdf } from '../../_components/share-supplier-order-draft-pdf';
 
 type Action = 'send' | 'accept' | 'decline' | 'reopen' | 'cancel';
 
@@ -31,6 +31,7 @@ export default function SupplierOrderDraftDetailPage() {
   const [editing, setEditing] = useState(false);
   const [pending, setPending] = useState<Action | null>(null);
   const [acting, setActing] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,25 +65,6 @@ export default function SupplierOrderDraftDetailPage() {
     } catch (cause) { showToast('error', 'Could not duplicate draft', cause instanceof Error ? cause.message : undefined); }
   }
 
-  async function share() {
-    if (!draft) return;
-    try {
-      const result = await shareSupplierOrderDraftPdf({
-        id: draft.id,
-        draftNumber: draft.draftNumber,
-        supplierName: draft.supplierName,
-      });
-      if (result === 'downloaded') showToast('success', 'PDF downloaded for external sharing');
-    } catch (cause) {
-      if (cause instanceof DOMException && cause.name === 'AbortError') return;
-      showToast(
-        'error',
-        'Could not share supplier order draft',
-        cause instanceof Error ? cause.message : undefined,
-      );
-    }
-  }
-
   if (loading) return <div className="space-y-5 p-6"><PageHeader title="Supplier Order Draft" subtitle="Loading planning document" /><SkeletonTable rows={7} cols={5} /></div>;
   if (!draft) return <div className="p-6"><PageHeader title="Supplier Order Draft" subtitle={error || 'Document not found'} /><Link href="/operations/purchase-orders/order-drafts" className="mt-5 inline-block text-sm text-brand-600">Back to drafts</Link></div>;
 
@@ -93,6 +75,7 @@ export default function SupplierOrderDraftDetailPage() {
   return (
     <div className="space-y-5 p-6">
       {editing && <SupplierOrderDraftForm open companies={companies.length ? companies : [draft.company!]} initial={draft} onClose={() => setEditing(false)} onSaved={(updated) => { setDraft(updated); setEditing(false); }} />}
+      <SupplierOrderDraftShareDialog open={sharing} draft={draft} onClose={() => setSharing(false)} />
       <ConfirmDialog open={Boolean(pending)} title={`${pending ? pending[0].toUpperCase() + pending.slice(1) : ''} supplier order draft`} message={`Confirm that you want to ${pending} ${draft.draftNumber}. This changes only the planning document lifecycle.`} confirmLabel={pending === 'send' ? 'Mark Sent' : 'Confirm'} variant={pending === 'decline' || pending === 'cancel' ? 'danger' : 'default'} loading={acting} onConfirm={transition} onClose={() => setPending(null)} />
 
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -102,7 +85,7 @@ export default function SupplierOrderDraftDetailPage() {
           {hasPermission('supplier_order_drafts.create') && <Btn size="sm" variant="secondary" icon={<Copy className="h-3.5 w-3.5" />} onClick={duplicate}>Duplicate</Btn>}
           <Link href={`/operations/purchase-orders/order-drafts/${draft.id}/print`}><Btn size="sm" variant="secondary" icon={<ExternalLink className="h-3.5 w-3.5" />}>Print View</Btn></Link>
           {hasPermission('supplier_order_drafts.export') && <DocumentArtifactButton entityType="SUPPLIER_ORDER_DRAFT" entityId={draft.id} compact />}
-          <Btn size="sm" variant="secondary" icon={<Share2 className="h-3.5 w-3.5" />} onClick={share}>Share</Btn>
+          {hasPermission('supplier_order_drafts.export') && <Btn size="sm" variant="secondary" icon={<Share2 className="h-3.5 w-3.5" />} onClick={() => setSharing(true)}>Share</Btn>}
           {canSend && <Btn size="sm" icon={<Send className="h-3.5 w-3.5" />} onClick={() => setPending('send')}>Mark Sent</Btn>}
           {draft.status === 'DRAFT' && canManage && <Btn size="sm" variant="warning" onClick={() => setPending('cancel')}>Cancel</Btn>}
           {draft.status === 'SENT' && canManage && <><Btn size="sm" variant="success" onClick={() => setPending('accept')}>Accept</Btn><Btn size="sm" variant="danger" onClick={() => setPending('decline')}>Decline</Btn><Btn size="sm" variant="warning" onClick={() => setPending('cancel')}>Cancel</Btn></>}

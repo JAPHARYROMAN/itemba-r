@@ -1,17 +1,23 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Request } from 'express';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import {
   CreateSupplierOrderDraftDto,
   QuerySupplierOrderDraftDto,
   SupplierOrderDraftExportAuditDto,
+  SupplierOrderDraftEmailDto,
   UpdateSupplierOrderDraftDto,
 } from './dto/supplier-order-draft.dto';
 import { SupplierOrderDraftsService } from './supplier-order-drafts.service';
+import { SupplierOrderDraftSharingService } from './supplier-order-draft-sharing.service';
 
 @Controller('supplier-order-drafts')
 export class SupplierOrderDraftsController {
-  constructor(private readonly service: SupplierOrderDraftsService) {}
+  constructor(
+    private readonly service: SupplierOrderDraftsService,
+    private readonly sharing: SupplierOrderDraftSharingService,
+  ) {}
 
   @Get()
   @RequirePermissions('supplier_order_drafts.view')
@@ -45,6 +51,17 @@ export class SupplierOrderDraftsController {
   @RequirePermissions('supplier_order_drafts.create')
   duplicate(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.duplicate(id, user);
+  }
+
+  @Post(':id/share/email')
+  @RequirePermissions('supplier_order_drafts.export')
+  emailPdf(
+    @Param('id') id: string,
+    @Body() dto: SupplierOrderDraftEmailDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: Request,
+  ) {
+    return this.sharing.emailPdf(id, dto, user, req.ip);
   }
 
   @Patch(':id/send')

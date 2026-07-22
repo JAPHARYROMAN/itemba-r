@@ -3,6 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { Transporter } from 'nodemailer';
 
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType: string;
+}
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -26,16 +32,48 @@ export class EmailService {
   }
 
   async sendEmail(to: string, subject: string, html: string, text?: string): Promise<void> {
+    await this.deliver(to, subject, html, text);
+  }
+
+  async sendEmailWithAttachments(
+    to: string,
+    subject: string,
+    html: string,
+    text: string | undefined,
+    attachments: EmailAttachment[],
+    cc: string[] = [],
+  ): Promise<boolean> {
+    return this.deliver(to, subject, html, text, attachments, cc);
+  }
+
+  private async deliver(
+    to: string,
+    subject: string,
+    html: string,
+    text?: string,
+    attachments: EmailAttachment[] = [],
+    cc: string[] = [],
+  ): Promise<boolean> {
     if (!this.transporter) {
       this.logger.warn(`Email skipped (SMTP not configured): "${subject}" to ${to}`);
-      return;
+      return false;
     }
     try {
       const from = this.config.get<string>('SMTP_FROM') ?? 'ITEMBA-R System <noreply@itemba-r.com>';
-      await this.transporter.sendMail({ from, to, subject, html, text });
+      await this.transporter.sendMail({
+        from,
+        to,
+        ...(cc.length && { cc }),
+        subject,
+        html,
+        text,
+        ...(attachments.length && { attachments }),
+      });
       this.logger.log(`Email sent: "${subject}" to ${to}`);
+      return true;
     } catch (err) {
       this.logger.error(`Failed to send email to ${to}: ${(err as Error).message}`, (err as Error).stack);
+      return false;
     }
   }
 
