@@ -69,6 +69,7 @@ export const DEFAULT_PATTERNS: Record<string, EntityCodePattern> = {
   // ── Operations / sales / purchasing ─────────────────────────────────────
   SalesOrder: { prefix: 'SO-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
   PurchaseOrder: { prefix: 'PO-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
+  SupplierOrderDraft: { prefix: 'SOD-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
   Customer: { prefix: 'CUST-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
   Invoice: { prefix: 'INV-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
   Quotation: { prefix: 'QUO-{YYYY}-', padding: 5, resetFrequency: 'YEARLY' },

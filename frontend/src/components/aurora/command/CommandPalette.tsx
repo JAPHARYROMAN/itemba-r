@@ -108,6 +108,15 @@ const NAV_ICON_LABELS: Record<string, string> = {
 
 const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
   {
+    id: 'route:supplier-order-drafts',
+    label: 'Supplier Order Drafts',
+    href: '/operations/purchase-orders/order-drafts',
+    group: 'Operations',
+    icon: <AppIcon name="purchase" size={16} />,
+    permission: 'supplier_order_drafts.view',
+    keywords: ['supplier request', 'order planning', 'draft purchase', 'manual items'],
+  },
+  {
     id: 'route:home',
     label: 'Public Home',
     href: '/',

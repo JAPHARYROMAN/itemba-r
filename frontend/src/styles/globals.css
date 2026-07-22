@@ -1120,4 +1120,25 @@ html.motion-reduced *::after {
   .document-footer {
     margin-top: 5mm !important;
   }
+
+  .supplier-order-draft-document {
+    font-family: Arial, Helvetica, sans-serif !important;
+  }
+
+  .supplier-order-draft-header {
+    height: 54mm !important;
+    max-height: 54mm !important;
+    overflow: hidden !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  .supplier-order-draft-table thead {
+    display: table-header-group !important;
+  }
+
+  .supplier-order-draft-table tr {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
 }

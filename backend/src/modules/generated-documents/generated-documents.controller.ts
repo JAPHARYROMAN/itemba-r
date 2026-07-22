@@ -13,6 +13,7 @@ const BUSINESS_PDF_SOURCE_PERMISSIONS = [
   'documents.manage',
   'sales.view',
   'purchases.view',
+  'supplier_order_drafts.export',
   'quotations.view',
   'proformas.view',
   'delivery_notes.view',

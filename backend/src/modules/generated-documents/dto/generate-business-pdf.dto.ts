@@ -3,6 +3,7 @@ import { IsIn, IsString } from 'class-validator';
 export const BUSINESS_PDF_ENTITY_TYPES = [
   'SALES_ORDER',
   'PURCHASE_ORDER',
+  'SUPPLIER_ORDER_DRAFT',
   'QUOTATION',
   'PROFORMA_INVOICE',
   'DELIVERY_NOTE',

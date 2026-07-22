@@ -257,6 +257,7 @@ const ALL_PERMISSIONS: PermDef[] = [
   },
   ...perms('sales', ['view', 'create', 'confirm', 'cancel']),
   ...perms('purchases', ['view', 'create', 'confirm', 'receive', 'cancel']),
+  ...perms('supplier_order_drafts', ['view', 'create', 'update', 'send', 'manage', 'export']),
   {
     code: 'operations.reports.view',
     description: 'View operations reports',
@@ -905,6 +906,7 @@ const OPERATIONS_MODULES = [
   'inventory',
   'sales',
   'purchases',
+  'supplier_order_drafts',
   'operations',
 ];
 
@@ -1177,6 +1179,7 @@ const ACCOUNTING_ENGINE_MODULES = [
 
 const PROCUREMENT_MODULES = [
   'procurement',
+  'supplier_order_drafts',
   'purchase_requisitions',
   'rfqs',
   'supplier_quotations',
@@ -1557,6 +1560,7 @@ const ROLES: RoleDef[] = [
         'inventory',
         'sales',
         'purchases',
+        'supplier_order_drafts',
         'expenses',
         'documents',
         'reports',

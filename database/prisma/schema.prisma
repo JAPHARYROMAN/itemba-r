@@ -371,26 +371,26 @@ model Company {
   companyAccess UserCompanyAccess[]
 
   // Finance (Milestone 3)
-  chartOfAccounts      ChartOfAccount[]
-  fiscalYears          FiscalYear[]
-  accountingPeriods    AccountingPeriod[]
-  journalEntries       JournalEntry[]
-  journalEntryLines    JournalEntryLine[]
-  cashAccounts         CashAccount[]
-  expenseCategories    ExpenseCategory[]
-  expenses             Expense[]
-  recordBookDailySales RecordBookDailySale[]
+  chartOfAccounts             ChartOfAccount[]
+  fiscalYears                 FiscalYear[]
+  accountingPeriods           AccountingPeriod[]
+  journalEntries              JournalEntry[]
+  journalEntryLines           JournalEntryLine[]
+  cashAccounts                CashAccount[]
+  expenseCategories           ExpenseCategory[]
+  expenses                    Expense[]
+  recordBookDailySales        RecordBookDailySale[]
   recordBookExpenseCategories RecordBookExpenseCategory[]
-  recordBookExpenses   RecordBookExpense[]
-  receivables          Receivable[]
-  payables             Payable[]
-  creditNotes          CreditNote[]
-  refunds              Refund[]
-  customerPayments     CustomerPayment[]
-  paymentAllocations   PaymentAllocation[]
-  interCompanyTxFrom   InterCompanyTransaction[] @relation("InterCompanyTxFrom")
-  interCompanyTxTo     InterCompanyTransaction[] @relation("InterCompanyTxTo")
-  financialAttachments FinancialAttachment[]
+  recordBookExpenses          RecordBookExpense[]
+  receivables                 Receivable[]
+  payables                    Payable[]
+  creditNotes                 CreditNote[]
+  refunds                     Refund[]
+  customerPayments            CustomerPayment[]
+  paymentAllocations          PaymentAllocation[]
+  interCompanyTxFrom          InterCompanyTransaction[]   @relation("InterCompanyTxFrom")
+  interCompanyTxTo            InterCompanyTransaction[]   @relation("InterCompanyTxTo")
+  financialAttachments        FinancialAttachment[]
 
   // Operations (Milestone 4)
   customers             Customer[]
@@ -403,6 +403,7 @@ model Company {
   stockAdjustments      StockAdjustment[]
   salesOrders           SalesOrder[]
   purchaseOrders        PurchaseOrder[]
+  supplierOrderDrafts   SupplierOrderDraft[]
   operationsAttachments OperationsAttachment[]
 
   // Petroleum (Milestone 5)
@@ -661,16 +662,17 @@ model Division {
   documents      Document[]           @relation("DivisionDocuments")
 
   // Operations (Milestone 4)
-  customers          Customer[]
-  suppliers          Supplier[]
-  inventoryBalances  InventoryBalance[]
-  inventoryMovements InventoryMovement[]
-  stockAdjustments   StockAdjustment[]
-  salesOrders        SalesOrder[]
-  purchaseOrders     PurchaseOrder[]
-  goodsReceivedNotes GoodsReceivedNote[]
+  customers            Customer[]
+  suppliers            Supplier[]
+  inventoryBalances    InventoryBalance[]
+  inventoryMovements   InventoryMovement[]
+  stockAdjustments     StockAdjustment[]
+  salesOrders          SalesOrder[]
+  purchaseOrders       PurchaseOrder[]
+  goodsReceivedNotes   GoodsReceivedNote[]
   recordBookDailySales RecordBookDailySale[]
   recordBookExpenses   RecordBookExpense[]
+  supplierOrderDrafts  SupplierOrderDraft[]
 
   // Petroleum (Milestone 5)
   fuelTanks   FuelTank[]
@@ -737,8 +739,8 @@ model Division {
   supplierInvoices       SupplierInvoice[]
 
   // UX Backend Wave 2
-  creditNotes CreditNote[]
-  refunds     Refund[]
+  creditNotes      CreditNote[]
+  refunds          Refund[]
   customerPayments CustomerPayment[]
 
   @@unique([companyId, code])
@@ -772,17 +774,18 @@ model Branch {
   documents    Document[]         @relation("BranchDocuments")
 
   // Operations (Milestone 4)
-  customers          Customer[]
-  suppliers          Supplier[]
-  inventoryBalances  InventoryBalance[]
-  inventoryMovements InventoryMovement[]
-  stockAdjustments   StockAdjustment[]
-  salesOrders        SalesOrder[]
-  purchaseOrders     PurchaseOrder[]
-  businessLicenses   BusinessLicense[]
-  goodsReceivedNotes GoodsReceivedNote[]
+  customers            Customer[]
+  suppliers            Supplier[]
+  inventoryBalances    InventoryBalance[]
+  inventoryMovements   InventoryMovement[]
+  stockAdjustments     StockAdjustment[]
+  salesOrders          SalesOrder[]
+  purchaseOrders       PurchaseOrder[]
+  businessLicenses     BusinessLicense[]
+  goodsReceivedNotes   GoodsReceivedNote[]
   recordBookDailySales RecordBookDailySale[]
   recordBookExpenses   RecordBookExpense[]
+  supplierOrderDrafts  SupplierOrderDraft[]
 
   // Petroleum (Milestone 5)
   fuelTanks                FuelTank[]
@@ -841,8 +844,8 @@ model Branch {
   supplierInvoices       SupplierInvoice[]
 
   // UX Backend Wave 2
-  creditNotes CreditNote[]
-  refunds     Refund[]
+  creditNotes      CreditNote[]
+  refunds          Refund[]
   customerPayments CustomerPayment[]
 
   @@unique([divisionId, code])
@@ -895,33 +898,34 @@ model User {
   intercompanyTxApproved InterCompanyTransaction[] @relation("InterCompanyTxApprovedBy")
 
   // Operations (Milestone 4)
-  customersCreated         Customer[]          @relation("CustomerCreatedBy")
-  customersUpdated         Customer[]          @relation("CustomerUpdatedBy")
-  suppliersCreated         Supplier[]          @relation("SupplierCreatedBy")
-  suppliersUpdated         Supplier[]          @relation("SupplierUpdatedBy")
-  movementsCreated         InventoryMovement[] @relation("MovementCreatedBy")
-  adjustmentsCreated       StockAdjustment[]   @relation("AdjustmentCreatedBy")
-  adjustmentsApproved      StockAdjustment[]   @relation("AdjustmentApprovedBy")
-  adjustmentsPosted        StockAdjustment[]   @relation("AdjustmentPostedBy")
-  salesOrdersCreated       SalesOrder[]        @relation("SalesOrderCreatedBy")
-  salesOrdersConfirmed     SalesOrder[]        @relation("SalesOrderConfirmedBy")
-  salesCommissionsCreated  SalesCommission[]   @relation("SalesCommissionCreatedBy")
-  salesCommissionsApproved SalesCommission[]   @relation("SalesCommissionApprovedBy")
-  purchaseOrdersCreated    PurchaseOrder[]     @relation("PurchaseOrderCreatedBy")
-  purchaseOrdersConfirmed  PurchaseOrder[]     @relation("PurchaseOrderConfirmedBy")
-  purchaseOrdersReceived   PurchaseOrder[]     @relation("PurchaseOrderReceivedBy")
-  creditNotesCreated       CreditNote[]        @relation("CreditNoteCreatedBy")
-  refundsCreated           Refund[]            @relation("RefundCreatedBy")
-  customerPaymentsCreated  CustomerPayment[]   @relation("CustomerPaymentCreatedBy")
-  customerPaymentsReversed CustomerPayment[]   @relation("CustomerPaymentReversedBy")
-  recordBookSalesCreated   RecordBookDailySale[] @relation("RecordBookSaleCreatedBy")
-  recordBookSalesUpdated   RecordBookDailySale[] @relation("RecordBookSaleUpdatedBy")
-  recordBookSalesFinalized RecordBookDailySale[] @relation("RecordBookSaleFinalizedBy")
-  recordBookSalesVoided    RecordBookDailySale[] @relation("RecordBookSaleVoidedBy")
-  recordBookExpensesCreated   RecordBookExpense[] @relation("RecordBookExpenseCreatedBy")
-  recordBookExpensesUpdated   RecordBookExpense[] @relation("RecordBookExpenseUpdatedBy")
-  recordBookExpensesFinalized RecordBookExpense[] @relation("RecordBookExpenseFinalizedBy")
-  recordBookExpensesVoided    RecordBookExpense[] @relation("RecordBookExpenseVoidedBy")
+  customersCreated            Customer[]            @relation("CustomerCreatedBy")
+  customersUpdated            Customer[]            @relation("CustomerUpdatedBy")
+  suppliersCreated            Supplier[]            @relation("SupplierCreatedBy")
+  suppliersUpdated            Supplier[]            @relation("SupplierUpdatedBy")
+  movementsCreated            InventoryMovement[]   @relation("MovementCreatedBy")
+  adjustmentsCreated          StockAdjustment[]     @relation("AdjustmentCreatedBy")
+  adjustmentsApproved         StockAdjustment[]     @relation("AdjustmentApprovedBy")
+  adjustmentsPosted           StockAdjustment[]     @relation("AdjustmentPostedBy")
+  salesOrdersCreated          SalesOrder[]          @relation("SalesOrderCreatedBy")
+  salesOrdersConfirmed        SalesOrder[]          @relation("SalesOrderConfirmedBy")
+  salesCommissionsCreated     SalesCommission[]     @relation("SalesCommissionCreatedBy")
+  salesCommissionsApproved    SalesCommission[]     @relation("SalesCommissionApprovedBy")
+  purchaseOrdersCreated       PurchaseOrder[]       @relation("PurchaseOrderCreatedBy")
+  purchaseOrdersConfirmed     PurchaseOrder[]       @relation("PurchaseOrderConfirmedBy")
+  purchaseOrdersReceived      PurchaseOrder[]       @relation("PurchaseOrderReceivedBy")
+  supplierOrderDraftsCreated  SupplierOrderDraft[]  @relation("SupplierOrderDraftCreatedBy")
+  creditNotesCreated          CreditNote[]          @relation("CreditNoteCreatedBy")
+  refundsCreated              Refund[]              @relation("RefundCreatedBy")
+  customerPaymentsCreated     CustomerPayment[]     @relation("CustomerPaymentCreatedBy")
+  customerPaymentsReversed    CustomerPayment[]     @relation("CustomerPaymentReversedBy")
+  recordBookSalesCreated      RecordBookDailySale[] @relation("RecordBookSaleCreatedBy")
+  recordBookSalesUpdated      RecordBookDailySale[] @relation("RecordBookSaleUpdatedBy")
+  recordBookSalesFinalized    RecordBookDailySale[] @relation("RecordBookSaleFinalizedBy")
+  recordBookSalesVoided       RecordBookDailySale[] @relation("RecordBookSaleVoidedBy")
+  recordBookExpensesCreated   RecordBookExpense[]   @relation("RecordBookExpenseCreatedBy")
+  recordBookExpensesUpdated   RecordBookExpense[]   @relation("RecordBookExpenseUpdatedBy")
+  recordBookExpensesFinalized RecordBookExpense[]   @relation("RecordBookExpenseFinalizedBy")
+  recordBookExpensesVoided    RecordBookExpense[]   @relation("RecordBookExpenseVoidedBy")
 
   // Petroleum (Milestone 5)
   fuelShiftsOpened                 FuelShift[]               @relation("ShiftOpenedBy")
@@ -2051,23 +2055,23 @@ model JournalEntry {
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
-  company           Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  accountingPeriod  AccountingPeriod?         @relation(fields: [accountingPeriodId], references: [id], onDelete: SetNull)
-  createdBy         User                      @relation("JournalEntryCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  postedBy          User?                     @relation("JournalEntryPostedBy", fields: [postedById], references: [id], onDelete: SetNull)
-  reversedBy        User?                     @relation("JournalEntryReversedBy", fields: [reversedById], references: [id], onDelete: SetNull)
-  reversalOf        JournalEntry?             @relation("JournalEntryReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
-  reversedBy_       JournalEntry[]            @relation("JournalEntryReversal")
-  lines             JournalEntryLine[]
-  expensesPosted    Expense[]
-  receivablesPosted Receivable[]
-  payablesPosted    Payable[]
-  creditNotesPosted CreditNote[]
-  refundsPosted     Refund[]
-  customerPaymentsPosted   CustomerPayment[] @relation("CustomerPaymentJournalEntry")
-  customerPaymentsReversed CustomerPayment[] @relation("CustomerPaymentReversalJournalEntry")
-  intercompanyFrom  InterCompanyTransaction[] @relation("InterCompanyFromJE")
-  intercompanyTo    InterCompanyTransaction[] @relation("InterCompanyToJE")
+  company                  Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  accountingPeriod         AccountingPeriod?         @relation(fields: [accountingPeriodId], references: [id], onDelete: SetNull)
+  createdBy                User                      @relation("JournalEntryCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  postedBy                 User?                     @relation("JournalEntryPostedBy", fields: [postedById], references: [id], onDelete: SetNull)
+  reversedBy               User?                     @relation("JournalEntryReversedBy", fields: [reversedById], references: [id], onDelete: SetNull)
+  reversalOf               JournalEntry?             @relation("JournalEntryReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
+  reversedBy_              JournalEntry[]            @relation("JournalEntryReversal")
+  lines                    JournalEntryLine[]
+  expensesPosted           Expense[]
+  receivablesPosted        Receivable[]
+  payablesPosted           Payable[]
+  creditNotesPosted        CreditNote[]
+  refundsPosted            Refund[]
+  customerPaymentsPosted   CustomerPayment[]         @relation("CustomerPaymentJournalEntry")
+  customerPaymentsReversed CustomerPayment[]         @relation("CustomerPaymentReversalJournalEntry")
+  intercompanyFrom         InterCompanyTransaction[] @relation("InterCompanyFromJE")
+  intercompanyTo           InterCompanyTransaction[] @relation("InterCompanyToJE")
 
   @@unique([companyId, journalNumber])
   @@index([companyId])
@@ -2372,17 +2376,17 @@ model Receivable {
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 
-  company         Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  division        Division?        @relation(fields: [divisionId], references: [id], onDelete: SetNull)
-  branch          Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  customer        Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  journalEntry    JournalEntry?    @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
-  salesOrders     SalesOrder[]
-  fuelCreditSales FuelCreditSale[]
-  projectBillings ProjectBilling[] @relation("ProjectBillingReceivable")
-  trips           Trip[]           @relation("TripReceivable")
-  creditNotes     CreditNote[]
-  refunds         Refund[]
+  company            Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division           Division?           @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch             Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer           Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  journalEntry       JournalEntry?       @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  salesOrders        SalesOrder[]
+  fuelCreditSales    FuelCreditSale[]
+  projectBillings    ProjectBilling[]    @relation("ProjectBillingReceivable")
+  trips              Trip[]              @relation("TripReceivable")
+  creditNotes        CreditNote[]
+  refunds            Refund[]
   paymentAllocations PaymentAllocation[]
 
   @@unique([companyId, receivableNumber])
@@ -2552,31 +2556,31 @@ model CreditNoteLine {
 /// note or a receivable-carried customer credit. Paying posts DR AR / CR
 /// Cash|Bank; voiding reverses that entry.
 model Refund {
-  id                      String       @id @default(uuid())
-  refundNumber            String
-  companyId               String
-  divisionId              String?
-  branchId                String?
-  customerId              String?
-  customerName            String?
-  creditNoteId            String?
-  receivableId            String?
-  cashAccountId           String
-  amount                  Decimal      @db.Decimal(18, 2)
-  currency                CurrencyCode @default(TZS)
-  refundDate              DateTime
-  status                  RefundStatus @default(DRAFT)
-  reason                  String?
-  notes                   String?
-  journalEntryId          String?
-  reversalJournalEntryId  String?
-  createdById             String?
-  postedById              String?
-  postedAt                DateTime?
-  voidedAt                DateTime?
-  deletedAt               DateTime?
-  createdAt               DateTime     @default(now())
-  updatedAt               DateTime     @updatedAt
+  id                     String       @id @default(uuid())
+  refundNumber           String
+  companyId              String
+  divisionId             String?
+  branchId               String?
+  customerId             String?
+  customerName           String?
+  creditNoteId           String?
+  receivableId           String?
+  cashAccountId          String
+  amount                 Decimal      @db.Decimal(18, 2)
+  currency               CurrencyCode @default(TZS)
+  refundDate             DateTime
+  status                 RefundStatus @default(DRAFT)
+  reason                 String?
+  notes                  String?
+  journalEntryId         String?
+  reversalJournalEntryId String?
+  createdById            String?
+  postedById             String?
+  postedAt               DateTime?
+  voidedAt               DateTime?
+  deletedAt              DateTime?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
 
   company      Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division     Division?     @relation(fields: [divisionId], references: [id], onDelete: SetNull)
@@ -2632,17 +2636,17 @@ model CustomerPayment {
   reversedAt             DateTime?
   deletedAt              DateTime?
   createdAt              DateTime              @default(now())
-  updatedAt             DateTime              @updatedAt
+  updatedAt              DateTime              @updatedAt
 
-  company             Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  division            Division?           @relation(fields: [divisionId], references: [id], onDelete: SetNull)
-  branch              Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  customer            Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  cashAccount         CashAccount?        @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
-  journalEntry        JournalEntry?       @relation("CustomerPaymentJournalEntry", fields: [journalEntryId], references: [id], onDelete: SetNull)
-  reversalJournalEntry JournalEntry?      @relation("CustomerPaymentReversalJournalEntry", fields: [reversalJournalEntryId], references: [id], onDelete: SetNull)
-  createdBy           User?               @relation("CustomerPaymentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  reversedBy          User?               @relation("CustomerPaymentReversedBy", fields: [reversedById], references: [id], onDelete: SetNull)
+  company              Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division             Division?     @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch               Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer             Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  cashAccount          CashAccount?  @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  journalEntry         JournalEntry? @relation("CustomerPaymentJournalEntry", fields: [journalEntryId], references: [id], onDelete: SetNull)
+  reversalJournalEntry JournalEntry? @relation("CustomerPaymentReversalJournalEntry", fields: [reversalJournalEntryId], references: [id], onDelete: SetNull)
+  createdBy            User?         @relation("CustomerPaymentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  reversedBy           User?         @relation("CustomerPaymentReversedBy", fields: [reversedById], references: [id], onDelete: SetNull)
 
   allocations PaymentAllocation[]
 
@@ -2906,6 +2910,14 @@ enum PurchaseOrderStatus {
   VOIDED
 }
 
+enum SupplierOrderDraftStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+
 // ── Models ───────────────────────────────────────────────────────────────────
 
 model Customer {
@@ -2935,16 +2947,16 @@ model Customer {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  company         Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  division        Division?        @relation(fields: [divisionId], references: [id], onDelete: SetNull)
-  branch          Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  createdBy       User?            @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy       User?            @relation("CustomerUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  salesOrders     SalesOrder[]
-  fuelCreditSales FuelCreditSale[]
-  receivables     Receivable[]
-  creditNotes     CreditNote[]
-  refunds         Refund[]
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division         Division?         @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch           Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  createdBy        User?             @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy        User?             @relation("CustomerUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  salesOrders      SalesOrder[]
+  fuelCreditSales  FuelCreditSale[]
+  receivables      Receivable[]
+  creditNotes      CreditNote[]
+  refunds          Refund[]
   customerPayments CustomerPayment[]
 
   // Westsides (Milestone 6)
@@ -3000,15 +3012,16 @@ model Supplier {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  company           Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  division          Division?                 @relation(fields: [divisionId], references: [id], onDelete: SetNull)
-  branch            Branch?                   @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  createdBy         User?                     @relation("SupplierCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy         User?                     @relation("SupplierUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  purchaseOrders    PurchaseOrder[]
-  fuelDeliveries    FuelDelivery[]
-  payables          Payable[]
-  productCategories SupplierProductCategory[]
+  company             Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division            Division?                 @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch              Branch?                   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  createdBy           User?                     @relation("SupplierCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy           User?                     @relation("SupplierUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  purchaseOrders      PurchaseOrder[]
+  supplierOrderDrafts SupplierOrderDraft[]
+  fuelDeliveries      FuelDelivery[]
+  payables            Payable[]
+  productCategories   SupplierProductCategory[]
 
   // Westsides (Milestone 6)
   productBatches   ProductBatch[]
@@ -3142,21 +3155,21 @@ model ProductCategory {
 }
 
 model ProductFamily {
-  id          String    @id @default(uuid())
-  companyId   String
-  divisionId  String?
-  categoryId  String
-  name        String
-  brand       String?
-  description String?
+  id                   String    @id @default(uuid())
+  companyId            String
+  divisionId           String?
+  categoryId           String
+  name                 String
+  brand                String?
+  description          String?
   defaultPurchasePrice Decimal?  @db.Decimal(18, 2)
   defaultSellingPrice  Decimal?  @db.Decimal(18, 2)
   wholesalePrice       Decimal?  @db.Decimal(18, 2)
   retailPrice          Decimal?  @db.Decimal(18, 2)
-  isActive    Boolean   @default(true)
-  deletedAt   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  isActive             Boolean   @default(true)
+  deletedAt            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   company  Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division Division?       @relation("DivisionProductFamilies", fields: [divisionId], references: [id], onDelete: SetNull)
@@ -3667,6 +3680,83 @@ model PurchaseOrderLine {
   @@index([purchaseOrderId])
   @@index([purchaseOrderId, createdAt])
   @@map("purchase_order_lines")
+}
+
+/// Supplier-facing planning document created before an operational PurchaseOrder.
+/// It is deliberately isolated from products, units, inventory, payables, GRNs,
+/// tax posting, and accounting journals. Lines are free-form snapshots only.
+model SupplierOrderDraft {
+  id                   String                   @id @default(uuid())
+  draftNumber          String
+  companyId            String
+  divisionId           String?
+  branchId             String?
+  supplierId           String?
+  supplierName         String
+  supplierAddress      String?
+  supplierContact      String?
+  supplierTin          String?
+  supplierVrn          String?
+  supplierPhone        String?
+  supplierEmail        String?
+  draftDate            DateTime
+  neededBy             DateTime?
+  currency             CurrencyCode             @default(TZS)
+  title                String?
+  deliveryInstructions String?
+  terms                String?
+  notes                String?
+  subtotal             Decimal                  @default(0) @db.Decimal(18, 2)
+  discountAmount       Decimal                  @default(0) @db.Decimal(18, 2)
+  taxAmount            Decimal                  @default(0) @db.Decimal(18, 2)
+  totalAmount          Decimal                  @default(0) @db.Decimal(18, 2)
+  hasUnpricedLines     Boolean                  @default(false)
+  status               SupplierOrderDraftStatus @default(DRAFT)
+  createdById          String
+  sentAt               DateTime?
+  acceptedAt           DateTime?
+  declinedAt           DateTime?
+  cancelledAt          DateTime?
+  deletedAt            DateTime?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+
+  company   Company                  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division  Division?                @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch    Branch?                  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  supplier  Supplier?                @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  createdBy User                     @relation("SupplierOrderDraftCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  lines     SupplierOrderDraftLine[]
+
+  @@unique([companyId, draftNumber])
+  @@index([companyId, status, draftDate])
+  @@index([supplierId])
+  @@index([divisionId])
+  @@index([branchId])
+  @@map("supplier_order_drafts")
+}
+
+model SupplierOrderDraftLine {
+  id             String   @id @default(uuid())
+  draftId        String
+  lineNumber     Int
+  itemCode       String?
+  description    String
+  quantity       Decimal  @db.Decimal(18, 4)
+  unitLabel      String
+  unitPrice      Decimal? @db.Decimal(18, 4)
+  discountAmount Decimal  @default(0) @db.Decimal(18, 2)
+  taxAmount      Decimal  @default(0) @db.Decimal(18, 2)
+  lineTotal      Decimal? @db.Decimal(18, 2)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  draft SupplierOrderDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@unique([draftId, lineNumber])
+  @@index([draftId])
+  @@map("supplier_order_draft_lines")
 }
 
 model OperationsAttachment {

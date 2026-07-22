@@ -336,6 +336,8 @@ export class GeneratedDocumentsService {
         return this.salesOrderPdf(entityId, user);
       case 'PURCHASE_ORDER':
         return this.purchaseOrderPdf(entityId, user);
+      case 'SUPPLIER_ORDER_DRAFT':
+        return this.supplierOrderDraftPdf(entityId, user);
       case 'QUOTATION':
         return this.quotationPdf(entityId, user);
       case 'PROFORMA_INVOICE':
@@ -496,6 +498,111 @@ export class GeneratedDocumentsService {
         ]),
         notesSection(record.notes),
         { title: 'Authorization', signatures: ['Prepared By', 'Approved By', 'Supplier'] },
+      ].filter(Boolean) as BusinessPdfSection[],
+    });
+  }
+
+  private async supplierOrderDraftPdf(
+    id: string,
+    user: AuthUser,
+  ): Promise<ResolvedBusinessPdfModel> {
+    const where: any = { id, deletedAt: null };
+    applyCompanyScopeWhere(where, user);
+    const record = await this.prisma.supplierOrderDraft.findFirst({
+      where,
+      include: {
+        company: companySelect(),
+        branch: branchSelect(),
+        createdBy: { select: { fullName: true } },
+        lines: { orderBy: { lineNumber: 'asc' } },
+      },
+    });
+    if (!record) throw new NotFoundException('Supplier order draft not found');
+
+    const supplierDetails = [
+      record.supplierContact ? `Contact: ${record.supplierContact}` : null,
+      record.supplierAddress ? `Address: ${record.supplierAddress}` : null,
+      record.supplierPhone ? `Phone: ${record.supplierPhone}` : null,
+      record.supplierEmail ? `Email: ${record.supplierEmail}` : null,
+      [record.supplierTin ? `TIN: ${record.supplierTin}` : null, record.supplierVrn ? `VRN: ${record.supplierVrn}` : null]
+        .filter(Boolean)
+        .join(' | '),
+    ].filter((item): item is string => Boolean(item));
+
+    const pricingNote = record.hasUnpricedLines
+      ? 'One or more item prices are still to be confirmed. The amount shown is a partial total for priced lines only.'
+      : null;
+
+    return this.wrapPdf(record.companyId, record.branchId, record.draftNumber, DocumentCategory.OTHER, {
+      title: 'Supplier Order Draft',
+      subtitle: record.title ?? undefined,
+      reference: record.draftNumber,
+      status: label(record.status),
+      orientation: 'portrait',
+      organization: organization(record.company, record.branch),
+      generatedAt: new Date(),
+      meta: [],
+      compactPartyHeader: {
+        partyLabel: 'Supplier',
+        partyName: record.supplierName,
+        partyDetails: supplierDetails,
+        documentDetails: [
+          kv('Draft date', date(record.draftDate)),
+          kv('Needed by', date(record.neededBy)),
+          kv('Currency', record.currency),
+        ],
+      },
+      sections: [
+        {
+          title: record.title || 'Requested Items',
+          ...(pricingNote && { paragraphs: [pricingNote] }),
+          table: {
+            headers: ['#', 'Description', 'Item Code', 'Qty', 'Unit', 'Unit Price', 'Discount', 'Tax', 'Amount'],
+            rows: record.lines.map((line) => [
+              String(line.lineNumber),
+              line.description,
+              value(line.itemCode),
+              qty(line.quantity),
+              line.unitLabel,
+              line.unitPrice === null ? 'Price to be confirmed' : money(line.unitPrice, record.currency),
+              line.unitPrice === null ? '-' : money(line.discountAmount, record.currency),
+              line.unitPrice === null ? '-' : money(line.taxAmount, record.currency),
+              line.lineTotal === null ? 'Price to be confirmed' : money(line.lineTotal, record.currency),
+            ]),
+            numericColumns: [0, 3, 5, 6, 7, 8],
+            columnWeights: [0.35, 2.6, 0.8, 0.55, 0.55, 1.1, 0.85, 0.75, 1.15],
+            stripedRows: true,
+            mutedColumns: [0, 2],
+          },
+          totals: [
+            total('Priced subtotal', record.subtotal, record.currency),
+            total('Discount', record.discountAmount, record.currency),
+            total('Tax', record.taxAmount, record.currency),
+            total(record.hasUnpricedLines ? 'Partial total' : 'Total', record.totalAmount, record.currency, true),
+          ],
+        },
+        {
+          title: 'Supplier Contact Record',
+          items: [
+            kv('Supplier', record.supplierName),
+            kv('Contact', record.supplierContact),
+            kv('Phone', record.supplierPhone),
+            kv('Email', record.supplierEmail),
+            kv('Address', record.supplierAddress),
+            kv('TIN', record.supplierTin),
+            kv('VRN', record.supplierVrn),
+          ],
+        },
+        record.deliveryInstructions
+          ? { title: 'Delivery Instructions', paragraphs: [record.deliveryInstructions] }
+          : null,
+        record.terms ? { title: 'Terms', paragraphs: [record.terms] } : null,
+        notesSection(record.notes),
+        {
+          title: 'Acknowledgement',
+          items: [kv('Prepared By', record.createdBy?.fullName), kv('Document Status', label(record.status))],
+          signatures: ['Prepared By', 'Supplier Acknowledgement'],
+        },
       ].filter(Boolean) as BusinessPdfSection[],
     });
   }
@@ -2153,6 +2260,8 @@ function permissionForBusinessPdfEntity(entityType: BusinessPdfEntityType) {
       return 'sales.view';
     case 'PURCHASE_ORDER':
       return 'purchases.view';
+    case 'SUPPLIER_ORDER_DRAFT':
+      return 'supplier_order_drafts.export';
     case 'QUOTATION':
       return 'quotations.view';
     case 'PROFORMA_INVOICE':
@@ -2324,6 +2433,8 @@ function safeFileStem(value: string) {
 function templateTypeFor(entityType: string): DocumentTemplateType {
   switch (entityType) {
     case 'PURCHASE_ORDER':
+      return DocumentTemplateType.PURCHASE_ORDER;
+    case 'SUPPLIER_ORDER_DRAFT':
       return DocumentTemplateType.PURCHASE_ORDER;
     case 'QUOTATION':
       return DocumentTemplateType.QUOTATION;

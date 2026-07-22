@@ -16,6 +16,8 @@
   "/operations/products/[id]": "/operations/products/e2e-product",
   "/operations/purchase-orders/[id]": "/operations/purchase-orders/e2e-purchase-order",
   "/operations/purchase-orders/[id]/print": "/operations/purchase-orders/e2e-purchase-order/print",
+  "/operations/purchase-orders/order-drafts/[id]": "/operations/purchase-orders/order-drafts/e2e-supplier-order-draft",
+  "/operations/purchase-orders/order-drafts/[id]/print": "/operations/purchase-orders/order-drafts/e2e-supplier-order-draft/print",
   "/operations/sales-orders/[id]": "/operations/sales-orders/e2e-sales-order",
   "/operations/sales-orders/[id]/print": "/operations/sales-orders/e2e-sales-order/print",
   "/operations/suppliers/[id]": "/operations/suppliers/e2e-supplier",

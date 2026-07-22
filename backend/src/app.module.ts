@@ -55,6 +55,7 @@ import { StockAdjustmentsModule } from './modules/stock-adjustments/stock-adjust
 import { SalesOrdersModule } from './modules/sales-orders/sales-orders.module';
 import { SalesCommissionsModule } from './modules/sales-commissions/sales-commissions.module';
 import { PurchaseOrdersModule } from './modules/purchase-orders/purchase-orders.module';
+import { SupplierOrderDraftsModule } from './modules/supplier-order-drafts/supplier-order-drafts.module';
 import { ProfitModule } from './modules/profit/profit.module';
 import { RecordBookModule } from './modules/record-book/record-book.module';
 import { OperationsDashboardModule } from './modules/operations-dashboard/operations-dashboard.module';
@@ -275,6 +276,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     SalesOrdersModule,
     SalesCommissionsModule,
     PurchaseOrdersModule,
+    SupplierOrderDraftsModule,
     ProfitModule,
     RecordBookModule,
     OperationsDashboardModule,

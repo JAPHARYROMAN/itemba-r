@@ -13,6 +13,9 @@ const BADGE_MAP: Record<string, string> = {
   LOCKED:                'bg-red-50     text-red-700     border-red-200',
   PENDING_APPROVAL:      'bg-amber-50   text-amber-700   border-amber-200',
   COMPLETED:             'bg-blue-50    text-blue-700    border-blue-200',
+  SENT:                  'bg-blue-50    text-blue-700    border-blue-200',
+  ACCEPTED:              'bg-emerald-50 text-emerald-700 border-emerald-200',
+  DECLINED:              'bg-red-50     text-red-700     border-red-200',
   // ── Loan / Debt ────────────────────────────────────────────────────────────
   SETTLED:               'bg-emerald-50 text-emerald-700 border-emerald-200',
   DEFAULTED:             'bg-red-50     text-red-700     border-red-200',

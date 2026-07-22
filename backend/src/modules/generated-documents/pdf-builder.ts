@@ -56,6 +56,13 @@ export interface BusinessPdfModel {
   organization: BusinessPdfOrganization;
   generatedAt: Date;
   meta: Array<{ label: string; value: string }>;
+  /** Dense first-page identity block reserved for supplier-facing order drafts. */
+  compactPartyHeader?: {
+    partyLabel: string;
+    partyName: string;
+    partyDetails: string[];
+    documentDetails: Array<{ label: string; value: string }>;
+  };
   sections: BusinessPdfSection[];
 }
 
@@ -125,6 +132,10 @@ class SimplePdf {
   addHeader(model: BusinessPdfModel) {
     this.documentTitle = cleanText(model.title).toUpperCase();
     this.documentReference = cleanText(model.reference);
+    if (model.compactPartyHeader) {
+      this.addCompactPartyHeader(model);
+      return;
+    }
     const headerTop = this.y;
     const org = model.organization;
     const groupName = valueOrNull(org.groupName) ?? 'ITEMBA GROUP';
@@ -237,6 +248,95 @@ class SimplePdf {
 
     this.metaStrip(model.meta);
     this.y += 5;
+  }
+
+  /**
+   * A4 supplier-order header. From the printable top margin to the divider it
+   * is capped at 153 points (54 mm), leaving at least 80% of the first page for
+   * item lines, totals, terms, and signatures.
+   */
+  private addCompactPartyHeader(model: BusinessPdfModel) {
+    const headerTop = MARGIN;
+    const headerBottom = headerTop + 153;
+    const org = model.organization;
+    const compact = model.compactPartyHeader!;
+    const leftWidth = this.contentWidth * 0.52;
+    const gap = 18;
+    const rightX = MARGIN + leftWidth + gap;
+    const rightWidth = this.contentWidth - leftWidth - gap;
+    const logoSize = 38;
+
+    this.rect(MARGIN, headerTop, logoSize, logoSize, false, TEXT_DARK);
+    const imageDrawn = org.logoImage
+      ? this.image(org.logoImage, MARGIN + 4, headerTop + 4, logoSize - 8, logoSize - 8)
+      : false;
+    if (!imageDrawn) {
+      this.text(valueOrNull(org.logoText) ?? 'IG', MARGIN, headerTop + 24, 12, 'F2', logoSize, 'center');
+    }
+
+    const orgX = MARGIN + logoSize + 10;
+    const orgWidth = leftWidth - logoSize - 10;
+    let leftY = headerTop + 2;
+    leftY = this.compactWrappedText(
+      (valueOrNull(org.groupName) ?? 'ITEMBA GROUP').toUpperCase(),
+      orgX,
+      leftY,
+      10,
+      orgWidth,
+      'F2',
+      1,
+    );
+    leftY = this.compactWrappedText(
+      (valueOrNull(org.name) ?? valueOrNull(org.companyName) ?? 'ITEMBA-R').toUpperCase(),
+      orgX,
+      leftY,
+      8.5,
+      orgWidth,
+      'F2',
+      2,
+    );
+    const identityLines = [
+      valueOrNull(org.address) ? `Address: ${valueOrNull(org.address)}` : null,
+      [valueOrNull(org.telephone) ? `Tel: ${valueOrNull(org.telephone)}` : null, valueOrNull(org.phone) ? `Phone: ${valueOrNull(org.phone)}` : null]
+        .filter(Boolean)
+        .join(' | '),
+      valueOrNull(org.email) ? `Email: ${valueOrNull(org.email)}` : null,
+      [valueOrNull(org.tin) ? `TIN: ${valueOrNull(org.tin)}` : null, valueOrNull(org.vrn) ? `VRN: ${valueOrNull(org.vrn)}` : null]
+        .filter(Boolean)
+        .join(' | '),
+      valueOrNull(org.registrationNumber) ? `Reg No: ${valueOrNull(org.registrationNumber)}` : null,
+    ].filter((line): line is string => Boolean(line));
+    for (const line of identityLines) {
+      if (leftY > headerBottom - 14) break;
+      leftY = this.compactWrappedText(line, orgX, leftY, 6.6, orgWidth, 'F1', 1, TEXT_DARK);
+    }
+
+    let rightY = headerTop + 1;
+    rightY = this.compactWrappedText(model.title.toUpperCase(), rightX, rightY, 11, rightWidth, 'F2', 1);
+    rightY = this.compactWrappedText(model.reference, rightX, rightY, 9, rightWidth, 'F2', 1);
+    for (const detail of compact.documentDetails.slice(0, 3)) {
+      rightY = this.compactWrappedText(
+        `${detail.label}: ${detail.value}`,
+        rightX,
+        rightY,
+        6.7,
+        rightWidth,
+        'F1',
+        1,
+        TEXT_MUTED,
+      );
+    }
+    rightY += 2;
+    this.text(compact.partyLabel.toUpperCase(), rightX, rightY, 6.5, 'F2', rightWidth, 'left', TEXT_MUTED);
+    rightY += 9;
+    rightY = this.compactWrappedText(compact.partyName, rightX, rightY, 8.5, rightWidth, 'F2', 2);
+    for (const detail of compact.partyDetails) {
+      if (rightY > headerBottom - 12) break;
+      rightY = this.compactWrappedText(detail, rightX, rightY, 6.5, rightWidth, 'F1', 1, TEXT_DARK);
+    }
+
+    this.line(MARGIN, headerBottom - 5, this.pageWidth - MARGIN, headerBottom - 5, 0.9, TEXT_DARK);
+    this.y = headerBottom;
   }
 
   /** Whitespace-separated label-over-value pairs between two hairlines, up to 4 columns per band. */
@@ -631,6 +731,28 @@ class SimplePdf {
       this.text(line, x, y + index * (size + 3), size, font, width, 'left', color),
     );
     return y + lines.length * (size + 3);
+  }
+
+  private compactWrappedText(
+    value: string,
+    x: number,
+    y: number,
+    size: number,
+    width: number,
+    font: FontName,
+    maxLines: number,
+    color?: Rgb,
+  ) {
+    const wrapped = wrapText(value, width, size);
+    const lines = wrapped.slice(0, maxLines);
+    if (wrapped.length > maxLines && lines.length) {
+      const last = lines.length - 1;
+      lines[last] = `${lines[last].replace(/[. ]+$/, '')}...`;
+    }
+    lines.forEach((line, index) =>
+      this.text(line, x, y + index * (size + 2), size, font, width, 'left', color),
+    );
+    return y + lines.length * (size + 2);
   }
 
   private text(

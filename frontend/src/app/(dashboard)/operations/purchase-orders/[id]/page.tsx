@@ -7,6 +7,7 @@ import { backendGet, backendPage } from '@/lib/api-client';
 import { downloadTablePdf } from '@/lib/export-download';
 import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
 import { useAuth } from '@/hooks/use-auth';
+import { PurchaseOrderTabs } from '../_components/PurchaseOrderTabs';
 
 type AnyRecord = Record<string, any>;
 
@@ -324,6 +325,7 @@ export default function PurchaseOrderDetailPage() {
           </div>
         }
       />
+      <PurchaseOrderTabs />
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">

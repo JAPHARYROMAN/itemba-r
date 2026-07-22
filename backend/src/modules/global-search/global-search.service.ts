@@ -86,6 +86,7 @@ export class GlobalSearchService {
       this.searchProducts(query, user, companyWhere, limit),
       this.searchSalesOrders(query, user, companyWhere, limit),
       this.searchPurchaseOrders(query, user, companyWhere, limit),
+      this.searchSupplierOrderDrafts(query, user, companyWhere, limit),
       this.searchReceivables(query, user, companyWhere, limit),
       this.searchPayables(query, user, companyWhere, limit),
       this.searchJournalEntries(query, user, companyWhere, limit),
@@ -478,6 +479,62 @@ export class GlobalSearchService {
         href: `/finance/receivables?search=${encodeSearch(row.receivableNumber)}`,
         badge: row.status,
         date: dateOnly(row.dueDate ?? row.issueDate),
+      })),
+    };
+  }
+
+  private async searchSupplierOrderDrafts(
+    query: string,
+    user: AuthUser,
+    companyWhere: CompanyScopedWhere,
+    limit: number,
+  ): Promise<SearchBucket> {
+    if (!hasAnyPermission(user, ['supplier_order_drafts.view'])) {
+      return this.empty('supplier-order-drafts', 'Supplier Order Drafts');
+    }
+
+    const rows = await this.prisma.supplierOrderDraft.findMany({
+      where: {
+        deletedAt: null,
+        ...companyWhere,
+        OR: [
+          { draftNumber: contains(query) },
+          { supplierName: contains(query) },
+          { title: contains(query) },
+          { lines: { some: { description: contains(query) } } },
+        ],
+      },
+      select: {
+        id: true,
+        draftNumber: true,
+        supplierName: true,
+        title: true,
+        totalAmount: true,
+        currency: true,
+        status: true,
+        draftDate: true,
+        hasUnpricedLines: true,
+      },
+      orderBy: { draftDate: 'desc' },
+      take: limit,
+    });
+
+    return {
+      key: 'supplier-order-drafts',
+      label: 'Supplier Order Drafts',
+      results: rows.map((row) => ({
+        id: row.id,
+        type: 'supplier-order-draft',
+        module: 'Purchases',
+        title: row.draftNumber,
+        subtitle: compactSubtitle([
+          row.supplierName,
+          row.title,
+          row.hasUnpricedLines ? 'Partial pricing' : `${row.currency} ${row.totalAmount}`,
+        ]),
+        href: `/operations/purchase-orders/order-drafts/${row.id}`,
+        badge: row.status,
+        date: dateOnly(row.draftDate),
       })),
     };
   }

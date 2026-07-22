@@ -30,6 +30,7 @@ import { cellToString, downloadTextFile, formatDateOnly, rowsToCsv } from '@/lib
 import { downloadTablePdf } from '@/lib/export-download';
 import { useAuth } from '@/hooks/use-auth';
 import { OrderLineEditor, mergeOrderProductOptions } from '../_components/order-line-editor';
+import { PurchaseOrderTabs } from './_components/PurchaseOrderTabs';
 
 interface Company {
   id: string;
@@ -1159,6 +1160,7 @@ export default function PurchaseOrdersPage() {
         title="Purchase Orders"
         subtitle="Supplier orders, receiving, and procurement spend"
       />
+      <PurchaseOrderTabs />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 aurora-stagger">
         <StatCard label="Total Orders" value={data?.total ?? 0} />
