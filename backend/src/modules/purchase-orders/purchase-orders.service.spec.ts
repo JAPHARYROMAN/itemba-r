@@ -10,6 +10,7 @@ function makeService() {
       findFirst: jest.fn(),
       findUniqueOrThrow: jest.fn(async () => ({ id: 'po-1', companyId: 'company-1' })),
       groupBy: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
     },
     cashAccount: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -41,6 +42,9 @@ function makeService() {
     supplier: {
       findFirst: jest.fn(),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    supplierInvoice: {
+      findFirst: jest.fn().mockResolvedValue(null),
     },
     product: {
       findMany: jest.fn().mockResolvedValue([{ id: 'product-1', companyId: 'company-1' }]),
@@ -123,6 +127,40 @@ function createDto(purchaseType: 'CASH_PURCHASE' | 'CREDIT_PURCHASE') {
 }
 
 describe('PurchaseOrdersService payment state', () => {
+  it('stores an optional supplier-issued invoice reference without changing purchase state', async () => {
+    const { service, prisma } = makeService();
+    const dto = createDto('CREDIT_PURCHASE');
+    dto.supplierInvoiceNumber = 'INV-SUP-204';
+    dto.supplierInvoiceDate = '2026-05-27';
+
+    await service.create(dto, user);
+
+    expect(prisma.purchaseOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          supplierInvoiceNumber: 'INV-SUP-204',
+          supplierInvoiceDate: new Date('2026-05-27'),
+          paymentStatus: 'UNPAID',
+        }),
+      }),
+    );
+  });
+
+  it('rejects a duplicate invoice number for the same manual supplier', async () => {
+    const { service, prisma } = makeService();
+    const dto = createDto('CREDIT_PURCHASE');
+    dto.supplierInvoiceNumber = 'INV-DUPLICATE';
+    prisma.purchaseOrder.findFirst.mockResolvedValue({
+      id: 'po-existing',
+      purchaseOrderNumber: 'PO-2026-000009',
+    });
+
+    await expect(service.create(dto, user)).rejects.toThrow(
+      'Supplier invoice number is already recorded on PO-2026-000009',
+    );
+    expect(prisma.purchaseOrder.create).not.toHaveBeenCalled();
+  });
+
   it('marks cash purchases paid immediately', async () => {
     const { service, prisma } = makeService();
 
@@ -374,6 +412,63 @@ describe('PurchaseOrdersService payment state', () => {
   });
 });
 
+describe('PurchaseOrdersService invoice reference metadata', () => {
+  it('updates a received purchase without reopening or reposting it', async () => {
+    const { service, prisma, inventoryMovements, postingEngine, auditLogs } = makeService();
+    prisma.purchaseOrder.findFirst
+      .mockResolvedValueOnce({
+        id: 'po-1',
+        companyId: 'company-1',
+        supplierId: null,
+        supplierName: 'Supplier Ltd',
+        status: 'RECEIVED',
+        paymentStatus: 'UNPAID',
+        totalAmount: 200,
+        supplierInvoiceNumber: null,
+        supplierInvoiceDate: null,
+        supplierInvoices: [],
+      })
+      .mockResolvedValueOnce(null);
+    prisma.purchaseOrder.update.mockResolvedValue({
+      id: 'po-1',
+      companyId: 'company-1',
+      status: 'RECEIVED',
+      paymentStatus: 'UNPAID',
+      totalAmount: 200,
+      supplierInvoiceNumber: 'INV-HIST-12',
+      supplierInvoiceDate: new Date('2026-04-30'),
+      supplierInvoices: [],
+    });
+
+    const result = await service.updateInvoiceReference(
+      'po-1',
+      { supplierInvoiceNumber: ' INV-HIST-12 ', supplierInvoiceDate: '2026-04-30' },
+      user,
+    );
+
+    expect(prisma.purchaseOrder.update).toHaveBeenCalledWith({
+      where: { id: 'po-1' },
+      data: {
+        supplierInvoiceNumber: 'INV-HIST-12',
+        supplierInvoiceDate: new Date('2026-04-30'),
+      },
+      include: expect.any(Object),
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: 'RECEIVED',
+        displayInvoiceNumber: 'INV-HIST-12',
+        invoiceSource: 'PURCHASE_ORDER_REFERENCE',
+      }),
+    );
+    expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'PURCHASE_ORDER_INVOICE_REFERENCE_UPDATE' }),
+    );
+  });
+});
+
 describe('PurchaseOrdersService.receive credit purchase payable sync', () => {
   function creditOrder(extra: Record<string, unknown> = {}) {
     return {
@@ -447,7 +542,11 @@ describe('PurchaseOrdersService.receive credit purchase payable sync', () => {
         referenceType: 'Payable',
         referenceId: 'payable-1',
         lines: expect.arrayContaining([
-          expect.objectContaining({ accountId: 'inventory-account', debit: expect.anything(), credit: 0 }),
+          expect.objectContaining({
+            accountId: 'inventory-account',
+            debit: expect.anything(),
+            credit: 0,
+          }),
           expect.objectContaining({ accountId: 'ap-account', debit: 0, credit: expect.anything() }),
         ]),
       }),

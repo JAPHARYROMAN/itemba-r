@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  downloadBinaryGet,
   downloadReportPdf,
   downloadTablePdf,
   filenameFromDisposition,
@@ -61,6 +62,32 @@ describe('export-download', () => {
 
     it('falls back when the header has no filename', () => {
       expect(filenameFromDisposition('attachment', 'fallback.pdf')).toBe('fallback.pdf');
+    });
+  });
+
+  describe('downloadBinaryGet', () => {
+    it('downloads a GET export using the server filename', async () => {
+      const fetchMock = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(pdfResponse('attachment; filename="supplier-360.pdf"'));
+
+      await downloadBinaryGet('/operations-reports/supplier-360/export?format=pdf', 'fallback.pdf');
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/backend/operations-reports/supplier-360/export?format=pdf',
+        { method: 'GET', cache: 'no-store' },
+      );
+      expect(downloads).toEqual(['supplier-360.pdf']);
+    });
+
+    it('surfaces a GET export validation error', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify({ message: 'Select a supplier' }), { status: 400 }),
+      );
+
+      await expect(
+        downloadBinaryGet('/operations-reports/supplier-360/export', 'report.pdf'),
+      ).rejects.toThrow('Select a supplier');
     });
   });
 

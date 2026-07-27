@@ -41,6 +41,9 @@ interface PurchaseOrder {
   purchaseOrderNumber?: string | null;
   orderDate: string;
   expectedDate?: string | null;
+  displayInvoiceNumber?: string | null;
+  displayInvoiceDate?: string | null;
+  invoiceSource?: string | null;
   purchaseType: string;
   supplierName?: string | null;
   status: string;
@@ -124,6 +127,8 @@ export default function PurchaseOrderPrintPage() {
         { label: 'Purchase Order', value: number },
         { label: 'Order Date', value: formatDocumentDate(record.orderDate) },
         { label: 'Expected Date', value: formatDocumentDate(record.expectedDate) },
+        { label: 'Supplier Invoice #', value: valueOrNA(record.displayInvoiceNumber) },
+        { label: 'Invoice Date', value: formatDocumentDate(record.displayInvoiceDate) },
         { label: 'Payment Status', value: labelDocumentValue(record.paymentStatus) },
       ]}
       actions={
@@ -148,6 +153,7 @@ export default function PurchaseOrderPrintPage() {
             { label: 'Payment Terms', value: valueOrNA(record.supplier?.paymentTerms) },
             { label: 'Address', value: valueOrNA(record.supplier?.address) },
             { label: 'Purchase Type', value: labelDocumentValue(record.purchaseType) },
+            { label: 'Invoice Source', value: labelDocumentValue(record.invoiceSource) },
             { label: 'Prepared By', value: valueOrNA(record.createdBy?.fullName) },
             { label: 'Confirmed By', value: valueOrNA(record.confirmedBy?.fullName) },
             { label: 'Received By', value: valueOrNA(record.receivedBy?.fullName) },

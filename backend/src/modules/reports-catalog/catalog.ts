@@ -37,18 +37,9 @@ export type ReportType =
   | 'DASHBOARD'
   | 'SELF_SERVICE';
 
-export type ReportLifecycleStatus =
-  | 'DRAFT'
-  | 'VALIDATED'
-  | 'CERTIFIED'
-  | 'OFFICIAL'
-  | 'ARCHIVED';
+export type ReportLifecycleStatus = 'DRAFT' | 'VALIDATED' | 'CERTIFIED' | 'OFFICIAL' | 'ARCHIVED';
 
-export type SecurityClassification =
-  | 'INTERNAL'
-  | 'CONFIDENTIAL'
-  | 'RESTRICTED'
-  | 'SENSITIVE';
+export type SecurityClassification = 'INTERNAL' | 'CONFIDENTIAL' | 'RESTRICTED' | 'SENSITIVE';
 
 export interface CatalogEntry {
   id: string;
@@ -95,7 +86,8 @@ function inferReportType(entry: CatalogEntry): ReportType {
   if (entry.sector === 'BI') return 'SELF_SERVICE';
   if (text.includes('dashboard') || text.includes('cockpit')) return 'DASHBOARD';
   if (text.includes('audit')) return 'AUDIT';
-  if (entry.sector === 'COMPLIANCE' || text.includes('tax') || text.includes('obligation')) return 'COMPLIANCE';
+  if (entry.sector === 'COMPLIANCE' || text.includes('tax') || text.includes('obligation'))
+    return 'COMPLIANCE';
   if (
     entry.sector === 'FINANCE' ||
     text.includes('trial-balance') ||
@@ -107,7 +99,8 @@ function inferReportType(entry: CatalogEntry): ReportType {
   ) {
     return 'FINANCIAL_STATEMENT';
   }
-  if (text.includes('summary') || text.includes('performance') || text.includes('profitability')) return 'ANALYTICAL';
+  if (text.includes('summary') || text.includes('performance') || text.includes('profitability'))
+    return 'ANALYTICAL';
   return 'OPERATIONAL';
 }
 
@@ -128,7 +121,8 @@ function inferSecurity(entry: CatalogEntry, reportType: ReportType): SecurityCla
 function inferFreshness(entry: CatalogEntry, reportType: ReportType): string {
   if (reportType === 'SELF_SERVICE') return 'Saved definition and execution history';
   if (reportType === 'FINANCIAL_STATEMENT') return 'Live ledger, snapshot capable';
-  if (reportType === 'COMPLIANCE' || reportType === 'AUDIT') return 'Live controls with audit history';
+  if (reportType === 'COMPLIANCE' || reportType === 'AUDIT')
+    return 'Live controls with audit history';
   if (reportType === 'DASHBOARD') return 'Live operational cockpit';
   return 'Live operational transactions';
 }
@@ -136,7 +130,8 @@ function inferFreshness(entry: CatalogEntry, reportType: ReportType): string {
 function inferOutputs(reportType: ReportType): string[] {
   if (reportType === 'DASHBOARD') return ['HTML', 'PDF', 'JSON'];
   if (reportType === 'SELF_SERVICE') return ['HTML', 'CSV', 'XLSX', 'JSON'];
-  if (reportType === 'AUDIT' || reportType === 'COMPLIANCE') return ['HTML', 'PDF', 'CSV', 'Evidence Pack'];
+  if (reportType === 'AUDIT' || reportType === 'COMPLIANCE')
+    return ['HTML', 'PDF', 'CSV', 'Evidence Pack'];
   return ['HTML', 'PDF', 'CSV', 'XLSX'];
 }
 
@@ -157,34 +152,62 @@ function inferTags(entry: CatalogEntry, reportType: ReportType): string[] {
 
 function inferBusinessQuestions(entry: CatalogEntry, reportType: ReportType): string[] {
   if (reportType === 'FINANCIAL_STATEMENT') {
-    return ['What happened financially?', 'Which account or entity explains the variance?', 'Can this number be traced to ledger evidence?'];
+    return [
+      'What happened financially?',
+      'Which account or entity explains the variance?',
+      'Can this number be traced to ledger evidence?',
+    ];
   }
   if (reportType === 'AUDIT' || reportType === 'COMPLIANCE') {
-    return ['What must be reported formally?', 'Which controls or obligations need attention?', 'Who changed or approved the record?'];
+    return [
+      'What must be reported formally?',
+      'Which controls or obligations need attention?',
+      'Who changed or approved the record?',
+    ];
   }
   if (reportType === 'DASHBOARD') {
-    return ['What is happening now?', 'Which exceptions require action?', 'Which KPI should be investigated first?'];
+    return [
+      'What is happening now?',
+      'Which exceptions require action?',
+      'Which KPI should be investigated first?',
+    ];
   }
   if (reportType === 'SELF_SERVICE') {
-    return ['Which governed dataset can answer this question?', 'Can users save, schedule, or share this view?', 'Which reports were run or exported?'];
+    return [
+      'Which governed dataset can answer this question?',
+      'Can users save, schedule, or share this view?',
+      'Which reports were run or exported?',
+    ];
   }
-  return ['What is happening operationally?', 'Where are bottlenecks or exceptions?', 'Which source transactions explain the result?'];
+  return [
+    'What is happening operationally?',
+    'Where are bottlenecks or exceptions?',
+    'Which source transactions explain the result?',
+  ];
 }
 
 function inferDrillPaths(entry: CatalogEntry, reportType: ReportType): string[] {
-  if (reportType === 'FINANCIAL_STATEMENT') return ['Statement line', 'Account', 'Journal entry', 'Source document'];
-  if (entry.sector === 'OPERATIONS') return ['Summary', 'Branch or location', 'Product or order', 'Source transaction'];
-  if (entry.sector === 'WESTSIDES') return ['Summary', 'Customer or product', 'Invoice or order', 'Payment or delivery'];
-  if (entry.sector === 'PETROLEUM') return ['Summary', 'Station or shift', 'Tank or sale', 'Reconciliation record'];
-  if (entry.sector === 'RECORDS_BOOK') return ['Summary', 'Date or grouping', 'Manual source record'];
-  if (reportType === 'AUDIT' || reportType === 'COMPLIANCE') return ['Finding', 'Entity', 'User action', 'Evidence'];
+  if (reportType === 'FINANCIAL_STATEMENT')
+    return ['Statement line', 'Account', 'Journal entry', 'Source document'];
+  if (entry.sector === 'OPERATIONS')
+    return ['Summary', 'Branch or location', 'Product or order', 'Source transaction'];
+  if (entry.sector === 'WESTSIDES')
+    return ['Summary', 'Customer or product', 'Invoice or order', 'Payment or delivery'];
+  if (entry.sector === 'PETROLEUM')
+    return ['Summary', 'Station or shift', 'Tank or sale', 'Reconciliation record'];
+  if (entry.sector === 'RECORDS_BOOK')
+    return ['Summary', 'Date or grouping', 'Manual source record'];
+  if (reportType === 'AUDIT' || reportType === 'COMPLIANCE')
+    return ['Finding', 'Entity', 'User action', 'Evidence'];
   return ['Summary', 'Dimension', 'Record', 'Audit trail'];
 }
 
 function inferRelatedCapabilities(reportType: ReportType): string[] {
   if (reportType === 'SELF_SERVICE') return ['Builder', 'Saved Views', 'Report Runs', 'Scheduling'];
-  if (reportType === 'FINANCIAL_STATEMENT') return ['Financial Statements Archive', 'Report Packs', 'Lineage', 'Export'];
-  if (reportType === 'AUDIT' || reportType === 'COMPLIANCE') return ['Evidence Packs', 'Audit Trail', 'Approvals', 'Retention'];
+  if (reportType === 'FINANCIAL_STATEMENT')
+    return ['Financial Statements Archive', 'Report Packs', 'Lineage', 'Export'];
+  if (reportType === 'AUDIT' || reportType === 'COMPLIANCE')
+    return ['Evidence Packs', 'Audit Trail', 'Approvals', 'Retention'];
   if (reportType === 'DASHBOARD') return ['KPIs', 'Alerts', 'Executive Insights', 'Subscriptions'];
   return ['Operational Drill-through', 'Exceptions', 'Export', 'Workflow'];
 }
@@ -334,7 +357,7 @@ export const REPORTS_CATALOG: CatalogEntry[] = [
     sector: 'FINANCE',
     category: 'Group',
     name: 'Group Trial Balance',
-    description: 'Sums every company\'s posted lines by accountCode (pre-consolidation).',
+    description: "Sums every company's posted lines by accountCode (pre-consolidation).",
     scopes: ['GROUP'],
     permission: 'finance.reports.view',
     apiPath: '/financial-reports/group/trial-balance',
@@ -586,7 +609,29 @@ export const REPORTS_CATALOG: CatalogEntry[] = [
     scopes: ['COMPANY', 'DIVISION'],
     permission: 'operations.reports.view',
     apiPath: '/operations-reports/supplier-product-purchases',
-    frontendPath: '/operations/reports',
+    frontendPath: '/operations/reports/suppliers',
+  },
+  {
+    id: 'ops.supplier-360',
+    sector: 'OPERATIONS',
+    category: 'Suppliers',
+    name: 'Supplier 360',
+    description: 'Supplier profile, purchases, invoice references, products and payable exposure.',
+    scopes: ['COMPANY', 'DIVISION'],
+    permission: 'operations.reports.view',
+    apiPath: '/operations-reports/supplier-360',
+    frontendPath: '/operations/reports/suppliers',
+  },
+  {
+    id: 'ops.supplier-purchases-invoices',
+    sector: 'OPERATIONS',
+    category: 'Suppliers',
+    name: 'Supplier Purchases and Invoices',
+    description: 'Purchase history with supplier invoice coverage, values and settlement status.',
+    scopes: ['COMPANY', 'DIVISION'],
+    permission: 'operations.reports.view',
+    apiPath: '/operations-reports/supplier-360?section=PURCHASES',
+    frontendPath: '/operations/reports/suppliers?section=PURCHASES',
   },
   {
     id: 'ops.inventory-movements',

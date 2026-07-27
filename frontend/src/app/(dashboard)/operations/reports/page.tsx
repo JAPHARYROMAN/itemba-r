@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { Card, PageHeader, StatCard, showToast } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useOrgScope } from '@/hooks/use-org-scope';
@@ -888,11 +889,18 @@ export default function OperationsReportsPage() {
   return (
     <div className="space-y-6 p-6">
       <PrintStyles />
-      <div className="no-print">
+      <div className="no-print flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <PageHeader
           title="Operations Reports"
           subtitle="Readable operational reports for inventory, stock adjustments, sales, purchases, customers, suppliers, and product performance."
         />
+        <Link
+          href="/operations/reports/suppliers"
+          className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border px-4 text-sm font-semibold"
+          style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
+        >
+          Supplier 360 Reports
+        </Link>
       </div>
 
       <Card className="no-print">

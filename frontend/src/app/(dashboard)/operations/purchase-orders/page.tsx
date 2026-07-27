@@ -21,6 +21,7 @@ import {
 } from '@/components/ui';
 import {
   backendDelete,
+  backendGet,
   backendList,
   backendPage,
   backendPatch,
@@ -103,6 +104,18 @@ interface PurchaseOrder {
   purchaseOrderNumber?: string;
   orderDate: string;
   expectedDate?: string | null;
+  supplierInvoiceNumber?: string | null;
+  supplierInvoiceDate?: string | null;
+  displayInvoiceNumber?: string | null;
+  displayInvoiceDate?: string | null;
+  invoiceSource?: 'PROCUREMENT_INVOICE' | 'PURCHASE_ORDER_REFERENCE' | 'MISSING';
+  invoiceReferences?: Array<{
+    id?: string | null;
+    number: string;
+    date?: string | null;
+    status?: string | null;
+    source: string;
+  }>;
   supplierId?: string | null;
   supplierName?: string | null;
   purchaseType: string;
@@ -129,6 +142,8 @@ interface PurchaseOrderForm {
   purchaseType: string;
   orderDate: string;
   expectedDate: string;
+  supplierInvoiceNumber: string;
+  supplierInvoiceDate: string;
   currency: string;
   notes: string;
   lines: PurchaseOrderLine[];
@@ -158,12 +173,14 @@ const PURCHASE_STATUSES = [
   'PARTIALLY_RECEIVED',
   'RECEIVED',
   'CANCELLED',
-  'CLOSED',
+  'VOIDED',
 ];
 const PAYMENT_STATUSES = ['UNPAID', 'PARTIALLY_PAID', 'PAID'];
 const CURRENCIES = ['TZS', 'USD', 'EUR'];
 const EXPORT_COLUMNS = [
   'PO #',
+  'Invoice #',
+  'Invoice Date',
   'Date',
   'Expected',
   'Supplier',
@@ -174,6 +191,15 @@ const EXPORT_COLUMNS = [
   'Total',
   'Outstanding',
 ];
+
+interface PurchaseSummary {
+  totals?: { count?: number; totalAmount?: number; outstandingAmount?: number };
+  invoices?: {
+    missingInvoiceCount?: number;
+    recordedInvoiceCount?: number;
+    linkedInvoiceCount?: number;
+  };
+}
 
 const BLANK_LINE = (): PurchaseOrderLine => ({
   productId: '',
@@ -195,6 +221,8 @@ const blankForm = (): PurchaseOrderForm => ({
   purchaseType: 'CASH_PURCHASE',
   orderDate: new Date().toISOString().slice(0, 10),
   expectedDate: '',
+  supplierInvoiceNumber: '',
+  supplierInvoiceDate: '',
   currency: 'TZS',
   notes: '',
   lines: [BLANK_LINE()],
@@ -229,6 +257,8 @@ function PurchaseOrderModal({
           purchaseType: initial.purchaseType,
           orderDate: initial.orderDate.slice(0, 10),
           expectedDate: initial.expectedDate?.slice(0, 10) ?? '',
+          supplierInvoiceNumber: initial.supplierInvoiceNumber ?? '',
+          supplierInvoiceDate: initial.supplierInvoiceDate?.slice(0, 10) ?? '',
           currency: initial.currency,
           notes: initial.notes ?? '',
           lines: initial.lines?.length
@@ -263,13 +293,10 @@ function PurchaseOrderModal({
     .map((line) => line.productId)
     .filter(Boolean)
     .join('|');
-  const handleProductSearch = useCallback(
-    (query: string, filters?: { categoryId?: string }) => {
-      setProductSearchQuery(query);
-      setProductSearchCategoryId(filters?.categoryId ?? '');
-    },
-    [],
-  );
+  const handleProductSearch = useCallback((query: string, filters?: { categoryId?: string }) => {
+    setProductSearchQuery(query);
+    setProductSearchCategoryId(filters?.categoryId ?? '');
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -475,6 +502,10 @@ function PurchaseOrderModal({
       if (form.supplierId) body.supplierId = form.supplierId;
       if (form.supplierName) body.supplierName = form.supplierName;
       if (form.expectedDate) body.expectedDate = form.expectedDate;
+      if (form.supplierInvoiceNumber.trim()) {
+        body.supplierInvoiceNumber = form.supplierInvoiceNumber.trim();
+      }
+      if (form.supplierInvoiceDate) body.supplierInvoiceDate = form.supplierInvoiceDate;
       if (form.notes) body.notes = form.notes;
       if (mode === 'create') {
         await backendPost('/purchase-orders', { ...body, companyId: form.companyId });
@@ -653,7 +684,19 @@ function PurchaseOrderModal({
             value={form.expectedDate}
             onChange={(e) => setField('expectedDate', e.target.value)}
           />
-          <div className="col-span-2">
+          <FormInput
+            label="Supplier Invoice #"
+            value={form.supplierInvoiceNumber}
+            onChange={(e) => setField('supplierInvoiceNumber', e.target.value)}
+            placeholder="Supplier-issued invoice number"
+          />
+          <FormInput
+            label="Invoice Date"
+            type="date"
+            value={form.supplierInvoiceDate}
+            onChange={(e) => setField('supplierInvoiceDate', e.target.value)}
+          />
+          <div className="col-span-3">
             <FormTextarea
               label="Notes"
               rows={2}
@@ -677,6 +720,108 @@ function PurchaseOrderModal({
           onProductSearch={handleProductSearch}
         />
       </div>
+    </Modal>
+  );
+}
+
+function InvoiceReferenceModal({
+  order,
+  onClose,
+  onSaved,
+}: {
+  order: PurchaseOrder;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const linked = order.invoiceSource === 'PROCUREMENT_INVOICE';
+  const [number, setNumber] = useState(order.supplierInvoiceNumber ?? '');
+  const [invoiceDate, setInvoiceDate] = useState(order.supplierInvoiceDate?.slice(0, 10) ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const save = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await backendPatch(`/purchase-orders/${order.id}/invoice-reference`, {
+        supplierInvoiceNumber: number.trim() || null,
+        supplierInvoiceDate: invoiceDate || null,
+      });
+      showToast('success', 'Supplier invoice reference updated');
+      onSaved();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not update invoice reference';
+      setError(message);
+      showToast('error', 'Invoice reference was not saved', message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={linked ? 'Linked Supplier Invoice' : 'Supplier Invoice Reference'}
+      size="md"
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>
+            {linked ? 'Close' : 'Cancel'}
+          </Btn>
+          {!linked && (
+            <Btn variant="primary" onClick={save} loading={saving}>
+              Save Invoice
+            </Btn>
+          )}
+        </>
+      }
+    >
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+      {linked ? (
+        <div className="space-y-3">
+          <p className="text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+            This reference is controlled by Procurement Supplier Invoices and cannot be changed from
+            the purchase order.
+          </p>
+          {(order.invoiceReferences ?? []).map((invoice) => (
+            <div
+              key={invoice.id ?? invoice.number}
+              className="rounded-lg border p-3"
+              style={{ borderColor: 'var(--aurora-border)' }}
+            >
+              <p className="font-mono text-sm font-semibold">{invoice.number}</p>
+              <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                {invoice.date ? formatDateOnly(invoice.date) : 'No invoice date'}
+                {invoice.status ? ` · ${invoice.status.replace(/_/g, ' ')}` : ''}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormInput
+            label="Supplier Invoice #"
+            value={number}
+            onChange={(event) => setNumber(event.target.value)}
+            placeholder="e.g. INV-1042"
+          />
+          <FormInput
+            label="Invoice Date"
+            type="date"
+            value={invoiceDate}
+            onChange={(event) => setInvoiceDate(event.target.value)}
+          />
+          <p className="sm:col-span-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+            This changes invoice metadata only. It does not alter stock, totals, payables, or
+            accounting entries.
+          </p>
+        </div>
+      )}
     </Modal>
   );
 }
@@ -806,6 +951,7 @@ export default function PurchaseOrdersPage() {
   const { hasPermission } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<PurchaseOrder> | null>(null);
+  const [summary, setSummary] = useState<PurchaseSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState('');
   const [filterSearch, setFilterSearch] = useState('');
@@ -813,6 +959,7 @@ export default function PurchaseOrdersPage() {
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterPayment, setFilterPayment] = useState('');
+  const [filterInvoiceStatus, setFilterInvoiceStatus] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [page, setPage] = useState(1);
@@ -820,6 +967,7 @@ export default function PurchaseOrdersPage() {
   const [editing, setEditing] = useState<PurchaseOrder | null>(null);
   const [deleting, setDeleting] = useState<PurchaseOrder | null>(null);
   const [receiving, setReceiving] = useState<PurchaseOrder | null>(null);
+  const [editingInvoice, setEditingInvoice] = useState<PurchaseOrder | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
   const [loadError, setLoadError] = useState('');
@@ -857,9 +1005,18 @@ export default function PurchaseOrdersPage() {
       if (filterType) query.purchaseType = filterType;
       if (filterStatus) query.status = filterStatus;
       if (filterPayment) query.paymentStatus = filterPayment;
+      if (filterInvoiceStatus) query.invoiceStatus = filterInvoiceStatus;
       if (filterDateFrom) query.dateFrom = filterDateFrom;
       if (filterDateTo) query.dateTo = filterDateTo;
-      setData(await backendPage<PurchaseOrder>('/purchase-orders', { query }));
+      const summaryQuery = { ...query };
+      delete summaryQuery.page;
+      delete summaryQuery.limit;
+      const [pageResult, summaryResult] = await Promise.all([
+        backendPage<PurchaseOrder>('/purchase-orders', { query }),
+        backendGet<PurchaseSummary>('/purchase-orders/summary', { query: summaryQuery }),
+      ]);
+      setData(pageResult);
+      setSummary(summaryResult);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to load purchase orders';
       setData(emptyPaginated<PurchaseOrder>());
@@ -876,6 +1033,7 @@ export default function PurchaseOrdersPage() {
     filterType,
     filterStatus,
     filterPayment,
+    filterInvoiceStatus,
     filterDateFrom,
     filterDateTo,
   ]);
@@ -904,6 +1062,7 @@ export default function PurchaseOrdersPage() {
     if (filterType) query.purchaseType = filterType;
     if (filterStatus) query.status = filterStatus;
     if (filterPayment) query.paymentStatus = filterPayment;
+    if (filterInvoiceStatus) query.invoiceStatus = filterInvoiceStatus;
     if (filterDateFrom) query.dateFrom = filterDateFrom;
     if (filterDateTo) query.dateTo = filterDateTo;
 
@@ -919,6 +1078,8 @@ export default function PurchaseOrdersPage() {
 
     const rows = orders.map((o) => ({
       'PO #': o.purchaseOrderNumber ?? o.id,
+      'Invoice #': o.displayInvoiceNumber ?? '',
+      'Invoice Date': formatDateOnly(o.displayInvoiceDate),
       Date: formatDateOnly(o.orderDate),
       Expected: formatDateOnly(o.expectedDate),
       Supplier: o.supplier?.name ?? o.supplierName ?? 'Supplier',
@@ -943,6 +1104,7 @@ export default function PurchaseOrdersPage() {
     filterType,
     filterStatus,
     filterPayment,
+    filterInvoiceStatus,
     filterDateFrom,
     filterDateTo,
   ]);
@@ -981,6 +1143,7 @@ export default function PurchaseOrdersPage() {
           filterType,
           filterStatus,
           filterPayment,
+          filterInvoiceStatus,
           filterDateFrom || filterDateTo
             ? `${filterDateFrom || '...'} to ${filterDateTo || '...'}`
             : '',
@@ -994,7 +1157,7 @@ export default function PurchaseOrdersPage() {
           rows: rows.map((r) =>
             EXPORT_COLUMNS.map((c) => cellToString((r as Record<string, unknown>)[c])),
           ),
-          numericColumns: [8, 9],
+          numericColumns: [10, 11],
           baseName: 'purchase-orders',
         });
       }
@@ -1016,6 +1179,7 @@ export default function PurchaseOrdersPage() {
     filterType,
     filterStatus,
     filterPayment,
+    filterInvoiceStatus,
     filterDateFrom,
     filterDateTo,
   ]);
@@ -1134,14 +1298,22 @@ export default function PurchaseOrdersPage() {
           }}
         />
       )}
+      {editingInvoice && (
+        <InvoiceReferenceModal
+          order={editingInvoice}
+          onClose={() => setEditingInvoice(null)}
+          onSaved={() => {
+            setEditingInvoice(null);
+            void load();
+          }}
+        />
+      )}
       {pendingAction && (
         <ConfirmDialog
           open
           variant={pendingAction.action === 'cancel' ? 'danger' : 'default'}
           title={
-            pendingAction.action === 'confirm'
-              ? 'Confirm purchase order'
-              : 'Cancel purchase order'
+            pendingAction.action === 'confirm' ? 'Confirm purchase order' : 'Cancel purchase order'
           }
           message={
             pendingAction.action === 'confirm'
@@ -1162,11 +1334,16 @@ export default function PurchaseOrdersPage() {
       />
       <PurchaseOrderTabs />
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 aurora-stagger">
-        <StatCard label="Total Orders" value={data?.total ?? 0} />
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 aurora-stagger">
+        <StatCard label="Total Orders" value={summary?.totals?.count ?? data?.total ?? 0} />
         <StatCard label="Confirmed (page)" value={stats.confirmed} />
         <StatCard label="Received (page)" value={stats.received} />
-        <StatCard label="Total Cost (page)" value={fmtMoney(stats.cost)} />
+        <StatCard label="Total Cost" value={fmtMoney(summary?.totals?.totalAmount ?? stats.cost)} />
+        <StatCard
+          label="Missing Invoice"
+          value={summary?.invoices?.missingInvoiceCount ?? 0}
+          variant={(summary?.invoices?.missingInvoiceCount ?? 0) > 0 ? 'amber' : 'green'}
+        />
       </div>
 
       {loadError && (
@@ -1189,7 +1366,7 @@ export default function PurchaseOrdersPage() {
       <PageToolbar
         search={searchInput}
         onSearch={setSearchInput}
-        searchPlaceholder="Order # or supplier…"
+        searchPlaceholder="Order #, invoice #, or supplier…"
         filters={
           <>
             <select
@@ -1260,6 +1437,21 @@ export default function PurchaseOrdersPage() {
                 </option>
               ))}
             </select>
+            <select
+              aria-label="Filter by invoice status"
+              value={filterInvoiceStatus}
+              onChange={(e) => {
+                setFilterInvoiceStatus(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
+              <option value="">All Invoice Status</option>
+              <option value="MISSING">Missing Invoice</option>
+              <option value="RECORDED">Recorded on Purchase</option>
+              <option value="LINKED">Linked Procurement Invoice</option>
+            </select>
             <input
               type="date"
               aria-label="Filter from date"
@@ -1303,34 +1495,55 @@ export default function PurchaseOrdersPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1100px]" aria-label="Purchase orders">
+          <table className="w-full text-sm min-w-[1240px]" aria-label="Purchase orders">
             <caption className="sr-only">Purchase orders with status, totals, and actions</caption>
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
                 style={{ color: 'var(--aurora-text-muted)' }}
               >
-                <th scope="col" className="px-4 py-3">Number</th>
-                <th scope="col" className="px-4 py-3">Date</th>
-                <th scope="col" className="px-4 py-3">Supplier</th>
-                <th scope="col" className="px-4 py-3">Type</th>
-                <th scope="col" className="px-4 py-3 text-right">Total</th>
-                <th scope="col" className="px-4 py-3 text-right">Outstanding</th>
-                <th scope="col" className="px-4 py-3">Status</th>
-                <th scope="col" className="px-4 py-3">Payment</th>
-                <th scope="col" className="px-4 py-3 text-right">Actions</th>
+                <th scope="col" className="px-4 py-3">
+                  Number
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Date
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Supplier
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Invoice
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Type
+                </th>
+                <th scope="col" className="px-4 py-3 text-right">
+                  Total
+                </th>
+                <th scope="col" className="px-4 py-3 text-right">
+                  Outstanding
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Status
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Payment
+                </th>
+                <th scope="col" className="px-4 py-3 text-right">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={9}>
-                    <SkeletonTable rows={6} cols={9} />
+                  <td colSpan={10}>
+                    <SkeletonTable rows={6} cols={10} />
                   </td>
                 </tr>
               ) : !data?.data.length ? (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={10}>
                     <EmptyState
                       title="No purchase orders"
                       description="No orders match the current filters."
@@ -1341,97 +1554,122 @@ export default function PurchaseOrdersPage() {
                 data.data.map((o) => {
                   const orderLabel = o.purchaseOrderNumber ?? o.id.slice(0, 8);
                   return (
-                  <tr key={o.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-mono text-xs">
-                      {o.purchaseOrderNumber ?? o.id.slice(0, 8)}
-                    </td>
-                    <td className="px-4 py-3 text-xs">
-                      {new Date(o.orderDate).toLocaleDateString('en-GB')}
-                    </td>
-                    <td className="px-4 py-3">
-                      {o.supplier?.name ?? o.supplierName ?? (
-                        <span className="italic" style={{ color: 'var(--aurora-text-muted)' }}>
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-xs">{o.purchaseType.replace(/_/g, ' ')}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {fmtMoney(o.totalAmount, o.currency)}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {fmtMoney(o.outstandingAmount, o.currency)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge value={o.status} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge value={o.paymentStatus} />
-                    </td>
-                    <td className="px-4 py-3 text-right space-x-1">
-                      <Link
-                        href={`/operations/purchase-orders/${o.id}`}
-                        aria-label={`View order ${orderLabel}`}
-                        className="inline-flex items-center justify-center px-2.5 py-1 text-[11px] rounded-md font-medium bg-transparent text-zinc-600 hover:bg-zinc-100 border border-transparent transition"
-                      >
-                        View
-                      </Link>
-                      <DocumentPreviewLink href={`/operations/purchase-orders/${o.id}/print`} />
-                      {o.status === 'DRAFT' && canCreate && (
-                        <Btn
-                          variant="ghost"
-                          size="xs"
-                          aria-label={`Edit order ${orderLabel}`}
-                          onClick={() => setEditing(o)}
+                    <tr key={o.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-mono text-xs">
+                        {o.purchaseOrderNumber ?? o.id.slice(0, 8)}
+                      </td>
+                      <td className="px-4 py-3 text-xs">
+                        {new Date(o.orderDate).toLocaleDateString('en-GB')}
+                      </td>
+                      <td className="px-4 py-3">
+                        {o.supplier?.name ?? o.supplierName ?? (
+                          <span className="italic" style={{ color: 'var(--aurora-text-muted)' }}>
+                            —
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {o.displayInvoiceNumber ? (
+                          <div>
+                            <p className="font-mono text-xs">{o.displayInvoiceNumber}</p>
+                            <p
+                              className="mt-0.5 text-[10px] uppercase"
+                              style={{ color: 'var(--aurora-text-muted)' }}
+                            >
+                              {o.invoiceSource === 'PROCUREMENT_INVOICE' ? 'Linked' : 'Recorded'}
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="text-xs font-medium text-amber-600">Missing</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs">{o.purchaseType.replace(/_/g, ' ')}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {fmtMoney(o.totalAmount, o.currency)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {fmtMoney(o.outstandingAmount, o.currency)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge value={o.status} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge value={o.paymentStatus} />
+                      </td>
+                      <td className="px-4 py-3 text-right space-x-1">
+                        <Link
+                          href={`/operations/purchase-orders/${o.id}`}
+                          aria-label={`View order ${orderLabel}`}
+                          className="inline-flex items-center justify-center px-2.5 py-1 text-[11px] rounded-md font-medium bg-transparent text-zinc-600 hover:bg-zinc-100 border border-transparent transition"
                         >
-                          Edit
-                        </Btn>
-                      )}
-                      {o.status === 'DRAFT' && canConfirm && (
-                        <Btn
-                          variant="primary"
-                          size="xs"
-                          aria-label={`Confirm order ${orderLabel}`}
-                          loading={actionLoading === `${o.id}:confirm`}
-                          onClick={() => setPendingAction({ id: o.id, action: 'confirm' })}
-                        >
-                          Confirm
-                        </Btn>
-                      )}
-                      {(o.status === 'CONFIRMED' || o.status === 'PARTIALLY_RECEIVED') &&
-                        canReceive && (
+                          View
+                        </Link>
+                        <DocumentPreviewLink href={`/operations/purchase-orders/${o.id}/print`} />
+                        {canCreate && !['CANCELLED', 'VOIDED'].includes(o.status) && (
                           <Btn
-                            variant="success"
+                            variant="ghost"
                             size="xs"
-                            aria-label={`Receive order ${orderLabel}`}
-                            onClick={() => setReceiving(o)}
+                            aria-label={`${o.displayInvoiceNumber ? 'View or edit' : 'Add'} invoice for ${orderLabel}`}
+                            onClick={() => setEditingInvoice(o)}
                           >
-                            Receive
+                            {o.displayInvoiceNumber ? 'Invoice' : 'Add Invoice'}
                           </Btn>
                         )}
-                      {o.status === 'CONFIRMED' && canCancel && (
-                        <Btn
-                          variant="danger"
-                          size="xs"
-                          aria-label={`Cancel order ${orderLabel}`}
-                          loading={actionLoading === `${o.id}:cancel`}
-                          onClick={() => setPendingAction({ id: o.id, action: 'cancel' })}
-                        >
-                          Cancel
-                        </Btn>
-                      )}
-                      {o.status === 'DRAFT' && canCreate && (
-                        <Btn
-                          variant="ghost"
-                          size="xs"
-                          aria-label={`Delete order ${orderLabel}`}
-                          onClick={() => setDeleting(o)}
-                        >
-                          Delete
-                        </Btn>
-                      )}
-                    </td>
-                  </tr>
+                        {o.status === 'DRAFT' && canCreate && (
+                          <Btn
+                            variant="ghost"
+                            size="xs"
+                            aria-label={`Edit order ${orderLabel}`}
+                            onClick={() => setEditing(o)}
+                          >
+                            Edit
+                          </Btn>
+                        )}
+                        {o.status === 'DRAFT' && canConfirm && (
+                          <Btn
+                            variant="primary"
+                            size="xs"
+                            aria-label={`Confirm order ${orderLabel}`}
+                            loading={actionLoading === `${o.id}:confirm`}
+                            onClick={() => setPendingAction({ id: o.id, action: 'confirm' })}
+                          >
+                            Confirm
+                          </Btn>
+                        )}
+                        {(o.status === 'CONFIRMED' || o.status === 'PARTIALLY_RECEIVED') &&
+                          canReceive && (
+                            <Btn
+                              variant="success"
+                              size="xs"
+                              aria-label={`Receive order ${orderLabel}`}
+                              onClick={() => setReceiving(o)}
+                            >
+                              Receive
+                            </Btn>
+                          )}
+                        {o.status === 'CONFIRMED' && canCancel && (
+                          <Btn
+                            variant="danger"
+                            size="xs"
+                            aria-label={`Cancel order ${orderLabel}`}
+                            loading={actionLoading === `${o.id}:cancel`}
+                            onClick={() => setPendingAction({ id: o.id, action: 'cancel' })}
+                          >
+                            Cancel
+                          </Btn>
+                        )}
+                        {o.status === 'DRAFT' && canCreate && (
+                          <Btn
+                            variant="ghost"
+                            size="xs"
+                            aria-label={`Delete order ${orderLabel}`}
+                            onClick={() => setDeleting(o)}
+                          >
+                            Delete
+                          </Btn>
+                        )}
+                      </td>
+                    </tr>
                   );
                 })
               )}

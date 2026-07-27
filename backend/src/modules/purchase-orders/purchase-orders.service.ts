@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
@@ -10,18 +16,13 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreatePurchaseOrderDto, PurchaseOrderLineDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { QueryPurchaseOrderDto } from './dto/query-purchase-order.dto';
+import { UpdatePurchaseInvoiceReferenceDto } from './dto/update-purchase-invoice-reference.dto';
 import { ProfitService } from '../profit/profit.service';
 import {
   ReceiveFuelTankAllocationDto,
   ReceivePurchaseOrderDto,
 } from './dto/receive-purchase-order.dto';
-import {
-  AccessLevel,
-  AuditSeverity,
-  CashAccountType,
-  Prisma,
-  PurchaseType,
-} from '@prisma/client';
+import { AccessLevel, AuditSeverity, CashAccountType, Prisma, PurchaseType } from '@prisma/client';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 
 type PurchaseOrderReferenceIds = {
@@ -142,6 +143,8 @@ export class PurchaseOrdersService {
       dateFrom,
       dateTo,
       search,
+      invoiceNumber,
+      invoiceStatus,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -164,7 +167,49 @@ export class PurchaseOrdersService {
       where.OR = [
         { purchaseOrderNumber: { contains: search, mode: 'insensitive' } },
         { supplierName: { contains: search, mode: 'insensitive' } },
+        { supplierInvoiceNumber: { contains: search, mode: 'insensitive' } },
+        {
+          supplierInvoices: {
+            some: {
+              deletedAt: null,
+              supplierInvoiceNumber: { contains: search, mode: 'insensitive' },
+            },
+          },
+        },
       ];
+    }
+    if (invoiceNumber) {
+      where.AND = [
+        ...(where.AND ?? []),
+        {
+          OR: [
+            { supplierInvoiceNumber: { equals: invoiceNumber.trim(), mode: 'insensitive' } },
+            {
+              supplierInvoices: {
+                some: {
+                  deletedAt: null,
+                  supplierInvoiceNumber: { equals: invoiceNumber.trim(), mode: 'insensitive' },
+                },
+              },
+            },
+          ],
+        },
+      ];
+    }
+    if (invoiceStatus === 'MISSING') {
+      where.AND = [
+        ...(where.AND ?? []),
+        { supplierInvoiceNumber: null },
+        { supplierInvoices: { none: { deletedAt: null } } },
+      ];
+    } else if (invoiceStatus === 'RECORDED') {
+      where.AND = [
+        ...(where.AND ?? []),
+        { supplierInvoiceNumber: { not: null } },
+        { supplierInvoices: { none: { deletedAt: null } } },
+      ];
+    } else if (invoiceStatus === 'LINKED') {
+      where.supplierInvoices = { some: { deletedAt: null } };
     }
 
     const [data, total] = await Promise.all([
@@ -173,6 +218,16 @@ export class PurchaseOrdersService {
         include: {
           company: { select: { id: true, name: true, code: true } },
           supplier: { select: { id: true, name: true } },
+          supplierInvoices: {
+            where: { deletedAt: null },
+            select: {
+              id: true,
+              supplierInvoiceNumber: true,
+              invoiceDate: true,
+              status: true,
+            },
+            orderBy: { invoiceDate: 'desc' },
+          },
           lines: {
             include: {
               product: {
@@ -193,7 +248,13 @@ export class PurchaseOrdersService {
       this.prisma.purchaseOrder.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return {
+      data: data.map((order) => this.decorateInvoiceReference(order)),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   /**
@@ -203,28 +264,115 @@ export class PurchaseOrdersService {
    * header cards line up with the list below them.
    */
   async summary(query: QueryPurchaseOrderDto, user: AuthUser) {
-    const { companyId, divisionId, branchId, supplierId, purchaseType, dateFrom, dateTo } = query;
+    const {
+      companyId,
+      divisionId,
+      branchId,
+      supplierId,
+      purchaseType,
+      status,
+      paymentStatus,
+      dateFrom,
+      dateTo,
+      search,
+      invoiceNumber,
+      invoiceStatus,
+    } = query;
 
-    const where: any = {
+    const baseWhere: any = {
       deletedAt: null,
       ...(await this.companyScope.companyWhereFor(user, companyId)),
     };
-    if (divisionId) where.divisionId = divisionId;
-    if (branchId) where.branchId = branchId;
-    if (supplierId) where.supplierId = supplierId;
-    if (purchaseType) where.purchaseType = purchaseType;
+    if (divisionId) baseWhere.divisionId = divisionId;
+    if (branchId) baseWhere.branchId = branchId;
+    if (supplierId) baseWhere.supplierId = supplierId;
+    if (purchaseType) baseWhere.purchaseType = purchaseType;
+    if (status) baseWhere.status = status;
+    if (paymentStatus) baseWhere.paymentStatus = paymentStatus;
     if (dateFrom || dateTo) {
-      where.orderDate = {};
-      if (dateFrom) where.orderDate.gte = dateRangeStart(dateFrom);
-      if (dateTo) where.orderDate.lte = dateRangeEnd(dateTo);
+      baseWhere.orderDate = {};
+      if (dateFrom) baseWhere.orderDate.gte = dateRangeStart(dateFrom);
+      if (dateTo) baseWhere.orderDate.lte = dateRangeEnd(dateTo);
+    }
+    if (search?.trim()) {
+      const term = search.trim();
+      baseWhere.OR = [
+        { purchaseOrderNumber: { contains: term, mode: 'insensitive' } },
+        { supplierName: { contains: term, mode: 'insensitive' } },
+        { supplier: { name: { contains: term, mode: 'insensitive' } } },
+        { supplierInvoiceNumber: { contains: term, mode: 'insensitive' } },
+        {
+          supplierInvoices: {
+            some: {
+              deletedAt: null,
+              supplierInvoiceNumber: { contains: term, mode: 'insensitive' },
+            },
+          },
+        },
+      ];
+    }
+    if (invoiceNumber?.trim()) {
+      const term = invoiceNumber.trim();
+      baseWhere.AND = [
+        {
+          OR: [
+            { supplierInvoiceNumber: { equals: term, mode: 'insensitive' } },
+            {
+              supplierInvoices: {
+                some: {
+                  deletedAt: null,
+                  supplierInvoiceNumber: { equals: term, mode: 'insensitive' },
+                },
+              },
+            },
+          ],
+        },
+      ];
     }
 
-    const grouped = await this.prisma.purchaseOrder.groupBy({
-      by: ['status'],
-      where,
-      _count: { _all: true },
-      _sum: { totalAmount: true, outstandingAmount: true },
-    });
+    const where: any = { ...baseWhere };
+    if (invoiceStatus === 'MISSING') {
+      where.AND = [
+        ...(where.AND ?? []),
+        { supplierInvoiceNumber: null },
+        { supplierInvoices: { none: { deletedAt: null } } },
+      ];
+    } else if (invoiceStatus === 'RECORDED') {
+      where.AND = [
+        ...(where.AND ?? []),
+        { supplierInvoiceNumber: { not: null } },
+        { supplierInvoices: { none: { deletedAt: null } } },
+      ];
+    } else if (invoiceStatus === 'LINKED') {
+      where.supplierInvoices = { some: { deletedAt: null } };
+    }
+
+    const [grouped, missingInvoiceCount, recordedInvoiceCount, linkedInvoiceCount] =
+      await Promise.all([
+        this.prisma.purchaseOrder.groupBy({
+          by: ['status'],
+          where,
+          _count: { _all: true },
+          _sum: { totalAmount: true, outstandingAmount: true },
+        }),
+        this.prisma.purchaseOrder.count({
+          where: {
+            ...baseWhere,
+            supplierInvoiceNumber: null,
+            supplierInvoices: { none: { deletedAt: null } },
+          },
+        }),
+        this.prisma.purchaseOrder.count({
+          where: {
+            ...baseWhere,
+            supplierInvoiceNumber: { not: null },
+            supplierInvoices: { none: { deletedAt: null } },
+          },
+        }),
+        this.prisma.purchaseOrder.count({
+          where: { ...baseWhere, supplierInvoices: { some: { deletedAt: null } } },
+        }),
+      ]);
 
     const byStatus = grouped.map((row) => ({
       status: row.status,
@@ -250,6 +398,7 @@ export class PurchaseOrdersService {
         outstandingAmount: roundMoney(totals.outstandingAmount),
       },
       byStatus,
+      invoices: { missingInvoiceCount, recordedInvoiceCount, linkedInvoiceCount },
     };
   }
 
@@ -304,6 +453,16 @@ export class PurchaseOrdersService {
             paymentTerms: true,
           },
         },
+        supplierInvoices: {
+          where: { deletedAt: null },
+          select: {
+            id: true,
+            supplierInvoiceNumber: true,
+            invoiceDate: true,
+            status: true,
+          },
+          orderBy: { invoiceDate: 'desc' },
+        },
         lines: {
           include: {
             product: {
@@ -325,7 +484,7 @@ export class PurchaseOrdersService {
     });
     if (!record) throw new NotFoundException('Purchase order not found');
     if (user) await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
-    return record;
+    return this.decorateInvoiceReference(record);
   }
 
   async create(dto: CreatePurchaseOrderDto, user: AuthUser) {
@@ -336,6 +495,15 @@ export class PurchaseOrdersService {
       dto.supplierId,
       dto.supplierName,
     );
+    const supplierInvoiceNumber = this.normalizeInvoiceNumber(dto.supplierInvoiceNumber);
+    if (supplierInvoiceNumber) {
+      await this.assertInvoiceReferenceAvailable({
+        companyId: dto.companyId,
+        supplierId: dto.supplierId,
+        supplierName,
+        supplierInvoiceNumber,
+      });
+    }
     await this.profit.assertPurchaseLinesHaveCost(dto.companyId, dto.lines);
     const userId = user.id;
     let subtotal = 0;
@@ -378,6 +546,10 @@ export class PurchaseOrdersService {
           branchId: dto.branchId,
           supplierId: dto.supplierId,
           supplierName,
+          supplierInvoiceNumber,
+          supplierInvoiceDate: dto.supplierInvoiceDate
+            ? new Date(dto.supplierInvoiceDate)
+            : undefined,
           purchaseType: dto.purchaseType,
           orderDate: new Date(dto.orderDate),
           expectedDate: dto.expectedDate ? new Date(dto.expectedDate) : undefined,
@@ -423,11 +595,32 @@ export class PurchaseOrdersService {
       lines: dto.lines,
     });
     const nextSupplierId =
-      dto.supplierId !== undefined ? (dto.supplierId || null) : existing.supplierId;
+      dto.supplierId !== undefined ? dto.supplierId || null : existing.supplierId;
     const supplierName =
       dto.supplierId !== undefined || dto.supplierName !== undefined
         ? await this.resolveSupplierName(existing.companyId, nextSupplierId, dto.supplierName)
         : undefined;
+    if (
+      existing.supplierInvoices?.length &&
+      (dto.supplierInvoiceNumber !== undefined || dto.supplierInvoiceDate !== undefined)
+    ) {
+      throw new BadRequestException(
+        'Invoice reference is controlled by the linked Procurement Supplier Invoice',
+      );
+    }
+    const nextInvoiceNumber =
+      dto.supplierInvoiceNumber !== undefined
+        ? this.normalizeInvoiceNumber(dto.supplierInvoiceNumber)
+        : existing.supplierInvoiceNumber;
+    if (nextInvoiceNumber) {
+      await this.assertInvoiceReferenceAvailable({
+        companyId: existing.companyId,
+        supplierId: nextSupplierId,
+        supplierName: supplierName ?? existing.supplierName,
+        supplierInvoiceNumber: nextInvoiceNumber,
+        excludePurchaseOrderId: id,
+      });
+    }
 
     let subtotal: number | undefined;
     let totalDiscount: number | undefined;
@@ -479,6 +672,12 @@ export class PurchaseOrdersService {
         data: {
           ...(dto.supplierId !== undefined && { supplierId: dto.supplierId }),
           ...(supplierName !== undefined && { supplierName }),
+          ...(dto.supplierInvoiceNumber !== undefined && {
+            supplierInvoiceNumber: this.normalizeInvoiceNumber(dto.supplierInvoiceNumber),
+          }),
+          ...(dto.supplierInvoiceDate !== undefined && {
+            supplierInvoiceDate: dto.supplierInvoiceDate ? new Date(dto.supplierInvoiceDate) : null,
+          }),
           ...(dto.purchaseType && { purchaseType: dto.purchaseType }),
           ...(dto.orderDate && { orderDate: new Date(dto.orderDate) }),
           ...(dto.expectedDate !== undefined && {
@@ -516,6 +715,185 @@ export class PurchaseOrdersService {
     });
 
     return record;
+  }
+
+  async updateInvoiceReference(id: string, dto: UpdatePurchaseInvoiceReferenceDto, user: AuthUser) {
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (['CANCELLED', 'VOIDED'].includes(existing.status)) {
+      throw new BadRequestException(
+        'Invoice references cannot be changed on cancelled or voided purchase orders',
+      );
+    }
+    if (existing.supplierInvoices?.length) {
+      throw new BadRequestException(
+        'Invoice reference is controlled by the linked Procurement Supplier Invoice',
+      );
+    }
+
+    const supplierInvoiceNumber = this.normalizeInvoiceNumber(dto.supplierInvoiceNumber);
+    if (supplierInvoiceNumber) {
+      await this.assertInvoiceReferenceAvailable({
+        companyId: existing.companyId,
+        supplierId: existing.supplierId,
+        supplierName: existing.supplierName,
+        supplierInvoiceNumber,
+        excludePurchaseOrderId: id,
+      });
+    }
+
+    const updated = await this.prisma.purchaseOrder.update({
+      where: { id },
+      data: {
+        supplierInvoiceNumber,
+        supplierInvoiceDate: dto.supplierInvoiceDate ? new Date(dto.supplierInvoiceDate) : null,
+      },
+      include: {
+        supplierInvoices: {
+          where: { deletedAt: null },
+          select: {
+            id: true,
+            supplierInvoiceNumber: true,
+            invoiceDate: true,
+            status: true,
+          },
+          orderBy: { invoiceDate: 'desc' },
+        },
+      },
+    });
+
+    await this.auditLogs.log({
+      action: 'PURCHASE_ORDER_INVOICE_REFERENCE_UPDATE',
+      entityType: 'PurchaseOrder',
+      entityId: id,
+      userId: user.id,
+      companyId: existing.companyId,
+      oldValue: {
+        supplierInvoiceNumber: existing.supplierInvoiceNumber,
+        supplierInvoiceDate: existing.supplierInvoiceDate,
+      } as any,
+      newValue: {
+        supplierInvoiceNumber: updated.supplierInvoiceNumber,
+        supplierInvoiceDate: updated.supplierInvoiceDate,
+      } as any,
+      severity: AuditSeverity.MEDIUM,
+    });
+
+    return this.decorateInvoiceReference(updated);
+  }
+
+  private normalizeInvoiceNumber(value?: string | null) {
+    const normalized = value?.trim();
+    return normalized || null;
+  }
+
+  private decorateInvoiceReference<
+    T extends {
+      supplierInvoiceNumber?: string | null;
+      supplierInvoiceDate?: Date | null;
+      supplierInvoices?: Array<{
+        id: string;
+        supplierInvoiceNumber: string;
+        invoiceDate: Date;
+        status: unknown;
+      }>;
+    },
+  >(order: T) {
+    const linked = order.supplierInvoices ?? [];
+    const invoiceReferences = linked.length
+      ? linked.map((invoice) => ({
+          id: invoice.id,
+          number: invoice.supplierInvoiceNumber,
+          date: invoice.invoiceDate,
+          status: invoice.status,
+          source: 'PROCUREMENT_INVOICE' as const,
+        }))
+      : order.supplierInvoiceNumber
+        ? [
+            {
+              id: null,
+              number: order.supplierInvoiceNumber,
+              date: order.supplierInvoiceDate ?? null,
+              status: null,
+              source: 'PURCHASE_ORDER_REFERENCE' as const,
+            },
+          ]
+        : [];
+
+    return {
+      ...order,
+      displayInvoiceNumber: invoiceReferences.map((invoice) => invoice.number).join(', ') || null,
+      displayInvoiceDate: invoiceReferences[0]?.date ?? null,
+      invoiceReferences,
+      invoiceSource: linked.length
+        ? ('PROCUREMENT_INVOICE' as const)
+        : order.supplierInvoiceNumber
+          ? ('PURCHASE_ORDER_REFERENCE' as const)
+          : ('MISSING' as const),
+    };
+  }
+
+  private async assertInvoiceReferenceAvailable(input: {
+    companyId: string;
+    supplierId?: string | null;
+    supplierName?: string | null;
+    supplierInvoiceNumber: string;
+    excludePurchaseOrderId?: string;
+  }) {
+    const supplierIdentity: Prisma.PurchaseOrderWhereInput = input.supplierId
+      ? { supplierId: input.supplierId }
+      : {
+          supplierId: null,
+          supplierName: {
+            equals: input.supplierName?.trim() || '',
+            mode: 'insensitive',
+          },
+        };
+    const duplicatePurchase = await this.prisma.purchaseOrder.findFirst({
+      where: {
+        companyId: input.companyId,
+        deletedAt: null,
+        ...supplierIdentity,
+        supplierInvoiceNumber: {
+          equals: input.supplierInvoiceNumber,
+          mode: 'insensitive',
+        },
+        ...(input.excludePurchaseOrderId ? { id: { not: input.excludePurchaseOrderId } } : {}),
+      },
+      select: { id: true, purchaseOrderNumber: true },
+    });
+    if (duplicatePurchase) {
+      throw new ConflictException(
+        `Supplier invoice number is already recorded on ${duplicatePurchase.purchaseOrderNumber}`,
+      );
+    }
+
+    if (input.supplierId) {
+      const duplicateInvoice = await this.prisma.supplierInvoice.findFirst({
+        where: {
+          companyId: input.companyId,
+          supplierId: input.supplierId,
+          deletedAt: null,
+          supplierInvoiceNumber: {
+            equals: input.supplierInvoiceNumber,
+            mode: 'insensitive',
+          },
+          ...(input.excludePurchaseOrderId
+            ? {
+                OR: [
+                  { purchaseOrderId: null },
+                  { purchaseOrderId: { not: input.excludePurchaseOrderId } },
+                ],
+              }
+            : {}),
+        },
+        select: { id: true, supplierInvoiceNumber: true },
+      });
+      if (duplicateInvoice) {
+        throw new ConflictException(
+          'Supplier invoice number already exists in Procurement Supplier Invoices',
+        );
+      }
+    }
   }
 
   private async assertReferencesBelongToCompany(
@@ -1246,7 +1624,9 @@ export class PurchaseOrdersService {
   }) {
     const amount = new Prisma.Decimal(input.order.totalAmount).toDecimalPlaces(2);
     if (amount.lte(0)) {
-      throw new BadRequestException('Credit purchase total must be greater than zero to create a payable');
+      throw new BadRequestException(
+        'Credit purchase total must be greater than zero to create a payable',
+      );
     }
 
     const existingPayable = await input.tx.payable.findFirst({

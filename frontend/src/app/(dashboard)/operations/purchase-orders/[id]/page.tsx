@@ -178,7 +178,22 @@ export default function PurchaseOrderDetailPage() {
     } else if (activeTab === 'Supplier Invoice') {
       suffix = 'supplier-invoices';
       numericColumns = [4, 5, 6];
-      rows = invoices.map((inv) => ({
+      const invoiceRows = invoices.length
+        ? invoices
+        : order?.displayInvoiceNumber
+          ? [
+              {
+                supplierInvoiceNumber: order.displayInvoiceNumber,
+                invoiceDate: order.displayInvoiceDate,
+                status: order.invoiceSource === 'PURCHASE_ORDER_REFERENCE' ? 'RECORDED' : '',
+                totalAmount: order.totalAmount,
+                paidAmount: order.paidAmount,
+                outstandingAmount: order.outstandingAmount,
+                currency: order.currency,
+              },
+            ]
+          : [];
+      rows = invoiceRows.map((inv) => ({
         invoiceNumber: inv.supplierInvoiceNumber ?? '',
         reference: inv.invoiceReference ?? '',
         invoiceDate: date(inv.invoiceDate),
@@ -201,7 +216,7 @@ export default function PurchaseOrderDetailPage() {
     }
 
     return { rows, suffix, numericColumns };
-  }, [activeTab, lines, grns, invoices, matches, currency]);
+  }, [activeTab, lines, grns, invoices, matches, currency, order]);
 
   const exportCsv = useCallback(() => {
     const stamp = new Date().toISOString().slice(0, 10);
@@ -370,6 +385,18 @@ export default function PurchaseOrderDetailPage() {
             <InfoRow label="Currency" value={order.currency} />
             <InfoRow label="Order Date" value={date(order.orderDate)} />
             <InfoRow label="Expected Date" value={date(order.expectedDate)} />
+            <InfoRow
+              label="Supplier Invoice #"
+              value={
+                order.displayInvoiceNumber ? (
+                  <span className="font-mono">{order.displayInvoiceNumber}</span>
+                ) : (
+                  <span className="text-amber-600">Missing</span>
+                )
+              }
+            />
+            <InfoRow label="Supplier Invoice Date" value={date(order.displayInvoiceDate)} />
+            <InfoRow label="Invoice Source" value={order.invoiceSource?.replace(/_/g, ' ')} />
             <InfoRow label="Confirmed At" value={date(order.confirmedAt)} />
             <InfoRow label="Received At" value={date(order.receivedAt)} />
             <InfoRow label="Prepared By" value={order.createdBy?.fullName} />
@@ -563,7 +590,27 @@ export default function PurchaseOrderDetailPage() {
                     </td>
                   </tr>
                 ))}
-                {invoices.length === 0 && (
+                {invoices.length === 0 && order.displayInvoiceNumber && (
+                  <tr>
+                    <td className="px-4 py-3 font-mono text-xs">{order.displayInvoiceNumber}</td>
+                    <td className="px-4 py-3">Direct Operations reference</td>
+                    <td className="px-4 py-3">{date(order.displayInvoiceDate)}</td>
+                    <td className="px-4 py-3">-</td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {money(order.totalAmount, currency)}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {money(order.paidAmount, currency)}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {money(order.outstandingAmount, currency)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge value="RECORDED" />
+                    </td>
+                  </tr>
+                )}
+                {invoices.length === 0 && !order.displayInvoiceNumber && (
                   <tr>
                     <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-500">
                       No supplier invoice linked to this purchase order yet.

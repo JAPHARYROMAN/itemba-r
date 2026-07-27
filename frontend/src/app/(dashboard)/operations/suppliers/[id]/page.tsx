@@ -418,7 +418,9 @@ export default function SupplierDetailPage() {
           <Btn
             variant="secondary"
             onClick={() =>
-              router.push(`/operations/reports?search=${encodeURIComponent(supplier.name)}`)
+              router.push(
+                `/operations/reports/suppliers?companyId=${encodeURIComponent(supplier.companyId)}&supplierId=${encodeURIComponent(supplier.id)}`,
+              )
             }
           >
             Supplier Reports

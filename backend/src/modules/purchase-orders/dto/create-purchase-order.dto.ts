@@ -86,6 +86,14 @@ export class CreatePurchaseOrderDto {
   @IsDateString()
   expectedDate?: string;
 
+  @IsOptional()
+  @IsString()
+  supplierInvoiceNumber?: string;
+
+  @IsOptional()
+  @IsDateString()
+  supplierInvoiceDate?: string;
+
   @IsNotEmpty()
   @IsEnum(CurrencyCode)
   currency!: CurrencyCode;

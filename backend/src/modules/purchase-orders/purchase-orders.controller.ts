@@ -4,6 +4,7 @@ import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { QueryPurchaseOrderDto } from './dto/query-purchase-order.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
+import { UpdatePurchaseInvoiceReferenceDto } from './dto/update-purchase-invoice-reference.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
@@ -49,6 +50,16 @@ export class PurchaseOrdersController {
   @RequirePermissions('purchases.confirm')
   confirm(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.confirm(id, user);
+  }
+
+  @Patch(':id/invoice-reference')
+  @RequirePermissions('purchases.create')
+  updateInvoiceReference(
+    @Param('id') id: string,
+    @Body() dto: UpdatePurchaseInvoiceReferenceDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.updateInvoiceReference(id, dto, user);
   }
 
   @Patch(':id/receive')

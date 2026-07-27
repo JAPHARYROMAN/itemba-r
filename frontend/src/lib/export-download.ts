@@ -60,6 +60,38 @@ export async function downloadBinaryExport(
   URL.revokeObjectURL(url);
 }
 
+/** Download a binary export produced by a GET endpoint with query parameters. */
+export async function downloadBinaryGet(path: string, fallbackName: string): Promise<void> {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const res = await fetch(`${BACKEND_PROXY}${normalizedPath}`, {
+    method: 'GET',
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    let message = `Export failed (${res.status})`;
+    try {
+      const payload = await res.json();
+      if (payload?.message) {
+        message = Array.isArray(payload.message) ? payload.message.join(', ') : payload.message;
+      }
+    } catch {
+      // Keep the status-based fallback for non-JSON error responses.
+    }
+    throw new Error(message);
+  }
+
+  const filename = filenameFromDisposition(res.headers.get('Content-Disposition'), fallbackName);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
+
 /** Row cap enforced by the backend table-pdf DTO. */
 export const TABLE_PDF_MAX_ROWS = 5000;
 

@@ -3626,6 +3626,8 @@ model PurchaseOrder {
   confirmedAt         DateTime?
   receivedById        String?
   receivedAt          DateTime?
+  supplierInvoiceNumber String?
+  supplierInvoiceDate   DateTime?
   notes               String?
   payableId           String?
   journalEntryId      String?
@@ -3643,6 +3645,7 @@ model PurchaseOrder {
   payable     Payable?  @relation(fields: [payableId], references: [id], onDelete: SetNull)
 
   lines          PurchaseOrderLine[]
+  supplierInvoices SupplierInvoice[] @relation("PurchaseOrderSupplierInvoices")
   fuelDeliveries FuelDelivery[]
 
   // Westsides (Milestone 6)
@@ -3653,6 +3656,7 @@ model PurchaseOrder {
   @@index([supplierId])
   @@index([status])
   @@index([orderDate])
+  @@index([companyId, supplierInvoiceNumber])
   @@index([companyId, supplierId, orderDate, status])
   @@map("purchase_orders")
 }
@@ -13426,12 +13430,13 @@ model SupplierInvoice {
   division          Division?             @relation(fields: [divisionId], references: [id], onDelete: SetNull)
   branch            Branch?               @relation(fields: [branchId], references: [id], onDelete: SetNull)
   goodsReceivedNote GoodsReceivedNote?    @relation(fields: [goodsReceivedNoteId], references: [id], onDelete: SetNull)
+  purchaseOrder     PurchaseOrder?        @relation("PurchaseOrderSupplierInvoices", fields: [purchaseOrderId], references: [id], onDelete: SetNull)
   createdBy         User                  @relation("SupplierInvCreatedBy", fields: [createdById], references: [id])
   approvedBy        User?                 @relation("SupplierInvApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   lines             SupplierInvoiceLine[]
   threeWayMatches   ThreeWayMatch[]
 
-  @@unique([companyId, supplierInvoiceNumber])
+  @@unique([companyId, supplierId, supplierInvoiceNumber])
   @@index([companyId, supplierId, status, invoiceDate])
   @@index([divisionId])
   @@index([branchId])

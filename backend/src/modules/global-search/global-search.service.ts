@@ -384,6 +384,15 @@ export class GlobalSearchService {
         OR: [
           { purchaseOrderNumber: contains(query) },
           { supplierName: contains(query) },
+          { supplierInvoiceNumber: contains(query) },
+          {
+            supplierInvoices: {
+              some: {
+                deletedAt: null,
+                supplierInvoiceNumber: contains(query),
+              },
+            },
+          },
           { supplier: { name: contains(query) } },
           { supplier: { supplierCode: contains(query) } },
         ],
@@ -397,6 +406,13 @@ export class GlobalSearchService {
         status: true,
         paymentStatus: true,
         orderDate: true,
+        supplierInvoiceNumber: true,
+        supplierInvoices: {
+          where: { deletedAt: null },
+          select: { supplierInvoiceNumber: true },
+          orderBy: { invoiceDate: 'desc' },
+          take: 1,
+        },
         supplier: { select: { name: true } },
       },
       orderBy: { orderDate: 'desc' },
@@ -413,6 +429,7 @@ export class GlobalSearchService {
         title: row.purchaseOrderNumber,
         subtitle: compactSubtitle([
           row.supplier?.name ?? row.supplierName,
+          row.supplierInvoices[0]?.supplierInvoiceNumber ?? row.supplierInvoiceNumber,
           `${row.currency} ${row.totalAmount}`,
           row.paymentStatus,
         ]),
@@ -990,14 +1007,24 @@ export class GlobalSearchService {
 
     const reportPages: GlobalSearchResult[] = [
       ['daily-sales', 'Daily Sales Report', 'Day-end sales and receipt splits'],
-      ['receipt-methods', 'Sales by Receipt Method', 'Cash, mobile money, bank, card, and other receipts'],
+      [
+        'receipt-methods',
+        'Sales by Receipt Method',
+        'Cash, mobile money, bank, card, and other receipts',
+      ],
       ['expenses-by-category', 'Expenses by Category', 'Money out grouped by category'],
       ['expenses-by-payee', 'Expenses by Payee', 'Money out grouped by recipient'],
       ['net-movement', 'Daily Net Movement', 'Recorded sales less money out'],
       ['branch-comparison', 'Records Book Branch Comparison', 'Manual movement compared by branch'],
-      ['monthly-trend', 'Monthly Sales and Expense Trend', 'Monthly manual sales and money-out movement'],
+      [
+        'monthly-trend',
+        'Monthly Sales and Expense Trend',
+        'Monthly manual sales and money-out movement',
+      ],
     ]
-      .filter(([, title, subtitle]) => `${title} ${subtitle}`.toLowerCase().includes(query.toLowerCase()))
+      .filter(([, title, subtitle]) =>
+        `${title} ${subtitle}`.toLowerCase().includes(query.toLowerCase()),
+      )
       .map(([key, title, subtitle]) => ({
         id: `record-book-report-${key}`,
         type: 'record-book-report',

@@ -113,7 +113,6 @@ export class SupplierInvoicesService {
 
   async create(dto: CreateSupplierInvoiceDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
-    await this.assertInvoiceNumberAvailable(dto.companyId, dto.supplierInvoiceNumber);
 
     const refs = await this.assertProcurementReferences({
       companyId: dto.companyId,
@@ -123,6 +122,12 @@ export class SupplierInvoicesService {
       purchaseOrderId: dto.purchaseOrderId,
       goodsReceivedNoteId: dto.goodsReceivedNoteId,
       currency: dto.currency ?? CurrencyCode.TZS,
+    });
+    await this.assertInvoiceNumberAvailable({
+      companyId: dto.companyId,
+      supplierId: dto.supplierId,
+      invoiceNumber: dto.supplierInvoiceNumber,
+      purchaseOrderId: refs.purchaseOrderId,
     });
     const totals = this.buildInvoiceLines(dto.lines, dto.totalAmount);
 
@@ -173,13 +178,6 @@ export class SupplierInvoicesService {
     if (dto.companyId && dto.companyId !== existing.companyId) {
       throw new BadRequestException('Supplier invoice company cannot be changed');
     }
-    if (
-      dto.supplierInvoiceNumber &&
-      dto.supplierInvoiceNumber.trim() !== existing.supplierInvoiceNumber
-    ) {
-      await this.assertInvoiceNumberAvailable(existing.companyId, dto.supplierInvoiceNumber, id);
-    }
-
     const supplierId = dto.supplierId ?? existing.supplierId;
     const refs = await this.assertProcurementReferences({
       companyId: existing.companyId,
@@ -191,6 +189,19 @@ export class SupplierInvoicesService {
       goodsReceivedNoteId: dto.goodsReceivedNoteId ?? existing.goodsReceivedNoteId ?? undefined,
       currency: dto.currency ?? existing.currency,
     });
+    if (
+      dto.supplierInvoiceNumber !== undefined ||
+      dto.supplierId !== undefined ||
+      dto.purchaseOrderId !== undefined
+    ) {
+      await this.assertInvoiceNumberAvailable({
+        companyId: existing.companyId,
+        supplierId,
+        invoiceNumber: dto.supplierInvoiceNumber ?? existing.supplierInvoiceNumber,
+        excludeInvoiceId: id,
+        purchaseOrderId: refs.purchaseOrderId,
+      });
+    }
     const totals = dto.lines ? this.buildInvoiceLines(dto.lines, dto.totalAmount) : undefined;
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -260,9 +271,7 @@ export class SupplierInvoicesService {
     // silently revert it out of APPROVED. Only the pre-approval statuses — the same
     // set the approve() atomic claim accepts — may be (re)matched.
     if (!['DRAFT', 'RECEIVED', 'MATCHED', 'DISPUTED'].includes(existing.status as string)) {
-      throw new BadRequestException(
-        `A ${existing.status} supplier invoice cannot be re-matched`,
-      );
+      throw new BadRequestException(`A ${existing.status} supplier invoice cannot be re-matched`);
     }
     const match = await this.createThreeWayMatch(existing, user.id);
     await this.auditLogs.log({
@@ -665,21 +674,67 @@ export class SupplierInvoicesService {
     return cents / 100;
   }
 
-  private async assertInvoiceNumberAvailable(
-    companyId: string,
-    invoiceNumber: string,
-    id?: string,
-  ) {
+  private async assertInvoiceNumberAvailable(input: {
+    companyId: string;
+    supplierId: string;
+    invoiceNumber: string;
+    excludeInvoiceId?: string;
+    purchaseOrderId?: string;
+  }) {
     const existing = await this.prisma.supplierInvoice.findFirst({
       where: {
-        companyId,
-        supplierInvoiceNumber: invoiceNumber.trim(),
-        ...(id ? { id: { not: id } } : {}),
+        companyId: input.companyId,
+        supplierId: input.supplierId,
+        supplierInvoiceNumber: {
+          equals: input.invoiceNumber.trim(),
+          mode: 'insensitive',
+        },
+        ...(input.excludeInvoiceId ? { id: { not: input.excludeInvoiceId } } : {}),
       },
       select: { id: true },
     });
     if (existing) {
-      throw new ConflictException('Supplier invoice number already exists for this company');
+      throw new ConflictException('Supplier invoice number already exists for this supplier');
+    }
+
+    const purchaseOrder = input.purchaseOrderId
+      ? await this.prisma.purchaseOrder.findFirst({
+          where: {
+            id: input.purchaseOrderId,
+            companyId: input.companyId,
+            deletedAt: null,
+          },
+          select: { supplierInvoiceNumber: true },
+        })
+      : null;
+    if (
+      purchaseOrder?.supplierInvoiceNumber &&
+      purchaseOrder.supplierInvoiceNumber.localeCompare(input.invoiceNumber.trim(), undefined, {
+        sensitivity: 'accent',
+      }) !== 0
+    ) {
+      throw new ConflictException(
+        `Purchase order already carries supplier invoice ${purchaseOrder.supplierInvoiceNumber}`,
+      );
+    }
+
+    const duplicatePurchase = await this.prisma.purchaseOrder.findFirst({
+      where: {
+        companyId: input.companyId,
+        supplierId: input.supplierId,
+        deletedAt: null,
+        supplierInvoiceNumber: {
+          equals: input.invoiceNumber.trim(),
+          mode: 'insensitive',
+        },
+        ...(input.purchaseOrderId ? { id: { not: input.purchaseOrderId } } : {}),
+      },
+      select: { purchaseOrderNumber: true },
+    });
+    if (duplicatePurchase) {
+      throw new ConflictException(
+        `Supplier invoice number is already recorded on ${duplicatePurchase.purchaseOrderNumber}`,
+      );
     }
   }
 
@@ -737,7 +792,9 @@ export class SupplierInvoicesService {
       // linked purchase order, otherwise the matched amounts are not comparable.
       // (GRNs carry no currency of their own, so the PO is the currency authority.)
       if (refs.currency && po.currency && refs.currency !== po.currency) {
-        throw new BadRequestException('Supplier invoice currency must match the purchase order currency');
+        throw new BadRequestException(
+          'Supplier invoice currency must match the purchase order currency',
+        );
       }
       if (supplier.divisionId && po.divisionId && supplier.divisionId !== po.divisionId) {
         throw new BadRequestException('Purchase order is outside the supplier division');

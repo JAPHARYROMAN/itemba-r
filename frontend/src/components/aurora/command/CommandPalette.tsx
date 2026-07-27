@@ -5,10 +5,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { backendGet } from '@/lib/api-client';
 import { NAV, isGroup, type NavItem, type NavLeaf } from '@/components/layout/sidebar';
 import { AppIcon, type AppIconName } from '@/components/ui/icon-set';
-import {
-  usePersonalization,
-  type PersonalizationEntry,
-} from '@/hooks/use-personalization';
+import { usePersonalization, type PersonalizationEntry } from '@/hooks/use-personalization';
 
 interface CommandItem {
   id: string;
@@ -107,6 +104,15 @@ const NAV_ICON_LABELS: Record<string, string> = {
 };
 
 const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
+  {
+    id: 'route:supplier-360-reports',
+    label: 'Supplier 360 Reports',
+    href: '/operations/reports/suppliers',
+    group: 'Reports',
+    icon: <AppIcon name="report" size={16} />,
+    permission: 'operations.reports.view',
+    keywords: ['supplier purchases', 'supplier invoices', 'products bought', 'payables'],
+  },
   {
     id: 'route:supplier-order-drafts',
     label: 'Supplier Order Drafts',
@@ -356,7 +362,12 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
 ];
 
 function routeId(href: string) {
-  return `nav:${href.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'home'}`;
+  return `nav:${
+    href
+      .replace(/[^a-z0-9]+/gi, '-')
+      .replace(/^-|-$/g, '')
+      .toLowerCase() || 'home'
+  }`;
 }
 
 function labelForLeaf(leaf: NavLeaf, parentLabel?: string) {
@@ -484,12 +495,7 @@ export function CommandPalette({ open, onClose, additionalCommands = [] }: Comma
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const { user, hasPermission } = useAuth();
-  const {
-    favorites,
-    recent,
-    isFavorite,
-    toggleFavorite,
-  } = usePersonalization();
+  const { favorites, recent, isFavorite, toggleFavorite } = usePersonalization();
 
   const allCommands = useMemo(
     () => [...DEFAULT_COMMANDS, ...additionalCommands],

@@ -33,6 +33,14 @@ export class UpdatePurchaseOrderDto {
   expectedDate?: string;
 
   @IsOptional()
+  @IsString()
+  supplierInvoiceNumber?: string;
+
+  @IsOptional()
+  @IsDateString()
+  supplierInvoiceDate?: string;
+
+  @IsOptional()
   @IsEnum(CurrencyCode)
   currency?: CurrencyCode;
 

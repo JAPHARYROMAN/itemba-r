@@ -1,8 +1,14 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { OperationsReportsService } from './operations-reports.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { IsOptional, IsString, IsNumberString } from 'class-validator';
+import { Supplier360ReportService } from './supplier-360-report.service';
+import {
+  Supplier360ExportQueryDto,
+  Supplier360ReportQueryDto,
+} from './dto/supplier-360-report.dto';
 
 class StockValuationQueryDto {
   @IsOptional() @IsString() companyId?: string;
@@ -71,7 +77,26 @@ class OperationsReportQueryDto {
 
 @Controller('operations-reports')
 export class OperationsReportsController {
-  constructor(private readonly service: OperationsReportsService) {}
+  constructor(
+    private readonly service: OperationsReportsService,
+    private readonly supplier360: Supplier360ReportService,
+  ) {}
+
+  @Get('supplier-360')
+  @RequirePermissions('operations.reports.view')
+  getSupplier360(@Query() q: Supplier360ReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.supplier360.getReport(q, user);
+  }
+
+  @Get('supplier-360/export')
+  @RequirePermissions('operations.reports.view')
+  exportSupplier360(
+    @Query() q: Supplier360ExportQueryDto,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    return this.supplier360.export(q, user, res);
+  }
 
   @Get('stock-valuation')
   @RequirePermissions('operations.reports.view')
