@@ -54,7 +54,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
   const mobilePosStandalone =
-    pathname?.startsWith('/westsides/mobile-pos') || pathname?.startsWith('/operations/mobile-pos');
+    pathname?.startsWith('/mobile-pos') ||
+    pathname?.startsWith('/westsides/mobile-pos') ||
+    pathname?.startsWith('/operations/mobile-pos');
   const showBreadcrumbs = !BREADCRUMB_HIDDEN_PATHS.has(pathname ?? '');
 
   useEffect(() => {

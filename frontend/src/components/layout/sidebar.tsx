@@ -307,10 +307,10 @@ export const NAV: NavItem[] = [
         permission: 'sales.view',
       },
       {
-        href: '/operations/mobile-pos',
-        label: 'Mobile POS',
+        href: '/mobile-pos',
+        label: 'Mobile POS Lite',
         iconKey: 'creditCard',
-        permission: 'sales.create',
+        permission: 'mobile_pos_lite.use',
       },
       {
         href: '/operations/purchase-orders',
@@ -434,6 +434,12 @@ export const NAV: NavItem[] = [
         label: 'Quick Sale',
         iconKey: 'creditCard',
         permission: 'sales.create',
+      },
+      {
+        href: '/westsides/mobile-pos/terminals',
+        label: 'Mobile POS Terminals',
+        iconKey: 'mobile',
+        permission: 'mobile_pos_lite.manage',
       },
       {
         href: '/westsides/customers',

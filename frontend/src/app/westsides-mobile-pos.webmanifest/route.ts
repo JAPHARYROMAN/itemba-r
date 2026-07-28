@@ -3,10 +3,10 @@ export const dynamic = 'force-static';
 export function GET() {
   return new Response(
     JSON.stringify({
-      name: 'Itemba Mobile POS',
+      name: 'Itemba Mobile POS Lite',
       short_name: 'Itemba POS',
-      description: 'Mobile counter-sale entry connected to ITEMBA-R.',
-      start_url: '/operations/mobile-pos',
+      description: 'A branch-locked mobile sales counter connected to ITEMBA-R.',
+      start_url: '/mobile-pos',
       scope: '/',
       display: 'standalone',
       background_color: '#07111f',

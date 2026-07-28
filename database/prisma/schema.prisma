@@ -547,6 +547,7 @@ model Company {
   apiRequestLogs         ApiRequestLog[]
   deviceRegistrations    DeviceRegistration[]
   mobileSessions         MobileSession[]
+  mobilePosTerminals     MobilePosTerminal[]
   offlineSyncBatches     OfflineSyncBatch[]
   syncCheckpoints        SyncCheckpoint[]
   externalPayments       ExternalPayment[]
@@ -743,6 +744,9 @@ model Division {
   refunds          Refund[]
   customerPayments CustomerPayment[]
 
+  // Mobile POS Lite
+  mobilePosTerminals MobilePosTerminal[]
+
   @@unique([companyId, code])
   @@index([companyId])
   @@index([type])
@@ -847,6 +851,9 @@ model Branch {
   creditNotes      CreditNote[]
   refunds          Refund[]
   customerPayments CustomerPayment[]
+
+  // Mobile POS Lite
+  mobilePosTerminals MobilePosTerminal[]
 
   @@unique([divisionId, code])
   @@index([divisionId])
@@ -1105,6 +1112,7 @@ model User {
   apiRequestLogs                ApiRequestLog[]         @relation("ApiRequestLogUser")
   deviceRegistrations           DeviceRegistration[]    @relation("DeviceUser")
   mobileSessions                MobileSession[]         @relation("MobileSessionUser")
+  mobilePosTerminals            MobilePosTerminal[]     @relation("MobilePosTerminalAssignedUser")
   offlineSyncBatches            OfflineSyncBatch[]      @relation("SyncBatchUser")
   syncRecordsResolved           OfflineSyncRecord[]     @relation("SyncRecordResolvedBy")
   syncCheckpoints               SyncCheckpoint[]        @relation("SyncCheckpointUser")
@@ -2137,6 +2145,7 @@ model CashAccount {
   salesOrders          SalesOrder[]          @relation("SalesOrderCashAccount")
   refunds              Refund[]
   customerPayments     CustomerPayment[]
+  mobilePosPayments    MobilePosTerminalPayment[]
 
   // Westsides (Milestone 6)
   bankReconciliations BankReconciliation[]
@@ -2958,6 +2967,7 @@ model Customer {
   creditNotes      CreditNote[]
   refunds          Refund[]
   customerPayments CustomerPayment[]
+  mobilePosGeneralTerminals MobilePosTerminal[] @relation("MobilePosTerminalGeneralCustomer")
 
   // Westsides (Milestone 6)
   priceAgreements  CustomerPriceAgreement[]
@@ -3438,6 +3448,8 @@ model SalesOrder {
   /// POS). A retried checkout carrying the same key returns the original order
   /// instead of creating a duplicate. Unique per company; many NULLs allowed.
   idempotencyKey    String?
+  /// The locked Mobile POS Lite terminal that recorded this sale, when applicable.
+  mobilePosTerminalId String?
   receivableId      String?
   journalEntryId    String?
   deletedAt         DateTime?
@@ -3453,6 +3465,7 @@ model SalesOrder {
   receivable  Receivable?  @relation(fields: [receivableId], references: [id], onDelete: SetNull)
   salesperson Employee?    @relation("SalesOrderSalesperson", fields: [salespersonId], references: [id], onDelete: SetNull)
   cashAccount CashAccount? @relation("SalesOrderCashAccount", fields: [cashAccountId], references: [id], onDelete: SetNull)
+  mobilePosTerminal MobilePosTerminal? @relation(fields: [mobilePosTerminalId], references: [id], onDelete: SetNull)
 
   lines           SalesOrderLine[]
   commissions     SalesCommission[]
@@ -3473,6 +3486,7 @@ model SalesOrder {
   @@index([orderDate])
   @@index([salespersonId])
   @@index([cashAccountId])
+  @@index([mobilePosTerminalId, orderDate])
   @@index([companyId, customerId, orderDate, status])
   @@map("sales_orders")
 }
@@ -7881,6 +7895,7 @@ model Employee {
   costAllocations      ProjectCostAllocation[] @relation("EmployeeCostAllocations")
   salesOrders          SalesOrder[]            @relation("SalesOrderSalesperson")
   salesCommissions     SalesCommission[]       @relation("EmployeeSalesCommissions")
+  mobilePosTerminals   MobilePosTerminal[]     @relation("MobilePosTerminalSalesperson")
   driverProfiles       DriverProfile[]         @relation("DriverEmployee")
 
   @@unique([companyId, employeeCode])
@@ -11000,6 +11015,15 @@ enum MobileSessionStatus {
   LOGGED_OUT
 }
 
+/// A managed, single-scope Mobile POS Lite installation. The terminal's
+/// configuration is authoritative: the sales rep never chooses its company,
+/// division, branch, customer, or receipt account at checkout.
+enum MobilePosTerminalStatus {
+  ACTIVE
+  SUSPENDED
+  REVOKED
+}
+
 enum OfflineSyncDirection {
   UPLOAD
   DOWNLOAD
@@ -11405,6 +11429,68 @@ model MobileSession {
 
   @@index([userId, deviceId, status, expiresAt])
   @@map("mobile_sessions")
+}
+
+/// A dedicated Mobile POS Lite device assigned to one sales rep and one
+/// Company → Division → Branch scope. Activation codes and device secrets are
+/// stored only as hashes; the browser never receives a reusable server secret.
+model MobilePosTerminal {
+  id                  String                  @id @default(uuid())
+  terminalCode        String                  @unique
+  name                String
+  companyId           String
+  divisionId          String
+  branchId            String
+  assignedUserId      String
+  salespersonId       String
+  generalCustomerId   String
+  status              MobilePosTerminalStatus @default(ACTIVE)
+  creditEnabled       Boolean                 @default(false)
+  offlineCashEnabled  Boolean                 @default(false)
+  configVersion       Int                     @default(1)
+  activationTokenHash String?
+  activationExpiresAt DateTime?
+  deviceSecretHash    String?
+  deviceName          String?
+  activatedAt         DateTime?
+  lastSeenAt          DateTime?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  company         Company                    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division        Division                   @relation(fields: [divisionId], references: [id], onDelete: Restrict)
+  branch          Branch                     @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  assignedUser    User                       @relation("MobilePosTerminalAssignedUser", fields: [assignedUserId], references: [id], onDelete: Restrict)
+  salesperson     Employee                   @relation("MobilePosTerminalSalesperson", fields: [salespersonId], references: [id], onDelete: Restrict)
+  generalCustomer Customer                   @relation("MobilePosTerminalGeneralCustomer", fields: [generalCustomerId], references: [id], onDelete: Restrict)
+  paymentMethods  MobilePosTerminalPayment[]
+  salesOrders     SalesOrder[]
+
+  @@index([companyId, divisionId, branchId, status])
+  @@index([assignedUserId, status])
+  @@index([salespersonId, status])
+  @@map("mobile_pos_terminals")
+}
+
+/// The one receipt account configured for each payment method enabled on a
+/// Mobile POS Lite terminal. There is intentionally no cashier-side account
+/// selector.
+model MobilePosTerminalPayment {
+  id            String             @id @default(uuid())
+  terminalId    String
+  paymentMethod SalesPaymentMethod
+  cashAccountId String
+  label         String?
+  isEnabled     Boolean            @default(true)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  terminal    MobilePosTerminal @relation(fields: [terminalId], references: [id], onDelete: Cascade)
+  cashAccount CashAccount       @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
+
+  @@unique([terminalId, paymentMethod])
+  @@index([cashAccountId])
+  @@map("mobile_pos_terminal_payments")
 }
 
 model OfflineSyncBatch {

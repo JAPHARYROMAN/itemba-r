@@ -41,6 +41,10 @@ type SalesOrderReferenceIds = {
   lines?: SalesOrderLineDto[];
 };
 
+type SalesOrderCreateContext = {
+  mobilePosTerminalId?: string;
+};
+
 type LinkedReceivableSnapshot = {
   id: string;
   sourceId: string | null;
@@ -1516,7 +1520,32 @@ export class SalesOrdersService {
     return this.createAndConfirm(safeDto, user);
   }
 
-  async create(dto: CreateSalesOrderDto, user: AuthUser) {
+  /**
+   * Trusted entry point for the locked-down Mobile POS Lite flow. The terminal
+   * service derives the entire order context server-side before it reaches
+   * here; this method only records the already verified terminal identity.
+   */
+  async mobilePosLiteQuickSale(
+    dto: CreateSalesOrderDto,
+    user: AuthUser,
+    terminalId: string,
+    terminalCode: string,
+  ) {
+    const safeDto: CreateSalesOrderDto = {
+      ...dto,
+      currency: dto.currency ?? CurrencyCode.TZS,
+      notes: [dto.notes, `Created from Mobile POS Lite (${terminalCode})`]
+        .filter(Boolean)
+        .join('\n'),
+    };
+    return this.createAndConfirm(safeDto, user, { mobilePosTerminalId: terminalId });
+  }
+
+  async create(
+    dto: CreateSalesOrderDto,
+    user: AuthUser,
+    context: SalesOrderCreateContext = {},
+  ) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const paymentMethod = normalizePaymentMethodForSalesType(dto.salesType, dto.paymentMethod);
     const cashAccountId =
@@ -1591,6 +1620,7 @@ export class SalesOrdersService {
           cashAccountId: cashAccountId ?? null,
           paymentReference: dto.paymentReference,
           idempotencyKey: dto.idempotencyKey ?? null,
+          mobilePosTerminalId: context.mobilePosTerminalId ?? null,
           createdById: userId,
         },
       });
@@ -2486,7 +2516,11 @@ export class SalesOrdersService {
    * original order instead of creating a duplicate, so a retried checkout over
    * a flaky mobile network is safe.
    */
-  private async createAndConfirm(dto: CreateSalesOrderDto, user: AuthUser) {
+  private async createAndConfirm(
+    dto: CreateSalesOrderDto,
+    user: AuthUser,
+    context: SalesOrderCreateContext = {},
+  ) {
     const safeDto: CreateSalesOrderDto = { ...dto };
     if (!safeDto.divisionId && safeDto.branchId) {
       const branch = await this.prisma.branch.findFirst({
@@ -2508,7 +2542,7 @@ export class SalesOrdersService {
 
     let draft: Awaited<ReturnType<SalesOrdersService['create']>>;
     try {
-      draft = await this.create(safeDto, user);
+      draft = await this.create(safeDto, user, context);
     } catch (error) {
       // Lost a race with a concurrent request carrying the same key — the
       // company-scoped unique index rejected the duplicate. Replay the winner.

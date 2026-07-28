@@ -257,6 +257,16 @@ const ALL_PERMISSIONS: PermDef[] = [
   },
   ...perms('sales', ['view', 'create', 'confirm', 'cancel']),
   ...perms('purchases', ['view', 'create', 'confirm', 'receive', 'cancel']),
+  // Mobile POS Lite: sales reps receive only `use`; terminal provisioning is
+  // reserved for a group-controlled administrator.
+  ...perms('mobile_pos_lite', ['use']),
+  {
+    code: 'mobile_pos_lite.manage',
+    description: 'Provision and manage Mobile POS Lite terminals',
+    module: 'mobile_pos_lite',
+    action: 'manage',
+    isGroupControl: true,
+  },
   ...perms('supplier_order_drafts', ['view', 'create', 'update', 'send', 'manage', 'export']),
   {
     code: 'operations.reports.view',
@@ -1673,7 +1683,8 @@ const ROLES: RoleDef[] = [
       // Westsides POS
       (p.module === 'pos' && ['view', 'create', 'complete'].includes(p.action)) ||
       (p.module === 'retail_sales' && p.action === 'view') ||
-      (p.module === 'westsides' && p.action === 'dashboard.view'),
+      (p.module === 'westsides' && p.action === 'dashboard.view') ||
+      p.code === 'mobile_pos_lite.use',
   },
   {
     name: 'INVENTORY_OFFICER',
@@ -1706,7 +1717,8 @@ const ROLES: RoleDef[] = [
       (p.module === 'wholesale_sales' && p.action === 'view') ||
       (p.module === 'retail_sales' && p.action === 'view') ||
       (p.module === 'price_lists' && p.action === 'view') ||
-      (p.module === 'westsides' && p.action === 'dashboard.view'),
+      (p.module === 'westsides' && p.action === 'dashboard.view') ||
+      p.code === 'mobile_pos_lite.use',
   },
 
   // ── Itemba Enterprises Roles (Milestone 7) ──────────────────────────────────

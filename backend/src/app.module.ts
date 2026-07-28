@@ -132,6 +132,7 @@ import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { ApiRequestLogsModule } from './modules/api-request-logs/api-request-logs.module';
 import { MobileSessionsModule } from './modules/mobile-sessions/mobile-sessions.module';
 import { OfflineSyncModule } from './modules/offline-sync/offline-sync.module';
+import { MobilePosLiteModule } from './modules/mobile-pos-lite/mobile-pos-lite.module';
 import { ExternalPaymentsModule } from './modules/external-payments/external-payments.module';
 import { ExternalMessagesModule } from './modules/external-messages/external-messages.module';
 import { MessageTemplatesModule } from './modules/message-templates/message-templates.module';
@@ -351,6 +352,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     ApiRequestLogsModule,
     MobileSessionsModule,
     OfflineSyncModule,
+    MobilePosLiteModule,
     ExternalPaymentsModule,
     ExternalMessagesModule,
     MessageTemplatesModule,
