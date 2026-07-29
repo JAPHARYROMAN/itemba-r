@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel, Prisma } from '@prisma/client';
+import { AccessLevel, Prisma, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
@@ -157,8 +157,38 @@ export class EmployeesService {
     return stripSensitive(record, user);
   }
 
+  /**
+   * Returns accounts that may safely be linked to an employee in a company.
+   * A Mobile POS rep needs write access to the terminal's company, so an
+   * account is eligible only when its primary company or explicit access grant
+   * satisfies that requirement and it is not already linked elsewhere.
+   */
+  async findLinkableUsers(companyId: string, employeeId: string | undefined, user: any) {
+    assertCanAccessCompanyFromUser(user, companyId, AccessLevel.WRITE);
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        deletedAt: null,
+        status: UserStatus.ACTIVE,
+        AND: [
+          this.userAccessForCompany(companyId),
+          employeeId
+            ? {
+                OR: [{ hrEmployee: { is: null } }, { hrEmployee: { is: { id: employeeId } } }],
+              }
+            : { hrEmployee: { is: null } },
+        ],
+      },
+      select: { id: true, fullName: true, email: true },
+      orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
+    });
+
+    return users;
+  }
+
   async create(dto: CreateEmployeeDto, user: any) {
     const placement = await this.normalizeEmployeeHierarchy(dto, user);
+    await this.validateUserLink(dto.userId, dto.companyId);
     const explicitCode = dto.employeeCode?.trim();
     const record = explicitCode
       ? await this.prisma.employee.create({
@@ -246,6 +276,11 @@ export class EmployeesService {
       } as CreateEmployeeDto,
       user,
     );
+    await this.validateUserLink(
+      dto.userId !== undefined ? dto.userId : existing.userId,
+      dto.companyId ?? existing.companyId,
+      id,
+    );
     const record = await this.prisma.employee.update({
       where: { id },
       data: this.employeeUpdateData(dto, placement),
@@ -315,6 +350,58 @@ export class EmployeesService {
     }
 
     return data;
+  }
+
+  private userAccessForCompany(companyId: string): Prisma.UserWhereInput {
+    return {
+      OR: [
+        { companyId },
+        {
+          companyAccess: {
+            some: {
+              companyId,
+              accessLevel: { in: [AccessLevel.WRITE, AccessLevel.MANAGE] },
+            },
+          },
+        },
+      ],
+    };
+  }
+
+  private async validateUserLink(
+    userId: string | null | undefined,
+    companyId: string,
+    employeeId?: string,
+  ) {
+    if (!userId) return;
+
+    const account = await this.prisma.user.findFirst({
+      where: {
+        id: userId,
+        deletedAt: null,
+        status: UserStatus.ACTIVE,
+        AND: [this.userAccessForCompany(companyId)],
+      },
+      select: { id: true },
+    });
+    if (!account) {
+      throw new BadRequestException(
+        'The selected user account must be active and have write access to the employee company',
+      );
+    }
+
+    const existingLink = await this.prisma.employee.findFirst({
+      where: {
+        userId,
+        ...(employeeId ? { id: { not: employeeId } } : {}),
+      },
+      select: { employeeCode: true, fullName: true },
+    });
+    if (existingLink) {
+      throw new BadRequestException(
+        `The selected user account is already linked to ${existingLink.fullName} (${existingLink.employeeCode})`,
+      );
+    }
   }
 
   private parseEmployeeDate(field: string, value: string): Date {

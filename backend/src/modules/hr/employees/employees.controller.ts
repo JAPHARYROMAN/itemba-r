@@ -12,7 +12,10 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
-import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
+import {
+  RequireAnyPermissions,
+  RequirePermissions,
+} from '../../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.decorator';
 import { EmployeesService } from './employees.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
@@ -38,6 +41,16 @@ export class EmployeesController {
   @RequirePermissions('employees.view')
   async nextCode(@Query('companyId') companyId: string) {
     return { employeeCode: await this.service.nextEmployeeCode(companyId) };
+  }
+
+  @Get('linkable-users')
+  @RequireAnyPermissions('employees.create', 'employees.update')
+  findLinkableUsers(
+    @Query('companyId') companyId: string,
+    @Query('employeeId') employeeId: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.findLinkableUsers(companyId, employeeId, user);
   }
 
   @Get(':id')

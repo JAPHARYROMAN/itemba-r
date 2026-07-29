@@ -7,6 +7,7 @@ import {
   ConfirmDialog,
   FormInput,
   FormSelect,
+  IconBtn,
   Modal,
   PageHeader,
   PageToolbar,
@@ -16,7 +17,9 @@ import {
 import { ResponsiveDataTable } from '@/components/aurora';
 import type { ResponsiveColumn } from '@/components/aurora';
 import { ApiError, backendDelete } from '@/lib/api-client';
+import { downloadTablePdf } from '@/lib/export-download';
 import { useAuth } from '@/hooks/use-auth';
+import { Eye, FileDown } from 'lucide-react';
 
 interface Company {
   id: string;
@@ -41,6 +44,11 @@ interface Position {
   companyId?: string;
   departmentId?: string;
 }
+interface LinkableUser {
+  id: string;
+  fullName: string;
+  email: string;
+}
 
 interface EmployeeRow extends Record<string, unknown> {
   id: string;
@@ -64,6 +72,7 @@ interface FormState {
   branchId: string;
   departmentId: string;
   positionId: string;
+  userId: string;
   // Person
   employeeCode: string;
   firstName: string;
@@ -114,6 +123,7 @@ const blank: FormState = {
   branchId: '',
   departmentId: '',
   positionId: '',
+  userId: '',
   employeeCode: '',
   firstName: '',
   middleName: '',
@@ -169,12 +179,14 @@ export default function EmployeesPage() {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterCompanyId, setFilterCompanyId] = useState('');
   const [nextCodePreview, setNextCodePreview] = useState('');
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   // Lookup tables
   const [companies, setCompanies] = useState<Company[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
+  const [linkableUsers, setLinkableUsers] = useState<LinkableUser[]>([]);
 
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -216,9 +228,11 @@ export default function EmployeesPage() {
       setBranches([]);
       setDepartments([]);
       setPositions([]);
+      setLinkableUsers([]);
       setNextCodePreview('');
       return;
     }
+    setForm((current) => ({ ...current, userId: '' }));
     fetch(`/api/backend/branches?companyId=${form.companyId}&limit=200`)
       .then((r) => r.json())
       .then((j) =>
@@ -247,6 +261,10 @@ export default function EmployeesPage() {
       .then((r) => r.json())
       .then((j) => setNextCodePreview(j.data?.employeeCode ?? j.employeeCode ?? ''))
       .catch(() => setNextCodePreview(''));
+    fetch(`/api/backend/hr/employees/linkable-users?companyId=${form.companyId}`)
+      .then((r) => r.json())
+      .then((j) => setLinkableUsers(Array.isArray(j.data) ? j.data : Array.isArray(j) ? j : []))
+      .catch(() => setLinkableUsers([]));
   }, [form.companyId]);
 
   useEffect(() => {
@@ -276,6 +294,7 @@ export default function EmployeesPage() {
         // Omit employeeCode entirely when blank — server auto-generates.
         ...(form.employeeCode.trim() ? { employeeCode: form.employeeCode.trim() } : {}),
         companyId: form.companyId,
+        ...(form.userId ? { userId: form.userId } : {}),
         firstName: form.firstName.trim(),
         middleName: form.middleName.trim() || undefined,
         lastName: form.lastName.trim(),
@@ -354,6 +373,64 @@ export default function EmployeesPage() {
       set(k, e.target.value as FormState[K]);
 
   const fullName = (e: EmployeeRow) => e.fullName ?? `${e.firstName} ${e.lastName}`;
+  const companyName = (e: EmployeeRow) =>
+    typeof e.company === 'object' ? (e.company?.name ?? '—') : (e.company ?? '—');
+  const departmentName = (e: EmployeeRow) =>
+    typeof e.department === 'object' ? (e.department?.name ?? '—') : (e.department ?? '—');
+  const positionName = (e: EmployeeRow) =>
+    typeof e.position === 'object' ? (e.position?.title ?? '—') : (e.position ?? '—');
+
+  const handleExportPdf = async () => {
+    if (rows.length === 0) {
+      showToast('error', 'No employees to export');
+      return;
+    }
+
+    const selectedCompany = companies.find((company) => company.id === filterCompanyId);
+    const filters = [
+      selectedCompany ? selectedCompany.name : 'All companies',
+      filterStatus ? `Status: ${filterStatus.replace('_', ' ')}` : 'All statuses',
+    ];
+
+    setExportingPdf(true);
+    try {
+      await downloadTablePdf({
+        title: 'Employee Register',
+        subtitle: filters.join(' · '),
+        companyId: filterCompanyId || undefined,
+        columns: [
+          'Code',
+          'Full Name',
+          'Company',
+          'Department',
+          'Position',
+          'Type',
+          'Region',
+          'Status',
+        ],
+        rows: rows.map((employee) => [
+          employee.employeeCode || '—',
+          fullName(employee),
+          companyName(employee),
+          departmentName(employee),
+          positionName(employee),
+          employee.employmentType ?? '—',
+          employee.payrollRegion ?? '—',
+          employee.employmentStatus ?? employee.status ?? '—',
+        ]),
+        orientation: 'landscape',
+        sectionTitle: 'Employees',
+        summary: [{ label: 'Employees exported', value: String(rows.length) }],
+        note: 'This register reflects the filters selected when the PDF was generated.',
+        baseName: 'employee-register',
+      });
+      showToast('success', 'Employee register exported as PDF');
+    } catch (err) {
+      showToast('error', 'PDF export failed', err instanceof Error ? err.message : undefined);
+    } finally {
+      setExportingPdf(false);
+    }
+  };
 
   const handleDelete = async () => {
     if (!deleting) return;
@@ -385,22 +462,19 @@ export default function EmployeesPage() {
       key: 'company',
       header: 'Company',
       priority: 2,
-      accessor: (emp) =>
-        typeof emp.company === 'object' ? (emp.company?.name ?? '—') : (emp.company ?? '—'),
+      accessor: companyName,
     },
     {
       key: 'department',
       header: 'Department',
       priority: 2,
-      accessor: (emp) =>
-        typeof emp.department === 'object' ? (emp.department?.name ?? '—') : (emp.department ?? '—'),
+      accessor: departmentName,
     },
     {
       key: 'position',
       header: 'Position',
       priority: 3,
-      accessor: (emp) =>
-        typeof emp.position === 'object' ? (emp.position?.title ?? '—') : (emp.position ?? '—'),
+      accessor: positionName,
     },
     {
       key: 'employmentType',
@@ -420,28 +494,40 @@ export default function EmployeesPage() {
       priority: 1,
       accessor: (emp) => <StatusBadge status={emp.employmentStatus ?? emp.status ?? '—'} />,
     },
-    ...(canDelete
-      ? ([
-          {
-            key: 'actions',
-            header: '',
-            priority: 1,
-            accessor: (emp) => (
-              <Btn
-                variant="danger"
-                size="xs"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setDeleteError('');
-                  setDeleting(emp);
-                }}
-              >
-                Delete
-              </Btn>
-            ),
-          },
-        ] as ResponsiveColumn<EmployeeRow>[])
-      : []),
+    {
+      key: 'actions',
+      header: 'Actions',
+      priority: 1,
+      accessor: (emp) => (
+        <div className="flex items-center justify-end gap-1">
+          <IconBtn
+            variant="secondary"
+            size="xs"
+            label={`View ${fullName(emp)}`}
+            title={`View ${fullName(emp)}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              router.push(`/hr/employees/${emp.id}`);
+            }}
+          >
+            <Eye size={14} aria-hidden="true" />
+          </IconBtn>
+          {canDelete && (
+            <Btn
+              variant="danger"
+              size="xs"
+              onClick={(event) => {
+                event.stopPropagation();
+                setDeleteError('');
+                setDeleting(emp);
+              }}
+            >
+              Delete
+            </Btn>
+          )}
+        </div>
+      ),
+    },
   ];
 
   return (
@@ -492,16 +578,27 @@ export default function EmployeesPage() {
           </>
         }
         actions={
-          <Btn
-            variant="primary"
-            onClick={() => {
-              setForm(blank);
-              setShowCreate(true);
-              setError('');
-            }}
-          >
-            + Add Employee
-          </Btn>
+          <div className="flex flex-wrap gap-2">
+            <Btn
+              variant="secondary"
+              icon={<FileDown size={16} aria-hidden="true" />}
+              loading={exportingPdf}
+              disabled={rows.length === 0}
+              onClick={() => void handleExportPdf()}
+            >
+              Export PDF
+            </Btn>
+            <Btn
+              variant="primary"
+              onClick={() => {
+                setForm(blank);
+                setShowCreate(true);
+                setError('');
+              }}
+            >
+              + Add Employee
+            </Btn>
+          </div>
         }
       />
 
@@ -576,6 +673,22 @@ export default function EmployeesPage() {
                   label: `${b.code ? b.code + ' — ' : ''}${b.name}`,
                 }))}
                 placeholder={form.companyId ? 'Select branch (optional)' : 'Select company first'}
+              />
+              <FormSelect
+                label="User account"
+                value={form.userId}
+                disabled={!form.companyId}
+                onChange={sf('userId')}
+                options={linkableUsers.map((user) => ({
+                  value: user.id,
+                  label: `${user.fullName} (${user.email})`,
+                }))}
+                placeholder={
+                  form.companyId
+                    ? 'Link an account for Mobile POS (optional)'
+                    : 'Select company first'
+                }
+                hint="Required when this employee will use a Mobile POS terminal"
               />
               <FormSelect
                 label="Department"

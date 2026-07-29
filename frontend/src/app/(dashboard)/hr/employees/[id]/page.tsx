@@ -31,6 +31,7 @@ type Tab =
 interface Employee {
   id: string;
   employeeCode: string;
+  userId?: string | null;
   firstName: string;
   middleName?: string;
   lastName: string;
@@ -89,6 +90,11 @@ interface Employee {
   // Audit
   notes?: string;
 }
+interface LinkableUser {
+  id: string;
+  fullName: string;
+  email: string;
+}
 
 interface MobileMoney {
   id: string;
@@ -134,6 +140,7 @@ export default function EmployeeDetailPage() {
 
   const [emp, setEmp] = useState<Employee | null>(null);
   const [mobileMoney, setMobileMoney] = useState<MobileMoney[]>([]);
+  const [linkableUsers, setLinkableUsers] = useState<LinkableUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('profile');
   const [showProfileEdit, setShowProfileEdit] = useState(false);
@@ -166,12 +173,35 @@ export default function EmployeeDetailPage() {
     setMobileMoney(Array.isArray(j.data) ? j.data : []);
   }, [id]);
 
+  const loadLinkableUsers = useCallback(async () => {
+    const companyId = emp?.company?.id;
+    if (!companyId) {
+      setLinkableUsers([]);
+      return;
+    }
+    try {
+      const response = await fetch(
+        `/api/backend/hr/employees/linkable-users?companyId=${companyId}&employeeId=${id}`,
+      );
+      const payload = await response.json();
+      setLinkableUsers(
+        Array.isArray(payload.data) ? payload.data : Array.isArray(payload) ? payload : [],
+      );
+    } catch {
+      setLinkableUsers([]);
+    }
+  }, [emp?.company?.id, id]);
+
   useEffect(() => {
     if (id) {
       load();
       loadMobileMoney();
     }
   }, [id, load, loadMobileMoney]);
+
+  useEffect(() => {
+    void loadLinkableUsers();
+  }, [loadLinkableUsers]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -710,6 +740,19 @@ export default function EmployeeDetailPage() {
               label="Emergency contact phone"
               value={form.emergencyContactPhone ?? ''}
               onChange={ff('emergencyContactPhone')}
+            />
+            <FormSelect
+              label="User account"
+              value={form.userId ?? ''}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, userId: event.target.value || null }))
+              }
+              options={linkableUsers.map((user) => ({
+                value: user.id,
+                label: `${user.fullName} (${user.email})`,
+              }))}
+              placeholder="No linked user account"
+              hint="Link an active account to make this employee eligible for Mobile POS"
             />
             <FormSelect
               label="Status"
