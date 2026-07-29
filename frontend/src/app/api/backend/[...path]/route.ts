@@ -83,6 +83,14 @@ async function forwardToBackend(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${accessToken}`,
   };
+
+  // POS terminal credentials are validated by the backend. Keep the proxy
+  // allowlist narrow rather than forwarding arbitrary browser headers.
+  for (const name of ['x-mobile-pos-terminal', 'x-mobile-pos-device']) {
+    const value = req.headers.get(name);
+    if (value) headers[name] = value;
+  }
+
   if (body) headers['Content-Type'] = contentType ?? 'application/json';
 
   const init: RequestInit = {
