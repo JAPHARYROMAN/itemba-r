@@ -96,6 +96,61 @@ interface LinkableUser {
   email: string;
 }
 
+const EMPLOYEE_UPDATE_FIELDS = [
+  'userId',
+  'firstName',
+  'middleName',
+  'lastName',
+  'gender',
+  'dateOfBirth',
+  'nationality',
+  'email',
+  'phone',
+  'address',
+  'emergencyContactName',
+  'emergencyContactPhone',
+  'employmentStatus',
+  'terminationDate',
+  'baseSalary',
+  'paymentFrequency',
+  'nidaNumber',
+  'votersIdNumber',
+  'passportNumber',
+  'passportCountry',
+  'tin',
+  'taxResidencyStatus',
+  'payrollRegion',
+  'dependents',
+  'disabilityStatus',
+  'disabilityCertificateNo',
+  'nssfNumber',
+  'pssfNumber',
+  'nhifNumber',
+  'wcfRegistrationNumber',
+  'heslbNumber',
+  'heslbBorrower',
+  'bankName',
+  'bankAccountName',
+  'bankAccountNumber',
+  'mobileMoneyNumber',
+] as const;
+
+function employeeUpdatePayload(form: Partial<Employee>): Record<string, unknown> {
+  const payload = Object.fromEntries(
+    EMPLOYEE_UPDATE_FIELDS.flatMap((field) => {
+      const value = form[field];
+      return value === undefined ? [] : [[field, value]];
+    }),
+  );
+
+  const fullName = [form.firstName, form.middleName, form.lastName]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join(' ');
+  if (fullName) payload.fullName = fullName;
+
+  return payload;
+}
+
 interface MobileMoney {
   id: string;
   provider: string;
@@ -208,15 +263,10 @@ export default function EmployeeDetailPage() {
     setSaving(true);
     setError('');
     try {
-      // Strip non-scalar fields the backend won't accept
-      const { company, department, position, ...rest } = form as Record<string, unknown>;
-      void company;
-      void department;
-      void position;
       const res = await fetch(`/api/backend/hr/employees/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(rest),
+        body: JSON.stringify(employeeUpdatePayload(form)),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
