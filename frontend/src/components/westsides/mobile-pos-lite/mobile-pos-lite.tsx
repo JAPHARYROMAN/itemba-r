@@ -99,14 +99,13 @@ export function MobilePosLite() {
     return items;
   }, []);
 
-  const updateCatalog = useCallback((products: MobilePosLiteProduct[]) => {
-    if (!binding) return;
+  const updateCatalog = useCallback((terminalCode: string, products: MobilePosLiteProduct[]) => {
     setCatalog((current) => {
       const merged = mergeProducts(current, products);
-      void saveMobilePosLiteCatalog(binding.terminalCode, merged);
+      void saveMobilePosLiteCatalog(terminalCode, merged);
       return merged;
     });
-  }, [binding]);
+  }, []);
 
   const syncPendingSales = useCallback(async (current: MobilePosLiteBinding) => {
     if (!navigator.onLine || syncingRef.current) return;
@@ -146,7 +145,7 @@ export function MobilePosLite() {
     const products = await backendGet<MobilePosLiteProduct[]>('/mobile-pos-lite/catalog', {
       headers: terminalHeaders(current),
     });
-    updateCatalog(products);
+    updateCatalog(current.terminalCode, products);
   }, [updateCatalog]);
 
   useEffect(() => {
@@ -211,7 +210,7 @@ export function MobilePosLite() {
         .then((products) => {
           if (cancelled) return;
           setRemoteProducts(products);
-          updateCatalog(products);
+          updateCatalog(binding.terminalCode, products);
         })
         .catch(() => {
           if (!cancelled) setRemoteProducts([]);
