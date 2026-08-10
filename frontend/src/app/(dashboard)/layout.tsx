@@ -20,6 +20,19 @@ const BREADCRUMB_HIDDEN_PATHS = new Set(['/', '/dashboard']);
 
 const PUBLIC_DASHBOARD_PATHS = new Set(['/westsides/mobile-pos/install']);
 
+// A user whose every permission sits in this set is a POS-only sales rep:
+// their whole app is Itemba POS, and the ERP shell should never appear.
+// Office users always hold other permissions, so they are never redirected.
+const POS_ONLY_PERMISSIONS = new Set(['mobile_pos_lite.use']);
+
+function isPosOnlyUser(user: { permissions: string[] } | null | undefined): boolean {
+  return (
+    !!user &&
+    user.permissions.includes('mobile_pos_lite.use') &&
+    user.permissions.every((permission) => POS_ONLY_PERMISSIONS.has(permission))
+  );
+}
+
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -34,9 +47,15 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     router.replace(`/login?from=${encodeURIComponent(returnPath)}`);
   }, [isPublicDashboardPath, loading, pathname, router, user]);
 
+  useEffect(() => {
+    if (loading || !isPosOnlyUser(user)) return;
+    if (pathname?.startsWith('/mobile-pos')) return;
+    router.replace('/mobile-pos');
+  }, [loading, pathname, router, user]);
+
   if (isPublicDashboardPath) return <>{children}</>;
 
-  if (loading || !user) {
+  if (loading || !user || (isPosOnlyUser(user) && !pathname?.startsWith('/mobile-pos'))) {
     return (
       <div
         className="flex min-h-screen items-center justify-center"
@@ -54,9 +73,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
   const mobilePosStandalone =
-    pathname?.startsWith('/mobile-pos') ||
-    pathname?.startsWith('/westsides/mobile-pos') ||
-    pathname?.startsWith('/operations/mobile-pos');
+    pathname?.startsWith('/mobile-pos') || pathname?.startsWith('/westsides/mobile-pos');
   const showBreadcrumbs = !BREADCRUMB_HIDDEN_PATHS.has(pathname ?? '');
 
   useEffect(() => {

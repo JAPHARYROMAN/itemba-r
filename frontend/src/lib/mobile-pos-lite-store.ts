@@ -28,13 +28,34 @@ export type PendingMobilePosLiteSale = {
   };
   createdAt: string;
   lastError?: string;
+  /** Display-only snapshot so the queue screen can describe the sale offline. */
+  totalAmount?: number;
+  itemCount?: number;
+  lineSummary?: string;
+};
+
+/** Snapshot of the terminal session so the POS can open after an offline cold start. */
+export type MobilePosLiteCachedSession = {
+  terminal: {
+    id: string;
+    code: string;
+    name: string;
+    configVersion: number;
+    offlineCashEnabled: boolean;
+  };
+  company: { id: string; name: string; code: string };
+  division: { id: string; name: string; code: string };
+  branch: { id: string; name: string; code: string };
+  rep: { id: string; name: string };
+  paymentMethods: Array<{ code: string; label: string; requiresReference: boolean }>;
 };
 
 const DB_NAME = 'itemba-mobile-pos-lite';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const BINDINGS = 'bindings';
 const CATALOGS = 'catalogs';
 const OUTBOX = 'outbox';
+const SESSIONS = 'sessions';
 const ACTIVE_BINDING = 'active';
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -50,6 +71,7 @@ function openDatabase(): Promise<IDBDatabase> {
         const store = database.createObjectStore(OUTBOX, { keyPath: 'id' });
         store.createIndex('terminalCode', 'terminalCode', { unique: false });
       }
+      if (!database.objectStoreNames.contains(SESSIONS)) database.createObjectStore(SESSIONS);
     };
   });
 }
@@ -101,6 +123,26 @@ export async function getMobilePosLiteCatalog(terminalCode: string): Promise<Mob
 export async function saveMobilePosLiteCatalog(terminalCode: string, products: MobilePosLiteProduct[]) {
   await transaction(CATALOGS, 'readwrite', (store) =>
     store.put({ products, updatedAt: new Date().toISOString() }, terminalCode),
+  );
+}
+
+export async function getMobilePosLiteSession(
+  terminalCode: string,
+): Promise<MobilePosLiteCachedSession | null> {
+  const value = await transaction<{ session?: MobilePosLiteCachedSession } | undefined>(
+    SESSIONS,
+    'readonly',
+    (store) => store.get(terminalCode),
+  );
+  return value?.session ?? null;
+}
+
+export async function saveMobilePosLiteSession(
+  terminalCode: string,
+  session: MobilePosLiteCachedSession,
+) {
+  await transaction(SESSIONS, 'readwrite', (store) =>
+    store.put({ session, updatedAt: new Date().toISOString() }, terminalCode),
   );
 }
 

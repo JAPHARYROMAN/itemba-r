@@ -35,7 +35,11 @@ export function proxy(req: NextRequest) {
   if (!isAuthenticated) {
     const loginUrl = req.nextUrl.clone();
     loginUrl.pathname = '/login';
-    loginUrl.searchParams.set('from', pathname);
+    // Keep the query string inside `from` so deep links survive login — e.g.
+    // the POS activation QR (?terminal=…&code=…) must not force reps to
+    // retype codes after signing in.
+    loginUrl.search = '';
+    loginUrl.searchParams.set('from', `${pathname}${req.nextUrl.search}`);
     return NextResponse.redirect(loginUrl);
   }
 

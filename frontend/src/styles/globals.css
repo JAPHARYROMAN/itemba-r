@@ -47,6 +47,11 @@
   --aurora-danger: #ef4444;
   --aurora-danger-bg: #fee2e2;
   --aurora-danger-text: #7f1d1d;
+  /* Subtle status fills (POS chips/banners). var() resolves at usage time,
+     so the .dark -bg overrides flow through without dark-scope duplicates. */
+  --aurora-success-subtle: var(--aurora-success-bg);
+  --aurora-warning-subtle: var(--aurora-warning-bg);
+  --aurora-danger-subtle: var(--aurora-danger-bg);
   --aurora-info: #06b6d4;
   --aurora-info-bg: #cffafe;
   --aurora-info-text: #083344;

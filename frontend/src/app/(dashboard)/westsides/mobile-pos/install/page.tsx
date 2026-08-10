@@ -26,7 +26,7 @@ const STEPS = [
   },
   {
     title: 'Open counter sales',
-    body: 'Launch Mobile POS to continue into the Westsides sale-entry workflow.',
+    body: 'Launch Itemba POS to start selling from this phone.',
   },
 ];
 
