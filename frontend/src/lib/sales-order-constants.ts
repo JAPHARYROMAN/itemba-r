@@ -1,8 +1,7 @@
-// Shared sales-order constants used by both the Operations sales-order screen
-// (app/(dashboard)/operations/sales-orders/page.tsx) and the Mobile POS
-// (components/westsides/mobile-pos/mobile-pos-sale-entry.tsx) so the two
-// experiences cannot drift apart. Values mirror the backend SalesType /
-// SalesPaymentMethod / CashAccountType enums.
+// Shared sales-order constants used by the Operations sales-order screen
+// (app/(dashboard)/operations/sales-orders/page.tsx) and the Westsides
+// quick-sale flow so the experiences cannot drift apart. Values mirror the
+// backend SalesType / SalesPaymentMethod / CashAccountType enums.
 
 export const SALES_TYPES = [
   'CASH_SALE',
