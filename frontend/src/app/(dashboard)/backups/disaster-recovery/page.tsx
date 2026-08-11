@@ -21,7 +21,6 @@ const runbookSteps = [
 const readinessChecks = [
   { label: 'Backup jobs active', href: '/backups/jobs', owner: 'Platform admin' },
   { label: 'Recent successful backup run exists', href: '/backups/runs', owner: 'Platform admin' },
-  { label: 'Restore test evidence is current', href: '/backups/restore-tests', owner: 'IT operations' },
   { label: 'Critical accounts and permissions reviewed', href: '/security/user-profiles', owner: 'Security admin' },
   { label: 'Cash, sales, purchase, and report smoke checks documented', href: '/reports', owner: 'Business owner' },
 ];
@@ -50,12 +49,6 @@ export default function DisasterRecoveryPage() {
             className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             Backup Runs
-          </Link>
-          <Link
-            href="/backups/restore-tests"
-            className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-          >
-            Restore Tests
           </Link>
         </div>
       </div>

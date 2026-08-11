@@ -419,40 +419,6 @@ export const REPORTS_CATALOG: CatalogEntry[] = [
     frontendPath: '/finance/reports',
   },
 
-  // ── GROUP CROSS-SECTOR (R4) ──────────────────────────────────────────────
-  {
-    id: 'group.sales',
-    sector: 'FINANCE',
-    category: 'Group Cross-sector',
-    name: 'Group Sales',
-    description: 'Confirmed sales across all companies, with company + division breakdown.',
-    scopes: ['GROUP'],
-    permission: 'finance.reports.view',
-    apiPath: '/group-reports/sales',
-    frontendPath: '/reports',
-  },
-  {
-    id: 'group.activity-feed',
-    sector: 'FINANCE',
-    category: 'Group Cross-sector',
-    name: 'Group Activity Feed',
-    description: 'Recent material events across every sector (audit-sourced).',
-    scopes: ['GROUP'],
-    permission: 'finance.reports.view',
-    apiPath: '/group-reports/activity-feed',
-    frontendPath: '/reports',
-  },
-  {
-    id: 'group.audit-trail',
-    sector: 'COMPLIANCE',
-    category: 'Audit',
-    name: 'Group Audit Trail',
-    description: 'Filterable audit log with paginated rows + entity/action histograms.',
-    scopes: ['GROUP', 'COMPANY'],
-    permission: 'finance.reports.view',
-    apiPath: '/group-reports/audit-trail',
-    frontendPath: '/reports',
-  },
 
   // ── HR ───────────────────────────────────────────────────────────────────
   {

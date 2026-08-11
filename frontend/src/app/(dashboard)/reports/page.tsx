@@ -117,16 +117,9 @@ const QUICK_REPORT_ROOMS = [
     href: '/hr/reports',
     icon: <Users className="h-5 w-5" />,
   },
-  {
-    title: 'Compliance Reports',
-    description: 'Tax, obligations, documents, control evidence, and compliance readiness.',
-    href: '/compliance/reports',
-    icon: <ShieldCheck className="h-5 w-5" />,
-  },
 ];
 
 const PRIORITY_REPORT_IDS = [
-  'group.sales',
   'ops.sales-summary',
   'ops.stock-valuation',
   'ops.purchase-summary',
@@ -141,7 +134,6 @@ const PRIORITY_REPORT_IDS = [
 
 const KNOWN_MODULE_PATHS = new Set([
   '/accounting-engine/financial-statements',
-  '/compliance/reports',
   '/finance/reports',
   '/hr/reports',
   '/hr/reports/statutory',

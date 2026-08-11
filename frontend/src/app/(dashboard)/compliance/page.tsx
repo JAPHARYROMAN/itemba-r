@@ -55,7 +55,6 @@ const SECTIONS = [
   { href: '/compliance/events', label: 'Events Log', desc: 'Filings, payments, audits' },
   { href: '/compliance/evidence-packs', label: 'Evidence Packs', desc: 'Audit & tax bundles' },
   { href: '/compliance/exports', label: 'Exports', desc: 'Compliance data extracts' },
-  { href: '/compliance/reports', label: 'Reports', desc: 'Summaries & analytics' },
   { href: '/compliance/statutory-rules', label: 'Statutory Rules', desc: 'NSSF, PAYE, SDL rules' },
   {
     href: '/compliance/tax-authorities',

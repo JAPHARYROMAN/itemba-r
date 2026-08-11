@@ -558,18 +558,6 @@ export const NAV: NavItem[] = [
         permission: 'hr.contracts.view',
       },
       {
-        href: '/hr/work-shifts',
-        label: 'Work Shifts',
-        iconKey: 'settings',
-        permission: 'hr.shifts.view',
-      },
-      {
-        href: '/hr/shift-schedules',
-        label: 'Shift Schedules',
-        iconKey: 'clipboardList',
-        permission: 'hr.schedules.view',
-      },
-      {
         href: '/hr/attendance',
         label: 'Attendance',
         iconKey: 'clipboardList',
@@ -646,18 +634,6 @@ export const NAV: NavItem[] = [
         label: 'Salary Advances',
         iconKey: 'creditCard',
         permission: 'hr.advances.view',
-      },
-      {
-        href: '/hr/performance',
-        label: 'Performance',
-        iconKey: 'barChart',
-        permission: 'hr.performance.view',
-      },
-      {
-        href: '/hr/hr-documents',
-        label: 'HR Documents',
-        iconKey: 'document',
-        permission: 'hr.documents.view',
       },
       { href: '/hr/reports', label: 'Reports', iconKey: 'barChart', permission: 'hr.reports.view' },
     ],
@@ -769,12 +745,6 @@ export const NAV: NavItem[] = [
         iconKey: 'settings',
         permission: 'data_exports.view',
       },
-      {
-        href: '/compliance/reports',
-        label: 'Reports',
-        iconKey: 'barChart',
-        permission: 'compliance.reports.view',
-      },
     ],
   },
   {
@@ -783,12 +753,6 @@ export const NAV: NavItem[] = [
     children: [
       { href: '/reports', label: 'Catalog', iconKey: 'barChart' },
       { href: '/reports/run', label: 'Run Report', iconKey: 'play', permission: 'report_runs.create' },
-      {
-        href: '/reports/saved-views',
-        label: 'Saved Views',
-        iconKey: 'bookmark',
-        permission: 'saved_report_views.view',
-      },
       {
         href: '/reports/scheduled',
         label: 'Scheduled Reports',
@@ -862,80 +826,6 @@ export const NAV: NavItem[] = [
     ],
   },
   { href: '/tasks', label: 'Tasks', iconKey: 'clipboardList', permission: 'tasks.view' },
-  {
-    href: '/internal-controls',
-    label: 'Internal Controls',
-    iconKey: 'shieldCheck',
-    permission: 'internal_controls.view',
-  },
-  // === Integrations & API (M13) ===
-  {
-    label: 'Integrations & API',
-    iconKey: 'integration',
-    permission: 'integrations.dashboard.view',
-    children: [
-      {
-        href: '/integrations',
-        label: 'Dashboard',
-        iconKey: 'barChart',
-        permission: 'integrations.dashboard.view',
-      },
-      {
-        href: '/integrations/providers',
-        label: 'Providers',
-        iconKey: 'integration',
-        permission: 'integration_providers.view',
-      },
-      {
-        href: '/integrations/connections',
-        label: 'Connections',
-        iconKey: 'server',
-        permission: 'integration_connections.view',
-      },
-      {
-        href: '/integrations/events',
-        label: 'Events Log',
-        iconKey: 'clipboardList',
-        permission: 'integration_events.view',
-      },
-      {
-        href: '/integrations/webhooks',
-        label: 'Webhook Endpoints',
-        iconKey: 'webhook',
-        permission: 'webhook_endpoints.view',
-      },
-      {
-        href: '/integrations/webhook-events',
-        label: 'Webhook Events',
-        iconKey: 'clipboardList',
-        permission: 'webhook_events.view',
-      },
-      {
-        href: '/integrations/payments',
-        label: 'External Payments',
-        iconKey: 'creditCard',
-        permission: 'external_payments.view',
-      },
-      {
-        href: '/integrations/messages',
-        label: 'Messages',
-        iconKey: 'bell',
-        permission: 'external_messages.view',
-      },
-      {
-        href: '/integrations/templates',
-        label: 'Templates',
-        iconKey: 'fileText',
-        permission: 'message_templates.view',
-      },
-      {
-        href: '/integrations/mappings',
-        label: 'Mappings',
-        iconKey: 'clipboardList',
-        permission: 'integration_mappings.view',
-      },
-    ],
-  },
   // === BI & Executive Intelligence (M12) ===
   // === Security & Audit (M14) ===
   {
@@ -1005,12 +895,6 @@ export const NAV: NavItem[] = [
         permission: 'backup_runs.view',
       },
       {
-        href: '/backups/restore-tests',
-        label: 'Restore Tests',
-        iconKey: 'Database',
-        permission: 'restore_tests.view',
-      },
-      {
         href: '/backups/disaster-recovery',
         label: 'Disaster Recovery',
         iconKey: 'Database',
@@ -1060,17 +944,13 @@ export const NAV: NavItem[] = [
     children: [
       { href: '/procurement', label: 'Dashboard', iconKey: 'procurement' },
       { href: '/procurement/requisitions', label: 'Requisitions', iconKey: 'document' },
-      { href: '/procurement/rfqs', label: 'RFQs', iconKey: 'document' },
       {
-        href: '/procurement/supplier-quotations',
-        label: 'Supplier Quotations',
+        href: '/procurement/grns',
+        label: 'Goods Received',
         iconKey: 'document',
       },
-      { href: '/procurement/bid-comparisons', label: 'Bid Comparisons', iconKey: 'document' },
-      { href: '/procurement/grns', label: 'Goods Received', iconKey: 'document' },
       { href: '/procurement/supplier-invoices', label: 'Supplier Invoices', iconKey: 'document' },
       { href: '/procurement/three-way-matching', label: 'Three-Way Match', iconKey: 'document' },
-      { href: '/procurement/plans', label: 'Procurement Plans', iconKey: 'document' },
     ],
   },
   // === CRM / SRM (M14.5) ===
@@ -1080,11 +960,8 @@ export const NAV: NavItem[] = [
     permission: 'crm.dashboard',
     children: [
       { href: '/crm', label: 'Dashboard', iconKey: 'crm' },
-      { href: '/crm/contact-persons', label: 'Contact Persons', iconKey: 'users' },
-      { href: '/crm/communication-logs', label: 'Communications', iconKey: 'document' },
       { href: '/crm/credit-profiles', label: 'Credit Profiles', iconKey: 'document' },
       { href: '/crm/supplier-performance', label: 'Supplier Performance', iconKey: 'document' },
-      { href: '/crm/customer-segments', label: 'Customer Segments', iconKey: 'document' },
       { href: '/crm/customer-statements', label: 'Customer Statements', iconKey: 'document' },
       { href: '/crm/supplier-statements', label: 'Supplier Statements', iconKey: 'document' },
     ],

@@ -62,7 +62,8 @@ interface ThreeWayMatch {
 }
 
 const today = new Date().toISOString().slice(0, 10);
-const MATCH_STATUSES = ['MATCHED', 'PARTIAL_MATCH', 'VARIANCE', 'FAILED', 'MANUAL_OVERRIDE'];
+// Only statuses the server actually computes — there is no manual-override action.
+const MATCH_STATUSES = ['MATCHED', 'PARTIAL_MATCH', 'VARIANCE', 'FAILED'];
 
 function optionLabel(row: { name?: string; code?: string | null }) {
   return row.code ? `${row.code} - ${row.name}` : (row.name ?? '');

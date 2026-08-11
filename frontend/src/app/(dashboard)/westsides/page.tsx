@@ -695,18 +695,6 @@ export default function WestsidesCockpitPage() {
               hint={`${formatCount(model.outOfStock)} out | ${formatCount(model.lowStock)} low`}
               tone={model.outOfStock > 0 ? 'danger' : model.lowStock > 0 ? 'warn' : 'good'}
             />
-            <KpiTile
-              label="Open folios"
-              value={formatCount(model.openFoliosCount)}
-              hint={`${formatMoney(model.openFoliosTotal, true)} unsettled`}
-              tone={model.openFoliosTotal > 0 ? 'warn' : 'neutral'}
-            />
-            <KpiTile
-              label="Occupancy"
-              value={model.rooms.total > 0 ? formatPercent(model.rooms.occupancyRate) : 'No rooms'}
-              hint={`${formatCount(model.rooms.inHouseGuests)} in-house guests`}
-              tone={model.rooms.total > 0 && model.rooms.occupancyRate >= 70 ? 'good' : 'neutral'}
-            />
           </section>
 
           <ReadinessCommandPanel readiness={model.readiness} />
@@ -918,53 +906,6 @@ export default function WestsidesCockpitPage() {
               />
             </Card>
 
-            <Card padding="none" className="overflow-hidden">
-              <SectionHeader
-                eyebrow="Hospitality"
-                title="Rooms posture"
-                subtitle="Occupancy and readiness."
-              />
-              <div className="p-4 space-y-4">
-                {model.rooms.total === 0 ? (
-                  <EmptyLine text="No rooms configured." tone="neutral" />
-                ) : (
-                  <>
-                    <ProgressSummary
-                      label="Occupancy"
-                      value={formatPercent(model.rooms.occupancyRate)}
-                      pct={model.rooms.occupancyRate}
-                      tone={model.rooms.occupancyRate >= 70 ? 'good' : 'brand'}
-                    />
-                    <div className="grid grid-cols-2 gap-2">
-                      <InlineStat
-                        label="Occupied"
-                        value={formatCount(model.rooms.occupied)}
-                        tone="brand"
-                        compact
-                      />
-                      <InlineStat
-                        label="Dirty"
-                        value={formatCount(model.rooms.dirty)}
-                        tone="warn"
-                        compact
-                      />
-                      <InlineStat
-                        label="Available"
-                        value={formatCount(model.rooms.available)}
-                        tone="good"
-                        compact
-                      />
-                      <InlineStat
-                        label="OOO"
-                        value={formatCount(model.rooms.outOfOrder)}
-                        tone="neutral"
-                        compact
-                      />
-                    </div>
-                  </>
-                )}
-              </div>
-            </Card>
           </section>
 
           <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">

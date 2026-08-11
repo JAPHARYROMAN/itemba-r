@@ -53,7 +53,6 @@ export default function BackupDashboardPage() {
   const quickLinks = [
     { label: 'Backup Jobs', href: '/backups/jobs', desc: 'Configure scheduled backup jobs' },
     { label: 'Backup Runs', href: '/backups/runs', desc: 'View backup run history' },
-    { label: 'Restore Tests', href: '/backups/restore-tests', desc: 'Verify restore procedures' },
     { label: 'Disaster Recovery', href: '/backups/disaster-recovery', desc: 'Manage DR plans' },
   ];
 

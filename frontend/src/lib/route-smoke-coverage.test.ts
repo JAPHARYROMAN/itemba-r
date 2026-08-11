@@ -104,9 +104,37 @@ describe('route smoke coverage manifest', () => {
   });
 
   it('keeps every static app page discoverable through navigation or global search', () => {
+    // Kept in code but deliberately unlinked (simplification plan §2C / decision 7):
+    // admin/engineering tooling and the not-yet-live integrations surface stay
+    // reachable by URL only until the business needs them.
+    const intentionallyHidden = new Set([
+      '/api-gateway/logs',
+      '/background-jobs',
+      '/background-jobs/queues',
+      '/data-isolation',
+      '/data-isolation/issues',
+      '/data-isolation/test-runs',
+      '/integrations',
+      '/integrations/connections',
+      '/integrations/events',
+      '/integrations/mappings',
+      '/integrations/messages',
+      '/integrations/payments',
+      '/integrations/providers',
+      '/integrations/templates',
+      '/integrations/webhook-events',
+      '/integrations/webhooks',
+    ]);
     const hrefs = new Set(navigationSourceFiles.flatMap(hrefsFromSource));
-    const undiscoverableRoutes = staticRoutes.filter((route) => !hrefs.has(route));
+    const undiscoverableRoutes = staticRoutes.filter(
+      (route) => !hrefs.has(route) && !intentionallyHidden.has(route),
+    );
 
     expect(undiscoverableRoutes).toEqual([]);
+
+    const staleHiddenEntries = [...intentionallyHidden].filter(
+      (route) => !staticRoutes.includes(route) || hrefs.has(route),
+    );
+    expect(staleHiddenEntries).toEqual([]);
   });
 });

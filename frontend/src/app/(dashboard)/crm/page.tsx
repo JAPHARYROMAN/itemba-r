@@ -151,26 +151,11 @@ export default function CRMDashboardPage() {
   const status = readiness?.status ?? 'WARNING';
 
   const quickLinks = [
-    {
-      label: 'Contact Persons',
-      href: '/crm/contact-persons',
-      desc: 'Manage customer and supplier contacts',
-    },
-    {
-      label: 'Communication Logs',
-      href: '/crm/communication-logs',
-      desc: 'Track relationship activity and follow-ups',
-    },
     { label: 'Credit Profiles', href: '/crm/credit-profiles', desc: 'Customer credit risk review' },
     {
       label: 'Supplier Performance',
       href: '/crm/supplier-performance',
       desc: 'Supplier risk, quality, and performance',
-    },
-    {
-      label: 'Customer Segments',
-      href: '/crm/customer-segments',
-      desc: 'Govern relationship segmentation',
     },
     {
       label: 'Customer Statements',

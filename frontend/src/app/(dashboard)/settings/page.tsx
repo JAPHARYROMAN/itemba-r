@@ -255,7 +255,6 @@ export default function MasterSettingsPage() {
   const [scope, setScope] = useState<SettingScope | 'ALL'>('ALL');
   const [category, setCategory] = useState<SettingCategory | 'ALL'>('ALL');
   const [search, setSearch] = useState('');
-  const [showPlanned, setShowPlanned] = useState(false);
   const [showDirectory, setShowDirectory] = useState(false);
 
   const loadCatalog = useCallback(async () => {
@@ -288,7 +287,6 @@ export default function MasterSettingsPage() {
 
   const filteredEntries = useMemo(() => {
     let list = catalog?.entries ?? [];
-    if (!showPlanned) list = list.filter((entry) => entry.status !== 'PLANNED');
     if (scope !== 'ALL') list = list.filter((entry) => entry.scope === scope);
     if (category !== 'ALL') list = list.filter((entry) => entry.category === category);
 
@@ -305,7 +303,7 @@ export default function MasterSettingsPage() {
         SCOPE_META[entry.scope].label,
       ].some((value) => value.toLowerCase().includes(q));
     });
-  }, [catalog, category, scope, search, showPlanned]);
+  }, [catalog, category, scope, search]);
 
   const availableCategoryOptions = useMemo(() => {
     const categories = catalog?.categories ?? [];
@@ -321,7 +319,6 @@ export default function MasterSettingsPage() {
     setSearch('');
     setScope('ALL');
     setCategory('ALL');
-    setShowPlanned(false);
   };
 
   const resetMyWorkspace = async () => {
@@ -541,15 +538,6 @@ export default function MasterSettingsPage() {
                 </select>
               </label>
 
-              <label className="flex items-center gap-2 self-end rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
-                <input
-                  type="checkbox"
-                  checked={showPlanned}
-                  onChange={(event) => setShowPlanned(event.target.checked)}
-                  className="rounded border-slate-300"
-                />
-                <span style={{ color: 'var(--aurora-text-secondary)' }}>Include planned</span>
-              </label>
             </div>
           </Card>
 

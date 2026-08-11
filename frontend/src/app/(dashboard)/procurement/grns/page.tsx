@@ -143,7 +143,8 @@ interface GrnLinePayload {
 /** Purchase orders in these states can still receive stock (see PO service). */
 const RECEIVABLE_PO_STATUSES = ['CONFIRMED', 'PARTIALLY_RECEIVED'];
 
-const STATUSES = ['DRAFT', 'RECEIVED', 'INSPECTED', 'APPROVED', 'POSTED', 'REJECTED', 'CANCELLED'];
+// Only states the backend can actually reach (draft → receive → approve → post).
+const STATUSES = ['DRAFT', 'RECEIVED', 'APPROVED', 'POSTED'];
 
 function toNum(value: number | string | null | undefined): number {
   if (value === null || value === undefined || value === '') return 0;

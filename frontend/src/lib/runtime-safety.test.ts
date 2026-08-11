@@ -23,7 +23,6 @@ const HARDENED_JOB_BACKUP_PAGES = [
   'src/app/(dashboard)/backups/page.tsx',
   'src/app/(dashboard)/backups/jobs/page.tsx',
   'src/app/(dashboard)/backups/runs/page.tsx',
-  'src/app/(dashboard)/backups/restore-tests/page.tsx',
 ];
 
 const HARDENED_OPERATIONAL_READINESS_PAGES = [

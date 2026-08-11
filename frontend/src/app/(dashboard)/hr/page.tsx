@@ -67,9 +67,6 @@ const quickLinks = [
   { href: '/hr/leave-requests', label: 'Leave Requests', desc: 'Leave approvals' },
   { href: '/hr/payroll-runs', label: 'Payroll Runs', desc: 'Process payroll' },
   { href: '/hr/payroll-periods', label: 'Payroll Periods', desc: 'Manage pay periods' },
-  { href: '/hr/work-shifts', label: 'Work Shifts', desc: 'Shift management' },
-  { href: '/hr/shift-schedules', label: 'Shift Schedules', desc: 'Employee schedules' },
-  { href: '/hr/performance', label: 'Performance', desc: 'Performance reviews' },
   { href: '/hr/reports', label: 'Reports', desc: 'HR analytics' },
 ];
 

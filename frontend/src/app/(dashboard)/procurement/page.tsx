@@ -27,7 +27,6 @@ interface ProcurementReadiness {
 
 interface ProcurementSummary {
   openRequisitions: number;
-  pendingRfqs: number;
   pendingGrns: number;
   pendingInvoices: number;
   overdueRequisitions: number;
@@ -35,7 +34,6 @@ interface ProcurementSummary {
   committedAmount: number;
   invoiceOutstandingAmount: number;
   threeWayMatchVariances: number;
-  activeProcurementPlans: number;
   readiness?: ProcurementReadiness;
 }
 
@@ -87,7 +85,6 @@ function detailPreview(details: ReadinessCheck['details']) {
 export default function ProcurementDashboardPage() {
   const [stats, setStats] = useState<ProcurementSummary>({
     openRequisitions: 0,
-    pendingRfqs: 0,
     pendingGrns: 0,
     pendingInvoices: 0,
     overdueRequisitions: 0,
@@ -95,7 +92,6 @@ export default function ProcurementDashboardPage() {
     committedAmount: 0,
     invoiceOutstandingAmount: 0,
     threeWayMatchVariances: 0,
-    activeProcurementPlans: 0,
   });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -111,7 +107,6 @@ export default function ProcurementDashboardPage() {
       const data = result.data ?? result;
       setStats({
         openRequisitions: data.openRequisitions ?? 0,
-        pendingRfqs: data.pendingRfqs ?? 0,
         pendingGrns: data.pendingGrns ?? 0,
         pendingInvoices: data.pendingInvoices ?? 0,
         overdueRequisitions: data.requisitions?.overdue ?? 0,
@@ -119,7 +114,6 @@ export default function ProcurementDashboardPage() {
         committedAmount: data.purchaseOrders?.committedAmount ?? 0,
         invoiceOutstandingAmount: data.invoices?.outstandingAmount ?? 0,
         threeWayMatchVariances: data.receiving?.threeWayMatchVariances ?? 0,
-        activeProcurementPlans: data.activeProcurementPlans ?? 0,
         readiness: data.readiness,
       });
     } catch (err) {
@@ -147,21 +141,6 @@ export default function ProcurementDashboardPage() {
       desc: 'Request, approve, and convert demand',
     },
     {
-      label: 'Requests for Quotation',
-      href: '/procurement/rfqs',
-      desc: 'Competitive sourcing and supplier invitations',
-    },
-    {
-      label: 'Supplier Quotations',
-      href: '/procurement/supplier-quotations',
-      desc: 'Supplier offers, validity, and pricing',
-    },
-    {
-      label: 'Bid Comparisons',
-      href: '/procurement/bid-comparisons',
-      desc: 'Compare suppliers and approve awards',
-    },
-    {
       label: 'Purchase Orders',
       href: '/operations/purchase-orders',
       desc: 'Committed spend and supplier orders',
@@ -182,11 +161,6 @@ export default function ProcurementDashboardPage() {
       desc: 'PO, GRN, and invoice variance control',
     },
     {
-      label: 'Procurement Plans',
-      href: '/procurement/plans',
-      desc: 'Budgeted annual and periodic procurement plans',
-    },
-    {
       label: 'Suppliers',
       href: '/operations/suppliers',
       desc: 'Supplier master data and active vendor base',
@@ -198,7 +172,7 @@ export default function ProcurementDashboardPage() {
       <div className="space-y-6 p-6">
         <PageHeader
           title="Procurement"
-          subtitle="Procure-to-pay command center, readiness controls, sourcing, receiving, and AP handoff"
+          subtitle="Procure-to-pay command center: requisitions, orders, receiving, and AP handoff"
         />
         <SkeletonCardGrid count={4} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" />
         <Card className="p-5">
@@ -211,7 +185,7 @@ export default function ProcurementDashboardPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Procurement"
-        subtitle="Procure-to-pay command center, readiness controls, sourcing, receiving, and AP handoff"
+        subtitle="Procure-to-pay command center: requisitions, orders, receiving, and AP handoff"
         actions={
           <button
             type="button"
@@ -233,7 +207,7 @@ export default function ProcurementDashboardPage() {
 
       <div className="aurora-stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Open Requisitions" value={stats.openRequisitions} variant="blue" />
-        <StatCard label="Pending RFQs" value={stats.pendingRfqs} variant="amber" />
+        <StatCard label="Overdue POs" value={stats.overduePurchaseOrders} variant="amber" />
         <StatCard label="Pending GRNs" value={stats.pendingGrns} variant="purple" />
         <StatCard label="Pending Invoices" value={stats.pendingInvoices} variant="red" />
       </div>
@@ -367,20 +341,6 @@ export default function ProcurementDashboardPage() {
                 </div>
                 <div className="mt-1 text-lg font-semibold" style={{ color: 'var(--aurora-text)' }}>
                   {stats.threeWayMatchVariances}
-                </div>
-              </div>
-              <div
-                className="rounded-lg border p-3"
-                style={{ borderColor: 'var(--aurora-border)' }}
-              >
-                <div
-                  className="text-[11px] uppercase"
-                  style={{ color: 'var(--aurora-text-muted)' }}
-                >
-                  Active Plans
-                </div>
-                <div className="mt-1 text-lg font-semibold" style={{ color: 'var(--aurora-text)' }}>
-                  {stats.activeProcurementPlans}
                 </div>
               </div>
             </div>

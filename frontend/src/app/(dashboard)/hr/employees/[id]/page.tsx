@@ -693,8 +693,8 @@ export default function EmployeeDetailPage() {
       {tab === 'documents' && (
         <PlaceholderCard
           text="Documents will appear here."
-          linkLabel="View HR Documents →"
-          linkHref="/hr/hr-documents"
+          linkLabel="View Documents Vault →"
+          linkHref="/group-control/documents"
         />
       )}
 
