@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
 
 interface ExternalMessage {
@@ -34,22 +34,25 @@ export default function ExternalMessagesPage() {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     const params = new URLSearchParams({ limit: '50' });
     if (filterChannel) params.set('channel', filterChannel);
     if (filterStatus) params.set('status', filterStatus);
     fetch(`/api/backend/external-messages?${params}`)
       .then(r => r.json())
       .then(data => setMessages(unwrapList(data)))
-      .catch(console.error)
+      .catch(() => { setMessages([]); setLoadError('Failed to load external messages.'); })
       .finally(() => setLoading(false));
   }, [filterChannel, filterStatus]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    fetch('/api/backend/message-templates?limit=100').then(r => r.json()).then(data => setTemplates(unwrapList(data))).catch(() => {});
+    // optional lookup — on failure the template dropdown simply stays empty
+    fetch('/api/backend/message-templates?limit=100').then(r => r.json()).then(data => setTemplates(unwrapList(data))).catch(() => undefined);
   }, []);
 
   async function send() {
@@ -86,7 +89,7 @@ export default function ExternalMessagesPage() {
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Btn, ConfirmDialog, FormInput, FormSelect, Modal, PageSpinner, showToast } from '@/components/ui';
+import { Btn, ConfirmDialog, ErrorState, FormInput, FormSelect, Modal, PageSpinner, showToast } from '@/components/ui';
 import { ApiError, backendDelete, backendList, backendPatch, backendPost } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
 
@@ -109,14 +109,16 @@ export default function BackupJobsPage() {
 
   const [data, setData] = useState<BackupJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<BackupJob | null>(null);
   const [deleting, setDeleting] = useState<BackupJob | null>(null);
 
   const load = useCallback(() => {
+    setLoadError('');
     backendList<BackupJob>('/backup-jobs')
       .then(setData)
-      .catch(() => {})
+      .catch(() => { setData([]); setLoadError('Failed to load backup jobs.'); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -146,6 +148,8 @@ export default function BackupJobsPage() {
 
       {loading ? (
         <PageSpinner label="Loading records" />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={load} />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
           <table className="w-full text-sm">

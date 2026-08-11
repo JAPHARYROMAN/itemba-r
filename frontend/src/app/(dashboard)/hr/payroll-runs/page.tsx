@@ -229,7 +229,10 @@ function PayrollRunsContent() {
           // Cash + Bank accounts are the natural disbursing accounts.
           setAccounts(list.filter((a) => a.accountType === 'ASSET'));
         } catch {
-          // Fall through — operator can still submit without selection.
+          // Non-blocking: submitting without a selection uses the backend default account.
+          setPayError(
+            'Could not load the account list — you can still submit and the default disbursing account will be used.',
+          );
         }
       }
       return;

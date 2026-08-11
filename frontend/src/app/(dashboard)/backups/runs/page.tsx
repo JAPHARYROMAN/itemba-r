@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { PageSpinner } from '@/components/ui';
+import { ErrorState, PageSpinner } from '@/components/ui';
 import { backendList } from '@/lib/api-client';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -15,11 +15,12 @@ const STATUS_COLORS: Record<string, string> = {
 export default function BackupRunsPage() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     backendList<any>('/backup-runs')
       .then(setData)
-      .catch(() => {})
+      .catch(() => setLoadError('Failed to load backup runs.'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -32,6 +33,8 @@ export default function BackupRunsPage() {
 
       {loading ? (
         <PageSpinner label="Loading records" />
+      ) : loadError ? (
+        <ErrorState message={loadError} />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
           <table className="w-full text-sm">

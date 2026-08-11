@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
 
 interface Connection {
@@ -32,24 +32,27 @@ export default function IntegrationConnectionsPage() {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     const params = new URLSearchParams({ limit: '50' });
     if (filterStatus) params.set('status', filterStatus);
     if (filterEnv) params.set('environment', filterEnv);
     fetch(`/api/backend/integration-connections?${params}`)
       .then(r => r.json())
       .then(data => setConnections(unwrapList(data)))
-      .catch(console.error)
+      .catch(() => { setConnections([]); setLoadError('Failed to load integration connections.'); })
       .finally(() => setLoading(false));
   }, [filterStatus, filterEnv]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    fetch('/api/backend/integration-providers?limit=100').then(r => r.json()).then(data => setProviders(unwrapList(data))).catch(() => {});
+    // optional lookup — on failure the provider dropdown simply stays empty
+    fetch('/api/backend/integration-providers?limit=100').then(r => r.json()).then(data => setProviders(unwrapList(data))).catch(() => undefined);
   }, []);
 
   async function save() {
@@ -109,7 +112,7 @@ export default function IntegrationConnectionsPage() {
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>

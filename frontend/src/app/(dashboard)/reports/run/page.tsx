@@ -387,7 +387,8 @@ function ReportRunContent() {
             : [];
         setCompanies(rows);
       })
-      .catch(() => {});
+      // Company-scoped reports cannot run without this list, so surface the failure.
+      .catch(() => setError('Failed to load companies. Refresh the page to try again.'));
   }, []);
 
   useEffect(() => {
@@ -406,7 +407,8 @@ function ReportRunContent() {
             : [];
         setDivisions(rows);
       })
-      .catch(() => {});
+      // Optional division filter only: reports still run company-wide if this fails.
+      .catch(() => undefined);
   }, [companyId]);
 
   // Build the URL for the chosen entry, filling :id / {companyId} placeholders
@@ -696,6 +698,7 @@ function ReportRunContent() {
           const manifestPayload = await manifestRes.json();
           setRunManifest((manifestPayload.data ?? manifestPayload) as ViewerRunManifest);
         }
+        // eslint-disable-next-line no-restricted-syntax -- run-manifest logging is best-effort provenance; the report itself already rendered and its own errors are surfaced above
       } catch {
         // Report rendering remains available if manifest logging is temporarily unavailable.
       }
@@ -822,6 +825,7 @@ function ReportRunContent() {
         showToast('success', `${format} export audited`, audit.audit?.auditHash);
         void loadExportHistory();
       }
+      // eslint-disable-next-line no-restricted-syntax -- export-audit write is deliberately best-effort: the download must proceed even when the audit endpoint is down (non-ok responses are already ignored above)
     } catch {
       // Keep client-side export usable if the audit write is temporarily unavailable.
     } finally {

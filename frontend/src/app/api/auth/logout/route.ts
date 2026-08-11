@@ -38,9 +38,8 @@ export async function POST(req: NextRequest) {
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({ refreshToken }),
-    }).catch(() => {
-      /* ignore — still clear cookies */
-    });
+      // Backend revoke is best-effort — cookies are cleared regardless.
+    }).catch(() => undefined);
   }
 
   const res = NextResponse.json({ message: 'Logged out' });

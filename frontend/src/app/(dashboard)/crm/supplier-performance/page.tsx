@@ -139,15 +139,20 @@ export default function SupplierPerformancePage() {
   const [data, setData] = useState<SupplierPerf[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<SupplierPerf | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
+    setError('');
     fetch('/api/backend/supplier-performance')
       .then(r => r.json())
       .then(res => setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []))
-      .catch(() => {})
+      .catch((err) => {
+        setData([]);
+        setError(err instanceof Error ? err.message : 'Failed to load supplier performance records');
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -157,7 +162,8 @@ export default function SupplierPerformancePage() {
     fetch('/api/backend/companies?limit=100')
       .then((r) => r.json())
       .then((j) => setCompanies(j.data?.data ?? j.data ?? []))
-      .catch(() => {});
+      // Company options only enrich the modal dropdown and table names (raw ids remain as fallback).
+      .catch(() => undefined);
   }, []);
 
   const onSaved = () => { setCreating(false); setEditing(null); load(); };
@@ -173,6 +179,11 @@ export default function SupplierPerformancePage() {
         <PageToolbar actions={canCreate ? <Btn variant="primary" onClick={() => setCreating(true)}>+ New Record</Btn> : null} />
       </div>
 
+      {error && (
+        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
       {loading ? (
         <PageSpinner label="Loading records" />
       ) : (

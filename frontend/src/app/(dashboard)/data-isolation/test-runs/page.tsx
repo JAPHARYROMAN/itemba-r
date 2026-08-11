@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Btn, Modal, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { Btn, ErrorState, Modal, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { ApiError, backendPost, backendPut } from '@/lib/api-client';
 import Link from 'next/link';
@@ -138,6 +138,7 @@ export default function DataIsolationTestRunsPage() {
 
   const [testRuns, setTestRuns] = useState<TestRun[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [runType, setRunType] = useState('COMPANY_SCOPE');
   const [saving, setSaving] = useState(false);
@@ -147,10 +148,11 @@ export default function DataIsolationTestRunsPage() {
 
   const fetchTestRuns = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     fetch('/api/backend/data-isolation-tests')
       .then(r => r.json())
       .then(res => setTestRuns(res.data ?? res.testRuns ?? res ?? []))
-      .catch(() => {})
+      .catch(() => { setTestRuns([]); setLoadError('Failed to load isolation test runs.'); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -211,6 +213,8 @@ export default function DataIsolationTestRunsPage() {
           <tbody>
             {loading ? (
               <tr><td colSpan={colCount} className="px-4 py-6"><PageSpinner label="Loading records" className="py-8" /></td></tr>
+            ) : loadError ? (
+              <tr><td colSpan={colCount} className="px-4 py-6"><ErrorState message={loadError} onRetry={fetchTestRuns} /></td></tr>
             ) : testRuns.length === 0 ? (
               <tr><td colSpan={colCount} className="px-4 py-10 text-center text-gray-400">No test runs found</td></tr>
             ) : testRuns.map((t) => (

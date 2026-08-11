@@ -180,18 +180,21 @@ export default function AuditLogsPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [entityTypes, setEntityTypes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [selected, setSelected] = useState<AuditLog | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!canView) return;
+    // Filter-dropdown enrichment only: on failure the selects just show fewer
+    // options while the log table still loads, so silence is safe here.
     void backendPage<Company>('companies', { query: { limit: 100 } })
       .then((page) => setCompanies(page.data))
-      .catch(() => {});
+      .catch(() => undefined);
     void backendGet<string[]>('audit-logs/entity-types')
       .then((types) => setEntityTypes(Array.isArray(types) ? types : []))
-      .catch(() => {});
+      .catch(() => undefined);
   }, [canView]);
 
   useEffect(() => {
@@ -201,6 +204,7 @@ export default function AuditLogsPage() {
     const { signal } = abortRef.current;
 
     setLoading(true);
+    setLoadError('');
     (async () => {
       try {
         const logs = await backendPage<AuditLog>('audit-logs', {
@@ -218,8 +222,11 @@ export default function AuditLogsPage() {
           },
         });
         setResult(logs);
-      } catch {
-        /* aborted */
+      } catch (err) {
+        // A superseded request aborts itself — only real failures are surfaced.
+        if ((err as { name?: string })?.name !== 'AbortError') {
+          setLoadError(err instanceof Error ? err.message : 'Failed to load audit logs');
+        }
       } finally {
         setLoading(false);
       }
@@ -377,6 +384,12 @@ export default function AuditLogsPage() {
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {loadError}
+        </div>
+      )}
 
       {/* Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">

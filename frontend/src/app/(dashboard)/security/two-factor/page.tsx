@@ -1,17 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { PageSpinner } from '@/components/ui';
+import { ErrorState, PageSpinner } from '@/components/ui';
 import { backendList } from '@/lib/api-client';
 
 export default function TwoFactorAuthPage() {
   const [profiles, setProfiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     backendList<any>('user-security-profiles')
       .then(setProfiles)
-      .catch(() => {})
+      .catch(() => setLoadError('Failed to load 2FA statistics.'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -43,6 +44,8 @@ export default function TwoFactorAuthPage() {
 
       {loading ? (
         <PageSpinner label="Loading records" />
+      ) : loadError ? (
+        <ErrorState message={loadError} />
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

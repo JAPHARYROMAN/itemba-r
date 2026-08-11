@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Card, PageHeader, PageToolbar, StatusBadge, Btn, PageSpinner, StatCard } from '@/components/ui';
+import { Card, PageHeader, PageToolbar, StatusBadge, Btn, PageSpinner, StatCard, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
 
 interface ExternalPayment {
@@ -25,9 +25,11 @@ export default function ExternalPaymentsPage() {
   const [filterContextType, setFilterContextType] = useState('');
   const [filterMethod, setFilterMethod] = useState('');
   const [actionId, setActionId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     const params = new URLSearchParams({ limit: '50' });
     if (filterStatus) params.set('status', filterStatus);
     if (filterContextType) params.set('paymentContextType', filterContextType);
@@ -44,7 +46,7 @@ export default function ExternalPaymentsPage() {
           pending: list.filter(p => p.status === 'PENDING').length,
         });
       })
-      .catch(console.error)
+      .catch(() => { setPayments([]); setLoadError('Failed to load external payments.'); })
       .finally(() => setLoading(false));
   }, [filterStatus, filterContextType, filterMethod]);
 
@@ -84,7 +86,7 @@ export default function ExternalPaymentsPage() {
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>

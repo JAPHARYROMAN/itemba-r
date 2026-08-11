@@ -890,15 +890,14 @@ function useGrnDetail(grnId: string | null) {
         const byProduct: Record<string, string> = {};
         const byUnit: Record<string, string> = {};
         if (item.purchaseOrderId) {
-          try {
-            const po = await backendGet<PoDetail>(`/purchase-orders/${item.purchaseOrderId}`);
-            for (const line of po.lines ?? []) {
-              byProduct[line.productId] = poLineLabel(line);
-              const unitLabel = line.unit?.symbol || line.unit?.name;
-              if (unitLabel) byUnit[line.unitId] = unitLabel;
-            }
-          } catch {
-            // Labels are cosmetic — fall back to raw ids if the PO is unreadable.
+          // Labels are cosmetic — fall back to raw ids if the PO is unreadable.
+          const po = await backendGet<PoDetail>(`/purchase-orders/${item.purchaseOrderId}`).catch(
+            () => undefined,
+          );
+          for (const line of po?.lines ?? []) {
+            byProduct[line.productId] = poLineLabel(line);
+            const unitLabel = line.unit?.symbol || line.unit?.name;
+            if (unitLabel) byUnit[line.unitId] = unitLabel;
           }
         }
         if (cancelled) return;

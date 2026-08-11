@@ -101,6 +101,7 @@ export default function AccountingLocksPage() {
   const [companyId, setCompanyId] = useState('');
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const [releasing, setReleasing] = useState<any | null>(null);
   const [releaseBusy, setReleaseBusy] = useState(false);
@@ -123,6 +124,7 @@ export default function AccountingLocksPage() {
       return;
     }
     setLoading(true);
+    setError('');
     fetch(`/api/backend/accounting-locks?companyId=${companyId}`)
       .then((r) => r.json())
       .then((res) =>
@@ -130,7 +132,10 @@ export default function AccountingLocksPage() {
           Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : [],
         ),
       )
-      .catch(() => {})
+      .catch((err) => {
+        setData([]);
+        setError(err instanceof Error ? err.message : 'Failed to load accounting locks');
+      })
       .finally(() => setLoading(false));
   }, [companyId]);
 
@@ -174,6 +179,11 @@ export default function AccountingLocksPage() {
         {canCreate && <Btn variant="primary" onClick={() => setCreating(true)}>+ New Lock</Btn>}
       </div>
 
+      {error && (
+        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
       {loading ? (
         <PageSpinner label="Loading records" />
       ) : (

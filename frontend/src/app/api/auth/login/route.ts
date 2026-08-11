@@ -91,7 +91,8 @@ export async function POST(req: NextRequest) {
       user = meJson.data ?? meJson;
     }
   } catch {
-    // Non-fatal: client will re-fetch via refreshUser()
+    // Non-fatal: client will re-fetch via refreshUser().
+    user = null;
   }
 
   const res = NextResponse.json({ user });

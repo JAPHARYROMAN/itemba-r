@@ -259,7 +259,11 @@ export default function UsersPage() {
       if (!res.ok) return;
       const json = await res.json();
       setCompanies(unwrapList(json));
-    } catch {/* non-fatal */}
+    } catch {
+      // Enrichment only (company-name resolution + modal dropdown): the users
+      // table still loads and surfaces its own errors, so silence is safe.
+      setCompanies([]);
+    }
   }, []);
 
   const fetchRoles = useCallback(async () => {
@@ -268,7 +272,10 @@ export default function UsersPage() {
       if (!res.ok) return;
       const json = await res.json();
       setRoles(unwrapList(json));
-    } catch {/* non-fatal */}
+    } catch {
+      // Enrichment only (assign-roles modal options); users table has its own error state.
+      setRoles([]);
+    }
   }, []);
 
   useEffect(() => {

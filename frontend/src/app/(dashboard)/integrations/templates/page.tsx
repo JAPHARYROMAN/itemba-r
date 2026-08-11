@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Card, PageHeader, PageToolbar, StatusBadge, Modal, ConfirmDialog, Btn, PageSpinner, FormInput, FormSelect, FormTextarea, showToast } from '@/components/ui';
+import { Card, PageHeader, PageToolbar, StatusBadge, Modal, ConfirmDialog, Btn, PageSpinner, FormInput, FormSelect, FormTextarea, showToast, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
 import { backendPost, backendPatch, backendDelete, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
@@ -35,13 +35,15 @@ export default function MessageTemplatesPage() {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     fetch('/api/backend/message-templates?limit=50')
       .then(r => r.json())
       .then(data => setTemplates(unwrapList(data)))
-      .catch(console.error)
+      .catch(() => { setTemplates([]); setLoadError('Failed to load message templates.'); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -93,7 +95,7 @@ export default function MessageTemplatesPage() {
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>

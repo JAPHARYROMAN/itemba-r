@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { PageSpinner } from '@/components/ui';
-import { backendList, backendPatch } from '@/lib/api-client';
+import { ErrorState, PageSpinner, showToast } from '@/components/ui';
+import { ApiError, backendList, backendPatch } from '@/lib/api-client';
 
 const STATUS_COLORS: Record<string, string> = {
   ACTIVE: 'bg-green-100 text-green-700',
@@ -13,12 +13,14 @@ const STATUS_COLORS: Record<string, string> = {
 export default function ActiveSessionsPage() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   function load() {
     setLoading(true);
+    setLoadError('');
     backendList<any>('active-sessions')
       .then(setData)
-      .catch(() => {})
+      .catch(() => { setData([]); setLoadError('Failed to load active sessions.'); })
       .finally(() => setLoading(false));
   }
 
@@ -27,9 +29,12 @@ export default function ActiveSessionsPage() {
   }, []);
 
   async function revoke(id: string) {
-    await backendPatch(`active-sessions/${id}/revoke`, { revokeReason: 'ADMIN_REVOKED' }).catch(
-      () => {},
-    );
+    try {
+      await backendPatch(`active-sessions/${id}/revoke`, { revokeReason: 'ADMIN_REVOKED' });
+    } catch (err) {
+      showToast('error', 'Failed to revoke session', err instanceof ApiError ? err.message : undefined);
+      return;
+    }
     load();
   }
 
@@ -42,6 +47,8 @@ export default function ActiveSessionsPage() {
 
       {loading ? (
         <PageSpinner label="Loading records" />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={load} />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
           <table className="w-full text-sm">

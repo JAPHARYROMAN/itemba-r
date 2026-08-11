@@ -1,18 +1,20 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { PageSpinner } from '@/components/ui';
+import { ErrorState, PageSpinner } from '@/components/ui';
 import { backendList, backendPut } from '@/lib/api-client';
 
 export default function JobQueuesPage() {
   const [queues, setQueues] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const fetchQueues = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     backendList<any>('/job-queue-configs')
       .then(setQueues)
-      .catch(() => {})
+      .catch(() => { setQueues([]); setLoadError('Failed to load job queue configurations.'); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -47,6 +49,8 @@ export default function JobQueuesPage() {
           <tbody>
             {loading ? (
               <tr><td colSpan={7} className="px-4 py-6"><PageSpinner label="Loading records" className="py-8" /></td></tr>
+            ) : loadError ? (
+              <tr><td colSpan={7} className="px-4 py-6"><ErrorState message={loadError} onRetry={fetchQueues} /></td></tr>
             ) : queues.length === 0 ? (
               <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400">No queues configured</td></tr>
             ) : queues.map((q: any) => (

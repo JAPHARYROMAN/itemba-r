@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { PageSpinner } from '@/components/ui';
+import { ErrorState, PageSpinner } from '@/components/ui';
 
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-200 text-red-900',
@@ -21,18 +21,20 @@ const STATUS_COLORS: Record<string, string> = {
 export default function DataIsolationIssuesPage() {
   const [issues, setIssues] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [severityFilter, setSeverityFilter] = useState('');
 
   const fetchIssues = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     const params = new URLSearchParams();
     if (statusFilter) params.set('status', statusFilter);
     if (severityFilter) params.set('severity', severityFilter);
     fetch(`/api/backend/data-isolation-issues?${params}`)
       .then(r => r.json())
       .then(res => setIssues(res.data ?? res.issues ?? res ?? []))
-      .catch(() => {})
+      .catch(() => { setIssues([]); setLoadError('Failed to load isolation issues.'); })
       .finally(() => setLoading(false));
   }, [statusFilter, severityFilter]);
 
@@ -86,6 +88,8 @@ export default function DataIsolationIssuesPage() {
           <tbody>
             {loading ? (
               <tr><td colSpan={8} className="px-4 py-6"><PageSpinner label="Loading records" className="py-8" /></td></tr>
+            ) : loadError ? (
+              <tr><td colSpan={8} className="px-4 py-6"><ErrorState message={loadError} onRetry={fetchIssues} /></td></tr>
             ) : issues.length === 0 ? (
               <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">No issues found</td></tr>
             ) : issues.map((issue: any) => (

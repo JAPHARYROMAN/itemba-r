@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { safeLocalStorageSet } from '@/lib/safe-storage';
 
 /**
  * Itemba POS is Swahili-first: reps see Swahili by default with an English
@@ -170,11 +171,8 @@ export function usePosLang(): {
 
   const setLang = useCallback((next: PosLang) => {
     setLangState(next);
-    try {
-      window.localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      // Storage unavailable (private mode) — language just won't persist.
-    }
+    // Best-effort persist (private mode etc.) — language just won't stick.
+    safeLocalStorageSet(STORAGE_KEY, next);
   }, []);
 
   const t = useCallback(

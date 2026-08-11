@@ -1,19 +1,27 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { PageSpinner } from '@/components/ui';
 
 export default function GeneratedDocumentsPage() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true);
+    setLoadError('');
     fetch('/api/backend/generated-documents')
       .then(r => r.json())
       .then(res => setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []))
-      .catch(() => {})
+      .catch(() => {
+        setData([]);
+        setLoadError('Failed to load generated documents. Check your connection and try again.');
+      })
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   return (
     <div className="p-6">
@@ -21,6 +29,13 @@ export default function GeneratedDocumentsPage() {
         <h1 className="text-2xl font-bold text-gray-900">Generated Documents</h1>
         <p className="text-gray-500 mt-1">View all documents generated from templates</p>
       </div>
+
+      {loadError && (
+        <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <span>{loadError}</span>
+          <button onClick={load} className="text-red-700 font-medium hover:underline ml-3">Retry</button>
+        </div>
+      )}
 
       {loading ? (
         <PageSpinner label="Loading records" />

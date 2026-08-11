@@ -143,14 +143,19 @@ export default function TasksPage() {
   const [confirming, setConfirming] = useState<{ task: Task; action: 'cancel' | 'delete' } | null>(null);
   const [actionLoading, setActionLoading] = useState('');
   const [actionError, setActionError] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     const endpoint = activeTab === 'my' ? '/api/backend/tasks/my-tasks' : '/api/backend/tasks';
     fetch(endpoint)
       .then(r => r.json())
       .then((res: any) => setTasks(res.data?.data ?? []))
-      .catch(console.error)
+      .catch(() => {
+        setTasks([]);
+        setLoadError('Failed to load tasks. Check your connection and try again.');
+      })
       .finally(() => setLoading(false));
   }, [activeTab]);
 
@@ -232,6 +237,13 @@ export default function TasksPage() {
           </button>
         ))}
       </div>
+
+      {loadError && (
+        <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <span>{loadError}</span>
+          <button onClick={load} className="text-red-700 font-medium hover:underline ml-3">Retry</button>
+        </div>
+      )}
 
       {actionError && (
         <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">

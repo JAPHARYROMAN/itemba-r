@@ -137,7 +137,8 @@ export default function ComplianceCockpitPage() {
         const rows: Company[] = Array.isArray(inner) ? inner : Array.isArray(inner?.data) ? inner.data : [];
         setCompanies(rows);
       })
-      .catch(() => {});
+      // Without companies the cockpit cannot load anything, so surface the failure.
+      .catch(() => setError('Failed to load companies. Refresh the page to try again.'));
   }, []);
 
   const load = useCallback(async () => {

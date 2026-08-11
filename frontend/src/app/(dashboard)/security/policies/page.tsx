@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Btn, ConfirmDialog, FormInput, FormSelect, FormTextarea, Modal, PageSpinner, showToast } from '@/components/ui';
+import { Btn, ConfirmDialog, ErrorState, FormInput, FormSelect, FormTextarea, Modal, PageSpinner, showToast } from '@/components/ui';
 import { ApiError, backendDelete, backendList, backendPatch, backendPost } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
 
@@ -108,14 +108,16 @@ export default function SecurityPoliciesPage() {
   const [data, setData] = useState<SecurityPolicy[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<SecurityPolicy | null>(null);
   const [deleting, setDeleting] = useState<SecurityPolicy | null>(null);
 
   const load = useCallback(() => {
+    setLoadError('');
     backendList<SecurityPolicy>('security-policies')
       .then(setData)
-      .catch(() => {})
+      .catch(() => { setData([]); setLoadError('Failed to load security policies.'); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -123,9 +125,10 @@ export default function SecurityPoliciesPage() {
 
   useEffect(() => {
     if (!canManage) return;
+    // optional lookup — on failure the company dropdown in the modal simply stays empty
     backendList<Company>('companies', { query: { limit: 100 } })
       .then(setCompanies)
-      .catch(() => {});
+      .catch(() => undefined);
   }, [canManage]);
 
   const onSaved = () => { setCreating(false); setEditing(null); load(); };
@@ -154,6 +157,8 @@ export default function SecurityPoliciesPage() {
 
       {loading ? (
         <PageSpinner label="Loading records" />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={load} />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
           <table className="w-full text-sm">

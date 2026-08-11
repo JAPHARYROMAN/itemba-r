@@ -100,7 +100,8 @@ export default function UserPreferencesPage() {
         const rows: Company[] = Array.isArray(inner) ? inner : Array.isArray(inner?.data) ? inner.data : [];
         setCompanies(rows);
       })
-      .catch(() => {});
+      // Dropdown options only: the preferences form still loads and saves; failure just leaves the company select empty.
+      .catch(() => undefined);
   }, []);
 
   // Cascade divisions → branches when defaults change.
@@ -113,7 +114,8 @@ export default function UserPreferencesPage() {
         const rows: Division[] = Array.isArray(inner) ? inner : Array.isArray(inner?.data) ? inner.data : [];
         setDivisions(rows);
       })
-      .catch(() => {});
+      // Dropdown options only: failure just leaves the division select empty.
+      .catch(() => undefined);
   }, [prefs.defaultCompanyId]);
 
   useEffect(() => {
@@ -125,7 +127,8 @@ export default function UserPreferencesPage() {
         const rows: Branch[] = Array.isArray(inner) ? inner : Array.isArray(inner?.data) ? inner.data : [];
         setBranches(rows);
       })
-      .catch(() => {});
+      // Dropdown options only: failure just leaves the branch select empty.
+      .catch(() => undefined);
   }, [prefs.defaultDivisionId]);
 
   // Load my prefs.

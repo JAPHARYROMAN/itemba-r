@@ -101,7 +101,8 @@ export default function NumberSequencesPage() {
         const rows: Company[] = Array.isArray(inner) ? inner : Array.isArray(inner?.data) ? inner.data : [];
         setCompanies(rows);
       })
-      .catch(() => {});
+      // Company filter dropdown only: the sequences load has its own error state; failure just leaves the filter empty.
+      .catch(() => undefined);
   }, []);
 
   const load = useCallback(async () => {

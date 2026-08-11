@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { PageSpinner } from '@/components/ui';
+import { ErrorState, PageSpinner } from '@/components/ui';
 import Link from 'next/link';
 import { backendGet } from '@/lib/api-client';
 
@@ -28,6 +28,7 @@ export default function BackupDashboardPage() {
   const [runs, setRuns] = useState<BackupRunLite[]>([]);
   const [failedRunsLast7Days, setFailedRunsLast7Days] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     backendGet<any>('/backups/dashboard')
@@ -36,7 +37,7 @@ export default function BackupDashboardPage() {
         setRuns(Array.isArray(d?.recentRuns) ? d.recentRuns : []);
         setFailedRunsLast7Days(typeof d?.failedRunsLast7Days === 'number' ? d.failedRunsLast7Days : 0);
       })
-      .catch(() => {})
+      .catch(() => setLoadError('Failed to load the backup dashboard.'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -65,6 +66,8 @@ export default function BackupDashboardPage() {
 
       {loading ? (
         <PageSpinner label="Loading records" />
+      ) : loadError ? (
+        <ErrorState message={loadError} />
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

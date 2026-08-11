@@ -40,16 +40,21 @@ export default function AlertEventsPage() {
   const { hasPermission } = useAuth();
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<Tab>('OPEN');
   const [actionLoading, setActionLoading] = useState('');
   const [dismissing, setDismissing] = useState<any | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     fetch(`/api/backend/alert-events?status=${activeTab}`)
       .then(r => r.json())
       .then((res: any) => setEvents(res.data?.data ?? []))
-      .catch(console.error)
+      .catch(() => {
+        setEvents([]);
+        setLoadError('Failed to load alert events. Check your connection and try again.');
+      })
       .finally(() => setLoading(false));
   }, [activeTab]);
 
@@ -98,6 +103,13 @@ export default function AlertEventsPage() {
           </button>
         ))}
       </div>
+
+      {loadError && (
+        <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <span>{loadError}</span>
+          <button onClick={load} className="text-red-700 font-medium hover:underline ml-3">Retry</button>
+        </div>
+      )}
 
       {loading ? (
         <PageSpinner label="Loading records" />

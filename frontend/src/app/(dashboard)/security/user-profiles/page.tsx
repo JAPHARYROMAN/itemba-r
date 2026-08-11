@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { PageSpinner, Modal, Btn, FormInput, FormSelect } from '@/components/ui';
+import { PageSpinner, Modal, Btn, FormInput, FormSelect, ErrorState } from '@/components/ui';
 import { backendList, backendPost, backendPatch } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
 
@@ -167,14 +167,16 @@ export default function UserSecurityProfilesPage() {
 
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [users, setUsers] = useState<UserRef[]>([]);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
 
   const load = useCallback(() => {
+    setLoadError('');
     backendList<any>('user-security-profiles')
       .then(setData)
-      .catch(() => {})
+      .catch(() => { setData([]); setLoadError('Failed to load user security profiles.'); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -203,6 +205,8 @@ export default function UserSecurityProfilesPage() {
 
       {loading ? (
         <PageSpinner label="Loading records" />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={load} />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
           <table className="w-full text-sm">

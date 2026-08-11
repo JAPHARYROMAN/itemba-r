@@ -40,6 +40,7 @@ export default function NotificationsPage() {
 
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<Tab>('all');
   const [unreadCount, setUnreadCount] = useState(0);
   const [actionLoading, setActionLoading] = useState('');
@@ -52,6 +53,7 @@ export default function NotificationsPage() {
     if (activeTab === 'archived') params.status = 'ARCHIVED';
     if (activeTab === 'dismissed') params.status = 'DISMISSED';
     setLoading(true);
+    setLoadError('');
     const qs = new URLSearchParams(params).toString();
     fetch(`/api/backend/notifications${qs ? '?' + qs : ''}`)
       .then(r => r.json())
@@ -64,7 +66,10 @@ export default function NotificationsPage() {
           setUnreadCount(data.length);
         }
       })
-      .catch(console.error)
+      .catch(() => {
+        setNotifications([]);
+        setLoadError('Failed to load notifications. Check your connection and try again.');
+      })
       .finally(() => setLoading(false));
   }, [activeTab]);
 
@@ -147,6 +152,13 @@ export default function NotificationsPage() {
           </button>
         ))}
       </div>
+
+      {loadError && (
+        <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <span>{loadError}</span>
+          <button onClick={load} className="text-red-700 font-medium hover:underline ml-3">Retry</button>
+        </div>
+      )}
 
       {loading ? (
         <SkeletonCardGrid count={4} className="grid grid-cols-1 gap-2" />

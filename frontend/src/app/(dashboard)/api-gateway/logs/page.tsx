@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
 
 interface ApiRequestLog {
@@ -35,9 +36,11 @@ export default function ApiRequestLogsPage() {
   const [loading, setLoading] = useState(true);
   const [filterStatusCode, setFilterStatusCode] = useState('');
   const [filterRateLimited, setFilterRateLimited] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     const params = new URLSearchParams({ limit: '50' });
     if (filterStatusCode) params.set('statusCode', filterStatusCode);
     if (filterRateLimited === 'true') params.set('rateLimited', 'true');
@@ -45,7 +48,7 @@ export default function ApiRequestLogsPage() {
     fetch(`/api/backend/api-request-logs?${params}`)
       .then(r => r.json())
       .then(data => setLogs(unwrapList(data)))
-      .catch(console.error)
+      .catch(() => { setLogs([]); setLoadError('Failed to load API request logs.'); })
       .finally(() => setLoading(false));
   }, [filterStatusCode, filterRateLimited]);
 
@@ -69,7 +72,7 @@ export default function ApiRequestLogsPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-        {loading ? <div className="text-center py-10 text-gray-500">Loading...</div> : (
+        {loading ? <div className="text-center py-10 text-gray-500">Loading...</div> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">

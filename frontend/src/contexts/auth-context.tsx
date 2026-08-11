@@ -55,6 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch {
       // Retryable network/backend failure. Keep any existing user state.
+      return false;
     }
     return false;
   }, []);

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect } from '@/components/ui';
+import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
 
 interface IntegrationMapping {
@@ -29,19 +29,22 @@ export default function IntegrationMappingsPage() {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     fetch('/api/backend/integration-mappings?limit=50')
       .then(r => r.json())
       .then(data => setMappings(unwrapList(data)))
-      .catch(console.error)
+      .catch(() => { setMappings([]); setLoadError('Failed to load integration mappings.'); })
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    fetch('/api/backend/integration-providers?limit=100').then(r => r.json()).then(data => setProviders(unwrapList(data))).catch(() => {});
+    // optional lookup — on failure the provider dropdown simply stays empty
+    fetch('/api/backend/integration-providers?limit=100').then(r => r.json()).then(data => setProviders(unwrapList(data))).catch(() => undefined);
   }, []);
 
   async function save() {
@@ -63,7 +66,7 @@ export default function IntegrationMappingsPage() {
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>

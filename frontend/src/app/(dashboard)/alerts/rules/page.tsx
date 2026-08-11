@@ -148,11 +148,16 @@ export default function AlertRulesPage() {
   const [editing, setEditing] = useState<AlertRule | null>(null);
   const [deleting, setDeleting] = useState<AlertRule | null>(null);
   const [actionLoading, setActionLoading] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(() => {
+    setLoadError('');
     fetch('/api/backend/alert-rules').then(r => r.json())
       .then((res: any) => setRules(res.data?.data ?? []))
-      .catch(console.error)
+      .catch(() => {
+        setRules([]);
+        setLoadError('Failed to load alert rules. Check your connection and try again.');
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -160,9 +165,10 @@ export default function AlertRulesPage() {
 
   useEffect(() => {
     if (!canManage) return;
+    // Company dropdown options for the rule modal only; failure just shows "All companies".
     fetch('/api/backend/companies?limit=100').then(r => r.json())
       .then((res: any) => setCompanies(res.data?.data ?? res.data ?? []))
-      .catch(() => {});
+      .catch(() => undefined);
   }, [canManage]);
 
   const onSaved = () => {
@@ -206,6 +212,13 @@ export default function AlertRulesPage() {
           </button>
         )}
       </div>
+
+      {loadError && (
+        <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <span>{loadError}</span>
+          <button onClick={load} className="text-red-700 font-medium hover:underline ml-3">Retry</button>
+        </div>
+      )}
 
       {loading ? (
         <PageSpinner label="Loading records" />

@@ -758,6 +758,7 @@ export default function OperationsReportsPage() {
           setActiveKey(settings.activeKey);
         }
       }
+      // eslint-disable-next-line no-restricted-syntax -- corrupt/blocked localStorage only affects remembered filter defaults; the report itself is unaffected
     } catch {
       /* ignore corrupt settings */
     } finally {
@@ -791,6 +792,7 @@ export default function OperationsReportsPage() {
           activeKey,
         }),
       );
+      // eslint-disable-next-line no-restricted-syntax -- persisting filter defaults is best-effort; a quota/private-mode failure loses nothing visible
     } catch {
       /* ignore storage failures */
     }

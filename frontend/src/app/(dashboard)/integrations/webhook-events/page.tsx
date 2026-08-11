@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Card, PageHeader, PageToolbar, StatusBadge, Btn, PageSpinner } from '@/components/ui';
+import { Card, PageHeader, PageToolbar, StatusBadge, Btn, PageSpinner, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
 
 interface WebhookEvent {
@@ -20,16 +20,18 @@ export default function WebhookEventsPage() {
   const [filterProcessing, setFilterProcessing] = useState('');
   const [filterVerification, setFilterVerification] = useState('');
   const [reprocessingId, setReprocessingId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     const params = new URLSearchParams({ limit: '50' });
     if (filterProcessing) params.set('processingStatus', filterProcessing);
     if (filterVerification) params.set('verificationStatus', filterVerification);
     fetch(`/api/backend/webhook-events?${params}`)
       .then(r => r.json())
       .then(data => setEvents(unwrapList(data)))
-      .catch(console.error)
+      .catch(() => { setEvents([]); setLoadError('Failed to load webhook events.'); })
       .finally(() => setLoading(false));
   }, [filterProcessing, filterVerification]);
 
@@ -64,7 +66,7 @@ export default function WebhookEventsPage() {
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>

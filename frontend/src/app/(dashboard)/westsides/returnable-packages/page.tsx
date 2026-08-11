@@ -187,7 +187,8 @@ export default function ReturnablePackagesPage() {
 
   useEffect(() => {
     if (!canManage) return;
-    fetch('/api/backend/companies?limit=100').then((r) => r.json()).then((j) => setCompanies(j.data?.data ?? j.data ?? [])).catch(() => {});
+    // Company options only feed the create/edit modal dropdown — the list itself still renders.
+    fetch('/api/backend/companies?limit=100').then((r) => r.json()).then((j) => setCompanies(j.data?.data ?? j.data ?? [])).catch(() => undefined);
   }, [canManage]);
 
   const onSaved = () => { setCreating(false); setEditing(null); load(); loadBalances(); };

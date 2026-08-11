@@ -187,12 +187,9 @@ async function downloadBlob(path: string, filename: string) {
   const res = await fetch(`${BACKEND_PROXY_URL}${path}`, { cache: 'no-store' });
   if (!res.ok) {
     let message = `Export failed (${res.status})`;
-    try {
-      const json = await res.json();
-      if (json?.message) message = Array.isArray(json.message) ? json.message.join(', ') : json.message;
-    } catch {
-      // keep fallback
-    }
+    // Error body is best-effort decoration — the status fallback above is kept when it is unreadable.
+    const json = await res.json().catch(() => null);
+    if (json?.message) message = Array.isArray(json.message) ? json.message.join(', ') : json.message;
     throw new Error(message);
   }
   const disposition = res.headers.get('Content-Disposition');

@@ -119,12 +119,17 @@ export default function DocumentTemplatesPage() {
   const [editing, setEditing] = useState<DocumentTemplate | null>(null);
   const [deleting, setDeleting] = useState<DocumentTemplate | null>(null);
   const [actionLoading, setActionLoading] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(() => {
+    setLoadError('');
     fetch('/api/backend/document-templates')
       .then(r => r.json())
       .then(res => setData(Array.isArray(res.data?.items) ? res.data.items : Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []))
-      .catch(() => {})
+      .catch(() => {
+        setData([]);
+        setLoadError('Failed to load document templates. Check your connection and try again.');
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -132,9 +137,10 @@ export default function DocumentTemplatesPage() {
 
   useEffect(() => {
     if (!canCreate && !canUpdate) return;
+    // Company dropdown options for the template modal only; failure just shows "All companies".
     fetch('/api/backend/companies?limit=100').then(r => r.json())
       .then(res => setCompanies(res.data?.data ?? res.data ?? []))
-      .catch(() => {});
+      .catch(() => undefined);
   }, [canCreate, canUpdate]);
 
   const onSaved = () => {
@@ -178,6 +184,13 @@ export default function DocumentTemplatesPage() {
           </button>
         )}
       </div>
+
+      {loadError && (
+        <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <span>{loadError}</span>
+          <button onClick={load} className="text-red-700 font-medium hover:underline ml-3">Retry</button>
+        </div>
+      )}
 
       {loading ? (
         <PageSpinner label="Loading records" />

@@ -109,11 +109,16 @@ export default function DelegationsPage() {
   const [cancelling, setCancelling] = useState<Delegation | null>(null);
   const [deleting, setDeleting] = useState<Delegation | null>(null);
   const [actionError, setActionError] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(() => {
+    setLoadError('');
     fetch('/api/backend/approvals/delegations').then(r => r.json())
       .then((res: { data?: { data?: Delegation[] } }) => setDelegations(res.data?.data ?? []))
-      .catch(console.error)
+      .catch(() => {
+        setDelegations([]);
+        setLoadError('Failed to load delegations. Check your connection and try again.');
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -183,6 +188,13 @@ export default function DelegationsPage() {
           </button>
         )}
       </div>
+
+      {loadError && (
+        <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <span>{loadError}</span>
+          <button onClick={load} className="text-red-700 font-medium hover:underline ml-3">Retry</button>
+        </div>
+      )}
 
       {actionError && (
         <div className="mb-4 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{actionError}</div>

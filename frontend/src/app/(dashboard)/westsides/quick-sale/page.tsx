@@ -316,6 +316,7 @@ function saveSettings(userId: string, s: Settings): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(getSettingsKey(userId), JSON.stringify(s));
+    // eslint-disable-next-line no-restricted-syntax -- persisting the settings cache is best-effort; full/blocked storage must not break the sale flow
   } catch {
     /* storage full / blocked — silently ignore */
   }

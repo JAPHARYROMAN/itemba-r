@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { PageSpinner } from '@/components/ui';
-import { backendPage, backendPatch } from '@/lib/api-client';
+import { ErrorState, PageSpinner, showToast } from '@/components/ui';
+import { ApiError, backendPage, backendPatch } from '@/lib/api-client';
 
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-100 text-red-700',
@@ -22,14 +22,16 @@ const STATUS_COLORS: Record<string, string> = {
 export default function SecurityEventsPage() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [severity, setSeverity] = useState('');
   const [status, setStatus] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     backendPage<any>('security-events', { query: { severity, status } })
       .then((page) => setData(page.data))
-      .catch(() => {})
+      .catch(() => { setData([]); setLoadError('Failed to load security events.'); })
       .finally(() => setLoading(false));
   }, [severity, status]);
 
@@ -38,7 +40,12 @@ export default function SecurityEventsPage() {
   }, [load]);
 
   async function handleAction(id: string, action: 'review' | 'resolve') {
-    await backendPatch(`security-events/${id}/${action}`).catch(() => {});
+    try {
+      await backendPatch(`security-events/${id}/${action}`);
+    } catch (err) {
+      showToast('error', `Failed to ${action} security event`, err instanceof ApiError ? err.message : undefined);
+      return;
+    }
     load();
   }
 
@@ -74,6 +81,8 @@ export default function SecurityEventsPage() {
 
       {loading ? (
         <PageSpinner label="Loading records" />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={load} />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
           <table className="w-full text-sm">

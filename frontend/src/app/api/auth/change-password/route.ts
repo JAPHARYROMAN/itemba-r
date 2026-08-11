@@ -85,7 +85,8 @@ export async function POST(req: NextRequest) {
       user = meJson.data ?? meJson;
     }
   } catch {
-    // Client can re-fetch user profile after redirect.
+    // Client can re-fetch the user profile after redirect.
+    user = null;
   }
 
   const res = NextResponse.json({ user });

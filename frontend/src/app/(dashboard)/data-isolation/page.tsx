@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { PageSpinner } from '@/components/ui';
+import { ErrorState, PageSpinner } from '@/components/ui';
 import Link from 'next/link';
 
 export default function DataIsolationDashboardPage() {
   const [stats, setStats] = useState({ totalTestRuns: 0, passed: 0, failed: 0, openIssues: 0, criticalIssues: 0, highIssues: 0 });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     fetch('/api/backend/data-isolation/dashboard')
@@ -22,7 +23,7 @@ export default function DataIsolationDashboardPage() {
           highIssues: d.highIssues ?? 0,
         });
       })
-      .catch(() => {})
+      .catch(() => setLoadError('Failed to load data isolation statistics.'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -47,6 +48,8 @@ export default function DataIsolationDashboardPage() {
 
       {loading ? (
         <PageSpinner label="Loading records" />
+      ) : loadError ? (
+        <ErrorState message={loadError} />
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

@@ -84,9 +84,8 @@ export function ProductPicker({
         setQuery(label);
         resolvedForRef.current = value;
       })
-      .catch(() => {
-        /* leave the field blank if the product can't be resolved */
-      });
+      // Leave the field blank if the product can't be resolved.
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };

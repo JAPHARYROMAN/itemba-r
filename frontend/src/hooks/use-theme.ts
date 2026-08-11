@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { safeLocalStorageSet } from '@/lib/safe-storage';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -63,11 +64,8 @@ export function useTheme() {
 
   const setMode = useCallback((next: ThemeMode) => {
     setModeState(next);
-    try {
-      window.localStorage.setItem(THEME_KEY, next);
-    } catch {
-      /* storage unavailable (private mode) — theme still applies this session */
-    }
+    // Best-effort persist (private mode etc.) — the theme still applies this session.
+    safeLocalStorageSet(THEME_KEY, next);
     applyMode(next);
   }, []);
 

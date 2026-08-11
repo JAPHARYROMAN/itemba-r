@@ -122,13 +122,18 @@ export default function DocumentNumberSequencesPage() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Sequence | null>(null);
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     fetch('/api/backend/document-number-sequences')
       .then(r => r.json())
       .then(res => setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.items) ? res.data.items : Array.isArray(res.data?.data) ? res.data.data : []))
-      .catch(() => {})
+      .catch(() => {
+        setData([]);
+        setLoadError('Failed to load number sequences. Check your connection and try again.');
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -136,10 +141,11 @@ export default function DocumentNumberSequencesPage() {
 
   useEffect(() => {
     if (!canCreate) return;
+    // Company dropdown options for the create modal only; failure just leaves the select empty.
     fetch('/api/backend/companies?limit=100')
       .then(r => r.json())
       .then(j => setCompanies(j.data?.data ?? j.data ?? []))
-      .catch(() => {});
+      .catch(() => undefined);
   }, [canCreate]);
 
   const onSaved = () => { setCreating(false); setEditing(null); load(); };
@@ -153,6 +159,13 @@ export default function DocumentNumberSequencesPage() {
         </div>
         {canCreate && <Btn variant="primary" onClick={() => setCreating(true)}>+ New Sequence</Btn>}
       </div>
+
+      {loadError && (
+        <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <span>{loadError}</span>
+          <button onClick={load} className="text-red-700 font-medium hover:underline ml-3">Retry</button>
+        </div>
+      )}
 
       {loading ? (
         <PageSpinner label="Loading records" />

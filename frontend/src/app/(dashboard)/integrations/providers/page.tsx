@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea, ConfirmDialog } from '@/components/ui';
+import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea, ConfirmDialog, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
 import { backendPost, backendPatch, backendDelete } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
@@ -39,16 +39,18 @@ export default function IntegrationProvidersPage() {
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState<Provider | null>(null);
   const [actionError, setActionError] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     const params = new URLSearchParams({ limit: '50' });
     if (filterType) params.set('providerType', filterType);
     if (filterStatus) params.set('status', filterStatus);
     fetch(`/api/backend/integration-providers?${params}`)
       .then(r => r.json())
       .then(data => setProviders(unwrapList(data)))
-      .catch(console.error)
+      .catch(() => { setProviders([]); setLoadError('Failed to load integration providers.'); })
       .finally(() => setLoading(false));
   }, [filterType, filterStatus]);
 
@@ -113,7 +115,7 @@ export default function IntegrationProvidersPage() {
       {actionError && <div className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{actionError}</div>}
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>

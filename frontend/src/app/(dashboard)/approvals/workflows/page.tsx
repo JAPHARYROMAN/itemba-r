@@ -117,16 +117,21 @@ export default function ApprovalWorkflowsPage() {
   const [editing, setEditing] = useState<Workflow | null>(null);
   const [deleting, setDeleting] = useState<Workflow | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(() => {
     const params: Record<string, string> = {};
     if (filterEntityType) params.entityType = filterEntityType;
     if (filterActive !== '') params.isActive = filterActive;
     const qs = new URLSearchParams(params).toString();
+    setLoadError('');
     fetch(`/api/backend/approvals/workflows${qs ? '?' + qs : ''}`)
       .then(r => r.json())
       .then((res: any) => setWorkflows(res.data?.data ?? []))
-      .catch(console.error)
+      .catch(() => {
+        setWorkflows([]);
+        setLoadError('Failed to load approval workflows. Check your connection and try again.');
+      })
       .finally(() => setLoading(false));
   }, [filterEntityType, filterActive]);
 
@@ -134,10 +139,11 @@ export default function ApprovalWorkflowsPage() {
 
   useEffect(() => {
     if (!canManage) return;
+    // Company dropdown options for the create modal only; failure just leaves the select empty.
     fetch('/api/backend/companies?limit=100')
       .then(r => r.json())
       .then((j: any) => setCompanies(j.data?.data ?? j.data ?? []))
-      .catch(console.error);
+      .catch(() => undefined);
   }, [canManage]);
 
   const onSaved = () => { setCreating(false); setEditing(null); load(); };
@@ -196,6 +202,13 @@ export default function ApprovalWorkflowsPage() {
           <option value="false">Inactive</option>
         </select>
       </div>
+
+      {loadError && (
+        <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <span>{loadError}</span>
+          <button onClick={load} className="text-red-700 font-medium hover:underline ml-3">Retry</button>
+        </div>
+      )}
 
       {loading ? (
         <PageSpinner label="Loading records" />

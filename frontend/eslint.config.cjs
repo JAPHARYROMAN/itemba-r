@@ -16,11 +16,11 @@ module.exports = [
       'react-hooks/set-state-in-effect': 'off',
       // Simplification plan phase 4: failures must be visible. A swallowed
       // rejection renders a false empty state or fakes a successful save —
-      // surface it (toast/ErrorState) or at minimum log it deliberately.
-      // Warn (not error) while the ~200 legacy sites are burned down; do not
-      // add new ones.
+      // surface it (toast/ErrorState), fall back deliberately with
+      // `.catch(() => undefined)` + a comment, or disable with a reason.
+      // The legacy backlog was burned down to zero; this is now a hard gate.
       'no-restricted-syntax': [
-        'warn',
+        'error',
         {
           selector:
             "CallExpression[callee.property.name='catch'] > ArrowFunctionExpression[params.length=0] > BlockStatement[body.length=0]",

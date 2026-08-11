@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { safeLocalStorageSet } from '@/lib/safe-storage';
 
 /**
  * Navigation personalization store.
@@ -65,19 +66,13 @@ function loadFromStorage() {
 }
 
 function persistFavorites() {
-  try {
-    window.localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
-  } catch {
-    /* storage unavailable (private mode) — still works for the session */
-  }
+  // Best-effort persist (private mode etc.) — favorites still work for the session.
+  safeLocalStorageSet(FAVORITES_KEY, JSON.stringify(favorites));
 }
 
 function persistRecent() {
-  try {
-    window.localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
-  } catch {
-    /* storage unavailable */
-  }
+  // Best-effort persist (private mode etc.).
+  safeLocalStorageSet(RECENT_KEY, JSON.stringify(recent));
 }
 
 function normalizeHref(href: string): string {

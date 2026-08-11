@@ -23,9 +23,8 @@ export function MobilePosInstallActions() {
   useEffect(() => {
     setInstallUrl(new URL(WESTSIDES_MOBILE_POS_INSTALL_PATH, window.location.origin).toString());
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/mobile-pos-sw.js').catch(() => {
-        // Install prompts still fall back to browser "Add to Home screen" guidance.
-      });
+      // On failure, install prompts fall back to browser "Add to Home screen" guidance.
+      navigator.serviceWorker.register('/mobile-pos-sw.js').catch(() => undefined);
     }
     setInstalled(
       window.matchMedia('(display-mode: standalone)').matches ||

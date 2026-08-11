@@ -809,6 +809,7 @@ export default function WestsideReportsPage() {
           setActiveKey(settings.activeKey);
         }
       }
+      // eslint-disable-next-line no-restricted-syntax -- local settings cache is convenience-only; a corrupt/blocked cache must not break the page and the defaults already apply
     } catch {
       /* ignore corrupt settings */
     } finally {
@@ -836,6 +837,7 @@ export default function WestsideReportsPage() {
         SETTINGS_KEY,
         JSON.stringify({ companyId, branchId, dateFrom, dateTo, activeKey }),
       );
+      // eslint-disable-next-line no-restricted-syntax -- persisting the settings cache is best-effort; blocked/full storage must not break the page
     } catch {
       /* ignore storage failures */
     }

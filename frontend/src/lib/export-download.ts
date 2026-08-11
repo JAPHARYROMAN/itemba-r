@@ -40,12 +40,9 @@ export async function downloadBinaryExport(
   });
   if (!res.ok) {
     let message = `Export failed (${res.status})`;
-    try {
-      const j = await res.json();
-      if (j?.message) message = Array.isArray(j.message) ? j.message.join(', ') : j.message;
-    } catch {
-      // Non-JSON error body — keep the status-based fallback message.
-    }
+    // Non-JSON error bodies keep the status-based fallback message.
+    const j = await res.json().catch(() => null);
+    if (j?.message) message = Array.isArray(j.message) ? j.message.join(', ') : j.message;
     throw new Error(message);
   }
   const filename = filenameFromDisposition(res.headers.get('Content-Disposition'), fallbackName);
@@ -69,13 +66,10 @@ export async function downloadBinaryGet(path: string, fallbackName: string): Pro
   });
   if (!res.ok) {
     let message = `Export failed (${res.status})`;
-    try {
-      const payload = await res.json();
-      if (payload?.message) {
-        message = Array.isArray(payload.message) ? payload.message.join(', ') : payload.message;
-      }
-    } catch {
-      // Keep the status-based fallback for non-JSON error responses.
+    // Non-JSON error bodies keep the status-based fallback message.
+    const payload = await res.json().catch(() => null);
+    if (payload?.message) {
+      message = Array.isArray(payload.message) ? payload.message.join(', ') : payload.message;
     }
     throw new Error(message);
   }

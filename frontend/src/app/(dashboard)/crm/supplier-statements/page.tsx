@@ -6,12 +6,16 @@ import { PageSpinner } from '@/components/ui';
 export default function SupplierStatementsPage() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     fetch('/api/backend/supplier-statements')
       .then(r => r.json())
       .then(res => setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []))
-      .catch(() => {})
+      .catch((err) => {
+        setData([]);
+        setError(err instanceof Error ? err.message : 'Failed to load supplier statements');
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -22,6 +26,11 @@ export default function SupplierStatementsPage() {
         <p className="text-gray-500 mt-1">View supplier account statements by period</p>
       </div>
 
+      {error && (
+        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
       {loading ? (
         <PageSpinner label="Loading records" />
       ) : (

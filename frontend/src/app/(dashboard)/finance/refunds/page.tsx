@@ -642,9 +642,8 @@ function RefundDetailModal({ refund, onClose }: { refund: Refund; onClose: () =>
       .then((next) => {
         if (!cancelled) setDetail(next);
       })
-      .catch(() => {
-        /* keep the row-level snapshot on failure */
-      })
+      // Detail fetch only enriches the row-level snapshot already on screen — keep it on failure.
+      .catch(() => undefined)
       .finally(() => {
         if (!cancelled) setLoading(false);
       });

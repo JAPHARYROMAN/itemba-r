@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect } from '@/components/ui';
+import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
 
 interface WebhookEndpoint {
@@ -35,22 +35,25 @@ export default function WebhookEndpointsPage() {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [secretModal, setSecretModal] = useState<{ secret: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     fetch('/api/backend/webhook-endpoints?limit=50')
       .then(r => r.json())
       .then(data => setWebhooks(unwrapList(data)))
-      .catch(console.error)
+      .catch(() => { setWebhooks([]); setLoadError('Failed to load webhook endpoints.'); })
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    fetch('/api/backend/integration-providers?limit=100').then(r => r.json()).then(data => setProviders(unwrapList(data))).catch(() => {});
-    fetch('/api/backend/integration-connections?limit=100').then(r => r.json()).then(data => setConnections(unwrapList(data))).catch(() => {});
+    // optional lookups — on failure the provider/connection dropdowns simply stay empty
+    fetch('/api/backend/integration-providers?limit=100').then(r => r.json()).then(data => setProviders(unwrapList(data))).catch(() => undefined);
+    fetch('/api/backend/integration-connections?limit=100').then(r => r.json()).then(data => setConnections(unwrapList(data))).catch(() => undefined);
   }, []);
 
   async function save() {
@@ -88,7 +91,7 @@ export default function WebhookEndpointsPage() {
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>

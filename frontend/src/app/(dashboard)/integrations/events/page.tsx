@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner } from '@/components/ui';
+import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
 
 interface IntegrationEvent {
@@ -25,9 +25,11 @@ export default function IntegrationEventsPage() {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterDirection, setFilterDirection] = useState('');
   const [selected, setSelected] = useState<IntegrationEvent | null>(null);
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     const params = new URLSearchParams({ limit: '50' });
     if (filterType) params.set('eventType', filterType);
     if (filterStatus) params.set('status', filterStatus);
@@ -35,7 +37,7 @@ export default function IntegrationEventsPage() {
     fetch(`/api/backend/integration-events?${params}`)
       .then(r => r.json())
       .then(data => setEvents(unwrapList(data)))
-      .catch(console.error)
+      .catch(() => { setEvents([]); setLoadError('Failed to load integration events.'); })
       .finally(() => setLoading(false));
   }, [filterType, filterStatus, filterDirection]);
 
@@ -64,7 +66,7 @@ export default function IntegrationEventsPage() {
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>

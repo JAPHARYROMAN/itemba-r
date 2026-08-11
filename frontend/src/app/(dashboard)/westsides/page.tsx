@@ -536,6 +536,7 @@ export default function WestsidesCockpitPage() {
         if (settings.companyId) setCompanyId(settings.companyId);
         if (settings.branchId) setBranchId(settings.branchId);
       }
+      // eslint-disable-next-line no-restricted-syntax -- local settings cache is convenience-only; a corrupt/blocked cache must not break the cockpit and the defaults already apply
     } catch {
       // Local settings are convenience-only.
     }
@@ -546,6 +547,7 @@ export default function WestsidesCockpitPage() {
     if (!hydrated || !user?.id) return;
     try {
       localStorage.setItem(`${SETTINGS_KEY}.${user.id}`, JSON.stringify({ companyId, branchId }));
+      // eslint-disable-next-line no-restricted-syntax -- persisting the settings cache is best-effort; blocked/full storage must not break the cockpit
     } catch {
       // Local settings are convenience-only.
     }

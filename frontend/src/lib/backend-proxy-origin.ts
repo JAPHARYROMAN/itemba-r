@@ -18,8 +18,9 @@ function addOrigin(target: Set<string>, rawValue?: string) {
     try {
       target.add(new URL(trimmed).origin);
     } catch {
-      // Invalid operator-provided origin entries are ignored here; deployment
+      // Invalid operator-provided origin entries are skipped here; deployment
       // env validation is responsible for failing fast on malformed config.
+      continue;
     }
   }
 }

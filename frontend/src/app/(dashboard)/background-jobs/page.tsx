@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { PageSpinner } from '@/components/ui';
+import { ErrorState, PageSpinner } from '@/components/ui';
 import { backendGet, backendPage, backendPut } from '@/lib/api-client';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -17,12 +17,14 @@ export default function BackgroundJobsPage() {
   const [jobs, setJobs] = useState<any[]>([]);
   const [stats, setStats] = useState({ queued: 0, running: 0, failed: 0, deadLetter: 0 });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const limit = 20;
 
   const fetchJobs = useCallback(() => {
     setLoading(true);
+    setLoadError('');
     Promise.all([
       backendPage<any>('/background-jobs', { query: { page, pageSize: limit } }),
       backendGet<Record<string, number>>('/background-jobs/stats'),
@@ -33,7 +35,7 @@ export default function BackgroundJobsPage() {
         const s = statsRes;
         setStats({ queued: s.queued ?? s.QUEUED ?? 0, running: s.running ?? s.RUNNING ?? 0, failed: s.failed ?? s.FAILED ?? 0, deadLetter: s.deadLetter ?? s.DEAD_LETTER ?? 0 });
       })
-      .catch(() => {})
+      .catch(() => { setJobs([]); setLoadError('Failed to load background jobs.'); })
       .finally(() => setLoading(false));
   }, [page]);
 
@@ -90,6 +92,8 @@ export default function BackgroundJobsPage() {
           <tbody>
             {loading ? (
               <tr><td colSpan={9} className="px-4 py-6"><PageSpinner label="Loading records" className="py-8" /></td></tr>
+            ) : loadError ? (
+              <tr><td colSpan={9} className="px-4 py-6"><ErrorState message={loadError} onRetry={fetchJobs} /></td></tr>
             ) : jobs.length === 0 ? (
               <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-400">No jobs found</td></tr>
             ) : jobs.map((j: any) => (
