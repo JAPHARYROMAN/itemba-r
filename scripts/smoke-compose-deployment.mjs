@@ -46,6 +46,8 @@ const sampleEnv = {
   TWO_FACTOR_ENCRYPTION_KEY: 'two-factor-smoke-validation-secret-40',
   REFRESH_TOKEN_PEPPER: 'refresh-pepper-smoke-validation-secret-40',
   APP_ENCRYPTION_KEY: 'app-encryption-smoke-validation-secret-40',
+  SEED_ADMIN_EMAIL: 'smoke-admin@smoke.local',
+  SEED_ADMIN_PASSWORD: 'Admin-smoke-validation-secret-40',
   JWT_ACCESS_EXPIRES_IN: '15m',
   JWT_REFRESH_EXPIRES_IN: '7d',
   JOB_WORKER_ENABLED: 'true',
