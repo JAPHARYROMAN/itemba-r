@@ -199,13 +199,16 @@ describe('Critical Business Workflows (e2e)', () => {
     });
     fiscalYearIds.push(fiscalYear.id);
 
+    // One OPEN period spanning the whole fiscal year: the journal-entry test
+    // posts on fixed January dates while the stock-adjustment test posts at
+    // "now" — a January-only period made this suite date-bomb every Feb 1.
     const accountingPeriod = await prisma.accountingPeriod.create({
       data: {
         companyId: companyA.id,
         fiscalYearId: fiscalYear.id,
-        name: `JAN-${suffix}`,
+        name: `FY-OPEN-${suffix}`,
         startDate: new Date('2026-01-01T00:00:00.000Z'),
-        endDate: new Date('2026-01-31T00:00:00.000Z'),
+        endDate: new Date('2026-12-31T23:59:59.999Z'),
       },
     });
     accountingPeriodAId = accountingPeriod.id;
@@ -579,6 +582,42 @@ describe('Critical Business Workflows (e2e)', () => {
       ).body,
     );
     productIds.push(product.id);
+
+    // Posting a stock adjustment writes a GL entry: the inventory asset leg
+    // resolves via accountSubType "inventory_asset" and the counter-leg via
+    // "inventory_adjustment_variance" (stock-adjustments.service.ts). A fresh
+    // company has no chart, so create both accounts the resolver needs.
+    const inventoryAsset = unwrap<any>(
+      (
+        await request(app.getHttpServer())
+          .post('/api/v1/chart-of-accounts')
+          .set('Authorization', authorization(companyToken))
+          .send({
+            companyId: companyAId,
+            accountCode: `120-${short}`,
+            accountName: `E2E Inventory ${suffix}`,
+            accountType: AccountType.ASSET,
+            accountSubType: 'inventory_asset',
+          })
+          .expect(201)
+      ).body,
+    );
+    const adjustmentVariance = unwrap<any>(
+      (
+        await request(app.getHttpServer())
+          .post('/api/v1/chart-of-accounts')
+          .set('Authorization', authorization(companyToken))
+          .send({
+            companyId: companyAId,
+            accountCode: `520-${short}`,
+            accountName: `E2E Inventory Adjustment Variance ${suffix}`,
+            accountType: AccountType.EXPENSE,
+            accountSubType: 'inventory_adjustment_variance',
+          })
+          .expect(201)
+      ).body,
+    );
+    chartAccountIds.push(inventoryAsset.id, adjustmentVariance.id);
 
     const adjustment = unwrap<any>(
       (

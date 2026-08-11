@@ -69,7 +69,6 @@ const BRAND_TINT_FILL_OP = '0.94 0.96 1 rg';
 const BRAND_TINT_STRONG_FILL_OP = '0.86 0.92 1 rg';
 const TEXT_MUTED_FILL_OP = '0.39 0.46 0.55 rg';
 const PANEL_FILL_OP = '0.97 0.98 0.99 rg';
-const BRAND_RULE_OP = `${BRAND_FILL_OP} 0 838.89 595.28 3 re f`;
 
 describe('buildBusinessPdf rendering', () => {
   it('renders the redesigned single-page document', () => {
@@ -81,13 +80,13 @@ describe('buildBusinessPdf rendering', () => {
     expect(raw).toContain('/MediaBox [0 0 595.28 841.89]');
     expect(raw).toContain('/Count 1');
 
-    // Document type replaces the old 'DOCUMENT' literal in the letterhead.
+    // The restrained legacy letterhead marker plus the document-type title —
+    // c7d491e9 deliberately walked the redesign back to the legacy letterhead.
     expect(raw).toContain('(SALES ORDER) Tj');
-    expect(raw).not.toContain('(DOCUMENT) Tj');
+    expect(raw).toContain('(DOCUMENT) Tj');
 
-    // Brand color plumbing landed: accent rule / reference / table labels.
+    // Brand color remains in the table chrome (header labels, tinted bands).
     expect(raw).toContain(BRAND_FILL_OP);
-    expect(raw).toContain(BRAND_RULE_OP);
     // Tinted table-header band and grand-total emphasis row.
     expect(raw).toContain(BRAND_TINT_FILL_OP);
     expect(raw).toContain(BRAND_TINT_STRONG_FILL_OP);
@@ -100,8 +99,8 @@ describe('buildBusinessPdf rendering', () => {
     // Footer: contact line left, generated stamp + page counter right.
     expect(raw).toContain('Page 1 of');
     expect(raw).toContain('(Address: Kisimani Area, Tunduma Town Centre) Tj');
-    expect(raw).toContain('(Tel: +255758793511 | Phone: +255764601358) Tj');
-    expect(raw).toContain('(Email: info@itembagrouptz.com) Tj');
+    expect(raw).toContain('(Tel: +255758793511 | Email: info@itembagrouptz.com) Tj');
+    expect(raw).toContain('(Phone: +255764601358) Tj');
     expect(raw).toContain('(TIN: 136-065-580 | VRN: 40-030602-Q) Tj');
     expect(raw).toContain('(Reg No: 135764) Tj');
     expect(raw).toContain(
@@ -154,8 +153,8 @@ describe('buildBusinessPdf rendering', () => {
 
     // The tinted table header repeats at the top of each continuation page.
     expect(occurrences(raw, '(ITEM) Tj')).toBe(pageCount);
-    // The brand accent rule is painted on every page.
-    expect(occurrences(raw, BRAND_RULE_OP)).toBe(pageCount);
+    // Every continuation page repeats the compact title + reference chrome.
+    expect(occurrences(raw, '| CONTINUED')).toBe(pageCount - 1);
     // Every page carries its footer page counter.
     for (let page = 1; page <= pageCount; page += 1) {
       expect(raw).toContain(`Page ${page} of ${pageCount}`);
@@ -251,6 +250,6 @@ describe('buildBusinessPdf rendering', () => {
     expect(raw).toContain('(CONSOLIDATED DEBT SCHEDULE) Tj');
     expect(raw).toContain('(DEBT DETAIL - REC-2026-000001) Tj');
     expect(raw).toContain('(DEBT DETAIL - REC-2026-000002) Tj');
-    expect(occurrences(raw, BRAND_RULE_OP)).toBe(3);
+    expect(occurrences(raw, '| CONTINUED')).toBe(2);
   });
 });
