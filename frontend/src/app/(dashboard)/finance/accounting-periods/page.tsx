@@ -57,7 +57,7 @@ function PeriodModal({ mode, initial, companies, onClose, onSaved }: {
     try {
       const res = await fetch(
         mode === 'create' ? '/api/backend/accounting-periods' : `/api/backend/accounting-periods/${initial!.id}`,
-        { method: mode === 'create' ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }
+        { method: mode === 'create' ? 'POST' : 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }
       );
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
       onSaved();
@@ -87,17 +87,6 @@ function PeriodModal({ mode, initial, companies, onClose, onSaved }: {
   );
 }
 
-function DeleteConfirm({ period, onClose, onDeleted }: { period: AccountingPeriod; onClose: () => void; onDeleted: () => void }) {
-  const [deleting, setDeleting] = useState(false);
-  const confirm = async () => { setDeleting(true); await fetch(`/api/backend/accounting-periods/${period.id}`, { method: 'DELETE' }); onDeleted(); };
-  return (
-    <Modal open onClose={onClose} title="Delete Period" size="md"
-      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="danger" onClick={confirm} loading={deleting}>Delete</Btn></>}>
-      <p className="text-sm" style={{ color: 'var(--aurora-text)' }}>Delete period <span className="font-medium">{period.name}</span>?</p>
-    </Modal>
-  );
-}
-
 export default function AccountingPeriodsPage() {
   const { hasPermission } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -109,7 +98,6 @@ export default function AccountingPeriodsPage() {
   const [status, setStatus] = useState('');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AccountingPeriod | null>(null);
-  const [deleting, setDeleting] = useState<AccountingPeriod | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const canView = hasPermission('accounting_periods.view');
@@ -166,7 +154,6 @@ export default function AccountingPeriodsPage() {
     <div className="p-6 space-y-6">
       {creating && <PeriodModal mode="create" companies={companies} onClose={() => setCreating(false)} onSaved={() => { setCreating(false); load(); }} />}
       {editing && <PeriodModal mode="edit" initial={editing} companies={companies} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
-      {deleting && <DeleteConfirm period={deleting} onClose={() => setDeleting(null)} onDeleted={() => { setDeleting(null); load(); }} />}
 
       <PageHeader title="Accounting Periods" subtitle="Manage monthly/quarterly accounting periods" />
 
@@ -233,7 +220,6 @@ export default function AccountingPeriodsPage() {
                           <>
                             <Btn variant="warning" size="xs" onClick={() => handleAction(p.id, 'close')} loading={actionLoading === p.id + 'close'}>Close</Btn>
                             <Btn variant="ghost" size="xs" onClick={() => setEditing(p)}>Edit</Btn>
-                            <Btn variant="danger" size="xs" onClick={() => setDeleting(p)}>Delete</Btn>
                           </>
                         )}
                         {p.status === 'CLOSED' && (

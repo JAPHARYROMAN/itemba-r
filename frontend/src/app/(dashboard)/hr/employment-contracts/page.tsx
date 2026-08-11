@@ -70,7 +70,7 @@ export default function EmploymentContractsPage() {
 
   const doAction = async (id: string, action: string) => {
     setActionLoading(`${id}-${action}`);
-    await fetch(`/api/backend/hr/employment-contracts/${id}/${action}`, { method: 'POST' });
+    await fetch(`/api/backend/hr/employment-contracts/${id}/${action}`, { method: 'PATCH' });
     setActionLoading('');
     load();
   };

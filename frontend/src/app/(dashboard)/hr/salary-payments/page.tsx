@@ -63,7 +63,7 @@ export default function SalaryPaymentsPage() {
 
   const doReverse = async (id: string) => {
     setActionLoading(id);
-    await fetch(`/api/backend/hr/salary-payments/${id}/reverse`, { method: 'POST' });
+    await fetch(`/api/backend/hr/salary-payments/${id}/reverse`, { method: 'PATCH' });
     setActionLoading('');
     load();
   };

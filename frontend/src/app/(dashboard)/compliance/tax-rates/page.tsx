@@ -60,7 +60,7 @@ function RateModal({ mode, initial, taxTypes, onClose, onSaved }: { mode: 'creat
         effectiveTo: form.effectiveTo || undefined,
         notes: form.notes || undefined,
       };
-      const res = await fetch(mode === 'create' ? '/api/backend/compliance/tax-rates' : `/api/backend/compliance/tax-rates/${initial!.id}`,
+      const res = await fetch(mode === 'create' ? '/api/backend/tax/rates' : `/api/backend/tax/rates/${initial!.id}`,
         { method: mode === 'create' ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
       onSaved();
@@ -108,7 +108,7 @@ export default function TaxRatesPage() {
   const [actingId, setActingId] = useState('');
 
   useEffect(() => {
-    fetch('/api/backend/compliance/tax-types?limit=100').then((r) => r.json()).then((j) => setTaxTypes(j.data?.data ?? j.data ?? []));
+    fetch('/api/backend/tax/types?limit=100').then((r) => r.json()).then((j) => setTaxTypes(j.data?.data ?? j.data ?? []));
   }, []);
 
   const load = useCallback(async () => {
@@ -118,7 +118,7 @@ export default function TaxRatesPage() {
     if (taxTypeId) params.set('taxTypeId', taxTypeId);
     if (status) params.set('status', status);
     try {
-      const j = await fetch(`/api/backend/compliance/tax-rates?${params}`).then((r) => r.json());
+      const j = await fetch(`/api/backend/tax/rates?${params}`).then((r) => r.json());
       const p: Paginated<TaxRate> = j.data ?? {};
       setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
     } catch {
@@ -134,12 +134,12 @@ export default function TaxRatesPage() {
   const onSaved = () => { setCreating(false); setEditing(null); load(); };
   const doDelete = async () => {
     if (!deleting) return;
-    await fetch(`/api/backend/compliance/tax-rates/${deleting.id}`, { method: 'DELETE' });
+    await fetch(`/api/backend/tax/rates/${deleting.id}`, { method: 'DELETE' });
     setDeleting(null); load();
   };
   const doAction = async (id: string, action: 'approve' | 'deactivate') => {
     setActingId(id);
-    await fetch(`/api/backend/compliance/tax-rates/${id}/${action}`, { method: 'POST' });
+    await fetch(`/api/backend/tax/rates/${id}/${action}`, { method: 'PATCH' });
     setActingId(''); load();
   };
 

@@ -149,7 +149,7 @@ export default function ObligationsPage() {
   };
   const doComplete = async (id: string) => {
     setActingId(id);
-    await fetch(`/api/backend/compliance/obligations/${id}/complete`, { method: 'POST' });
+    await fetch(`/api/backend/compliance/obligations/${id}/complete`, { method: 'PATCH' });
     setActingId(''); load();
   };
 

@@ -82,7 +82,7 @@ function AccountModal({ mode, initial, companies, onClose, onSaved }: {
       const body = { ...form, accountSubType: form.accountSubType || undefined, parentAccountId: form.parentAccountId || undefined, description: form.description || undefined };
       const res = await fetch(
         mode === 'create' ? '/api/backend/chart-of-accounts' : `/api/backend/chart-of-accounts/${initial!.id}`,
-        { method: mode === 'create' ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+        { method: mode === 'create' ? 'POST' : 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
       );
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
       onSaved();

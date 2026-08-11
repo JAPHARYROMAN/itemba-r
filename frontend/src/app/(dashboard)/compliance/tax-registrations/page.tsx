@@ -65,7 +65,7 @@ function RegModal({ mode, initial, companies, authorities, onClose, onSaved }: {
         effectiveTo: form.effectiveTo || undefined,
         notes: form.notes || undefined,
       };
-      const res = await fetch(mode === 'create' ? '/api/backend/compliance/tax-registrations' : `/api/backend/compliance/tax-registrations/${initial!.id}`,
+      const res = await fetch(mode === 'create' ? '/api/backend/tax/registrations' : `/api/backend/tax/registrations/${initial!.id}`,
         { method: mode === 'create' ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
       onSaved();
@@ -121,7 +121,7 @@ export default function TaxRegistrationsPage() {
 
   useEffect(() => {
     fetch('/api/backend/companies?limit=100').then((r) => r.json()).then((j) => setCompanies(j.data?.data ?? j.data ?? []));
-    fetch('/api/backend/compliance/tax-authorities?limit=100').then((r) => r.json()).then((j) => setAuthorities(j.data?.data ?? j.data ?? []));
+    fetch('/api/backend/tax/authorities?limit=100').then((r) => r.json()).then((j) => setAuthorities(j.data?.data ?? j.data ?? []));
   }, []);
 
   const load = useCallback(async () => {
@@ -130,7 +130,7 @@ export default function TaxRegistrationsPage() {
     if (companyId) params.set('companyId', companyId);
     if (registrationType) params.set('registrationType', registrationType);
     if (status) params.set('status', status);
-    const j = await fetch(`/api/backend/compliance/tax-registrations?${params}`).then((r) => r.json()).catch(() => ({}));
+    const j = await fetch(`/api/backend/tax/registrations?${params}`).then((r) => r.json()).catch(() => ({}));
     const p: Paginated<TaxRegistration> = j.data ?? {};
     setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
     setLoading(false);
@@ -141,7 +141,7 @@ export default function TaxRegistrationsPage() {
   const onSaved = () => { setCreating(false); setEditing(null); load(); };
   const doDelete = async () => {
     if (!deleting) return;
-    await fetch(`/api/backend/compliance/tax-registrations/${deleting.id}`, { method: 'DELETE' });
+    await fetch(`/api/backend/tax/registrations/${deleting.id}`, { method: 'DELETE' });
     setDeleting(null); load();
   };
 

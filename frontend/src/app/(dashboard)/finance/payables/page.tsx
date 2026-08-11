@@ -903,7 +903,7 @@ function PayableModal({
       const res = await fetch(
         mode === 'create' ? '/api/backend/payables' : `/api/backend/payables/${initial!.id}`,
         {
-          method: mode === 'create' ? 'POST' : 'PUT',
+          method: mode === 'create' ? 'POST' : 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         },

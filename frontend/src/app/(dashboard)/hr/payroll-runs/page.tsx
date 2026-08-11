@@ -183,7 +183,7 @@ function PayrollRunsContent() {
       // Lazy-load accounts the first time the Pay modal opens.
       if (accounts.length === 0) {
         try {
-          const r = await fetch('/api/backend/finance/chart-of-accounts?limit=500');
+          const r = await fetch('/api/backend/chart-of-accounts?limit=500');
           const j = await r.json();
           const list: ChartAccount[] = Array.isArray(j.data?.data)
             ? j.data.data

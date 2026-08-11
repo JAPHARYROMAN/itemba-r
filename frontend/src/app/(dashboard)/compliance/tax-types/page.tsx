@@ -66,7 +66,7 @@ function TaxTypeModal({ mode, initial, onClose, onSaved }: { mode: 'create' | 'e
     setSaving(true); setError('');
     try {
       const body = { ...form, description: form.description || undefined };
-      const res = await fetch(mode === 'create' ? '/api/backend/compliance/tax-types' : `/api/backend/compliance/tax-types/${initial!.id}`,
+      const res = await fetch(mode === 'create' ? '/api/backend/tax/types' : `/api/backend/tax/types/${initial!.id}`,
         { method: mode === 'create' ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
       onSaved();
@@ -127,7 +127,7 @@ export default function TaxTypesPage() {
     const params = new URLSearchParams({ page: String(page), limit: '20' });
     if (taxCategory) params.set('taxCategory', taxCategory);
     if (status) params.set('status', status);
-    const j = await fetch(`/api/backend/compliance/tax-types?${params}`).then((r) => r.json()).catch(() => ({}));
+    const j = await fetch(`/api/backend/tax/types?${params}`).then((r) => r.json()).catch(() => ({}));
     const p: Paginated<TaxType> = j.data ?? {};
     setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
     setLoading(false);
@@ -141,7 +141,7 @@ export default function TaxTypesPage() {
 
   const doDelete = async () => {
     if (!deleting) return;
-    await fetch(`/api/backend/compliance/tax-types/${deleting.id}`, { method: 'DELETE' });
+    await fetch(`/api/backend/tax/types/${deleting.id}`, { method: 'DELETE' });
     setDeleting(null); load();
   };
 

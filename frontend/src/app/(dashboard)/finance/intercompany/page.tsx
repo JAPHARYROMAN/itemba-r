@@ -95,7 +95,7 @@ function TxModal({ mode, initial, companies, onClose, onSaved }: {
       const body = { ...form, amount: Number(form.amount) };
       const res = await fetch(
         mode === 'create' ? '/api/backend/intercompany-transactions' : `/api/backend/intercompany-transactions/${initial!.id}`,
-        { method: mode === 'create' ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+        { method: mode === 'create' ? 'POST' : 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
       );
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
       onSaved();

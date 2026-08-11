@@ -51,7 +51,7 @@ function FiscalYearModal({ mode, initial, companies, onClose, onSaved }: {
     try {
       const res = await fetch(
         mode === 'create' ? '/api/backend/fiscal-years' : `/api/backend/fiscal-years/${initial!.id}`,
-        { method: mode === 'create' ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }
+        { method: mode === 'create' ? 'POST' : 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }
       );
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
       onSaved();
@@ -78,17 +78,6 @@ function FiscalYearModal({ mode, initial, companies, onClose, onSaved }: {
   );
 }
 
-function DeleteConfirm({ fy, onClose, onDeleted }: { fy: FiscalYear; onClose: () => void; onDeleted: () => void }) {
-  const [deleting, setDeleting] = useState(false);
-  const confirm = async () => { setDeleting(true); await fetch(`/api/backend/fiscal-years/${fy.id}`, { method: 'DELETE' }); onDeleted(); };
-  return (
-    <Modal open onClose={onClose} title="Delete Fiscal Year" size="md"
-      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="danger" onClick={confirm} loading={deleting}>Delete</Btn></>}>
-      <p className="text-sm" style={{ color: 'var(--aurora-text)' }}>Delete fiscal year <span className="font-medium">{fy.name}</span>?</p>
-    </Modal>
-  );
-}
-
 export default function FiscalYearsPage() {
   const { hasPermission } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -98,7 +87,6 @@ export default function FiscalYearsPage() {
   const [status, setStatus] = useState('');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<FiscalYear | null>(null);
-  const [deleting, setDeleting] = useState<FiscalYear | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const canView = hasPermission('fiscal_years.view');
@@ -149,7 +137,6 @@ export default function FiscalYearsPage() {
     <div className="p-6 space-y-6">
       {creating && <FiscalYearModal mode="create" companies={companies} onClose={() => setCreating(false)} onSaved={() => { setCreating(false); load(); }} />}
       {editing && <FiscalYearModal mode="edit" initial={editing} companies={companies} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
-      {deleting && <DeleteConfirm fy={deleting} onClose={() => setDeleting(null)} onDeleted={() => { setDeleting(null); load(); }} />}
 
       <PageHeader title="Fiscal Years" subtitle="Manage company fiscal years" />
 
@@ -210,7 +197,6 @@ export default function FiscalYearsPage() {
                           <>
                             <Btn variant="warning" size="xs" onClick={() => handleAction(fy.id, 'close')} loading={actionLoading === fy.id + 'close'}>Close</Btn>
                             <Btn variant="ghost" size="xs" onClick={() => setEditing(fy)}>Edit</Btn>
-                            <Btn variant="danger" size="xs" onClick={() => setDeleting(fy)}>Delete</Btn>
                           </>
                         )}
                         {fy.status === 'CLOSED' && (

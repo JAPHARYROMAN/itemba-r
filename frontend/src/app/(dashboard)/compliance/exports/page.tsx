@@ -53,7 +53,7 @@ function CreateExportModal({ companies, onClose, onSaved }: { companies: Company
         periodEnd: form.periodEnd || undefined,
         notes: form.notes || undefined,
       };
-      const res = await fetch('/api/backend/compliance/exports', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const res = await fetch('/api/backend/data-exports', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
       onSaved();
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); } finally { setSaving(false); }
@@ -110,7 +110,7 @@ export default function ComplianceExportsPage() {
     if (exportType) params.set('exportType', exportType);
     if (format) params.set('format', format);
     if (status) params.set('status', status);
-    const j = await fetch(`/api/backend/compliance/exports?${params}`).then((r) => r.json()).catch(() => ({}));
+    const j = await fetch(`/api/backend/data-exports?${params}`).then((r) => r.json()).catch(() => ({}));
     const p: Paginated<ExportItem> = j.data ?? {};
     setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
     setLoading(false);

@@ -142,16 +142,17 @@ async function parseError(res: Response, fallback: string) {
 }
 
 function parseList<T>(json: unknown): T[] {
-  const j = json as { data?: { data?: T[] } | T[] } | T[];
-  if (Array.isArray(j)) return j;
-  if (j && typeof j === 'object' && 'data' in j) {
-    const inner = (j as { data?: { data?: T[] } | T[] }).data;
-    if (Array.isArray(inner)) return inner;
-    if (inner && typeof inner === 'object' && 'data' in inner && Array.isArray(inner.data)) {
-      return inner.data;
-    }
+  // Accepts every envelope the backend produces: bare arrays, { data: [...] },
+  // { data: { data: [...] } }, and the credit-notes list's { data: { items: [...] } }.
+  const seen = new Set<unknown>();
+  let current: unknown = json;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    if (Array.isArray(current)) return current as T[];
+    const record = current as { data?: unknown; items?: unknown };
+    current = record.items ?? record.data;
   }
-  return [];
+  return Array.isArray(current) ? (current as T[]) : [];
 }
 
 // ── Create modal ──────────────────────────────────────────────────────────────

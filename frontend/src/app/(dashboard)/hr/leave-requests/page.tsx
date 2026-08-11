@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, PageHeader, StatusBadge, FormInput, FormSelect, Modal, Btn, PageSpinner, FormTextarea, PageToolbar } from '@/components/ui';
+import { Card, PageHeader, StatusBadge, FormInput, FormSelect, Modal, Btn, PageSpinner, FormTextarea, PageToolbar, showToast } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
@@ -63,11 +63,27 @@ export default function LeaveRequestsPage() {
     load();
   };
 
-  const doAction = async (id: string, action: 'approve' | 'reject') => {
+  const doAction = async (id: string, action: 'submit' | 'approve' | 'reject' | 'cancel') => {
     setActionLoading(`${id}-${action}`);
-    await fetch(`/api/backend/hr/leave-requests/${id}/${action}`, { method: 'POST' });
-    setActionLoading('');
-    load();
+    try {
+      const res = await fetch(`/api/backend/hr/leave-requests/${id}/${action}`, { method: 'PATCH' });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Action failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? `Could not ${action} this request.`));
+      }
+    } finally {
+      setActionLoading('');
+      load();
+    }
+  };
+
+  const relationLabel = (value: unknown, fallback?: string | null) => {
+    if (typeof value === 'string' && value) return value;
+    if (value && typeof value === 'object') {
+      const rel = value as { fullName?: string; name?: string; employeeCode?: string };
+      return rel.fullName ?? rel.name ?? rel.employeeCode ?? fallback ?? '—';
+    }
+    return fallback ?? '—';
   };
 
   const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
@@ -100,14 +116,24 @@ export default function LeaveRequestsPage() {
               <tbody style={{ color: 'var(--aurora-text)' }}>
                 {rows.map(lr => (
                   <tr key={lr.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-medium`}>{lr.employee ?? lr.employeeId ?? '—'}</td>
-                    <td className={tdCls}>{lr.leaveType ?? lr.leaveTypeId ?? '—'}</td>
+                    <td className={`${tdCls} font-medium`}>{relationLabel(lr.employee, lr.employeeId)}</td>
+                    <td className={tdCls}>{relationLabel(lr.leaveType, lr.leaveTypeId)}</td>
                     <td className={tdCls}>{lr.startDate ? new Date(lr.startDate).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}>{lr.endDate ? new Date(lr.endDate).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}>{lr.numberOfDays ?? '—'}</td>
                     <td className={tdCls}><StatusBadge status={lr.status} /></td>
                     <td className={tdCls}>
-                      {lr.status === 'PENDING' && (
+                      {lr.status === 'DRAFT' && (
+                        <div className="flex gap-1">
+                          <Btn variant="primary" size="xs" onClick={() => doAction(lr.id, 'submit')} disabled={actionLoading === `${lr.id}-submit`}>
+                            {actionLoading === `${lr.id}-submit` ? '…' : 'Submit'}
+                          </Btn>
+                          <Btn variant="secondary" size="xs" onClick={() => doAction(lr.id, 'cancel')} disabled={actionLoading === `${lr.id}-cancel`}>
+                            {actionLoading === `${lr.id}-cancel` ? '…' : 'Cancel'}
+                          </Btn>
+                        </div>
+                      )}
+                      {lr.status === 'SUBMITTED' && (
                         <div className="flex gap-1">
                           <Btn variant="success" size="xs" onClick={() => doAction(lr.id, 'approve')} disabled={actionLoading === `${lr.id}-approve`}>
                             {actionLoading === `${lr.id}-approve` ? '…' : 'Approve'}

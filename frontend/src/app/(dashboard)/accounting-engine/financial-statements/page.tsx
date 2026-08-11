@@ -75,8 +75,41 @@ function errorMessage(json: any, fallback: string) {
 }
 
 function trialRows(summary: unknown): TrialBalanceRow[] {
-  if (!Array.isArray(summary)) return [];
-  return summary.filter((row): row is TrialBalanceRow => Boolean(row && typeof row === 'object' && 'accountId' in row));
+  // The backend stores { companyId, rows: [{ account, debit, credit, ... }], totalDebit, ... }
+  // (financial-reports.service.ts getTrialBalance); older runs may hold a flat row array.
+  const source = Array.isArray(summary)
+    ? summary
+    : summary && typeof summary === 'object' && Array.isArray((summary as { rows?: unknown }).rows)
+      ? ((summary as { rows: unknown[] }).rows)
+      : [];
+  return source
+    .map((row): TrialBalanceRow | null => {
+      if (!row || typeof row !== 'object') return null;
+      const flat = row as Partial<TrialBalanceRow>;
+      if (typeof flat.accountId === 'string') {
+        return {
+          accountId: flat.accountId,
+          accountCode: flat.accountCode ?? '',
+          accountName: flat.accountName ?? '',
+          debit: Number(flat.debit ?? 0),
+          credit: Number(flat.credit ?? 0),
+        };
+      }
+      const nested = row as {
+        account?: { id?: string; accountCode?: string; accountName?: string; name?: string };
+        debit?: number | string;
+        credit?: number | string;
+      };
+      if (!nested.account) return null;
+      return {
+        accountId: nested.account.id ?? nested.account.accountCode ?? '',
+        accountCode: nested.account.accountCode ?? '',
+        accountName: nested.account.accountName ?? nested.account.name ?? '',
+        debit: Number(nested.debit ?? 0),
+        credit: Number(nested.credit ?? 0),
+      };
+    })
+    .filter((row): row is TrialBalanceRow => row !== null);
 }
 
 export default function FinancialStatementsPage() {

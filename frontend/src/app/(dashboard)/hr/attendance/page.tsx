@@ -118,7 +118,7 @@ export default function AttendancePage() {
 
   const doApprove = async (id: string) => {
     setActionLoading(id);
-    await fetch(`/api/backend/hr/attendance/${id}/approve`, { method: 'POST' });
+    await fetch(`/api/backend/hr/attendance/${id}/approve`, { method: 'PATCH' });
     setActionLoading('');
     load();
   };

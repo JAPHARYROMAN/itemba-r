@@ -68,7 +68,7 @@ function CreateModal({ companies, taxTypes, taxCodes, onClose, onSaved }: { comp
         referenceId: form.referenceId || undefined,
         notes: form.notes || undefined,
       };
-      const res = await fetch('/api/backend/compliance/tax-transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const res = await fetch('/api/backend/tax/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
       onSaved();
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); } finally { setSaving(false); }
@@ -129,8 +129,8 @@ export default function TaxTransactionsPage() {
 
   useEffect(() => {
     fetch('/api/backend/companies?limit=100').then((r) => r.json()).then((j) => setCompanies(j.data?.data ?? j.data ?? []));
-    fetch('/api/backend/compliance/tax-types?limit=100').then((r) => r.json()).then((j) => setTaxTypes(j.data?.data ?? j.data ?? []));
-    fetch('/api/backend/compliance/tax-codes?limit=100').then((r) => r.json()).then((j) => setTaxCodes(j.data?.data ?? j.data ?? []));
+    fetch('/api/backend/tax/types?limit=100').then((r) => r.json()).then((j) => setTaxTypes(j.data?.data ?? j.data ?? []));
+    fetch('/api/backend/tax/codes?limit=100').then((r) => r.json()).then((j) => setTaxCodes(j.data?.data ?? j.data ?? []));
   }, []);
 
   const load = useCallback(async () => {
@@ -142,7 +142,7 @@ export default function TaxTransactionsPage() {
     if (status) params.set('status', status);
     if (dateFrom) params.set('dateFrom', dateFrom);
     if (dateTo) params.set('dateTo', dateTo);
-    const j = await fetch(`/api/backend/compliance/tax-transactions?${params}`).then((r) => r.json()).catch(() => ({}));
+    const j = await fetch(`/api/backend/tax/transactions?${params}`).then((r) => r.json()).catch(() => ({}));
     const p: Paginated<TaxTransaction> = j.data ?? {};
     setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
     setLoading(false);
@@ -153,7 +153,7 @@ export default function TaxTransactionsPage() {
   const onSaved = () => { setCreating(false); load(); };
   const doAction = async (id: string, action: 'post' | 'reverse') => {
     setActingId(id);
-    await fetch(`/api/backend/compliance/tax-transactions/${id}/${action}`, { method: 'POST' });
+    await fetch(`/api/backend/tax/transactions/${id}/${action}`, { method: 'PATCH' });
     setActingId(''); load();
   };
 

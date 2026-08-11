@@ -958,7 +958,7 @@ function ReceivableModal({
       const res = await fetch(
         mode === 'create' ? '/api/backend/receivables' : `/api/backend/receivables/${initial!.id}`,
         {
-          method: mode === 'create' ? 'POST' : 'PUT',
+          method: mode === 'create' ? 'POST' : 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         },

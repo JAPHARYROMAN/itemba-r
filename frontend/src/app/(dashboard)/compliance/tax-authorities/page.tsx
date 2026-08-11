@@ -60,7 +60,7 @@ function AuthorityModal({ mode, initial, onClose, onSaved }: { mode: 'create' | 
       const body = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, v || undefined]));
       body.authorityCode = form.authorityCode; body.name = form.name; body.country = form.country;
       body.authorityType = form.authorityType; body.status = form.status;
-      const res = await fetch(mode === 'create' ? '/api/backend/compliance/tax-authorities' : `/api/backend/compliance/tax-authorities/${initial!.id}`,
+      const res = await fetch(mode === 'create' ? '/api/backend/tax/authorities' : `/api/backend/tax/authorities/${initial!.id}`,
         { method: mode === 'create' ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
       onSaved();
@@ -114,7 +114,7 @@ export default function TaxAuthoritiesPage() {
     if (search) params.set('search', search);
     if (authorityType) params.set('authorityType', authorityType);
     if (status) params.set('status', status);
-    const j = await fetch(`/api/backend/compliance/tax-authorities?${params}`).then((r) => r.json()).catch(() => ({}));
+    const j = await fetch(`/api/backend/tax/authorities?${params}`).then((r) => r.json()).catch(() => ({}));
     const p: Paginated<TaxAuthority> = j.data ?? {};
     setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
     setLoading(false);
@@ -126,7 +126,7 @@ export default function TaxAuthoritiesPage() {
   const onSaved = () => { setCreating(false); setEditing(null); load(); };
   const doDelete = async () => {
     if (!deleting) return;
-    await fetch(`/api/backend/compliance/tax-authorities/${deleting.id}`, { method: 'DELETE' });
+    await fetch(`/api/backend/tax/authorities/${deleting.id}`, { method: 'DELETE' });
     setDeleting(null); load();
   };
 

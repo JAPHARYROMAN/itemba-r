@@ -230,7 +230,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     href: '/hr/medical-exams',
     group: 'HR & Payroll',
     icon: <AppIcon name="medical" size={16} />,
-    permission: 'hr.employees.view',
+    permission: 'employees.view',
     keywords: ['employee medical'],
   },
   {
@@ -239,7 +239,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     href: '/hr/disputes',
     group: 'HR & Payroll',
     icon: <AppIcon name="alert" size={16} />,
-    permission: 'hr.employees.view',
+    permission: 'employees.view',
     keywords: ['labor disputes'],
   },
   {
@@ -248,7 +248,7 @@ const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
     href: '/hr/disciplinary-actions',
     group: 'HR & Payroll',
     icon: <AppIcon name="alert" size={16} />,
-    permission: 'hr.employees.view',
+    permission: 'employees.view',
     keywords: ['employee discipline'],
   },
   {

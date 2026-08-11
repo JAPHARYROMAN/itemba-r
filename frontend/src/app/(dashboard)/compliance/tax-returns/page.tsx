@@ -47,7 +47,7 @@ function ReturnModal({ companies, taxTypes, filingPeriods, onClose, onSaved }: {
         netTaxDue: parseFloat(form.netTaxDue) || 0,
         totalDue: parseFloat(form.totalDue) || 0,
       };
-      const res = await fetch('/api/backend/compliance/tax-returns', {
+      const res = await fetch('/api/backend/tax/returns', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
@@ -112,8 +112,8 @@ export default function TaxReturnsPage() {
 
   useEffect(() => {
     fetch('/api/backend/companies?limit=100').then((r) => r.json()).then((j) => setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
-    fetch('/api/backend/compliance/tax-types?limit=100').then((r) => r.json()).then((j) => setTaxTypes(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
-    fetch('/api/backend/compliance/tax-filing-periods?limit=100').then((r) => r.json()).then((j) => setFilingPeriods(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
+    fetch('/api/backend/tax/types?limit=100').then((r) => r.json()).then((j) => setTaxTypes(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
+    fetch('/api/backend/tax/filing-periods?limit=100').then((r) => r.json()).then((j) => setFilingPeriods(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
   }, []);
 
   const load = useCallback(async () => {
@@ -123,7 +123,7 @@ export default function TaxReturnsPage() {
       if (companyId) params.set('companyId', companyId);
       if (taxTypeId) params.set('taxTypeId', taxTypeId);
       if (status) params.set('status', status);
-      const res = await fetch(`/api/backend/compliance/tax-returns?${params}`);
+      const res = await fetch(`/api/backend/tax/returns?${params}`);
       const json = await res.json();
       setData(json.data ?? null);
     } finally { setLoading(false); }
@@ -135,7 +135,7 @@ export default function TaxReturnsPage() {
 
   const doAction = async (id: string, action: string) => {
     setActionLoading(id + action);
-    try { await fetch(`/api/backend/compliance/tax-returns/${id}/${action}`, { method: 'POST' }); load(); }
+    try { await fetch(`/api/backend/tax/returns/${id}/${action}`, { method: 'PATCH' }); load(); }
     finally { setActionLoading(null); }
   };
 

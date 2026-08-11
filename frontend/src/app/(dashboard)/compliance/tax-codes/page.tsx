@@ -51,7 +51,7 @@ function TaxCodeModal({ mode, initial, companies, taxTypes, onClose, onSaved }: 
       const body: Record<string, unknown> = { ...form };
       if (!body.companyId) delete body.companyId;
       if (!body.taxTypeId) delete body.taxTypeId;
-      const res = await fetch(mode === 'create' ? '/api/backend/compliance/tax-codes' : `/api/backend/compliance/tax-codes/${initial!.id}`,
+      const res = await fetch(mode === 'create' ? '/api/backend/tax/codes' : `/api/backend/tax/codes/${initial!.id}`,
         { method: mode === 'create' ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
       onSaved();
@@ -108,7 +108,7 @@ export default function TaxCodesPage() {
 
   useEffect(() => {
     fetch('/api/backend/companies?limit=100').then((r) => r.json()).then((j) => setCompanies(j.data?.data ?? j.data ?? []));
-    fetch('/api/backend/compliance/tax-types?limit=100').then((r) => r.json()).then((j) => setTaxTypes(j.data?.data ?? j.data ?? []));
+    fetch('/api/backend/tax/types?limit=100').then((r) => r.json()).then((j) => setTaxTypes(j.data?.data ?? j.data ?? []));
   }, []);
 
   const load = useCallback(async () => {
@@ -118,7 +118,7 @@ export default function TaxCodesPage() {
     if (taxTypeId) params.set('taxTypeId', taxTypeId);
     if (appliesTo) params.set('appliesTo', appliesTo);
     if (status) params.set('status', status);
-    const j = await fetch(`/api/backend/compliance/tax-codes?${params}`).then((r) => r.json()).catch(() => ({}));
+    const j = await fetch(`/api/backend/tax/codes?${params}`).then((r) => r.json()).catch(() => ({}));
     const p: Paginated<TaxCode> = j.data ?? {};
     setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
     setLoading(false);
@@ -129,7 +129,7 @@ export default function TaxCodesPage() {
   const onSaved = () => { setCreating(false); setEditing(null); load(); };
   const doDelete = async () => {
     if (!deleting) return;
-    await fetch(`/api/backend/compliance/tax-codes/${deleting.id}`, { method: 'DELETE' });
+    await fetch(`/api/backend/tax/codes/${deleting.id}`, { method: 'DELETE' });
     setDeleting(null); load();
   };
 

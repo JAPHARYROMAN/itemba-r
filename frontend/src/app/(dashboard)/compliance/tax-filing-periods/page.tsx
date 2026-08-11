@@ -63,7 +63,7 @@ function PeriodModal({ mode, initial, companies, taxTypes, onClose, onSaved }: {
         periodEnd: form.periodEnd || undefined,
         dueDate: form.dueDate || undefined,
       };
-      const res = await fetch(mode === 'create' ? '/api/backend/compliance/tax-filing-periods' : `/api/backend/compliance/tax-filing-periods/${initial!.id}`,
+      const res = await fetch(mode === 'create' ? '/api/backend/tax/filing-periods' : `/api/backend/tax/filing-periods/${initial!.id}`,
         { method: mode === 'create' ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
       onSaved();
@@ -119,7 +119,7 @@ export default function FilingPeriodsPage() {
 
   useEffect(() => {
     fetch('/api/backend/companies?limit=100').then((r) => r.json()).then((j) => setCompanies(j.data?.data ?? j.data ?? []));
-    fetch('/api/backend/compliance/tax-types?limit=100').then((r) => r.json()).then((j) => setTaxTypes(j.data?.data ?? j.data ?? []));
+    fetch('/api/backend/tax/types?limit=100').then((r) => r.json()).then((j) => setTaxTypes(j.data?.data ?? j.data ?? []));
   }, []);
 
   const load = useCallback(async () => {
@@ -129,7 +129,7 @@ export default function FilingPeriodsPage() {
     if (taxTypeId) params.set('taxTypeId', taxTypeId);
     if (filingFrequency) params.set('filingFrequency', filingFrequency);
     if (status) params.set('status', status);
-    const j = await fetch(`/api/backend/compliance/tax-filing-periods?${params}`).then((r) => r.json()).catch(() => ({}));
+    const j = await fetch(`/api/backend/tax/filing-periods?${params}`).then((r) => r.json()).catch(() => ({}));
     const p: Paginated<FilingPeriod> = j.data ?? {};
     setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
     setLoading(false);
@@ -140,7 +140,7 @@ export default function FilingPeriodsPage() {
   const onSaved = () => { setCreating(false); setEditing(null); load(); };
   const doDelete = async () => {
     if (!deleting) return;
-    await fetch(`/api/backend/compliance/tax-filing-periods/${deleting.id}`, { method: 'DELETE' });
+    await fetch(`/api/backend/tax/filing-periods/${deleting.id}`, { method: 'DELETE' });
     setDeleting(null); load();
   };
 

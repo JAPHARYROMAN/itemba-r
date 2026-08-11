@@ -149,7 +149,7 @@ function ExpenseModal({
       };
       const res = await fetch(
         mode === 'create' ? '/api/backend/expenses' : `/api/backend/expenses/${initial!.id}`,
-        { method: mode === 'create' ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+        { method: mode === 'create' ? 'POST' : 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
       );
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
       onSaved();
