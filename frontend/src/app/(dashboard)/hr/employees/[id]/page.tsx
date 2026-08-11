@@ -81,6 +81,10 @@ interface Employee {
   // Employment
   employmentType?: string;
   employmentStatus?: string;
+  pendingTerminationDate?: string | null;
+  terminationRequestedAt?: string | null;
+  terminationRequestedById?: string | null;
+  terminationReason?: string | null;
   hireDate?: string;
   terminationDate?: string;
   baseSalary?: number | string;
@@ -191,6 +195,8 @@ export default function EmployeeDetailPage() {
   const router = useRouter();
   const { hasPermission } = useAuth();
   const canDelete = hasPermission('employees.delete');
+  const canRequestTermination = hasPermission('employees.termination.request');
+  const canApproveTermination = hasPermission('employees.termination.approve.hr');
   const id = params.id as string;
 
   const [emp, setEmp] = useState<Employee | null>(null);
@@ -211,6 +217,14 @@ export default function EmployeeDetailPage() {
   // Delete confirmation state
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+
+  // Termination workflow state (single-approver: request -> approve)
+  const [showTerminateModal, setShowTerminateModal] = useState(false);
+  const [terminationReason, setTerminationReason] = useState('');
+  const [terminationDate, setTerminationDate] = useState('');
+  const [requestingTermination, setRequestingTermination] = useState(false);
+  const [confirmingTermination, setConfirmingTermination] = useState(false);
+  const [approvingTermination, setApprovingTermination] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -304,6 +318,57 @@ export default function EmployeeDetailPage() {
   if (!emp) return <div className="p-6 text-sm text-slate-500">Employee not found.</div>;
 
   const fullName = emp.fullName ?? `${emp.firstName} ${emp.lastName}`;
+  const isTerminated = emp.employmentStatus === 'TERMINATED';
+  const terminationPending = !isTerminated && Boolean(emp.terminationRequestedAt);
+
+  const requestTermination = async () => {
+    if (!terminationReason.trim()) {
+      showToast('error', 'Reason required', 'Enter the termination reason.');
+      return;
+    }
+    setRequestingTermination(true);
+    try {
+      const res = await fetch(`/api/backend/hr/employees/${id}/request-termination`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: terminationReason.trim(),
+          ...(terminationDate ? { terminationDate } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Request failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not request termination.'));
+        return;
+      }
+      showToast('success', 'Termination requested', 'An approver must now sign it off.');
+      setShowTerminateModal(false);
+      setTerminationReason('');
+      setTerminationDate('');
+      await load();
+    } finally {
+      setRequestingTermination(false);
+    }
+  };
+
+  const approveTermination = async () => {
+    setApprovingTermination(true);
+    try {
+      const res = await fetch(`/api/backend/hr/employees/${id}/approve-termination`, {
+        method: 'PATCH',
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Approval failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not approve the termination.'));
+        return;
+      }
+      showToast('success', 'Termination approved', 'The employee is now terminated.');
+      setConfirmingTermination(false);
+      await load();
+    } finally {
+      setApprovingTermination(false);
+    }
+  };
 
   return (
     <div className="p-6 space-y-4">
@@ -327,6 +392,16 @@ export default function EmployeeDetailPage() {
                 Edit Tax & Statutory
               </Btn>
             )}
+            {canRequestTermination && !isTerminated && !terminationPending && (
+              <Btn variant="warning" onClick={() => setShowTerminateModal(true)}>
+                Request Termination
+              </Btn>
+            )}
+            {canApproveTermination && terminationPending && (
+              <Btn variant="danger" onClick={() => setConfirmingTermination(true)}>
+                Approve Termination
+              </Btn>
+            )}
             {canDelete && (
               <Btn
                 variant="danger"
@@ -347,6 +422,12 @@ export default function EmployeeDetailPage() {
 
       <div className="flex items-center gap-3 flex-wrap">
         <StatusBadge status={emp.employmentStatus ?? 'ACTIVE'} />
+        {terminationPending && (
+          <span className="text-xs px-2 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-700">
+            Termination pending approval
+            {emp.terminationReason ? ` — ${emp.terminationReason}` : ''}
+          </span>
+        )}
         {emp.employmentType && (
           <span
             className="text-xs px-2 py-1 rounded-full"
@@ -713,6 +794,53 @@ export default function EmployeeDetailPage() {
           setDeleteError('');
         }}
       />
+
+      <ConfirmDialog
+        open={confirmingTermination}
+        title="Approve Termination"
+        variant="danger"
+        confirmLabel={approvingTermination ? 'Approving…' : 'Approve Termination'}
+        message={`Terminate ${fullName} (${emp.employeeCode})${emp.pendingTerminationDate ? ` effective ${new Date(emp.pendingTerminationDate).toLocaleDateString('en-GB')}` : ''}? Reason: ${emp.terminationReason ?? '—'}. This ends their employment and cannot be undone from this screen.`}
+        onConfirm={approveTermination}
+        onCancel={() => setConfirmingTermination(false)}
+      />
+
+      {/* Request-termination modal (single-approver workflow: request → approve) */}
+      <Modal
+        open={showTerminateModal}
+        onClose={() => setShowTerminateModal(false)}
+        title="Request Termination"
+        size="md"
+        footer={
+          <>
+            <Btn variant="secondary" type="button" onClick={() => setShowTerminateModal(false)}>
+              Cancel
+            </Btn>
+            <Btn variant="danger" type="button" onClick={() => void requestTermination()} loading={requestingTermination}>
+              Request Termination
+            </Btn>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+            The request must be approved by someone else before {fullName} is terminated
+            (the requester cannot approve their own request).
+          </p>
+          <FormInput
+            label="Termination reason"
+            value={terminationReason}
+            onChange={(e) => setTerminationReason(e.target.value)}
+            placeholder="e.g. End of contract, resignation, misconduct case #…"
+          />
+          <FormInput
+            label="Termination date (optional — defaults to today)"
+            type="date"
+            value={terminationDate}
+            onChange={(e) => setTerminationDate(e.target.value)}
+          />
+        </div>
+      </Modal>
 
       {/* Profile edit modal */}
       <Modal

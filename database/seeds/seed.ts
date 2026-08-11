@@ -491,38 +491,10 @@ const ALL_PERMISSIONS: PermDef[] = [
     isGroupControl: false,
   },
   {
-    code: 'employees.termination.approve.gm',
-    description: 'Company GM approval for employee termination',
-    module: 'hr_governance',
-    action: 'termination.approve.gm',
-    isGroupControl: false,
-  },
-  {
-    code: 'employees.transfer.approve.division',
-    description: 'Division Manager approval for employee transfer',
-    module: 'hr_governance',
-    action: 'transfer.approve.division',
-    isGroupControl: false,
-  },
-  {
     code: 'employees.transfer.approve.hr',
     description: 'Group HR approval for employee transfer',
     module: 'hr_governance',
     action: 'transfer.approve.hr',
-    isGroupControl: false,
-  },
-  {
-    code: 'employees.transfer.approve.gm',
-    description: 'Company GM approval for employee transfer',
-    module: 'hr_governance',
-    action: 'transfer.approve.gm',
-    isGroupControl: false,
-  },
-  {
-    code: 'employees.transfer.approve.finance',
-    description: 'Group Finance approval for inter-company employee transfer',
-    module: 'hr_governance',
-    action: 'transfer.approve.finance',
     isGroupControl: false,
   },
   {
@@ -587,13 +559,6 @@ const ALL_PERMISSIONS: PermDef[] = [
     description: 'Group HR co-sign for disciplinary actions',
     module: 'hr_governance',
     action: 'disciplinary.approve.hr',
-    isGroupControl: false,
-  },
-  {
-    code: 'disciplinary_actions.approve.gm',
-    description: 'Company GM co-sign for disciplinary actions',
-    module: 'hr_governance',
-    action: 'disciplinary.approve.gm',
     isGroupControl: false,
   },
 
@@ -1081,13 +1046,6 @@ const HR_GROUP_APPROVAL_CODES = [
   'employees.transfer.approve.hr',
   'disciplinary_actions.approve.hr',
 ];
-const HR_COMPANY_GM_APPROVAL_CODES = [
-  'employees.termination.approve.gm',
-  'employees.transfer.approve.gm',
-  'disciplinary_actions.approve.gm',
-];
-const HR_DIVISION_MANAGER_APPROVAL_CODES = ['employees.transfer.approve.division'];
-const HR_FINANCE_APPROVAL_CODES = ['employees.transfer.approve.finance'];
 
 const ALL_M9_MODULES = [
   ...HR_CORE_MODULES,
@@ -1422,7 +1380,6 @@ const ROLES: RoleDef[] = [
       inModules(...ACCOUNTING_ENGINE_MODULES, ...PROCUREMENT_MODULES),
       (p) => inModules(...OPERATIONS_MODULES)(p) && readExport(p),
       (p) => p.code === 'payroll.approve.finance',
-      (p) => HR_FINANCE_APPROVAL_CODES.includes(p.code),
       (p) =>
         inModules('fuel_collections', 'fuel_credit_sales', 'fuel_reconciliation', 'petroleum')(p) &&
         !['manage', 'approve', 'post'].includes(p.action),
@@ -1562,7 +1519,6 @@ const ROLES: RoleDef[] = [
         'final_qa',
       ),
       notGroupCtrl,
-      (p) => HR_COMPANY_GM_APPROVAL_CODES.includes(p.code),
     ),
   },
   {
@@ -1912,7 +1868,6 @@ const ROLES: RoleDef[] = [
           'shifts',
           'reports',
         )(p) && !p.isGroupControl,
-      (p) => HR_DIVISION_MANAGER_APPROVAL_CODES.includes(p.code),
       (p) => ['employees.termination.request', 'leave_requests.approve'].includes(p.code),
     ),
   },

@@ -207,50 +207,68 @@ export class EmployeeAssignmentsService {
     return { message: 'Employee assignment deleted' };
   }
 
-  async approveTransferSourceDivision(id: string, user: any) {
-    return this.applyTransferApproval(
-      id,
-      user,
-      'sourceDivisionApprovedById',
-      'sourceDivisionApprovedAt',
-    );
-  }
-
-  async approveTransferTargetDivision(id: string, user: any) {
+  /**
+   * Single-approver transfer sign-off (simplification decision 5: the
+   * five-step division/GM/HR/CFO chain is gone). Any pending step state is
+   * approvable, so legacy in-flight transfers can't get stuck. Maker-checker
+   * still applies: the requester cannot approve.
+   */
+  async approveTransfer(id: string, user: any) {
     const existing = await this.findOne(id, user);
-    if (!(existing as any).sourceDivisionApprovedById) {
-      throw new BadRequestException('Source Division Manager approval is required first');
+    const approvalStatus = (existing as any).approvalStatus as string | null;
+    if (approvalStatus === 'APPROVED') {
+      throw new BadRequestException('Transfer assignment is already approved');
     }
-    return this.applyTransferApproval(
-      id,
-      user,
-      'targetDivisionApprovedById',
-      'targetDivisionApprovedAt',
-    );
-  }
+    if (!approvalStatus || !approvalStatus.startsWith('PENDING')) {
+      throw new BadRequestException('This assignment has no pending transfer');
+    }
+    if ((existing as any).transferRequestedById === user.id) {
+      throw new BadRequestException('Maker-checker: transfer requester cannot approve');
+    }
 
-  async approveTransferGm(id: string, user: any) {
-    const existing = await this.findOne(id, user);
-    if (!(existing as any).targetDivisionApprovedById) {
-      throw new BadRequestException('Target Division Manager approval is required first');
-    }
-    return this.applyTransferApproval(id, user, 'companyGmApprovedById', 'companyGmApprovedAt');
-  }
+    const now = new Date();
+    const record = await this.prisma.$transaction(async (tx) => {
+      await tx.employeeAssignment.updateMany({
+        where: {
+          employeeId: existing.employeeId,
+          status: 'ACTIVE',
+          isPrimary: true,
+          deletedAt: null,
+        },
+        data: { isPrimary: false },
+      });
+      const approved = await tx.employeeAssignment.update({
+        where: { id },
+        data: {
+          groupHrApprovedById: user.id,
+          groupHrApprovedAt: now,
+          approvalStatus: 'APPROVED',
+          status: 'ACTIVE',
+          isPrimary: true,
+        } as any,
+      });
+      await tx.employee.update({
+        where: { id: existing.employeeId },
+        data: {
+          companyId: existing.companyId,
+          divisionId: existing.divisionId,
+          branchId: existing.branchId,
+          licensedBusinessUnitId: existing.licensedBusinessUnitId,
+          departmentId: existing.departmentId,
+          positionId: existing.positionId,
+        } as any,
+      });
+      return approved;
+    });
 
-  async approveTransferHr(id: string, user: any) {
-    const existing = await this.findOne(id, user);
-    if (!(existing as any).companyGmApprovedById) {
-      throw new BadRequestException('Company GM approval is required before Group HR approval');
-    }
-    return this.applyTransferApproval(id, user, 'groupHrApprovedById', 'groupHrApprovedAt');
-  }
-
-  async approveTransferFinance(id: string, user: any) {
-    const existing = await this.findOne(id, user);
-    if (!(existing as any).groupHrApprovedById) {
-      throw new BadRequestException('Group HR approval is required before Group CFO approval');
-    }
-    return this.applyTransferApproval(id, user, 'groupCfoApprovedById', 'groupCfoApprovedAt');
+    await this.audit.log({
+      userId: user.id,
+      action: 'TRANSFER_APPROVAL',
+      entityType: 'EmployeeAssignment',
+      entityId: id,
+      newValue: { approvalStatus: 'APPROVED' },
+    });
+    return record;
   }
 
   private assertValidDateRange(startDate: Date, endDate?: Date | null) {
@@ -276,108 +294,6 @@ export class EmployeeAssignmentsService {
     return dto.companyId !== employee.companyId || (dto.divisionId ?? null) !== employee.divisionId;
   }
 
-  private async applyTransferApproval(
-    id: string,
-    user: any,
-    approverField: string,
-    approvedAtField: string,
-  ) {
-    const existing = await this.findOne(id, user);
-    if ((existing as any).approvalStatus === 'APPROVED') {
-      throw new BadRequestException('Transfer assignment is already approved');
-    }
-    if ((existing as any).transferRequestedById === user.id) {
-      throw new BadRequestException('Maker-checker: transfer requester cannot approve');
-    }
-    this.assertDistinctTransferApprover(existing, user.id, approverField);
 
-    const now = new Date();
-    const data: Record<string, unknown> = {
-      [approverField]: user.id,
-      [approvedAtField]: now,
-    };
-    const nextApprovalStatus = this.nextTransferApprovalStatus(existing, data);
-    data.approvalStatus = nextApprovalStatus;
 
-    const record = await this.prisma.$transaction(async (tx) => {
-      if (nextApprovalStatus !== 'APPROVED') {
-        return tx.employeeAssignment.update({ where: { id }, data: data as any });
-      }
-
-      await tx.employeeAssignment.updateMany({
-        where: {
-          employeeId: existing.employeeId,
-          status: 'ACTIVE',
-          isPrimary: true,
-          deletedAt: null,
-        },
-        data: { isPrimary: false },
-      });
-      const approved = await tx.employeeAssignment.update({
-        where: { id },
-        data: {
-          ...data,
-          status: 'ACTIVE',
-          isPrimary: true,
-        } as any,
-      });
-      await tx.employee.update({
-        where: { id: existing.employeeId },
-        data: {
-          companyId: existing.companyId,
-          divisionId: existing.divisionId,
-          branchId: existing.branchId,
-          licensedBusinessUnitId: existing.licensedBusinessUnitId,
-          departmentId: existing.departmentId,
-          positionId: existing.positionId,
-        } as any,
-      });
-      return approved;
-    });
-
-    await this.audit.log({
-      userId: user.id,
-      action: 'TRANSFER_APPROVAL',
-      entityType: 'EmployeeAssignment',
-      entityId: id,
-      newValue: { approvalStatus: nextApprovalStatus, approverField },
-    });
-    return record;
-  }
-
-  private nextTransferApprovalStatus(existing: any, incoming: Record<string, unknown>): string {
-    const sourceApproved = Boolean(
-      incoming.sourceDivisionApprovedById ?? existing.sourceDivisionApprovedById,
-    );
-    const targetApproved = Boolean(
-      incoming.targetDivisionApprovedById ?? existing.targetDivisionApprovedById,
-    );
-    const gmApproved = Boolean(incoming.companyGmApprovedById ?? existing.companyGmApprovedById);
-    const hrApproved = Boolean(incoming.groupHrApprovedById ?? existing.groupHrApprovedById);
-    const cfoApproved = Boolean(incoming.groupCfoApprovedById ?? existing.groupCfoApprovedById);
-    const interCompany = existing.employee?.companyId
-      ? existing.companyId !== existing.employee.companyId
-      : false;
-    if (!sourceApproved) return 'PENDING_SOURCE_DIVISION_APPROVAL';
-    if (!targetApproved) return 'PENDING_TARGET_DIVISION_APPROVAL';
-    if (!gmApproved) return 'PENDING_COMPANY_GM_APPROVAL';
-    if (!hrApproved) return 'PENDING_GROUP_HR_APPROVAL';
-    if (interCompany && !cfoApproved) return 'PENDING_GROUP_CFO_APPROVAL';
-    return 'APPROVED';
-  }
-
-  private assertDistinctTransferApprover(existing: any, userId: string, currentField: string) {
-    const priorApprovals = [
-      'sourceDivisionApprovedById',
-      'targetDivisionApprovedById',
-      'companyGmApprovedById',
-      'groupHrApprovedById',
-      'groupCfoApprovedById',
-    ].filter((field) => field !== currentField);
-    if (priorApprovals.some((field) => existing[field] === userId)) {
-      throw new BadRequestException(
-        'Maker-checker: transfer approval steps need distinct approvers',
-      );
-    }
-  }
 }

@@ -20,6 +20,7 @@ interface Assignment {
   startDate?: string;
   endDate?: string;
   status: string;
+  approvalStatus?: string | null;
 }
 
 interface FormState {
@@ -44,7 +45,9 @@ export default function EmployeeAssignmentsPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const { companyOptions, branchOptions, divisionOptions, employeeOptions } = useOrgScope(form.companyId);
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canApproveTransfer = hasPermission('employees.transfer.approve.hr');
+  const [approvingId, setApprovingId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -105,6 +108,22 @@ export default function EmployeeAssignmentsPage() {
     }
   };
 
+  const handleApproveTransfer = async (id: string) => {
+    setApprovingId(id);
+    try {
+      const res = await fetch(`/api/backend/hr/employee-assignments/${id}/approve-transfer`, { method: 'PATCH' });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Approval failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not approve the transfer.'));
+        return;
+      }
+      showToast('success', 'Transfer approved', 'The assignment is now active and the employee has moved.');
+      load();
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
   const handleDelete = async () => {
     if (!deleteId) return;
     const res = await fetch(`/api/backend/hr/employee-assignments/${deleteId}`, { method: 'DELETE' });
@@ -155,9 +174,20 @@ export default function EmployeeAssignmentsPage() {
                     <td className={tdCls}>{typeof a.company === 'string' ? a.company : (a.company?.name ?? '—')}</td>
                     <td className={tdCls}>{a.startDate ? new Date(a.startDate).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}>{a.endDate ? new Date(a.endDate).toLocaleDateString('en-GB') : '—'}</td>
-                    <td className={tdCls}><StatusBadge status={a.status} /></td>
+                    <td className={tdCls}>
+                      {a.approvalStatus?.startsWith('PENDING') ? (
+                        <StatusBadge status="TRANSFER_PENDING" />
+                      ) : (
+                        <StatusBadge status={a.status} />
+                      )}
+                    </td>
                     <td className={tdCls}>
                       <div className="flex gap-2">
+                        {a.approvalStatus?.startsWith('PENDING') && canApproveTransfer && (
+                          <Btn variant="success" size="xs" onClick={() => handleApproveTransfer(a.id)} disabled={approvingId === a.id}>
+                            {approvingId === a.id ? '…' : 'Approve Transfer'}
+                          </Btn>
+                        )}
                         <Btn variant="ghost" size="xs" onClick={() => openEdit(a)}>Edit</Btn>
                         <Btn variant="danger" size="xs" onClick={() => setDeleteId(a.id)}>Delete</Btn>
                       </div>

@@ -119,61 +119,25 @@ export class DisciplinaryActionsService {
     return row;
   }
 
-  async approveHr(actionId: string, user: AuthUser) {
+  /**
+   * Single-approver sign-off (simplification decision 5: no dual HR+GM chain).
+   * Accepts legacy PENDING_GM_APPROVAL rows so nothing already in flight gets
+   * stuck. Maker-checker still applies: the issuer cannot approve.
+   */
+  async approve(actionId: string, user: AuthUser) {
     const action = await this.findOne(actionId, user);
     const userId = user.id;
     this.assertCanApprove(action, userId);
-    if (action.status !== 'PENDING_HR_APPROVAL') {
-      throw new BadRequestException('Disciplinary action is not pending Group HR approval');
-    }
-    if ((action as any).gmApprovedById === userId) {
-      throw new BadRequestException('Maker-checker: Group HR and Company GM approvers must differ');
-    }
-    const now = new Date();
-    const finalStatus = requiresGmApproval(action.type) ? 'PENDING_GM_APPROVAL' : 'ACTIVE';
-    const row = await this.prisma.disciplinaryAction.update({
-      where: { id: actionId },
-      data: {
-        status: finalStatus,
-        hrApprovedById: userId,
-        hrApprovedAt: now,
-        ...(finalStatus === 'ACTIVE' ? { approvedById: userId, approvedAt: now } : {}),
-      } as any,
-      include: this.include(),
-    });
-    if (finalStatus === 'ACTIVE' && row.fineAmount && Number(row.fineAmount) > 0) {
-      await this.applyFine(actionId, userId);
-    }
-    await this.audit.log({
-      userId,
-      action: 'DISCIPLINARY_HR_APPROVE',
-      entityType: 'DisciplinaryAction',
-      entityId: actionId,
-      newValue: { status: finalStatus },
-    });
-    return row;
-  }
-
-  async approveGm(actionId: string, user: AuthUser) {
-    const action = await this.findOne(actionId, user);
-    const userId = user.id;
-    this.assertCanApprove(action, userId);
-    if (action.status !== 'PENDING_GM_APPROVAL') {
-      throw new BadRequestException('Disciplinary action is not pending Company GM approval');
-    }
-    if (!action.hrApprovedById) {
-      throw new BadRequestException('Group HR approval is required before Company GM approval');
-    }
-    if ((action as any).hrApprovedById === userId) {
-      throw new BadRequestException('Maker-checker: Company GM and Group HR approvers must differ');
+    if (action.status !== 'PENDING_HR_APPROVAL' && action.status !== 'PENDING_GM_APPROVAL') {
+      throw new BadRequestException('Disciplinary action is not pending approval');
     }
     const now = new Date();
     const row = await this.prisma.disciplinaryAction.update({
       where: { id: actionId },
       data: {
         status: 'ACTIVE',
-        gmApprovedById: userId,
-        gmApprovedAt: now,
+        hrApprovedById: (action as any).hrApprovedById ?? userId,
+        hrApprovedAt: (action as any).hrApprovedAt ?? now,
         approvedById: userId,
         approvedAt: now,
       } as any,
@@ -184,7 +148,7 @@ export class DisciplinaryActionsService {
     }
     await this.audit.log({
       userId,
-      action: 'DISCIPLINARY_GM_APPROVE',
+      action: 'DISCIPLINARY_APPROVE',
       entityType: 'DisciplinaryAction',
       entityId: actionId,
       newValue: { status: 'ACTIVE' },
@@ -343,10 +307,4 @@ export class DisciplinaryActionsService {
 
 function requiresHrApproval(type: string): boolean {
   return type !== 'VERBAL_WARNING';
-}
-
-function requiresGmApproval(type: string): boolean {
-  return ['TERMINATION', 'SUSPENSION_WITH_PAY', 'SUSPENSION_WITHOUT_PAY', 'DEMOTION'].includes(
-    type,
-  );
 }

@@ -456,42 +456,29 @@ export class EmployeesService {
     return stripSensitive(record, user);
   }
 
-  async approveTerminationHr(id: string, user: any) {
+  /**
+   * Single-approver termination sign-off (simplification decision 5: no dual
+   * HR+GM chain). Maker-checker still applies via assertTerminationPending —
+   * the requester cannot approve.
+   */
+  async approveTermination(id: string, user: any) {
     const existing = await this.findOne(id, user);
     this.assertTerminationPending(existing, user.id);
-    if ((existing as any).terminationGmApprovedById === user.id) {
-      throw new BadRequestException('Maker-checker: HR and GM termination approvers must differ');
-    }
-    const record = await this.applyTerminationApproval(id, existing, user, {
-      terminationHrApprovedById: user.id,
-      terminationHrApprovedAt: new Date(),
+    const record = await this.prisma.employee.update({
+      where: { id },
+      data: {
+        terminationHrApprovedById: user.id,
+        terminationHrApprovedAt: new Date(),
+        employmentStatus: 'TERMINATED',
+        terminationDate: (existing as any).pendingTerminationDate ?? new Date(),
+      } as any,
     });
     await this.audit.log({
       userId: user.id,
-      action: 'TERMINATION_HR_APPROVE',
+      action: 'TERMINATION_APPROVE',
       entityType: 'Employee',
       entityId: id,
-      newValue: { employmentStatus: (record as any).employmentStatus },
-    });
-    return stripSensitive(record, user);
-  }
-
-  async approveTerminationGm(id: string, user: any) {
-    const existing = await this.findOne(id, user);
-    this.assertTerminationPending(existing, user.id);
-    if ((existing as any).terminationHrApprovedById === user.id) {
-      throw new BadRequestException('Maker-checker: GM and HR termination approvers must differ');
-    }
-    const record = await this.applyTerminationApproval(id, existing, user, {
-      terminationGmApprovedById: user.id,
-      terminationGmApprovedAt: new Date(),
-    });
-    await this.audit.log({
-      userId: user.id,
-      action: 'TERMINATION_GM_APPROVE',
-      entityType: 'Employee',
-      entityId: id,
-      newValue: { employmentStatus: (record as any).employmentStatus },
+      newValue: { employmentStatus: 'TERMINATED' },
     });
     return stripSensitive(record, user);
   }
@@ -692,28 +679,4 @@ export class EmployeesService {
     }
   }
 
-  private async applyTerminationApproval(
-    id: string,
-    existing: any,
-    user: any,
-    approvalData: Record<string, unknown>,
-  ) {
-    const hasHrApproval = Boolean(
-      approvalData.terminationHrApprovedById ?? existing.terminationHrApprovedById,
-    );
-    const hasGmApproval = Boolean(
-      approvalData.terminationGmApprovedById ?? existing.terminationGmApprovedById,
-    );
-    const finalData =
-      hasHrApproval && hasGmApproval
-        ? {
-            employmentStatus: 'TERMINATED',
-            terminationDate: existing.pendingTerminationDate ?? new Date(),
-          }
-        : {};
-    return this.prisma.employee.update({
-      where: { id },
-      data: { ...approvalData, ...finalData } as any,
-    });
-  }
 }

@@ -81,16 +81,10 @@ export class EmployeesController {
     return this.service.requestTermination(id, body, user);
   }
 
-  @Patch(':id/approve-termination-hr')
+  @Patch(':id/approve-termination')
   @RequirePermissions('employees.termination.approve.hr')
-  approveTerminationHr(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approveTerminationHr(id, user);
-  }
-
-  @Patch(':id/approve-termination-gm')
-  @RequirePermissions('employees.termination.approve.gm')
-  approveTerminationGm(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approveTerminationGm(id, user);
+  approveTermination(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.approveTermination(id, user);
   }
 
   @Delete(':id')

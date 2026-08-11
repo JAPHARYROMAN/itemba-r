@@ -51,34 +51,10 @@ export class EmployeeAssignmentsController {
     return this.service.update(id, dto, user);
   }
 
-  @Patch(':id/approve-transfer-source-division')
-  @RequirePermissions('employees.transfer.approve.division')
-  approveTransferSourceDivision(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approveTransferSourceDivision(id, user);
-  }
-
-  @Patch(':id/approve-transfer-target-division')
-  @RequirePermissions('employees.transfer.approve.division')
-  approveTransferTargetDivision(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approveTransferTargetDivision(id, user);
-  }
-
-  @Patch(':id/approve-transfer-gm')
-  @RequirePermissions('employees.transfer.approve.gm')
-  approveTransferGm(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approveTransferGm(id, user);
-  }
-
-  @Patch(':id/approve-transfer-hr')
+  @Patch(':id/approve-transfer')
   @RequirePermissions('employees.transfer.approve.hr')
-  approveTransferHr(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approveTransferHr(id, user);
-  }
-
-  @Patch(':id/approve-transfer-finance')
-  @RequirePermissions('employees.transfer.approve.finance')
-  approveTransferFinance(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approveTransferFinance(id, user);
+  approveTransfer(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.approveTransfer(id, user);
   }
 
   @Delete(':id')

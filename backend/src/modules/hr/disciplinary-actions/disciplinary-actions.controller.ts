@@ -58,16 +58,10 @@ export class DisciplinaryActionsController {
     return this.service.update(id, dto, user);
   }
 
-  @Patch(':id/approve-hr')
+  @Patch(':id/approve')
   @RequirePermissions('disciplinary_actions.approve.hr')
-  approveHr(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approveHr(id, user);
-  }
-
-  @Patch(':id/approve-gm')
-  @RequirePermissions('disciplinary_actions.approve.gm')
-  approveGm(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.approveGm(id, user);
+  approve(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.approve(id, user);
   }
 
   @Delete(':id')

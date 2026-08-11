@@ -12,7 +12,9 @@ import {
   PageSpinner,
   PageToolbar,
   StatusBadge,
+  showToast,
 } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
 
 interface Company {
   id: string;
@@ -113,6 +115,9 @@ export default function DisciplinaryActionsPage() {
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const { hasPermission } = useAuth();
+  const canApprove = hasPermission('disciplinary_actions.approve.hr');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -249,6 +254,22 @@ export default function DisciplinaryActionsPage() {
     load();
   };
 
+  const handleApprove = async (id: string) => {
+    setApprovingId(id);
+    try {
+      const res = await fetch(`/api/backend/hr/disciplinary-actions/${id}/approve`, { method: 'PATCH' });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Approval failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not approve the action.'));
+        return;
+      }
+      showToast('success', 'Action approved', 'The disciplinary action is now active.');
+      load();
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
@@ -348,6 +369,11 @@ export default function DisciplinaryActionsPage() {
                       <StatusBadge status={r.status} />
                     </td>
                     <td className="px-4 py-2 text-right whitespace-nowrap">
+                      {canApprove && (r.status === 'PENDING_HR_APPROVAL' || r.status === 'PENDING_GM_APPROVAL') && (
+                        <Btn variant="success" size="xs" onClick={() => handleApprove(r.id)} disabled={approvingId === r.id}>
+                          {approvingId === r.id ? '…' : 'Approve'}
+                        </Btn>
+                      )}
                       <Btn variant="ghost" size="xs" onClick={() => openEdit(r)}>
                         Edit
                       </Btn>
