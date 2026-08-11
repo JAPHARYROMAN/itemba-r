@@ -129,7 +129,10 @@ export default function OperationsDashboardPage() {
     async function loadCompanies() {
       try {
         const records = await backendList<Company>('/companies', { query: { limit: 100 } });
-        if (!cancelled) setCompanies(records);
+        if (cancelled) return;
+        setCompanies(records);
+        // A sole-company user shouldn't have to pick it (matches the inventory hub).
+        if (records.length === 1) setCompanyId(records[0].id);
       } catch {
         if (!cancelled) setCompanies([]);
       }

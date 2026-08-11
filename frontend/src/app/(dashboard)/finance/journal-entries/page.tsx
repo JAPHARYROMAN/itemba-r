@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { formatDate, formatMoney, formatNumber } from '@/lib/format';
+
+/** Exact 2-decimal figure for the entry grid, where sub-shilling imbalances must stay visible. */
+function fmtExact(amount: number) {
+  return formatNumber(amount, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 interface Company { id: string; name: string; code: string }
 interface AccountingPeriod { id: string; name: string }
@@ -36,15 +42,6 @@ interface JournalEntry {
 }
 
 interface Paginated<T> { data: T[]; total: number; page: number; totalPages: number }
-
-function fmtDate(d?: string | null) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-function fmtMoney(amount: number) {
-  return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(amount ?? 0);
-}
 
 function ReverseDialog({ entry, onClose, onDone }: { entry: JournalEntry; onClose: () => void; onDone: () => void }) {
   const [reason, setReason] = useState('');
@@ -80,7 +77,7 @@ function JournalDrawer({ entry, onClose }: { entry: JournalEntry; onClose: () =>
         <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--aurora-border)' }}>
           <div>
             <h3 className="text-lg font-semibold">{entry.journalNumber ?? 'Journal Entry'}</h3>
-            <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{fmtDate(entry.transactionDate)}</p>
+            <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{formatDate(entry.transactionDate)}</p>
           </div>
           <Btn variant="ghost" size="sm" onClick={onClose}>Close</Btn>
         </div>
@@ -111,14 +108,14 @@ function JournalDrawer({ entry, onClose }: { entry: JournalEntry; onClose: () =>
                   <tr key={l.id ?? i}>
                     <td className="px-2 py-2 font-mono">{l.account?.accountCode} — {l.account?.accountName}</td>
                     <td className="px-2 py-2">{l.description ?? '—'}</td>
-                    <td className="px-2 py-2 text-right font-mono">{l.debit ? fmtMoney(l.debit) : '—'}</td>
-                    <td className="px-2 py-2 text-right font-mono">{l.credit ? fmtMoney(l.credit) : '—'}</td>
+                    <td className="px-2 py-2 text-right font-mono">{l.debit ? formatMoney(l.debit) : '—'}</td>
+                    <td className="px-2 py-2 text-right font-mono">{l.credit ? formatMoney(l.credit) : '—'}</td>
                   </tr>
                 ))}
                 <tr className="bg-gray-50 font-semibold">
                   <td className="px-2 py-2" colSpan={2}>Totals</td>
-                  <td className="px-2 py-2 text-right font-mono">{fmtMoney(entry.totalDebit)}</td>
-                  <td className="px-2 py-2 text-right font-mono">{fmtMoney(entry.totalCredit)}</td>
+                  <td className="px-2 py-2 text-right font-mono">{formatMoney(entry.totalDebit)}</td>
+                  <td className="px-2 py-2 text-right font-mono">{formatMoney(entry.totalCredit)}</td>
                 </tr>
               </tbody>
             </table>
@@ -250,15 +247,15 @@ function JournalModal({ mode, initial, companies, onClose, onSaved }: {
                 ))}
                 <tr className="bg-gray-50 font-semibold">
                   <td className="px-2 py-2" colSpan={2}>Totals</td>
-                  <td className="px-2 py-2 text-right font-mono">{fmtMoney(totalDebit)}</td>
-                  <td className="px-2 py-2 text-right font-mono">{fmtMoney(totalCredit)}</td>
+                  <td className="px-2 py-2 text-right font-mono">{fmtExact(totalDebit)}</td>
+                  <td className="px-2 py-2 text-right font-mono">{fmtExact(totalCredit)}</td>
                   <td></td>
                 </tr>
               </tbody>
             </table>
           </div>
           <div className={`mt-2 text-xs font-medium ${balanced ? 'text-emerald-600' : 'text-red-600'}`}>
-            {balanced ? 'Balanced' : `Difference: ${fmtMoney(Math.abs(totalDebit - totalCredit))}`}
+            {balanced ? 'Balanced' : `Difference: ${fmtExact(Math.abs(totalDebit - totalCredit))}`}
           </div>
         </div>
       </div>
@@ -426,11 +423,11 @@ export default function JournalEntriesPage() {
               ) : data.data.map((e) => (
                 <tr key={e.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => openDetail(e.id)}>
                   <td className="px-4 py-3 font-mono text-xs">{e.journalNumber ?? e.id.slice(0, 8)}</td>
-                  <td className="px-4 py-3">{fmtDate(e.transactionDate)}</td>
+                  <td className="px-4 py-3">{formatDate(e.transactionDate)}</td>
                   <td className="px-4 py-3 max-w-xs truncate">{e.description}</td>
                   <td className="px-4 py-3 text-xs">{e.company?.name ?? '—'}</td>
-                  <td className="px-4 py-3 text-right font-mono">{fmtMoney(e.totalDebit)}</td>
-                  <td className="px-4 py-3 text-right font-mono">{fmtMoney(e.totalCredit)}</td>
+                  <td className="px-4 py-3 text-right font-mono">{formatMoney(e.totalDebit)}</td>
+                  <td className="px-4 py-3 text-right font-mono">{formatMoney(e.totalCredit)}</td>
                   <td className="px-4 py-3"><StatusBadge status={e.status} /></td>
                   <td className="px-4 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
                     <div className="flex items-center justify-end gap-1.5">

@@ -109,6 +109,8 @@ export default function AuditAdjustmentsPage() {
   const [status, setStatus] = useState('');
   const [selected, setSelected] = useState<AuditAdjustment | null>(null);
   const [creating, setCreating] = useState(false);
+  const [reverseTarget, setReverseTarget] = useState<AuditAdjustment | null>(null);
+  const [reverseReason, setReverseReason] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -291,10 +293,10 @@ export default function AuditAdjustmentsPage() {
   const runAction = async (
     row: AuditAdjustment,
     action: 'submit' | 'approve' | 'post' | 'reverse',
+    reason?: string,
   ) => {
-    const body =
-      action === 'reverse' ? { reason: window.prompt('Reason for reversal')?.trim() } : undefined;
-    if (action === 'reverse' && !body?.reason) return;
+    const body = action === 'reverse' ? { reason } : undefined;
+    if (action === 'reverse' && !body?.reason) return false;
 
     setSaving(true);
     setError('');
@@ -307,10 +309,21 @@ export default function AuditAdjustmentsPage() {
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorMessage(json, `${action} failed`));
       await load();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : `${action} failed`);
+      return false;
     } finally {
       setSaving(false);
+    }
+  };
+
+  const confirmReverse = async () => {
+    if (!reverseTarget || !reverseReason.trim()) return;
+    const ok = await runAction(reverseTarget, 'reverse', reverseReason.trim());
+    if (ok) {
+      setReverseTarget(null);
+      setReverseReason('');
     }
   };
 
@@ -560,7 +573,10 @@ export default function AuditAdjustmentsPage() {
                   variant="warning"
                   loading={saving}
                   disabled={selected.status !== 'POSTED'}
-                  onClick={() => runAction(selected, 'reverse')}
+                  onClick={() => {
+                    setReverseReason('');
+                    setReverseTarget(selected);
+                  }}
                 >
                   Reverse
                 </Btn>
@@ -569,6 +585,47 @@ export default function AuditAdjustmentsPage() {
           )}
         </Card>
       </div>
+
+      {reverseTarget && (
+        <Modal
+          open
+          title="Reverse Adjustment"
+          subtitle={reverseTarget.adjustmentNumber}
+          size="sm"
+          onClose={() => setReverseTarget(null)}
+          footer={
+            <>
+              <Btn variant="secondary" disabled={saving} onClick={() => setReverseTarget(null)}>
+                Cancel
+              </Btn>
+              <Btn
+                variant="warning"
+                loading={saving}
+                disabled={!reverseReason.trim()}
+                onClick={confirmReverse}
+              >
+                Reverse
+              </Btn>
+            </>
+          }
+        >
+          <div className="space-y-3">
+            {error && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {error}
+              </div>
+            )}
+            <FormTextarea
+              label="Reason for reversal"
+              required
+              rows={3}
+              value={reverseReason}
+              onChange={(e) => setReverseReason(e.target.value)}
+              hint="A reversal journal entry will be posted against this adjustment."
+            />
+          </div>
+        </Modal>
+      )}
 
       {creating && (
         <Modal

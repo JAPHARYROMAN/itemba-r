@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { PageHeader, Card } from '@/components/ui';
+import { PageHeader, Card, ConfirmDialog, showToast } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { unwrapList } from '@/lib/unwrap';
 import { RolesModal } from './_components/RolesModal';
@@ -472,6 +472,7 @@ function UserRow({
   onDeleted: () => void;
 }) {
   const [deleting, setDeleting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const initials = user.fullName
     .split(' ')
@@ -483,23 +484,22 @@ function UserRow({
   const roleNames = (user.userRoles ?? []).map((ur) => ur.role.displayName);
 
   const handleDelete = async () => {
-    if (
-      !confirm(
-        `Deactivate user "${user.fullName}" (${user.email})? This sets status to INACTIVE and revokes their refresh tokens. Audit history is preserved.`,
-      )
-    )
-      return;
     setDeleting(true);
     try {
       const res = await fetch(`/api/backend/users/${user.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        alert(j.message ?? 'Delete failed');
+        showToast(
+          'error',
+          'Delete failed',
+          Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? undefined),
+        );
       } else {
         onDeleted();
       }
     } finally {
       setDeleting(false);
+      setConfirmingDelete(false);
     }
   };
 
@@ -565,7 +565,7 @@ function UserRow({
             )}
             {canDelete && (
               <button
-                onClick={handleDelete}
+                onClick={() => setConfirmingDelete(true)}
                 disabled={deleting}
                 className="text-xs px-3 py-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors font-medium disabled:opacity-50"
               >
@@ -573,6 +573,18 @@ function UserRow({
               </button>
             )}
           </div>
+          {canDelete && (
+            <ConfirmDialog
+              open={confirmingDelete}
+              title="Deactivate User"
+              variant="danger"
+              confirmLabel="Deactivate"
+              message={`Deactivate user "${user.fullName}" (${user.email})? This sets status to INACTIVE and revokes their refresh tokens. Audit history is preserved.`}
+              loading={deleting}
+              onConfirm={handleDelete}
+              onCancel={() => setConfirmingDelete(false)}
+            />
+          )}
         </td>
       )}
     </tr>

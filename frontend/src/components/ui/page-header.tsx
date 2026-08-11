@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from 'next/link';
 
 interface Breadcrumb { label: string; href?: string }
 
@@ -24,7 +25,7 @@ export function PageHeader({ title, subtitle, description, breadcrumbs, actions,
               <React.Fragment key={i}>
                 {i > 0 && <span>/</span>}
                 {bc.href ? (
-                  <a href={bc.href} className="hover:underline transition-colors" style={{ color: 'var(--aurora-text-secondary)' }}>{bc.label}</a>
+                  <Link href={bc.href} className="hover:underline transition-colors" style={{ color: 'var(--aurora-text-secondary)' }}>{bc.label}</Link>
                 ) : (
                   <span style={{ color: 'var(--aurora-text-muted)' }}>{bc.label}</span>
                 )}

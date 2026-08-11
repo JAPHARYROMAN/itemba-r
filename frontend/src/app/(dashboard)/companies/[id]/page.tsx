@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { AppIcon, type AppIconName, Card } from '@/components/ui';
+import { AppIcon, type AppIconName, Card, ConfirmDialog } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { Modal } from '@/components/aurora/overlays/Modal';
 import { FormInput } from '@/components/aurora/forms/FormInput';
@@ -152,6 +152,7 @@ export default function CompanyDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'divisions' | 'documents' | 'profile'>('overview');
   const [editOpen, setEditOpen] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deletingCompany, setDeletingCompany] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -212,17 +213,6 @@ export default function CompanyDetailPage() {
   async function deleteCompany() {
     const targetCompany = company;
     if (!targetCompany) return;
-    if (
-      !confirm(
-        `Delete ${targetCompany.name} from the registry? This archives its divisions and branches/stations so historical records remain intact.`,
-      )
-    ) {
-      return;
-    }
-    const typedCode = prompt(`Type ${targetCompany.code} to confirm this registry delete.`);
-    if (typedCode?.trim() !== targetCompany.code) {
-      return;
-    }
     setDeletingCompany(true);
     setDeleteError(null);
     try {
@@ -281,7 +271,7 @@ export default function CompanyDetailPage() {
             {hasPermission('companies.delete') && (
               <button
                 type="button"
-                onClick={deleteCompany}
+                onClick={() => setConfirmingDelete(true)}
                 disabled={deletingCompany}
                 className="px-3 py-1.5 text-sm border border-red-200 rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
               >
@@ -368,6 +358,20 @@ export default function CompanyDetailPage() {
             onSaved={() => {
               setEditOpen(false);
               void loadCompany({ showLoading: false });
+            }}
+          />
+        )}
+
+        {confirmingDelete && (
+          <TypeCodeConfirmModal
+            title="Delete Company"
+            message={`Delete ${company.name} from the registry? This archives its divisions and branches/stations so historical records remain intact.`}
+            code={company.code}
+            confirmLabel="Delete Company"
+            onCancel={() => setConfirmingDelete(false)}
+            onConfirm={() => {
+              setConfirmingDelete(false);
+              void deleteCompany();
             }}
           />
         )}
@@ -650,6 +654,9 @@ function DivisionsTab({
   const [editingBranch, setEditingBranch] = useState<{ division: Division; branch: Branch } | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [deactivatingDivision, setDeactivatingDivision] = useState<Division | null>(null);
+  const [archivingDivision, setArchivingDivision] = useState<Division | null>(null);
+  const [archivingBranch, setArchivingBranch] = useState<Branch | null>(null);
 
   useEffect(() => {
     if (divisions.length === 0) {
@@ -664,7 +671,6 @@ function DivisionsTab({
   const selectedDivision = divisions.find((division) => division.id === selectedDivisionId) ?? divisions[0] ?? null;
 
   async function setDivisionActive(division: Division, isActive: boolean) {
-    if (!isActive && !confirm(`Deactivate division ${division.name}? Its active branches/stations will also be deactivated.`)) return;
     setBusyAction(`division:${division.id}:active`);
     setActionError(null);
     try {
@@ -684,17 +690,6 @@ function DivisionsTab({
   }
 
   async function archiveDivision(division: Division) {
-    if (
-      !confirm(
-        `Delete division ${division.name} from the registry? This archives its branches/stations so historical records remain intact.`,
-      )
-    ) {
-      return;
-    }
-    const typedCode = prompt(`Type ${division.code} to confirm this division delete.`);
-    if (typedCode?.trim() !== division.code) {
-      return;
-    }
     setBusyAction(`division:${division.id}:delete`);
     setActionError(null);
     try {
@@ -730,11 +725,6 @@ function DivisionsTab({
   }
 
   async function archiveBranch(branch: Branch) {
-    if (!confirm(`Delete branch/station ${branch.name} from the registry? Historical records remain intact.`)) return;
-    const typedCode = prompt(`Type ${branch.code} to confirm this branch/station delete.`);
-    if (typedCode?.trim() !== branch.code) {
-      return;
-    }
     setBusyAction(`branch:${branch.id}:delete`);
     setActionError(null);
     try {
@@ -831,7 +821,11 @@ function DivisionsTab({
                             <button
                               type="button"
                               data-testid={`division-toggle-${division.code}`}
-                              onClick={() => setDivisionActive(division, !division.isActive)}
+                              onClick={() =>
+                                division.isActive
+                                  ? setDeactivatingDivision(division)
+                                  : setDivisionActive(division, true)
+                              }
                               disabled={busyAction === `division:${division.id}:active`}
                               className="px-2.5 py-1 text-xs border border-slate-200 rounded-md text-slate-700 hover:bg-white disabled:opacity-50 transition-colors"
                             >
@@ -847,7 +841,7 @@ function DivisionsTab({
                           <button
                             type="button"
                             data-testid={`division-archive-${division.code}`}
-                            onClick={() => archiveDivision(division)}
+                            onClick={() => setArchivingDivision(division)}
                             disabled={busyAction === `division:${division.id}:delete`}
                             className="px-2.5 py-1 text-xs border border-red-200 rounded-md text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
                           >
@@ -967,7 +961,7 @@ function DivisionsTab({
                                     <button
                                       type="button"
                                       data-testid={`branch-archive-${branch.code}`}
-                                      onClick={() => archiveBranch(branch)}
+                                      onClick={() => setArchivingBranch(branch)}
                                       disabled={busyAction === `branch:${branch.id}:delete`}
                                       className="text-xs text-red-600 hover:underline disabled:opacity-50"
                                     >
@@ -1036,6 +1030,50 @@ function DivisionsTab({
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={!!deactivatingDivision}
+        title="Deactivate Division"
+        message={`Deactivate division ${deactivatingDivision?.name ?? ''}? Its active branches/stations will also be deactivated.`}
+        variant="warning"
+        confirmLabel="Deactivate"
+        onConfirm={() => {
+          const division = deactivatingDivision;
+          setDeactivatingDivision(null);
+          if (division) void setDivisionActive(division, false);
+        }}
+        onCancel={() => setDeactivatingDivision(null)}
+      />
+
+      {archivingDivision && (
+        <TypeCodeConfirmModal
+          title="Delete Division"
+          message={`Delete division ${archivingDivision.name} from the registry? This archives its branches/stations so historical records remain intact.`}
+          code={archivingDivision.code}
+          confirmLabel="Delete Division"
+          onCancel={() => setArchivingDivision(null)}
+          onConfirm={() => {
+            const division = archivingDivision;
+            setArchivingDivision(null);
+            void archiveDivision(division);
+          }}
+        />
+      )}
+
+      {archivingBranch && (
+        <TypeCodeConfirmModal
+          title="Delete Branch/Station"
+          message={`Delete branch/station ${archivingBranch.name} from the registry? Historical records remain intact.`}
+          code={archivingBranch.code}
+          confirmLabel="Delete Branch"
+          onCancel={() => setArchivingBranch(null)}
+          onConfirm={() => {
+            const branch = archivingBranch;
+            setArchivingBranch(null);
+            void archiveBranch(branch);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -1045,6 +1083,59 @@ function apiErrorMessage(json: Record<string, unknown>, status: number) {
   if (Array.isArray(message)) return message.join(', ');
   if (typeof message === 'string' && message.trim()) return message;
   return `HTTP ${status}`;
+}
+
+// ── Type-the-code delete confirmation ─────────────────────────────────────────
+
+function TypeCodeConfirmModal({
+  title,
+  message,
+  code,
+  confirmLabel,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  message: string;
+  code: string;
+  confirmLabel: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const [typedCode, setTypedCode] = useState('');
+  const matches = typedCode.trim() === code;
+  return (
+    <Modal open={true} onClose={onCancel} title={title} size="sm">
+      <div className="p-5 space-y-4">
+        <p className="text-sm text-slate-600">{message}</p>
+        <FormInput
+          label={`Type ${code} to confirm`}
+          required
+          value={typedCode}
+          onChange={(e) => setTypedCode(e.target.value)}
+          placeholder={code}
+          autoComplete="off"
+        />
+        <div className="flex justify-end gap-2 pt-2 border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={!matches}
+            className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 function enumLabel(value: string) {

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Hash, ListFilter, Plus, RefreshCw, RotateCcw, Save, ShieldCheck } from 'lucide-react';
-import { Card, PageHeader, FormInput, FormSelect, Btn, Modal } from '@/components/ui';
+import { Card, PageHeader, FormInput, FormSelect, Btn, Modal, ConfirmDialog } from '@/components/ui';
 
 interface Company { id: string; name: string; code: string; }
 
@@ -88,6 +88,7 @@ export default function NumberSequencesPage() {
   const [editing, setEditing] = useState<NumberSequence | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [advancing, setAdvancing] = useState<NumberSequence | null>(null);
   const activeCount = useMemo(() => sequences.filter((seq) => seq.isActive).length, [sequences]);
   const globalCount = useMemo(() => sequences.filter((seq) => !seq.companyId).length, [sequences]);
   const selectedCompany = companies.find((company) => company.id === companyId);
@@ -181,7 +182,6 @@ export default function NumberSequencesPage() {
   };
 
   const advance = async (seq: NumberSequence) => {
-    if (!confirm(`Advance "${seq.sequenceCode}" — preview ${seq.prefix ?? ''}${String(seq.currentNumber + 1).padStart(seq.padding, '0')}${seq.suffix ?? ''}?\n\nThis is an audit-logged operation.`)) return;
     try {
       const res = await fetch(`/api/backend/document-number-sequences/${seq.id}/next`, { method: 'POST' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -307,7 +307,7 @@ export default function NumberSequencesPage() {
                           : <span className="inline-flex items-center px-2 py-0.5 border rounded-full text-[10px] font-medium bg-zinc-100 text-zinc-500 border-zinc-200">Inactive</span>}
                       </td>
                       <td className="px-4 py-2 text-right whitespace-nowrap">
-                        <button onClick={() => advance(seq)} className="text-xs text-indigo-600 hover:underline mr-3">Advance</button>
+                        <button onClick={() => setAdvancing(seq)} className="text-xs text-indigo-600 hover:underline mr-3">Advance</button>
                         <button onClick={() => openEdit(seq)} className="text-xs text-slate-600 hover:underline">Edit</button>
                       </td>
                     </tr>
@@ -435,6 +435,25 @@ export default function NumberSequencesPage() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={!!advancing}
+        title="Advance Sequence"
+        variant="warning"
+        confirmLabel="Advance"
+        message={
+          advancing
+            ? `Advance "${advancing.sequenceCode}" — preview ${advancing.prefix ?? ''}${String(advancing.currentNumber + 1).padStart(advancing.padding, '0')}${advancing.suffix ?? ''}? This consumes the number and is an audit-logged operation.`
+            : ''
+        }
+        onConfirm={async () => {
+          const seq = advancing;
+          if (!seq) return;
+          await advance(seq);
+          setAdvancing(null);
+        }}
+        onCancel={() => setAdvancing(null)}
+      />
 
       {sequences.length > 0 && (
         <p className="text-[11px] text-slate-400">

@@ -16,6 +16,7 @@ import {
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { DocumentArtifactButton } from '@/components/documents';
+import { formatDate, formatMoney, formatMoneyTotals, sumByCurrency } from '@/lib/format';
 import {
   DetailGrid,
   DetailItem,
@@ -26,7 +27,6 @@ import {
   MoneyTile,
   fmtDateOnly as fmtDetailDate,
   fmtDateTime,
-  fmtMoney,
   fmtQty,
 } from '../_components/ar-ap-detail-ui';
 
@@ -265,24 +265,6 @@ function receivableCustomerName(receivable: Receivable) {
   );
 }
 
-function fmtTZS(n: unknown) {
-  return (
-    'TZS ' +
-    new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
-      moneyNumber(n),
-    )
-  );
-}
-
-function fmtDate(d?: string | null) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
 function agingBucket(dueDate: string): string {
   const days = Math.floor((Date.now() - new Date(dueDate).getTime()) / 86400000);
   if (days <= 0) return 'Current';
@@ -423,10 +405,10 @@ function ReceivableDetailModal({
             <DetailItem label="TIN" value={customer?.tin} mono />
             <DetailItem label="VRN" value={customer?.vrn} mono />
             <DetailItem label="Payment Terms" value={customer?.paymentTerms} />
-            <DetailItem label="Credit Limit" value={fmtMoney(customer?.creditLimit, currency)} />
+            <DetailItem label="Credit Limit" value={formatMoney(customer?.creditLimit, currency)} />
             <DetailItem
               label="Current Balance"
-              value={fmtMoney(customer?.currentBalance, currency)}
+              value={formatMoney(customer?.currentBalance, currency)}
             />
             <DetailItem
               label="Customer Status"
@@ -483,13 +465,13 @@ function ReceivableDetailModal({
                         <InlineStatus status={order.paymentStatus} />
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {fmtMoney(order.totalAmount, currency)}
+                        {formatMoney(order.totalAmount, currency)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {fmtMoney(order.paidAmount, currency)}
+                        {formatMoney(order.paidAmount, currency)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {fmtMoney(order.outstandingAmount, currency)}
+                        {formatMoney(order.outstandingAmount, currency)}
                       </td>
                     </tr>
                   ))}
@@ -514,10 +496,10 @@ function ReceivableDetailModal({
                       <td className="px-3 py-2">{sale.product?.name ?? '-'}</td>
                       <td className="px-3 py-2 text-right font-mono">{fmtQty(sale.litres, 3)}</td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {fmtMoney(sale.pricePerLitre, currency)}
+                        {formatMoney(sale.pricePerLitre, currency)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {fmtMoney(sale.totalAmount, currency)}
+                        {formatMoney(sale.totalAmount, currency)}
                       </td>
                       <td className="px-3 py-2">
                         <InlineStatus status={sale.status} />
@@ -536,7 +518,7 @@ function ReceivableDetailModal({
                       <td className="px-3 py-2">{fmtDetailDate(billing.billingDate)}</td>
                       <td className="px-3 py-2">{billing.description}</td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {fmtMoney(billing.amount, billing.currency)}
+                        {formatMoney(billing.amount, billing.currency)}
                       </td>
                       <td className="px-3 py-2">
                         <InlineStatus status={billing.status} />
@@ -557,7 +539,7 @@ function ReceivableDetailModal({
                         {trip.origin} {'->'} {trip.destination}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {fmtMoney(trip.revenueAmount, trip.currency)}
+                        {formatMoney(trip.revenueAmount, trip.currency)}
                       </td>
                       <td className="px-3 py-2">
                         <InlineStatus status={trip.status} />
@@ -602,16 +584,16 @@ function ReceivableDetailModal({
                   <td className="px-3 py-2 text-right font-mono">{fmtQty(line.quantity, 2)}</td>
                   <td className="px-3 py-2">{unitLabel(line.unit)}</td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {fmtMoney(line.unitPrice, currency)}
+                    {formatMoney(line.unitPrice, currency)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {fmtMoney(line.discountAmount, currency)}
+                    {formatMoney(line.discountAmount, currency)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {fmtMoney(line.taxAmount, currency)}
+                    {formatMoney(line.taxAmount, currency)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {fmtMoney(line.lineTotal, currency)}
+                    {formatMoney(line.lineTotal, currency)}
                   </td>
                 </tr>
               ))}
@@ -636,11 +618,11 @@ function ReceivableDetailModal({
                 />
                 <DetailItem
                   label="Total Debit"
-                  value={fmtMoney(detail.journalEntry.totalDebit, currency)}
+                  value={formatMoney(detail.journalEntry.totalDebit, currency)}
                 />
                 <DetailItem
                   label="Total Credit"
-                  value={fmtMoney(detail.journalEntry.totalCredit, currency)}
+                  value={formatMoney(detail.journalEntry.totalCredit, currency)}
                 />
                 <DetailItem label="Posted At" value={fmtDateTime(detail.journalEntry.postedAt)} />
               </DetailGrid>
@@ -657,10 +639,10 @@ function ReceivableDetailModal({
                           </td>
                           <td className="px-3 py-2">{line.description ?? '-'}</td>
                           <td className="px-3 py-2 text-right font-mono">
-                            {fmtMoney(line.debit, currency)}
+                            {formatMoney(line.debit, currency)}
                           </td>
                           <td className="px-3 py-2 text-right font-mono">
-                            {fmtMoney(line.credit, currency)}
+                            {formatMoney(line.credit, currency)}
                           </td>
                         </tr>
                       ))
@@ -708,7 +690,9 @@ function RecordPaymentModal({
     }
     const outstanding = receivableOutstandingAmount(receivable);
     if (amt > outstanding) {
-      setError(`Amount cannot exceed outstanding balance ${fmtTZS(outstanding)}`);
+      setError(
+        `Amount cannot exceed outstanding balance ${formatMoney(outstanding, receivable.currency)}`,
+      );
       return;
     }
     setSaving(true);
@@ -740,7 +724,7 @@ function RecordPaymentModal({
       open
       onClose={onClose}
       title="Record Payment"
-      subtitle={`Outstanding: ${fmtTZS(receivableOutstandingAmount(receivable))}`}
+      subtitle={`Outstanding: ${formatMoney(receivableOutstandingAmount(receivable), receivable.currency)}`}
       size="md"
       footer={
         <>
@@ -1215,16 +1199,27 @@ export default function ReceivablesPage() {
     setExpandedAccounts({});
   };
 
-  const totalOutstanding =
+  const outstandingTotals = sumByCurrency(
     viewMode === 'accounts'
-      ? (accounts?.data.reduce((s, account) => s + account.outstandingAmount, 0) ?? 0)
-      : (data?.data.reduce((s, r) => s + receivableOutstandingAmount(r), 0) ?? 0);
-  const totalOverdue =
+      ? (accounts?.data ?? []).map((account) => ({
+          amount: account.outstandingAmount,
+          currency: account.currency,
+        }))
+      : (data?.data ?? []).map((r) => ({
+          amount: receivableOutstandingAmount(r),
+          currency: r.currency,
+        })),
+  );
+  const overdueTotals = sumByCurrency(
     viewMode === 'accounts'
-      ? (accounts?.data.reduce((s, account) => s + account.overdueAmount, 0) ?? 0)
-      : (data?.data
+      ? (accounts?.data ?? []).map((account) => ({
+          amount: account.overdueAmount,
+          currency: account.currency,
+        }))
+      : (data?.data ?? [])
           .filter((r) => r.status === 'OVERDUE')
-          .reduce((s, r) => s + receivableOutstandingAmount(r), 0) ?? 0);
+          .map((r) => ({ amount: receivableOutstandingAmount(r), currency: r.currency })),
+  );
   const totalRecords = viewMode === 'accounts' ? (accounts?.total ?? 0) : (data?.total ?? 0);
   const openRecords =
     viewMode === 'accounts'
@@ -1316,8 +1311,8 @@ export default function ReceivablesPage() {
           value={totalRecords}
         />
         <StatCard label="Open" value={openRecords} />
-        <StatCard label="Outstanding" value={fmtTZS(totalOutstanding)} />
-        <StatCard label="Overdue" value={fmtTZS(totalOverdue)} hint="Past due date" />
+        <StatCard label="Outstanding" value={formatMoneyTotals(outstandingTotals)} />
+        <StatCard label="Overdue" value={formatMoneyTotals(overdueTotals)} hint="Past due date" />
       </div>
 
       <PageToolbar
@@ -1435,18 +1430,18 @@ export default function ReceivablesPage() {
                             ) : null}
                           </td>
                           <td className="px-4 py-3 text-right font-mono">
-                            {fmtTZS(account.amount)}
+                            {formatMoney(account.amount, account.currency)}
                           </td>
                           <td className="px-4 py-3 text-right font-mono text-green-700">
-                            {fmtTZS(account.paidAmount)}
+                            {formatMoney(account.paidAmount, account.currency)}
                           </td>
                           <td className="px-4 py-3 text-right font-mono font-semibold">
-                            {fmtTZS(account.outstandingAmount)}
+                            {formatMoney(account.outstandingAmount, account.currency)}
                           </td>
                           <td className="px-4 py-3 text-right font-mono">
-                            {fmtTZS(account.overdueAmount)}
+                            {formatMoney(account.overdueAmount, account.currency)}
                           </td>
-                          <td className="px-4 py-3">{fmtDate(account.nextDueDate)}</td>
+                          <td className="px-4 py-3">{formatDate(account.nextDueDate)}</td>
                           <td className="px-4 py-3">
                             <StatusBadge status={account.status} />
                           </td>
@@ -1507,16 +1502,16 @@ export default function ReceivablesPage() {
                                         <td className="px-3 py-2 font-mono">
                                           {r.receivableNumber ?? r.id.slice(0, 8)}
                                         </td>
-                                        <td className="px-3 py-2">{fmtDate(r.issueDate)}</td>
-                                        <td className="px-3 py-2">{fmtDate(r.dueDate)}</td>
+                                        <td className="px-3 py-2">{formatDate(r.issueDate)}</td>
+                                        <td className="px-3 py-2">{formatDate(r.dueDate)}</td>
                                         <td className="px-3 py-2 text-right font-mono">
-                                          {fmtTZS(r.amount)}
+                                          {formatMoney(r.amount, r.currency)}
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono text-green-700">
-                                          {fmtTZS(receivablePaidAmount(r))}
+                                          {formatMoney(receivablePaidAmount(r), r.currency)}
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono font-semibold">
-                                          {fmtTZS(receivableOutstandingAmount(r))}
+                                          {formatMoney(receivableOutstandingAmount(r), r.currency)}
                                         </td>
                                         <td className="px-3 py-2">
                                           <StatusBadge status={r.status} />
@@ -1646,15 +1641,17 @@ export default function ReceivablesPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 font-medium">{receivableCustomerName(r)}</td>
-                      <td className="px-4 py-3 text-right font-mono">{fmtTZS(r.amount)}</td>
+                      <td className="px-4 py-3 text-right font-mono">
+                        {formatMoney(r.amount, r.currency)}
+                      </td>
                       <td className="px-4 py-3 text-right font-mono text-green-700">
-                        {fmtTZS(receivablePaidAmount(r))}
+                        {formatMoney(receivablePaidAmount(r), r.currency)}
                       </td>
                       <td className="px-4 py-3 text-right font-mono font-semibold">
-                        {fmtTZS(receivableOutstandingAmount(r))}
+                        {formatMoney(receivableOutstandingAmount(r), r.currency)}
                       </td>
-                      <td className="px-4 py-3">{fmtDate(r.issueDate)}</td>
-                      <td className="px-4 py-3">{fmtDate(r.dueDate)}</td>
+                      <td className="px-4 py-3">{formatDate(r.issueDate)}</td>
+                      <td className="px-4 py-3">{formatDate(r.dueDate)}</td>
                       <td className="px-4 py-3">
                         <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
                           {agingBucket(r.dueDate)}

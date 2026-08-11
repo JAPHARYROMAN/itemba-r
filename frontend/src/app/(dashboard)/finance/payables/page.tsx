@@ -15,6 +15,7 @@ import {
   FormTextarea,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { formatDate, formatMoney, formatMoneyTotals, sumByCurrency } from '@/lib/format';
 import {
   DetailGrid,
   DetailItem,
@@ -25,7 +26,6 @@ import {
   MoneyTile,
   fmtDateOnly as fmtDetailDate,
   fmtDateTime,
-  fmtMoney,
   fmtQty,
 } from '../_components/ar-ap-detail-ui';
 
@@ -219,25 +219,6 @@ const BLANK_FORM: PayableForm = {
 
 const CURRENCIES = ['TZS', 'USD', 'EUR', 'KES', 'UGX', 'GBP'];
 
-function fmtTZS(n: number | string | null | undefined) {
-  const value = Number(n ?? 0);
-  return (
-    'TZS ' +
-    new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
-      Number.isFinite(value) ? value : 0,
-    )
-  );
-}
-
-function fmtDate(d?: string | null) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
 function moneyNumber(value: unknown) {
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? n : 0;
@@ -395,10 +376,10 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
             <DetailItem label="TIN" value={supplier?.tin} mono />
             <DetailItem label="VRN" value={supplier?.vrn} mono />
             <DetailItem label="Payment Terms" value={supplier?.paymentTerms} />
-            <DetailItem label="Credit Limit" value={fmtMoney(supplier?.creditLimit, currency)} />
+            <DetailItem label="Credit Limit" value={formatMoney(supplier?.creditLimit, currency)} />
             <DetailItem
               label="Current Balance"
-              value={fmtMoney(supplier?.currentBalance, currency)}
+              value={formatMoney(supplier?.currentBalance, currency)}
             />
             <DetailItem
               label="Supplier Status"
@@ -457,13 +438,13 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
                         <InlineStatus status={order.paymentStatus} />
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {fmtMoney(order.totalAmount, currency)}
+                        {formatMoney(order.totalAmount, currency)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {fmtMoney(order.paidAmount, currency)}
+                        {formatMoney(order.paidAmount, currency)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {fmtMoney(order.outstandingAmount, currency)}
+                        {formatMoney(order.outstandingAmount, currency)}
                       </td>
                     </tr>
                   ))}
@@ -497,10 +478,10 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
                         {fmtQty(delivery.acceptedLitres, 3)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {fmtMoney(delivery.unitCost, currency)}
+                        {formatMoney(delivery.unitCost, currency)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {fmtMoney(delivery.totalCost, currency)}
+                        {formatMoney(delivery.totalCost, currency)}
                       </td>
                       <td className="px-3 py-2">
                         <InlineStatus status={delivery.status} />
@@ -546,16 +527,16 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
                   <td className="px-3 py-2 text-right font-mono">{fmtQty(line.quantity, 2)}</td>
                   <td className="px-3 py-2">{unitLabel(line.unit)}</td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {fmtMoney(line.unitCost, currency)}
+                    {formatMoney(line.unitCost, currency)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {fmtMoney(line.discountAmount, currency)}
+                    {formatMoney(line.discountAmount, currency)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {fmtMoney(line.taxAmount, currency)}
+                    {formatMoney(line.taxAmount, currency)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {fmtMoney(line.lineTotal, currency)}
+                    {formatMoney(line.lineTotal, currency)}
                   </td>
                   <td className="px-3 py-2">
                     <div>{line.batchNumber ?? '-'}</div>
@@ -586,11 +567,11 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
                 />
                 <DetailItem
                   label="Total Debit"
-                  value={fmtMoney(detail.journalEntry.totalDebit, currency)}
+                  value={formatMoney(detail.journalEntry.totalDebit, currency)}
                 />
                 <DetailItem
                   label="Total Credit"
-                  value={fmtMoney(detail.journalEntry.totalCredit, currency)}
+                  value={formatMoney(detail.journalEntry.totalCredit, currency)}
                 />
                 <DetailItem label="Posted At" value={fmtDateTime(detail.journalEntry.postedAt)} />
               </DetailGrid>
@@ -607,10 +588,10 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
                           </td>
                           <td className="px-3 py-2">{line.description ?? '-'}</td>
                           <td className="px-3 py-2 text-right font-mono">
-                            {fmtMoney(line.debit, currency)}
+                            {formatMoney(line.debit, currency)}
                           </td>
                           <td className="px-3 py-2 text-right font-mono">
-                            {fmtMoney(line.credit, currency)}
+                            {formatMoney(line.credit, currency)}
                           </td>
                         </tr>
                       ))
@@ -656,7 +637,9 @@ function RecordPaymentModal({
     }
     const outstanding = payableOutstandingAmount(payable);
     if (amt > outstanding) {
-      setError(`Amount cannot exceed outstanding balance ${fmtTZS(outstanding)}`);
+      setError(
+        `Amount cannot exceed outstanding balance ${formatMoney(outstanding, payable.currency)}`,
+      );
       return;
     }
     setSaving(true);
@@ -688,7 +671,7 @@ function RecordPaymentModal({
       open
       onClose={onClose}
       title="Record Payment"
-      subtitle={`Outstanding: ${fmtTZS(payableOutstandingAmount(payable))}`}
+      subtitle={`Outstanding: ${formatMoney(payableOutstandingAmount(payable), payable.currency)}`}
       size="md"
       footer={
         <>
@@ -1152,16 +1135,27 @@ export default function PayablesPage() {
     setExpandedAccounts({});
   };
 
-  const totalOutstanding =
+  const outstandingTotals = sumByCurrency(
     viewMode === 'accounts'
-      ? (accounts?.data.reduce((s, account) => s + account.outstandingAmount, 0) ?? 0)
-      : (data?.data.reduce((s, p) => s + payableOutstandingAmount(p), 0) ?? 0);
-  const totalOverdue =
+      ? (accounts?.data ?? []).map((account) => ({
+          amount: account.outstandingAmount,
+          currency: account.currency,
+        }))
+      : (data?.data ?? []).map((p) => ({
+          amount: payableOutstandingAmount(p),
+          currency: p.currency,
+        })),
+  );
+  const overdueTotals = sumByCurrency(
     viewMode === 'accounts'
-      ? (accounts?.data.reduce((s, account) => s + account.overdueAmount, 0) ?? 0)
-      : (data?.data
+      ? (accounts?.data ?? []).map((account) => ({
+          amount: account.overdueAmount,
+          currency: account.currency,
+        }))
+      : (data?.data ?? [])
           .filter((p) => p.status === 'OVERDUE')
-          .reduce((s, p) => s + payableOutstandingAmount(p), 0) ?? 0);
+          .map((p) => ({ amount: payableOutstandingAmount(p), currency: p.currency })),
+  );
   const totalRecords = viewMode === 'accounts' ? (accounts?.total ?? 0) : (data?.total ?? 0);
   const openRecords =
     viewMode === 'accounts'
@@ -1253,8 +1247,8 @@ export default function PayablesPage() {
           value={totalRecords}
         />
         <StatCard label="Open" value={openRecords} />
-        <StatCard label="Outstanding" value={fmtTZS(totalOutstanding)} />
-        <StatCard label="Overdue" value={fmtTZS(totalOverdue)} hint="Past due date" />
+        <StatCard label="Outstanding" value={formatMoneyTotals(outstandingTotals)} />
+        <StatCard label="Overdue" value={formatMoneyTotals(overdueTotals)} hint="Past due date" />
       </div>
 
       <PageToolbar
@@ -1372,18 +1366,18 @@ export default function PayablesPage() {
                             ) : null}
                           </td>
                           <td className="px-4 py-3 text-right font-mono">
-                            {fmtTZS(account.amount)}
+                            {formatMoney(account.amount, account.currency)}
                           </td>
                           <td className="px-4 py-3 text-right font-mono text-green-700">
-                            {fmtTZS(account.paidAmount)}
+                            {formatMoney(account.paidAmount, account.currency)}
                           </td>
                           <td className="px-4 py-3 text-right font-mono font-semibold">
-                            {fmtTZS(account.outstandingAmount)}
+                            {formatMoney(account.outstandingAmount, account.currency)}
                           </td>
                           <td className="px-4 py-3 text-right font-mono">
-                            {fmtTZS(account.overdueAmount)}
+                            {formatMoney(account.overdueAmount, account.currency)}
                           </td>
-                          <td className="px-4 py-3">{fmtDate(account.nextDueDate)}</td>
+                          <td className="px-4 py-3">{formatDate(account.nextDueDate)}</td>
                           <td className="px-4 py-3">
                             <StatusBadge status={account.status} />
                           </td>
@@ -1434,16 +1428,16 @@ export default function PayablesPage() {
                                         <td className="px-3 py-2 font-mono">
                                           {p.payableNumber ?? p.id.slice(0, 8)}
                                         </td>
-                                        <td className="px-3 py-2">{fmtDate(p.issueDate)}</td>
-                                        <td className="px-3 py-2">{fmtDate(p.dueDate)}</td>
+                                        <td className="px-3 py-2">{formatDate(p.issueDate)}</td>
+                                        <td className="px-3 py-2">{formatDate(p.dueDate)}</td>
                                         <td className="px-3 py-2 text-right font-mono">
-                                          {fmtTZS(p.amount)}
+                                          {formatMoney(p.amount, p.currency)}
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono text-green-700">
-                                          {fmtTZS(payablePaidAmount(p))}
+                                          {formatMoney(payablePaidAmount(p), p.currency)}
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono font-semibold">
-                                          {fmtTZS(payableOutstandingAmount(p))}
+                                          {formatMoney(payableOutstandingAmount(p), p.currency)}
                                         </td>
                                         <td className="px-3 py-2">
                                           <StatusBadge status={p.status} />
@@ -1573,15 +1567,17 @@ export default function PayablesPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 font-medium">{payableSupplierName(p)}</td>
-                      <td className="px-4 py-3 text-right font-mono">{fmtTZS(p.amount)}</td>
+                      <td className="px-4 py-3 text-right font-mono">
+                        {formatMoney(p.amount, p.currency)}
+                      </td>
                       <td className="px-4 py-3 text-right font-mono text-green-700">
-                        {fmtTZS(payablePaidAmount(p))}
+                        {formatMoney(payablePaidAmount(p), p.currency)}
                       </td>
                       <td className="px-4 py-3 text-right font-mono font-semibold">
-                        {fmtTZS(payableOutstandingAmount(p))}
+                        {formatMoney(payableOutstandingAmount(p), p.currency)}
                       </td>
-                      <td className="px-4 py-3">{fmtDate(p.issueDate)}</td>
-                      <td className="px-4 py-3">{fmtDate(p.dueDate)}</td>
+                      <td className="px-4 py-3">{formatDate(p.issueDate)}</td>
+                      <td className="px-4 py-3">{formatDate(p.dueDate)}</td>
                       <td className="px-4 py-3">
                         <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
                           {agingBucket(p.dueDate)}

@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 interface ConfirmDialogProps {
@@ -72,6 +72,45 @@ export function ConfirmDialog({
     return () => window.removeEventListener('keydown', handler);
   }, [open, handleCancel]);
 
+  // Focus management: capture the opener, move focus to the (safe) cancel
+  // button, trap Tab inside the dialog, and restore focus on close.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      openerRef.current = document.activeElement as HTMLElement | null;
+      cancelRef.current?.focus();
+      return;
+    }
+    openerRef.current?.focus?.();
+    openerRef.current = null;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    function trapTab(e: KeyboardEvent) {
+      if (e.key !== 'Tab' || !containerRef.current) return;
+      const focusable = containerRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !containerRef.current.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !containerRef.current.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    window.addEventListener('keydown', trapTab);
+    return () => window.removeEventListener('keydown', trapTab);
+  }, [open]);
+
   if (!rendered) return null;
 
   const handleConfirm = async () => {
@@ -85,7 +124,8 @@ export function ConfirmDialog({
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${closing ? 'animate-fade-out' : 'animate-fade-in'}`}
+      ref={containerRef}
+      className={`fixed inset-0 z-[1300] flex items-center justify-center p-4 ${closing ? 'animate-fade-out' : 'animate-fade-in'}`}
       style={{ background: 'var(--aurora-overlay)' }}
       role="dialog"
       aria-modal="true"
@@ -112,6 +152,7 @@ export function ConfirmDialog({
         <p className="text-[13px] mt-2" style={{ color: 'var(--aurora-text-muted)' }}>{message}</p>
         <div className="flex justify-end gap-2 mt-6">
           <button
+            ref={cancelRef}
             onClick={handleCancel}
             disabled={loading}
             className="px-4 py-2 text-[13px] font-medium border rounded-lg hover:bg-[var(--aurora-bg-subtle)] transition-colors disabled:opacity-50"

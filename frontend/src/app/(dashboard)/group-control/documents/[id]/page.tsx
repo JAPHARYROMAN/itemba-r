@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Card } from '@/components/ui';
+import { Card, ConfirmDialog } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -220,6 +220,8 @@ export default function DocumentDetailPage() {
   const [tab, setTab] = useState<Tab>('overview');
   const [showEdit, setShowEdit] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
 
   const canManage = hasPermission('documents.update');
@@ -260,10 +262,18 @@ export default function DocumentDetailPage() {
   };
 
   const handleDelete = async () => {
-    if (!confirm('Soft-delete this document? It will be hidden but not permanently removed.')) return;
-    const res = await fetch(`/api/backend/documents/${id}`, { method: 'DELETE' });
-    if (res.ok) router.push('/group-control/documents');
-    else setError('Delete failed');
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/backend/documents/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        router.push('/group-control/documents');
+        return;
+      }
+      setError('Delete failed');
+      setConfirmingDelete(false);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   if (loading) return (
@@ -361,7 +371,7 @@ export default function DocumentDetailPage() {
                 <button onClick={() => setShowEdit(true)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
                   Edit Metadata
                 </button>
-                <button onClick={handleDelete} className="px-4 py-2 text-sm font-medium text-red-600 bg-white border border-red-300 rounded-lg hover:bg-red-50 ml-auto">
+                <button onClick={() => setConfirmingDelete(true)} className="px-4 py-2 text-sm font-medium text-red-600 bg-white border border-red-300 rounded-lg hover:bg-red-50 ml-auto">
                   Delete
                 </button>
               </>
@@ -501,6 +511,17 @@ export default function DocumentDetailPage() {
       {showEdit && doc && (
         <EditModal doc={doc} onClose={() => setShowEdit(false)} onSuccess={fetchDoc} />
       )}
+
+      <ConfirmDialog
+        open={confirmingDelete}
+        title="Delete Document"
+        message="Soft-delete this document? It will be hidden but not permanently removed."
+        variant="danger"
+        confirmLabel="Delete"
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmingDelete(false)}
+      />
     </div>
   );
 }

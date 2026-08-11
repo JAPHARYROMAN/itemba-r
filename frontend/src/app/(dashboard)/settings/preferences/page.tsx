@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Building2, Globe2, MonitorCog, RotateCcw, Save, ShieldCheck } from 'lucide-react';
-import { Card, PageHeader, FormSelect, Btn, SkeletonCardGrid, showToast } from '@/components/ui';
+import { Card, PageHeader, FormSelect, Btn, SkeletonCardGrid, ConfirmDialog, showToast } from '@/components/ui';
 import { FormSwitch } from '@/components/aurora/forms/FormSwitch';
 import { useMotionPreference } from '@/hooks/use-motion-preference';
 import { useTheme, type ThemeMode } from '@/hooks/use-theme';
@@ -87,6 +87,7 @@ export default function UserPreferencesPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [confirmingReset, setConfirmingReset] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
 
@@ -204,7 +205,7 @@ export default function UserPreferencesPage() {
   };
 
   const reset = async () => {
-    if (!window.confirm('Reset your workspace settings back to the Itemba-R defaults?')) return;
+    setConfirmingReset(false);
     setSaving(true); setError(''); setInfo('');
     try {
       const res = await fetch('/api/backend/user-preferences/me', { method: 'DELETE' });
@@ -234,7 +235,7 @@ export default function UserPreferencesPage() {
             <Btn
               variant="secondary"
               icon={<RotateCcw className="h-3.5 w-3.5" />}
-              onClick={reset}
+              onClick={() => setConfirmingReset(true)}
               disabled={saving || loading}
             >
               Reset
@@ -248,6 +249,16 @@ export default function UserPreferencesPage() {
             </Btn>
           </div>
         }
+      />
+
+      <ConfirmDialog
+        open={confirmingReset}
+        title="Reset Workspace Settings"
+        variant="warning"
+        confirmLabel="Reset"
+        message="Reset your workspace settings back to the Itemba-R defaults?"
+        onConfirm={reset}
+        onCancel={() => setConfirmingReset(false)}
       />
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">

@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 
 // ── Shared base styles ────────────────────────────────────────────────────────
 //
@@ -53,9 +53,18 @@ function SuccessCheck() {
 }
 
 // ── Label ─────────────────────────────────────────────────────────────────────
-function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
+function Label({
+  children,
+  required,
+  htmlFor,
+}: {
+  children: React.ReactNode;
+  required?: boolean;
+  htmlFor?: string;
+}) {
   return (
     <label
+      htmlFor={htmlFor}
       className="block text-[12px] font-medium mb-1"
       style={{ color: 'var(--aurora-text-secondary)' }}
     >
@@ -69,17 +78,19 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
   );
 }
 
-function Hint({ children }: { children: React.ReactNode }) {
+function Hint({ children, id }: { children: React.ReactNode; id?: string }) {
   return (
-    <p className="mt-1 text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+    <p id={id} className="mt-1 text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
       {children}
     </p>
   );
 }
 
-function FieldError({ children }: { children: React.ReactNode }) {
+function FieldError({ children, id }: { children: React.ReactNode; id?: string }) {
   return (
     <p
+      id={id}
+      role="alert"
       className="mt-1 text-[11px] flex items-center gap-1 animate-fade-in"
       style={{ color: 'var(--aurora-danger)' }}
     >
@@ -99,6 +110,27 @@ function FieldError({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Field accessibility wiring shared by every form primitive: a stable id for
+ * the control (caller-provided `id` wins), plus aria-invalid/aria-describedby
+ * pointing at the error (announced via role="alert") or hint element.
+ */
+function useFieldA11y(propsId: string | undefined, error?: string, hint?: string) {
+  const autoId = useId();
+  const fieldId = propsId ?? autoId;
+  const errorId = `${fieldId}-error`;
+  const hintId = `${fieldId}-hint`;
+  return {
+    fieldId,
+    errorId,
+    hintId,
+    aria: {
+      'aria-invalid': error ? true : undefined,
+      'aria-describedby': error ? errorId : hint ? hintId : undefined,
+    } as const,
+  };
+}
+
 // ── FormInput ─────────────────────────────────────────────────────────────────
 interface FormInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -110,17 +142,20 @@ interface FormInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
 
 export function FormInput({ label, hint, error, success, className = '', ...props }: FormInputProps) {
   const shake = useShakeOnError(error);
+  const { fieldId, errorId, hintId, aria } = useFieldA11y(props.id, error, hint);
   return (
     <div className={className}>
-      {label && <Label required={props.required}>{label}</Label>}
+      {label && <Label required={props.required} htmlFor={fieldId}>{label}</Label>}
       <div className="relative">
         <input
           className={`${INPUT_BASE} ${fieldStateClasses(error, success)}${shake} ${success && !error ? 'pr-8' : ''}`}
           {...props}
+          id={fieldId}
+          {...aria}
         />
         {success && !error && <SuccessCheck />}
       </div>
-      {error ? <FieldError>{error}</FieldError> : hint ? <Hint>{hint}</Hint> : null}
+      {error ? <FieldError id={errorId}>{error}</FieldError> : hint ? <Hint id={hintId}>{hint}</Hint> : null}
     </div>
   );
 }
@@ -141,16 +176,22 @@ interface FormSelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> 
 
 export function FormSelect({ label, hint, error, success, options, placeholder, children, className = '', ...props }: FormSelectProps) {
   const shake = useShakeOnError(error);
+  const { fieldId, errorId, hintId, aria } = useFieldA11y(props.id, error, hint);
   return (
     <div className={className}>
-      {label && <Label required={props.required}>{label}</Label>}
-      <select className={`${INPUT_BASE} ${fieldStateClasses(error, success)}${shake}`} {...props}>
+      {label && <Label required={props.required} htmlFor={fieldId}>{label}</Label>}
+      <select
+        className={`${INPUT_BASE} ${fieldStateClasses(error, success)}${shake}`}
+        {...props}
+        id={fieldId}
+        {...aria}
+      >
         {placeholder && <option value="">{placeholder}</option>}
         {options
           ? options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)
           : children}
       </select>
-      {error ? <FieldError>{error}</FieldError> : hint ? <Hint>{hint}</Hint> : null}
+      {error ? <FieldError id={errorId}>{error}</FieldError> : hint ? <Hint id={hintId}>{hint}</Hint> : null}
     </div>
   );
 }
@@ -165,15 +206,18 @@ interface FormTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaEle
 
 export function FormTextarea({ label, hint, error, success, className = '', ...props }: FormTextareaProps) {
   const shake = useShakeOnError(error);
+  const { fieldId, errorId, hintId, aria } = useFieldA11y(props.id, error, hint);
   return (
     <div className={className}>
-      {label && <Label required={props.required}>{label}</Label>}
+      {label && <Label required={props.required} htmlFor={fieldId}>{label}</Label>}
       <textarea
         rows={3}
         className={`${INPUT_BASE} resize-y ${fieldStateClasses(error, success)}${shake}`}
         {...props}
+        id={fieldId}
+        {...aria}
       />
-      {error ? <FieldError>{error}</FieldError> : hint ? <Hint>{hint}</Hint> : null}
+      {error ? <FieldError id={errorId}>{error}</FieldError> : hint ? <Hint id={hintId}>{hint}</Hint> : null}
     </div>
   );
 }
@@ -187,15 +231,18 @@ interface DateInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement
 
 export function DateInput({ label, hint, error, className = '', ...props }: DateInputProps) {
   const shake = useShakeOnError(error);
+  const { fieldId, errorId, hintId, aria } = useFieldA11y(props.id, error, hint);
   return (
     <div className={className}>
-      {label && <Label required={props.required}>{label}</Label>}
+      {label && <Label required={props.required} htmlFor={fieldId}>{label}</Label>}
       <input
         type="date"
         className={`${INPUT_BASE} ${fieldStateClasses(error)}${shake}`}
         {...props}
+        id={fieldId}
+        {...aria}
       />
-      {error ? <FieldError>{error}</FieldError> : hint ? <Hint>{hint}</Hint> : null}
+      {error ? <FieldError id={errorId}>{error}</FieldError> : hint ? <Hint id={hintId}>{hint}</Hint> : null}
     </div>
   );
 }

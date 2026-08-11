@@ -7,6 +7,7 @@ import {
   type AppIconName,
   Btn,
   Card,
+  ConfirmDialog,
   PageHeader,
   SkeletonCardGrid,
   showToast,
@@ -251,6 +252,7 @@ export default function MasterSettingsPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [resetting, setResetting] = useState(false);
+  const [confirmingReset, setConfirmingReset] = useState(false);
 
   const [scope, setScope] = useState<SettingScope | 'ALL'>('ALL');
   const [category, setCategory] = useState<SettingCategory | 'ALL'>('ALL');
@@ -322,11 +324,7 @@ export default function MasterSettingsPage() {
   };
 
   const resetMyWorkspace = async () => {
-    const confirmed = window.confirm(
-      'Reset your personal workspace settings to defaults? This affects theme, density, formatting, and default scope only.',
-    );
-    if (!confirmed) return;
-
+    setConfirmingReset(false);
     setResetting(true);
     setNotice('');
     try {
@@ -358,11 +356,21 @@ export default function MasterSettingsPage() {
             <Btn variant="secondary" onClick={() => setShowDirectory((value) => !value)}>
               {showDirectory ? 'Hide directory' : 'Show all settings'}
             </Btn>
-            <Btn variant="warning" onClick={resetMyWorkspace} loading={resetting}>
+            <Btn variant="warning" onClick={() => setConfirmingReset(true)} loading={resetting}>
               Reset my workspace
             </Btn>
           </div>
         }
+      />
+
+      <ConfirmDialog
+        open={confirmingReset}
+        title="Reset My Workspace"
+        variant="warning"
+        confirmLabel="Reset"
+        message="Reset your personal workspace settings to defaults? This affects theme, density, formatting, and default scope only."
+        onConfirm={resetMyWorkspace}
+        onCancel={() => setConfirmingReset(false)}
       />
 
       {notice && (

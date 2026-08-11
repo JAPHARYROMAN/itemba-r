@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { usePersonalization } from '@/hooks/use-personalization';
 
@@ -1015,6 +1015,25 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     return init;
   });
 
+  // Client-side navigation (search, command palette, in-page links) must open
+  // the destination's group too — the initializer only runs on first mount.
+  // Groups the user collapsed stay collapsed unless they navigate into them.
+  useEffect(() => {
+    setExpanded((current) => {
+      let changed = false;
+      const next = { ...current };
+      NAV.forEach((item) => {
+        if (isGroup(item) && groupHasActive(item) && !next[item.label]) {
+          next[item.label] = true;
+          changed = true;
+        }
+      });
+      return changed ? next : current;
+    });
+    // groupHasActive reads pathname; re-run exactly when the route changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+
   function toggle(label: string) {
     setExpanded((prev) => ({ ...prev, [label]: !prev[label] }));
   }
@@ -1157,7 +1176,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
               // Group
               const visibleChildren = item.children.filter((c) => canSee(c.permission));
-              if (!canSee(item.permission) && visibleChildren.length === 0) return null;
+              // A group whose every child is permission-filtered is dead weight
+              // even when the group itself has no permission gate — hide it.
+              if (visibleChildren.length === 0) return null;
               const isOpen = expanded[item.label] ?? false;
               const anyChildActive = groupHasActive(item);
 
@@ -1165,6 +1186,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 <div key={item.label}>
                   <button
                     onClick={() => toggle(item.label)}
+                    aria-expanded={isOpen}
                     className={`
                       w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium transition-colors
                       ${

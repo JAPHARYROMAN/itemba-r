@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Sidebar } from '@/components/layout/sidebar';
+import { NAV, Sidebar, isGroup, type NavItem } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { AuthProvider } from '@/contexts/auth-context';
 import { useAuth } from '@/hooks/use-auth';
@@ -19,6 +19,26 @@ import { BreadcrumbTrail } from '@/components/aurora/navigation/BreadcrumbTrail'
 const BREADCRUMB_HIDDEN_PATHS = new Set(['/', '/dashboard']);
 
 const PUBLIC_DASHBOARD_PATHS = new Set(['/westsides/mobile-pos/install']);
+
+/**
+ * Resolve the browser-tab title from the NAV tree: the deepest nav entry whose
+ * href is the pathname or an ancestor of it. Every page gets a distinguishable
+ * tab title without per-page wiring; unknown routes fall back to the app name.
+ */
+function titleForPath(pathname: string): string | null {
+  let best: { href: string; label: string } | null = null;
+  const visit = (items: NavItem[]) => {
+    for (const item of items) {
+      if (isGroup(item)) {
+        visit(item.children);
+      } else if (pathname === item.href || pathname.startsWith(`${item.href}/`)) {
+        if (!best || item.href.length > best.href.length) best = item;
+      }
+    }
+  };
+  visit(NAV);
+  return best ? (best as { label: string }).label : null;
+}
 
 // A user whose every permission sits in this set is a POS-only sales rep:
 // their whole app is Itemba POS, and the ERP shell should never appear.
@@ -79,6 +99,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     initTheme();
   }, []);
+
+  useEffect(() => {
+    const label = titleForPath(pathname ?? '');
+    document.title = label ? `${label} · Itemba` : 'Itemba OS';
+  }, [pathname]);
 
   return (
     <AuthProvider>

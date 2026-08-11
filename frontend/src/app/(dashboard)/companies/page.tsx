@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { AppIcon, PageHeader, Card, EmptyState, ErrorState, PermissionDeniedState } from '@/components/ui';
+import { AppIcon, PageHeader, Card, EmptyState, ErrorState, PermissionDeniedState, Modal, FormInput, Btn } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useApiList } from '@/hooks/use-api-resource';
 
@@ -64,6 +64,8 @@ export default function CompaniesPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [deletingCompanyId, setDeletingCompanyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Company | null>(null);
+  const [deleteCode, setDeleteCode] = useState('');
 
   // Debounced search
   useEffect(() => {
@@ -85,19 +87,6 @@ export default function CompaniesPage() {
   );
 
   async function deleteCompany(company: Company) {
-    if (
-      !confirm(
-        `Delete ${company.name} from the registry? This archives the company and its divisions and branches so historical records remain intact.`,
-      )
-    ) {
-      return;
-    }
-
-    const typedCode = prompt(`Type ${company.code} to confirm this registry delete.`);
-    if (typedCode?.trim() !== company.code) {
-      return;
-    }
-
     setDeletingCompanyId(company.id);
     setActionError(null);
 
@@ -230,10 +219,56 @@ export default function CompaniesPage() {
                 company={company}
                 canDelete={hasPermission('companies.delete')}
                 deleting={deletingCompanyId === company.id}
-                onDelete={() => deleteCompany(company)}
+                onDelete={() => {
+                  setDeleteCode('');
+                  setDeleteTarget(company);
+                }}
               />
             ))}
           </div>
+        )}
+
+        {deleteTarget && (
+          <Modal
+            open
+            title="Delete Company"
+            subtitle={deleteTarget.name}
+            size="sm"
+            onClose={() => setDeleteTarget(null)}
+            footer={
+              <>
+                <Btn variant="secondary" onClick={() => setDeleteTarget(null)}>
+                  Cancel
+                </Btn>
+                <Btn
+                  variant="danger"
+                  disabled={deleteCode.trim() !== deleteTarget.code}
+                  onClick={() => {
+                    const target = deleteTarget;
+                    setDeleteTarget(null);
+                    deleteCompany(target);
+                  }}
+                >
+                  Delete
+                </Btn>
+              </>
+            }
+          >
+            <div className="space-y-3">
+              <p className="text-sm text-slate-600">
+                Delete {deleteTarget.name} from the registry? This archives the company and its
+                divisions and branches so historical records remain intact.
+              </p>
+              <FormInput
+                label={`Type ${deleteTarget.code} to confirm this registry delete`}
+                required
+                value={deleteCode}
+                onChange={(e) => setDeleteCode(e.target.value)}
+                placeholder={deleteTarget.code}
+                autoComplete="off"
+              />
+            </div>
+          </Modal>
         )}
       </main>
     </>

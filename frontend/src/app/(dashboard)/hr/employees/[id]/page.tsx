@@ -213,6 +213,7 @@ export default function EmployeeDetailPage() {
   // Mobile money modal state
   const [showMmModal, setShowMmModal] = useState(false);
   const [editingMm, setEditingMm] = useState<MobileMoney | null>(null);
+  const [deletingMm, setDeletingMm] = useState<MobileMoney | null>(null);
 
   // Delete confirmation state
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -312,6 +313,24 @@ export default function EmployeeDetailPage() {
     } catch (err) {
       setDeleteError(err instanceof ApiError ? err.message : 'Failed to delete employee');
     }
+  };
+
+  const deleteMobileMoney = async () => {
+    if (!deletingMm) return;
+    const res = await fetch(`/api/backend/hr/mobile-money-accounts/${deletingMm.id}`, {
+      method: 'DELETE',
+    });
+    setDeletingMm(null);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      showToast(
+        'error',
+        'Delete failed',
+        Array.isArray(j?.message) ? j.message.join(', ') : (j?.message ?? 'Could not delete the account.'),
+      );
+      return;
+    }
+    loadMobileMoney();
   };
 
   if (loading) return <PageSpinner />;
@@ -701,28 +720,7 @@ export default function EmployeeDetailPage() {
                           Edit
                         </Btn>
                         {!mm.isPrimary && (
-                          <Btn
-                            variant="ghost"
-                            size="xs"
-                            onClick={async () => {
-                              if (
-                                !confirm(
-                                  `Remove ${PROVIDER_LABELS[mm.provider] ?? mm.provider} account?`,
-                                )
-                              )
-                                return;
-                              const res = await fetch(
-                                `/api/backend/hr/mobile-money-accounts/${mm.id}`,
-                                { method: 'DELETE' },
-                              );
-                              if (!res.ok) {
-                                const j = await res.json().catch(() => ({}));
-                                alert(j?.message ?? 'Delete failed');
-                                return;
-                              }
-                              loadMobileMoney();
-                            }}
-                          >
+                          <Btn variant="ghost" size="xs" onClick={() => setDeletingMm(mm)}>
                             Delete
                           </Btn>
                         )}
@@ -793,6 +791,16 @@ export default function EmployeeDetailPage() {
           setConfirmingDelete(false);
           setDeleteError('');
         }}
+      />
+
+      <ConfirmDialog
+        open={!!deletingMm}
+        title="Remove Mobile Money Account"
+        variant="danger"
+        confirmLabel="Remove"
+        message={`Remove ${deletingMm ? (PROVIDER_LABELS[deletingMm.provider] ?? deletingMm.provider) : ''} account?`}
+        onConfirm={deleteMobileMoney}
+        onCancel={() => setDeletingMm(null)}
       />
 
       <ConfirmDialog
