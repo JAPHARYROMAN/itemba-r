@@ -12,12 +12,17 @@ import {
   CurrencyCode,
   MobilePosTerminalStatus,
   Prisma,
+  PurchaseType,
+  SalesOrderStatus,
   SalesPaymentMethod,
   SalesType,
 } from '@prisma/client';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { SalesOrdersService } from '../sales-orders/sales-orders.service';
+import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
+import { GoodsReceivedNotesService } from '../goods-received-notes/goods-received-notes.service';
+import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -30,8 +35,69 @@ import {
 } from './dto/mobile-pos-terminal.dto';
 import { ActivateMobilePosTerminalDto } from './dto/mobile-pos-lite-session.dto';
 import { CreateMobilePosLiteSaleDto } from './dto/mobile-pos-lite-sale.dto';
+import { CreateMobilePosLitePurchaseDto } from './dto/mobile-pos-lite-purchase.dto';
 
 const ACTIVATION_TTL_MS = 20 * 60 * 1000;
+
+/**
+ * "Confirmed" sales, mirroring westsides-reports dailyClose:
+ * SalesOrder.status ∈ {CONFIRMED, PARTIALLY_PAID, PAID}.
+ */
+const CONFIRMED_SALES_STATUSES = [
+  SalesOrderStatus.CONFIRMED,
+  SalesOrderStatus.PARTIALLY_PAID,
+  SalesOrderStatus.PAID,
+] as const;
+
+/**
+ * Product types that never carry stock value, mirroring the predicate the GRN
+ * posting flow uses (goods-received-notes.service.ts). A POS purchase must only
+ * accept products whose receipt will actually post an inventory movement.
+ */
+const STOCK_EXEMPT_PRODUCT_TYPES = new Set(['SERVICE', 'NON_STOCK_ITEM']);
+
+function isStockItem(product: {
+  productType?: string | null;
+  trackInventory?: boolean | null;
+}): boolean {
+  if (product.trackInventory === false) return false;
+  return !STOCK_EXEMPT_PRODUCT_TYPES.has(String(product.productType ?? '').toUpperCase());
+}
+
+/**
+ * PurchaseOrder has no idempotencyKey column (unlike SalesOrder), so the POS
+ * purchase flow anchors replay protection on a structured marker embedded in
+ * the purchase order's notes at create time. The marker is written atomically
+ * with the PO row, so a retried request can find and resume the original chain.
+ */
+function purchaseIdempotencyMarker(idempotencyKey: string) {
+  return `[MPL-PURCHASE:${idempotencyKey}]`;
+}
+
+/** The slice of a PurchaseOrder the purchase chain needs to resume/replay. */
+interface PurchaseChainOrder {
+  id: string;
+  companyId: string;
+  divisionId: string | null;
+  branchId: string | null;
+  supplierId: string | null;
+  status: string;
+  purchaseOrderNumber: string;
+  totalAmount: unknown;
+  lines: Array<{ productId: string; unitId: string; quantity: unknown; unitCost: unknown }>;
+}
+
+const PURCHASE_CHAIN_SELECT = {
+  id: true,
+  companyId: true,
+  divisionId: true,
+  branchId: true,
+  supplierId: true,
+  status: true,
+  purchaseOrderNumber: true,
+  totalAmount: true,
+  lines: { select: { productId: true, unitId: true, quantity: true, unitCost: true } },
+} satisfies Prisma.PurchaseOrderSelect;
 
 const TERMINAL_INCLUDE = {
   company: { select: { id: true, name: true, code: true } },
@@ -120,6 +186,9 @@ export class MobilePosLiteService {
     private readonly companyScope: CompanyScopeService,
     private readonly auditLogs: AuditLogsService,
     private readonly salesOrders: SalesOrdersService,
+    private readonly purchaseOrders: PurchaseOrdersService,
+    private readonly goodsReceivedNotes: GoodsReceivedNotesService,
+    private readonly codes: EntityCodeGeneratorService,
   ) {}
 
   async findTerminals(query: QueryMobilePosTerminalDto, user: AuthUser) {
@@ -375,7 +444,7 @@ export class MobilePosLiteService {
       companyId: active.companyId,
       severity: AuditSeverity.HIGH,
     });
-    return this.sessionPayload(active);
+    return this.sessionPayload(active, user);
   }
 
   async session(
@@ -384,7 +453,7 @@ export class MobilePosLiteService {
     user: AuthUser,
   ) {
     const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
-    return this.sessionPayload(terminal);
+    return this.sessionPayload(terminal, user);
   }
 
   async products(
@@ -420,6 +489,7 @@ export class MobilePosLiteService {
         baseUnitId: true,
         productType: true,
         trackInventory: true,
+        imageUrl: true,
         defaultSellingPrice: true,
         retailPrice: true,
         wholesalePrice: true,
@@ -461,6 +531,7 @@ export class MobilePosLiteService {
           sellingPrice,
           availableStock: product.trackInventory ? (availability.get(product.id) ?? 0) : null,
           trackInventory: product.trackInventory,
+          imageUrl: product.imageUrl ?? null,
         };
       })
       .filter((product): product is NonNullable<typeof product> => product !== null);
@@ -504,6 +575,223 @@ export class MobilePosLiteService {
       orderBy: { name: 'asc' },
       take: 12,
     });
+  }
+
+  async mySalesToday(
+    terminalCode: string | undefined,
+    deviceSecret: string | undefined,
+    user: AuthUser,
+  ) {
+    const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
+
+    // Local-day boundary, mirroring westsides-reports dailyClose: truncate to
+    // the server's local midnight (UTC+3 for Tanzania in production).
+    const now = new Date();
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000);
+
+    // POS sales are recorded via mobilePosLiteQuickSale, which stamps the
+    // terminal on SalesOrder.mobilePosTerminalId and the authenticated rep on
+    // SalesOrder.createdById — scope on exactly those two.
+    const where: Prisma.SalesOrderWhereInput = {
+      companyId: terminal.companyId,
+      mobilePosTerminalId: terminal.id,
+      createdById: user.id,
+      status: { in: [...CONFIRMED_SALES_STATUSES] },
+      orderDate: { gte: dayStart, lt: dayEnd },
+    };
+
+    const [totals, orders] = await Promise.all([
+      this.prisma.salesOrder.aggregate({
+        where,
+        _count: { _all: true },
+        _sum: { totalAmount: true },
+      }),
+      this.prisma.salesOrder.findMany({
+        where,
+        select: {
+          id: true,
+          salesOrderNumber: true,
+          totalAmount: true,
+          paymentMethod: true,
+          createdAt: true,
+          customerName: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+    ]);
+
+    return {
+      count: totals._count._all,
+      totalAmount: Number(totals._sum.totalAmount ?? 0),
+      sales: orders.map((order) => ({
+        id: order.id,
+        salesOrderNumber: order.salesOrderNumber,
+        totalAmount: Number(order.totalAmount),
+        paymentMethod: order.paymentMethod,
+        createdAt: order.createdAt,
+        customerName: order.customerName ?? undefined,
+      })),
+    };
+  }
+
+  async suppliers(
+    terminalCode: string | undefined,
+    deviceSecret: string | undefined,
+    search: string | undefined,
+    user: AuthUser,
+  ) {
+    const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
+    const term = search?.trim() ?? '';
+    if (term.length < 2) return [];
+
+    return this.prisma.supplier.findMany({
+      where: {
+        companyId: terminal.companyId,
+        status: 'ACTIVE',
+        AND: [
+          { OR: [{ divisionId: terminal.divisionId }, { divisionId: null }] },
+          { OR: [{ branchId: terminal.branchId }, { branchId: null }] },
+          {
+            OR: [
+              { name: { contains: term, mode: 'insensitive' } },
+              { supplierCode: { contains: term, mode: 'insensitive' } },
+              { phone: { contains: term, mode: 'insensitive' } },
+            ],
+          },
+        ],
+      },
+      select: { id: true, name: true, supplierCode: true, phone: true },
+      orderBy: { name: 'asc' },
+      take: 20,
+    });
+  }
+
+  /**
+   * Rep-recorded stock-in purchase. Reuses the core procurement chain — a
+   * CONFIRMED PurchaseOrder plus a fully-received, approved, POSTED
+   * GoodsReceivedNote — by calling the purchase-orders and goods-received-notes
+   * services with the authenticated rep. Those services scope by company access
+   * only (no procurement permission codes are enforced service-side), so the
+   * rep needs nothing beyond mobile_pos_lite.purchase.
+   *
+   * Atomicity: each step is individually atomic inside the core services'
+   * own transactions; the chain as a whole is NOT one DB transaction (the core
+   * services own their transactions and cannot be composed without bypassing
+   * them). Instead, every retry carrying the same idempotencyKey RESUMES an
+   * interrupted chain from its recorded state and replays a completed one, and
+   * the GRN over-receipt ceiling plus the RECEIVED-PO guard make a second
+   * stock receipt against the same purchase order impossible.
+   */
+  async createPurchase(
+    terminalCode: string | undefined,
+    deviceSecret: string | undefined,
+    dto: CreateMobilePosLitePurchaseDto,
+    user: AuthUser,
+  ) {
+    const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
+
+    const supplier = await this.prisma.supplier.findFirst({
+      where: {
+        id: dto.supplierId,
+        companyId: terminal.companyId,
+        status: 'ACTIVE',
+        AND: [
+          { OR: [{ divisionId: terminal.divisionId }, { divisionId: null }] },
+          { OR: [{ branchId: terminal.branchId }, { branchId: null }] },
+        ],
+      },
+      select: { id: true },
+    });
+    if (!supplier) {
+      throw new BadRequestException(
+        'The selected supplier is not available for this terminal branch',
+      );
+    }
+
+    const lines = await this.resolvePurchaseLines(terminal, dto.lines);
+    const marker = purchaseIdempotencyMarker(dto.idempotencyKey);
+
+    // Replay/resume: a purchase order carrying this marker means the same
+    // request already ran (fully or partially). Drive it to completion instead
+    // of creating a duplicate — an offline-retried purchase never double-receives.
+    let order = await this.findPurchaseByMarker(terminal.companyId, marker);
+
+    if (!order) {
+      const created = await this.purchaseOrders.create(
+        {
+          companyId: terminal.companyId,
+          divisionId: terminal.divisionId,
+          branchId: terminal.branchId,
+          supplierId: dto.supplierId,
+          purchaseType: PurchaseType.STOCK_PURCHASE,
+          orderDate: new Date().toISOString(),
+          currency: CurrencyCode.TZS,
+          notes: [
+            dto.notes?.trim(),
+            `Created from Mobile POS Lite (${terminal.terminalCode})`,
+            marker,
+          ]
+            .filter(Boolean)
+            .join('\n'),
+          lines,
+        },
+        user,
+      );
+      order = {
+        id: created.id,
+        companyId: created.companyId,
+        divisionId: created.divisionId,
+        branchId: created.branchId,
+        supplierId: created.supplierId,
+        status: created.status,
+        purchaseOrderNumber: created.purchaseOrderNumber,
+        totalAmount: created.totalAmount,
+        lines: created.lines,
+      };
+
+      // Best-effort duplicate-create race check: with no unique index available
+      // on the marker, two concurrent requests with the same key can both pass
+      // the pre-check and create twin DRAFT POs. Deterministically keep the
+      // earliest one; the loser soft-deletes its own (still stockless) draft
+      // and resumes the winner's chain.
+      const twins = await this.prisma.purchaseOrder.findMany({
+        where: { companyId: terminal.companyId, notes: { contains: marker } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true },
+      });
+      if (twins.length > 1 && twins[0].id !== order.id) {
+        await this.prisma.purchaseOrder.delete({ where: { id: order.id } });
+        order = await this.findPurchaseByMarker(terminal.companyId, marker);
+        if (!order) {
+          throw new ConflictException(
+            'This purchase is being recorded by another request. Retry in a moment.',
+          );
+        }
+      }
+    }
+
+    const result = await this.resumePurchaseChain(order, terminal, user);
+
+    await this.prisma.mobilePosTerminal.update({
+      where: { id: terminal.id },
+      data: { lastSeenAt: new Date() },
+    });
+    await this.auditLogs.log({
+      action: 'MOBILE_POS_LITE_PURCHASE_COMPLETED',
+      entityType: 'PurchaseOrder',
+      entityId: result.id,
+      userId: user.id,
+      companyId: terminal.companyId,
+      severity: AuditSeverity.MEDIUM,
+      newValue: {
+        terminalCode: terminal.terminalCode,
+        purchaseOrderNumber: result.purchaseOrderNumber,
+        grnNumber: result.grnNumber,
+      },
+    });
+    return result;
   }
 
   async createSale(
@@ -633,6 +921,235 @@ export class MobilePosLiteService {
         taxAmount: 0,
       };
     });
+  }
+
+  private async resolvePurchaseLines(
+    terminal: Terminal,
+    lines: CreateMobilePosLitePurchaseDto['lines'],
+  ) {
+    const quantities = new Map<string, number>();
+    const explicitCosts = new Map<string, number>();
+    for (const line of lines) {
+      quantities.set(line.productId, (quantities.get(line.productId) ?? 0) + Number(line.quantity));
+      if (line.unitCost != null) {
+        const existing = explicitCosts.get(line.productId);
+        if (existing != null && existing !== Number(line.unitCost)) {
+          throw new BadRequestException('Provide a single unit cost per product');
+        }
+        explicitCosts.set(line.productId, Number(line.unitCost));
+      }
+    }
+
+    const products = await this.prisma.product.findMany({
+      where: {
+        id: { in: Array.from(quantities.keys()) },
+        companyId: terminal.companyId,
+        status: 'ACTIVE',
+        AND: [{ OR: [{ divisionId: terminal.divisionId }, { divisionId: null }] }],
+      },
+      select: {
+        id: true,
+        name: true,
+        baseUnitId: true,
+        productType: true,
+        trackInventory: true,
+        defaultPurchasePrice: true,
+        productFamily: { select: { defaultPurchasePrice: true } },
+      },
+    });
+    if (products.length !== quantities.size) {
+      throw new BadRequestException('One or more products are unavailable for this terminal');
+    }
+
+    return products.map((product) => {
+      if (!isStockItem(product)) {
+        throw new BadRequestException(
+          `${product.name} is not a stock item and cannot be received here`,
+        );
+      }
+      // Cost resolution mirrors the GRN receive flow: an explicit line cost
+      // wins, then the product (then family) default purchase price. Ordering
+      // in the product's base unit keeps those base-unit-denominated defaults
+      // valid, exactly like the GRN post's base-unit guard.
+      const unitCost =
+        explicitCosts.get(product.id) ??
+        positivePrice(product.defaultPurchasePrice) ??
+        positivePrice(product.productFamily?.defaultPurchasePrice);
+      if (unitCost == null) {
+        throw new BadRequestException(
+          `${product.name} does not have a purchase cost — enter the unit cost`,
+        );
+      }
+      return {
+        productId: product.id,
+        description: product.name,
+        quantity: quantities.get(product.id) ?? 0,
+        unitId: product.baseUnitId,
+        unitCost,
+      };
+    });
+  }
+
+  private async findPurchaseByMarker(
+    companyId: string,
+    marker: string,
+  ): Promise<PurchaseChainOrder | null> {
+    return this.prisma.purchaseOrder.findFirst({
+      where: { companyId, notes: { contains: marker } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: PURCHASE_CHAIN_SELECT,
+    });
+  }
+
+  /**
+   * Drive a marker-anchored purchase order to its terminal state: CONFIRMED
+   * PO -> DRAFT GRN -> APPROVED -> POSTED. Every step is state-guarded inside
+   * the core services, so this is safe to call on a fresh order, on a resume
+   * after a mid-chain crash, and on a full replay (where it short-circuits to
+   * the recorded result). Concurrent retries that lose a state-transition race
+   * re-read the entity and continue instead of failing.
+   */
+  private async resumePurchaseChain(order: PurchaseChainOrder, terminal: Terminal, user: AuthUser) {
+    let status = String(order.status);
+    if (status === 'CANCELLED' || status === 'VOIDED') {
+      throw new ConflictException(
+        'The original purchase behind this idempotency key was cancelled',
+      );
+    }
+
+    if (status === 'DRAFT') {
+      try {
+        await this.purchaseOrders.confirm(order.id, user);
+        status = 'CONFIRMED';
+      } catch (error) {
+        // A concurrent retry may have confirmed it first — continue if so.
+        const fresh = await this.prisma.purchaseOrder.findFirst({
+          where: { id: order.id },
+          select: { status: true },
+        });
+        if (!fresh || fresh.status === 'DRAFT') throw error;
+        status = fresh.status;
+      }
+    }
+
+    let grn = await this.prisma.goodsReceivedNote.findFirst({
+      where: { companyId: order.companyId, purchaseOrderId: order.id },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, status: true, grnNumber: true },
+    });
+
+    if (!grn) {
+      if (status === 'RECEIVED') {
+        // Stock already came in outside this flow (e.g. a direct PO receive by
+        // an operations user). Never receive again — replay what exists.
+        return this.purchaseResult(order, null);
+      }
+      const grnNumber = await this.nextGrnNumber(order.companyId);
+      const created = await this.goodsReceivedNotes.create(
+        {
+          companyId: order.companyId,
+          divisionId: order.divisionId ?? undefined,
+          branchId: order.branchId ?? undefined,
+          purchaseOrderId: order.id,
+          supplierId: order.supplierId ?? undefined,
+          grnNumber,
+          receivedDate: new Date().toISOString(),
+          notes: `Created from Mobile POS Lite (${terminal.terminalCode})`,
+          lines: order.lines.map((line) => ({
+            productId: line.productId,
+            unitId: line.unitId,
+            orderedQuantity: Number(line.quantity),
+            receivedQuantity: Number(line.quantity),
+            acceptedQuantity: Number(line.quantity),
+            rejectedQuantity: 0,
+            unitCost: Number(line.unitCost),
+          })),
+        },
+        user,
+      );
+      grn = { id: created.id, status: created.status, grnNumber: created.grnNumber };
+    }
+
+    if (String(grn.status) === 'DRAFT') {
+      try {
+        await this.goodsReceivedNotes.approve(grn.id, user);
+        grn = { ...grn, status: 'APPROVED' as typeof grn.status };
+      } catch (error) {
+        const fresh = await this.prisma.goodsReceivedNote.findFirst({
+          where: { id: grn.id },
+          select: { status: true },
+        });
+        if (!fresh || String(fresh.status) === 'DRAFT') throw error;
+        grn = { ...grn, status: fresh.status };
+      }
+    }
+    if (String(grn.status) === 'APPROVED') {
+      try {
+        await this.goodsReceivedNotes.post(grn.id, user);
+        grn = { ...grn, status: 'POSTED' as typeof grn.status };
+      } catch (error) {
+        const fresh = await this.prisma.goodsReceivedNote.findFirst({
+          where: { id: grn.id },
+          select: { status: true },
+        });
+        if (!fresh || String(fresh.status) !== 'POSTED') throw error;
+        grn = { ...grn, status: fresh.status };
+      }
+    }
+    if (String(grn.status) !== 'POSTED') {
+      throw new ConflictException(
+        'The goods received note behind this purchase is no longer postable',
+      );
+    }
+
+    return this.purchaseResult(order, grn.grnNumber);
+  }
+
+  private purchaseResult(order: PurchaseChainOrder, grnNumber: string | null) {
+    return {
+      id: order.id,
+      purchaseOrderNumber: order.purchaseOrderNumber,
+      grnNumber,
+      totalAmount: Number(order.totalAmount),
+    };
+  }
+
+  /**
+   * Issue the next server-generated GRN number via the global entity-code
+   * generator. `DEFAULT_PATTERNS` has no GoodsReceivedNote entry, so the first
+   * call for a company would lazy-create an awkward fallback prefix; pre-create
+   * the sequence with the conventional GRN prefix instead (a later operator
+   * override via /settings/number-sequences is respected — we only create when
+   * the row is missing).
+   */
+  private async nextGrnNumber(companyId: string) {
+    const sequenceCode = `GoodsReceivedNote_${companyId}`;
+    const existing = await this.prisma.documentNumberSequence.findFirst({
+      where: { sequenceCode },
+      select: { id: true },
+    });
+    if (!existing) {
+      try {
+        await this.prisma.documentNumberSequence.create({
+          data: {
+            sequenceCode,
+            companyId,
+            entityType: 'GoodsReceivedNote',
+            prefix: 'GRN-{YYYY}-',
+            padding: 6,
+            resetFrequency: 'YEARLY',
+            currentNumber: 0,
+            isActive: true,
+          },
+        });
+      } catch (error) {
+        // Lost a create race — the winner's row is what codes.next will use.
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) {
+          throw error;
+        }
+      }
+    }
+    return this.codes.next({ entityType: 'GoodsReceivedNote', companyId });
   }
 
   private async requireTerminal(
@@ -824,7 +1341,7 @@ export class MobilePosLiteService {
     };
   }
 
-  private sessionPayload(terminal: Terminal) {
+  private sessionPayload(terminal: Terminal, user: AuthUser) {
     return {
       terminal: {
         id: terminal.id,
@@ -833,6 +1350,10 @@ export class MobilePosLiteService {
         configVersion: terminal.configVersion,
         offlineCashEnabled: terminal.offlineCashEnabled,
       },
+      // Stock-in purchases are gated on the rep's own permission set, not on
+      // terminal configuration: managers holding mobile_pos_lite.purchase see
+      // the purchase flow, ordinary cashiers/salespeople do not.
+      purchasesEnabled: user.permissions?.includes('mobile_pos_lite.purchase') ?? false,
       company: terminal.company,
       division: terminal.division,
       branch: terminal.branch,

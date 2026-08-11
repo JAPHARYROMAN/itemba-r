@@ -9,8 +9,21 @@ import { QueryProductDto } from './dto/query-product.dto';
 import { QueryProductFamilyDto } from './dto/query-product-family.dto';
 import { CreateProductFamilyDto, UpdateProductFamilyDto } from './dto/manage-product-family.dto';
 import { priceSourceWhere } from './price-source-where';
+import {
+  PRODUCT_IMAGE_MAX_BYTES,
+  PRODUCT_IMAGE_MIME_TYPES,
+  PRODUCT_IMAGE_TAG,
+  productImageUrl,
+} from './product-image';
 import { ProfitService } from '../profit/profit.service';
-import { AccessLevel, AuditSeverity, Prisma } from '@prisma/client';
+import { DocumentsService } from '../documents/documents.service';
+import {
+  AccessLevel,
+  AuditSeverity,
+  DocumentCategory,
+  DocumentOwnerType,
+  Prisma,
+} from '@prisma/client';
 
 type ProductReferenceIds = {
   categoryId?: string | null;
@@ -95,6 +108,7 @@ export class ProductsService {
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
     private readonly profit: ProfitService,
+    private readonly documents: DocumentsService,
   ) {}
 
   async findAll(query: QueryProductDto, user: AuthUser) {
@@ -138,7 +152,9 @@ export class ProductsService {
       });
       if (supplier) {
         await this.companyScope.assertCanAccessCompany(user, supplier.companyId);
-        const supplierCategoryIds = supplier.productCategories.map((link) => link.productCategoryId);
+        const supplierCategoryIds = supplier.productCategories.map(
+          (link) => link.productCategoryId,
+        );
         if (supplierCategoryIds.length > 0 && !categoryId) {
           where.categoryId = { in: supplierCategoryIds };
         }
@@ -302,11 +318,11 @@ export class ProductsService {
     return products.map((product) => {
       const balance = branchId
         ? (balanceByProductId.get(product.id) ?? {
-          quantityOnHand: 0,
-          quantityReserved: 0,
-          availableQuantity: 0,
-          averageCost: 0,
-        })
+            quantityOnHand: 0,
+            quantityReserved: 0,
+            availableQuantity: 0,
+            averageCost: 0,
+          })
         : null;
       const productSellingPrice = positivePrice(product.defaultSellingPrice);
       const productPurchasePrice = positivePrice(product.defaultPurchasePrice);
@@ -423,7 +439,9 @@ export class ProductsService {
       select: { id: true },
     });
     if (duplicate) {
-      throw new BadRequestException('A product family with this name already exists in this category');
+      throw new BadRequestException(
+        'A product family with this name already exists in this category',
+      );
     }
 
     const record = await this.prisma.productFamily.create({
@@ -472,15 +490,24 @@ export class ProductsService {
     await this.assertFamilyReferences(existing.companyId, categoryId, divisionId);
     this.assertFamilyPricing({
       defaultPurchasePrice:
-        dto.defaultPurchasePrice !== undefined ? dto.defaultPurchasePrice : existing.defaultPurchasePrice,
+        dto.defaultPurchasePrice !== undefined
+          ? dto.defaultPurchasePrice
+          : existing.defaultPurchasePrice,
       defaultSellingPrice:
-        dto.defaultSellingPrice !== undefined ? dto.defaultSellingPrice : existing.defaultSellingPrice,
-      wholesalePrice: dto.wholesalePrice !== undefined ? dto.wholesalePrice : existing.wholesalePrice,
+        dto.defaultSellingPrice !== undefined
+          ? dto.defaultSellingPrice
+          : existing.defaultSellingPrice,
+      wholesalePrice:
+        dto.wholesalePrice !== undefined ? dto.wholesalePrice : existing.wholesalePrice,
       retailPrice: dto.retailPrice !== undefined ? dto.retailPrice : existing.retailPrice,
     });
 
     const nextName = optionalText(dto.name) ?? existing.name;
-    if (nextName !== existing.name || categoryId !== existing.categoryId || divisionId !== existing.divisionId) {
+    if (
+      nextName !== existing.name ||
+      categoryId !== existing.categoryId ||
+      divisionId !== existing.divisionId
+    ) {
       const duplicate = await this.prisma.productFamily.findFirst({
         where: {
           companyId: existing.companyId,
@@ -493,7 +520,9 @@ export class ProductsService {
         select: { id: true },
       });
       if (duplicate) {
-        throw new BadRequestException('A product family with this name already exists in this category');
+        throw new BadRequestException(
+          'A product family with this name already exists in this category',
+        );
       }
     }
 
@@ -504,7 +533,9 @@ export class ProductsService {
         ...(dto.divisionId !== undefined && { divisionId }),
         ...(dto.name !== undefined && { name: nextName }),
         ...(dto.brand !== undefined && { brand: optionalText(dto.brand) ?? null }),
-        ...(dto.description !== undefined && { description: optionalText(dto.description) ?? null }),
+        ...(dto.description !== undefined && {
+          description: optionalText(dto.description) ?? null,
+        }),
         ...(dto.defaultPurchasePrice !== undefined && {
           defaultPurchasePrice: nullablePrice(dto.defaultPurchasePrice),
         }),
@@ -548,7 +579,9 @@ export class ProductsService {
       where: { productFamilyId: id, deletedAt: null },
     });
     if (productCount > 0) {
-      throw new BadRequestException('Product family is in use. Deactivate it instead of deleting it.');
+      throw new BadRequestException(
+        'Product family is in use. Deactivate it instead of deleting it.',
+      );
     }
 
     await this.prisma.productFamily.update({
@@ -703,9 +736,7 @@ export class ProductsService {
         deletedAt: null,
         isActive: true,
         id: { not: selectedProductFamilyId },
-        ...(divisionId
-          ? { OR: [{ divisionId }, { divisionId: null }] }
-          : { divisionId: null }),
+        ...(divisionId ? { OR: [{ divisionId }, { divisionId: null }] } : { divisionId: null }),
       },
       select: {
         id: true,
@@ -1070,7 +1101,7 @@ export class ProductsService {
     const effectiveDefaultPurchasePrice =
       dto.defaultPurchasePrice !== undefined
         ? dto.defaultPurchasePrice
-        : existing.defaultPurchasePrice ?? familyPricing?.defaultPurchasePrice ?? null;
+        : (existing.defaultPurchasePrice ?? familyPricing?.defaultPurchasePrice ?? null);
 
     if (productCode && productCode !== existing.productCode) {
       const duplicate = await this.prisma.product.findFirst({
@@ -1343,5 +1374,140 @@ export class ProductsService {
     }
 
     return { success: true };
+  }
+
+  // ── Product image (POS tile photo) ─────────────────────────────────────────
+  // Bytes are stored through the existing documents storage
+  // (DocumentsService.createFromBuffer) and served back through
+  // GET /products/:id/image so product-read permission holders (incl. POS
+  // reps) can load them without `documents.view`.
+
+  /** Store an uploaded image and point `product.imageUrl` at the serving route. */
+  async setImage(id: string, file: Express.Multer.File | undefined, user: AuthUser) {
+    if (!file) throw new BadRequestException('No image file provided');
+    if (!PRODUCT_IMAGE_MIME_TYPES.has(file.mimetype)) {
+      throw new BadRequestException(
+        `Unsupported image type: ${file.mimetype}. Use JPEG, PNG, or WebP.`,
+      );
+    }
+    if (file.size > PRODUCT_IMAGE_MAX_BYTES) {
+      throw new BadRequestException('Product image must be 2 MB or smaller');
+    }
+
+    const product = await this.findProductForImage(id);
+    await this.companyScope.assertCanAccessCompany(user, product.companyId, AccessLevel.WRITE);
+
+    const doc = await this.documents.createFromBuffer(
+      {
+        buffer: file.buffer,
+        fileName: file.originalname || `${product.productCode}-image`,
+        mimeType: file.mimetype,
+        title: `${product.name} product image`,
+        ownerType: DocumentOwnerType.TRANSACTION,
+        ownerId: product.id,
+        companyId: product.companyId,
+        category: DocumentCategory.OTHER,
+        description: `Product image for ${product.productCode}`,
+        tags: [PRODUCT_IMAGE_TAG],
+      },
+      user,
+    );
+
+    // Supersede any previous image document so the serving route streams the
+    // newest upload (files themselves are retained, matching documents.remove).
+    await this.prisma.document.updateMany({
+      where: {
+        ownerType: DocumentOwnerType.TRANSACTION,
+        ownerId: product.id,
+        tags: { has: PRODUCT_IMAGE_TAG },
+        deletedAt: null,
+        NOT: { id: doc.id },
+      },
+      data: { deletedAt: new Date() },
+    });
+
+    const imageUrl = productImageUrl(product.id);
+    await this.prisma.product.update({ where: { id: product.id }, data: { imageUrl } });
+
+    {
+      const meta = auditFor('Product', 'UPDATE');
+      await this.auditLogs.log({
+        action: meta.action,
+        entityType: 'Product',
+        entityId: product.id,
+        userId: user.id,
+        companyId: product.companyId,
+        oldValue: { imageUrl: product.imageUrl },
+        newValue: { imageUrl, imageDocumentId: doc.id },
+        severity: meta.severity,
+      });
+    }
+
+    return { id: product.id, imageUrl };
+  }
+
+  /** Resolve the stored image bytes for streaming (permission gate is the controller's). */
+  async getImage(id: string, user: AuthUser) {
+    const product = await this.findProductForImage(id);
+    await this.companyScope.assertCanAccessCompany(user, product.companyId);
+    if (!product.imageUrl) throw new NotFoundException('Product has no image');
+
+    const doc = await this.prisma.document.findFirst({
+      where: {
+        ownerType: DocumentOwnerType.TRANSACTION,
+        ownerId: product.id,
+        tags: { has: PRODUCT_IMAGE_TAG },
+        deletedAt: null,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (!doc) throw new NotFoundException('Product image file not found');
+
+    return this.documents.readFileBuffer(doc.id, user);
+  }
+
+  /** Clear `product.imageUrl` and soft-delete the backing image document. */
+  async clearImage(id: string, user: AuthUser) {
+    const product = await this.findProductForImage(id);
+    await this.companyScope.assertCanAccessCompany(user, product.companyId, AccessLevel.WRITE);
+
+    await this.prisma.document.updateMany({
+      where: {
+        ownerType: DocumentOwnerType.TRANSACTION,
+        ownerId: product.id,
+        tags: { has: PRODUCT_IMAGE_TAG },
+        deletedAt: null,
+      },
+      data: { deletedAt: new Date() },
+    });
+    if (product.imageUrl) {
+      await this.prisma.product.update({ where: { id: product.id }, data: { imageUrl: null } });
+    }
+
+    {
+      const meta = auditFor('Product', 'UPDATE');
+      await this.auditLogs.log({
+        action: meta.action,
+        entityType: 'Product',
+        entityId: product.id,
+        userId: user.id,
+        companyId: product.companyId,
+        oldValue: { imageUrl: product.imageUrl },
+        newValue: { imageUrl: null },
+        severity: meta.severity,
+      });
+    }
+
+    return { id: product.id, imageUrl: null };
+  }
+
+  private async findProductForImage(id: string) {
+    const product = await this.prisma.product.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, companyId: true, name: true, productCode: true, imageUrl: true },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+    return product;
   }
 }

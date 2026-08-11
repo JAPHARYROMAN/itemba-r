@@ -258,8 +258,16 @@ const ALL_PERMISSIONS: PermDef[] = [
   ...perms('sales', ['view', 'create', 'confirm', 'cancel']),
   ...perms('purchases', ['view', 'create', 'confirm', 'receive', 'cancel']),
   // Mobile POS Lite: sales reps receive only `use`; terminal provisioning is
-  // reserved for a group-controlled administrator.
+  // reserved for a group-controlled administrator. Stock-in purchases from a
+  // terminal are a manager-level grant (`purchase`), not part of `use`.
   ...perms('mobile_pos_lite', ['use']),
+  {
+    code: 'mobile_pos_lite.purchase',
+    description: 'Record stock-in purchases from a Mobile POS Lite terminal',
+    module: 'mobile_pos_lite',
+    action: 'purchase',
+    isGroupControl: false,
+  },
   {
     code: 'mobile_pos_lite.manage',
     description: 'Provision and manage Mobile POS Lite terminals',
@@ -283,7 +291,16 @@ const ALL_PERMISSIONS: PermDef[] = [
     isGroupControl: false,
   },
   ...perms('profit', ['view', 'manage_costs', 'audit']),
-  ...perms('record_book', ['view', 'create', 'update', 'delete', 'finalize', 'void', 'admin', 'export']),
+  ...perms('record_book', [
+    'view',
+    'create',
+    'update',
+    'delete',
+    'finalize',
+    'void',
+    'admin',
+    'export',
+  ]),
 
   // ── Petroleum Operations (Milestone 5) ──────────────────────────────────────
   ...perms('petroleum', ['setup.view', 'setup.manage', 'reports.view', 'dashboard.view']),
@@ -1519,6 +1536,9 @@ const ROLES: RoleDef[] = [
         'final_qa',
       ),
       notGroupCtrl,
+      // Mobile POS Lite stock-in purchases (manager-level; not granted to
+      // cashiers/salespeople by default).
+      (p) => p.code === 'mobile_pos_lite.purchase',
     ),
   },
   {
@@ -1568,6 +1588,9 @@ const ROLES: RoleDef[] = [
           'external_payments',
           'external_messages',
         )(p) && readExport(p),
+      // Mobile POS Lite stock-in purchases (manager-level; not granted to
+      // cashiers/salespeople by default).
+      (p) => p.code === 'mobile_pos_lite.purchase',
     ),
   },
   {

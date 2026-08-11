@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   Card,
   PageHeader,
@@ -12,6 +13,7 @@ import {
   Modal,
   Btn,
   SkeletonTable,
+  FileUpload,
   FormInput,
   FormSelect,
   FormTextarea,
@@ -26,6 +28,7 @@ import {
   backendPage,
   backendPatch,
   backendPost,
+  backendUpload,
 } from '@/lib/api-client';
 
 interface Company {
@@ -108,6 +111,7 @@ interface Product {
   variantColor?: string | null;
   variantSize?: string | null;
   variantFinish?: string | null;
+  imageUrl?: string | null;
   company?: { name: string } | null;
   division?: { id: string; name: string; code: string } | null;
   category?: { name: string } | null;
@@ -263,7 +267,9 @@ function priceInputValue(value?: number | string | null) {
   return Number.isFinite(numeric) && numeric > 0 ? String(value) : '';
 }
 
-function familyPricePatch(family?: ProductFamily | null): Pick<
+function familyPricePatch(
+  family?: ProductFamily | null,
+): Pick<
   ProductForm,
   'defaultPurchasePrice' | 'defaultSellingPrice' | 'wholesalePrice' | 'retailPrice'
 > {
@@ -356,14 +362,19 @@ function ProductModal({
   const [useFamilyPrice, setUseFamilyPrice] = useState(() =>
     Boolean(
       initial?.productFamilyId &&
-        initial.defaultSellingPrice == null &&
-        initial.wholesalePrice == null &&
-        initial.retailPrice == null,
+      initial.defaultSellingPrice == null &&
+      initial.wholesalePrice == null &&
+      initial.retailPrice == null,
     ),
   );
   const [createFamilyVariants, setCreateFamilyVariants] = useState(mode === 'create');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // Product image (edit mode only): uploads immediately via the dedicated
+  // image endpoints, independent of the Save Changes PATCH.
+  const [imageUrl, setImageUrl] = useState<string | null>(initial?.imageUrl ?? null);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageVersion, setImageVersion] = useState(0);
   const requiresCost = productRequiresCost(form.productType, form.trackInventory);
   const selectedFamily = families.find((family) => family.id === form.productFamilyId);
   const siblingFamilies =
@@ -373,7 +384,9 @@ function ProductModal({
   const canCreateFamilyVariants = Boolean(selectedFamily && siblingFamilies.length > 0);
   const familySellingPrice = familySellingPriceValue(selectedFamily);
   const hasFamilyPrice = Boolean(selectedFamily && familySellingPrice > 0);
-  const purchaseCost = Number(form.defaultPurchasePrice || selectedFamily?.defaultPurchasePrice || 0);
+  const purchaseCost = Number(
+    form.defaultPurchasePrice || selectedFamily?.defaultPurchasePrice || 0,
+  );
   const displayedSellingPrice =
     Number(form.defaultSellingPrice || 0) || (useFamilyPrice ? familySellingPrice : 0);
   const marginPreview =
@@ -447,6 +460,51 @@ function ProductModal({
       setUseFamilyPrice(false);
     }
   }, [form.productFamilyId, useFamilyPrice]);
+
+  const handleImageUpload = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file || !initial) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      showToast('error', 'Unsupported image type', 'Use a PNG, JPEG, or WebP image.');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      showToast('error', 'Image too large', 'Product images must be 2 MB or smaller.');
+      return;
+    }
+    setImageBusy(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const result = await backendUpload<{ id: string; imageUrl: string }>(
+        `/products/${initial.id}/image`,
+        formData,
+      );
+      setImageUrl(result.imageUrl);
+      setImageVersion((v) => v + 1);
+      showToast('success', 'Product image updated', form.name.trim() || initial.name);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed';
+      showToast('error', 'Could not upload image', message);
+    } finally {
+      setImageBusy(false);
+    }
+  };
+
+  const handleImageRemove = async () => {
+    if (!initial) return;
+    setImageBusy(true);
+    try {
+      await backendDelete(`/products/${initial.id}/image`);
+      setImageUrl(null);
+      showToast('success', 'Product image removed', form.name.trim() || initial.name);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed';
+      showToast('error', 'Could not remove image', message);
+    } finally {
+      setImageBusy(false);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!form.companyId) {
@@ -533,7 +591,8 @@ function ProductModal({
       }
       if (form.productFamilyName.trim()) {
         body.productFamilyName = form.productFamilyName.trim();
-        if (form.productFamilyBrand.trim()) body.productFamilyBrand = form.productFamilyBrand.trim();
+        if (form.productFamilyBrand.trim())
+          body.productFamilyBrand = form.productFamilyBrand.trim();
       } else if (mode === 'edit') {
         body.productFamilyId = form.productFamilyId || null;
       } else if (form.productFamilyId) {
@@ -863,8 +922,7 @@ function ProductModal({
           <div
             className="col-span-2 rounded-lg border px-3 py-2 text-sm"
             style={{
-              borderColor:
-                purchaseCost > 0 ? 'var(--aurora-border)' : 'rgba(239, 68, 68, 0.45)',
+              borderColor: purchaseCost > 0 ? 'var(--aurora-border)' : 'rgba(239, 68, 68, 0.45)',
               background: purchaseCost > 0 ? 'var(--aurora-card)' : 'rgba(239, 68, 68, 0.08)',
               color: purchaseCost > 0 ? 'var(--aurora-text-secondary)' : 'rgb(185, 28, 28)',
             }}
@@ -897,7 +955,8 @@ function ProductModal({
           <span>
             <span className="block font-medium">Use family price</span>
             <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-              Clears product selling-price overrides so this product inherits prices from the selected family.
+              Clears product selling-price overrides so this product inherits prices from the
+              selected family.
             </span>
           </span>
         </label>
@@ -921,8 +980,8 @@ function ProductModal({
             <span>
               <span className="block font-medium">Create all family sizes</span>
               <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                Creates this product name across the other families in this category and applies each
-                family&apos;s default purchase, selling, wholesale, and retail prices.
+                Creates this product name across the other families in this category and applies
+                each family&apos;s default purchase, selling, wholesale, and retail prices.
               </span>
               {canCreateFamilyVariants ? (
                 <span
@@ -932,7 +991,9 @@ function ProductModal({
                   {siblingFamilies.slice(0, 6).map((family) => (
                     <span key={family.id}>
                       {form.name.trim() || 'Product'} {familyVariantLabel(family.name)} ·{' '}
-                      {fmtTZS(family.defaultSellingPrice ?? family.retailPrice ?? family.wholesalePrice)}
+                      {fmtTZS(
+                        family.defaultSellingPrice ?? family.retailPrice ?? family.wholesalePrice,
+                      )}
                     </span>
                   ))}
                   {siblingFamilies.length > 6 && (
@@ -973,10 +1034,7 @@ function ProductModal({
           value={form.reorderLevel}
           onChange={(e) => set('reorderLevel', e.target.value)}
         />
-        <label
-          className="flex items-center gap-2 text-sm"
-          style={{ color: 'var(--aurora-text)' }}
-        >
+        <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--aurora-text)' }}>
           <input
             type="checkbox"
             className="rounded"
@@ -1051,6 +1109,34 @@ function ProductModal({
             onChange={(e) => set('description', e.target.value)}
           />
         </div>
+        {mode === 'edit' && initial && (
+          <div className="col-span-2 flex items-start gap-3">
+            {imageUrl && (
+              <div className="flex flex-col items-center gap-1">
+                <Image
+                  src={`/api/backend/products/${initial.id}/image?v=${imageVersion}`}
+                  alt={`${form.name.trim() || initial.name} product image`}
+                  width={64}
+                  height={64}
+                  className="h-16 w-16 rounded-lg border object-cover"
+                  style={{ borderColor: 'var(--aurora-border)' }}
+                  unoptimized
+                />
+                <Btn variant="ghost" size="xs" onClick={handleImageRemove} disabled={imageBusy}>
+                  Remove
+                </Btn>
+              </div>
+            )}
+            <FileUpload
+              label="Product Image"
+              hint="PNG, JPEG, or WebP up to 2 MB. Shown as the POS tile photo."
+              accept="image/png,image/jpeg,image/webp"
+              disabled={imageBusy}
+              onChange={handleImageUpload}
+              className="flex-1"
+            />
+          </div>
+        )}
       </div>
     </Modal>
   );
@@ -1613,21 +1699,53 @@ export default function ProductsPage() {
                 className="text-left text-xs uppercase bg-gray-50"
                 style={{ color: 'var(--aurora-text-muted)' }}
               >
-                <th scope="col" className="px-4 py-3">Code</th>
-                <th scope="col" className="px-4 py-3">Name</th>
-                <th scope="col" className="px-4 py-3">Family</th>
-                <th scope="col" className="px-4 py-3">Variant</th>
-                <th scope="col" className="px-4 py-3">Category</th>
-                <th scope="col" className="px-4 py-3">Division</th>
-                <th scope="col" className="px-4 py-3">Type</th>
-                <th scope="col" className="px-4 py-3">Unit</th>
-                <th scope="col" className="px-4 py-3 text-right">Selling</th>
-                <th scope="col" className="px-4 py-3 text-right">Purchase</th>
-                {branchId && <th scope="col" className="px-4 py-3 text-right">On hand</th>}
-                {branchId && <th scope="col" className="px-4 py-3 text-right">Available</th>}
-                <th scope="col" className="px-4 py-3">Status</th>
+                <th scope="col" className="px-4 py-3">
+                  Code
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Name
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Family
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Variant
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Category
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Division
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Type
+                </th>
+                <th scope="col" className="px-4 py-3">
+                  Unit
+                </th>
+                <th scope="col" className="px-4 py-3 text-right">
+                  Selling
+                </th>
+                <th scope="col" className="px-4 py-3 text-right">
+                  Purchase
+                </th>
+                {branchId && (
+                  <th scope="col" className="px-4 py-3 text-right">
+                    On hand
+                  </th>
+                )}
+                {branchId && (
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Available
+                  </th>
+                )}
+                <th scope="col" className="px-4 py-3">
+                  Status
+                </th>
                 {(canUpdate || canDelete) && (
-                  <th scope="col" className="px-4 py-3 text-right">Actions</th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Actions
+                  </th>
                 )}
               </tr>
             </thead>
@@ -1659,13 +1777,26 @@ export default function ProductsPage() {
                       </Link>
                     </td>
                     <td className="px-4 py-3 font-medium">
-                      <Link
-                        href={`/operations/products/${p.id}`}
-                        className="text-blue-600 hover:underline"
-                        title={`View ${p.name}`}
-                      >
-                        {p.name}
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        {p.imageUrl && (
+                          <Image
+                            src={`/api/backend/products/${p.id}/image`}
+                            alt=""
+                            width={32}
+                            height={32}
+                            className="h-8 w-8 shrink-0 rounded border object-cover"
+                            style={{ borderColor: 'var(--aurora-border)' }}
+                            unoptimized
+                          />
+                        )}
+                        <Link
+                          href={`/operations/products/${p.id}`}
+                          className="text-blue-600 hover:underline"
+                          title={`View ${p.name}`}
+                        >
+                          {p.name}
+                        </Link>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-xs">
                       {p.productFamily

@@ -12,6 +12,7 @@ import {
   QueryMobilePosLiteCatalogDto,
 } from './dto/mobile-pos-lite-session.dto';
 import { CreateMobilePosLiteSaleDto } from './dto/mobile-pos-lite-sale.dto';
+import { CreateMobilePosLitePurchaseDto } from './dto/mobile-pos-lite-purchase.dto';
 import { MobilePosLiteService } from './mobile-pos-lite.service';
 
 @Controller('mobile-pos-lite')
@@ -113,5 +114,37 @@ export class MobilePosLiteController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.createSale(terminalCode, deviceSecret, dto, user);
+  }
+
+  @Get('my-sales-today')
+  @RequirePermissions('mobile_pos_lite.use')
+  mySalesToday(
+    @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
+    @Headers('x-mobile-pos-device') deviceSecret: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.mySalesToday(terminalCode, deviceSecret, user);
+  }
+
+  @Get('suppliers')
+  @RequirePermissions('mobile_pos_lite.purchase')
+  suppliers(
+    @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
+    @Headers('x-mobile-pos-device') deviceSecret: string | undefined,
+    @Query() query: QueryMobilePosLiteCatalogDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.suppliers(terminalCode, deviceSecret, query.search, user);
+  }
+
+  @Post('purchases')
+  @RequirePermissions('mobile_pos_lite.purchase')
+  createPurchase(
+    @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
+    @Headers('x-mobile-pos-device') deviceSecret: string | undefined,
+    @Body() dto: CreateMobilePosLitePurchaseDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.createPurchase(terminalCode, deviceSecret, dto, user);
   }
 }

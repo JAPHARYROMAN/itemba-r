@@ -1,5 +1,22 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  Res,
+  StreamableFile,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Response } from 'express';
 import { ProductsService } from './products.service';
+import { PRODUCT_IMAGE_MAX_BYTES, PRODUCT_IMAGE_MIME_TYPES } from './product-image';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductDto } from './dto/query-product.dto';
@@ -87,5 +104,64 @@ export class ProductsController {
   @RequirePermissions('products.delete')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.remove(id, user);
+  }
+
+  /** Stream the product image. Same read permissions as the product itself so POS reps can load tiles. */
+  @Get(':id/image')
+  @RequireAnyPermissions(
+    'products.view',
+    'pos.create',
+    'sales.create',
+    'purchases.create',
+    'inventory.view',
+    'inventory.adjustments.create',
+    'operations.dashboard.view',
+  )
+  async getImage(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const file = await this.service.getImage(id, user);
+    res.set({
+      'Content-Type': file.mimeType,
+      'Content-Disposition': 'inline',
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, max-age=300',
+    });
+    return new StreamableFile(file.buffer);
+  }
+
+  /** Upload / replace the product image (multipart field `file`, JPEG/PNG/WebP, ≤ 2 MB). */
+  @Post(':id/image')
+  @RequirePermissions('products.update')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      // Memory storage: the 2 MB cap keeps buffers small and matches the
+      // documents storage entry point (DocumentsService.createFromBuffer).
+      fileFilter: (_req, file, cb) => {
+        if (PRODUCT_IMAGE_MIME_TYPES.has(file.mimetype)) return cb(null, true);
+        return cb(
+          new BadRequestException(
+            `Unsupported image type: ${file.mimetype}. Use JPEG, PNG, or WebP.`,
+          ),
+          false,
+        );
+      },
+      limits: { fileSize: PRODUCT_IMAGE_MAX_BYTES },
+    }),
+  )
+  uploadImage(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.setImage(id, file, user);
+  }
+
+  @Delete(':id/image')
+  @RequirePermissions('products.update')
+  removeImage(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.clearImage(id, user);
   }
 }

@@ -1,12 +1,14 @@
 import { Module } from '@nestjs/common';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { SalesOrdersModule } from '../sales-orders/sales-orders.module';
+import { PurchaseOrdersModule } from '../purchase-orders/purchase-orders.module';
+import { GoodsReceivedNotesModule } from '../goods-received-notes/goods-received-notes.module';
 import { CompanyScopeService } from '../../common/services';
 import { MobilePosLiteController } from './mobile-pos-lite.controller';
 import { MobilePosLiteService } from './mobile-pos-lite.service';
 
 @Module({
-  imports: [AuditLogsModule, SalesOrdersModule],
+  imports: [AuditLogsModule, SalesOrdersModule, PurchaseOrdersModule, GoodsReceivedNotesModule],
   controllers: [MobilePosLiteController],
   providers: [MobilePosLiteService, CompanyScopeService],
   exports: [MobilePosLiteService],

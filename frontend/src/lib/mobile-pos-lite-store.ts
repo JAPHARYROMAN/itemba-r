@@ -14,6 +14,8 @@ export type MobilePosLiteProduct = {
   sellingPrice: number;
   availableStock: number | null;
   trackInventory: boolean;
+  /** Backend-relative image path (`/products/:id/image`) — null when no photo. */
+  imageUrl?: string | null;
 };
 
 export type PendingMobilePosLiteSale = {
@@ -51,11 +53,12 @@ export type MobilePosLiteCachedSession = {
 };
 
 const DB_NAME = 'itemba-mobile-pos-lite';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const BINDINGS = 'bindings';
 const CATALOGS = 'catalogs';
 const OUTBOX = 'outbox';
 const SESSIONS = 'sessions';
+const FREQUENTS = 'frequents';
 const ACTIVE_BINDING = 'active';
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -72,6 +75,7 @@ function openDatabase(): Promise<IDBDatabase> {
         store.createIndex('terminalCode', 'terminalCode', { unique: false });
       }
       if (!database.objectStoreNames.contains(SESSIONS)) database.createObjectStore(SESSIONS);
+      if (!database.objectStoreNames.contains(FREQUENTS)) database.createObjectStore(FREQUENTS);
     };
   });
 }
@@ -152,6 +156,31 @@ export async function saveMobilePosLiteSession(
   await transaction(SESSIONS, 'readwrite', (store) =>
     store.put({ session, updatedAt: new Date().toISOString() }, terminalCode),
   );
+}
+
+/**
+ * Per-terminal sale counts per product, powering the quick-pick grid. The grid
+ * personalizes itself to what THIS phone actually sells and works offline; no
+ * backend involvement.
+ */
+export async function getMobilePosLiteFrequents(
+  terminalCode: string,
+): Promise<Record<string, number>> {
+  const value = await transaction<{ counts?: Record<string, number> } | undefined>(
+    FREQUENTS,
+    'readonly',
+    (store) => store.get(terminalCode),
+  );
+  return value?.counts ?? {};
+}
+
+export async function bumpMobilePosLiteFrequents(terminalCode: string, productIds: string[]) {
+  const counts = await getMobilePosLiteFrequents(terminalCode);
+  for (const id of productIds) counts[id] = (counts[id] ?? 0) + 1;
+  await transaction(FREQUENTS, 'readwrite', (store) =>
+    store.put({ counts, updatedAt: new Date().toISOString() }, terminalCode),
+  );
+  return counts;
 }
 
 export async function enqueueMobilePosLiteSale(sale: PendingMobilePosLiteSale) {

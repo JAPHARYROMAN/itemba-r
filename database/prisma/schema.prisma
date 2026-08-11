@@ -3210,6 +3210,10 @@ model Product {
   variantSize          String?
   variantFinish        String?
   description          String?
+  /// Optional product photo shown as the POS tile image. Stores the
+  /// backend-relative serving path (`/products/{id}/image`); the bytes live in
+  /// the documents storage (Document tagged `product-image`).
+  imageUrl             String?
   productType          ProductType   @default(STOCK_ITEM)
   baseUnitId           String
   purchaseUnitId       String?
