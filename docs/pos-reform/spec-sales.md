@@ -13,7 +13,7 @@ These are not screens but the sale flow cannot ship without them. Each is a sepa
 ### 0.1 Phase 0 — characterization tests (M)
 Jest/RTL tests against the current `mobile-pos-lite.tsx` BEFORE any refactor, locking the load-bearing quirks:
 1. Cart survives into success; receipt text built from it; resets only on `beginSale`.
-2. Sync loop: connection error ⇒ `break` (order preserved); server rejection ⇒ `updatePendingMobilePosLiteSaleError` + continue.
+2. Sync loop: connection error ⇒ `break` (order preserved (CHAR-pinned reality: the outbox drains in IndexedDB index order = UUID-sort of sale ids, NOT insertion FIFO — mobile-pos-lite.characterization.test.tsx CHAR-2; the refactor must keep this, or change it knowingly with a queue-order migration note)); server rejection ⇒ `updatePendingMobilePosLiteSaleError` + continue.
 3. Frequency bump fires on queued sales too (before outcome).
 4. Offline cold start: session restored from IDB `sessions`, catalog from `catalogs`, queue rendered; `online` event triggers session+catalog refetch.
 5. Queued payload is frozen (idempotencyKey inside payload; replay posts identical bytes).
