@@ -5,6 +5,7 @@ import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { PayrollCalculatorService } from '../payroll-calculator/payroll-calculator.service';
 import { PayrollPostingsService } from '../payroll-postings/payroll-postings.service';
 import { CompanyScopeService } from '../../../common/services';
+import { EntityCodeGeneratorService } from '../../entity-code-generator/entity-code-generator.service';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
 import { CreatePayrollRunDto } from './dto/create-payroll-run.dto';
 import { UpdatePayrollRunDto } from './dto/update-payroll-run.dto';
@@ -39,6 +40,7 @@ export class PayrollRunsService {
     private readonly calculator: PayrollCalculatorService,
     private readonly postings: PayrollPostingsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly codes: EntityCodeGeneratorService,
   ) {}
 
   async findAll(user: AuthUser, query: any) {
@@ -94,8 +96,15 @@ export class PayrollRunsService {
       // Pin the run to the actor's primary company when DTO omits it.
       (dto as any).companyId = user.companyId;
     }
+    const payrollRunNumber =
+      dto.payrollRunNumber ??
+      (await this.codes.next({ companyId: (dto as any).companyId, entityType: 'PayrollRun' }));
     const record = await this.prisma.payrollRun.create({
-      data: { ...dto, runDate: dto.runDate ? new Date(dto.runDate) : new Date() } as any,
+      data: {
+        ...dto,
+        payrollRunNumber,
+        runDate: dto.runDate ? new Date(dto.runDate) : new Date(),
+      } as any,
     });
     await this.audit.log({
       userId: user.id,

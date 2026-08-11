@@ -7,12 +7,12 @@ import {
   Card,
   PageHeader,
   StatusBadge,
-  FormInput,
   FormSelect,
   Modal,
   Btn,
   PageToolbar,
   PageSpinner,
+  showToast,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 
@@ -100,14 +100,17 @@ function normalizePayrollRun(row: RawPayrollRun): PayrollRun {
 
 function PayrollRunsContent() {
   const searchParams = useSearchParams();
-  const { hasPermission } = useAuth();
+  const { user, hasPermission } = useAuth();
   const [rows, setRows] = useState<PayrollRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<FormState>(empty);
   const [saving, setSaving] = useState(false);
   const [actionLoading, setActionLoading] = useState('');
-  const [periodFilter, setPeriodFilter] = useState(searchParams.get('periodId') ?? '');
+  const [periodFilter, setPeriodFilter] = useState(
+    searchParams.get('payrollPeriodId') ?? searchParams.get('periodId') ?? '',
+  );
+  const [periods, setPeriods] = useState<{ id: string; name?: string; payrollPeriodCode?: string; companyId?: string }[]>([]);
   const [filesManifest, setFilesManifest] = useState<DisbursementManifest | null>(null);
   const [filesError, setFilesError] = useState('');
   const [filesLoading, setFilesLoading] = useState(false);
@@ -150,7 +153,7 @@ function PayrollRunsContent() {
   const load = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams();
-    if (periodFilter) params.set('periodId', periodFilter);
+    if (periodFilter) params.set('payrollPeriodId', periodFilter);
     const r = await fetch(`/api/backend/hr/payroll-runs?${params}`);
     const j = await r.json();
     const list = Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [];
@@ -162,17 +165,50 @@ function PayrollRunsContent() {
     load();
   }, [load]);
 
+  // Period options for the New Run modal (also carry companyId, which the
+  // create DTO requires).
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/backend/hr/payroll-periods?limit=100')
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled) return;
+        const list = Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [];
+        setPeriods(list);
+      })
+      .catch(() => {
+        if (!cancelled) setPeriods([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    await fetch('/api/backend/hr/payroll-runs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    });
-    setSaving(false);
-    setShowModal(false);
-    load();
+    const period = periods.find((p) => p.id === form.periodId);
+    try {
+      const res = await fetch('/api/backend/hr/payroll-runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payrollPeriodId: form.periodId,
+          companyId: period?.companyId,
+          payrollType: form.runType,
+          createdById: user?.id,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not create the payroll run.'));
+        return;
+      }
+      setShowModal(false);
+      load();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const doAction = async (id: string, action: string) => {
@@ -199,9 +235,16 @@ function PayrollRunsContent() {
       return;
     }
     setActionLoading(`${id}-${action}`);
-    await fetch(`/api/backend/hr/payroll-runs/${id}/${action}`, { method: 'PATCH' });
-    setActionLoading('');
-    load();
+    try {
+      const res = await fetch(`/api/backend/hr/payroll-runs/${id}/${action}`, { method: 'PATCH' });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Action failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? `Could not ${action} this run.`));
+      }
+    } finally {
+      setActionLoading('');
+      load();
+    }
   };
 
   const submitPay = async () => {
@@ -412,10 +455,15 @@ function PayrollRunsContent() {
         }
       >
         <form id="payroll-run-form" onSubmit={handleSubmit} className="space-y-3">
-          <FormInput
-            label="Payroll Period ID"
+          <FormSelect
+            label="Payroll Period"
             value={form.periodId}
             onChange={f('periodId')}
+            options={periods.map((p) => ({
+              value: p.id,
+              label: `${p.payrollPeriodCode ? p.payrollPeriodCode + ' — ' : ''}${p.name ?? p.id}`,
+            }))}
+            placeholder="Select payroll period"
             required
           />
           <FormSelect
@@ -424,8 +472,10 @@ function PayrollRunsContent() {
             onChange={f('runType')}
             options={[
               { value: 'REGULAR', label: 'Regular' },
-              { value: 'SUPPLEMENTARY', label: 'Supplementary' },
-              { value: 'FINAL', label: 'Final' },
+              { value: 'BONUS', label: 'Bonus' },
+              { value: 'ADVANCE', label: 'Advance' },
+              { value: 'FINAL_SETTLEMENT', label: 'Final Settlement' },
+              { value: 'ADJUSTMENT', label: 'Adjustment' },
             ]}
           />
         </form>

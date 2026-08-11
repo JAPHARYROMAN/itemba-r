@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader } from '@/components/ui';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Btn, Card, FormInput, FormSelect, Modal, PageHeader, showToast } from '@/components/ui';
+import { ApiError, backendPost } from '@/lib/api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -9,26 +10,60 @@ interface PackageMovement {
   id: string;
   movementNumber: string;
   movementDate: string;
+  returnablePackageId?: string;
+  customerId?: string | null;
+  supplierId?: string | null;
   packageName?: string;
   partyName?: string;
   movementType: string;
   quantity: number;
   depositAmount: number;
-  reference?: string;
+  referenceType?: string | null;
+  referenceId?: string | null;
 }
+
+interface Company { id: string; name: string }
+interface Customer { id: string; name: string }
+interface Supplier { id: string; name: string }
+interface ReturnablePackageOption { id: string; packageCode?: string; name: string; companyId?: string }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const fieldCls = 'w-full text-sm border border-slate-200 rounded-md px-3 py-2 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300';
 const labelCls = 'block text-xs font-medium text-slate-600 mb-1';
+const fieldCls = 'w-full text-sm border border-slate-200 rounded-md px-3 py-2 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300';
 const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm text-slate-700';
 
+// Values must match the backend PackageMovementType enum.
+const MOVEMENT_TYPES = [
+  { value: 'ISSUED_TO_CUSTOMER', label: 'Issued to Customer' },
+  { value: 'RETURNED_BY_CUSTOMER', label: 'Returned by Customer' },
+  { value: 'RECEIVED_FROM_SUPPLIER', label: 'Received from Supplier' },
+  { value: 'RETURNED_TO_SUPPLIER', label: 'Returned to Supplier' },
+  { value: 'ADJUSTMENT_IN', label: 'Adjustment In' },
+  { value: 'ADJUSTMENT_OUT', label: 'Adjustment Out' },
+  { value: 'DAMAGED', label: 'Damaged' },
+  { value: 'LOST', label: 'Lost' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+// Movement types the backend accepts on a customer-linked movement.
+const CUSTOMER_MOVEMENT_TYPES = new Set([
+  'ISSUED_TO_CUSTOMER',
+  'RETURNED_BY_CUSTOMER',
+  'ADJUSTMENT_IN',
+  'ADJUSTMENT_OUT',
+]);
+
 const MOVEMENT_CLR: Record<string, string> = {
-  ISSUE: 'bg-amber-50 text-amber-700 border-amber-200',
-  RETURN: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  ADJUSTMENT: 'bg-blue-50 text-blue-700 border-blue-200',
-  WRITEOFF: 'bg-red-50 text-red-700 border-red-200',
+  ISSUED_TO_CUSTOMER: 'bg-amber-50 text-amber-700 border-amber-200',
+  RETURNED_BY_CUSTOMER: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  RECEIVED_FROM_SUPPLIER: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  RETURNED_TO_SUPPLIER: 'bg-amber-50 text-amber-700 border-amber-200',
+  ADJUSTMENT_IN: 'bg-blue-50 text-blue-700 border-blue-200',
+  ADJUSTMENT_OUT: 'bg-blue-50 text-blue-700 border-blue-200',
+  DAMAGED: 'bg-red-50 text-red-700 border-red-200',
+  LOST: 'bg-red-50 text-red-700 border-red-200',
 };
 
 function Badge({ type }: { type: string }) {
@@ -52,100 +87,139 @@ function Spinner() {
   );
 }
 
-function CloseIcon() {
-  return <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
+function listFromJson<T>(j: unknown): T[] {
+  const json = j as { data?: { data?: T[] } | T[] };
+  const inner = json?.data;
+  if (Array.isArray(inner)) return inner;
+  if (inner && Array.isArray((inner as { data?: T[] }).data)) return (inner as { data: T[] }).data;
+  return [];
+}
+
+function packageLabel(p: ReturnablePackageOption) {
+  return p.packageCode ? `${p.packageCode} — ${p.name}` : p.name;
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
-interface ModalProps { onClose: () => void; onSaved: () => void }
+interface ModalProps { packages: ReturnablePackageOption[]; onClose: () => void; onSaved: () => void }
 
-function MovementModal({ onClose, onSaved }: ModalProps) {
-  const [packageId, setPackageId] = useState('');
+function MovementModal({ packages, onClose, onSaved }: ModalProps) {
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [companyId, setCompanyId] = useState('');
+  const [returnablePackageId, setReturnablePackageId] = useState('');
+  const [partyType, setPartyType] = useState('');
   const [customerId, setCustomerId] = useState('');
-  const [movementType, setMovementType] = useState('ISSUE');
-  const [quantity, setQuantity] = useState<number | ''>(0);
-  const [depositAmount, setDepositAmount] = useState<number | ''>(0);
-  const [reference, setReference] = useState('');
-  const [movementDate, setMovementDate] = useState('');
+  const [supplierId, setSupplierId] = useState('');
+  const [movementType, setMovementType] = useState('ISSUED_TO_CUSTOMER');
+  const [quantity, setQuantity] = useState('');
+  const [depositAmount, setDepositAmount] = useState('');
+  const [referenceType, setReferenceType] = useState('');
+  const [referenceId, setReferenceId] = useState('');
+  const [movementDate, setMovementDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!packageId || !quantity) { setError('Package and quantity are required'); return; }
+  useEffect(() => {
+    fetch('/api/backend/companies?limit=100')
+      .then((r) => r.json())
+      .then((j) => setCompanies(listFromJson<Company>(j)))
+      .catch(() => setCompanies([]));
+  }, []);
+
+  useEffect(() => {
+    if (!companyId) { setCustomers([]); setCustomerId(''); setSuppliers([]); setSupplierId(''); return; }
+    fetch(`/api/backend/customers?companyId=${encodeURIComponent(companyId)}&limit=500`)
+      .then((r) => r.json())
+      .then((j) => setCustomers(listFromJson<Customer>(j)))
+      .catch(() => setCustomers([]));
+    fetch(`/api/backend/suppliers?companyId=${encodeURIComponent(companyId)}&limit=500`)
+      .then((r) => r.json())
+      .then((j) => setSuppliers(listFromJson<Supplier>(j)))
+      .catch(() => setSuppliers([]));
+  }, [companyId]);
+
+  // Only offer packages belonging to the chosen company (when the row carries one).
+  const companyPackages = useMemo(
+    () => packages.filter((p) => !companyId || !p.companyId || p.companyId === companyId),
+    [packages, companyId],
+  );
+
+  // A customer-linked movement only supports the customer movement types.
+  const movementTypeOptions = useMemo(
+    () => (partyType === 'CUSTOMER' ? MOVEMENT_TYPES.filter((t) => CUSTOMER_MOVEMENT_TYPES.has(t.value)) : MOVEMENT_TYPES),
+    [partyType],
+  );
+
+  useEffect(() => {
+    if (partyType === 'CUSTOMER' && !CUSTOMER_MOVEMENT_TYPES.has(movementType)) {
+      setMovementType('ISSUED_TO_CUSTOMER');
+    }
+  }, [partyType, movementType]);
+
+  const submit = async () => {
+    if (!companyId) { setError('Company is required'); return; }
+    if (!returnablePackageId) { setError('Package is required'); return; }
+    if (partyType === 'CUSTOMER' && !customerId) { setError('Select a customer'); return; }
+    if (partyType === 'SUPPLIER' && !supplierId) { setError('Select a supplier'); return; }
+    if (quantity === '' || Number(quantity) <= 0) { setError('Quantity must be greater than zero'); return; }
+    if (!movementDate) { setError('Movement date is required'); return; }
     setSaving(true); setError('');
     try {
-      const body = {
-        packageId,
-        customerId: customerId || undefined,
+      await backendPost('/westsides/package-movements', {
+        companyId,
+        returnablePackageId,
+        ...(partyType === 'CUSTOMER' && customerId ? { customerId } : {}),
+        ...(partyType === 'SUPPLIER' && supplierId ? { supplierId } : {}),
         movementType,
         quantity: Number(quantity),
-        depositAmount: Number(depositAmount) || 0,
-        reference: reference || undefined,
-        movementDate: movementDate || undefined,
-      };
-      const res = await fetch('/api/backend/westsides/package-movements', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
+        ...(depositAmount !== '' ? { depositAmount: Number(depositAmount) } : {}),
+        ...(referenceType ? { referenceType } : {}),
+        ...(referenceId ? { referenceId } : {}),
+        movementDate,
+      });
+      showToast('success', 'Movement recorded');
       onSaved();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error saving');
+      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Error saving');
     } finally { setSaving(false); }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <h2 className="text-base font-semibold text-slate-900">Record Package Movement</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><CloseIcon /></button>
-        </div>
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-          {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className={labelCls}>Package ID *</label>
-              <input required value={packageId} onChange={(e) => setPackageId(e.target.value)} className={fieldCls} placeholder="Package ID" />
-            </div>
-            <div>
-              <label className={labelCls}>Customer/Supplier ID</label>
-              <input value={customerId} onChange={(e) => setCustomerId(e.target.value)} className={fieldCls} placeholder="Customer or Supplier ID" />
-            </div>
-            <div>
-              <label className={labelCls}>Movement Type</label>
-              <select value={movementType} onChange={(e) => setMovementType(e.target.value)} className={fieldCls}>
-                <option value="ISSUE">Issue</option>
-                <option value="RETURN">Return</option>
-                <option value="ADJUSTMENT">Adjustment</option>
-                <option value="WRITEOFF">Write-off</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>Movement Date</label>
-              <input type="date" value={movementDate} onChange={(e) => setMovementDate(e.target.value)} className={fieldCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Quantity *</label>
-              <input required type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value === '' ? '' : Number(e.target.value))} className={fieldCls} placeholder="0" />
-            </div>
-            <div>
-              <label className={labelCls}>Deposit Amount (TZS)</label>
-              <input type="number" min={0} value={depositAmount} onChange={(e) => setDepositAmount(e.target.value === '' ? '' : Number(e.target.value))} className={fieldCls} placeholder="0" />
-            </div>
-            <div className="col-span-2">
-              <label className={labelCls}>Reference</label>
-              <input value={reference} onChange={(e) => setReference(e.target.value)} className={fieldCls} placeholder="e.g. Delivery Note #, Sales Order #" />
-            </div>
-          </div>
-        </form>
-        <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
-          <button onClick={onClose} className="text-sm text-slate-600 px-4 py-2 rounded-md border border-slate-200 hover:bg-slate-50">Cancel</button>
-          <button onClick={(e) => handleSubmit(e as unknown as React.FormEvent)} disabled={saving} className="text-sm bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-5 py-2 rounded-md font-medium">
-            {saving ? 'Saving…' : 'Record Movement'}
-          </button>
-        </div>
+    <Modal open onClose={onClose} title="Record Package Movement"
+      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Record Movement</Btn></>}>
+      {error && <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
+      <div className="grid grid-cols-2 gap-4">
+        <FormSelect label="Company" required value={companyId} onChange={(e) => { setCompanyId(e.target.value); setReturnablePackageId(''); }} placeholder="Select…">
+          {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </FormSelect>
+        <FormSelect label="Package" required value={returnablePackageId} onChange={(e) => setReturnablePackageId(e.target.value)} placeholder={companyId ? 'Select…' : 'Select company first'} disabled={!companyId}>
+          {companyPackages.map((p) => <option key={p.id} value={p.id}>{packageLabel(p)}</option>)}
+        </FormSelect>
+        <FormSelect label="Party" value={partyType} onChange={(e) => { setPartyType(e.target.value); setCustomerId(''); setSupplierId(''); }} placeholder="None">
+          <option value="CUSTOMER">Customer</option>
+          <option value="SUPPLIER">Supplier</option>
+        </FormSelect>
+        {partyType === 'CUSTOMER' ? (
+          <FormSelect label="Customer" required value={customerId} onChange={(e) => setCustomerId(e.target.value)} placeholder={companyId ? 'Select…' : 'Select company first'} disabled={!companyId}>
+            {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </FormSelect>
+        ) : partyType === 'SUPPLIER' ? (
+          <FormSelect label="Supplier" required value={supplierId} onChange={(e) => setSupplierId(e.target.value)} placeholder={companyId ? 'Select…' : 'Select company first'} disabled={!companyId}>
+            {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </FormSelect>
+        ) : (
+          <div />
+        )}
+        <FormSelect label="Movement Type" required value={movementType} onChange={(e) => setMovementType(e.target.value)} options={movementTypeOptions} />
+        <FormInput label="Movement Date" required type="date" value={movementDate} onChange={(e) => setMovementDate(e.target.value)} />
+        <FormInput label="Quantity" required type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
+        <FormInput label="Deposit Amount (TZS)" type="number" min={0} value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} placeholder="0" />
+        <FormInput label="Reference Type" value={referenceType} onChange={(e) => setReferenceType(e.target.value)} placeholder="e.g. Delivery Note, Sales Order" />
+        <FormInput label="Reference #" value={referenceId} onChange={(e) => setReferenceId(e.target.value)} placeholder="e.g. DN-2026-00012" />
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -153,6 +227,9 @@ function MovementModal({ onClose, onSaved }: ModalProps) {
 
 export default function PackageMovementsPage() {
   const [items, setItems] = useState<PackageMovement[]>([]);
+  const [packages, setPackages] = useState<ReturnablePackageOption[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -176,6 +253,41 @@ export default function PackageMovementsPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Reference data for the filter select, the modal package picker, and for
+  // resolving names in the table (movement rows only carry raw ids).
+  useEffect(() => {
+    fetch('/api/backend/westsides/returnable-packages?limit=100')
+      .then((r) => r.json())
+      .then((j) => setPackages(listFromJson<ReturnablePackageOption>(j)))
+      .catch(() => setPackages([]));
+    fetch('/api/backend/customers?limit=500')
+      .then((r) => r.json())
+      .then((j) => setCustomers(listFromJson<Customer>(j)))
+      .catch(() => setCustomers([]));
+    fetch('/api/backend/suppliers?limit=500')
+      .then((r) => r.json())
+      .then((j) => setSuppliers(listFromJson<Supplier>(j)))
+      .catch(() => setSuppliers([]));
+  }, []);
+
+  const packageName = (m: PackageMovement) => {
+    if (m.packageName) return m.packageName;
+    const p = packages.find((x) => x.id === m.returnablePackageId);
+    return p ? packageLabel(p) : '—';
+  };
+
+  const partyName = (m: PackageMovement) => {
+    if (m.partyName) return m.partyName;
+    if (m.customerId) return customers.find((c) => c.id === m.customerId)?.name ?? '—';
+    if (m.supplierId) return suppliers.find((s) => s.id === m.supplierId)?.name ?? '—';
+    return '—';
+  };
+
+  const referenceLabel = (m: PackageMovement) => {
+    const parts = [m.referenceType, m.referenceId].filter(Boolean);
+    return parts.length ? parts.join(' ') : '—';
+  };
+
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -188,22 +300,17 @@ export default function PackageMovementsPage() {
       <Card className="p-4">
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className={labelCls}>Customer ID</label>
-            <input
-              value={filterCustomerId}
-              onChange={(e) => setFilterCustomerId(e.target.value)}
-              className={fieldCls}
-              placeholder="Filter by customer ID…"
-            />
+            <label className={labelCls}>Customer</label>
+            <select value={filterCustomerId} onChange={(e) => setFilterCustomerId(e.target.value)} className={fieldCls}>
+              <option value="">All Customers</option>
+              {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
           </div>
           <div>
             <label className={labelCls}>Movement Type</label>
             <select value={filterMovementType} onChange={(e) => setFilterMovementType(e.target.value)} className={fieldCls}>
               <option value="">All Types</option>
-              <option value="ISSUE">Issue</option>
-              <option value="RETURN">Return</option>
-              <option value="ADJUSTMENT">Adjustment</option>
-              <option value="WRITEOFF">Write-off</option>
+              {MOVEMENT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
           </div>
         </div>
@@ -234,12 +341,12 @@ export default function PackageMovementsPage() {
                     <tr key={m.id} className="hover:bg-slate-50">
                       <td className={`${tdCls} font-medium`}>{m.movementNumber}</td>
                       <td className={tdCls}>{fmtDate(m.movementDate)}</td>
-                      <td className={tdCls}>{m.packageName ?? '—'}</td>
-                      <td className={tdCls}>{m.partyName ?? '—'}</td>
+                      <td className={tdCls}>{packageName(m)}</td>
+                      <td className={tdCls}>{partyName(m)}</td>
                       <td className={tdCls}><Badge type={m.movementType} /></td>
                       <td className={`${tdCls} text-right`}>{fmtNum(m.quantity)}</td>
                       <td className={`${tdCls} text-right`}>{fmtCurrency(m.depositAmount)}</td>
-                      <td className={tdCls}>{m.reference ?? '—'}</td>
+                      <td className={tdCls}>{referenceLabel(m)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -251,6 +358,7 @@ export default function PackageMovementsPage() {
 
       {modalOpen && (
         <MovementModal
+          packages={packages}
           onClose={() => setModalOpen(false)}
           onSaved={() => { setModalOpen(false); load(); }}
         />

@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, FormInput, FormSelect, ConfirmDialog, Modal, Btn, PageSpinner } from '@/components/ui';
+import { Card, PageHeader, PageToolbar, FormInput, FormSelect, ConfirmDialog, Modal, Btn, PageSpinner, showToast } from '@/components/ui';
+import { useOrgScope } from '@/hooks/use-org-scope';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm';
@@ -10,12 +11,14 @@ interface AllowanceType {
   id: string;
   name: string;
   code: string;
-  isTaxable: boolean;
+  companyId?: string;
+  taxable: boolean;
   defaultAmount?: number;
   isActive: boolean;
 }
 
 interface FormState {
+  companyId: string;
   name: string;
   code: string;
   isTaxable: string;
@@ -23,7 +26,7 @@ interface FormState {
   isActive: string;
 }
 
-const empty: FormState = { name: '', code: '', isTaxable: 'false', defaultAmount: '', isActive: 'true' };
+const empty: FormState = { companyId: '', name: '', code: '', isTaxable: 'false', defaultAmount: '', isActive: 'true' };
 
 export default function AllowanceTypesPage() {
   const [rows, setRows] = useState<AllowanceType[]>([]);
@@ -33,6 +36,7 @@ export default function AllowanceTypesPage() {
   const [form, setForm] = useState<FormState>(empty);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const { companyOptions } = useOrgScope(form.companyId, { skipBranches: true, skipDivisions: true, skipEmployees: true });
 
   const load = async () => {
     setLoading(true);
@@ -47,7 +51,7 @@ export default function AllowanceTypesPage() {
   const openCreate = () => { setEditing(null); setForm(empty); setShowModal(true); };
   const openEdit = (a: AllowanceType) => {
     setEditing(a);
-    setForm({ name: a.name, code: a.code, isTaxable: String(a.isTaxable), defaultAmount: String(a.defaultAmount ?? ''), isActive: String(a.isActive) });
+    setForm({ companyId: a.companyId ?? '', name: a.name, code: a.code, isTaxable: String(a.taxable), defaultAmount: String(a.defaultAmount ?? ''), isActive: String(a.isActive) });
     setShowModal(true);
   };
 
@@ -55,19 +59,38 @@ export default function AllowanceTypesPage() {
     e.preventDefault();
     setSaving(true);
     const url = editing ? `/api/backend/hr/allowance-types/${editing.id}` : '/api/backend/hr/allowance-types';
-    await fetch(url, {
-      method: editing ? 'PUT' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, isTaxable: form.isTaxable === 'true', isActive: form.isActive === 'true', defaultAmount: form.defaultAmount ? Number(form.defaultAmount) : undefined }),
-    });
-    setSaving(false);
-    setShowModal(false);
-    load();
+    try {
+      const res = await fetch(url, {
+        method: editing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: form.companyId,
+          name: form.name,
+          code: form.code,
+          taxable: form.isTaxable === 'true',
+          isActive: form.isActive === 'true',
+          defaultAmount: form.defaultAmount ? Number(form.defaultAmount) : undefined,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not save the allowance type.'));
+        return;
+      }
+      setShowModal(false);
+      load();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async () => {
     if (!deleteId) return;
-    await fetch(`/api/backend/hr/allowance-types/${deleteId}`, { method: 'DELETE' });
+    const res = await fetch(`/api/backend/hr/allowance-types/${deleteId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      showToast('error', 'Delete failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not delete the allowance type.'));
+    }
     setDeleteId(null);
     load();
   };
@@ -105,7 +128,7 @@ export default function AllowanceTypesPage() {
                   <tr key={a.id} className="border-b border-slate-50 hover:bg-slate-50">
                     <td className={`${tdCls} font-medium`}>{a.name}</td>
                     <td className={`${tdCls} font-mono`}>{a.code}</td>
-                    <td className={tdCls}>{bool(a.isTaxable)}</td>
+                    <td className={tdCls}>{bool(a.taxable)}</td>
                     <td className={tdCls}>{a.defaultAmount != null ? `TZS ${(Number.isFinite(Number(a.defaultAmount)) ? Number(a.defaultAmount).toLocaleString('en-TZ') : '0')}` : '—'}</td>
                     <td className={tdCls}>{bool(a.isActive)}</td>
                     <td className={tdCls}>
@@ -135,6 +158,9 @@ export default function AllowanceTypesPage() {
         }
       >
         <form id="allowance-type-form" onSubmit={handleSubmit} className="space-y-3">
+          <FormSelect label="Company" required value={form.companyId}
+            onChange={(e) => setForm(p => ({ ...p, companyId: e.target.value }))}
+            options={companyOptions} placeholder="Select company" />
           <div className="grid grid-cols-2 gap-3">
             <FormInput label="Name" value={form.name} onChange={f('name')} required />
             <FormInput label="Code" value={form.code} onChange={f('code')} required />

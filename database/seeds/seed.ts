@@ -323,6 +323,13 @@ const ALL_PERMISSIONS: PermDef[] = [
     action: 'reports.view',
     isGroupControl: false,
   },
+  {
+    code: 'westsides.daily_close.manage',
+    description: 'Save and sign off the Westsides daily cash close',
+    module: 'westsides',
+    action: 'daily_close.manage',
+    isGroupControl: false,
+  },
   ...perms('sales_channels', ['view', 'manage']),
   ...perms('price_lists', ['view', 'manage', 'approve']),
   ...perms('customer_price_agreements', ['view', 'manage', 'approve']),

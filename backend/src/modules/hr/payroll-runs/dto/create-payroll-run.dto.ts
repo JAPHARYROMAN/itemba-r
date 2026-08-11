@@ -2,7 +2,8 @@ import { IsString, IsOptional, IsEnum, IsDateString } from 'class-validator';
 import { PayrollRunStatus, PayrollType } from '@prisma/client';
 
 export class CreatePayrollRunDto {
-  @IsString() payrollRunNumber!: string;
+  /** Server-generated when omitted (PR-{YYYY}-#####). */
+  @IsOptional() @IsString() payrollRunNumber?: string;
   @IsString() payrollPeriodId!: string;
   @IsString() companyId!: string;
   @IsString() createdById!: string;

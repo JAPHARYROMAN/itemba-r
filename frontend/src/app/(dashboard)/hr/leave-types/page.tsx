@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, PageHeader, FormInput, FormSelect, ConfirmDialog, Modal, Btn, PageSpinner, PageToolbar } from '@/components/ui';
+import { Card, PageHeader, FormInput, FormSelect, ConfirmDialog, Modal, Btn, PageSpinner, PageToolbar, showToast } from '@/components/ui';
+import { useOrgScope } from '@/hooks/use-org-scope';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm';
@@ -10,13 +11,15 @@ interface LeaveType {
   id: string;
   name: string;
   code: string;
-  isPaid: boolean;
-  annualDays?: number;
-  carryForward: boolean;
+  companyId?: string;
+  paid: boolean;
+  annualAllowanceDays?: number;
+  carryForwardAllowed: boolean;
   isActive: boolean;
 }
 
 interface FormState {
+  companyId: string;
   name: string;
   code: string;
   isPaid: string;
@@ -25,7 +28,7 @@ interface FormState {
   isActive: string;
 }
 
-const empty: FormState = { name: '', code: '', isPaid: 'true', annualDays: '', carryForward: 'false', isActive: 'true' };
+const empty: FormState = { companyId: '', name: '', code: '', isPaid: 'true', annualDays: '', carryForward: 'false', isActive: 'true' };
 
 export default function LeaveTypesPage() {
   const [rows, setRows] = useState<LeaveType[]>([]);
@@ -34,6 +37,7 @@ export default function LeaveTypesPage() {
   const [editing, setEditing] = useState<LeaveType | null>(null);
   const [form, setForm] = useState<FormState>(empty);
   const [saving, setSaving] = useState(false);
+  const { companyOptions } = useOrgScope(form.companyId, { skipBranches: true, skipDivisions: true, skipEmployees: true });
 
   const load = async () => {
     setLoading(true);
@@ -48,7 +52,7 @@ export default function LeaveTypesPage() {
   const openCreate = () => { setEditing(null); setForm(empty); setShowModal(true); };
   const openEdit = (lt: LeaveType) => {
     setEditing(lt);
-    setForm({ name: lt.name, code: lt.code, isPaid: String(lt.isPaid), annualDays: String(lt.annualDays ?? ''), carryForward: String(lt.carryForward), isActive: String(lt.isActive) });
+    setForm({ companyId: lt.companyId ?? '', name: lt.name, code: lt.code, isPaid: String(lt.paid), annualDays: String(lt.annualAllowanceDays ?? ''), carryForward: String(lt.carryForwardAllowed), isActive: String(lt.isActive) });
     setShowModal(true);
   };
 
@@ -56,22 +60,42 @@ export default function LeaveTypesPage() {
     e.preventDefault();
     setSaving(true);
     const url = editing ? `/api/backend/hr/leave-types/${editing.id}` : '/api/backend/hr/leave-types';
-    await fetch(url, {
-      method: editing ? 'PUT' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, isPaid: form.isPaid === 'true', carryForward: form.carryForward === 'true', isActive: form.isActive === 'true', annualDays: form.annualDays ? Number(form.annualDays) : undefined }),
-    });
-    setSaving(false);
-    setShowModal(false);
-    load();
+    try {
+      const res = await fetch(url, {
+        method: editing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: form.companyId,
+          name: form.name,
+          code: form.code,
+          paid: form.isPaid === 'true',
+          carryForwardAllowed: form.carryForward === 'true',
+          isActive: form.isActive === 'true',
+          annualAllowanceDays: form.annualDays ? Number(form.annualDays) : undefined,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not save the leave type.'));
+        return;
+      }
+      setShowModal(false);
+      load();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const doToggle = async (lt: LeaveType) => {
-    await fetch(`/api/backend/hr/leave-types/${lt.id}`, {
+    const res = await fetch(`/api/backend/hr/leave-types/${lt.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ isActive: !lt.isActive }),
     });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      showToast('error', 'Update failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not update the leave type.'));
+    }
     load();
   };
 
@@ -109,9 +133,9 @@ export default function LeaveTypesPage() {
                   <tr key={lt.id} className="border-b border-slate-50 hover:bg-slate-50">
                     <td className={`${tdCls} font-medium`}>{lt.name}</td>
                     <td className={`${tdCls} font-mono`}>{lt.code}</td>
-                    <td className={tdCls}>{bool(lt.isPaid)}</td>
-                    <td className={tdCls}>{lt.annualDays ?? '—'}</td>
-                    <td className={tdCls}>{bool(lt.carryForward)}</td>
+                    <td className={tdCls}>{bool(lt.paid)}</td>
+                    <td className={tdCls}>{lt.annualAllowanceDays != null ? Number(lt.annualAllowanceDays) : '—'}</td>
+                    <td className={tdCls}>{bool(lt.carryForwardAllowed)}</td>
                     <td className={tdCls}>{bool(lt.isActive)}</td>
                     <td className={tdCls}>
                       <div className="flex gap-2">
@@ -130,6 +154,9 @@ export default function LeaveTypesPage() {
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editing ? 'Edit Leave Type' : 'New Leave Type'} footer={<><Btn variant="secondary" onClick={() => setShowModal(false)}>Cancel</Btn><Btn variant="primary" type="submit" form="leave-type-form" loading={saving}>Save</Btn></>}>
         <form id="leave-type-form" onSubmit={handleSubmit} className="space-y-3">
+          <FormSelect label="Company" required value={form.companyId}
+            onChange={(e) => setForm(p => ({ ...p, companyId: e.target.value }))}
+            options={companyOptions} placeholder="Select company" />
           <div className="grid grid-cols-2 gap-3">
             <FormInput label="Name" value={form.name} onChange={f('name')} required />
             <FormInput label="Code" value={form.code} onChange={f('code')} required />

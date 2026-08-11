@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { EmailService } from '@common/services/email.service';
+import { EmailAttachment, EmailService } from '@common/services/email.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ScheduledReportsService } from '../scheduled-reports/scheduled-reports.service';
@@ -913,7 +913,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       if (claim.count === 0) continue;
       processed += 1;
 
-      let result: { export?: { filename: string } } | undefined;
+      let result: { reportRunId?: string; export?: { filename: string } } | undefined;
       try {
         result = await this.scheduledReports.run(s.id, principal);
       } catch (err) {
@@ -938,14 +938,27 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       const recipients = this.extractRecipientEmails(s.recipients);
       const filename = result?.export?.filename ?? `${s.scheduleCode}.export`;
       const subject = `Scheduled report: ${s.name}`;
-      const body =
-        `The scheduled report "${s.name}" (${s.scheduleCode}) has been generated ` +
-        `and is available for download: ${filename}.`;
+      // Attach the generated file when its stored content can be loaded from
+      // the run row; otherwise point recipients at the in-app download
+      // endpoint. The copy must always match what actually shipped.
+      const attachment = await this.loadScheduledRunAttachment(result?.reportRunId, filename);
+      const body = attachment
+        ? `The scheduled report "${s.name}" (${s.scheduleCode}) has been generated. ` +
+          `The export file ${attachment.filename} is attached. It can also be downloaded ` +
+          `from Reports > Scheduled reports > Runs in ITEMBA-R.`
+        : `The scheduled report "${s.name}" (${s.scheduleCode}) has been generated. ` +
+          `Download the export file (${filename}) from Reports > Scheduled reports > Runs in ITEMBA-R.`;
       if (this.emailService) {
         for (const to of recipients) {
           // Isolate each send so one bad recipient does not abort the batch.
           try {
-            await this.emailService.sendEmail(to, subject, `<p>${body}</p>`, body);
+            if (attachment) {
+              await this.emailService.sendEmailWithAttachments(to, subject, `<p>${body}</p>`, body, [
+                attachment,
+              ]);
+            } else {
+              await this.emailService.sendEmail(to, subject, `<p>${body}</p>`, body);
+            }
             emailed += 1;
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
@@ -958,6 +971,42 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     }
 
     return { processed, emailed, scanned: due.length, skipped };
+  }
+
+  /**
+   * Load the file a scheduled run generated (stored base64 inside
+   * ReportRun.resultSummary) as an email attachment. Best-effort: any failure
+   * returns null and the email falls back to download-only copy.
+   */
+  private async loadScheduledRunAttachment(
+    reportRunId: string | undefined,
+    fallbackFilename: string,
+  ): Promise<EmailAttachment | null> {
+    if (!reportRunId) return null;
+    try {
+      const run = await this.prisma.reportRun.findFirst({
+        where: { id: reportRunId },
+        select: { resultSummary: true },
+      });
+      const summary = (run?.resultSummary ?? {}) as Record<string, unknown>;
+      const contentBase64 = typeof summary.contentBase64 === 'string' ? summary.contentBase64 : '';
+      if (!contentBase64) return null;
+      return {
+        filename:
+          typeof summary.filename === 'string' && summary.filename
+            ? summary.filename
+            : fallbackFilename,
+        content: Buffer.from(contentBase64, 'base64'),
+        contentType:
+          typeof summary.mimeType === 'string' && summary.mimeType
+            ? summary.mimeType
+            : 'application/octet-stream',
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Could not load scheduled report attachment for run ${reportRunId}: ${message}`);
+      return null;
+    }
   }
 
   // --- Automation helpers ---------------------------------------------------

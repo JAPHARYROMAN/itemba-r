@@ -1,22 +1,23 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, PageHeader, StatusBadge, FormInput, FormSelect, Modal, Btn, PageSpinner } from '@/components/ui';
+import { Card, PageHeader, StatusBadge, FormInput, FormSelect, Modal, Btn, PageSpinner, showToast } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
+import { useAuth } from '@/hooks/use-auth';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm';
 
 interface Contract {
   id: string;
-  code: string;
-  employee?: string;
+  contractCode: string;
+  employee?: string | { fullName?: string; employeeCode?: string };
   employeeId?: string;
-  company?: string;
+  company?: string | { name?: string };
   contractType: string;
   startDate?: string;
   endDate?: string;
-  baseSalary?: number;
+  salaryAmount?: number;
   status: string;
 }
 
@@ -41,6 +42,7 @@ export default function EmploymentContractsPage() {
   const [saving, setSaving] = useState(false);
   const [actionLoading, setActionLoading] = useState('');
   const { companyOptions, employeeOptions } = useOrgScope(form.companyId, { skipBranches: true, skipDivisions: true });
+  const { user } = useAuth();
 
   const load = async () => {
     setLoading(true);
@@ -55,24 +57,46 @@ export default function EmploymentContractsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    await fetch('/api/backend/hr/employment-contracts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify((() => {
-        const { companyId, ...rest } = form;
-        return { ...rest, company: companyId, baseSalary: form.baseSalary ? Number(form.baseSalary) : undefined };
-      })()),
-    });
-    setSaving(false);
-    setShowModal(false);
-    load();
+    try {
+      const res = await fetch('/api/backend/hr/employment-contracts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contractCode: form.code || undefined,
+          employeeId: form.employeeId,
+          companyId: form.companyId,
+          contractType: form.contractType,
+          startDate: form.startDate,
+          endDate: form.endDate || undefined,
+          salaryAmount: Number(form.baseSalary),
+          currency: form.currency,
+          createdById: user?.id,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not create the contract.'));
+        return;
+      }
+      setShowModal(false);
+      load();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const doAction = async (id: string, action: string) => {
     setActionLoading(`${id}-${action}`);
-    await fetch(`/api/backend/hr/employment-contracts/${id}/${action}`, { method: 'PATCH' });
-    setActionLoading('');
-    load();
+    try {
+      const res = await fetch(`/api/backend/hr/employment-contracts/${id}/${action}`, { method: 'PATCH' });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Action failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? `Could not ${action} this contract.`));
+      }
+    } finally {
+      setActionLoading('');
+      load();
+    }
   };
 
   const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -107,13 +131,17 @@ export default function EmploymentContractsPage() {
               <tbody style={{ color: 'var(--aurora-text)' }}>
                 {rows.map(c => (
                   <tr key={c.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-mono`}>{c.code}</td>
-                    <td className={`${tdCls} font-medium`}>{c.employee ?? c.employeeId ?? '—'}</td>
-                    <td className={tdCls}>{c.company ?? '—'}</td>
+                    <td className={`${tdCls} font-mono`}>{c.contractCode}</td>
+                    <td className={`${tdCls} font-medium`}>
+                      {typeof c.employee === 'string'
+                        ? c.employee
+                        : (c.employee?.fullName ?? c.employee?.employeeCode ?? c.employeeId ?? '—')}
+                    </td>
+                    <td className={tdCls}>{typeof c.company === 'string' ? c.company : (c.company?.name ?? '—')}</td>
                     <td className={tdCls}>{c.contractType}</td>
                     <td className={tdCls}>{c.startDate ? new Date(c.startDate).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}>{c.endDate ? new Date(c.endDate).toLocaleDateString('en-GB') : '—'}</td>
-                    <td className={tdCls}>{c.baseSalary != null ? `TZS ${(Number.isFinite(Number(c.baseSalary)) ? Number(c.baseSalary).toLocaleString('en-TZ') : '0')}` : '—'}</td>
+                    <td className={tdCls}>{c.salaryAmount != null ? `TZS ${(Number.isFinite(Number(c.salaryAmount)) ? Number(c.salaryAmount).toLocaleString('en-TZ') : '0')}` : '—'}</td>
                     <td className={tdCls}><StatusBadge status={c.status} /></td>
                     <td className={tdCls}>
                       <div className="flex flex-wrap gap-1">
@@ -141,13 +169,16 @@ export default function EmploymentContractsPage() {
       <Modal open={showModal} onClose={() => setShowModal(false)} title="New Employment Contract" footer={<><Btn variant="secondary" onClick={() => setShowModal(false)}>Cancel</Btn><Btn variant="primary" type="submit" form="contract-form" loading={saving}>Save</Btn></>}>
         <form id="contract-form" onSubmit={handleSubmit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <FormInput label="Code" value={form.code} onChange={f('code')} required />
+            <FormInput label="Code" value={form.code} onChange={f('code')} placeholder="Auto-generated if blank" />
             <FormSelect label="Contract Type" value={form.contractType} onChange={f('contractType')}
               options={[
                 { value: 'PERMANENT', label: 'Permanent' },
                 { value: 'FIXED_TERM', label: 'Fixed Term' },
-                { value: 'CONTRACT', label: 'Contract' },
                 { value: 'CASUAL', label: 'Casual' },
+                { value: 'DAILY_WORKER', label: 'Daily Worker' },
+                { value: 'CONSULTANT', label: 'Consultant' },
+                { value: 'INTERNSHIP', label: 'Internship' },
+                { value: 'OTHER', label: 'Other' },
               ]} />
           </div>
           <FormSelect label="Company" required value={form.companyId}
@@ -160,7 +191,7 @@ export default function EmploymentContractsPage() {
             <FormInput label="End Date" type="date" value={form.endDate} onChange={f('endDate')} />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <FormInput label="Base Salary" type="number" value={form.baseSalary} onChange={f('baseSalary')} />
+            <FormInput label="Base Salary" type="number" value={form.baseSalary} onChange={f('baseSalary')} required />
             <FormSelect label="Currency" value={form.currency} onChange={f('currency')}
               options={[{ value: 'TZS', label: 'TZS' }, { value: 'USD', label: 'USD' }]} />
           </div>

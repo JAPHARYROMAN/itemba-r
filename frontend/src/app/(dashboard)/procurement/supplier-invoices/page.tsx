@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   Btn,
   Card,
+  ConfirmDialog,
   EmptyState,
   FormInput,
   FormSelect,
@@ -176,6 +177,9 @@ const STATUSES = [
   'DISPUTED',
   'CANCELLED',
 ];
+// Statuses the backend accepts for approval — mirrors supplier-invoices.service.ts
+// approve(), which rejects any other status.
+const APPROVABLE_STATUSES = ['DRAFT', 'RECEIVED', 'MATCHED', 'DISPUTED'];
 
 function emptyPage<T>(page = 1): Paginated<T> {
   return { data: [], total: 0, page, totalPages: 1 };
@@ -830,6 +834,13 @@ export default function SupplierInvoicesPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<SupplierInvoice | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Approval posts the invoice to Accounts Payable (payable + journal entries) and
+  // cannot be undone, so it is always routed through a ConfirmDialog — mirrors the
+  // GRN post confirmation pattern on the sibling GRNs page.
+  const [pending, setPending] = useState<{
+    invoice: SupplierInvoice;
+    action: 'approve' | 'approveVariance';
+  } | null>(null);
   const [exportingPdf, setExportingPdf] = useState(false);
 
   const canView =
@@ -903,6 +914,7 @@ export default function SupplierInvoicesPage() {
           action === 'approveVariance' ? { allowVariance: true } : {},
         );
       }
+      setPending(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Action failed');
@@ -1011,6 +1023,27 @@ export default function SupplierInvoicesPage() {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={pending !== null}
+        title={
+          pending?.action === 'approveVariance'
+            ? 'Approve invoice with variance'
+            : 'Approve supplier invoice'
+        }
+        message={
+          pending?.action === 'approveVariance'
+            ? `Approve invoice ${pending?.invoice.supplierInvoiceNumber} despite the PO/GRN variance? This posts it to Accounts Payable and creates the payable journal entries. It cannot be undone.`
+            : `Approve invoice ${pending?.invoice.supplierInvoiceNumber}? This posts it to Accounts Payable and creates the payable journal entries. It cannot be undone.`
+        }
+        confirmLabel="Approve"
+        variant="warning"
+        loading={pending ? busyId === pending.invoice.id : false}
+        onCancel={() => setPending(null)}
+        onConfirm={() => {
+          if (pending) void runAction(pending.invoice, pending.action);
+        }}
+      />
 
       <PageHeader
         title="Supplier Invoices"
@@ -1248,13 +1281,13 @@ export default function SupplierInvoicesPage() {
                               Match
                             </Btn>
                           )}
-                        {canApprove && !['APPROVED', 'PAID'].includes(invoice.status) && (
+                        {canApprove && APPROVABLE_STATUSES.includes(invoice.status) && (
                           <Btn
                             variant="primary"
                             size="xs"
                             aria-label={`Approve invoice ${invoice.supplierInvoiceNumber}`}
                             loading={busyId === invoice.id}
-                            onClick={() => runAction(invoice, 'approve')}
+                            onClick={() => setPending({ invoice, action: 'approve' })}
                           >
                             Approve
                           </Btn>
@@ -1265,7 +1298,7 @@ export default function SupplierInvoicesPage() {
                             size="xs"
                             aria-label={`Approve variance for invoice ${invoice.supplierInvoiceNumber}`}
                             loading={busyId === invoice.id}
-                            onClick={() => runAction(invoice, 'approveVariance')}
+                            onClick={() => setPending({ invoice, action: 'approveVariance' })}
                           >
                             Approve Variance
                           </Btn>

@@ -27,9 +27,15 @@ function makeService(status = 'PAID') {
   };
   const audit: any = { log: jest.fn().mockResolvedValue(undefined) };
   const postings: any = { postAdvancePayment: jest.fn().mockResolvedValue(null) };
-  const service = new SalaryAdvancesService(prisma, audit, postings, {
-    assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
-  } as any);
+  const service = new SalaryAdvancesService(
+    prisma,
+    audit,
+    postings,
+    {
+      assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
+    } as any,
+    { next: jest.fn().mockResolvedValue('ADV-2026-00001') } as any,
+  );
 
   return { service, tx, audit, postings };
 }

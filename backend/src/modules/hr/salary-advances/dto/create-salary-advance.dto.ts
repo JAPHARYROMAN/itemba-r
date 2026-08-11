@@ -3,7 +3,8 @@ import { Type } from 'class-transformer';
 import { SalaryAdvanceStatus, AdvanceRepaymentMethod } from '@prisma/client';
 
 export class CreateSalaryAdvanceDto {
-  @IsString() advanceNumber!: string;
+  /** Server-generated when omitted (ADV-{YYYY}-#####). */
+  @IsOptional() @IsString() advanceNumber?: string;
   @IsString() employeeId!: string;
   @IsString() companyId!: string;
   @IsString() createdById!: string;

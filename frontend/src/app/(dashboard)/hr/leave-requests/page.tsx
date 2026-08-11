@@ -3,19 +3,20 @@
 import { useEffect, useState } from 'react';
 import { Card, PageHeader, StatusBadge, FormInput, FormSelect, Modal, Btn, PageSpinner, FormTextarea, PageToolbar, showToast } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
+import { useAuth } from '@/hooks/use-auth';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm';
 
 interface LeaveRequest {
   id: string;
-  employee?: string;
+  employee?: string | { fullName?: string; name?: string; employeeCode?: string };
   employeeId?: string;
-  leaveType?: string;
+  leaveType?: string | { name?: string };
   leaveTypeId?: string;
   startDate?: string;
   endDate?: string;
-  numberOfDays?: number;
+  totalDays?: number;
   reason?: string;
   status: string;
 }
@@ -38,7 +39,23 @@ export default function LeaveRequestsPage() {
   const [form, setForm] = useState<FormState>(empty);
   const [saving, setSaving] = useState(false);
   const [actionLoading, setActionLoading] = useState('');
+  const [leaveTypeOptions, setLeaveTypeOptions] = useState<{ value: string; label: string }[]>([]);
   const { companyOptions, employeeOptions } = useOrgScope(form.companyId, { skipBranches: true, skipDivisions: true });
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (!form.companyId) { setLeaveTypeOptions([]); return; }
+    let cancelled = false;
+    fetch(`/api/backend/hr/leave-types?companyId=${form.companyId}&limit=100`)
+      .then(r => r.json())
+      .then(j => {
+        if (cancelled) return;
+        const list = Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [];
+        setLeaveTypeOptions(list.map((lt: { id: string; name?: string; code?: string }) => ({ value: lt.id, label: lt.name ?? lt.code ?? lt.id })));
+      })
+      .catch(() => { if (!cancelled) setLeaveTypeOptions([]); });
+    return () => { cancelled = true; };
+  }, [form.companyId]);
 
   const load = async () => {
     setLoading(true);
@@ -53,14 +70,36 @@ export default function LeaveRequestsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    await fetch('/api/backend/hr/leave-requests', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify((() => { const { companyId: _c, ...rest } = form; void _c; return rest; })()),
-    });
-    setSaving(false);
-    setShowModal(false);
-    load();
+    // Inclusive day count between the two dates (backend requires totalDays).
+    const totalDays = Math.max(
+      1,
+      Math.round((new Date(form.endDate).getTime() - new Date(form.startDate).getTime()) / 86_400_000) + 1,
+    );
+    try {
+      const res = await fetch('/api/backend/hr/leave-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: form.companyId,
+          employeeId: form.employeeId,
+          leaveTypeId: form.leaveTypeId,
+          startDate: form.startDate,
+          endDate: form.endDate,
+          totalDays,
+          reason: form.reason || undefined,
+          createdById: user?.id,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not create the leave request.'));
+        return;
+      }
+      setShowModal(false);
+      load();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const doAction = async (id: string, action: 'submit' | 'approve' | 'reject' | 'cancel') => {
@@ -120,7 +159,7 @@ export default function LeaveRequestsPage() {
                     <td className={tdCls}>{relationLabel(lr.leaveType, lr.leaveTypeId)}</td>
                     <td className={tdCls}>{lr.startDate ? new Date(lr.startDate).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}>{lr.endDate ? new Date(lr.endDate).toLocaleDateString('en-GB') : '—'}</td>
-                    <td className={tdCls}>{lr.numberOfDays ?? '—'}</td>
+                    <td className={tdCls}>{lr.totalDays != null ? Number(lr.totalDays) : '—'}</td>
                     <td className={tdCls}><StatusBadge status={lr.status} /></td>
                     <td className={tdCls}>
                       {lr.status === 'DRAFT' && (
@@ -160,7 +199,8 @@ export default function LeaveRequestsPage() {
             options={companyOptions} placeholder="Select company" />
           <FormSelect label="Employee" required value={form.employeeId} onChange={f('employeeId')}
             options={employeeOptions} placeholder={form.companyId ? 'Select employee' : 'Select company first'} />
-          <FormInput label="Leave Type ID" value={form.leaveTypeId} onChange={f('leaveTypeId')} required />
+          <FormSelect label="Leave Type" required value={form.leaveTypeId} onChange={f('leaveTypeId')}
+            options={leaveTypeOptions} placeholder={form.companyId ? 'Select leave type' : 'Select company first'} />
           <div className="grid grid-cols-2 gap-3">
             <FormInput label="Start Date" type="date" value={form.startDate} onChange={f('startDate')} required />
             <FormInput label="End Date" type="date" value={form.endDate} onChange={f('endDate')} required />

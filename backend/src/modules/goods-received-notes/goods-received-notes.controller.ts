@@ -3,6 +3,7 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { GoodsReceivedNotesService } from './goods-received-notes.service';
 import { UpdateGoodsReceivedNoteDto } from './dto/update-goods-received-note.dto';
+import { QueryGoodsReceivedNotesDto } from './dto/query-goods-received-notes.dto';
 
 @Controller('goods-received-notes')
 export class GoodsReceivedNotesController {
@@ -10,7 +11,7 @@ export class GoodsReceivedNotesController {
 
   @Get()
   @RequirePermissions('grn.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: QueryGoodsReceivedNotesDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 

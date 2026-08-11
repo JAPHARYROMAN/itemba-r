@@ -11,7 +11,9 @@ import {
   PageHeader,
   PageSpinner,
   PageToolbar,
+  showToast,
 } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
 import { useOrgScope } from '@/hooks/use-org-scope';
 
 // Types
@@ -61,10 +63,22 @@ interface MmRef {
   cashAccountId: string | null;
   cashAccountName: string | null;
 }
+interface SavedClose {
+  id: string;
+  countedByMethod: Record<string, number>;
+  expectedTotal: number | string;
+  countedTotal: number | string;
+  varianceTotal: number | string;
+  notes: string | null;
+  closedByName: string;
+  closedAt: string;
+}
+
 interface DailyClose {
   date: string;
   companyId: string;
   branchId: string | null;
+  savedClose?: SavedClose | null;
   totals: {
     salesCount: number;
     totalSales: number;
@@ -224,6 +238,9 @@ export default function DailyClosePage() {
   const [counted, setCounted] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState('');
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
+  const [savingClose, setSavingClose] = useState(false);
+  const { hasPermission } = useAuth();
+  const canSaveClose = hasPermission('westsides.daily_close.manage');
 
   const { companyOptions, branchOptions } = useOrgScope(companyId, {
     skipDivisions: true,
@@ -247,8 +264,24 @@ export default function DailyClosePage() {
         throw new Error(j?.message ?? `HTTP ${res.status}`);
       }
       const j = await res.json();
-      setData(j.data ?? j);
-      setCounted({});
+      const payload: DailyClose = j.data ?? j;
+      setData(payload);
+      // A persisted close for this scope+date pre-fills the count sheet, so a
+      // reload (or a supervisor on another device) sees what was signed off.
+      if (payload?.savedClose) {
+        setCounted(
+          Object.fromEntries(
+            Object.entries(payload.savedClose.countedByMethod ?? {}).map(([k, v]) => [
+              k,
+              String(v),
+            ]),
+          ),
+        );
+        setNotes(payload.savedClose.notes ?? '');
+      } else {
+        setCounted({});
+        setNotes('');
+      }
       setLastLoadedAt(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Load failed');
@@ -369,6 +402,45 @@ export default function DailyClosePage() {
     methodRows.length === 0 || (pendingMethodCount === 0 && invalidCountedCount === 0);
   const finalVariance = allMethodsCounted ? totalCounted - methodExpectedTotal : totalVariance;
   const expectedPaidGap = methodExpectedTotal - (data?.totals.paidAmount ?? 0);
+
+  const saveClose = async () => {
+    if (!companyId || savingClose) return;
+    setSavingClose(true);
+    try {
+      const countedByMethod = Object.fromEntries(
+        Object.entries(counted)
+          .map(([key, value]) => [key, parseCountedAmount(value)] as const)
+          .filter((entry): entry is readonly [string, number] => entry[1] != null),
+      );
+      const res = await fetch('/api/backend/westsides/reports/daily-close', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId,
+          ...(branchId ? { branchId } : {}),
+          closeDate: date,
+          countedByMethod,
+          expectedTotal: methodExpectedTotal,
+          countedTotal: totalCounted,
+          varianceTotal: finalVariance,
+          ...(notes.trim() ? { notes: notes.trim() } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(
+          Array.isArray(j?.message) ? j.message.join(', ') : (j?.message ?? `HTTP ${res.status}`),
+        );
+      }
+      showToast('success', 'Close saved', 'Counted amounts, variance, and sign-off are on record.');
+      await load();
+    } catch (err) {
+      showToast('error', 'Close not saved', err instanceof Error ? err.message : 'Save failed.');
+    } finally {
+      setSavingClose(false);
+    }
+  };
+
 
   const mobileMoneyStats = useMemo(() => {
     const refs = data?.mobileMoneyReferences ?? [];
@@ -1437,6 +1509,28 @@ export default function DailyClosePage() {
               placeholder="Document count differences, late mobile-money confirmations, offline terminals, or supervisor instructions."
               hint="Printed on the Z-report and used as exception support."
             />
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs" style={textMutedStyle}>
+                {data.savedClose ? (
+                  <span>
+                    Close saved by <span className="font-semibold">{data.savedClose.closedByName}</span>{' '}
+                    on {new Date(data.savedClose.closedAt).toLocaleString('en-GB')} — saving again
+                    replaces it.
+                  </span>
+                ) : (
+                  <span>Nothing saved yet for this date — counts are lost on reload until saved.</span>
+                )}
+              </div>
+              {canSaveClose && (
+                <Btn
+                  variant="primary"
+                  onClick={() => void saveClose()}
+                  disabled={savingClose || invalidCountedCount > 0 || countedMethodCount === 0}
+                >
+                  {savingClose ? 'Saving...' : data.savedClose ? 'Save Close Again' : 'Save & Sign Off Close'}
+                </Btn>
+              )}
+            </div>
           </Card>
 
           <ZReport

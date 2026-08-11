@@ -3,7 +3,8 @@ import { Type } from 'class-transformer';
 import { EmploymentContractType, EmploymentContractStatus, HRPaymentFrequency } from '@prisma/client';
 
 export class CreateEmploymentContractDto {
-  @IsString() contractCode!: string;
+  /** Server-generated when omitted (EC-{YYYY}-#####). */
+  @IsOptional() @IsString() contractCode?: string;
   @IsString() employeeId!: string;
   @IsString() companyId!: string;
   @IsString() createdById!: string;

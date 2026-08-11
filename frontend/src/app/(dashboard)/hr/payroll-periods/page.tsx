@@ -2,16 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, PageHeader, StatusBadge, FormInput, FormSelect, Modal, Btn, PageSpinner, PageToolbar } from '@/components/ui';
+import { Card, PageHeader, StatusBadge, FormInput, FormSelect, Modal, Btn, PageSpinner, PageToolbar, showToast } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
+import { useAuth } from '@/hooks/use-auth';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm';
 
 interface PayrollPeriod {
   id: string;
-  code: string;
-  company?: string;
+  payrollPeriodCode: string;
+  company?: string | { name?: string };
   name: string;
   startDate?: string;
   endDate?: string;
@@ -39,6 +40,7 @@ export default function PayrollPeriodsPage() {
   const [saving, setSaving] = useState(false);
   const [actionLoading, setActionLoading] = useState('');
   const { companyOptions } = useOrgScope(form.companyId, { skipBranches: true, skipDivisions: true, skipEmployees: true });
+  const { user } = useAuth();
 
   const load = async () => {
     setLoading(true);
@@ -53,28 +55,50 @@ export default function PayrollPeriodsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    await fetch('/api/backend/hr/payroll-periods', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify((() => {
-        const { companyId, ...rest } = form;
-        return { ...rest, company: companyId };
-      })()),
-    });
-    setSaving(false);
-    setShowModal(false);
-    load();
+    try {
+      const res = await fetch('/api/backend/hr/payroll-periods', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payrollPeriodCode: form.code || undefined,
+          companyId: form.companyId,
+          name: form.name,
+          startDate: form.startDate,
+          endDate: form.endDate,
+          paymentDate: form.paymentDate || undefined,
+          createdById: user?.id,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not create the payroll period.'));
+        return;
+      }
+      setShowModal(false);
+      load();
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const doAction = async (id: string, action: string) => {
-    setActionLoading(`${id}-${action}`);
-    await fetch(`/api/backend/hr/payroll-periods/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action }),
-    });
-    setActionLoading('');
-    load();
+  // The backend has no dedicated approve/close endpoints; status changes go
+  // through PUT with the whitelisted `status` field.
+  const doAction = async (id: string, status: 'APPROVED' | 'CLOSED') => {
+    setActionLoading(`${id}-${status}`);
+    try {
+      const res = await fetch(`/api/backend/hr/payroll-periods/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Action failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not update the period status.'));
+      }
+    } finally {
+      setActionLoading('');
+      load();
+    }
   };
 
   const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -108,24 +132,24 @@ export default function PayrollPeriodsPage() {
               <tbody style={{ color: 'var(--aurora-text)' }}>
                 {rows.map(p => (
                   <tr key={p.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-mono`}>{p.code}</td>
+                    <td className={`${tdCls} font-mono`}>{p.payrollPeriodCode}</td>
                     <td className={`${tdCls} font-medium`}>{p.name}</td>
-                    <td className={tdCls}>{p.company ?? '—'}</td>
+                    <td className={tdCls}>{typeof p.company === 'string' ? p.company : (p.company?.name ?? '—')}</td>
                     <td className={tdCls}>{p.startDate ? new Date(p.startDate).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}>{p.endDate ? new Date(p.endDate).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}>{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}><StatusBadge status={p.status} /></td>
                     <td className={tdCls}>
                       <div className="flex flex-wrap gap-1">
-                        <Btn variant="secondary" size="xs" onClick={() => router.push(`/hr/payroll-runs?periodId=${p.id}`)}>Runs</Btn>
-                        {p.status === 'DRAFT' && (
-                          <Btn variant="success" size="xs" onClick={() => doAction(p.id, 'approve')} disabled={actionLoading === `${p.id}-approve`}>
-                            {actionLoading === `${p.id}-approve` ? '…' : 'Approve'}
+                        <Btn variant="secondary" size="xs" onClick={() => router.push(`/hr/payroll-runs?payrollPeriodId=${p.id}`)}>Runs</Btn>
+                        {['OPEN', 'PROCESSING'].includes(p.status) && (
+                          <Btn variant="success" size="xs" onClick={() => doAction(p.id, 'APPROVED')} disabled={actionLoading === `${p.id}-APPROVED`}>
+                            {actionLoading === `${p.id}-APPROVED` ? '…' : 'Approve'}
                           </Btn>
                         )}
-                        {p.status === 'APPROVED' && (
-                          <Btn variant="secondary" size="xs" onClick={() => doAction(p.id, 'close')} disabled={actionLoading === `${p.id}-close`}>
-                            {actionLoading === `${p.id}-close` ? '…' : 'Close'}
+                        {['APPROVED', 'PAID'].includes(p.status) && (
+                          <Btn variant="secondary" size="xs" onClick={() => doAction(p.id, 'CLOSED')} disabled={actionLoading === `${p.id}-CLOSED`}>
+                            {actionLoading === `${p.id}-CLOSED` ? '…' : 'Close'}
                           </Btn>
                         )}
                       </div>
@@ -142,7 +166,7 @@ export default function PayrollPeriodsPage() {
       <Modal open={showModal} onClose={() => setShowModal(false)} title="New Payroll Period" footer={<><Btn variant="secondary" onClick={() => setShowModal(false)}>Cancel</Btn><Btn variant="primary" type="submit" form="payroll-period-form" loading={saving}>Save</Btn></>}>
         <form id="payroll-period-form" onSubmit={handleSubmit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <FormInput label="Code" value={form.code} onChange={f('code')} required />
+            <FormInput label="Code" value={form.code} onChange={f('code')} placeholder="Auto-generated if blank" />
             <FormSelect label="Company" required value={form.companyId}
               onChange={(e) => setForm(p => ({ ...p, companyId: e.target.value }))}
               options={companyOptions} placeholder="Select company" />

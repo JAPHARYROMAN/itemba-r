@@ -87,9 +87,16 @@ function makeServiceWithRun(initial: Partial<RunRow> = {}) {
     reverseAccrual: jest.fn().mockResolvedValue(null),
     postPayment: jest.fn().mockResolvedValue(null),
   };
-  const service = new PayrollRunsService(prisma, audit, {} as any, postings, {
-    assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
-  } as any);
+  const service = new PayrollRunsService(
+    prisma,
+    audit,
+    {} as any,
+    postings,
+    {
+      assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
+    } as any,
+    { next: jest.fn().mockResolvedValue('PR-2026-00001') } as any,
+  );
 
   return { service, row, postedRuns, postings, tx, audit };
 }

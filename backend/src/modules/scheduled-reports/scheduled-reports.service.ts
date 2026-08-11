@@ -8,6 +8,9 @@ import { CreateScheduledReportDto } from './dto/create-scheduled-report.dto';
 
 @Injectable()
 export class ScheduledReportsService {
+  /** Hard row ceiling for any generated snapshot file. */
+  private static readonly SNAPSHOT_ROW_CAP = 500;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogsService,
@@ -116,7 +119,7 @@ export class ScheduledReportsService {
     if (!schedule) throw new NotFoundException('Scheduled Report not found');
     await this.companyScope.assertCanAccessCompany(user, schedule.companyId, AccessLevel.READ);
 
-    const rows = this.buildSnapshotRows(schedule);
+    const rows = await this.buildSnapshotRows(schedule);
     const exportFile = this.materializeExport({
       format: schedule.exportFormat,
       reportName: schedule.name,
@@ -242,6 +245,106 @@ export class ScheduledReportsService {
     return record;
   }
 
+  /**
+   * List the generation history (ReportRun rows) for one schedule. Runs are
+   * linked to their schedule through filters.scheduleId (there is no dedicated
+   * FK column), so we filter on the JSON path. The stored file content is
+   * deliberately NOT returned here — only its metadata plus a downloadable
+   * flag; the binary streams through downloadRun().
+   */
+  async listRuns(id: string, user: AuthUser, query: any = {}) {
+    const schedule = await this.prisma.scheduledReport.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, companyId: true },
+    });
+    if (!schedule) throw new NotFoundException('Scheduled Report not found');
+    await this.companyScope.assertCanAccessCompany(user, schedule.companyId, AccessLevel.READ);
+
+    const page = Math.max(Number(query.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(query.limit) || 10, 1), 50);
+    const where = { filters: { path: ['scheduleId'], equals: id } };
+    const [rows, total] = await Promise.all([
+      this.prisma.reportRun.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          reportRunNumber: true,
+          status: true,
+          rowCount: true,
+          createdAt: true,
+          completedAt: true,
+          resultSummary: true,
+        },
+      }),
+      this.prisma.reportRun.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((run) => {
+        const summary = (run.resultSummary ?? {}) as Record<string, unknown>;
+        return {
+          id: run.id,
+          reportRunNumber: run.reportRunNumber,
+          status: run.status,
+          rowCount: run.rowCount,
+          createdAt: run.createdAt,
+          completedAt: run.completedAt,
+          filename: typeof summary.filename === 'string' ? summary.filename : null,
+          mimeType: typeof summary.mimeType === 'string' ? summary.mimeType : null,
+          sizeBytes: typeof summary.sizeBytes === 'number' ? summary.sizeBytes : null,
+          dataset: typeof summary.dataset === 'string' ? summary.dataset : null,
+          downloadable: typeof summary.contentBase64 === 'string' && summary.contentBase64.length > 0,
+        };
+      }),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  /**
+   * Stream the file a scheduled run generated (stored base64 inside
+   * ReportRun.resultSummary). Only runs produced by a schedule are served here
+   * — a run without filters.scheduleId is not part of this surface.
+   */
+  async downloadRun(runId: string, user: AuthUser) {
+    const run = await this.prisma.reportRun.findFirst({ where: { id: runId } });
+    if (!run) throw new NotFoundException('Report run not found');
+    const filters = (run.filters ?? {}) as Record<string, unknown>;
+    if (typeof filters.scheduleId !== 'string' || !filters.scheduleId) {
+      throw new NotFoundException('Report run not found');
+    }
+    await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.READ);
+
+    const summary = (run.resultSummary ?? {}) as Record<string, unknown>;
+    const contentBase64 = typeof summary.contentBase64 === 'string' ? summary.contentBase64 : '';
+    if (!contentBase64) {
+      throw new NotFoundException('No stored file is available for this report run');
+    }
+    const filename =
+      typeof summary.filename === 'string' && summary.filename
+        ? summary.filename
+        : `${run.reportRunNumber}.bin`;
+    const mimeType =
+      typeof summary.mimeType === 'string' && summary.mimeType
+        ? summary.mimeType
+        : 'application/octet-stream';
+
+    await this.audit.log({
+      userId: user.id,
+      action: 'DOWNLOAD',
+      entityType: 'ReportRun',
+      entityId: run.id,
+      companyId: run.companyId ?? undefined,
+      newValue: { filename, scheduleId: filters.scheduleId } as any,
+    });
+
+    return { filename, mimeType, content: Buffer.from(contentBase64, 'base64') };
+  }
+
   async remove(id: string, user: AuthUser) {
     await this.findOne(id, user);
     const record = await this.prisma.scheduledReport.update({
@@ -287,15 +390,194 @@ export class ScheduledReportsService {
     return next;
   }
 
-  private buildSnapshotRows(schedule: {
+  /**
+   * Build the actual rows that go into the generated snapshot file.
+   *
+   * Datasets with a low-risk, well-understood source table are served with
+   * REAL data (scoped to the schedule's company, group-wide when companyId is
+   * null, capped at {@link SNAPSHOT_ROW_CAP} rows). Every other dataset gets an
+   * EXPLICIT "not supported yet" row set — never schedule metadata silently
+   * pretending to be report data.
+   */
+  private async buildSnapshotRows(schedule: {
     scheduleCode: string;
     name: string;
     exportFormat: string;
     reportDefinition: { reportCode: string; name: string; datasetKey: string; reportCategory: string };
     savedReportView?: { name: string; filters: any; columns: any } | null;
     companyId?: string | null;
-  }) {
+  }): Promise<Array<Record<string, unknown>>> {
+    const datasetKey = schedule.reportDefinition.datasetKey;
+    const companyWhere = schedule.companyId ? { companyId: schedule.companyId } : {};
+    const now = new Date();
+
+    switch (datasetKey) {
+      case 'receivables_aging': {
+        const rows = await this.prisma.receivable.findMany({
+          where: {
+            deletedAt: null,
+            ...companyWhere,
+            status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+            outstandingAmount: { gt: 0 },
+          },
+          orderBy: [{ dueDate: 'asc' }, { receivableNumber: 'asc' }],
+          take: ScheduledReportsService.SNAPSHOT_ROW_CAP,
+          select: {
+            receivableNumber: true,
+            customerName: true,
+            status: true,
+            currency: true,
+            issueDate: true,
+            dueDate: true,
+            amount: true,
+            paidAmount: true,
+            outstandingAmount: true,
+          },
+        });
+        return this.orEmptyNotice(
+          rows.map((r) => {
+            const aging = this.agingBucket(r.dueDate, now);
+            return {
+              Number: r.receivableNumber,
+              Customer: r.customerName,
+              Status: r.status,
+              Currency: r.currency,
+              'Issue Date': this.dateOnly(r.issueDate),
+              'Due Date': this.dateOnly(r.dueDate),
+              Amount: Number(r.amount),
+              Paid: Number(r.paidAmount),
+              Outstanding: Number(r.outstandingAmount),
+              'Days Overdue': aging.daysOverdue,
+              Bucket: aging.bucket,
+            };
+          }),
+        );
+      }
+      case 'payables_aging': {
+        const rows = await this.prisma.payable.findMany({
+          where: {
+            deletedAt: null,
+            ...companyWhere,
+            status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+            outstandingAmount: { gt: 0 },
+          },
+          orderBy: [{ dueDate: 'asc' }, { payableNumber: 'asc' }],
+          take: ScheduledReportsService.SNAPSHOT_ROW_CAP,
+          select: {
+            payableNumber: true,
+            supplierName: true,
+            status: true,
+            currency: true,
+            issueDate: true,
+            dueDate: true,
+            amount: true,
+            paidAmount: true,
+            outstandingAmount: true,
+          },
+        });
+        return this.orEmptyNotice(
+          rows.map((r) => {
+            const aging = this.agingBucket(r.dueDate, now);
+            return {
+              Number: r.payableNumber,
+              Supplier: r.supplierName,
+              Status: r.status,
+              Currency: r.currency,
+              'Issue Date': this.dateOnly(r.issueDate),
+              'Due Date': this.dateOnly(r.dueDate),
+              Amount: Number(r.amount),
+              Paid: Number(r.paidAmount),
+              Outstanding: Number(r.outstandingAmount),
+              'Days Overdue': aging.daysOverdue,
+              Bucket: aging.bucket,
+            };
+          }),
+        );
+      }
+      case 'inventory_summary': {
+        const rows = await this.prisma.inventoryBalance.findMany({
+          where: { ...companyWhere },
+          orderBy: { totalValue: 'desc' },
+          take: ScheduledReportsService.SNAPSHOT_ROW_CAP,
+          select: {
+            quantityOnHand: true,
+            quantityReserved: true,
+            averageCost: true,
+            totalValue: true,
+            lastMovementAt: true,
+            product: { select: { productCode: true, name: true } },
+            branch: { select: { name: true } },
+          },
+        });
+        return this.orEmptyNotice(
+          rows.map((r) => ({
+            'Product Code': r.product.productCode,
+            Product: r.product.name,
+            Branch: r.branch?.name ?? '—',
+            'Qty On Hand': Number(r.quantityOnHand),
+            'Qty Reserved': Number(r.quantityReserved),
+            'Average Cost': Number(r.averageCost),
+            'Total Value': Number(r.totalValue),
+            'Last Movement': r.lastMovementAt ? r.lastMovementAt.toISOString() : '—',
+          })),
+        );
+      }
+      case 'audit_trail': {
+        const rows = await this.prisma.auditLog.findMany({
+          where: { ...companyWhere },
+          orderBy: { createdAt: 'desc' },
+          take: ScheduledReportsService.SNAPSHOT_ROW_CAP,
+          select: {
+            createdAt: true,
+            action: true,
+            entityType: true,
+            entityId: true,
+            severity: true,
+            user: { select: { email: true } },
+          },
+        });
+        return this.orEmptyNotice(
+          rows.map((r) => ({
+            Timestamp: r.createdAt.toISOString(),
+            Action: r.action,
+            'Entity Type': r.entityType,
+            'Entity ID': r.entityId ?? '—',
+            Severity: r.severity,
+            User: r.user?.email ?? 'system',
+          })),
+        );
+      }
+      default:
+        return this.unsupportedSnapshotRows(schedule);
+    }
+  }
+
+  /** A real dataset that matched nothing still gets an explicit, honest row. */
+  private orEmptyNotice(rows: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+    if (rows.length > 0) return rows;
+    return [{ Notice: 'The dataset returned no rows for this schedule scope.' }];
+  }
+
+  /**
+   * Explicit fallback for datasets without a snapshot implementation. The first
+   * row states plainly that this is NOT report data; the remaining rows are
+   * clearly-labelled schedule metadata for traceability.
+   */
+  private unsupportedSnapshotRows(schedule: {
+    scheduleCode: string;
+    name: string;
+    reportDefinition: { reportCode: string; name: string; datasetKey: string; reportCategory: string };
+    savedReportView?: { name: string } | null;
+    companyId?: string | null;
+  }): Array<Record<string, unknown>> {
     return [
+      {
+        field: 'Notice',
+        value:
+          `Dataset "${schedule.reportDefinition.datasetKey}" does not support automated snapshots yet. ` +
+          'This file contains schedule metadata only — it is NOT report data. ' +
+          'Run the report from the Reports hub for live figures.',
+      },
       { field: 'Schedule Code', value: schedule.scheduleCode },
       { field: 'Schedule Name', value: schedule.name },
       { field: 'Report Code', value: schedule.reportDefinition.reportCode },
@@ -308,14 +590,52 @@ export class ScheduledReportsService {
     ];
   }
 
+  private agingBucket(dueDate: Date | null, now: Date): { daysOverdue: number; bucket: string } {
+    if (!dueDate) return { daysOverdue: 0, bucket: 'No due date' };
+    const days = Math.floor((now.getTime() - new Date(dueDate).getTime()) / 86_400_000);
+    if (days <= 0) return { daysOverdue: 0, bucket: 'Current' };
+    if (days <= 30) return { daysOverdue: days, bucket: '1-30 days' };
+    if (days <= 60) return { daysOverdue: days, bucket: '31-60 days' };
+    if (days <= 90) return { daysOverdue: days, bucket: '61-90 days' };
+    return { daysOverdue: days, bucket: 'Over 90 days' };
+  }
+
+  private dateOnly(value: Date | null): string {
+    return value ? new Date(value).toISOString().slice(0, 10) : '—';
+  }
+
+  private tableColumns(rows: Array<Record<string, unknown>>): string[] {
+    const columns = new Set<string>();
+    for (const row of rows) for (const key of Object.keys(row)) columns.add(key);
+    return columns.size ? Array.from(columns) : ['Field', 'Value'];
+  }
+
+  private cellText(value: unknown): string {
+    if (value === null || value === undefined) return '';
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
+  }
+
+  /**
+   * Neutralize spreadsheet formula injection for CSV/Excel consumers while
+   * leaving plain negative numbers ("-500") untouched.
+   */
+  private sheetSafe(text: string): string {
+    if (!/^[=+\-@\t\r]/.test(text)) return text;
+    if (text.length > 0 && Number.isFinite(Number(text))) return text;
+    return `'${text}`;
+  }
+
   private materializeExport(input: {
     format: string;
     reportName: string;
     datasetKey: string;
-    rows: Array<Record<string, string>>;
+    rows: Array<Record<string, unknown>>;
   }): { filename: string; mimeType: string; content: Buffer } {
     const safeName = input.reportName.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'report';
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const columns = this.tableColumns(input.rows);
 
     switch (input.format) {
       case 'PDF': {
@@ -323,7 +643,8 @@ export class ScheduledReportsService {
           input.reportName,
           `Dataset: ${input.datasetKey}`,
           '',
-          ...input.rows.map((row) => `${row.field}: ${row.value}`),
+          columns.join(' | '),
+          ...input.rows.map((row) => columns.map((col) => this.cellText(row[col])).join(' | ')),
         ];
         return {
           filename: `${safeName}-${stamp}.pdf`,
@@ -335,14 +656,14 @@ export class ScheduledReportsService {
         return {
           filename: `${safeName}-${stamp}.xls`,
           mimeType: 'application/vnd.ms-excel',
-          content: Buffer.from(this.renderExcelXml(input.rows), 'utf8'),
+          content: Buffer.from(this.renderExcelXml(columns, input.rows), 'utf8'),
         };
       }
       case 'CSV': {
         return {
           filename: `${safeName}-${stamp}.csv`,
           mimeType: 'text/csv',
-          content: Buffer.from(this.renderCsv(input.rows), 'utf8'),
+          content: Buffer.from(this.renderCsv(columns, input.rows), 'utf8'),
         };
       }
       case 'JSON':
@@ -356,16 +677,22 @@ export class ScheduledReportsService {
     }
   }
 
-  private renderCsv(rows: Array<Record<string, string>>) {
-    const escape = (value: string) => `"${String(value ?? '').replace(/"/g, '""')}"`;
-    return ['Field,Value', ...rows.map((row) => `${escape(row.field)},${escape(row.value)}`)].join('\n');
+  private renderCsv(columns: string[], rows: Array<Record<string, unknown>>) {
+    const escape = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const line = (cells: string[]) => cells.map(escape).join(',');
+    return [
+      line(columns),
+      ...rows.map((row) => line(columns.map((col) => this.sheetSafe(this.cellText(row[col]))))),
+    ].join('\n');
   }
 
-  private renderExcelXml(rows: Array<Record<string, string>>) {
+  private renderExcelXml(columns: string[], rows: Array<Record<string, unknown>>) {
     const cell = (value: string) => `<Cell><Data ss:Type="String">${this.escapeXml(value)}</Data></Cell>`;
     const tableRows = [
-      `<Row>${cell('Field')}${cell('Value')}</Row>`,
-      ...rows.map((row) => `<Row>${cell(row.field)}${cell(row.value)}</Row>`),
+      `<Row>${columns.map((col) => cell(col)).join('')}</Row>`,
+      ...rows.map(
+        (row) => `<Row>${columns.map((col) => cell(this.sheetSafe(this.cellText(row[col])))).join('')}</Row>`,
+      ),
     ].join('');
     return `<?xml version="1.0"?>
 <?mso-application progid="Excel.Sheet"?>

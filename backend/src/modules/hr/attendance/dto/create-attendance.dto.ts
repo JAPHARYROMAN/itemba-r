@@ -3,7 +3,8 @@ import { Type } from 'class-transformer';
 import { AttendanceStatus, AttendanceSource } from '@prisma/client';
 
 export class CreateAttendanceDto {
-  @IsString() attendanceNumber!: string;
+  /** Server-generated when omitted (ATT-{YYYY}-######). */
+  @IsOptional() @IsString() attendanceNumber?: string;
   @IsString() employeeId!: string;
   @IsString() companyId!: string;
   @IsOptional() @IsString() divisionId?: string;

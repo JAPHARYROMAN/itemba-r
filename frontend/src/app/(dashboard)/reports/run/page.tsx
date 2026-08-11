@@ -596,7 +596,7 @@ function ReportRunContent() {
             showToast(
               'error',
               'Saved views unavailable',
-              'No report definition is registered for this report, so views cannot be stored.',
+              'This report is not registered in the reports catalog, so views cannot be stored.',
             );
           } else {
             showToast('error', 'Could not save view', `HTTP ${response.status}`);

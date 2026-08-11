@@ -1,13 +1,18 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
+import { EntityCodeGeneratorService } from '../../entity-code-generator/entity-code-generator.service';
 import { CreateEmploymentContractDto } from './dto/create-employment-contract.dto';
 import { UpdateEmploymentContractDto } from './dto/update-employment-contract.dto';
 import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class EmploymentContractsService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditLogsService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditLogsService,
+    private readonly codes: EntityCodeGeneratorService,
+  ) {}
 
   private companyFilter(user: any) {
     if (user.role?.scope === 'GROUP') return {};
@@ -47,9 +52,13 @@ export class EmploymentContractsService {
   }
 
   async create(dto: CreateEmploymentContractDto, user: any) {
+    const contractCode =
+      dto.contractCode ??
+      (await this.codes.next({ companyId: dto.companyId, entityType: 'EmploymentContract' }));
     const record = await this.prisma.employmentContract.create({
       data: {
         ...dto,
+        contractCode,
         startDate: new Date(dto.startDate),
         endDate: dto.endDate ? new Date(dto.endDate) : undefined,
         probationEndDate: dto.probationEndDate ? new Date(dto.probationEndDate) : undefined,

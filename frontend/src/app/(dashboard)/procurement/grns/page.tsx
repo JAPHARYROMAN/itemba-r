@@ -1643,7 +1643,7 @@ export default function GRNsPage() {
       <PageToolbar
         search={searchInput}
         onSearch={setSearchInput}
-        searchPlaceholder="Search GRN number..."
+        searchPlaceholder="Search GRN number or supplier..."
         filters={
           <>
             <select

@@ -21,20 +21,25 @@ import { showToast } from '@/components/aurora/feedback';
 import { PermissionGate } from '@/components/ui/permission-gate';
 import { useAuth } from '@/hooks/use-auth';
 import { backendPage, backendPost, backendPatch, backendDelete, ApiError } from '@/lib/api-client';
+import { downloadBinaryGet } from '@/lib/export-download';
 
 // ── Backend contract: bi/scheduled-reports (backend/src/modules/scheduled-reports) ──
-// GET    /bi/scheduled-reports              list (paginated)  — permission scheduled_reports.view
-// POST   /bi/scheduled-reports              create            — permission scheduled_reports.manage
-// PATCH  /bi/scheduled-reports/:id          edit              — permission scheduled_reports.manage
-// POST   /bi/scheduled-reports/:id/run      run now (only trigger today) — permission scheduled_reports.run
-// PATCH  /bi/scheduled-reports/:id/activate                   — permission scheduled_reports.manage
-// PATCH  /bi/scheduled-reports/:id/deactivate                 — permission scheduled_reports.manage
-// DELETE /bi/scheduled-reports/:id          soft delete       — permission scheduled_reports.manage
+// GET    /bi/scheduled-reports                     list (paginated)   — permission scheduled_reports.view
+// POST   /bi/scheduled-reports                     create             — permission scheduled_reports.manage
+// PATCH  /bi/scheduled-reports/:id                 edit               — permission scheduled_reports.manage
+// POST   /bi/scheduled-reports/:id/run             run now            — permission scheduled_reports.run
+// GET    /bi/scheduled-reports/:id/runs            run history        — permission scheduled_reports.view
+// GET    /bi/scheduled-reports/runs/:id/download   stored export file — permission scheduled_reports.view
+// PATCH  /bi/scheduled-reports/:id/activate                           — permission scheduled_reports.manage
+// PATCH  /bi/scheduled-reports/:id/deactivate                         — permission scheduled_reports.manage
+// DELETE /bi/scheduled-reports/:id                 soft delete        — permission scheduled_reports.manage
 //
-// IMPORTANT: The backend has NO scheduler (no @Cron) and NO email dispatch wired up.
-// "Run now" is the ONLY way a scheduled report is generated today. The frequency,
-// recipients and next-run fields are stored as configuration for a future automated
-// dispatcher — they do NOT cause anything to send on a schedule yet.
+// Dispatch: the backend job worker (backend/src/modules/job-worker) polls for due
+// schedules. When the server runs with JOB_WORKER_ENABLED=true AND
+// AUTOMATION_DISPATCH_ENABLED=true, due schedules run automatically and the
+// generated export is emailed to the configured recipients (file attached).
+// "Run now" generates a snapshot immediately WITHOUT emailing; every generated
+// file can be downloaded from the schedule's Runs list.
 
 type ScheduleFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'ANNUAL' | 'CUSTOM';
 type ReportExportFormat = 'PDF' | 'EXCEL' | 'CSV' | 'JSON' | 'DASHBOARD_ONLY';
@@ -75,6 +80,20 @@ interface ScheduledReport extends Record<string, unknown> {
   updatedAt: string;
 }
 
+interface ScheduledRun {
+  id: string;
+  reportRunNumber: string;
+  status: string;
+  rowCount: number | null;
+  createdAt: string;
+  completedAt: string | null;
+  filename: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  dataset: string | null;
+  downloadable: boolean;
+}
+
 interface ScheduleForm {
   scheduleCode: string;
   name: string;
@@ -112,6 +131,12 @@ function formatDate(value?: string | null): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function errorMessage(err: unknown, fallback: string): string {
@@ -160,6 +185,13 @@ export default function ScheduledReportsPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<ScheduledReport | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Run history modal + per-run file download.
+  const [runsTarget, setRunsTarget] = useState<ScheduledReport | null>(null);
+  const [runs, setRuns] = useState<ScheduledRun[]>([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [runsError, setRunsError] = useState<string | null>(null);
+  const [downloadingRunId, setDownloadingRunId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -259,6 +291,22 @@ export default function ScheduledReportsPage() {
     }
   };
 
+  const loadRuns = useCallback(async (scheduleId: string) => {
+    setRunsLoading(true);
+    setRunsError(null);
+    try {
+      const result = await backendPage<ScheduledRun>(`/bi/scheduled-reports/${scheduleId}/runs`, {
+        query: { page: 1, limit: 20 },
+      });
+      setRuns(result.data);
+    } catch (err) {
+      setRunsError(errorMessage(err, 'Failed to load run history'));
+      setRuns([]);
+    } finally {
+      setRunsLoading(false);
+    }
+  }, []);
+
   const runNow = async (schedule: ScheduledReport) => {
     setPendingAction(schedule.id);
     try {
@@ -270,14 +318,36 @@ export default function ScheduledReportsPage() {
         'success',
         'Report generated',
         result?.export?.filename
-          ? `Snapshot ready: ${result.export.filename}`
-          : 'A snapshot export was generated (not emailed).',
+          ? `Snapshot ready: ${result.export.filename} — download it from the Runs list.`
+          : 'A snapshot export was generated — download it from the Runs list. Manual runs are not emailed.',
       );
       await load();
+      // Keep an open runs modal in sync with the run that was just produced.
+      if (runsTarget?.id === schedule.id) void loadRuns(schedule.id);
     } catch (err) {
       showToast('error', 'Run failed', errorMessage(err, 'Please try again'));
     } finally {
       setPendingAction(null);
+    }
+  };
+
+  const openRuns = (schedule: ScheduledReport) => {
+    setRunsTarget(schedule);
+    setRuns([]);
+    void loadRuns(schedule.id);
+  };
+
+  const downloadRun = async (run: ScheduledRun) => {
+    setDownloadingRunId(run.id);
+    try {
+      await downloadBinaryGet(
+        `/bi/scheduled-reports/runs/${run.id}/download`,
+        run.filename ?? `${run.reportRunNumber}.bin`,
+      );
+    } catch (err) {
+      showToast('error', 'Download failed', errorMessage(err, 'Please try again'));
+    } finally {
+      setDownloadingRunId(null);
     }
   };
 
@@ -399,6 +469,9 @@ export default function ScheduledReportsPage() {
                   Run now
                 </AuroraButton>
               )}
+              <AuroraButton size="sm" variant="ghost" onClick={() => openRuns(row)}>
+                Runs
+              </AuroraButton>
               {canManage && (
                 <AuroraButton size="sm" variant="ghost" onClick={() => openEdit(row)}>
                   Edit
@@ -420,7 +493,7 @@ export default function ScheduledReportsPage() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canManage, canRun, pendingAction],
+    [canManage, canRun, pendingAction, runsTarget],
   );
 
   return (
@@ -454,24 +527,28 @@ export default function ScheduledReportsPage() {
           }
         />
 
-        {/* Prominent notice: automatic dispatch is NOT active yet. */}
+        {/* How dispatch actually works: the background job worker runs due schedules. */}
         <div
           className="rounded-lg border px-4 py-3 flex items-start gap-3"
           style={{
-            borderColor: 'var(--aurora-warning)',
-            background: 'var(--aurora-warning-bg)',
-            color: 'var(--aurora-warning-text)',
+            borderColor: 'var(--aurora-border)',
+            background: 'var(--aurora-bg-subtle)',
+            color: 'var(--aurora-text-secondary)',
           }}
           role="note"
         >
           <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
           </svg>
           <div className="text-sm leading-5">
-            <span className="font-semibold">Automated dispatch is not active yet.</span>{' '}
-            These schedules store frequency and recipient settings for a future dispatcher, but nothing runs
-            automatically and no emails are sent on a schedule today.{' '}
-            <span className="font-semibold">&ldquo;Run now&rdquo; is the only way to generate a report snapshot.</span>
+            <span className="font-semibold">Active schedules are dispatched by the background worker.</span>{' '}
+            When the server runs with the job worker and automation dispatch enabled
+            (<code className="text-[11px]">JOB_WORKER_ENABLED</code> and{' '}
+            <code className="text-[11px]">AUTOMATION_DISPATCH_ENABLED</code>), due schedules run automatically
+            and the generated export is emailed to the recipients with the file attached.{' '}
+            <span className="font-semibold">&ldquo;Run now&rdquo;</span> generates a snapshot immediately without
+            emailing — every generated file can be downloaded from the schedule&rsquo;s{' '}
+            <span className="font-semibold">Runs</span> list.
           </div>
         </div>
 
@@ -591,7 +668,7 @@ export default function ScheduledReportsPage() {
                   value={form.recipients}
                   error={formErrors.recipients}
                   placeholder="finance@itemba.co.tz, board@itemba.co.tz"
-                  help="Comma or newline separated email addresses. Stored for the future dispatcher — not emailed on a schedule yet."
+                  help="Comma or newline separated email addresses. The background worker emails the generated export to these addresses when the schedule fires (requires server automation dispatch to be enabled)."
                   onChange={(e) => setForm((f) => ({ ...f, recipients: e.target.value }))}
                 />
               </div>
@@ -603,6 +680,74 @@ export default function ScheduledReportsPage() {
               loading={saving}
             />
           </FormShell>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!runsTarget}
+        onClose={() => setRunsTarget(null)}
+        title={runsTarget ? `Runs — ${runsTarget.name}` : 'Runs'}
+        description="Generation history for this schedule. Download the stored export file of any completed run."
+        size="lg"
+      >
+        <div className="px-5 pb-5 pt-4 max-h-[70vh] overflow-y-auto">
+          {runsLoading && (
+            <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+              Loading run history…
+            </div>
+          )}
+          {runsError && !runsLoading && (
+            <div className="flex items-center gap-3">
+              <span className="text-sm" style={{ color: 'var(--aurora-danger)' }}>
+                {runsError}
+              </span>
+              {runsTarget && (
+                <AuroraButton size="sm" variant="ghost" onClick={() => void loadRuns(runsTarget.id)}>
+                  Retry
+                </AuroraButton>
+              )}
+            </div>
+          )}
+          {!runsLoading && !runsError && runs.length === 0 && (
+            <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+              No runs recorded yet. Use &ldquo;Run now&rdquo; or wait for the automated dispatcher to fire.
+            </div>
+          )}
+          <div className="space-y-2">
+            {runs.map((run) => (
+              <div
+                key={run.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                style={{ borderColor: 'var(--aurora-border)' }}
+              >
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium" style={{ color: 'var(--aurora-text)' }}>
+                    {run.filename ?? run.reportRunNumber}
+                  </span>
+                  <span className="text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+                    {formatDate(run.completedAt ?? run.createdAt)}
+                    {typeof run.rowCount === 'number' ? ` · ${run.rowCount} rows` : ''}
+                    {typeof run.sizeBytes === 'number' ? ` · ${formatBytes(run.sizeBytes)}` : ''}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <StatusBadge
+                    status={run.status}
+                    variant={run.status === 'COMPLETED' ? 'success' : 'muted'}
+                  />
+                  <AuroraButton
+                    size="sm"
+                    variant="primary"
+                    disabled={!run.downloadable}
+                    loading={downloadingRunId === run.id}
+                    onClick={() => void downloadRun(run)}
+                  >
+                    Download
+                  </AuroraButton>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </Modal>
 

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
+import { EntityCodeGeneratorService } from '../../entity-code-generator/entity-code-generator.service';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
 import { UpdateLeaveRequestDto } from './dto/update-leave-request.dto';
 import { applyCompanyScopeWhere } from '../../../common/services';
@@ -13,6 +14,7 @@ export class LeaveRequestsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogsService,
+    private readonly codes: EntityCodeGeneratorService,
   ) {}
 
   private companyFilter(user: any) {
@@ -96,9 +98,13 @@ export class LeaveRequestsService {
       dto.divisionId,
       dto.branchId,
     );
+    const leaveRequestNumber =
+      dto.leaveRequestNumber ??
+      (await this.codes.next({ companyId: dto.companyId, entityType: 'LeaveRequest' }));
     const record = await this.prisma.leaveRequest.create({
       data: {
         ...dto,
+        leaveRequestNumber,
         divisionId: hierarchy.divisionId,
         branchId: hierarchy.branchId,
         startDate: new Date(dto.startDate),

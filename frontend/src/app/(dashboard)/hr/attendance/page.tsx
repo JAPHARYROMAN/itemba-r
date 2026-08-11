@@ -11,21 +11,25 @@ import {
   Btn,
   PageToolbar,
   PageSpinner,
+  showToast,
 } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
+import { useAuth } from '@/hooks/use-auth';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm';
 
 interface Attendance {
   id: string;
-  employee?: string;
+  employee?: string | { fullName?: string; employeeCode?: string };
   employeeId?: string;
-  date?: string;
-  clockIn?: string;
-  clockOut?: string;
-  hoursWorked?: number;
-  status: string;
+  companyId?: string;
+  attendanceDate?: string;
+  clockInTime?: string;
+  clockOutTime?: string;
+  totalHours?: number;
+  attendanceStatus?: string;
+  approvedById?: string | null;
 }
 
 interface FormState {
@@ -61,6 +65,7 @@ export default function AttendancePage() {
     skipBranches: true,
     skipDivisions: true,
   });
+  const { user } = useAuth();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,15 +88,17 @@ export default function AttendancePage() {
     setForm(empty);
     setShowModal(true);
   };
+  const toTime = (iso?: string) => (iso ? new Date(iso).toTimeString().slice(0, 5) : '');
+
   const openEdit = (a: Attendance) => {
     setEditing(a);
     setForm({
-      companyId: '',
+      companyId: a.companyId ?? '',
       employeeId: a.employeeId ?? '',
-      date: a.date ?? '',
-      clockIn: a.clockIn ?? '',
-      clockOut: a.clockOut ?? '',
-      status: a.status,
+      date: a.attendanceDate ? a.attendanceDate.slice(0, 10) : '',
+      clockIn: toTime(a.clockInTime),
+      clockOut: toTime(a.clockOutTime),
+      status: a.attendanceStatus ?? 'PRESENT',
     });
     setShowModal(true);
   };
@@ -99,28 +106,46 @@ export default function AttendancePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    const payload: Record<string, unknown> = {
+      companyId: form.companyId,
+      employeeId: form.employeeId,
+      attendanceDate: form.date,
+      clockInTime: form.clockIn ? `${form.date}T${form.clockIn}:00` : undefined,
+      clockOutTime: form.clockOut ? `${form.date}T${form.clockOut}:00` : undefined,
+      attendanceStatus: form.status,
+    };
+    if (!editing) payload.createdById = user?.id;
     const url = editing ? `/api/backend/hr/attendance/${editing.id}` : '/api/backend/hr/attendance';
-    await fetch(url, {
-      method: editing ? 'PUT' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(
-        (() => {
-          const { companyId: _c, ...rest } = form;
-          void _c;
-          return rest;
-        })(),
-      ),
-    });
-    setSaving(false);
-    setShowModal(false);
-    load();
+    try {
+      const res = await fetch(url, {
+        method: editing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not save the attendance record.'));
+        return;
+      }
+      setShowModal(false);
+      load();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const doApprove = async (id: string) => {
     setActionLoading(id);
-    await fetch(`/api/backend/hr/attendance/${id}/approve`, { method: 'PATCH' });
-    setActionLoading('');
-    load();
+    try {
+      const res = await fetch(`/api/backend/hr/attendance/${id}/approve`, { method: 'PATCH' });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Approve failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not approve this record.'));
+      }
+    } finally {
+      setActionLoading('');
+      load();
+    }
   };
 
   const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -170,13 +195,7 @@ export default function AttendancePage() {
           </>
         }
         actions={
-          <Btn
-            variant="primary"
-            onClick={() => {
-              setForm(empty);
-              setShowModal(true);
-            }}
-          >
+          <Btn variant="primary" onClick={openCreate}>
             + Log Attendance
           </Btn>
         }
@@ -205,22 +224,26 @@ export default function AttendancePage() {
               <tbody style={{ color: 'var(--aurora-text)' }}>
                 {rows.map((a) => (
                   <tr key={a.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-medium`}>{a.employee ?? a.employeeId ?? '—'}</td>
-                    <td className={tdCls}>
-                      {a.date ? new Date(a.date).toLocaleDateString('en-GB') : '—'}
+                    <td className={`${tdCls} font-medium`}>
+                      {typeof a.employee === 'string'
+                        ? a.employee
+                        : (a.employee?.fullName ?? a.employee?.employeeCode ?? a.employeeId ?? '—')}
                     </td>
-                    <td className={tdCls}>{a.clockIn ?? '—'}</td>
-                    <td className={tdCls}>{a.clockOut ?? '—'}</td>
-                    <td className={tdCls}>{a.hoursWorked != null ? `${a.hoursWorked}h` : '—'}</td>
                     <td className={tdCls}>
-                      <StatusBadge status={a.status} />
+                      {a.attendanceDate ? new Date(a.attendanceDate).toLocaleDateString('en-GB') : '—'}
+                    </td>
+                    <td className={tdCls}>{a.clockInTime ? new Date(a.clockInTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                    <td className={tdCls}>{a.clockOutTime ? new Date(a.clockOutTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                    <td className={tdCls}>{a.totalHours != null ? `${Number(a.totalHours)}h` : '—'}</td>
+                    <td className={tdCls}>
+                      <StatusBadge status={a.attendanceStatus ?? 'UNKNOWN'} />
                     </td>
                     <td className={tdCls}>
                       <div className="flex gap-2">
                         <Btn variant="ghost" size="xs" onClick={() => openEdit(a)}>
                           Edit
                         </Btn>
-                        {a.status === 'PENDING' && (
+                        {!a.approvedById && (
                           <Btn
                             variant="success"
                             size="xs"
@@ -302,8 +325,10 @@ export default function AttendancePage() {
               { value: 'ABSENT', label: 'Absent' },
               { value: 'LATE', label: 'Late' },
               { value: 'HALF_DAY', label: 'Half Day' },
-              { value: 'PENDING', label: 'Pending' },
-              { value: 'APPROVED', label: 'Approved' },
+              { value: 'ON_LEAVE', label: 'On Leave' },
+              { value: 'HOLIDAY', label: 'Holiday' },
+              { value: 'SICK', label: 'Sick' },
+              { value: 'UNPAID_ABSENT', label: 'Unpaid Absent' },
             ]}
           />
         </form>

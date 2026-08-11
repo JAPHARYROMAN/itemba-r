@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, StatusBadge, FormInput, FormSelect, ConfirmDialog, Modal, Btn, PageSpinner } from '@/components/ui';
+import { Card, PageHeader, PageToolbar, StatusBadge, FormInput, FormSelect, ConfirmDialog, Modal, Btn, PageSpinner, showToast } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
@@ -9,9 +9,10 @@ const tdCls = 'px-4 py-2 text-sm';
 
 interface EmployeeAllowance {
   id: string;
-  employee?: string;
+  employee?: string | { fullName?: string; employeeCode?: string };
   employeeId?: string;
-  allowanceType?: string;
+  companyId?: string;
+  allowanceType?: string | { name?: string; code?: string };
   allowanceTypeId?: string;
   amount: number;
   effectiveFrom?: string;
@@ -40,6 +41,21 @@ export default function EmployeeAllowancesPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const { companyOptions, employeeOptions } = useOrgScope(form.companyId, { skipBranches: true, skipDivisions: true });
+  const [typeOptions, setTypeOptions] = useState<{ value: string; label: string }[]>([]);
+
+  useEffect(() => {
+    if (!form.companyId) { setTypeOptions([]); return; }
+    let cancelled = false;
+    fetch(`/api/backend/hr/allowance-types?companyId=${form.companyId}&limit=200`)
+      .then(r => r.json())
+      .then(j => {
+        if (cancelled) return;
+        const list = Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [];
+        setTypeOptions(list.map((t: { id: string; name?: string; code?: string }) => ({ value: t.id, label: t.name ?? t.code ?? t.id })));
+      })
+      .catch(() => { if (!cancelled) setTypeOptions([]); });
+    return () => { cancelled = true; };
+  }, [form.companyId]);
 
   const load = async () => {
     setLoading(true);
@@ -54,7 +70,15 @@ export default function EmployeeAllowancesPage() {
   const openCreate = () => { setEditing(null); setForm(empty); setShowModal(true); };
   const openEdit = (a: EmployeeAllowance) => {
     setEditing(a);
-    setForm({ companyId: '', employeeId: a.employeeId ?? '', allowanceTypeId: a.allowanceTypeId ?? '', amount: String(a.amount), effectiveFrom: a.effectiveFrom ?? '', effectiveTo: a.effectiveTo ?? '', status: a.status });
+    setForm({
+      companyId: a.companyId ?? '',
+      employeeId: a.employeeId ?? '',
+      allowanceTypeId: a.allowanceTypeId ?? '',
+      amount: String(a.amount),
+      effectiveFrom: a.effectiveFrom ? a.effectiveFrom.slice(0, 10) : '',
+      effectiveTo: a.effectiveTo ? a.effectiveTo.slice(0, 10) : '',
+      status: a.status,
+    });
     setShowModal(true);
   };
 
@@ -62,19 +86,39 @@ export default function EmployeeAllowancesPage() {
     e.preventDefault();
     setSaving(true);
     const url = editing ? `/api/backend/hr/employee-allowances/${editing.id}` : '/api/backend/hr/employee-allowances';
-    await fetch(url, {
-      method: editing ? 'PUT' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...(() => { const { companyId: _c, ...rest } = form; void _c; return rest; })(), amount: Number(form.amount) }),
-    });
-    setSaving(false);
-    setShowModal(false);
-    load();
+    try {
+      const res = await fetch(url, {
+        method: editing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: form.companyId,
+          employeeId: form.employeeId,
+          allowanceTypeId: form.allowanceTypeId,
+          amount: Number(form.amount),
+          effectiveFrom: form.effectiveFrom,
+          effectiveTo: form.effectiveTo || undefined,
+          status: form.status,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not save the allowance.'));
+        return;
+      }
+      setShowModal(false);
+      load();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async () => {
     if (!deleteId) return;
-    await fetch(`/api/backend/hr/employee-allowances/${deleteId}`, { method: 'DELETE' });
+    const res = await fetch(`/api/backend/hr/employee-allowances/${deleteId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      showToast('error', 'Delete failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not delete the allowance.'));
+    }
     setDeleteId(null);
     load();
   };
@@ -109,8 +153,16 @@ export default function EmployeeAllowancesPage() {
               <tbody style={{ color: 'var(--aurora-text)' }}>
                 {rows.map(a => (
                   <tr key={a.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-medium`}>{a.employee ?? a.employeeId ?? '—'}</td>
-                    <td className={tdCls}>{a.allowanceType ?? a.allowanceTypeId ?? '—'}</td>
+                    <td className={`${tdCls} font-medium`}>
+                      {typeof a.employee === 'string'
+                        ? a.employee
+                        : (a.employee?.fullName ?? a.employee?.employeeCode ?? a.employeeId ?? '—')}
+                    </td>
+                    <td className={tdCls}>
+                      {typeof a.allowanceType === 'string'
+                        ? a.allowanceType
+                        : (a.allowanceType?.name ?? a.allowanceType?.code ?? a.allowanceTypeId ?? '—')}
+                    </td>
                     <td className={tdCls}>TZS {(Number.isFinite(Number(a.amount)) ? Number(a.amount).toLocaleString('en-TZ') : '0')}</td>
                     <td className={tdCls}>{a.effectiveFrom ? new Date(a.effectiveFrom).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}>{a.effectiveTo ? new Date(a.effectiveTo).toLocaleDateString('en-GB') : '—'}</td>
@@ -147,10 +199,11 @@ export default function EmployeeAllowancesPage() {
             options={companyOptions} placeholder="Select company" />
           <FormSelect label="Employee" required value={form.employeeId} onChange={f('employeeId')}
             options={employeeOptions} placeholder={form.companyId ? 'Select employee' : 'Select company first'} />
-          <FormInput label="Allowance Type ID" value={form.allowanceTypeId} onChange={f('allowanceTypeId')} required />
+          <FormSelect label="Allowance Type" required value={form.allowanceTypeId} onChange={f('allowanceTypeId')}
+            options={typeOptions} placeholder={form.companyId ? 'Select allowance type' : 'Select company first'} />
           <FormInput label="Amount (TZS)" type="number" value={form.amount} onChange={f('amount')} required />
           <div className="grid grid-cols-2 gap-3">
-            <FormInput label="Effective From" type="date" value={form.effectiveFrom} onChange={f('effectiveFrom')} />
+            <FormInput label="Effective From" type="date" value={form.effectiveFrom} onChange={f('effectiveFrom')} required />
             <FormInput label="Effective To" type="date" value={form.effectiveTo} onChange={f('effectiveTo')} />
           </div>
           <FormSelect label="Status" value={form.status} onChange={f('status')}

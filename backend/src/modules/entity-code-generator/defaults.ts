@@ -136,6 +136,14 @@ export const DEFAULT_PATTERNS: Record<string, EntityCodePattern> = {
   // ── HR (additional) — match existing inline prefixes (DA-, ED-) ─────────
   DisciplinaryAction: { prefix: 'DA-{YYYY}-', padding: 5, resetFrequency: 'YEARLY' },
   EmploymentDispute: { prefix: 'ED-{YYYY}-', padding: 5, resetFrequency: 'YEARLY' },
+
+  // ── HR — server-generated document numbers for legacy create forms ──────
+  LeaveRequest: { prefix: 'LR-{YYYY}-', padding: 5, resetFrequency: 'YEARLY' },
+  SalaryAdvance: { prefix: 'ADV-{YYYY}-', padding: 5, resetFrequency: 'YEARLY' },
+  PayrollPeriod: { prefix: 'PP-{YYYY}-', padding: 4, resetFrequency: 'YEARLY' },
+  PayrollRun: { prefix: 'PR-{YYYY}-', padding: 5, resetFrequency: 'YEARLY' },
+  EmploymentContract: { prefix: 'EC-{YYYY}-', padding: 5, resetFrequency: 'YEARLY' },
+  SalaryPayment: { prefix: 'SP-{YYYY}-', padding: 6, resetFrequency: 'YEARLY' },
 };
 
 /**

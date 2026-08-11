@@ -85,14 +85,12 @@ function fmtMoney(amount: number | string | null | undefined, currency = 'TZS') 
   return `${currency} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(Number.isFinite(Number(amount ?? 0)) ? Number(amount ?? 0) : 0)}`;
 }
 
-function matchCode() {
-  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  return `TWM-${stamp}-${Date.now().toString(36).toUpperCase()}`;
-}
-
 export default function ThreeWayMatchingPage() {
   const { hasPermission } = useAuth();
-  const canView = hasPermission('three_way_match.view');
+  // The list endpoint (three-way-matching.controller.ts findAll) requires
+  // three_way_match.list, which is seeded — gate the page on the same code so a
+  // user who can open the page can actually load it.
+  const canView = hasPermission('three_way_match.list');
   const canCreate = hasPermission('three_way_match.create');
   const canApprove = hasPermission('three_way_match.approve');
 
@@ -109,14 +107,14 @@ export default function ThreeWayMatchingPage() {
   const [saving, setSaving] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [error, setError] = useState('');
+  // matchNumber and matchStatus are intentionally absent: the number is minted
+  // server-side and the status is computed from the PO/GRN/invoice variance.
   const [form, setForm] = useState({
-    matchNumber: '',
     companyId: '',
     purchaseOrderId: '',
     goodsReceivedNoteId: '',
     supplierInvoiceId: '',
     matchDate: today,
-    matchStatus: 'MATCHED',
     quantityVariance: '0',
     amountVariance: '0',
     notes: '',
@@ -180,13 +178,11 @@ export default function ThreeWayMatchingPage() {
 
   const openCreate = () => {
     setForm({
-      matchNumber: matchCode(),
       companyId,
       purchaseOrderId: '',
       goodsReceivedNoteId: '',
       supplierInvoiceId: '',
       matchDate: today,
-      matchStatus: 'MATCHED',
       quantityVariance: '0',
       amountVariance: '0',
       notes: '',
@@ -248,22 +244,23 @@ export default function ThreeWayMatchingPage() {
     : invoices;
 
   const saveMatch = async () => {
-    if (!form.companyId || !form.purchaseOrderId || !form.matchNumber.trim()) {
-      setError('Company, match number, and purchase order are required');
+    // The backend rejects a match without a supplier invoice
+    // (three-way-matching.service.ts create), so require it up front.
+    if (!form.companyId || !form.purchaseOrderId || !form.supplierInvoiceId) {
+      setError('Company, purchase order, and supplier invoice are required');
       return;
     }
     setSaving(true);
     setError('');
     try {
-      // Variance is computed server-side — do not send client-entered values.
+      // Match number, status, and variances are all server-minted/computed — do
+      // not send client-entered values.
       const body = {
-        matchNumber: form.matchNumber,
         companyId: form.companyId,
         purchaseOrderId: form.purchaseOrderId,
         goodsReceivedNoteId: form.goodsReceivedNoteId || undefined,
-        supplierInvoiceId: form.supplierInvoiceId || undefined,
+        supplierInvoiceId: form.supplierInvoiceId,
         matchDate: form.matchDate,
-        matchStatus: form.matchStatus,
         notes: form.notes || undefined,
       };
       await backendPost('/three-way-matching', body);
@@ -441,7 +438,6 @@ export default function ThreeWayMatchingPage() {
       {creating && (
         <Modal open title="Create Three-Way Match" onClose={() => setCreating(false)} size="xl" footer={<><Btn variant="secondary" onClick={() => setCreating(false)}>Cancel</Btn><Btn loading={saving} onClick={saveMatch}>Create</Btn></>}>
           <div className="grid md:grid-cols-2 gap-3">
-            <FormInput label="Match Number" required value={form.matchNumber} onChange={(e) => setForm((f) => ({ ...f, matchNumber: e.target.value }))} />
             <FormSelect label="Company" required value={form.companyId} onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value, purchaseOrderId: '', goodsReceivedNoteId: '', supplierInvoiceId: '' }))} placeholder="Select company">
               {companies.map((company) => <option key={company.id} value={company.id}>{optionLabel(company)}</option>)}
             </FormSelect>
@@ -452,17 +448,15 @@ export default function ThreeWayMatchingPage() {
             <FormSelect label="Goods Received Note" value={form.goodsReceivedNoteId} onChange={(e) => setForm((f) => ({ ...f, goodsReceivedNoteId: e.target.value }))} placeholder="Optional GRN" disabled={!form.purchaseOrderId}>
               {filteredGrns.map((grn) => <option key={grn.id} value={grn.id}>{grnLabel(grn)}</option>)}
             </FormSelect>
-            <FormSelect label="Supplier Invoice" value={form.supplierInvoiceId} onChange={(e) => setForm((f) => ({ ...f, supplierInvoiceId: e.target.value }))} placeholder="Optional invoice" disabled={!form.purchaseOrderId}>
+            <FormSelect label="Supplier Invoice" required value={form.supplierInvoiceId} onChange={(e) => setForm((f) => ({ ...f, supplierInvoiceId: e.target.value }))} placeholder={form.purchaseOrderId ? 'Select invoice' : 'Select purchase order first'} disabled={!form.purchaseOrderId}>
               {filteredInvoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoiceLabel(invoice)}</option>)}
-            </FormSelect>
-            <FormSelect label="Match Status" value={form.matchStatus} onChange={(e) => setForm((f) => ({ ...f, matchStatus: e.target.value }))}>
-              {MATCH_STATUSES.map((item) => <option key={item} value={item}>{item}</option>)}
             </FormSelect>
             <div />
             <FormInput label="Quantity Variance (computed)" type="number" value={form.quantityVariance} readOnly disabled />
             <FormInput label="Amount Variance (computed)" type="number" value={form.amountVariance} readOnly disabled />
             <div className="md:col-span-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-              Variance is calculated server-side from the linked PO, GRN, and invoice.
+              The match number is assigned automatically; variance and match status are calculated
+              server-side from the linked PO, GRN, and invoice.
             </div>
             <div className="md:col-span-2"><FormTextarea label="Notes" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} /></div>
           </div>

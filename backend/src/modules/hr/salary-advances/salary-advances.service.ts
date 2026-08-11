@@ -4,6 +4,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { PayrollPostingsService } from '../payroll-postings/payroll-postings.service';
 import { CompanyScopeService } from '../../../common/services';
+import { EntityCodeGeneratorService } from '../../entity-code-generator/entity-code-generator.service';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
 import { CreateSalaryAdvanceDto } from './dto/create-salary-advance.dto';
 import { UpdateSalaryAdvanceDto } from './dto/update-salary-advance.dto';
@@ -21,6 +22,7 @@ export class SalaryAdvancesService {
     private readonly audit: AuditLogsService,
     private readonly postings: PayrollPostingsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly codes: EntityCodeGeneratorService,
   ) {}
 
   async findAll(user: AuthUser, query: any) {
@@ -69,8 +71,11 @@ export class SalaryAdvancesService {
         AccessLevel.WRITE,
       );
     }
+    const advanceNumber =
+      dto.advanceNumber ??
+      (await this.codes.next({ companyId: dto.companyId, entityType: 'SalaryAdvance' }));
     const record = await this.prisma.salaryAdvance.create({
-      data: { ...dto, requestDate: new Date(dto.requestDate) } as any,
+      data: { ...dto, advanceNumber, requestDate: new Date(dto.requestDate) } as any,
     });
     await this.audit.log({
       userId: user.id,

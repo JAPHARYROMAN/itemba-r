@@ -3,7 +3,8 @@ import { Type } from 'class-transformer';
 import { SalaryPaymentMethod, SalaryPaymentStatus } from '@prisma/client';
 
 export class CreateSalaryPaymentDto {
-  @IsString() salaryPaymentNumber!: string;
+  /** Server-generated when omitted (SP-{YYYY}-######). */
+  @IsOptional() @IsString() salaryPaymentNumber?: string;
   @IsString() employeeId!: string;
   @IsString() companyId!: string;
   @IsString() payrollRunId!: string;

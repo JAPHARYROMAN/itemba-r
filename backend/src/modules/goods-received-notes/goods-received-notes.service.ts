@@ -9,6 +9,7 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { UpdateGoodsReceivedNoteDto } from './dto/update-goods-received-note.dto';
 import { CreateGoodsReceivedNoteDto } from './dto/create-goods-received-note.dto';
+import { QueryGoodsReceivedNotesDto } from './dto/query-goods-received-notes.dto';
 
 // Product types that do NOT carry stock value, mirroring profit.isStockProduct().
 // A product of one of these types must never post a cost-less inventory receipt,
@@ -38,8 +39,9 @@ export class GoodsReceivedNotesService {
     private readonly inventoryMovements: InventoryMovementsService,
   ) {}
 
-  async findAll(query: any, user: AuthUser) {
-    const { companyId, divisionId, branchId, status, supplierId, page = 1, limit = 20 } = query;
+  async findAll(query: QueryGoodsReceivedNotesDto, user: AuthUser) {
+    const { companyId, divisionId, branchId, status, supplierId, search, page = 1, limit = 20 } =
+      query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = {
       deletedAt: null,
@@ -49,6 +51,23 @@ export class GoodsReceivedNotesService {
     if (branchId) where.branchId = branchId;
     if (status) where.status = status;
     if (supplierId) where.supplierId = supplierId;
+    const term = search?.trim();
+    if (term) {
+      // GoodsReceivedNote has no Prisma relation to Supplier (supplierId is a raw
+      // column), so supplier-name matching resolves the matching supplier ids
+      // first and ORs them with a grnNumber match. Company scoping on the GRN
+      // `where` above keeps out-of-scope suppliers from ever surfacing rows.
+      const matchingSuppliers = await this.prisma.supplier.findMany({
+        where: { name: { contains: term, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      where.OR = [
+        { grnNumber: { contains: term, mode: 'insensitive' } },
+        ...(matchingSuppliers.length
+          ? [{ supplierId: { in: matchingSuppliers.map((supplier) => supplier.id) } }]
+          : []),
+      ];
+    }
     const [items, total] = await Promise.all([
       this.prisma.goodsReceivedNote.findMany({
         where,
@@ -63,18 +82,45 @@ export class GoodsReceivedNotesService {
       }),
       this.prisma.goodsReceivedNote.count({ where }),
     ]);
+    const withSuppliers = await this.attachSuppliers(items);
     const limitN = Number(limit);
     // `data` mirrors the paginated shape the rest of the app (and the frontend
     // `backendPage`/`normalizePaginated` helper) expects; `items` is kept for
     // backwards compatibility with any existing consumer.
     return {
-      data: items,
-      items,
+      data: withSuppliers,
+      items: withSuppliers,
       total,
       page: Number(page),
       limit: limitN,
       totalPages: Math.ceil(total / limitN) || 1,
     };
+  }
+
+  /**
+   * GoodsReceivedNote stores supplierId as a raw column with no Prisma relation
+   * to Supplier, so `include: { supplier: ... }` is not available. Batch-fetch
+   * the referenced suppliers and attach a relation-shaped `supplier` object so
+   * consumers can render names instead of UUIDs. Soft-deleted suppliers are
+   * intentionally included — a historical GRN should still show its name.
+   */
+  private async attachSuppliers<T extends { supplierId: string | null }>(
+    items: T[],
+  ): Promise<Array<T & { supplier: { id: string; name: string; supplierCode: string } | null }>> {
+    const supplierIds = Array.from(
+      new Set(items.map((item) => item.supplierId).filter((id): id is string => Boolean(id))),
+    );
+    const suppliers = supplierIds.length
+      ? await this.prisma.supplier.findMany({
+          where: { id: { in: supplierIds } },
+          select: { id: true, name: true, supplierCode: true },
+        })
+      : [];
+    const supplierById = new Map(suppliers.map((supplier) => [supplier.id, supplier]));
+    return items.map((item) => ({
+      ...item,
+      supplier: item.supplierId ? (supplierById.get(item.supplierId) ?? null) : null,
+    }));
   }
 
   async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
@@ -88,7 +134,8 @@ export class GoodsReceivedNotesService {
     });
     if (!item) throw new NotFoundException('GRN not found');
     await this.companyScope.assertCanAccessCompany(user, item.companyId, minimum);
-    return item;
+    const [withSupplier] = await this.attachSuppliers([item]);
+    return withSupplier;
   }
 
   async create(dto: any, user: AuthUser) {

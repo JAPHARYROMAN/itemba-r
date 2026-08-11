@@ -2,7 +2,8 @@ import { IsString, IsOptional, IsDateString, IsNumber } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateLeaveRequestDto {
-  @IsString() leaveRequestNumber!: string;
+  /** Server-generated when omitted (LR-{YYYY}-#####). */
+  @IsOptional() @IsString() leaveRequestNumber?: string;
   @IsString() employeeId!: string;
   @IsString() leaveTypeId!: string;
   @IsString() companyId!: string;

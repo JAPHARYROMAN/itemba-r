@@ -1,7 +1,8 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { WestsidesReportsService } from './westsides-reports.service';
 import { QueryReportDto } from './dto/query-report.dto';
+import { SaveDailyCloseDto } from './dto/save-daily-close.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
@@ -183,5 +184,12 @@ export class WestsidesReportsController {
     @Query('date') date: string | undefined,
   ) {
     return this.service.dailyClose({ companyId, branchId, date }, user);
+  }
+
+  @Post('daily-close')
+  @RequirePermissions('westsides.daily_close.manage')
+  @ApiOperation({ summary: 'Persist the daily cash close: counted amounts, variance, and sign-off' })
+  saveDailyClose(@Body() dto: SaveDailyCloseDto, @CurrentUser() user: AuthUser) {
+    return this.service.saveDailyClose(dto, user);
   }
 }

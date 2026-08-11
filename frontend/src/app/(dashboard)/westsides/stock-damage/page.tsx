@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader } from '@/components/ui';
+import { Btn, Card, FormInput, FormSelect, FormTextarea, Modal, PageHeader, ProductPicker, showToast } from '@/components/ui';
+import type { ProductPickerOption } from '@/components/ui';
+import { ApiError, backendPost } from '@/lib/api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -18,12 +20,25 @@ interface StockDamage {
   notes?: string;
 }
 
+interface Company { id: string; name: string }
+interface Branch { id: string; name: string }
+interface Unit { id: string; name: string; symbol?: string | null }
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const fieldCls = 'w-full text-sm border border-slate-200 rounded-md px-3 py-2 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300';
-const labelCls = 'block text-xs font-medium text-slate-600 mb-1';
 const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm text-slate-700';
+
+// Values must match the backend StockDamageType enum.
+const DAMAGE_TYPES = [
+  { value: 'BREAKAGE', label: 'Breakage' },
+  { value: 'EXPIRED', label: 'Expired' },
+  { value: 'SPOILED', label: 'Spoiled' },
+  { value: 'LOST', label: 'Lost' },
+  { value: 'THEFT', label: 'Theft' },
+  { value: 'DAMAGED_PACKAGING', label: 'Damaged Packaging' },
+  { value: 'OTHER', label: 'Other' },
+];
 
 const STATUS_CLR: Record<string, string> = {
   DRAFT: 'bg-zinc-100 text-zinc-500 border-zinc-200',
@@ -55,8 +70,12 @@ function Spinner() {
   );
 }
 
-function CloseIcon() {
-  return <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
+function listFromJson<T>(j: unknown): T[] {
+  const json = j as { data?: { data?: T[] } | T[] };
+  const inner = json?.data;
+  if (Array.isArray(inner)) return inner;
+  if (inner && Array.isArray((inner as { data?: T[] }).data)) return (inner as { data: T[] }).data;
+  return [];
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
@@ -64,86 +83,110 @@ function CloseIcon() {
 interface ModalProps { onClose: () => void; onSaved: () => void }
 
 function DamageModal({ onClose, onSaved }: ModalProps) {
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [companyId, setCompanyId] = useState('');
+  const [branchId, setBranchId] = useState('');
   const [productId, setProductId] = useState('');
-  const [locationId, setLocationId] = useState('');
-  const [quantity, setQuantity] = useState<number | ''>(0);
+  const [unitId, setUnitId] = useState('');
+  const [quantity, setQuantity] = useState('');
   const [damageType, setDamageType] = useState('BREAKAGE');
-  const [estimatedValue, setEstimatedValue] = useState<number | ''>(0);
+  const [estimatedValue, setEstimatedValue] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    fetch('/api/backend/companies?limit=100')
+      .then((r) => r.json())
+      .then((j) => setCompanies(listFromJson<Company>(j)))
+      .catch(() => setCompanies([]));
+    fetch('/api/backend/units?limit=500')
+      .then((r) => r.json())
+      .then((j) => setUnits(listFromJson<Unit>(j)))
+      .catch(() => setUnits([]));
+  }, []);
+
+  useEffect(() => {
+    if (!companyId) { setBranches([]); setBranchId(''); return; }
+    fetch(`/api/backend/branches?companyId=${encodeURIComponent(companyId)}&limit=200`)
+      .then((r) => r.json())
+      .then((j) => setBranches(listFromJson<Branch>(j)))
+      .catch(() => setBranches([]));
+  }, [companyId]);
+
+  const onPickProduct = (id: string, product?: ProductPickerOption) => {
+    setProductId(id);
+    if (product?.defaultUnitId) setUnitId(product.defaultUnitId);
+  };
+
+  const submit = async () => {
+    if (!companyId) { setError('Company is required'); return; }
+    if (!branchId) { setError('Branch is required'); return; }
     if (!productId) { setError('Product is required'); return; }
+    if (!unitId) { setError('Unit is required'); return; }
+    if (quantity === '' || Number(quantity) <= 0) { setError('Quantity must be greater than zero'); return; }
     setSaving(true); setError('');
     try {
-      const body = { productId, locationId: locationId || undefined, quantity: Number(quantity) || 0, damageType, estimatedValue: Number(estimatedValue) || 0, notes: notes || undefined };
-      const res = await fetch('/api/backend/westsides/stock-damage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
+      await backendPost('/westsides/stock-damage', {
+        companyId,
+        branchId,
+        productId,
+        quantity: Number(quantity),
+        unitId,
+        damageType,
+        ...(estimatedValue !== '' ? { estimatedValue: Number(estimatedValue) } : {}),
+        ...(notes ? { notes } : {}),
+      });
+      showToast('success', 'Damage reported');
       onSaved();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error saving');
+      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Error saving');
     } finally { setSaving(false); }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <h2 className="text-base font-semibold text-slate-900">Report Stock Damage</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><CloseIcon /></button>
+    <Modal open onClose={onClose} title="Report Stock Damage"
+      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="danger" onClick={submit} loading={saving}>Report Damage</Btn></>}>
+      {error && <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
+      <div className="grid grid-cols-2 gap-4">
+        <FormSelect label="Company" required value={companyId} onChange={(e) => { setCompanyId(e.target.value); setProductId(''); }} placeholder="Select…">
+          {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </FormSelect>
+        <FormSelect label="Branch" required value={branchId} onChange={(e) => setBranchId(e.target.value)} placeholder={companyId ? 'Select…' : 'Select company first'} disabled={!companyId}>
+          {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </FormSelect>
+        <div className="col-span-2">
+          <label className="block text-[12px] font-medium mb-1" style={{ color: 'var(--aurora-text-secondary)' }}>
+            Product <span style={{ color: 'var(--aurora-danger)' }}>*</span>
+          </label>
+          <ProductPicker value={productId} onChange={onPickProduct} companyId={companyId || undefined} placeholder={companyId ? 'Search products…' : 'Select company first'} disabled={!companyId} />
         </div>
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-          {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className={labelCls}>Product ID *</label>
-              <input required value={productId} onChange={(e) => setProductId(e.target.value)} className={fieldCls} placeholder="Product ID" />
-            </div>
-            <div>
-              <label className={labelCls}>Location ID</label>
-              <input value={locationId} onChange={(e) => setLocationId(e.target.value)} className={fieldCls} placeholder="Location ID" />
-            </div>
-            <div>
-              <label className={labelCls}>Quantity *</label>
-              <input required type="number" min={0} step="0.01" value={quantity} onChange={(e) => setQuantity(e.target.value === '' ? '' : Number(e.target.value))} className={fieldCls} placeholder="0" />
-            </div>
-            <div>
-              <label className={labelCls}>Damage Type</label>
-              <select value={damageType} onChange={(e) => setDamageType(e.target.value)} className={fieldCls}>
-                <option value="BREAKAGE">Breakage</option>
-                <option value="EXPIRY">Expiry</option>
-                <option value="THEFT">Theft</option>
-                <option value="SPOILAGE">Spoilage</option>
-                <option value="SPILLAGE">Spillage</option>
-                <option value="OTHER">Other</option>
-              </select>
-            </div>
-            <div className="col-span-2">
-              <label className={labelCls}>Estimated Value (TZS)</label>
-              <input type="number" min={0} value={estimatedValue} onChange={(e) => setEstimatedValue(e.target.value === '' ? '' : Number(e.target.value))} className={fieldCls} placeholder="0" />
-            </div>
-            <div className="col-span-2">
-              <label className={labelCls}>Notes</label>
-              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className={fieldCls} placeholder="Describe the damage…" />
-            </div>
-          </div>
-        </form>
-        <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
-          <button onClick={onClose} className="text-sm text-slate-600 px-4 py-2 rounded-md border border-slate-200 hover:bg-slate-50">Cancel</button>
-          <button onClick={(e) => handleSubmit(e as unknown as React.FormEvent)} disabled={saving} className="text-sm bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-5 py-2 rounded-md font-medium">
-            {saving ? 'Saving…' : 'Report Damage'}
-          </button>
+        <FormInput label="Quantity" required type="number" min={0} step="0.01" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
+        <FormSelect label="Unit" required value={unitId} onChange={(e) => setUnitId(e.target.value)} placeholder="Select…">
+          {units.map((u) => <option key={u.id} value={u.id}>{u.symbol ? `${u.name} (${u.symbol})` : u.name}</option>)}
+        </FormSelect>
+        <FormSelect label="Damage Type" value={damageType} onChange={(e) => setDamageType(e.target.value)} options={DAMAGE_TYPES} />
+        <FormInput label="Estimated Value (TZS)" type="number" min={0} value={estimatedValue} onChange={(e) => setEstimatedValue(e.target.value)} placeholder="0" />
+        <div className="col-span-2">
+          <FormTextarea label="Notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Describe the damage…" />
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 type DamageAction = 'submit' | 'approve' | 'reject' | 'post';
+
+const ACTION_DONE: Record<DamageAction, string> = {
+  submit: 'Record submitted',
+  approve: 'Record approved',
+  reject: 'Record rejected',
+  post: 'Record posted',
+};
 
 const STATUS_ACTIONS: Record<string, { action: DamageAction; label: string; cls: string }[]> = {
   DRAFT: [{ action: 'submit', label: 'Submit', cls: 'text-amber-600 hover:text-amber-800' }],
@@ -179,10 +222,14 @@ export default function StockDamagePage() {
     setActioning(`${id}-${action}`);
     try {
       const res = await fetch(`/api/backend/westsides/stock-damage/${id}/${action}`, { method: 'PATCH' });
-      if (!res.ok) throw new Error('Action failed');
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.message ?? 'Action failed');
+      }
+      showToast('success', ACTION_DONE[action]);
       load();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Action failed');
+      showToast('error', 'Action failed', err instanceof Error ? err.message : undefined);
     } finally { setActioning(null); }
   };
 

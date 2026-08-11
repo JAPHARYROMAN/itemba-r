@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
+import { EntityCodeGeneratorService } from '../../entity-code-generator/entity-code-generator.service';
 import { CreateAttendanceDto } from './dto/create-attendance.dto';
 import { UpdateAttendanceDto } from './dto/update-attendance.dto';
 import { applyCompanyScopeWhere } from '../../../common/services';
@@ -10,6 +11,7 @@ export class AttendanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogsService,
+    private readonly codes: EntityCodeGeneratorService,
   ) {}
 
   private companyFilter(user: any) {
@@ -96,9 +98,13 @@ export class AttendanceService {
     );
     await this.assertNoDailyDuplicate(dto.companyId, dto.employeeId, dto.attendanceDate);
     const normalized = await this.normalizeAttendance(dto);
+    const attendanceNumber =
+      dto.attendanceNumber ??
+      (await this.codes.next({ companyId: dto.companyId, entityType: 'AttendanceRecord' }));
     const record = await this.prisma.attendanceRecord.create({
       data: {
         ...dto,
+        attendanceNumber,
         divisionId: hierarchy.divisionId,
         branchId: hierarchy.branchId,
         attendanceDate: new Date(dto.attendanceDate),

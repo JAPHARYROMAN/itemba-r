@@ -15077,3 +15077,28 @@ model SupportTicketComment {
   @@index([internal])
   @@index([createdAt])
 }
+
+/// Persisted Westsides daily cash close: the counted amounts, variance, and
+/// supervisor sign-off that the close screen previously kept only in browser
+/// state. Intentionally relation-free (plain ids + a name snapshot) so the
+/// record survives user/branch changes and the migration stays additive.
+model WestsidesDailyClose {
+  id              String   @id @default(uuid())
+  companyId       String
+  branchId        String?
+  closeDate       DateTime @db.Date
+  countedByMethod Json
+  expectedTotal   Decimal  @db.Decimal(18, 2)
+  countedTotal    Decimal  @db.Decimal(18, 2)
+  varianceTotal   Decimal  @db.Decimal(18, 2)
+  notes           String?
+  closedById      String
+  closedByName    String
+  closedAt        DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([companyId, branchId, closeDate])
+  @@index([companyId, closeDate])
+  @@map("westsides_daily_closes")
+}

@@ -9,7 +9,7 @@ const tdCls = 'px-4 py-2 text-sm text-slate-700';
 
 interface PayrollEntry {
   id: string;
-  employee?: string;
+  employee?: string | { fullName?: string; employeeCode?: string };
   employeeId?: string;
   basePay?: number;
   totalAllowances?: number;
@@ -23,12 +23,14 @@ function PayrollEntriesContent() {
   const searchParams = useSearchParams();
   const [rows, setRows] = useState<PayrollEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [runFilter, setRunFilter] = useState(searchParams.get('runId') ?? '');
+  const [runFilter, setRunFilter] = useState(
+    searchParams.get('payrollRunId') ?? searchParams.get('runId') ?? '',
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams();
-    if (runFilter) params.set('runId', runFilter);
+    if (runFilter) params.set('payrollRunId', runFilter);
     const r = await fetch(`/api/backend/hr/payroll-entries?${params}`);
     const j = await r.json();
     setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
@@ -83,7 +85,11 @@ function PayrollEntriesContent() {
               <tbody>
                 {rows.map((e) => (
                   <tr key={e.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-medium`}>{e.employee ?? e.employeeId ?? '—'}</td>
+                    <td className={`${tdCls} font-medium`}>
+                      {typeof e.employee === 'string'
+                        ? e.employee
+                        : (e.employee?.fullName ?? e.employee?.employeeCode ?? e.employeeId ?? '—')}
+                    </td>
                     <td className={tdCls}>{fmt(e.basePay)}</td>
                     <td className={tdCls}>{fmt(e.totalAllowances)}</td>
                     <td className={`${tdCls} font-medium`}>{fmt(e.grossPay)}</td>

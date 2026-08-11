@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, FormInput, FormSelect, ConfirmDialog, Modal, Btn, PageSpinner } from '@/components/ui';
+import { Card, PageHeader, PageToolbar, FormInput, FormSelect, ConfirmDialog, Modal, Btn, PageSpinner, showToast } from '@/components/ui';
+import { useOrgScope } from '@/hooks/use-org-scope';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm';
@@ -10,13 +11,15 @@ interface DeductionType {
   id: string;
   name: string;
   code: string;
-  isStatutory: boolean;
+  companyId?: string;
+  statutory: boolean;
   defaultAmount?: number;
   defaultPercentage?: number;
   isActive: boolean;
 }
 
 interface FormState {
+  companyId: string;
   name: string;
   code: string;
   isStatutory: string;
@@ -25,7 +28,7 @@ interface FormState {
   isActive: string;
 }
 
-const empty: FormState = { name: '', code: '', isStatutory: 'false', defaultAmount: '', defaultPercentage: '', isActive: 'true' };
+const empty: FormState = { companyId: '', name: '', code: '', isStatutory: 'false', defaultAmount: '', defaultPercentage: '', isActive: 'true' };
 
 export default function DeductionTypesPage() {
   const [rows, setRows] = useState<DeductionType[]>([]);
@@ -35,6 +38,7 @@ export default function DeductionTypesPage() {
   const [form, setForm] = useState<FormState>(empty);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const { companyOptions } = useOrgScope(form.companyId, { skipBranches: true, skipDivisions: true, skipEmployees: true });
 
   const load = async () => {
     setLoading(true);
@@ -49,7 +53,7 @@ export default function DeductionTypesPage() {
   const openCreate = () => { setEditing(null); setForm(empty); setShowModal(true); };
   const openEdit = (d: DeductionType) => {
     setEditing(d);
-    setForm({ name: d.name, code: d.code, isStatutory: String(d.isStatutory), defaultAmount: String(d.defaultAmount ?? ''), defaultPercentage: String(d.defaultPercentage ?? ''), isActive: String(d.isActive) });
+    setForm({ companyId: d.companyId ?? '', name: d.name, code: d.code, isStatutory: String(d.statutory), defaultAmount: String(d.defaultAmount ?? ''), defaultPercentage: String(d.defaultPercentage ?? ''), isActive: String(d.isActive) });
     setShowModal(true);
   };
 
@@ -57,25 +61,39 @@ export default function DeductionTypesPage() {
     e.preventDefault();
     setSaving(true);
     const url = editing ? `/api/backend/hr/deduction-types/${editing.id}` : '/api/backend/hr/deduction-types';
-    await fetch(url, {
-      method: editing ? 'PUT' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...form,
-        isStatutory: form.isStatutory === 'true',
-        isActive: form.isActive === 'true',
-        defaultAmount: form.defaultAmount ? Number(form.defaultAmount) : undefined,
-        defaultPercentage: form.defaultPercentage ? Number(form.defaultPercentage) : undefined,
-      }),
-    });
-    setSaving(false);
-    setShowModal(false);
-    load();
+    try {
+      const res = await fetch(url, {
+        method: editing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: form.companyId,
+          name: form.name,
+          code: form.code,
+          statutory: form.isStatutory === 'true',
+          isActive: form.isActive === 'true',
+          defaultAmount: form.defaultAmount ? Number(form.defaultAmount) : undefined,
+          defaultPercentage: form.defaultPercentage ? Number(form.defaultPercentage) : undefined,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not save the deduction type.'));
+        return;
+      }
+      setShowModal(false);
+      load();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async () => {
     if (!deleteId) return;
-    await fetch(`/api/backend/hr/deduction-types/${deleteId}`, { method: 'DELETE' });
+    const res = await fetch(`/api/backend/hr/deduction-types/${deleteId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      showToast('error', 'Delete failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not delete the deduction type.'));
+    }
     setDeleteId(null);
     load();
   };
@@ -114,7 +132,7 @@ export default function DeductionTypesPage() {
                   <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50">
                     <td className={`${tdCls} font-medium`}>{d.name}</td>
                     <td className={`${tdCls} font-mono`}>{d.code}</td>
-                    <td className={tdCls}>{bool(d.isStatutory)}</td>
+                    <td className={tdCls}>{bool(d.statutory)}</td>
                     <td className={tdCls}>{d.defaultAmount != null ? `TZS ${(Number.isFinite(Number(d.defaultAmount)) ? Number(d.defaultAmount).toLocaleString('en-TZ') : '0')}` : '—'}</td>
                     <td className={tdCls}>{d.defaultPercentage != null ? `${d.defaultPercentage}%` : '—'}</td>
                     <td className={tdCls}>{bool(d.isActive)}</td>
@@ -145,6 +163,9 @@ export default function DeductionTypesPage() {
         }
       >
         <form id="deduction-type-form" onSubmit={handleSubmit} className="space-y-3">
+          <FormSelect label="Company" required value={form.companyId}
+            onChange={(e) => setForm(p => ({ ...p, companyId: e.target.value }))}
+            options={companyOptions} placeholder="Select company" />
           <div className="grid grid-cols-2 gap-3">
             <FormInput label="Name" value={form.name} onChange={f('name')} required />
             <FormInput label="Code" value={form.code} onChange={f('code')} required />

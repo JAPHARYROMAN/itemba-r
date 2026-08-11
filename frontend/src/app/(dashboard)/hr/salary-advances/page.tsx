@@ -12,8 +12,10 @@ import {
   Btn,
   PageSpinner,
   FormTextarea,
+  showToast,
 } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
+import { useAuth } from '@/hooks/use-auth';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm';
@@ -21,7 +23,7 @@ const tdCls = 'px-4 py-2 text-sm';
 interface SalaryAdvance {
   id: string;
   advanceNumber: string;
-  employee?: string;
+  employee?: string | { fullName?: string; employeeCode?: string };
   employeeId?: string;
   amount: number;
   status: string;
@@ -49,6 +51,7 @@ export default function SalaryAdvancesPage() {
     skipBranches: true,
     skipDivisions: true,
   });
+  const { user } = useAuth();
 
   const load = async () => {
     setLoading(true);
@@ -65,28 +68,43 @@ export default function SalaryAdvancesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    await fetch('/api/backend/hr/salary-advances', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...(() => {
-          const { companyId: _c, ...rest } = form;
-          void _c;
-          return rest;
-        })(),
-        amount: Number(form.amount),
-      }),
-    });
-    setSaving(false);
-    setShowModal(false);
-    load();
+    try {
+      const res = await fetch('/api/backend/hr/salary-advances', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: form.companyId,
+          employeeId: form.employeeId,
+          amount: Number(form.amount),
+          requestDate: form.requestDate || new Date().toISOString().slice(0, 10),
+          reason: form.reason || undefined,
+          createdById: user?.id,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not create the salary advance.'));
+        return;
+      }
+      setShowModal(false);
+      load();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const doAction = async (id: string, action: 'approve' | 'pay') => {
     setActionLoading(`${id}-${action}`);
-    await fetch(`/api/backend/hr/salary-advances/${id}/${action}`, { method: 'PATCH' });
-    setActionLoading('');
-    load();
+    try {
+      const res = await fetch(`/api/backend/hr/salary-advances/${id}/${action}`, { method: 'PATCH' });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Action failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? `Could not ${action} this advance.`));
+      }
+    } finally {
+      setActionLoading('');
+      load();
+    }
   };
 
   const f =
@@ -133,7 +151,11 @@ export default function SalaryAdvancesPage() {
                 {rows.map((a) => (
                   <tr key={a.id} className="border-b border-slate-50 hover:bg-slate-50">
                     <td className={`${tdCls} font-mono font-medium`}>{a.advanceNumber}</td>
-                    <td className={`${tdCls} font-medium`}>{a.employee ?? a.employeeId ?? '—'}</td>
+                    <td className={`${tdCls} font-medium`}>
+                      {typeof a.employee === 'string'
+                        ? a.employee
+                        : (a.employee?.fullName ?? a.employee?.employeeCode ?? a.employeeId ?? '—')}
+                    </td>
                     <td className={tdCls}>
                       TZS{' '}
                       {Number.isFinite(Number(a.amount))

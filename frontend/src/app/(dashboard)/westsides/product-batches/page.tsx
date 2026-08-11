@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader } from '@/components/ui';
+import { Btn, Card, FormInput, FormSelect, Modal, PageHeader, ProductPicker, showToast } from '@/components/ui';
+import type { ProductPickerOption } from '@/components/ui';
+import { ApiError, backendPost } from '@/lib/api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -13,17 +15,20 @@ interface ProductBatch {
   locationName?: string;
   manufactureDate?: string;
   expiryDate?: string;
-  initialQty: number;
-  remainingQty: number;
+  initialQuantity?: number | string;
+  remainingQuantity?: number | string;
   status: string;
 }
+
+interface Company { id: string; name: string }
+interface Branch { id: string; name: string }
+interface Supplier { id: string; name: string }
+interface Unit { id: string; name: string; symbol?: string | null }
 
 type TabKey = 'all' | 'expiring' | 'expired';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const fieldCls = 'w-full text-sm border border-slate-200 rounded-md px-3 py-2 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300';
-const labelCls = 'block text-xs font-medium text-slate-600 mb-1';
 const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm text-slate-700';
 
@@ -57,7 +62,7 @@ function expiryBadge(expiryDate?: string) {
 }
 
 function fmtDate(d: string) { return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
-function fmtNum(n: number) { return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(n); }
+function fmtNum(n: number | string | null | undefined) { const value = Number(n ?? 0); return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0); }
 
 function Spinner() {
   return (
@@ -67,8 +72,12 @@ function Spinner() {
   );
 }
 
-function CloseIcon() {
-  return <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
+function listFromJson<T>(j: unknown): T[] {
+  const json = j as { data?: { data?: T[] } | T[] };
+  const inner = json?.data;
+  if (Array.isArray(inner)) return inner;
+  if (inner && Array.isArray((inner as { data?: T[] }).data)) return (inner as { data: T[] }).data;
+  return [];
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
@@ -76,78 +85,101 @@ function CloseIcon() {
 interface ModalProps { onClose: () => void; onSaved: () => void }
 
 function BatchModal({ onClose, onSaved }: ModalProps) {
-  const [batchNumber, setBatchNumber] = useState('');
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [companyId, setCompanyId] = useState('');
   const [productId, setProductId] = useState('');
   const [supplierId, setSupplierId] = useState('');
-  const [locationId, setLocationId] = useState('');
+  const [branchId, setBranchId] = useState('');
+  const [unitId, setUnitId] = useState('');
   const [manufactureDate, setManufactureDate] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
-  const [initialQty, setInitialQty] = useState<number | ''>(0);
+  const [initialQuantity, setInitialQuantity] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!batchNumber || !productId) { setError('Batch number and product are required'); return; }
+  useEffect(() => {
+    fetch('/api/backend/companies?limit=100')
+      .then((r) => r.json())
+      .then((j) => setCompanies(listFromJson<Company>(j)))
+      .catch(() => setCompanies([]));
+    fetch('/api/backend/units?limit=500')
+      .then((r) => r.json())
+      .then((j) => setUnits(listFromJson<Unit>(j)))
+      .catch(() => setUnits([]));
+  }, []);
+
+  useEffect(() => {
+    if (!companyId) { setBranches([]); setBranchId(''); setSuppliers([]); setSupplierId(''); return; }
+    fetch(`/api/backend/branches?companyId=${encodeURIComponent(companyId)}&limit=200`)
+      .then((r) => r.json())
+      .then((j) => setBranches(listFromJson<Branch>(j)))
+      .catch(() => setBranches([]));
+    fetch(`/api/backend/suppliers?companyId=${encodeURIComponent(companyId)}&limit=500`)
+      .then((r) => r.json())
+      .then((j) => setSuppliers(listFromJson<Supplier>(j)))
+      .catch(() => setSuppliers([]));
+  }, [companyId]);
+
+  const onPickProduct = (id: string, product?: ProductPickerOption) => {
+    setProductId(id);
+    if (product?.defaultUnitId) setUnitId(product.defaultUnitId);
+  };
+
+  const submit = async () => {
+    if (!companyId) { setError('Company is required'); return; }
+    if (!productId) { setError('Product is required'); return; }
+    if (!unitId) { setError('Unit is required'); return; }
+    if (initialQuantity === '' || Number(initialQuantity) <= 0) { setError('Initial quantity must be greater than zero'); return; }
     setSaving(true); setError('');
     try {
-      const body = { batchNumber, productId, supplierId: supplierId || undefined, locationId: locationId || undefined, manufactureDate: manufactureDate || undefined, expiryDate: expiryDate || undefined, initialQty: Number(initialQty) || 0 };
-      const res = await fetch('/api/backend/westsides/product-batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
+      await backendPost('/westsides/product-batches', {
+        companyId,
+        productId,
+        ...(branchId ? { branchId } : {}),
+        ...(supplierId ? { supplierId } : {}),
+        ...(manufactureDate ? { manufactureDate } : {}),
+        ...(expiryDate ? { expiryDate } : {}),
+        initialQuantity: Number(initialQuantity),
+        unitId,
+      });
+      showToast('success', 'Batch created', 'The batch number is assigned automatically');
       onSaved();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error saving');
+      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Error saving');
     } finally { setSaving(false); }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <h2 className="text-base font-semibold text-slate-900">New Product Batch</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><CloseIcon /></button>
+    <Modal open onClose={onClose} title="New Product Batch" subtitle="Batch number is generated automatically"
+      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Create Batch</Btn></>}>
+      {error && <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
+      <div className="grid grid-cols-2 gap-4">
+        <FormSelect label="Company" required value={companyId} onChange={(e) => { setCompanyId(e.target.value); setProductId(''); }} placeholder="Select…" className="col-span-2">
+          {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </FormSelect>
+        <div className="col-span-2">
+          <label className="block text-[12px] font-medium mb-1" style={{ color: 'var(--aurora-text-secondary)' }}>
+            Product <span style={{ color: 'var(--aurora-danger)' }}>*</span>
+          </label>
+          <ProductPicker value={productId} onChange={onPickProduct} companyId={companyId || undefined} placeholder={companyId ? 'Search products…' : 'Select company first'} disabled={!companyId} />
         </div>
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-          {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className={labelCls}>Batch Number *</label>
-              <input required value={batchNumber} onChange={(e) => setBatchNumber(e.target.value)} className={fieldCls} placeholder="e.g. BATCH-001" />
-            </div>
-            <div>
-              <label className={labelCls}>Product ID *</label>
-              <input required value={productId} onChange={(e) => setProductId(e.target.value)} className={fieldCls} placeholder="Product ID" />
-            </div>
-            <div>
-              <label className={labelCls}>Supplier ID</label>
-              <input value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className={fieldCls} placeholder="Supplier ID" />
-            </div>
-            <div>
-              <label className={labelCls}>Location ID</label>
-              <input value={locationId} onChange={(e) => setLocationId(e.target.value)} className={fieldCls} placeholder="Location ID" />
-            </div>
-            <div>
-              <label className={labelCls}>Manufacture Date</label>
-              <input type="date" value={manufactureDate} onChange={(e) => setManufactureDate(e.target.value)} className={fieldCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Expiry Date</label>
-              <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} className={fieldCls} />
-            </div>
-            <div className="col-span-2">
-              <label className={labelCls}>Initial Quantity</label>
-              <input type="number" min={0} value={initialQty} onChange={(e) => setInitialQty(e.target.value === '' ? '' : Number(e.target.value))} className={fieldCls} placeholder="0" />
-            </div>
-          </div>
-        </form>
-        <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
-          <button onClick={onClose} className="text-sm text-slate-600 px-4 py-2 rounded-md border border-slate-200 hover:bg-slate-50">Cancel</button>
-          <button onClick={(e) => handleSubmit(e as unknown as React.FormEvent)} disabled={saving} className="text-sm bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-5 py-2 rounded-md font-medium">
-            {saving ? 'Saving…' : 'Create Batch'}
-          </button>
-        </div>
+        <FormSelect label="Supplier" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} placeholder={companyId ? 'None' : 'Select company first'} disabled={!companyId}>
+          {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </FormSelect>
+        <FormSelect label="Branch" value={branchId} onChange={(e) => setBranchId(e.target.value)} placeholder={companyId ? 'None' : 'Select company first'} disabled={!companyId}>
+          {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </FormSelect>
+        <FormInput label="Manufacture Date" type="date" value={manufactureDate} onChange={(e) => setManufactureDate(e.target.value)} />
+        <FormInput label="Expiry Date" type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} />
+        <FormInput label="Initial Quantity" required type="number" min={0} step="0.01" value={initialQuantity} onChange={(e) => setInitialQuantity(e.target.value)} placeholder="0" />
+        <FormSelect label="Unit" required value={unitId} onChange={(e) => setUnitId(e.target.value)} placeholder="Select…">
+          {units.map((u) => <option key={u.id} value={u.id}>{u.symbol ? `${u.name} (${u.symbol})` : u.name}</option>)}
+        </FormSelect>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -250,8 +282,8 @@ export default function ProductBatchesPage() {
                           {b.expiryDate ? fmtDate(b.expiryDate) : '—'}
                         </span>
                       </td>
-                      <td className={`${tdCls} text-right`}>{fmtNum(b.initialQty)}</td>
-                      <td className={`${tdCls} text-right`}>{fmtNum(b.remainingQty)}</td>
+                      <td className={`${tdCls} text-right`}>{fmtNum(b.initialQuantity)}</td>
+                      <td className={`${tdCls} text-right`}>{fmtNum(b.remainingQuantity)}</td>
                       <td className={tdCls}><Badge status={b.status} /></td>
                     </tr>
                   ))}

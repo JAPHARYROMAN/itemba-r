@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services/company-scope.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { QueryReportDto } from './dto/query-report.dto';
+import { SaveDailyCloseDto } from './dto/save-daily-close.dto';
 
 /**
  * All sales metrics now read from SalesOrder (POS module retired in W1).
@@ -955,11 +956,20 @@ export class WestsidesReportsService {
     ];
     const closeReadiness = this.dailyCloseReadiness(readinessChecks);
 
+    const savedClose = await this.prisma.westsidesDailyClose.findFirst({
+      where: {
+        companyId: query.companyId,
+        branchId: query.branchId ?? null,
+        closeDate: dayStart,
+      },
+    });
+
     return {
       date: dayStart.toISOString(),
       companyId: query.companyId,
       branchId: query.branchId ?? null,
       generatedAt: new Date().toISOString(),
+      savedClose,
       scope: {
         companyId: query.companyId,
         branchId: query.branchId ?? null,
@@ -1993,5 +2003,37 @@ export class WestsidesReportsService {
         ],
       }),
     }));
+  }
+
+  /**
+   * Upsert the persisted daily close for a company/branch/date. One record per
+   * scope+date; a re-save overwrites the previous sign-off (the record keeps
+   * who saved last and when, which is the supervisor sign-off of record).
+   */
+  async saveDailyClose(dto: SaveDailyCloseDto, user: AuthUser) {
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId);
+    const baseDate = new Date(dto.closeDate);
+    // Same local-day truncation as dailyClose() so GET and POST agree on the key.
+    const closeDate = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+    const scope = {
+      companyId: dto.companyId,
+      branchId: dto.branchId ?? null,
+      closeDate,
+    };
+    const data = {
+      countedByMethod: dto.countedByMethod,
+      expectedTotal: dto.expectedTotal,
+      countedTotal: dto.countedTotal,
+      varianceTotal: dto.varianceTotal,
+      notes: dto.notes ?? null,
+      closedById: user.id,
+      closedByName: user.fullName ?? user.email,
+      closedAt: new Date(),
+    };
+    const existing = await this.prisma.westsidesDailyClose.findFirst({ where: scope });
+    if (existing) {
+      return this.prisma.westsidesDailyClose.update({ where: { id: existing.id }, data });
+    }
+    return this.prisma.westsidesDailyClose.create({ data: { ...scope, ...data } });
   }
 }

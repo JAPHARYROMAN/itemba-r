@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DocumentPreviewLink } from '@/components/documents';
-import { Card, PageHeader, StatusBadge, showToast } from '@/components/ui';
+import { Btn, Card, Modal, PageHeader, StatusBadge, showToast } from '@/components/ui';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,6 +22,7 @@ interface DeliveryNote {
 /** Minimal shape of a confirmed sales order shown in the picker. */
 interface SalesOrderOption {
   id: string;
+  companyId?: string | null;
   salesOrderNumber?: string;
   orderNumber?: string;
   orderDate?: string;
@@ -55,6 +56,7 @@ interface DeliveryNoteLine {
   orderedQuantity: number;
   deliveredQuantity: number;
   unitId: string;
+  salesOrderLineId?: string;
   // Display-only helpers (not sent to the backend).
   productLabel: string;
   unitLabel: string;
@@ -111,6 +113,7 @@ function soLineToDnLine(line: SalesOrderLine): DeliveryNoteLine {
     orderedQuantity: ordered,
     deliveredQuantity: ordered,
     unitId: line.unitId ?? '',
+    salesOrderLineId: line.id,
     productLabel,
     unitLabel: line.unit?.symbol ?? line.unit?.name ?? '',
   };
@@ -124,10 +127,6 @@ function Spinner() {
   );
 }
 
-function CloseIcon() {
-  return <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
-}
-
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
 interface ModalProps { item: DeliveryNote | null; onClose: () => void; onSaved: () => void }
@@ -135,9 +134,13 @@ interface ModalProps { item: DeliveryNote | null; onClose: () => void; onSaved: 
 function DeliveryNoteModal({ item, onClose, onSaved }: ModalProps) {
   const [customerId, setCustomerId] = useState('');
   const [salesOrderId, setSalesOrderId] = useState('');
-  const [driverId, setDriverId] = useState('');
-  const [vehicleId, setVehicleId] = useState('');
-  const [dnDate, setDnDate] = useState(item?.dnDate?.slice(0, 10) ?? '');
+  // driverName / vehicleNumber are plain text on the backend (no driver or
+  // vehicle entities exist), so these are honest free-text fields.
+  const [driverName, setDriverName] = useState(item?.driverName ?? '');
+  const [vehicleNumber, setVehicleNumber] = useState(item?.vehicleNumber ?? '');
+  const [deliveryDate, setDeliveryDate] = useState(
+    (item?.deliveryDate ?? item?.dnDate)?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+  );
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -214,33 +217,57 @@ function DeliveryNoteModal({ item, onClose, onSaved }: ModalProps) {
     );
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async () => {
     // Creating a delivery note requires a source sales order (with lines) so the
     // note carries real fulfillment data instead of an empty shell.
     if (!item && !salesOrderId) {
       setError('Select a confirmed sales order to build this delivery note.');
       return;
     }
+    if (!deliveryDate) {
+      setError('Delivery date is required.');
+      return;
+    }
+    if (!item) {
+      const companyId = selectedSo?.companyId;
+      if (!companyId) {
+        setError('The selected sales order is missing its company — reload and try again.');
+        return;
+      }
+      if (!lines.length) {
+        setError('The selected sales order has no lines to deliver.');
+        return;
+      }
+      if (lines.some((line) => !line.productId || !line.unitId)) {
+        setError('Every delivery line needs a product and unit — the sales order has incomplete lines.');
+        return;
+      }
+    }
     setSaving(true); setError('');
     try {
-      const body = {
-        customerId: customerId || undefined,
-        salesOrderId: salesOrderId || undefined,
-        driverId: driverId || undefined,
-        vehicleId: vehicleId || undefined,
-        dnDate: dnDate || undefined,
-        notes: notes || undefined,
-        lines: !item && lines.length
-          ? lines.map((line) => ({
-              productId: line.productId || undefined,
+      const body = item
+        ? {
+            deliveryDate,
+            driverName: driverName || undefined,
+            vehicleNumber: vehicleNumber || undefined,
+            notes: notes || undefined,
+          }
+        : {
+            companyId: selectedSo!.companyId,
+            salesOrderId,
+            customerId: customerId || undefined,
+            deliveryDate,
+            driverName: driverName || undefined,
+            vehicleNumber: vehicleNumber || undefined,
+            notes: notes || undefined,
+            lines: lines.map((line) => ({
+              productId: line.productId,
               description: line.description || undefined,
-              orderedQuantity: line.orderedQuantity,
-              deliveredQuantity: line.deliveredQuantity,
-              unitId: line.unitId || undefined,
-            }))
-          : undefined,
-      };
+              quantity: line.deliveredQuantity,
+              unitId: line.unitId,
+              salesOrderLineId: line.salesOrderLineId || undefined,
+            })),
+          };
       const url = item ? `/api/backend/westsides/delivery-notes/${item.id}` : '/api/backend/westsides/delivery-notes';
       const method = item ? 'PATCH' : 'POST';
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -248,18 +275,16 @@ function DeliveryNoteModal({ item, onClose, onSaved }: ModalProps) {
       showToast('success', item ? 'Delivery note updated' : 'Delivery note created');
       onSaved();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error saving');
+      const message = err instanceof Error ? err.message : 'Error saving';
+      setError(message);
+      showToast('error', 'Save failed', message);
     } finally { setSaving(false); }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[92vh]">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <h2 className="text-base font-semibold text-slate-900">{item ? 'Edit Delivery Note' : 'New Delivery Note'}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><CloseIcon /></button>
-        </div>
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4 overflow-y-auto">
+    <Modal open onClose={onClose} title={item ? 'Edit Delivery Note' : 'New Delivery Note'} size="lg"
+      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={handleSubmit} loading={saving}>{item ? 'Update' : 'Create'}</Btn></>}>
+      <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="space-y-4">
           {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
 
           {/* Sales-order lookup — replaces the raw SO id field and drives line prefill. */}
@@ -346,35 +371,33 @@ function DeliveryNoteModal({ item, onClose, onSaved }: ModalProps) {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelCls}>Customer ID</label>
-              <input value={customerId} onChange={(e) => setCustomerId(e.target.value)} className={fieldCls} placeholder="Customer ID" />
+              <label className={labelCls}>Customer</label>
+              <input
+                value={item ? (item.customerName ?? '—') : (selectedSo?.customer?.name ?? selectedSo?.customerName ?? '')}
+                disabled
+                className={`${fieldCls} disabled:bg-slate-50 disabled:text-slate-500`}
+                placeholder="Inherited from the sales order"
+              />
             </div>
             <div>
-              <label className={labelCls}>Driver ID</label>
-              <input value={driverId} onChange={(e) => setDriverId(e.target.value)} className={fieldCls} placeholder="Driver ID" />
+              <label className={labelCls}>Delivery Date *</label>
+              <input type="date" required value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} className={fieldCls} />
             </div>
             <div>
-              <label className={labelCls}>Vehicle ID</label>
-              <input value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} className={fieldCls} placeholder="Vehicle ID" />
+              <label className={labelCls}>Driver name</label>
+              <input value={driverName} onChange={(e) => setDriverName(e.target.value)} className={fieldCls} placeholder="e.g. Juma Hassan (optional)" />
             </div>
             <div>
-              <label className={labelCls}>Delivery Date</label>
-              <input type="date" value={dnDate} onChange={(e) => setDnDate(e.target.value)} className={fieldCls} />
+              <label className={labelCls}>Vehicle</label>
+              <input value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} className={fieldCls} placeholder="e.g. T 123 ABC (optional)" />
             </div>
             <div className="col-span-2">
               <label className={labelCls}>Notes</label>
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className={fieldCls} placeholder="Delivery notes…" />
             </div>
           </div>
-        </form>
-        <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
-          <button onClick={onClose} className="text-sm text-slate-600 px-4 py-2 rounded-md border border-slate-200 hover:bg-slate-50">Cancel</button>
-          <button onClick={(e) => handleSubmit(e as unknown as React.FormEvent)} disabled={saving} className="text-sm bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-5 py-2 rounded-md font-medium">
-            {saving ? 'Saving…' : item ? 'Update' : 'Create'}
-          </button>
-        </div>
-      </div>
-    </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -400,6 +423,12 @@ const ACTION_ENDPOINT: Record<DNAction, string> = {
   dispatch: 'dispatch',
   deliver: 'deliver',
   cancel: 'cancel',
+};
+
+const ACTION_DONE: Record<DNAction, string> = {
+  dispatch: 'Delivery note dispatched',
+  deliver: 'Delivery note marked delivered',
+  cancel: 'Delivery note cancelled',
 };
 
 export default function DeliveryNotesPage() {
@@ -428,10 +457,14 @@ export default function DeliveryNotesPage() {
     setActioning(`${id}-${action}`);
     try {
       const res = await fetch(`/api/backend/westsides/delivery-notes/${id}/${ACTION_ENDPOINT[action]}`, { method: 'PATCH' });
-      if (!res.ok) throw new Error('Action failed');
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.message ?? 'Action failed');
+      }
+      showToast('success', ACTION_DONE[action]);
       load();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Action failed');
+      showToast('error', 'Action failed', err instanceof Error ? err.message : undefined);
     } finally { setActioning(null); }
   };
 

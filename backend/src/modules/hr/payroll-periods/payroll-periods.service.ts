@@ -1,13 +1,18 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
+import { EntityCodeGeneratorService } from '../../entity-code-generator/entity-code-generator.service';
 import { CreatePayrollPeriodDto } from './dto/create-payroll-period.dto';
 import { UpdatePayrollPeriodDto } from './dto/update-payroll-period.dto';
 import { applyCompanyScopeWhere } from '../../../common/services';
 
 @Injectable()
 export class PayrollPeriodsService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditLogsService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditLogsService,
+    private readonly codes: EntityCodeGeneratorService,
+  ) {}
 
   private companyFilter(user: any) {
     if (user.role?.scope === 'GROUP') return {};
@@ -40,9 +45,13 @@ export class PayrollPeriodsService {
   }
 
   async create(dto: CreatePayrollPeriodDto, user: any) {
+    const payrollPeriodCode =
+      dto.payrollPeriodCode ??
+      (await this.codes.next({ companyId: dto.companyId, entityType: 'PayrollPeriod' }));
     const record = await this.prisma.payrollPeriod.create({
       data: {
         ...dto,
+        payrollPeriodCode,
         startDate: new Date(dto.startDate),
         endDate: new Date(dto.endDate),
         paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : undefined,

@@ -1,18 +1,22 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, StatusBadge, FormInput, FormSelect, ConfirmDialog, Modal, Btn, PageSpinner } from '@/components/ui';
+import { Card, PageHeader, PageToolbar, StatusBadge, FormInput, FormSelect, ConfirmDialog, Modal, Btn, PageSpinner, showToast } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
+import { useAuth } from '@/hooks/use-auth';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm';
 
 interface Assignment {
   id: string;
-  employee?: string;
+  employee?: string | { fullName?: string; employeeCode?: string };
   employeeId?: string;
-  contextType: string;
-  company?: string;
+  assignmentContextType?: string;
+  company?: string | { id?: string; name?: string };
+  companyId?: string;
+  divisionId?: string | null;
+  branchId?: string | null;
   startDate?: string;
   endDate?: string;
   status: string;
@@ -40,6 +44,7 @@ export default function EmployeeAssignmentsPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const { companyOptions, branchOptions, divisionOptions, employeeOptions } = useOrgScope(form.companyId);
+  const { user } = useAuth();
 
   const load = async () => {
     setLoading(true);
@@ -54,30 +59,59 @@ export default function EmployeeAssignmentsPage() {
   const openCreate = () => { setEditing(null); setForm(empty); setShowModal(true); };
   const openEdit = (a: Assignment) => {
     setEditing(a);
-    setForm({ employeeId: a.employeeId ?? '', contextType: a.contextType, companyId: a.company ?? '', branchId: '', divisionId: '', startDate: a.startDate ?? '', endDate: a.endDate ?? '', status: a.status });
+    setForm({
+      employeeId: a.employeeId ?? '',
+      contextType: a.assignmentContextType ?? 'COMPANY',
+      companyId: (typeof a.company === 'object' ? a.company?.id : undefined) ?? a.companyId ?? '',
+      branchId: a.branchId ?? '',
+      divisionId: a.divisionId ?? '',
+      startDate: a.startDate ? a.startDate.slice(0, 10) : '',
+      endDate: a.endDate ? a.endDate.slice(0, 10) : '',
+      status: a.status,
+    });
     setShowModal(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    const payload: Record<string, unknown> = {
+      employeeId: form.employeeId,
+      companyId: form.companyId,
+      assignmentContextType: form.contextType,
+      divisionId: form.divisionId || undefined,
+      branchId: form.branchId || undefined,
+      startDate: form.startDate,
+      endDate: form.endDate || undefined,
+      status: form.status,
+    };
+    if (!editing) payload.createdById = user?.id;
     const url = editing ? `/api/backend/hr/employee-assignments/${editing.id}` : '/api/backend/hr/employee-assignments';
-    await fetch(url, {
-      method: editing ? 'PUT' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify((() => {
-        const { companyId, ...rest } = form;
-        return { ...rest, company: companyId };
-      })()),
-    });
-    setSaving(false);
-    setShowModal(false);
-    load();
+    try {
+      const res = await fetch(url, {
+        method: editing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not save the assignment.'));
+        return;
+      }
+      setShowModal(false);
+      load();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async () => {
     if (!deleteId) return;
-    await fetch(`/api/backend/hr/employee-assignments/${deleteId}`, { method: 'DELETE' });
+    const res = await fetch(`/api/backend/hr/employee-assignments/${deleteId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      showToast('error', 'Delete failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not delete the assignment.'));
+    }
     setDeleteId(null);
     load();
   };
@@ -112,9 +146,13 @@ export default function EmployeeAssignmentsPage() {
               <tbody style={{ color: 'var(--aurora-text)' }}>
                 {rows.map(a => (
                   <tr key={a.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-medium`}>{a.employee ?? a.employeeId ?? '—'}</td>
-                    <td className={tdCls}>{a.contextType}</td>
-                    <td className={tdCls}>{a.company ?? '—'}</td>
+                    <td className={`${tdCls} font-medium`}>
+                      {typeof a.employee === 'string'
+                        ? a.employee
+                        : (a.employee?.fullName ?? a.employee?.employeeCode ?? a.employeeId ?? '—')}
+                    </td>
+                    <td className={tdCls}>{a.assignmentContextType ?? '—'}</td>
+                    <td className={tdCls}>{typeof a.company === 'string' ? a.company : (a.company?.name ?? '—')}</td>
                     <td className={tdCls}>{a.startDate ? new Date(a.startDate).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}>{a.endDate ? new Date(a.endDate).toLocaleDateString('en-GB') : '—'}</td>
                     <td className={tdCls}><StatusBadge status={a.status} /></td>
@@ -153,15 +191,15 @@ export default function EmployeeAssignmentsPage() {
           <FormSelect label="Context Type" value={form.contextType} onChange={f('contextType')}
             options={[
               { value: 'COMPANY', label: 'Company' },
-              { value: 'DEPARTMENT', label: 'Department' },
-              { value: 'PROJECT', label: 'Project' },
-              { value: 'SITE', label: 'Site' },
+              { value: 'DIVISION', label: 'Division' },
+              { value: 'BRANCH', label: 'Branch' },
+              { value: 'OTHER', label: 'Other' },
             ]} />
           <FormSelect label="Branch" value={form.branchId} onChange={f('branchId')}
             options={branchOptions} placeholder={form.companyId ? 'Select branch' : 'Select company first'} />
           <FormSelect label="Division" value={form.divisionId} onChange={f('divisionId')}
             options={divisionOptions} placeholder={form.companyId ? 'Select division' : 'Select company first'} />
-          <FormInput label="Start Date" type="date" value={form.startDate} onChange={f('startDate')} />
+          <FormInput label="Start Date" type="date" value={form.startDate} onChange={f('startDate')} required />
           <FormInput label="End Date" type="date" value={form.endDate} onChange={f('endDate')} />
           <FormSelect label="Status" value={form.status} onChange={f('status')}
             options={[{ value: 'ACTIVE', label: 'Active' }, { value: 'INACTIVE', label: 'Inactive' }]} />
