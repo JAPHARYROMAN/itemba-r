@@ -1147,3 +1147,59 @@ html.motion-reduced *::after {
     page-break-inside: avoid !important;
   }
 }
+
+/* ─── Kaunta (Itemba POS) — Phase 1 identity ─────────────────────────────────
+   Scoped re-theme for the POS shell only (design spec: docs/pos-reform/
+   design-direction.md §2.1). Applied per-terminal behind the uiVersion pilot
+   flag — the component adds .pos-shell to its <main> when the session says
+   uiVersion >= 2. Mchana (warm paper/ink) is FORCED regardless of the app
+   theme: reps work in Dar sunlight on low-nit LCDs, so `.dark .pos-shell`
+   pins the same values. Usiku (ink-navy option) ships as a Phase-5 toggle:
+   .pos-shell[data-pos-theme='usiku'] — deferred per owner decision.
+   Four-color law: brass(accent)=money/custody · blue(primary)=press me ·
+   green=arrived · red=needs a human. Amber survives only for genuine
+   inline cautions. */
+.pos-shell,
+.dark .pos-shell {
+  /* Surfaces — warm paper */
+  --aurora-bg: #faf7f0;
+  --aurora-bg-subtle: #f4efe4;
+  --aurora-card: #ffffff;
+  --aurora-card-elevated: #ffffff;
+  --aurora-overlay: rgb(16 28 43 / 0.45);
+
+  /* Ink */
+  --aurora-text: #101c2b;
+  --aurora-text-secondary: #475569;
+  --aurora-text-muted: #64748b;
+
+  /* Warm borders (existing markup keeps borders until the Phase-2 reskin) */
+  --aurora-border: #eae3d6;
+  --aurora-border-strong: #d8cfbb;
+
+  /* Blue = press me (unchanged brand-600, pinned against .dark) */
+  --aurora-primary: #2563eb;
+  --aurora-primary-hover: #1d4ed8;
+  --aurora-primary-subtle: #eff6ff;
+  --aurora-primary-text: #1e40af;
+
+  /* Brass = money & custody. brass-700 for text-grade contrast on paper
+     (brass text only at Title size+; label-size money renders ink on
+     accent-subtle chips — direction §2.2 contrast rule). */
+  --aurora-accent: #b45309;
+  --aurora-accent-hover: #92400e;
+  --aurora-accent-subtle: #fffbeb;
+  --aurora-accent-text: #78350f;
+
+  /* Status trios pinned to light values (Mchana is forced under .dark too).
+     The -subtle aliases resolve through -bg, so they follow automatically. */
+  --aurora-success: #10b981;
+  --aurora-success-bg: #d1fae5;
+  --aurora-success-text: #064e3b;
+  --aurora-warning: #f59e0b;
+  --aurora-warning-bg: #fef3c7;
+  --aurora-warning-text: #78350f;
+  --aurora-danger: #ef4444;
+  --aurora-danger-bg: #fee2e2;
+  --aurora-danger-text: #7f1d1d;
+}

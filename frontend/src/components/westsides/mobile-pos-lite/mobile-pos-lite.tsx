@@ -157,6 +157,12 @@ export function MobilePosLite() {
   const [daySummary, setDaySummary] = useState<DaySummary | null>(null);
   const [dayLoading, setDayLoading] = useState(false);
 
+  // Kaunta pilot (design-direction §2.1): the .pos-shell token scope applies
+  // only when this terminal's uiVersion says so. Pre-session screens (boot
+  // splash) render classic; pilot terminals flip once the session (network or
+  // IndexedDB cache) arrives — an accepted one-beat flash during rollout.
+  const shellClass = (session?.terminal.uiVersion ?? 1) >= 2 ? ' pos-shell' : '';
+
   const pendingCount = pendingSales.length;
 
   const refreshPendingSales = useCallback(async (current: MobilePosLiteBinding) => {
@@ -686,7 +692,10 @@ export function MobilePosLite() {
 
   if (screen === 'home') {
     return (
-      <main className="min-h-screen px-4 py-4" style={{ background: 'var(--aurora-bg)' }}>
+      <main
+        className={`min-h-screen px-4 py-4${shellClass}`}
+        style={{ background: 'var(--aurora-bg)' }}
+      >
         <MobilePosHeader
           session={session}
           online={online}
@@ -769,7 +778,10 @@ export function MobilePosLite() {
 
   if (screen === 'mySales') {
     return (
-      <main className="min-h-screen px-4 py-4" style={{ background: 'var(--aurora-bg)' }}>
+      <main
+        className={`min-h-screen px-4 py-4${shellClass}`}
+        style={{ background: 'var(--aurora-bg)' }}
+      >
         <div className="mx-auto max-w-md">
           <button
             type="button"
@@ -893,7 +905,10 @@ export function MobilePosLite() {
 
   if (screen === 'purchase') {
     return (
-      <main className="min-h-screen px-4 py-4 pb-32" style={{ background: 'var(--aurora-bg)' }}>
+      <main
+        className={`min-h-screen px-4 py-4 pb-32${shellClass}`}
+        style={{ background: 'var(--aurora-bg)' }}
+      >
         <div className="mx-auto max-w-md">
           <button
             type="button"
@@ -1125,7 +1140,10 @@ export function MobilePosLite() {
 
   if (screen === 'queue') {
     return (
-      <main className="min-h-screen px-4 py-4" style={{ background: 'var(--aurora-bg)' }}>
+      <main
+        className={`min-h-screen px-4 py-4${shellClass}`}
+        style={{ background: 'var(--aurora-bg)' }}
+      >
         <div className="mx-auto max-w-md">
           <button
             type="button"
@@ -1287,7 +1305,10 @@ export function MobilePosLite() {
 
   if (screen === 'success') {
     return (
-      <main className="min-h-screen px-4 py-4" style={{ background: 'var(--aurora-bg)' }}>
+      <main
+        className={`min-h-screen px-4 py-4${shellClass}`}
+        style={{ background: 'var(--aurora-bg)' }}
+      >
         <MobilePosHeader
           session={session}
           online={online}
@@ -1353,7 +1374,10 @@ export function MobilePosLite() {
 
   if (screen === 'payment') {
     return (
-      <main className="min-h-screen px-4 py-4 pb-28" style={{ background: 'var(--aurora-bg)' }}>
+      <main
+        className={`min-h-screen px-4 py-4 pb-28${shellClass}`}
+        style={{ background: 'var(--aurora-bg)' }}
+      >
         <div className="mx-auto max-w-md">
           <button
             type="button"
@@ -1596,7 +1620,10 @@ export function MobilePosLite() {
   }
 
   return (
-    <main className="min-h-screen px-4 py-4 pb-32" style={{ background: 'var(--aurora-bg)' }}>
+    <main
+      className={`min-h-screen px-4 py-4 pb-32${shellClass}`}
+      style={{ background: 'var(--aurora-bg)' }}
+    >
       <div className="mx-auto max-w-md">
         <div className="flex items-center justify-between">
           <button

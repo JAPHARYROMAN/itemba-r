@@ -3,14 +3,16 @@ export const dynamic = 'force-static';
 export function GET() {
   return new Response(
     JSON.stringify({
-      name: 'Itemba Mobile POS Lite',
+      name: 'Itemba POS',
       short_name: 'Itemba POS',
       description: 'A branch-locked mobile sales counter connected to ITEMBA-R.',
       start_url: '/mobile-pos',
       scope: '/',
       display: 'standalone',
-      background_color: '#07111f',
-      theme_color: '#0f766e',
+      // Kaunta identity: warm-paper chrome (design-direction §2.1); the old
+      // teal theme_color was an orphan no surface ever used.
+      background_color: '#faf7f0',
+      theme_color: '#faf7f0',
       orientation: 'portrait',
       icons: [
         {
