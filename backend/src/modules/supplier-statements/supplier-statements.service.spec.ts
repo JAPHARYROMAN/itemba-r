@@ -116,10 +116,7 @@ describe('SupplierStatementsService.generate reconciliation', () => {
 
   it('honours an explicit currency in the DTO', async () => {
     const { service, prisma } = makeService([]);
-    const run = await service.generate(
-      { ...DTO, currency: CurrencyCode.USD } as any,
-      USER,
-    );
+    const run = await service.generate({ ...DTO, currency: CurrencyCode.USD } as any, USER);
     const where = prisma.payable.findMany.mock.calls[0][0].where;
     expect(where.currency).toBe(CurrencyCode.USD);
     expect(run.currency).toBe(CurrencyCode.USD);
@@ -147,7 +144,11 @@ describe('SupplierStatementsService.generate reconciliation', () => {
   it('enforces WRITE company access before generating', async () => {
     const assertCanAccessCompany = jest.fn().mockRejectedValue(new Error('forbidden'));
     const service = new SupplierStatementsService(
-      { supplier: { findFirst: jest.fn() }, payable: { findMany: jest.fn() }, supplierStatementRun: { create: jest.fn() } } as any,
+      {
+        supplier: { findFirst: jest.fn() },
+        payable: { findMany: jest.fn() },
+        supplierStatementRun: { create: jest.fn() },
+      } as any,
       { log: jest.fn() } as any,
       { assertCanAccessCompany } as any,
     );
@@ -158,9 +159,7 @@ describe('SupplierStatementsService.generate reconciliation', () => {
   it('rejects a supplier outside the selected company', async () => {
     const { service, prisma } = makeService();
     prisma.supplier.findFirst.mockResolvedValue(null);
-    await expect(service.generate(DTO as any, USER)).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(service.generate(DTO as any, USER)).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.supplierStatementRun.create).not.toHaveBeenCalled();
   });
 

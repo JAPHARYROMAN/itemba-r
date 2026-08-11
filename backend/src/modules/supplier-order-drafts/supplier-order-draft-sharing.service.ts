@@ -26,12 +26,7 @@ export class SupplierOrderDraftSharingService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async emailPdf(
-    id: string,
-    dto: SupplierOrderDraftEmailDto,
-    user: AuthUser,
-    ipAddress?: string,
-  ) {
+  async emailPdf(id: string, dto: SupplierOrderDraftEmailDto, user: AuthUser, ipAddress?: string) {
     const draft = await this.drafts.findOne(id, user);
     const generated = await this.generatedDocuments.generateBusinessPdf(
       { entityType: 'SUPPLIER_ORDER_DRAFT', entityId: id },
@@ -40,7 +35,8 @@ export class SupplierOrderDraftSharingService {
     );
     const pdf = await this.documents.readFileBuffer(generated.document.id, user);
     const subject = dto.subject?.trim() || `${draft.draftNumber} - Supplier Order Draft`;
-    const message = dto.message?.trim() ||
+    const message =
+      dto.message?.trim() ||
       `Please find attached supplier order draft ${draft.draftNumber} for your review.`;
     const companyName = draft.company?.name || 'ITEMBA GROUP';
     const safeMessage = escapeHtml(message).replace(/\n/g, '<br>');

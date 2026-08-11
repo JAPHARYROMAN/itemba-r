@@ -4,10 +4,12 @@ import { UserSecurityProfilesService } from './user-security-profiles.service';
 
 const actor = { id: 'admin-1' } as any;
 
-function makeService(opts: {
-  profile?: Record<string, any> | null;
-  targetUser?: Record<string, any> | null;
-} = {}) {
+function makeService(
+  opts: {
+    profile?: Record<string, any> | null;
+    targetUser?: Record<string, any> | null;
+  } = {},
+) {
   const profile =
     opts.profile === undefined
       ? {
@@ -21,9 +23,7 @@ function makeService(opts: {
       : opts.profile;
 
   const targetUser =
-    opts.targetUser === undefined
-      ? { companyId: 'company-1', companyAccess: [] }
-      : opts.targetUser;
+    opts.targetUser === undefined ? { companyId: 'company-1', companyAccess: [] } : opts.targetUser;
 
   const userSecurityProfile = {
     findFirst: jest.fn(async () => profile),

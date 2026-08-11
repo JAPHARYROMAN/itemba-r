@@ -251,9 +251,7 @@ describe('AuthService password-rotation recovery path (Wave C lockout fix)', () 
         passwordHash: await argon2.hash('BrandNew#Pw123'),
       }),
     );
-    jwt.signAsync
-      .mockResolvedValueOnce('access-2')
-      .mockResolvedValueOnce('refresh-2');
+    jwt.signAsync.mockResolvedValueOnce('access-2').mockResolvedValueOnce('refresh-2');
 
     const result: any = await service.login({
       email: 'admin@itemba.local',
@@ -272,18 +270,18 @@ describe('AuthService password-rotation recovery path (Wave C lockout fix)', () 
     const { service, jwt } = makeService();
     jwt.verifyAsync.mockResolvedValue({ sub: 'admin-1', scope: 'twoFactor' });
 
-    await expect(
-      service.changePassword('not-a-pw-token', 'BrandNew#Pw123'),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(service.changePassword('not-a-pw-token', 'BrandNew#Pw123')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
   });
 
   it('rejects change-password when the tempToken is invalid/expired', async () => {
     const { service, jwt } = makeService();
     jwt.verifyAsync.mockRejectedValue(new Error('jwt expired'));
 
-    await expect(
-      service.changePassword('expired', 'BrandNew#Pw123'),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(service.changePassword('expired', 'BrandNew#Pw123')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
   });
 
   it('enforces the minimum-length policy on the new password', async () => {
@@ -308,9 +306,7 @@ describe('AuthService password-rotation recovery path (Wave C lockout fix)', () 
     });
     prisma.user.findUnique.mockResolvedValue(await seededAdminRow());
 
-    await expect(
-      service.changePassword('tok', ADMIN_PASSWORD),
-    ).rejects.toThrow('reuse');
+    await expect(service.changePassword('tok', ADMIN_PASSWORD)).rejects.toThrow('reuse');
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
@@ -325,9 +321,7 @@ describe('AuthService password-rotation recovery path (Wave C lockout fix)', () 
       { passwordHash: await argon2.hash('OldRecent#1') },
     ]);
 
-    await expect(
-      service.changePassword('tok', 'OldRecent#1'),
-    ).rejects.toThrow('reuse');
+    await expect(service.changePassword('tok', 'OldRecent#1')).rejects.toThrow('reuse');
   });
 });
 
@@ -346,9 +340,7 @@ describe('AuthService.login tolerant email lookup (legacy mixed-case rows)', () 
       failedLoginAttempts: 0,
       lockedUntil: null,
     });
-    jwt.signAsync
-      .mockResolvedValueOnce('legacy-access')
-      .mockResolvedValueOnce('legacy-refresh');
+    jwt.signAsync.mockResolvedValueOnce('legacy-access').mockResolvedValueOnce('legacy-refresh');
 
     const result: any = await service.login({
       email: 'legacy.user@example.com',

@@ -11,16 +11,9 @@ export interface PreparedSupplierOrderDraftPdf {
   downloadHref: string;
 }
 
-export type SupplierOrderDraftShareChannel =
-  | 'DOWNLOAD'
-  | 'NATIVE_SHARE'
-  | 'WHATSAPP'
-  | 'EMAIL';
+export type SupplierOrderDraftShareChannel = 'DOWNLOAD' | 'NATIVE_SHARE' | 'WHATSAPP' | 'EMAIL';
 
-export async function prepareSupplierOrderDraftPdf(input: {
-  id: string;
-  draftNumber: string;
-}) {
+export async function prepareSupplierOrderDraftPdf(input: { id: string; draftNumber: string }) {
   const generated = await backendPost<GeneratedDocumentResponse>('/generated-documents/pdf', {
     entityType: 'SUPPLIER_ORDER_DRAFT',
     entityId: input.id,

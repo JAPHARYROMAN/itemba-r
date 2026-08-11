@@ -81,7 +81,10 @@ describe('LoansService.create — disbursement journal entry', () => {
   it('posts a balanced DR Cash / CR LOAN_PRINCIPAL_PAYABLE JE for a new drawdown (outstanding == principal)', async () => {
     const { service, postingEngine } = makeService();
 
-    await service.create(baseDto({ principalAmount: '1000000', outstandingBalance: '1000000' }), USER);
+    await service.create(
+      baseDto({ principalAmount: '1000000', outstandingBalance: '1000000' }),
+      USER,
+    );
 
     expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
     const [payload] = postingEngine.postLines.mock.calls[0];

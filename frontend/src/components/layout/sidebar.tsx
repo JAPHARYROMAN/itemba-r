@@ -45,7 +45,8 @@ const ICONS = {
   chevronDown: 'M6 9l6 6 6-6',
   chevronRight: 'M9 18l6-6-6-6',
   star: 'M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01z',
-  starFilled: 'M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01z',
+  starFilled:
+    'M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01z',
   scale:
     'M12 3v1m0 16v1M5.636 5.636l.707.707m11.314 11.314.707.707M3 12h1m16 0h1M5.636 18.364l.707-.707m11.314-11.314.707-.707M12 7a5 5 0 100 10 5 5 0 000-10z',
   // M11 icons
@@ -752,7 +753,12 @@ export const NAV: NavItem[] = [
     iconKey: 'barChart',
     children: [
       { href: '/reports', label: 'Catalog', iconKey: 'barChart' },
-      { href: '/reports/run', label: 'Run Report', iconKey: 'play', permission: 'report_runs.create' },
+      {
+        href: '/reports/run',
+        label: 'Run Report',
+        iconKey: 'play',
+        permission: 'report_runs.create',
+      },
       {
         href: '/reports/scheduled',
         label: 'Scheduled Reports',
@@ -1097,9 +1103,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               </p>
               {visibleFavorites.map((fav) => {
                 const active = isActive(fav.href, pathname);
-                const iconKey = (fav.iconKey && fav.iconKey in ICONS
-                  ? (fav.iconKey as keyof typeof ICONS)
-                  : 'star') as keyof typeof ICONS;
+                const iconKey = (
+                  fav.iconKey && fav.iconKey in ICONS ? (fav.iconKey as keyof typeof ICONS) : 'star'
+                ) as keyof typeof ICONS;
                 return (
                   <div key={fav.href} className="group relative">
                     <Link

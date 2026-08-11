@@ -460,7 +460,13 @@ describe('SupplierInvoicesService createThreeWayMatch shared-calculator variance
         // invoice.totalAmount to 2000 but has no PO counterpart. Modeled with
         // quantity 0 so it is a pure charge line and does not perturb the separate
         // quantity-variance path, isolating the amount-variance behaviour under test.
-        invLine({ productId: null, description: 'Freight', quantity: 0, unitPrice: 0, lineTotal: 1000 }),
+        invLine({
+          productId: null,
+          description: 'Freight',
+          quantity: 0,
+          unitPrice: 0,
+          lineTotal: 1000,
+        }),
       ],
     };
     await (service as any).createThreeWayMatch(invoice, 'user-1');

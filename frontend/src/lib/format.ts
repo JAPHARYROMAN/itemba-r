@@ -56,7 +56,9 @@ export function formatNumber(
   opts?: Intl.NumberFormatOptions,
 ): string {
   const n = toNumber(value);
-  return opts ? new Intl.NumberFormat(LOCALE, opts).format(n) : new Intl.NumberFormat(LOCALE).format(n);
+  return opts
+    ? new Intl.NumberFormat(LOCALE, opts).format(n)
+    : new Intl.NumberFormat(LOCALE).format(n);
 }
 
 /** Parse a date input; returns null when empty or invalid. */
@@ -77,7 +79,11 @@ export function formatDate(value: string | Date | null | undefined): string {
 export function formatDateTime(value: string | Date | null | undefined): string {
   const date = toDate(value);
   if (!date) return '—';
-  const day = date.toLocaleDateString(LOCALE, { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const day = date.toLocaleDateString(LOCALE, {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
   const time = date.toLocaleTimeString(LOCALE, {
     hour: '2-digit',
     minute: '2-digit',

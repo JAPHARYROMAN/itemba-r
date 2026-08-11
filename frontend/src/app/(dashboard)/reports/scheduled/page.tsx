@@ -151,7 +151,11 @@ function recipientEmails(recipients: ScheduledReport['recipients']): string[] {
   const raw = recipients as Record<string, unknown>;
   const candidate = raw.emails ?? raw.to ?? raw.recipients ?? raw.addresses;
   if (Array.isArray(candidate)) return candidate.map((v) => String(v)).filter(Boolean);
-  if (typeof candidate === 'string') return candidate.split(/[,\n;]/).map((s) => s.trim()).filter(Boolean);
+  if (typeof candidate === 'string')
+    return candidate
+      .split(/[,\n;]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
   return [];
 }
 
@@ -273,7 +277,9 @@ export default function ScheduledReportsPage() {
           name: form.name.trim(),
           description: form.description.trim() || undefined,
           reportDefinitionId: form.reportDefinitionId.trim(),
-          ...(form.savedReportViewId.trim() ? { savedReportViewId: form.savedReportViewId.trim() } : {}),
+          ...(form.savedReportViewId.trim()
+            ? { savedReportViewId: form.savedReportViewId.trim() }
+            : {}),
           ...(form.companyId.trim() ? { companyId: form.companyId.trim() } : {}),
           frequency: form.frequency,
           exportFormat: form.exportFormat,
@@ -285,7 +291,11 @@ export default function ScheduledReportsPage() {
       if (!editing && page !== 1) setPage(1);
       else await load();
     } catch (err) {
-      showToast('error', editing ? 'Update failed' : 'Create failed', errorMessage(err, 'Please try again'));
+      showToast(
+        'error',
+        editing ? 'Update failed' : 'Create failed',
+        errorMessage(err, 'Please try again'),
+      );
     } finally {
       setSaving(false);
     }
@@ -356,7 +366,11 @@ export default function ScheduledReportsPage() {
     const action = schedule.isActive ? 'deactivate' : 'activate';
     try {
       await backendPatch(`/bi/scheduled-reports/${schedule.id}/${action}`, {});
-      showToast('success', schedule.isActive ? 'Schedule deactivated' : 'Schedule activated', schedule.name);
+      showToast(
+        'success',
+        schedule.isActive ? 'Schedule deactivated' : 'Schedule activated',
+        schedule.name,
+      );
       await load();
     } catch (err) {
       showToast('error', 'Could not update status', errorMessage(err, 'Please try again'));
@@ -428,7 +442,11 @@ export default function ScheduledReportsPage() {
             return <span style={{ color: 'var(--aurora-text-muted)' }}>—</span>;
           }
           return (
-            <span className="text-xs" style={{ color: 'var(--aurora-text-secondary)' }} title={emails.join(', ')}>
+            <span
+              className="text-xs"
+              style={{ color: 'var(--aurora-text-secondary)' }}
+              title={emails.join(', ')}
+            >
               {emails.length === 1 ? emails[0] : `${emails[0]} +${emails.length - 1}`}
             </span>
           );
@@ -465,7 +483,12 @@ export default function ScheduledReportsPage() {
           return (
             <div className="flex flex-wrap items-center gap-1.5">
               {canRun && (
-                <AuroraButton size="sm" variant="primary" loading={busy} onClick={() => runNow(row)}>
+                <AuroraButton
+                  size="sm"
+                  variant="primary"
+                  loading={busy}
+                  onClick={() => runNow(row)}
+                >
                   Run now
                 </AuroraButton>
               )}
@@ -478,7 +501,12 @@ export default function ScheduledReportsPage() {
                 </AuroraButton>
               )}
               {canManage && (
-                <AuroraButton size="sm" variant="ghost" loading={busy} onClick={() => toggleActive(row)}>
+                <AuroraButton
+                  size="sm"
+                  variant="ghost"
+                  loading={busy}
+                  onClick={() => toggleActive(row)}
+                >
                   {row.isActive ? 'Deactivate' : 'Activate'}
                 </AuroraButton>
               )}
@@ -514,10 +542,7 @@ export default function ScheduledReportsPage() {
         <PageHeader
           title="Scheduled Reports"
           subtitle="Configure report snapshots with a frequency, export format and recipient list."
-          breadcrumbs={[
-            { label: 'Reports', href: '/reports' },
-            { label: 'Scheduled' },
-          ]}
+          breadcrumbs={[{ label: 'Reports', href: '/reports' }, { label: 'Scheduled' }]}
           actions={
             canManage ? (
               <AuroraButton variant="primary" onClick={openCreate}>
@@ -537,18 +562,30 @@ export default function ScheduledReportsPage() {
           }}
           role="note"
         >
-          <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          <svg
+            className="w-5 h-5 flex-shrink-0 mt-0.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+            />
           </svg>
           <div className="text-sm leading-5">
-            <span className="font-semibold">Active schedules are dispatched by the background worker.</span>{' '}
-            When the server runs with the job worker and automation dispatch enabled
-            (<code className="text-[11px]">JOB_WORKER_ENABLED</code> and{' '}
-            <code className="text-[11px]">AUTOMATION_DISPATCH_ENABLED</code>), due schedules run automatically
-            and the generated export is emailed to the recipients with the file attached.{' '}
-            <span className="font-semibold">&ldquo;Run now&rdquo;</span> generates a snapshot immediately without
-            emailing — every generated file can be downloaded from the schedule&rsquo;s{' '}
-            <span className="font-semibold">Runs</span> list.
+            <span className="font-semibold">
+              Active schedules are dispatched by the background worker.
+            </span>{' '}
+            When the server runs with the job worker and automation dispatch enabled (
+            <code className="text-[11px]">JOB_WORKER_ENABLED</code> and{' '}
+            <code className="text-[11px]">AUTOMATION_DISPATCH_ENABLED</code>), due schedules run
+            automatically and the generated export is emailed to the recipients with the file
+            attached. <span className="font-semibold">&ldquo;Run now&rdquo;</span> generates a
+            snapshot immediately without emailing — every generated file can be downloaded from the
+            schedule&rsquo;s <span className="font-semibold">Runs</span> list.
           </div>
         </div>
 
@@ -604,7 +641,11 @@ export default function ScheduledReportsPage() {
                 value={form.scheduleCode}
                 error={formErrors.scheduleCode}
                 placeholder="e.g. BOARD-PACK-M"
-                help={editing ? 'Schedule code cannot be changed.' : 'Unique short code for this schedule.'}
+                help={
+                  editing
+                    ? 'Schedule code cannot be changed.'
+                    : 'Unique short code for this schedule.'
+                }
                 onChange={(e) => setForm((f) => ({ ...f, scheduleCode: e.target.value }))}
               />
               <div className="sm:col-span-2">
@@ -625,7 +666,11 @@ export default function ScheduledReportsPage() {
                 value={form.reportDefinitionId}
                 error={formErrors.reportDefinitionId}
                 placeholder="UUID of the report definition"
-                help={editing ? 'Report definition cannot be changed.' : 'The report definition UUID to snapshot.'}
+                help={
+                  editing
+                    ? 'Report definition cannot be changed.'
+                    : 'The report definition UUID to snapshot.'
+                }
                 onChange={(e) => setForm((f) => ({ ...f, reportDefinitionId: e.target.value }))}
               />
               <FormInput
@@ -652,14 +697,18 @@ export default function ScheduledReportsPage() {
                 required
                 value={form.frequency}
                 options={FREQUENCY_OPTIONS}
-                onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value as ScheduleFrequency }))}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, frequency: e.target.value as ScheduleFrequency }))
+                }
               />
               <FormSelect
                 label="Export format"
                 required
                 value={form.exportFormat}
                 options={FORMAT_OPTIONS}
-                onChange={(e) => setForm((f) => ({ ...f, exportFormat: e.target.value as ReportExportFormat }))}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, exportFormat: e.target.value as ReportExportFormat }))
+                }
               />
               <div className="sm:col-span-2">
                 <FormTextarea
@@ -702,7 +751,11 @@ export default function ScheduledReportsPage() {
                 {runsError}
               </span>
               {runsTarget && (
-                <AuroraButton size="sm" variant="ghost" onClick={() => void loadRuns(runsTarget.id)}>
+                <AuroraButton
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void loadRuns(runsTarget.id)}
+                >
                   Retry
                 </AuroraButton>
               )}
@@ -710,7 +763,8 @@ export default function ScheduledReportsPage() {
           )}
           {!runsLoading && !runsError && runs.length === 0 && (
             <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
-              No runs recorded yet. Use &ldquo;Run now&rdquo; or wait for the automated dispatcher to fire.
+              No runs recorded yet. Use &ldquo;Run now&rdquo; or wait for the automated dispatcher
+              to fire.
             </div>
           )}
           <div className="space-y-2">

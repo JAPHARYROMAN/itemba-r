@@ -113,7 +113,10 @@ function makeService(opts?: {
         return opts?.sourceReceivableId ? { id: opts.sourceReceivableId } : null;
       }
       return receivable
-        ? { companyId: receivable.companyId, status: opts?.receivableStatus ?? receivable.status ?? 'OPEN' }
+        ? {
+            companyId: receivable.companyId,
+            status: opts?.receivableStatus ?? receivable.status ?? 'OPEN',
+          }
         : null;
     }),
     update: jest.fn(async () => ({})),
@@ -133,9 +136,30 @@ function makeService(opts?: {
       branchId: 'branch-1',
       status: 'POSTED',
       lines: [
-        { accountId: 'acc-rev', description: 'Sales returns & allowances', debit: D('1000'), credit: D('0'), divisionId: null, branchId: null },
-        { accountId: 'acc-vat', description: 'Output VAT reversal', debit: D('180'), credit: D('0'), divisionId: null, branchId: null },
-        { accountId: 'acc-ar', description: 'AR credit', debit: D('0'), credit: D('1180'), divisionId: null, branchId: null },
+        {
+          accountId: 'acc-rev',
+          description: 'Sales returns & allowances',
+          debit: D('1000'),
+          credit: D('0'),
+          divisionId: null,
+          branchId: null,
+        },
+        {
+          accountId: 'acc-vat',
+          description: 'Output VAT reversal',
+          debit: D('180'),
+          credit: D('0'),
+          divisionId: null,
+          branchId: null,
+        },
+        {
+          accountId: 'acc-ar',
+          description: 'AR credit',
+          debit: D('0'),
+          credit: D('1180'),
+          divisionId: null,
+          branchId: null,
+        },
       ],
     })),
     updateMany: jest.fn(async () => ({ count: 1 })),
@@ -239,8 +263,14 @@ describe('CreditNotesService.issue — balanced reversing journal entry', () => 
 
     const lines = postingEngine.postLines.mock.calls[0][0].lines as Array<any>;
     expect(lines.find((l) => l.accountId === 'acc-vat')).toBeUndefined();
-    const totalDebit = lines.reduce((s: any, l: any) => s.plus(new Prisma.Decimal(l.debit ?? 0)), D('0'));
-    const totalCredit = lines.reduce((s: any, l: any) => s.plus(new Prisma.Decimal(l.credit ?? 0)), D('0'));
+    const totalDebit = lines.reduce(
+      (s: any, l: any) => s.plus(new Prisma.Decimal(l.debit ?? 0)),
+      D('0'),
+    );
+    const totalCredit = lines.reduce(
+      (s: any, l: any) => s.plus(new Prisma.Decimal(l.credit ?? 0)),
+      D('0'),
+    );
     expect(totalDebit.equals(totalCredit)).toBe(true);
     expect(totalDebit.toString()).toBe('500');
   });
@@ -516,8 +546,14 @@ describe('CreditNotesService.void — reverses the issue JE', () => {
     expect(new Prisma.Decimal(rev.credit).toString()).toBe('1000');
     expect(new Prisma.Decimal(ar.debit).toString()).toBe('1180');
 
-    const totalDebit = lines.reduce((s: any, l: any) => s.plus(new Prisma.Decimal(l.debit ?? 0)), D('0'));
-    const totalCredit = lines.reduce((s: any, l: any) => s.plus(new Prisma.Decimal(l.credit ?? 0)), D('0'));
+    const totalDebit = lines.reduce(
+      (s: any, l: any) => s.plus(new Prisma.Decimal(l.debit ?? 0)),
+      D('0'),
+    );
+    const totalCredit = lines.reduce(
+      (s: any, l: any) => s.plus(new Prisma.Decimal(l.credit ?? 0)),
+      D('0'),
+    );
     expect(totalDebit.equals(totalCredit)).toBe(true);
 
     // Original JE flipped to REVERSED.
@@ -532,9 +568,9 @@ describe('CreditNotesService.void — reverses the issue JE', () => {
 
   it('rejects voiding a DRAFT credit note', async () => {
     const { service, postingEngine } = makeService({ note: { status: CreditNoteStatus.DRAFT } });
-    await expect(
-      service.void('cn-1', { reason: 'x' }, user),
-    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.void('cn-1', { reason: 'x' }, user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
     expect(postingEngine.postLines).not.toHaveBeenCalled();
   });
 
@@ -576,9 +612,9 @@ describe('CreditNotesService.void — cross-module double-relief guard', () => {
       liveRefundCount: 1,
     });
 
-    await expect(
-      service.void('cn-1', { reason: 'x' }, user),
-    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.void('cn-1', { reason: 'x' }, user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
 
     // Blocked before any GL reversal is posted.
     expect(postingEngine.postLines).not.toHaveBeenCalled();
@@ -615,9 +651,9 @@ describe('CreditNotesService.void — missing-swing abort', () => {
     const svc: any = service;
     (svc.prisma.journalEntry.updateMany as jest.Mock).mockResolvedValueOnce({ count: 0 });
 
-    await expect(
-      service.void('cn-1', { reason: 'x' }, user),
-    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.void('cn-1', { reason: 'x' }, user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
   });
 });
 

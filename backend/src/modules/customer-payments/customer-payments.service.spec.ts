@@ -54,21 +54,23 @@ function paymentRow(overrides: Record<string, any> = {}) {
  * the row returned by the FOR UPDATE lock ($queryRaw). Receivable `update`
  * captures the last-written data per id so tests can assert the decrement.
  */
-function makeService(opts: {
-  receivablesById?: Record<string, any>;
-  customer?: Record<string, any> | null;
-  cashAccount?: Record<string, any> | null;
-  advanceAccountId?: string | null;
-  paymentAllocations?: Array<{ receivableId: string; amount: Prisma.Decimal }>;
-  paymentStatus?: CustomerPaymentStatus;
-  updateManyCount?: number;
-  originalJournalLines?: Array<any>;
-  postLines?: jest.Mock;
-  /** When true, the original JE lookup returns null (mirror reversal cannot post). */
-  originalJournalMissing?: boolean;
-  /** Overrides for the reversed payment row returned by customerPayment.findFirst. */
-  paymentOverrides?: Record<string, any>;
-} = {}) {
+function makeService(
+  opts: {
+    receivablesById?: Record<string, any>;
+    customer?: Record<string, any> | null;
+    cashAccount?: Record<string, any> | null;
+    advanceAccountId?: string | null;
+    paymentAllocations?: Array<{ receivableId: string; amount: Prisma.Decimal }>;
+    paymentStatus?: CustomerPaymentStatus;
+    updateManyCount?: number;
+    originalJournalLines?: Array<any>;
+    postLines?: jest.Mock;
+    /** When true, the original JE lookup returns null (mirror reversal cannot post). */
+    originalJournalMissing?: boolean;
+    /** Overrides for the reversed payment row returned by customerPayment.findFirst. */
+    paymentOverrides?: Record<string, any>;
+  } = {},
+) {
   const receivablesById = opts.receivablesById ?? { 'rec-1': receivable() };
   const receivableUpdates: Record<string, any> = {};
 
@@ -95,8 +97,22 @@ function makeService(opts: {
       : opts.customer;
 
   const originalJournalLines = opts.originalJournalLines ?? [
-    { accountId: 'acc-cash', debit: new Prisma.Decimal(150), credit: new Prisma.Decimal(0), description: 'Payment received', divisionId: null, branchId: null },
-    { accountId: 'acc-ar', debit: new Prisma.Decimal(0), credit: new Prisma.Decimal(150), description: 'Settle receivables', divisionId: null, branchId: null },
+    {
+      accountId: 'acc-cash',
+      debit: new Prisma.Decimal(150),
+      credit: new Prisma.Decimal(0),
+      description: 'Payment received',
+      divisionId: null,
+      branchId: null,
+    },
+    {
+      accountId: 'acc-ar',
+      debit: new Prisma.Decimal(0),
+      credit: new Prisma.Decimal(150),
+      description: 'Settle receivables',
+      divisionId: null,
+      branchId: null,
+    },
   ];
 
   const tx: any = {
@@ -139,7 +155,9 @@ function makeService(opts: {
       findFirst: jest.fn(async () =>
         paymentRow({
           status: opts.paymentStatus ?? CustomerPaymentStatus.COMPLETED,
-          allocations: opts.paymentAllocations ?? [{ receivableId: 'rec-1', amount: new Prisma.Decimal(150) }],
+          allocations: opts.paymentAllocations ?? [
+            { receivableId: 'rec-1', amount: new Prisma.Decimal(150) },
+          ],
           ...(opts.paymentOverrides ?? {}),
         }),
       ),
@@ -184,7 +202,8 @@ function makeService(opts: {
     })),
   } as any;
   const postLines =
-    opts.postLines ?? jest.fn(async () => ({ id: 'je-1', journalNumber: 'JE-CUSTOMER_PAYMENTS-1' }));
+    opts.postLines ??
+    jest.fn(async () => ({ id: 'je-1', journalNumber: 'JE-CUSTOMER_PAYMENTS-1' }));
   const postingEngine = { postLines } as any;
   const codes = { next: jest.fn(async () => 'CPY-2026-000001') } as any;
 
@@ -196,7 +215,19 @@ function makeService(opts: {
     postingEngine,
     codes,
   );
-  return { service, prisma, tx, receivableUpdates, cashAccountUpdates, auditLogs, companyScope, accountResolver, postingEngine, postLines, codes };
+  return {
+    service,
+    prisma,
+    tx,
+    receivableUpdates,
+    cashAccountUpdates,
+    auditLogs,
+    companyScope,
+    accountResolver,
+    postingEngine,
+    postLines,
+    codes,
+  };
 }
 
 describe('CustomerPaymentsService.create — allocation across multiple receivables', () => {
@@ -546,8 +577,18 @@ describe('CustomerPaymentsService.reverse — restores receivables + mirror JE',
         { receivableId: 'rec-2', amount: new Prisma.Decimal(50) },
       ],
       receivablesById: {
-        'rec-1': receivable({ id: 'rec-1', outstandingAmount: new Prisma.Decimal(0), paidAmount: new Prisma.Decimal(100), status: 'PAID' }),
-        'rec-2': receivable({ id: 'rec-2', outstandingAmount: new Prisma.Decimal(0), paidAmount: new Prisma.Decimal(50), status: 'PAID' }),
+        'rec-1': receivable({
+          id: 'rec-1',
+          outstandingAmount: new Prisma.Decimal(0),
+          paidAmount: new Prisma.Decimal(100),
+          status: 'PAID',
+        }),
+        'rec-2': receivable({
+          id: 'rec-2',
+          outstandingAmount: new Prisma.Decimal(0),
+          paidAmount: new Prisma.Decimal(50),
+          status: 'PAID',
+        }),
       },
     });
 
@@ -575,7 +616,12 @@ describe('CustomerPaymentsService.reverse — restores receivables + mirror JE',
     const { service, receivableUpdates } = makeService({
       paymentAllocations: [{ receivableId: 'rec-1', amount: new Prisma.Decimal(100) }],
       receivablesById: {
-        'rec-1': receivable({ id: 'rec-1', outstandingAmount: new Prisma.Decimal(0), paidAmount: new Prisma.Decimal(100), status: 'WRITTEN_OFF' }),
+        'rec-1': receivable({
+          id: 'rec-1',
+          outstandingAmount: new Prisma.Decimal(0),
+          paidAmount: new Prisma.Decimal(100),
+          status: 'WRITTEN_OFF',
+        }),
       },
     });
 
@@ -589,9 +635,9 @@ describe('CustomerPaymentsService.reverse — restores receivables + mirror JE',
       paymentStatus: CustomerPaymentStatus.REVERSED,
     });
 
-    await expect(
-      service.reverse('pay-1', {} as any, user),
-    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.reverse('pay-1', {} as any, user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
     expect(postLines).not.toHaveBeenCalled();
   });
 
@@ -602,7 +648,11 @@ describe('CustomerPaymentsService.reverse — restores receivables + mirror JE',
     await service.reverse('pay-1', {} as any, user);
     expect(tx.customerPayment.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ id: 'pay-1', status: CustomerPaymentStatus.COMPLETED, deletedAt: null }),
+        where: expect.objectContaining({
+          id: 'pay-1',
+          status: CustomerPaymentStatus.COMPLETED,
+          deletedAt: null,
+        }),
         data: expect.objectContaining({ status: CustomerPaymentStatus.REVERSED }),
       }),
     );
@@ -616,14 +666,19 @@ describe('CustomerPaymentsService.reverse — restores receivables + mirror JE',
     const { service } = makeService({
       paymentAllocations: [{ receivableId: 'rec-1', amount: new Prisma.Decimal(150) }],
       receivablesById: {
-        'rec-1': receivable({ id: 'rec-1', outstandingAmount: new Prisma.Decimal(0), paidAmount: new Prisma.Decimal(150), status: 'PAID' }),
+        'rec-1': receivable({
+          id: 'rec-1',
+          outstandingAmount: new Prisma.Decimal(0),
+          paidAmount: new Prisma.Decimal(150),
+          status: 'PAID',
+        }),
       },
       originalJournalMissing: true,
     });
 
-    await expect(
-      service.reverse('pay-1', {} as any, user),
-    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.reverse('pay-1', {} as any, user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
   });
 
   it('does NOT throw when a payment that never posted a JE (journalEntryId null) is reversed', async () => {
@@ -633,14 +688,17 @@ describe('CustomerPaymentsService.reverse — restores receivables + mirror JE',
       paymentAllocations: [{ receivableId: 'rec-1', amount: new Prisma.Decimal(150) }],
       paymentOverrides: { journalEntryId: null },
       receivablesById: {
-        'rec-1': receivable({ id: 'rec-1', outstandingAmount: new Prisma.Decimal(0), paidAmount: new Prisma.Decimal(150), status: 'PAID' }),
+        'rec-1': receivable({
+          id: 'rec-1',
+          outstandingAmount: new Prisma.Decimal(0),
+          paidAmount: new Prisma.Decimal(150),
+          status: 'PAID',
+        }),
       },
       originalJournalMissing: true,
     });
 
-    await expect(
-      service.reverse('pay-1', {} as any, user),
-    ).resolves.toBeDefined();
+    await expect(service.reverse('pay-1', {} as any, user)).resolves.toBeDefined();
     // No mirror JE posted (nothing to reverse), and no throw.
     expect(postLines).not.toHaveBeenCalled();
   });
@@ -731,7 +789,12 @@ describe('CustomerPaymentsService — CashAccount.currentBalance maintenance', (
     const { service, cashAccountUpdates } = makeService({
       paymentAllocations: [{ receivableId: 'rec-1', amount: new Prisma.Decimal(150) }],
       receivablesById: {
-        'rec-1': receivable({ id: 'rec-1', outstandingAmount: new Prisma.Decimal(0), paidAmount: new Prisma.Decimal(150), status: 'PAID' }),
+        'rec-1': receivable({
+          id: 'rec-1',
+          outstandingAmount: new Prisma.Decimal(0),
+          paidAmount: new Prisma.Decimal(150),
+          status: 'PAID',
+        }),
       },
     });
 
@@ -746,7 +809,12 @@ describe('CustomerPaymentsService — CashAccount.currentBalance maintenance', (
       paymentAllocations: [{ receivableId: 'rec-1', amount: new Prisma.Decimal(150) }],
       paymentOverrides: { journalEntryId: null },
       receivablesById: {
-        'rec-1': receivable({ id: 'rec-1', outstandingAmount: new Prisma.Decimal(0), paidAmount: new Prisma.Decimal(150), status: 'PAID' }),
+        'rec-1': receivable({
+          id: 'rec-1',
+          outstandingAmount: new Prisma.Decimal(0),
+          paidAmount: new Prisma.Decimal(150),
+          status: 'PAID',
+        }),
       },
       originalJournalMissing: true,
     });

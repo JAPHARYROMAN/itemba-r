@@ -153,17 +153,13 @@ describe('IntercompanyTransactionsService.post — balanced dual-company journal
     const fromAr = fromPosting.lines.find(
       (l: any) => l.accountId === 'company-A:INTERCOMPANY_RECEIVABLE',
     )!;
-    const fromCash = fromPosting.lines.find(
-      (l: any) => l.accountId === 'company-A:CASH_ON_HAND',
-    )!;
+    const fromCash = fromPosting.lines.find((l: any) => l.accountId === 'company-A:CASH_ON_HAND')!;
     expect(new Prisma.Decimal(fromAr.debit).toString()).toBe('1000000');
     expect(new Prisma.Decimal(fromCash.credit).toString()).toBe('1000000');
     expect(totalDebit(fromPosting.lines).equals(totalCredit(fromPosting.lines))).toBe(true);
 
     // TO company: Dr Cash 1,000,000 / Cr IC-Payable 1,000,000
-    const toCash = toPosting.lines.find(
-      (l: any) => l.accountId === 'company-B:CASH_ON_HAND',
-    )!;
+    const toCash = toPosting.lines.find((l: any) => l.accountId === 'company-B:CASH_ON_HAND')!;
     const toAp = toPosting.lines.find(
       (l: any) => l.accountId === 'company-B:INTERCOMPANY_PAYABLE',
     )!;

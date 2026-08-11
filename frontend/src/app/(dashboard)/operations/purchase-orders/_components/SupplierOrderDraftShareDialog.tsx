@@ -35,7 +35,10 @@ function defaultMessage(draft: SupplierOrderDraft) {
 }
 
 function parseCc(value: string) {
-  return value.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
+  return value
+    .split(/[;,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 export function SupplierOrderDraftShareDialog({ open, draft, onClose }: Props) {
@@ -58,11 +61,16 @@ export function SupplierOrderDraftShareDialog({ open, draft, onClose }: Props) {
     setPhone(draft.supplierPhone || '');
     setMessage(defaultMessage(draft));
     void prepareSupplierOrderDraftPdf({ id: draft.id, draftNumber: draft.draftNumber })
-      .then((value) => { if (!cancelled) setPrepared(value); })
+      .then((value) => {
+        if (!cancelled) setPrepared(value);
+      })
       .catch((cause) => {
-        if (!cancelled) setPrepareError(cause instanceof Error ? cause.message : 'Could not prepare the PDF');
+        if (!cancelled)
+          setPrepareError(cause instanceof Error ? cause.message : 'Could not prepare the PDF');
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [open, draft]);
 
   async function emailPdf() {
@@ -72,19 +80,31 @@ export function SupplierOrderDraftShareDialog({ open, draft, onClose }: Props) {
     }
     setBusy('email');
     try {
-      const result = await backendPost<EmailResult>(`/supplier-order-drafts/${draft.id}/share/email`, {
-        to: email.trim(),
-        cc: parseCc(cc),
-        subject,
-        message,
-      });
+      const result = await backendPost<EmailResult>(
+        `/supplier-order-drafts/${draft.id}/share/email`,
+        {
+          to: email.trim(),
+          cc: parseCc(cc),
+          subject,
+          message,
+        },
+      );
       if (result.sent) {
         showToast('success', 'PDF emailed', `Sent to ${result.recipient}`);
         return;
       }
       if (prepared) downloadPreparedSupplierOrderDraftPdf(prepared);
-      window.location.href = emailShareUrl({ to: email.trim(), cc, subject, message: `${message}\n\nAttach the downloaded PDF: ${result.fileName}` });
-      showToast('warning', 'Mail app opened', 'SMTP delivery was unavailable. Attach the downloaded PDF before sending.');
+      window.location.href = emailShareUrl({
+        to: email.trim(),
+        cc,
+        subject,
+        message: `${message}\n\nAttach the downloaded PDF: ${result.fileName}`,
+      });
+      showToast(
+        'warning',
+        'Mail app opened',
+        'SMTP delivery was unavailable. Attach the downloaded PDF before sending.',
+      );
     } catch (cause) {
       showToast('error', 'Could not email PDF', cause instanceof Error ? cause.message : undefined);
     } finally {
@@ -105,13 +125,21 @@ export function SupplierOrderDraftShareDialog({ open, draft, onClose }: Props) {
         });
       } else {
         downloadPreparedSupplierOrderDraftPdf(prepared);
-        window.open(whatsappShareUrl(phone, `${message}\n\nAttach the downloaded PDF: ${prepared.file.name}`), '_blank', 'noopener,noreferrer');
+        window.open(
+          whatsappShareUrl(phone, `${message}\n\nAttach the downloaded PDF: ${prepared.file.name}`),
+          '_blank',
+          'noopener,noreferrer',
+        );
         showToast('info', 'WhatsApp opened', 'Attach the downloaded PDF to the prepared message.');
       }
       await auditSupplierOrderDraftShare(draft.id, 'WHATSAPP');
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === 'AbortError') return;
-      showToast('error', 'Could not share to WhatsApp', cause instanceof Error ? cause.message : undefined);
+      showToast(
+        'error',
+        'Could not share to WhatsApp',
+        cause instanceof Error ? cause.message : undefined,
+      );
     } finally {
       setBusy('');
     }
@@ -148,7 +176,9 @@ export function SupplierOrderDraftShareDialog({ open, draft, onClose }: Props) {
   }
 
   async function copyInternalLink() {
-    await navigator.clipboard.writeText(`${window.location.origin}/operations/purchase-orders/order-drafts/${draft.id}`);
+    await navigator.clipboard.writeText(
+      `${window.location.origin}/operations/purchase-orders/order-drafts/${draft.id}`,
+    );
     showToast('success', 'Internal link copied', 'Recipients must sign in to ITEMBA-R to open it.');
   }
 
@@ -161,36 +191,111 @@ export function SupplierOrderDraftShareDialog({ open, draft, onClose }: Props) {
       title={`Share ${draft.draftNumber}`}
       subtitle="Send the generated supplier PDF through a delivery channel."
       size="lg"
-      footer={<Btn variant="secondary" onClick={onClose}>Close</Btn>}
+      footer={
+        <Btn variant="secondary" onClick={onClose}>
+          Close
+        </Btn>
+      }
     >
       <div className="space-y-5">
-        <div className={`rounded-lg border px-4 py-3 text-sm ${prepareError ? 'border-red-200 bg-red-50 text-red-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-          {prepareError || (prepared ? `${prepared.file.name} is ready to share.` : 'Preparing the branded PDF...')}
+        <div
+          className={`rounded-lg border px-4 py-3 text-sm ${prepareError ? 'border-red-200 bg-red-50 text-red-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}
+        >
+          {prepareError ||
+            (prepared
+              ? `${prepared.file.name} is ready to share.`
+              : 'Preparing the branded PDF...')}
         </div>
 
         <section className="space-y-3">
-          <div className="flex items-center gap-2"><Mail className="h-4 w-4 text-brand-600" /><h3 className="text-sm font-semibold">Email with PDF attached</h3></div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <FormInput label="Recipient email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="supplier@example.com" />
-            <FormInput label="CC (optional)" value={cc} onChange={(event) => setCc(event.target.value)} placeholder="accounts@example.com, manager@example.com" />
+          <div className="flex items-center gap-2">
+            <Mail className="h-4 w-4 text-brand-600" />
+            <h3 className="text-sm font-semibold">Email with PDF attached</h3>
           </div>
-          <Btn icon={<Mail className="h-4 w-4" />} loading={busy === 'email'} onClick={emailPdf}>Email PDF</Btn>
-          <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>If server email is unavailable, the PDF downloads and your mail app opens with the message prepared.</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FormInput
+              label="Recipient email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="supplier@example.com"
+            />
+            <FormInput
+              label="CC (optional)"
+              value={cc}
+              onChange={(event) => setCc(event.target.value)}
+              placeholder="accounts@example.com, manager@example.com"
+            />
+          </div>
+          <Btn icon={<Mail className="h-4 w-4" />} loading={busy === 'email'} onClick={emailPdf}>
+            Email PDF
+          </Btn>
+          <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+            If server email is unavailable, the PDF downloads and your mail app opens with the
+            message prepared.
+          </p>
         </section>
 
-        <section className="space-y-3 border-t pt-5" style={{ borderColor: 'var(--aurora-border)' }}>
-          <div className="flex items-center gap-2"><MessageCircle className="h-4 w-4 text-emerald-600" /><h3 className="text-sm font-semibold">WhatsApp or WhatsApp Business</h3></div>
-          <FormInput label="Supplier phone (used by WhatsApp Web fallback)" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+255 ..." />
-          <Btn variant="success" icon={<MessageCircle className="h-4 w-4" />} loading={busy === 'whatsapp'} disabled={!pdfReady} onClick={shareWhatsApp}>Share PDF to WhatsApp</Btn>
-          <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>On phones, choose WhatsApp or WhatsApp Business from the app share sheet. On desktop, the PDF downloads before WhatsApp Web opens.</p>
+        <section
+          className="space-y-3 border-t pt-5"
+          style={{ borderColor: 'var(--aurora-border)' }}
+        >
+          <div className="flex items-center gap-2">
+            <MessageCircle className="h-4 w-4 text-emerald-600" />
+            <h3 className="text-sm font-semibold">WhatsApp or WhatsApp Business</h3>
+          </div>
+          <FormInput
+            label="Supplier phone (used by WhatsApp Web fallback)"
+            value={phone}
+            onChange={(event) => setPhone(event.target.value)}
+            placeholder="+255 ..."
+          />
+          <Btn
+            variant="success"
+            icon={<MessageCircle className="h-4 w-4" />}
+            loading={busy === 'whatsapp'}
+            disabled={!pdfReady}
+            onClick={shareWhatsApp}
+          >
+            Share PDF to WhatsApp
+          </Btn>
+          <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+            On phones, choose WhatsApp or WhatsApp Business from the app share sheet. On desktop,
+            the PDF downloads before WhatsApp Web opens.
+          </p>
         </section>
 
-        <section className="space-y-3 border-t pt-5" style={{ borderColor: 'var(--aurora-border)' }}>
-          <FormTextarea label="Message" value={message} onChange={(event) => setMessage(event.target.value)} rows={4} />
+        <section
+          className="space-y-3 border-t pt-5"
+          style={{ borderColor: 'var(--aurora-border)' }}
+        >
+          <FormTextarea
+            label="Message"
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            rows={4}
+          />
           <div className="flex flex-wrap gap-2">
-            <Btn variant="secondary" icon={<Share2 className="h-4 w-4" />} loading={busy === 'more'} disabled={!pdfReady} onClick={shareMore}>More Apps</Btn>
-            <Btn variant="secondary" icon={<Download className="h-4 w-4" />} disabled={!pdfReady} onClick={downloadPdf}>Download PDF</Btn>
-            <Btn variant="secondary" icon={<Copy className="h-4 w-4" />} onClick={copyInternalLink}>Copy Internal Link</Btn>
+            <Btn
+              variant="secondary"
+              icon={<Share2 className="h-4 w-4" />}
+              loading={busy === 'more'}
+              disabled={!pdfReady}
+              onClick={shareMore}
+            >
+              More Apps
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon={<Download className="h-4 w-4" />}
+              disabled={!pdfReady}
+              onClick={downloadPdf}
+            >
+              Download PDF
+            </Btn>
+            <Btn variant="secondary" icon={<Copy className="h-4 w-4" />} onClick={copyInternalLink}>
+              Copy Internal Link
+            </Btn>
           </div>
         </section>
       </div>

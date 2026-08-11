@@ -232,7 +232,12 @@ export function AllocationModal({ initial, companies, onClose, onSaved }: Props)
               required
               value={form.companyId}
               onChange={(e) =>
-                setForm((f) => ({ ...f, companyId: e.target.value, employeeId: '', leaveTypeId: '' }))
+                setForm((f) => ({
+                  ...f,
+                  companyId: e.target.value,
+                  employeeId: '',
+                  leaveTypeId: '',
+                }))
               }
               options={companies.map((c) => ({ value: c.id, label: c.name }))}
               placeholder="Select company"

@@ -30,11 +30,7 @@ describe('IntegrationApiController — getWebhookEvent', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    controller = new IntegrationApiController(
-      externalPayments,
-      externalMessages,
-      prisma as any,
-    );
+    controller = new IntegrationApiController(externalPayments, externalMessages, prisma as any);
   });
 
   it('returns a webhook event scoped to the API key company', async () => {
@@ -78,9 +74,9 @@ describe('IntegrationApiController — getWebhookEvent', () => {
   });
 
   it('rejects when the API key is not bound to a company', async () => {
-    await expect(
-      controller.getWebhookEvent('evt-1', makeReq(null)),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.getWebhookEvent('evt-1', makeReq(null))).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
     expect(prisma.webhookEvent.findFirst).not.toHaveBeenCalled();
   });
 });
@@ -90,11 +86,7 @@ describe('IntegrationApiController — messageDeliveryCallback', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    controller = new IntegrationApiController(
-      externalPayments,
-      externalMessages,
-      prisma as any,
-    );
+    controller = new IntegrationApiController(externalPayments, externalMessages, prisma as any);
   });
 
   it('marks the message DELIVERED and sets deliveredAt, scoped to the key company', async () => {

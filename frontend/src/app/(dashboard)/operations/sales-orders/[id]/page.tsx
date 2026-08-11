@@ -132,8 +132,7 @@ function buildStatusSteps(
 
   const outstanding = Number(order?.outstandingAmount ?? 0);
   const isPaid =
-    paymentStatus === 'PAID' ||
-    (isConfirmed && Number.isFinite(outstanding) && outstanding <= 0);
+    paymentStatus === 'PAID' || (isConfirmed && Number.isFinite(outstanding) && outstanding <= 0);
 
   const drafted: ApprovalStep = {
     id: 'draft',
@@ -179,10 +178,7 @@ function buildStatusSteps(
   return [drafted, confirmed, delivered, paid];
 }
 
-function buildAuditEntries(
-  order: AnyRecord,
-  audit: AnyRecord | null | undefined,
-): AuditEntry[] {
+function buildAuditEntries(order: AnyRecord, audit: AnyRecord | null | undefined): AuditEntry[] {
   const entries: AuditEntry[] = [];
   const entityType = 'Sales Order';
 
@@ -201,8 +197,7 @@ function buildAuditEntries(
       id: 'audit-confirmed',
       action: 'Order confirmed',
       entityType,
-      userEmail:
-        personName(audit.confirmedBy) !== '-' ? personName(audit.confirmedBy) : undefined,
+      userEmail: personName(audit.confirmedBy) !== '-' ? personName(audit.confirmedBy) : undefined,
       createdAt: dateTime(audit.confirmedAt),
     });
   }

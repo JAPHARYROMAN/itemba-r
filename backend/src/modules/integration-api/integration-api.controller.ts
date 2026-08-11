@@ -122,10 +122,7 @@ export class IntegrationApiController {
    */
   @Post('messages/delivery-callback')
   @RequireApiScope('messages.write')
-  async messageDeliveryCallback(
-    @Body() dto: MessageDeliveryCallbackDto,
-    @Req() req: Request,
-  ) {
+  async messageDeliveryCallback(@Body() dto: MessageDeliveryCallbackDto, @Req() req: Request) {
     const { companyId } = this.requireBoundCompany(req);
     if (!dto?.messageId) throw new BadRequestException('messageId is required');
 

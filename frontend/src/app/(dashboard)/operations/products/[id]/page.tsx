@@ -266,8 +266,7 @@ export default function ProductDetailPage() {
   const canView = hasPermission('products.view');
   const canViewInventory = hasPermission('inventory.view');
   const canViewMovements = hasPermission('inventory.movements.view');
-  const canViewProfit =
-    hasPermission('profit.view') || hasPermission('operations.reports.view');
+  const canViewProfit = hasPermission('profit.view') || hasPermission('operations.reports.view');
 
   const [product, setProduct] = useState<ProductDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -489,9 +488,7 @@ export default function ProductDetailPage() {
           <DetailField label="Category">{product.category?.name ?? '—'}</DetailField>
           <DetailField label="Family">{familyLabel ?? '—'}</DetailField>
           <DetailField label="Division">
-            {product.division?.name ?? (
-              <span className="italic text-slate-400">company-wide</span>
-            )}
+            {product.division?.name ?? <span className="italic text-slate-400">company-wide</span>}
           </DetailField>
           <DetailField label="Company">{product.company?.name ?? '—'}</DetailField>
           <DetailField label="Base Unit">
@@ -503,9 +500,7 @@ export default function ProductDetailPage() {
               : '—'}
           </DetailField>
           <DetailField label="Sales Unit">
-            {product.salesUnit
-              ? `${product.salesUnit.name} (${product.salesUnit.symbol})`
-              : '—'}
+            {product.salesUnit ? `${product.salesUnit.name} (${product.salesUnit.symbol})` : '—'}
           </DetailField>
           <DetailField label="Variant">
             {variantBits.length ? variantBits.join(' · ') : '—'}
@@ -544,8 +539,16 @@ export default function ProductDetailPage() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <StatCard label="Selling" value={fmtTZS(effSell)} countUp={false} />
         <StatCard label="Purchase" value={fmtTZS(effCost)} countUp={false} />
-        <StatCard label="Wholesale" value={fmtTZS(product.effectiveWholesalePrice ?? product.wholesalePrice)} countUp={false} />
-        <StatCard label="Retail" value={fmtTZS(product.effectiveRetailPrice ?? product.retailPrice)} countUp={false} />
+        <StatCard
+          label="Wholesale"
+          value={fmtTZS(product.effectiveWholesalePrice ?? product.wholesalePrice)}
+          countUp={false}
+        />
+        <StatCard
+          label="Retail"
+          value={fmtTZS(product.effectiveRetailPrice ?? product.retailPrice)}
+          countUp={false}
+        />
         <StatCard
           label="Margin"
           value={margin != null ? `${fmtNum(margin)}%` : '—'}
@@ -653,13 +656,27 @@ export default function ProductDetailPage() {
                         className="text-left text-xs uppercase bg-gray-50"
                         style={{ color: 'var(--aurora-text-muted)' }}
                       >
-                        <th scope="col" className={thCls}>Branch / Location</th>
-                        <th scope="col" className={`${thCls} text-right`}>On Hand</th>
-                        <th scope="col" className={`${thCls} text-right`}>Reserved</th>
-                        <th scope="col" className={`${thCls} text-right`}>Available</th>
-                        <th scope="col" className={`${thCls} text-right`}>Avg Cost</th>
-                        <th scope="col" className={`${thCls} text-right`}>Total Value</th>
-                        <th scope="col" className={thCls}>Last Movement</th>
+                        <th scope="col" className={thCls}>
+                          Branch / Location
+                        </th>
+                        <th scope="col" className={`${thCls} text-right`}>
+                          On Hand
+                        </th>
+                        <th scope="col" className={`${thCls} text-right`}>
+                          Reserved
+                        </th>
+                        <th scope="col" className={`${thCls} text-right`}>
+                          Available
+                        </th>
+                        <th scope="col" className={`${thCls} text-right`}>
+                          Avg Cost
+                        </th>
+                        <th scope="col" className={`${thCls} text-right`}>
+                          Total Value
+                        </th>
+                        <th scope="col" className={thCls}>
+                          Last Movement
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -738,15 +755,33 @@ export default function ProductDetailPage() {
                       className="text-left text-xs uppercase bg-gray-50"
                       style={{ color: 'var(--aurora-text-muted)' }}
                     >
-                      <th scope="col" className={thCls}>Movement #</th>
-                      <th scope="col" className={thCls}>Date</th>
-                      <th scope="col" className={thCls}>Branch</th>
-                      <th scope="col" className={thCls}>Type</th>
-                      <th scope="col" className={`${thCls} text-right`}>Quantity</th>
-                      <th scope="col" className={`${thCls} text-right`}>Unit Cost</th>
-                      <th scope="col" className={`${thCls} text-right`}>Total Cost</th>
-                      <th scope="col" className={thCls}>Reference</th>
-                      <th scope="col" className={thCls}>By</th>
+                      <th scope="col" className={thCls}>
+                        Movement #
+                      </th>
+                      <th scope="col" className={thCls}>
+                        Date
+                      </th>
+                      <th scope="col" className={thCls}>
+                        Branch
+                      </th>
+                      <th scope="col" className={thCls}>
+                        Type
+                      </th>
+                      <th scope="col" className={`${thCls} text-right`}>
+                        Quantity
+                      </th>
+                      <th scope="col" className={`${thCls} text-right`}>
+                        Unit Cost
+                      </th>
+                      <th scope="col" className={`${thCls} text-right`}>
+                        Total Cost
+                      </th>
+                      <th scope="col" className={thCls}>
+                        Reference
+                      </th>
+                      <th scope="col" className={thCls}>
+                        By
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -796,7 +831,9 @@ export default function ProductDetailPage() {
                                 : ''}
                             {fmtQty(mov.quantity)}
                           </td>
-                          <td className={`${tdCls} text-right font-mono`}>{fmtTZS(mov.unitCost)}</td>
+                          <td className={`${tdCls} text-right font-mono`}>
+                            {fmtTZS(mov.unitCost)}
+                          </td>
                           <td className={`${tdCls} text-right font-mono`}>
                             {fmtTZS(mov.totalCost)}
                           </td>
@@ -863,14 +900,30 @@ export default function ProductDetailPage() {
                       className="text-left text-xs uppercase bg-gray-50"
                       style={{ color: 'var(--aurora-text-muted)' }}
                     >
-                      <th scope="col" className={thCls}>Order</th>
-                      <th scope="col" className={thCls}>Customer</th>
-                      <th scope="col" className={`${thCls} text-right`}>Qty</th>
-                      <th scope="col" className={`${thCls} text-right`}>Price</th>
-                      <th scope="col" className={`${thCls} text-right`}>Cost</th>
-                      <th scope="col" className={`${thCls} text-right`}>Profit</th>
-                      <th scope="col" className={`${thCls} text-right`}>Margin</th>
-                      <th scope="col" className={thCls}>Cost Source</th>
+                      <th scope="col" className={thCls}>
+                        Order
+                      </th>
+                      <th scope="col" className={thCls}>
+                        Customer
+                      </th>
+                      <th scope="col" className={`${thCls} text-right`}>
+                        Qty
+                      </th>
+                      <th scope="col" className={`${thCls} text-right`}>
+                        Price
+                      </th>
+                      <th scope="col" className={`${thCls} text-right`}>
+                        Cost
+                      </th>
+                      <th scope="col" className={`${thCls} text-right`}>
+                        Profit
+                      </th>
+                      <th scope="col" className={`${thCls} text-right`}>
+                        Margin
+                      </th>
+                      <th scope="col" className={thCls}>
+                        Cost Source
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -891,7 +944,10 @@ export default function ProductDetailPage() {
                       </tr>
                     ) : (
                       ledger.map((row) => (
-                        <tr key={`${row.salesOrderId}-${row.orderDate}`} className="hover:bg-slate-50">
+                        <tr
+                          key={`${row.salesOrderId}-${row.orderDate}`}
+                          className="hover:bg-slate-50"
+                        >
                           <td className={tdCls}>
                             <Link
                               href={`/operations/sales-orders/${row.salesOrderId}`}
@@ -904,8 +960,12 @@ export default function ProductDetailPage() {
                             </div>
                           </td>
                           <td className={tdCls}>{row.customerName ?? 'Walk-in'}</td>
-                          <td className={`${tdCls} text-right font-mono`}>{fmtQty(row.quantity)}</td>
-                          <td className={`${tdCls} text-right font-mono`}>{fmtTZS(row.unitPrice)}</td>
+                          <td className={`${tdCls} text-right font-mono`}>
+                            {fmtQty(row.quantity)}
+                          </td>
+                          <td className={`${tdCls} text-right font-mono`}>
+                            {fmtTZS(row.unitPrice)}
+                          </td>
                           <td className={`${tdCls} text-right font-mono`}>
                             {fmtTZS(row.unitCostAtSale)}
                           </td>
@@ -934,10 +994,7 @@ export default function ProductDetailPage() {
                 className="px-5 py-3 border-t text-right"
                 style={{ borderColor: 'var(--aurora-border)' }}
               >
-                <Link
-                  href="/operations/profit"
-                  className="text-xs text-blue-600 hover:underline"
-                >
+                <Link href="/operations/profit" className="text-xs text-blue-600 hover:underline">
                   Open profit module →
                 </Link>
               </div>

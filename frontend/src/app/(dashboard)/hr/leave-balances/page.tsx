@@ -4,10 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Card, PageHeader, PageToolbar, StatCard, Btn, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useOrgScope } from '@/hooks/use-org-scope';
-import {
-  AllocationModal,
-  type LeaveBalanceRecord,
-} from './_components/AllocationModal';
+import { AllocationModal, type LeaveBalanceRecord } from './_components/AllocationModal';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm';
@@ -29,8 +26,7 @@ const CURRENT_YEAR = new Date().getFullYear();
 const YEAR_OPTIONS = Array.from({ length: 7 }, (_, i) => CURRENT_YEAR + 1 - i);
 
 const num = (v: number | string | null | undefined) => Number(v ?? 0);
-const fmtDays = (v: number) =>
-  v.toLocaleString('en-GB', { maximumFractionDigits: 2 });
+const fmtDays = (v: number) => v.toLocaleString('en-GB', { maximumFractionDigits: 2 });
 const remainingOf = (b: LeaveBalanceRecord) =>
   num(b.allocatedDays) + num(b.carriedForwardDays) - num(b.usedDays);
 
@@ -70,7 +66,11 @@ export default function LeaveBalancesPage() {
       .then((r) => r.json())
       .then((j) => {
         if (cancelled) return;
-        const list = Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [];
+        const list = Array.isArray(j.data?.data)
+          ? j.data.data
+          : Array.isArray(j.data)
+            ? j.data
+            : [];
         setLeaveTypes(list);
       })
       .catch(() => {
@@ -120,7 +120,10 @@ export default function LeaveBalancesPage() {
     load();
   };
 
-  const allocatedPage = rows.reduce((s, b) => s + num(b.allocatedDays) + num(b.carriedForwardDays), 0);
+  const allocatedPage = rows.reduce(
+    (s, b) => s + num(b.allocatedDays) + num(b.carriedForwardDays),
+    0,
+  );
   const usedPage = rows.reduce((s, b) => s + num(b.usedDays), 0);
   const remainingPage = rows.reduce((s, b) => s + remainingOf(b), 0);
 
@@ -188,7 +191,9 @@ export default function LeaveBalancesPage() {
               aria-label="Filter by leave type"
               disabled={!companyId}
             >
-              <option value="">{companyId ? 'All Leave Types' : 'Leave type (pick company)'}</option>
+              <option value="">
+                {companyId ? 'All Leave Types' : 'Leave type (pick company)'}
+              </option>
               {leaveTypes.map((lt) => (
                 <option key={lt.id} value={lt.id}>
                   {lt.name}
@@ -305,7 +310,12 @@ export default function LeaveBalancesPage() {
               Page {page} of {totalPages} ({total} total)
             </span>
             <div className="flex gap-2">
-              <Btn variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              <Btn
+                variant="secondary"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+              >
                 Previous
               </Btn>
               <Btn

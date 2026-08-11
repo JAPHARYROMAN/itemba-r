@@ -25,7 +25,11 @@ function makeMock(initial: any) {
     findUniqueOrThrow: jest.fn(async () => ({ ...row })),
     create: jest.fn(async () => ({ ...row })),
     update: jest.fn(async ({ data }: any) => {
-      if (data.currentNumber && typeof data.currentNumber === 'object' && 'increment' in data.currentNumber) {
+      if (
+        data.currentNumber &&
+        typeof data.currentNumber === 'object' &&
+        'increment' in data.currentNumber
+      ) {
         row.currentNumber += data.currentNumber.increment;
       } else if (typeof data.currentNumber === 'number') {
         row.currentNumber = data.currentNumber;
@@ -68,7 +72,11 @@ describe('EntityCodeGeneratorService.next()', () => {
     });
     const service = new EntityCodeGeneratorService(prisma);
 
-    const code = await service.next({ entityType: 'Trip', companyId: 'c1', when: new Date('2026-07-02') });
+    const code = await service.next({
+      entityType: 'Trip',
+      companyId: 'c1',
+      when: new Date('2026-07-02'),
+    });
 
     expect(code).toBe('TRIP-00042');
     // Fast path: a single increment update, never a reset claim.
@@ -88,7 +96,11 @@ describe('EntityCodeGeneratorService.next()', () => {
     });
     const service = new EntityCodeGeneratorService(prisma);
 
-    const code = await service.next({ entityType: 'Trip', companyId: 'c1', when: new Date('2026-01-02') });
+    const code = await service.next({
+      entityType: 'Trip',
+      companyId: 'c1',
+      when: new Date('2026-01-02'),
+    });
 
     expect(code).toBe('TRIP-00001');
     // The reset went through the compare-and-set, guarded on the old lastResetAt.
@@ -109,7 +121,11 @@ describe('EntityCodeGeneratorService.next()', () => {
     });
     const service = new EntityCodeGeneratorService(prisma);
 
-    const code = await service.next({ entityType: 'Trip', companyId: 'c1', when: new Date('2026-07-02') });
+    const code = await service.next({
+      entityType: 'Trip',
+      companyId: 'c1',
+      when: new Date('2026-07-02'),
+    });
 
     expect(code).toBe('TRIP-00006');
     expect(documentNumberSequence.updateMany).not.toHaveBeenCalled();
@@ -131,8 +147,16 @@ describe('EntityCodeGeneratorService.next()', () => {
     // Serialize the two advances against the shared row (the mock is
     // synchronous per-call, so running them back-to-back models the winner
     // committing before the loser's claim is evaluated).
-    const first = await service.next({ entityType: 'Trip', companyId: 'c1', when: new Date('2026-01-05') });
-    const second = await service.next({ entityType: 'Trip', companyId: 'c1', when: new Date('2026-01-05') });
+    const first = await service.next({
+      entityType: 'Trip',
+      companyId: 'c1',
+      when: new Date('2026-01-05'),
+    });
+    const second = await service.next({
+      entityType: 'Trip',
+      companyId: 'c1',
+      when: new Date('2026-01-05'),
+    });
 
     expect(first).toBe('TRIP-00001');
     expect(second).toBe('TRIP-00002');
@@ -163,7 +187,11 @@ describe('EntityCodeGeneratorService.next()', () => {
     row.currentNumber = 1;
     row.lastResetAt = new Date('2026-01-05');
 
-    const code = await service.next({ entityType: 'Trip', companyId: 'c1', when: new Date('2026-01-05') });
+    const code = await service.next({
+      entityType: 'Trip',
+      companyId: 'c1',
+      when: new Date('2026-01-05'),
+    });
 
     // Loser's guarded reset must fail (count 0), then it re-reads (already
     // reset -> no reset due) and increments to 2.
@@ -182,7 +210,11 @@ describe('EntityCodeGeneratorService.next()', () => {
     });
     const service = new EntityCodeGeneratorService(prisma);
 
-    const code = await service.next({ entityType: 'Trip', companyId: 'c1', when: new Date('2026-07-02') });
+    const code = await service.next({
+      entityType: 'Trip',
+      companyId: 'c1',
+      when: new Date('2026-07-02'),
+    });
 
     expect(code).toBe('TRIP-00001');
     // Guard pinned on null lastResetAt.

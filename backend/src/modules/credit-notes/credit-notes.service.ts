@@ -7,11 +7,7 @@ import {
 import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import {
-  AccountResolverService,
-  AccountRole,
-  CompanyScopeService,
-} from '../../common/services';
+import { AccountResolverService, AccountRole, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
@@ -316,10 +312,7 @@ export class CreditNotesService {
         where: { id: effectiveReceivableId, companyId: existing.companyId, deletedAt: null },
         select: { status: true },
       });
-      if (
-        linked &&
-        (linked.status === 'CANCELLED' || linked.status === 'WRITTEN_OFF')
-      ) {
+      if (linked && (linked.status === 'CANCELLED' || linked.status === 'WRITTEN_OFF')) {
         throw new ConflictException(
           `Cannot issue a credit note against a ${linked.status} receivable`,
         );

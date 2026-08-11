@@ -63,9 +63,9 @@ function makeService() {
     // findOne/findAll attach a relation-shaped `supplier` object (GRN has no
     // Prisma relation to Supplier), which batch-fetches the referenced suppliers.
     supplier: {
-      findMany: jest.fn().mockResolvedValue([
-        { id: 'supplier-1', name: 'Supplier One', supplierCode: 'SUP-001' },
-      ]),
+      findMany: jest
+        .fn()
+        .mockResolvedValue([{ id: 'supplier-1', name: 'Supplier One', supplierCode: 'SUP-001' }]),
     },
   } as any;
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;

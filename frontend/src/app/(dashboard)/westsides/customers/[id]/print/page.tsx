@@ -261,7 +261,9 @@ export default function CustomerPrintPage() {
                 <tr key={order.id}>
                   <DocumentTd mono>{order.salesOrderNumber}</DocumentTd>
                   <DocumentTd>{formatDate(order.orderDate)}</DocumentTd>
-                  <DocumentTd>{order.salesperson?.fullName ?? order.salesperson?.employeeCode ?? 'N/A'}</DocumentTd>
+                  <DocumentTd>
+                    {order.salesperson?.fullName ?? order.salesperson?.employeeCode ?? 'N/A'}
+                  </DocumentTd>
                   <DocumentTd align="right">{fmt(order.totalAmount)}</DocumentTd>
                   <DocumentTd align="right">
                     {Number(order.outstandingAmount) > 0 ? fmt(order.outstandingAmount) : 'N/A'}
@@ -321,7 +323,9 @@ export default function CustomerPrintPage() {
                 <tr key={product.productId}>
                   <DocumentTd>{product.productName}</DocumentTd>
                   <DocumentTd mono>{product.sku ?? 'N/A'}</DocumentTd>
-                  <DocumentTd align="right">{product.totalQuantity.toLocaleString('en-GB')}</DocumentTd>
+                  <DocumentTd align="right">
+                    {product.totalQuantity.toLocaleString('en-GB')}
+                  </DocumentTd>
                   <DocumentTd align="right">{fmt(product.totalSpend)}</DocumentTd>
                 </tr>
               ))}

@@ -195,16 +195,15 @@ class SimplePdf {
 
     const registrationNumber = valueOrNull(org.registrationNumber);
     if (registrationNumber)
-      orgY =
-        this.wrappedText(
-          `Reg No: ${registrationNumber}`,
-          orgX,
-          orgY,
-          7.5,
-          orgWidth,
-          'F1',
-          TEXT_DARK,
-        );
+      orgY = this.wrappedText(
+        `Reg No: ${registrationNumber}`,
+        orgX,
+        orgY,
+        7.5,
+        orgWidth,
+        'F1',
+        TEXT_DARK,
+      );
 
     // Restore the original restrained document marker used on the legacy letterhead.
     const rightX = this.pageWidth - MARGIN - rightWidth;
@@ -243,7 +242,8 @@ class SimplePdf {
     this.y = titleBaseline + 18;
 
     if (model.subtitle) {
-      this.y = this.wrappedText(model.subtitle, MARGIN, this.y, 13, titleWidth, 'F1', TEXT_DARK) + 3;
+      this.y =
+        this.wrappedText(model.subtitle, MARGIN, this.y, 13, titleWidth, 'F1', TEXT_DARK) + 3;
     }
 
     this.metaStrip(model.meta);
@@ -271,7 +271,15 @@ class SimplePdf {
       ? this.image(org.logoImage, MARGIN + 4, headerTop + 4, logoSize - 8, logoSize - 8)
       : false;
     if (!imageDrawn) {
-      this.text(valueOrNull(org.logoText) ?? 'IG', MARGIN, headerTop + 24, 12, 'F2', logoSize, 'center');
+      this.text(
+        valueOrNull(org.logoText) ?? 'IG',
+        MARGIN,
+        headerTop + 24,
+        12,
+        'F2',
+        logoSize,
+        'center',
+      );
     }
 
     const orgX = MARGIN + logoSize + 10;
@@ -297,11 +305,17 @@ class SimplePdf {
     );
     const identityLines = [
       valueOrNull(org.address) ? `Address: ${valueOrNull(org.address)}` : null,
-      [valueOrNull(org.telephone) ? `Tel: ${valueOrNull(org.telephone)}` : null, valueOrNull(org.phone) ? `Phone: ${valueOrNull(org.phone)}` : null]
+      [
+        valueOrNull(org.telephone) ? `Tel: ${valueOrNull(org.telephone)}` : null,
+        valueOrNull(org.phone) ? `Phone: ${valueOrNull(org.phone)}` : null,
+      ]
         .filter(Boolean)
         .join(' | '),
       valueOrNull(org.email) ? `Email: ${valueOrNull(org.email)}` : null,
-      [valueOrNull(org.tin) ? `TIN: ${valueOrNull(org.tin)}` : null, valueOrNull(org.vrn) ? `VRN: ${valueOrNull(org.vrn)}` : null]
+      [
+        valueOrNull(org.tin) ? `TIN: ${valueOrNull(org.tin)}` : null,
+        valueOrNull(org.vrn) ? `VRN: ${valueOrNull(org.vrn)}` : null,
+      ]
         .filter(Boolean)
         .join(' | '),
       valueOrNull(org.registrationNumber) ? `Reg No: ${valueOrNull(org.registrationNumber)}` : null,
@@ -312,7 +326,15 @@ class SimplePdf {
     }
 
     let rightY = headerTop + 1;
-    rightY = this.compactWrappedText(model.title.toUpperCase(), rightX, rightY, 11, rightWidth, 'F2', 1);
+    rightY = this.compactWrappedText(
+      model.title.toUpperCase(),
+      rightX,
+      rightY,
+      11,
+      rightWidth,
+      'F2',
+      1,
+    );
     rightY = this.compactWrappedText(model.reference, rightX, rightY, 9, rightWidth, 'F2', 1);
     for (const detail of compact.documentDetails.slice(0, 3)) {
       rightY = this.compactWrappedText(
@@ -327,7 +349,16 @@ class SimplePdf {
       );
     }
     rightY += 2;
-    this.text(compact.partyLabel.toUpperCase(), rightX, rightY, 6.5, 'F2', rightWidth, 'left', TEXT_MUTED);
+    this.text(
+      compact.partyLabel.toUpperCase(),
+      rightX,
+      rightY,
+      6.5,
+      'F2',
+      rightWidth,
+      'left',
+      TEXT_MUTED,
+    );
     rightY += 9;
     rightY = this.compactWrappedText(compact.partyName, rightX, rightY, 8.5, rightWidth, 'F2', 2);
     for (const detail of compact.partyDetails) {

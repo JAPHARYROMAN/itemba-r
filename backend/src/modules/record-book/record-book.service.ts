@@ -60,17 +60,25 @@ function csvEscape(value: unknown) {
 
 function rowsToCsv(rows: Record<string, unknown>[]) {
   if (!rows.length) return '';
-  const columns = Array.from(rows.reduce((set, row) => {
-    Object.keys(row).forEach((key) => set.add(key));
-    return set;
-  }, new Set<string>()));
-  return [columns.join(','), ...rows.map((row) => columns.map((c) => csvEscape(row[c])).join(','))].join(
-    '\n',
+  const columns = Array.from(
+    rows.reduce((set, row) => {
+      Object.keys(row).forEach((key) => set.add(key));
+      return set;
+    }, new Set<string>()),
   );
+  return [
+    columns.join(','),
+    ...rows.map((row) => columns.map((c) => csvEscape(row[c])).join(',')),
+  ].join('\n');
 }
 
 function safeFileStem(value: string) {
-  return value.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'record-book';
+  return (
+    value
+      .replace(/[^a-z0-9_-]+/gi, '-')
+      .replace(/^-+|-+$/g, '')
+      .toLowerCase() || 'record-book'
+  );
 }
 
 @Injectable()
@@ -216,20 +224,27 @@ export class RecordBookService {
     const existing = await this.getDailySale(id, user, AccessLevel.WRITE);
     this.assertEditable(existing.status);
     const nextCompanyId = existing.companyId;
-    const nextDivisionId = dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId;
+    const nextDivisionId =
+      dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId;
     const nextBranchId = dto.branchId !== undefined ? dto.branchId || null : existing.branchId;
     const nextCurrency = dto.currency ?? existing.currency;
     const nextRecordDate = dto.recordDate ? dayStart(dto.recordDate) : existing.recordDate;
     const nextTotal = dto.totalSalesAmount ?? toNumber(existing.totalSalesAmount);
-    const nextReceipts = dto.receipts ?? existing.receipts.map((receipt) => ({
-      receiptType: receipt.receiptType,
-      label: receipt.label ?? undefined,
-      amount: toNumber(receipt.amount),
-      reference: receipt.reference ?? undefined,
-      notes: receipt.notes ?? undefined,
-    }));
+    const nextReceipts =
+      dto.receipts ??
+      existing.receipts.map((receipt) => ({
+        receiptType: receipt.receiptType,
+        label: receipt.label ?? undefined,
+        amount: toNumber(receipt.amount),
+        reference: receipt.reference ?? undefined,
+        notes: receipt.notes ?? undefined,
+      }));
 
-    await this.assertOrgScope(nextCompanyId, nextDivisionId ?? undefined, nextBranchId ?? undefined);
+    await this.assertOrgScope(
+      nextCompanyId,
+      nextDivisionId ?? undefined,
+      nextBranchId ?? undefined,
+    );
     this.assertReceiptSplit(nextTotal, nextReceipts);
     await this.assertNoDuplicateDailySale({
       companyId: nextCompanyId,
@@ -349,7 +364,12 @@ export class RecordBookService {
     }
     const record = await this.prisma.recordBookDailySale.update({
       where: { id },
-      data: { status: RecordBookStatus.DRAFT, finalizedById: null, finalizedAt: null, updatedById: user.id },
+      data: {
+        status: RecordBookStatus.DRAFT,
+        finalizedById: null,
+        finalizedAt: null,
+        updatedById: user.id,
+      },
       include: this.dailySaleInclude(),
     });
     await this.auditLogs.log({
@@ -467,11 +487,16 @@ export class RecordBookService {
   async updateExpense(id: string, dto: UpdateRecordBookExpenseDto, user: AuthUser) {
     const existing = await this.getExpense(id, user, AccessLevel.WRITE);
     this.assertEditable(existing.status);
-    const nextDivisionId = dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId;
+    const nextDivisionId =
+      dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId;
     const nextBranchId = dto.branchId !== undefined ? dto.branchId || null : existing.branchId;
     const nextCategoryId = dto.expenseCategoryId ?? existing.expenseCategoryId;
 
-    await this.assertOrgScope(existing.companyId, nextDivisionId ?? undefined, nextBranchId ?? undefined);
+    await this.assertOrgScope(
+      existing.companyId,
+      nextDivisionId ?? undefined,
+      nextBranchId ?? undefined,
+    );
     await this.assertCategory(existing.companyId, nextCategoryId);
 
     const record = await this.prisma.recordBookExpense.update({
@@ -576,7 +601,12 @@ export class RecordBookService {
     }
     const record = await this.prisma.recordBookExpense.update({
       where: { id },
-      data: { status: RecordBookStatus.DRAFT, finalizedById: null, finalizedAt: null, updatedById: user.id },
+      data: {
+        status: RecordBookStatus.DRAFT,
+        finalizedById: null,
+        finalizedAt: null,
+        updatedById: user.id,
+      },
       include: this.expenseInclude(),
     });
     await this.auditLogs.log({
@@ -632,7 +662,10 @@ export class RecordBookService {
     const [data, total] = await Promise.all([
       this.prisma.recordBookExpenseCategory.findMany({
         where,
-        include: { company: { select: { id: true, name: true, code: true } }, _count: { select: { expenses: true } } },
+        include: {
+          company: { select: { id: true, name: true, code: true } },
+          _count: { select: { expenses: true } },
+        },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
         skip,
         take: limit,
@@ -794,12 +827,18 @@ export class RecordBookService {
     workbook.created = new Date();
     const sheet = workbook.addWorksheet(type === 'combined' ? 'Records Book' : type);
     const columns = rows.length
-      ? Array.from(rows.reduce((set, row) => {
-          Object.keys(row).forEach((key) => set.add(key));
-          return set;
-        }, new Set<string>()))
+      ? Array.from(
+          rows.reduce((set, row) => {
+            Object.keys(row).forEach((key) => set.add(key));
+            return set;
+          }, new Set<string>()),
+        )
       : ['message'];
-    sheet.columns = columns.map((key) => ({ header: key, key, width: Math.min(Math.max(key.length + 4, 14), 34) }));
+    sheet.columns = columns.map((key) => ({
+      header: key,
+      key,
+      width: Math.min(Math.max(key.length + 4, 14), 34),
+    }));
     if (rows.length) {
       sheet.addRows(rows);
     } else {
@@ -808,12 +847,19 @@ export class RecordBookService {
     sheet.getRow(1).font = { bold: true };
     sheet.views = [{ state: 'frozen', ySplit: 1 }];
     const buffer = await workbook.xlsx.writeBuffer();
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
     res.setHeader('Content-Disposition', `attachment; filename="${fileStem}.xlsx"`);
     return res.send(Buffer.from(buffer));
   }
 
-  private async exportRows(type: 'sales' | 'expenses' | 'combined', query: QueryRecordBookDto, user: AuthUser) {
+  private async exportRows(
+    type: 'sales' | 'expenses' | 'combined',
+    query: QueryRecordBookDto,
+    user: AuthUser,
+  ) {
     if (type === 'sales') return this.salesExportRows(query, user);
     if (type === 'expenses') return this.expenseExportRows(query, user);
     const [sales, expenses] = await Promise.all([
@@ -821,8 +867,18 @@ export class RecordBookService {
       this.expenseExportRows(query, user),
     ]);
     const rows = [
-      ...sales.map((row) => ({ recordType: 'SALE_RECEIPT', ...row, moneyIn: row.receiptAmount, moneyOut: '' })),
-      ...expenses.map((row) => ({ recordType: 'EXPENSE', ...row, moneyIn: '', moneyOut: row.amount })),
+      ...sales.map((row) => ({
+        recordType: 'SALE_RECEIPT',
+        ...row,
+        moneyIn: row.receiptAmount,
+        moneyOut: '',
+      })),
+      ...expenses.map((row) => ({
+        recordType: 'EXPENSE',
+        ...row,
+        moneyIn: '',
+        moneyOut: row.amount,
+      })),
     ].sort((a, b) => String(b.recordDate).localeCompare(String(a.recordDate)));
     if (rows.length > EXPORT_LIMIT) this.throwExportLimit();
     return rows;
@@ -1000,7 +1056,8 @@ export class RecordBookService {
   private assertReceiptSplit(total: number, receipts: Array<RecordBookReceiptDto>) {
     if (!receipts?.length) throw new BadRequestException('At least one receipt split is required');
     const sum = receipts.reduce((acc, receipt) => {
-      if (receipt.amount <= 0) throw new BadRequestException('Receipt amounts must be greater than zero');
+      if (receipt.amount <= 0)
+        throw new BadRequestException('Receipt amounts must be greater than zero');
       return acc + Number(receipt.amount);
     }, 0);
     if (Math.abs(sum - Number(total)) > EPSILON) {
@@ -1040,17 +1097,24 @@ export class RecordBookService {
       select: { id: true },
     });
     if (duplicate) {
-      throw new ConflictException('A daily sales summary already exists for this company, branch, date, and currency');
+      throw new ConflictException(
+        'A daily sales summary already exists for this company, branch, date, and currency',
+      );
     }
   }
 
-  private async assertOrgScope(companyId: string, divisionId?: string | null, branchId?: string | null) {
+  private async assertOrgScope(
+    companyId: string,
+    divisionId?: string | null,
+    branchId?: string | null,
+  ) {
     if (divisionId) {
       const division = await this.prisma.division.findFirst({
         where: { id: divisionId, companyId, deletedAt: null },
         select: { id: true },
       });
-      if (!division) throw new BadRequestException('Division does not belong to the selected company');
+      if (!division)
+        throw new BadRequestException('Division does not belong to the selected company');
     }
     if (branchId) {
       const branch = await this.prisma.branch.findFirst({
@@ -1062,7 +1126,8 @@ export class RecordBookService {
         },
         select: { id: true },
       });
-      if (!branch) throw new BadRequestException('Branch does not belong to the selected company/division');
+      if (!branch)
+        throw new BadRequestException('Branch does not belong to the selected company/division');
     }
   }
 
@@ -1076,12 +1141,7 @@ export class RecordBookService {
     }
   }
 
-  private async getDailySale(
-    id: string,
-    user: AuthUser,
-    minimum: AccessLevel,
-    deleted = false,
-  ) {
+  private async getDailySale(id: string, user: AuthUser, minimum: AccessLevel, deleted = false) {
     const record = await this.prisma.recordBookDailySale.findFirst({
       where: { id, deletedAt: deleted ? { not: null } : null },
       include: this.dailySaleInclude(),
@@ -1091,12 +1151,7 @@ export class RecordBookService {
     return record;
   }
 
-  private async getExpense(
-    id: string,
-    user: AuthUser,
-    minimum: AccessLevel,
-    deleted = false,
-  ) {
+  private async getExpense(id: string, user: AuthUser, minimum: AccessLevel, deleted = false) {
     const record = await this.prisma.recordBookExpense.findFirst({
       where: { id, deletedAt: deleted ? { not: null } : null },
       include: this.expenseInclude(),
@@ -1106,12 +1161,7 @@ export class RecordBookService {
     return record;
   }
 
-  private async getCategory(
-    id: string,
-    user: AuthUser,
-    minimum: AccessLevel,
-    deleted = false,
-  ) {
+  private async getCategory(id: string, user: AuthUser, minimum: AccessLevel, deleted = false) {
     const record = await this.prisma.recordBookExpenseCategory.findFirst({
       where: { id, deletedAt: deleted ? { not: null } : null },
     });

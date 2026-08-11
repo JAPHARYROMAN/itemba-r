@@ -72,16 +72,13 @@ describe('AlertEventsService status transition guards', () => {
   });
 
   describe('dismiss', () => {
-    it.each(['OPEN', 'ACKNOWLEDGED', 'RESOLVED'])(
-      'dismisses a %s alert event',
-      async (status) => {
-        const { service } = makeService(status);
+    it.each(['OPEN', 'ACKNOWLEDGED', 'RESOLVED'])('dismisses a %s alert event', async (status) => {
+      const { service } = makeService(status);
 
-        const result = await service.dismiss('event-1', {}, user);
+      const result = await service.dismiss('event-1', {}, user);
 
-        expect(result.status).toBe('DISMISSED');
-      },
-    );
+      expect(result.status).toBe('DISMISSED');
+    });
 
     it('rejects dismissing an already-DISMISSED alert event', async () => {
       const { service, prisma } = makeService('DISMISSED');

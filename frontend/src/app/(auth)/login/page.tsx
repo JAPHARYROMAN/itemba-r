@@ -205,7 +205,10 @@ export default function LoginPage() {
             </div>
             <div>
               <div className="flex items-center justify-between gap-3">
-                <label htmlFor="new-password" className="block text-sm font-semibold text-[#26364a]">
+                <label
+                  htmlFor="new-password"
+                  className="block text-sm font-semibold text-[#26364a]"
+                >
                   New password
                 </label>
                 <button
@@ -227,7 +230,10 @@ export default function LoginPage() {
               />
             </div>
             <div>
-              <label htmlFor="confirm-password" className="block text-sm font-semibold text-[#26364a]">
+              <label
+                htmlFor="confirm-password"
+                className="block text-sm font-semibold text-[#26364a]"
+              >
                 Confirm new password
               </label>
               <input

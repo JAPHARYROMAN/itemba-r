@@ -68,7 +68,9 @@ export function RecordBookConfirmDialog({
       dismissOnBackdrop={!busy}
       footer={
         <>
-          <Btn variant="secondary" disabled={busy} onClick={onClose}>Cancel</Btn>
+          <Btn variant="secondary" disabled={busy} onClick={onClose}>
+            Cancel
+          </Btn>
           <Btn
             variant={action?.tone ?? 'primary'}
             loading={busy}
@@ -113,11 +115,23 @@ export function RecordBookPagination({
     <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-400">
       <span>{total.toLocaleString()} records</span>
       <div className="flex items-center gap-2">
-        <Btn size="sm" variant="secondary" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+        <Btn
+          size="sm"
+          variant="secondary"
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+        >
           Previous
         </Btn>
-        <span className="min-w-24 text-center">Page {page} of {totalPages}</span>
-        <Btn size="sm" variant="secondary" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
+        <span className="min-w-24 text-center">
+          Page {page} of {totalPages}
+        </span>
+        <Btn
+          size="sm"
+          variant="secondary"
+          disabled={page >= totalPages}
+          onClick={() => onPageChange(page + 1)}
+        >
           Next
         </Btn>
       </div>

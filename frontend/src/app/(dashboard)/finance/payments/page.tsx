@@ -15,7 +15,14 @@ import {
   ResponsiveDataTable,
   type ResponsiveColumn,
 } from '@/components/aurora/data-display/ResponsiveDataTable';
-import { FormShell, FormSection, FormInput, FormSelect, FormTextarea, FormActions } from '@/components/aurora/forms';
+import {
+  FormShell,
+  FormSection,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  FormActions,
+} from '@/components/aurora/forms';
 import { DocumentArtifactButton } from '@/components/documents';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList, backendPage, backendPatch, backendPost } from '@/lib/api-client';
@@ -261,7 +268,8 @@ function ReceivePaymentModal({
       });
     backendGet<CashAccount[]>(`/cash-accounts/company/${companyId}`)
       .then((rows) => {
-        if (!cancelled) setCashAccounts(Array.isArray(rows) ? rows.filter((a) => a.isActive !== false) : []);
+        if (!cancelled)
+          setCashAccounts(Array.isArray(rows) ? rows.filter((a) => a.isActive !== false) : []);
       })
       .catch(() => {
         if (!cancelled) setCashAccounts([]);
@@ -581,7 +589,10 @@ function ReceivePaymentModal({
                             <div className="font-mono text-[11px]">
                               {r.receivableNumber ?? r.id.slice(0, 8)}
                             </div>
-                            <div className="text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+                            <div
+                              className="text-[11px]"
+                              style={{ color: 'var(--aurora-text-muted)' }}
+                            >
                               {money(r.amount, r.currency ?? currency)}
                             </div>
                           </td>
@@ -601,7 +612,10 @@ function ReceivePaymentModal({
                                 step="0.01"
                                 value={value}
                                 onChange={(e) =>
-                                  setAllocation(r.id, e.target.value === '' ? '' : Number(e.target.value))
+                                  setAllocation(
+                                    r.id,
+                                    e.target.value === '' ? '' : Number(e.target.value),
+                                  )
                                 }
                                 aria-label={`Allocate to ${r.receivableNumber ?? r.id.slice(0, 8)}`}
                                 className={`${fieldClass} w-32 text-right`}
@@ -732,7 +746,9 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
       open
       onClose={onClose}
       title={detail ? `Payment ${detail.paymentNumber}` : 'Customer Payment'}
-      description={detail ? `${detail.customer?.name ?? detail.customerId} · ${detail.status}` : undefined}
+      description={
+        detail ? `${detail.customer?.name ?? detail.customerId} · ${detail.status}` : undefined
+      }
       size="xl"
     >
       <div className="max-h-[75vh] overflow-y-auto p-5">
@@ -799,7 +815,11 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                           {a.receivable?.receivableNumber ?? a.receivableId.slice(0, 8)}
                         </td>
                         <td className="px-3 py-2">
-                          {a.receivable?.status ? <StatusBadge status={a.receivable.status} /> : '—'}
+                          {a.receivable?.status ? (
+                            <StatusBadge status={a.receivable.status} />
+                          ) : (
+                            '—'
+                          )}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums">
                           {money(a.amount, currency)}
@@ -837,7 +857,10 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                       label="Status"
                       value={<StatusBadge status={detail.journalEntry.status} />}
                     />
-                    <DetailRow label="Posted At" value={fmtDateTime(detail.journalEntry.postedAt)} />
+                    <DetailRow
+                      label="Posted At"
+                      value={fmtDateTime(detail.journalEntry.postedAt)}
+                    />
                   </div>
                   <div
                     className="overflow-x-auto rounded-lg border"
@@ -1112,7 +1135,10 @@ export default function CustomerPaymentsPage() {
   if (!canView) {
     return (
       <div className="p-6 space-y-6">
-        <PageHeader title="Customer Payments" subtitle="Receive & allocate customer payments (AR)" />
+        <PageHeader
+          title="Customer Payments"
+          subtitle="Receive & allocate customer payments (AR)"
+        />
         <PermissionDeniedState />
       </div>
     );

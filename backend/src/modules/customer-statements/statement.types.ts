@@ -1,12 +1,7 @@
 import { Prisma } from '@prisma/client';
 
 /** A single ledger movement on a customer statement. */
-export type StatementLineType =
-  | 'INVOICE'
-  | 'PAYMENT'
-  | 'CREDIT_NOTE'
-  | 'REFUND'
-  | 'ADJUSTMENT';
+export type StatementLineType = 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE' | 'REFUND' | 'ADJUSTMENT';
 
 /**
  * Sign convention (customer AR ledger, i.e. what the customer OWES us):

@@ -72,7 +72,7 @@ describe('DocumentNumberSequencesService company scoping', () => {
       });
     });
 
-    it('forbids a company user from reading another company\'s sequence', async () => {
+    it("forbids a company user from reading another company's sequence", async () => {
       const prisma = makePrisma();
       prisma.documentNumberSequence.findFirst.mockResolvedValue({
         id: 'seq-b',
@@ -153,9 +153,7 @@ describe('DocumentNumberSequencesService company scoping', () => {
 
     it('surfaces group-level (null company) sequences to a group-scoped user', async () => {
       const prisma = makePrisma();
-      const service = makeService(
-        prisma,
-      );
+      const service = makeService(prisma);
 
       await service.findAll(
         {} as any,
@@ -166,10 +164,7 @@ describe('DocumentNumberSequencesService company scoping', () => {
 
       const where = prisma.documentNumberSequence.findMany.mock.calls[0][0].where;
       expect(where.deletedAt).toBeNull();
-      expect(where.OR).toEqual([
-        { companyId: { in: ['company-1'] } },
-        { companyId: null },
-      ]);
+      expect(where.OR).toEqual([{ companyId: { in: ['company-1'] } }, { companyId: null }]);
     });
 
     it('does not widen to null-company rows when a group user narrows to one company', async () => {
@@ -190,7 +185,7 @@ describe('DocumentNumberSequencesService company scoping', () => {
   });
 
   describe('update', () => {
-    it('blocks cross-company updates instead of mutating another tenant\'s sequence', async () => {
+    it("blocks cross-company updates instead of mutating another tenant's sequence", async () => {
       const prisma = makePrisma();
       prisma.documentNumberSequence.findFirst.mockResolvedValue({
         id: 'seq-b',
@@ -216,9 +211,9 @@ describe('DocumentNumberSequencesService company scoping', () => {
         companyAccess: [{ companyId: 'company-1', accessLevel: AccessLevel.READ }],
       });
 
-      await expect(
-        service.update('seq-1', { prefix: 'X-' }, readOnly),
-      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service.update('seq-1', { prefix: 'X-' }, readOnly)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
       expect(prisma.documentNumberSequence.update).not.toHaveBeenCalled();
     });
 
@@ -239,7 +234,7 @@ describe('DocumentNumberSequencesService company scoping', () => {
   });
 
   describe('nextNumber', () => {
-    it('does not advance another company\'s live counter', async () => {
+    it("does not advance another company's live counter", async () => {
       const prisma = makePrisma();
       prisma.documentNumberSequence.findFirst.mockResolvedValue({
         id: 'seq-b',

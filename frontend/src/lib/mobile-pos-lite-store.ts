@@ -78,7 +78,8 @@ function openDatabase(): Promise<IDBDatabase> {
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
-    request.onerror = () => reject(request.error ?? new Error('Mobile POS storage operation failed'));
+    request.onerror = () =>
+      reject(request.error ?? new Error('Mobile POS storage operation failed'));
     request.onsuccess = () => resolve(request.result);
   });
 }
@@ -98,9 +99,11 @@ async function transaction<T>(
 }
 
 export async function getMobilePosLiteBinding(): Promise<MobilePosLiteBinding | null> {
-  return (await transaction<MobilePosLiteBinding | undefined>(BINDINGS, 'readonly', (store) =>
-    store.get(ACTIVE_BINDING),
-  )) ?? null;
+  return (
+    (await transaction<MobilePosLiteBinding | undefined>(BINDINGS, 'readonly', (store) =>
+      store.get(ACTIVE_BINDING),
+    )) ?? null
+  );
 }
 
 export async function saveMobilePosLiteBinding(binding: MobilePosLiteBinding) {
@@ -111,7 +114,9 @@ export async function clearMobilePosLiteBinding() {
   await transaction(BINDINGS, 'readwrite', (store) => store.delete(ACTIVE_BINDING));
 }
 
-export async function getMobilePosLiteCatalog(terminalCode: string): Promise<MobilePosLiteProduct[]> {
+export async function getMobilePosLiteCatalog(
+  terminalCode: string,
+): Promise<MobilePosLiteProduct[]> {
   const value = await transaction<{ products?: MobilePosLiteProduct[] } | undefined>(
     CATALOGS,
     'readonly',
@@ -120,7 +125,10 @@ export async function getMobilePosLiteCatalog(terminalCode: string): Promise<Mob
   return value?.products ?? [];
 }
 
-export async function saveMobilePosLiteCatalog(terminalCode: string, products: MobilePosLiteProduct[]) {
+export async function saveMobilePosLiteCatalog(
+  terminalCode: string,
+  products: MobilePosLiteProduct[],
+) {
   await transaction(CATALOGS, 'readwrite', (store) =>
     store.put({ products, updatedAt: new Date().toISOString() }, terminalCode),
   );
@@ -161,8 +169,10 @@ export async function removePendingMobilePosLiteSale(id: string) {
 }
 
 export async function updatePendingMobilePosLiteSaleError(id: string, lastError: string) {
-  const existing = await transaction<PendingMobilePosLiteSale | undefined>(OUTBOX, 'readonly', (store) =>
-    store.get(id),
+  const existing = await transaction<PendingMobilePosLiteSale | undefined>(
+    OUTBOX,
+    'readonly',
+    (store) => store.get(id),
   );
   if (!existing) return;
   await transaction(OUTBOX, 'readwrite', (store) => store.put({ ...existing, lastError }));

@@ -199,9 +199,7 @@ describe('enqueueDueOverdueReminders', () => {
     const notifications = { sendNotification: jest.fn().mockResolvedValue(undefined) };
     const prisma = {
       receivable: {
-        findMany: jest
-          .fn()
-          .mockResolvedValue([{ ...baseReceivable, customer: { email: null } }]),
+        findMany: jest.fn().mockResolvedValue([{ ...baseReceivable, customer: { email: null } }]),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       userCompanyAccess: { findMany: jest.fn().mockResolvedValue([{ userId: 'u-1' }]) },

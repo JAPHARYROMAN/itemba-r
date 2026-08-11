@@ -346,9 +346,15 @@ export class SupplierOrderDraftsService {
       data: { ...data, status },
       include: draftInclude,
     });
-    await this.audit('SUPPLIER_ORDER_DRAFT_STATUS_CHANGE', updated, user, {
-      status: draft.status,
-    }, { status });
+    await this.audit(
+      'SUPPLIER_ORDER_DRAFT_STATUS_CHANGE',
+      updated,
+      user,
+      {
+        status: draft.status,
+      },
+      { status },
+    );
     return updated;
   }
 
@@ -358,7 +364,8 @@ export class SupplierOrderDraftsService {
         where: { id: divisionId, companyId, deletedAt: null },
         select: { id: true },
       });
-      if (!division) throw new BadRequestException('Division does not belong to the selected company');
+      if (!division)
+        throw new BadRequestException('Division does not belong to the selected company');
     }
     if (branchId) {
       const branch = await this.prisma.branch.findFirst({
@@ -374,7 +381,8 @@ export class SupplierOrderDraftsService {
       const supplier = await this.prisma.supplier.findFirst({
         where: { id: dto.supplierId, companyId: dto.companyId, deletedAt: null },
       });
-      if (!supplier) throw new BadRequestException('Supplier does not belong to the selected company');
+      if (!supplier)
+        throw new BadRequestException('Supplier does not belong to the selected company');
       return {
         supplierId: supplier.id,
         name: supplier.name,
@@ -412,9 +420,8 @@ export class SupplierOrderDraftsService {
       const quantity = Number(line.quantity);
       const discount = Number(line.discountAmount ?? 0);
       const tax = Number(line.taxAmount ?? 0);
-      const unitPrice = line.unitPrice === null || line.unitPrice === undefined
-        ? null
-        : Number(line.unitPrice);
+      const unitPrice =
+        line.unitPrice === null || line.unitPrice === undefined ? null : Number(line.unitPrice);
       if (!Number.isFinite(quantity) || quantity <= 0) {
         throw new BadRequestException(`Line ${index + 1} quantity must be greater than zero`);
       }
@@ -424,7 +431,9 @@ export class SupplierOrderDraftsService {
       if (unitPrice === null) {
         hasUnpricedLines = true;
         if (discount > 0 || tax > 0) {
-          throw new BadRequestException(`Line ${index + 1} cannot have discount or tax without a price`);
+          throw new BadRequestException(
+            `Line ${index + 1} cannot have discount or tax without a price`,
+          );
         }
         return {
           lineNumber: index + 1,

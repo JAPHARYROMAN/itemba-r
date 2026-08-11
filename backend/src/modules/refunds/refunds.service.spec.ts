@@ -36,13 +36,15 @@ function draftRefund(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeService(opts: {
-  refund?: Record<string, any>;
-  creditNote?: Record<string, any>;
-  cashAccount?: Record<string, any> | null;
-  journalEntry?: Record<string, any>;
-  postLines?: jest.Mock;
-} = {}) {
+function makeService(
+  opts: {
+    refund?: Record<string, any>;
+    creditNote?: Record<string, any>;
+    cashAccount?: Record<string, any> | null;
+    journalEntry?: Record<string, any>;
+    postLines?: jest.Mock;
+  } = {},
+) {
   const cashAccount =
     opts.cashAccount === undefined
       ? {
@@ -91,8 +93,22 @@ function makeService(opts: {
       referenceId: 'refund-1',
       status: 'POSTED',
       lines: [
-        { accountId: 'acc-ar', debit: new Prisma.Decimal(100), credit: new Prisma.Decimal(0), description: 'Release customer credit', divisionId: null, branchId: null },
-        { accountId: 'acc-cash', debit: new Prisma.Decimal(0), credit: new Prisma.Decimal(100), description: 'Refund paid', divisionId: null, branchId: null },
+        {
+          accountId: 'acc-ar',
+          debit: new Prisma.Decimal(100),
+          credit: new Prisma.Decimal(0),
+          description: 'Release customer credit',
+          divisionId: null,
+          branchId: null,
+        },
+        {
+          accountId: 'acc-cash',
+          debit: new Prisma.Decimal(0),
+          credit: new Prisma.Decimal(100),
+          description: 'Refund paid',
+          divisionId: null,
+          branchId: null,
+        },
       ],
     })),
     updateMany: jest.fn(async () => ({ count: 1 })),
@@ -137,7 +153,16 @@ function makeService(opts: {
     postingEngine,
     codes,
   );
-  return { service, prisma, auditLogs, companyScope, accountResolver, postingEngine, postLines, codes };
+  return {
+    service,
+    prisma,
+    auditLogs,
+    companyScope,
+    accountResolver,
+    postingEngine,
+    postLines,
+    codes,
+  };
 }
 
 describe('RefundsService.create — double-refund guard & cash account resolution', () => {
@@ -199,7 +224,13 @@ describe('RefundsService.create — double-refund guard & cash account resolutio
 
     await expect(
       service.create(
-        { companyId: 'company-1', creditNoteId: 'cn-1', cashAccountId: 'cash-1', amount: 40, refundDate: '2026-06-01' } as any,
+        {
+          companyId: 'company-1',
+          creditNoteId: 'cn-1',
+          cashAccountId: 'cash-1',
+          amount: 40,
+          refundDate: '2026-06-01',
+        } as any,
         user,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -208,7 +239,13 @@ describe('RefundsService.create — double-refund guard & cash account resolutio
   it('takes a transaction-scoped advisory lock on the credit note before the ceiling check', async () => {
     const { service, prisma } = makeService();
     await service.create(
-      { companyId: 'company-1', creditNoteId: 'cn-1', cashAccountId: 'cash-1', amount: 10, refundDate: '2026-06-01' } as any,
+      {
+        companyId: 'company-1',
+        creditNoteId: 'cn-1',
+        cashAccountId: 'cash-1',
+        amount: 10,
+        refundDate: '2026-06-01',
+      } as any,
       user,
     );
     expect(prisma.$executeRaw).toHaveBeenCalled();
@@ -229,7 +266,13 @@ describe('RefundsService.create — double-refund guard & cash account resolutio
 
     await expect(
       service.create(
-        { companyId: 'company-1', creditNoteId: 'cn-1', cashAccountId: 'cash-1', amount: 10, refundDate: '2026-06-01' } as any,
+        {
+          companyId: 'company-1',
+          creditNoteId: 'cn-1',
+          cashAccountId: 'cash-1',
+          amount: 10,
+          refundDate: '2026-06-01',
+        } as any,
         user,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -237,12 +280,23 @@ describe('RefundsService.create — double-refund guard & cash account resolutio
 
   it('rejects a cash account that does not belong to the company', async () => {
     const { service } = makeService({
-      cashAccount: { id: 'cash-1', companyId: 'other-company', accountType: 'CASH_ON_HAND', accountName: 'Foreign Till' },
+      cashAccount: {
+        id: 'cash-1',
+        companyId: 'other-company',
+        accountType: 'CASH_ON_HAND',
+        accountName: 'Foreign Till',
+      },
     });
 
     await expect(
       service.create(
-        { companyId: 'company-1', creditNoteId: 'cn-1', cashAccountId: 'cash-1', amount: 10, refundDate: '2026-06-01' } as any,
+        {
+          companyId: 'company-1',
+          creditNoteId: 'cn-1',
+          cashAccountId: 'cash-1',
+          amount: 10,
+          refundDate: '2026-06-01',
+        } as any,
         user,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -271,7 +325,12 @@ describe('RefundsService.create — double-refund guard & cash account resolutio
     const { service } = makeService();
     await expect(
       service.create(
-        { companyId: 'company-1', cashAccountId: 'cash-1', amount: 10, refundDate: '2026-06-01' } as any,
+        {
+          companyId: 'company-1',
+          cashAccountId: 'cash-1',
+          amount: 10,
+          refundDate: '2026-06-01',
+        } as any,
         user,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -401,7 +460,9 @@ describe('RefundsService.pay — balanced JE & DRAFT-only guard', () => {
       },
     });
 
-    await expect(service.pay('refund-1', {} as any, user)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.pay('refund-1', {} as any, user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
     expect(postLines).not.toHaveBeenCalled();
   });
 
@@ -410,7 +471,11 @@ describe('RefundsService.pay — balanced JE & DRAFT-only guard', () => {
     await service.pay('refund-1', {} as any, user);
     expect(prisma.refund.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ id: 'refund-1', status: RefundStatus.DRAFT, deletedAt: null }),
+        where: expect.objectContaining({
+          id: 'refund-1',
+          status: RefundStatus.DRAFT,
+          deletedAt: null,
+        }),
         data: expect.objectContaining({ status: RefundStatus.PAID }),
       }),
     );
@@ -434,7 +499,9 @@ describe('RefundsService.pay — balanced JE & DRAFT-only guard', () => {
         findFirst: jest.fn(async () => draftRefund({ status: RefundStatus.PAID })),
       },
     });
-    await expect(service.pay('refund-1', {} as any, user)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.pay('refund-1', {} as any, user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
     expect(prisma.cashAccount.update).not.toHaveBeenCalled();
   });
 });
@@ -444,7 +511,9 @@ describe('RefundsService.void — reversing JE', () => {
     const { service, postLines, prisma } = makeService({
       refund: {
         updateMany: jest.fn(async () => ({ count: 1 })),
-        findFirst: jest.fn(async () => draftRefund({ status: RefundStatus.PAID, journalEntryId: 'je-1' })),
+        findFirst: jest.fn(async () =>
+          draftRefund({ status: RefundStatus.PAID, journalEntryId: 'je-1' }),
+        ),
       },
     });
 
@@ -481,9 +550,9 @@ describe('RefundsService.void — reversing JE', () => {
       },
     });
 
-    await expect(
-      service.void('refund-1', { reason: 'x' } as any, user),
-    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.void('refund-1', { reason: 'x' } as any, user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
     expect(postLines).not.toHaveBeenCalled();
   });
 
@@ -491,9 +560,14 @@ describe('RefundsService.void — reversing JE', () => {
     const { service, postLines } = makeService({
       refund: {
         updateMany: jest.fn(async () => ({ count: 1 })),
-        findFirst: jest.fn(async () => draftRefund({ status: RefundStatus.PAID, journalEntryId: null })),
+        findFirst: jest.fn(async () =>
+          draftRefund({ status: RefundStatus.PAID, journalEntryId: null }),
+        ),
       },
-      journalEntry: { findFirst: jest.fn(async () => null), updateMany: jest.fn(async () => ({ count: 0 })) },
+      journalEntry: {
+        findFirst: jest.fn(async () => null),
+        updateMany: jest.fn(async () => ({ count: 0 })),
+      },
     });
 
     const result = await service.void('refund-1', { reason: 'x' } as any, user);
@@ -505,9 +579,14 @@ describe('RefundsService.void — reversing JE', () => {
     const { service, prisma } = makeService({
       refund: {
         updateMany: jest.fn(async () => ({ count: 1 })),
-        findFirst: jest.fn(async () => draftRefund({ status: RefundStatus.PAID, journalEntryId: null })),
+        findFirst: jest.fn(async () =>
+          draftRefund({ status: RefundStatus.PAID, journalEntryId: null }),
+        ),
       },
-      journalEntry: { findFirst: jest.fn(async () => null), updateMany: jest.fn(async () => ({ count: 0 })) },
+      journalEntry: {
+        findFirst: jest.fn(async () => null),
+        updateMany: jest.fn(async () => ({ count: 0 })),
+      },
     });
 
     await service.void('refund-1', { reason: 'x' } as any, user);

@@ -337,7 +337,11 @@ function productTaxRate(product: OrderProductOption | undefined) {
 
 // Auto-computed VAT amount for a line given the selected product's rate, or null
 // when the product is not taxable (so callers can leave the manual tax alone).
-function autoLineTax(line: EditableOrderLine, product: OrderProductOption | undefined, variant: OrderVariant) {
+function autoLineTax(
+  line: EditableOrderLine,
+  product: OrderProductOption | undefined,
+  variant: OrderVariant,
+) {
   const rate = productTaxRate(product);
   if (rate == null) return null;
   return roundMoney((lineTaxBase(line, variant) * rate) / 100);
@@ -1130,8 +1134,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                           {lineTaxRate != null ? (
                             <span style={{ color: 'var(--aurora-text-muted)' }}>
                               {' '}
-                              (VAT {lineTaxRate}%
-                              {line.taxManual ? ', manual' : ' auto'})
+                              (VAT {lineTaxRate}%{line.taxManual ? ', manual' : ' auto'})
                             </span>
                           ) : null}
                         </span>

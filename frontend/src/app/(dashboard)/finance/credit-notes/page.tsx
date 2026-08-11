@@ -55,7 +55,12 @@ interface CreditNoteLine {
   netAmount: number | string;
   taxAmount: number | string;
   lineTotal: number | string;
-  product?: { id?: string | null; productCode?: string | null; sku?: string | null; name?: string | null } | null;
+  product?: {
+    id?: string | null;
+    productCode?: string | null;
+    sku?: string | null;
+    name?: string | null;
+  } | null;
   unit?: { id?: string | null; name?: string | null; symbol?: string | null } | null;
 }
 
@@ -447,7 +452,10 @@ function CreateModal({
   const set = <K extends keyof CreditNoteForm>(k: K, v: CreditNoteForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
   const setLine = (i: number, patch: Partial<CreditNoteFormLine>) =>
-    setForm((f) => ({ ...f, lines: f.lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)) }));
+    setForm((f) => ({
+      ...f,
+      lines: f.lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
+    }));
   const addLine = () => setForm((f) => ({ ...f, lines: [...f.lines, blankLine()] }));
   const removeLine = (i: number) =>
     setForm((f) => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }));
@@ -532,7 +540,11 @@ function CreateModal({
       if (form.receivableId.trim()) body.receivableId = form.receivableId.trim();
 
       await backendPost('/credit-notes', body);
-      showToast('success', 'Credit note created', 'Saved as draft — issue it to post to the ledger.');
+      showToast(
+        'success',
+        'Credit note created',
+        'Saved as draft — issue it to post to the ledger.',
+      );
       onSaved();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to create credit note';
@@ -831,15 +843,12 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                     : '—'
                 }
               />
-              <DetailRow
-                label="Sales Order"
-                value={detail.salesOrder?.salesOrderNumber ?? '—'}
-              />
+              <DetailRow label="Sales Order" value={detail.salesOrder?.salesOrderNumber ?? '—'} />
               <DetailRow
                 label="Receivable"
                 value={
                   detail.receivable
-                    ? detail.receivable.receivableNumber ?? detail.receivable.id.slice(0, 8)
+                    ? (detail.receivable.receivableNumber ?? detail.receivable.id.slice(0, 8))
                     : '—'
                 }
               />
@@ -859,7 +868,10 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                   <thead>
                     <tr
                       className="text-left text-[11px] uppercase"
-                      style={{ color: 'var(--aurora-text-muted)', background: 'var(--aurora-bg-subtle)' }}
+                      style={{
+                        color: 'var(--aurora-text-muted)',
+                        background: 'var(--aurora-bg-subtle)',
+                      }}
                     >
                       <th className="px-3 py-2">Description</th>
                       <th className="px-3 py-2 text-right">Qty</th>
@@ -875,7 +887,10 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                         <td className="px-3 py-2">
                           <div>{line.description ?? '—'}</div>
                           {line.product?.name && (
-                            <div className="text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+                            <div
+                              className="text-[11px]"
+                              style={{ color: 'var(--aurora-text-muted)' }}
+                            >
                               {line.product.name}
                             </div>
                           )}
@@ -918,10 +933,7 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
               {detail.journalEntry ? (
                 <div className="space-y-3">
                   <div className="grid gap-3 sm:grid-cols-3">
-                    <DetailRow
-                      label="Journal #"
-                      value={detail.journalEntry.journalNumber}
-                    />
+                    <DetailRow label="Journal #" value={detail.journalEntry.journalNumber} />
                     <DetailRow
                       label="Status"
                       value={<StatusBadge status={detail.journalEntry.status} />}
@@ -954,7 +966,9 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                         {(detail.journalEntry.lines ?? []).map((line) => (
                           <tr key={line.id}>
                             <td className="px-3 py-2">
-                              <div className="font-mono text-[11px]">{line.account.accountCode}</div>
+                              <div className="font-mono text-[11px]">
+                                {line.account.accountCode}
+                              </div>
                               <div>{line.account.accountName}</div>
                             </td>
                             <td className="px-3 py-2">{line.description ?? '—'}</td>

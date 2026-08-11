@@ -116,7 +116,11 @@ describe('PayrollPostingsService.postRun — accrual balance', () => {
         grossPay: '1000000',
         netPay: '900000', // gross - 100000 PAYE
         statutoryLines: [
-          { taxTypeCode: 'PAYE_MAINLAND', employeeContribution: '100000', employerContribution: '0' },
+          {
+            taxTypeCode: 'PAYE_MAINLAND',
+            employeeContribution: '100000',
+            employerContribution: '0',
+          },
         ],
         deductions: [],
       },
@@ -179,7 +183,11 @@ describe('PayrollPostingsService.postRun — accrual balance', () => {
         grossPay: '1000000',
         netPay: '710000',
         statutoryLines: [
-          { taxTypeCode: 'PAYE_MAINLAND', employeeContribution: '120000', employerContribution: '0' },
+          {
+            taxTypeCode: 'PAYE_MAINLAND',
+            employeeContribution: '120000',
+            employerContribution: '0',
+          },
           { taxTypeCode: 'NSSF', employeeContribution: '100000', employerContribution: '100000' },
         ],
         deductions: [
@@ -195,21 +203,21 @@ describe('PayrollPostingsService.postRun — accrual balance', () => {
     // Debits: gross 1,000,000 + NSSF employer 100,000 = 1,100,000
     expect(sum(je, 'debit').equals(new Prisma.Decimal('1100000'))).toBe(true);
     // Credit buckets.
-    expect(new Prisma.Decimal(lineFor(je, '2210').credit).equals(new Prisma.Decimal('120000'))).toBe(
-      true,
-    );
-    expect(new Prisma.Decimal(lineFor(je, '2220').credit).equals(new Prisma.Decimal('200000'))).toBe(
-      true,
-    );
+    expect(
+      new Prisma.Decimal(lineFor(je, '2210').credit).equals(new Prisma.Decimal('120000')),
+    ).toBe(true);
+    expect(
+      new Prisma.Decimal(lineFor(je, '2220').credit).equals(new Prisma.Decimal('200000')),
+    ).toBe(true);
     expect(new Prisma.Decimal(lineFor(je, '2280').credit).equals(new Prisma.Decimal('30000'))).toBe(
       true,
     );
     expect(new Prisma.Decimal(lineFor(je, '1110').credit).equals(new Prisma.Decimal('40000'))).toBe(
       true,
     );
-    expect(new Prisma.Decimal(lineFor(je, '2270').credit).equals(new Prisma.Decimal('710000'))).toBe(
-      true,
-    );
+    expect(
+      new Prisma.Decimal(lineFor(je, '2270').credit).equals(new Prisma.Decimal('710000')),
+    ).toBe(true);
   });
 
   it('throws a clear error if the advance-recovery bucket needs 1110 but it is unseeded', async () => {

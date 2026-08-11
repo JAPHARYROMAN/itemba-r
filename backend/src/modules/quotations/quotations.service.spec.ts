@@ -42,7 +42,11 @@ function makeService() {
     quotation: {
       findFirst: jest.fn(async () => quotationRow),
       updateMany: jest.fn(async () => ({ count: 1 })),
-      update: jest.fn(async ({ data }: any) => ({ id: 'quote-1', companyId: 'company-1', ...data })),
+      update: jest.fn(async ({ data }: any) => ({
+        id: 'quote-1',
+        companyId: 'company-1',
+        ...data,
+      })),
     },
     salesOrder: {
       create: jest.fn(async ({ data }: any) => ({ id: 'so-1', ...data })),

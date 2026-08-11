@@ -141,46 +141,79 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
 
   const actionButtons = record ? (
     <div className="flex flex-wrap gap-2">
-      <Link href={listHref} className="inline-flex items-center rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800">
+      <Link
+        href={listHref}
+        className="inline-flex items-center rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800"
+      >
         Back to list
       </Link>
       {record.status === 'DRAFT' && hasPermission('record_book.finalize') && (
-        <Btn variant="success" onClick={() => request({
-          title: 'Finalize record',
-          description: 'This locks the entry until an administrator reopens it.',
-          confirmLabel: 'Finalize',
-          tone: 'success',
-          execute: () => backendPatch(`/record-book/${kind}/${record.id}/finalize`, {}),
-        })}>Finalize</Btn>
+        <Btn
+          variant="success"
+          onClick={() =>
+            request({
+              title: 'Finalize record',
+              description: 'This locks the entry until an administrator reopens it.',
+              confirmLabel: 'Finalize',
+              tone: 'success',
+              execute: () => backendPatch(`/record-book/${kind}/${record.id}/finalize`, {}),
+            })
+          }
+        >
+          Finalize
+        </Btn>
       )}
       {record.status === 'FINALIZED' && hasPermission('record_book.admin') && (
-        <Btn variant="warning" onClick={() => request({
-          title: 'Reopen record',
-          description: 'This returns the entry to Draft for correction.',
-          confirmLabel: 'Reopen',
-          tone: 'warning',
-          execute: () => backendPatch(`/record-book/${kind}/${record.id}/reopen`, {}),
-        })}>Reopen</Btn>
+        <Btn
+          variant="warning"
+          onClick={() =>
+            request({
+              title: 'Reopen record',
+              description: 'This returns the entry to Draft for correction.',
+              confirmLabel: 'Reopen',
+              tone: 'warning',
+              execute: () => backendPatch(`/record-book/${kind}/${record.id}/reopen`, {}),
+            })
+          }
+        >
+          Reopen
+        </Btn>
       )}
       {record.status !== 'VOIDED' && hasPermission('record_book.void') && (
-        <Btn variant="danger" onClick={() => request({
-          title: 'Void record',
-          description: 'The entry remains visible for audit but is excluded from active totals.',
-          confirmLabel: 'Void record',
-          tone: 'danger',
-          requireReason: true,
-          execute: (voidReason) => backendPatch(`/record-book/${kind}/${record.id}/void`, { reason: voidReason }),
-        })}>Void</Btn>
+        <Btn
+          variant="danger"
+          onClick={() =>
+            request({
+              title: 'Void record',
+              description:
+                'The entry remains visible for audit but is excluded from active totals.',
+              confirmLabel: 'Void record',
+              tone: 'danger',
+              requireReason: true,
+              execute: (voidReason) =>
+                backendPatch(`/record-book/${kind}/${record.id}/void`, { reason: voidReason }),
+            })
+          }
+        >
+          Void
+        </Btn>
       )}
       {record.status === 'DRAFT' && hasPermission('record_book.delete') && (
-        <Btn variant="danger" onClick={() => request({
-          title: 'Move draft to Trash',
-          description: 'The record can later be restored by an administrator.',
-          confirmLabel: 'Move to Trash',
-          tone: 'danger',
-          execute: () => backendDelete(`/record-book/${kind}/${record.id}`),
-          after: () => router.push('/record-book/trash'),
-        })}>Delete</Btn>
+        <Btn
+          variant="danger"
+          onClick={() =>
+            request({
+              title: 'Move draft to Trash',
+              description: 'The record can later be restored by an administrator.',
+              confirmLabel: 'Move to Trash',
+              tone: 'danger',
+              execute: () => backendDelete(`/record-book/${kind}/${record.id}`),
+              after: () => router.push('/record-book/trash'),
+            })
+          }
+        >
+          Delete
+        </Btn>
       )}
     </div>
   ) : undefined;
@@ -193,26 +226,58 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
         actions={actionButtons}
       />
       <RecordBookNav />
-      {error && <div className="mb-4 rounded-lg border border-red-700 bg-red-950/40 px-4 py-3 text-sm text-red-200">{error}</div>}
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-700 bg-red-950/40 px-4 py-3 text-sm text-red-200">
+          {error}
+        </div>
+      )}
       {loading ? (
         <SkeletonTable rows={5} cols={4} />
       ) : !record ? (
-        <Card><EmptyState title="Record not found" description="The entry may have been moved to Trash or is outside your company access." /></Card>
+        <Card>
+          <EmptyState
+            title="Record not found"
+            description="The entry may have been moved to Trash or is outside your company access."
+          />
+        </Card>
       ) : (
         <div className="space-y-5">
           <Card>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-lg font-semibold text-slate-100">Record overview</h2>
-              <span className="rounded-full border border-slate-700 px-3 py-1 text-xs font-semibold text-slate-200">{record.status}</span>
+              <span className="rounded-full border border-slate-700 px-3 py-1 text-xs font-semibold text-slate-200">
+                {record.status}
+              </span>
             </div>
             <dl className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
               <Field label="Record ID" value={record.id} />
               <Field label="Record Date" value={recordBookDate(record.recordDate)} />
-              <Field label="Company" value={record.company ? `${record.company.code} - ${record.company.name}` : '-'} />
-              <Field label="Division" value={record.division ? `${record.division.code} - ${record.division.name}` : 'All divisions'} />
-              <Field label="Branch" value={record.branch ? `${record.branch.code} - ${record.branch.name}` : 'All branches'} />
+              <Field
+                label="Company"
+                value={record.company ? `${record.company.code} - ${record.company.name}` : '-'}
+              />
+              <Field
+                label="Division"
+                value={
+                  record.division
+                    ? `${record.division.code} - ${record.division.name}`
+                    : 'All divisions'
+                }
+              />
+              <Field
+                label="Branch"
+                value={
+                  record.branch ? `${record.branch.code} - ${record.branch.name}` : 'All branches'
+                }
+              />
               <Field label="Currency" value={record.currency} />
-              <Field label={isSale ? 'Total Sales' : 'Amount'} value={recordBookMoney(isSale ? (record as DailySale).totalSalesAmount : (record as Expense).amount, record.currency)} />
+              <Field
+                label={isSale ? 'Total Sales' : 'Amount'}
+                value={recordBookMoney(
+                  isSale ? (record as DailySale).totalSalesAmount : (record as Expense).amount,
+                  record.currency,
+                )}
+              />
               <Field label="Status" value={record.status} />
             </dl>
           </Card>
@@ -223,7 +288,13 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
               <div className="overflow-x-auto rounded-lg border border-slate-800">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-900/70 text-left text-slate-400">
-                    <tr><th className="px-3 py-3">Method</th><th className="px-3 py-3">Label</th><th className="px-3 py-3">Reference</th><th className="px-3 py-3 text-right">Amount</th><th className="px-3 py-3">Notes</th></tr>
+                    <tr>
+                      <th className="px-3 py-3">Method</th>
+                      <th className="px-3 py-3">Label</th>
+                      <th className="px-3 py-3">Reference</th>
+                      <th className="px-3 py-3 text-right">Amount</th>
+                      <th className="px-3 py-3">Notes</th>
+                    </tr>
                   </thead>
                   <tbody>
                     {(record as DailySale).receipts.map((receipt) => (
@@ -231,7 +302,9 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
                         <td className="px-3 py-3">{receipt.receiptType.replace('_', ' ')}</td>
                         <td className="px-3 py-3">{receipt.label || '-'}</td>
                         <td className="px-3 py-3">{receipt.reference || '-'}</td>
-                        <td className="px-3 py-3 text-right font-semibold">{recordBookMoney(receipt.amount, record.currency)}</td>
+                        <td className="px-3 py-3 text-right font-semibold">
+                          {recordBookMoney(receipt.amount, record.currency)}
+                        </td>
                         <td className="px-3 py-3">{receipt.notes || '-'}</td>
                       </tr>
                     ))}
@@ -246,7 +319,10 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
                 <Field label="Category" value={(record as Expense).expenseCategory?.name} />
                 <Field label="Description" value={(record as Expense).description} />
                 <Field label="Paid To" value={(record as Expense).paidTo} />
-                <Field label="Payment Method" value={(record as Expense).paymentMethod.replace('_', ' ')} />
+                <Field
+                  label="Payment Method"
+                  value={(record as Expense).paymentMethod.replace('_', ' ')}
+                />
                 <Field label="Payment Label" value={(record as Expense).paymentLabel} />
                 <Field label="Reference" value={(record as Expense).reference} />
               </dl>

@@ -82,12 +82,7 @@ function makeService(opts: {
     })),
   } as any;
 
-  const service = new BankReconciliationsService(
-    prisma,
-    auditLogs,
-    accountResolver,
-    postingEngine,
-  );
+  const service = new BankReconciliationsService(prisma, auditLogs, accountResolver, postingEngine);
   return { service, prisma, accountResolver, postingEngine, bankReconciliationUpdate };
 }
 

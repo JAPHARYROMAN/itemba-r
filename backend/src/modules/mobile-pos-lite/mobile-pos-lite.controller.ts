@@ -1,13 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Headers,
-  Param,
-  Patch,
-  Post,
-  Query,
-} from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import {
@@ -16,7 +7,10 @@ import {
   UpdateMobilePosTerminalDto,
   UpdateMobilePosTerminalStatusDto,
 } from './dto/mobile-pos-terminal.dto';
-import { ActivateMobilePosTerminalDto, QueryMobilePosLiteCatalogDto } from './dto/mobile-pos-lite-session.dto';
+import {
+  ActivateMobilePosTerminalDto,
+  QueryMobilePosLiteCatalogDto,
+} from './dto/mobile-pos-lite-session.dto';
 import { CreateMobilePosLiteSaleDto } from './dto/mobile-pos-lite-sale.dto';
 import { MobilePosLiteService } from './mobile-pos-lite.service';
 

@@ -1,15 +1,5 @@
-import {
-  CommunicationType,
-  CommunicationDirection,
-  CommunicationStatus,
-} from '@prisma/client';
-import {
-  IsBoolean,
-  IsDateString,
-  IsEnum,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { CommunicationType, CommunicationDirection, CommunicationStatus } from '@prisma/client';
+import { IsBoolean, IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
 
 /**
  * Typed input for updating a communication log. `companyId`, `entityType` and

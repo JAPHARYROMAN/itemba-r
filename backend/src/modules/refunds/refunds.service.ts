@@ -204,7 +204,11 @@ export class RefundsService {
 
     // Validate the cash/bank account belongs to the company (also gives us the
     // account type used to resolve the GL account at pay() time).
-    const cashAccount = await this.resolveCashAccount(this.prisma, dto.companyId, dto.cashAccountId);
+    const cashAccount = await this.resolveCashAccount(
+      this.prisma,
+      dto.companyId,
+      dto.cashAccountId,
+    );
 
     const record = await this.prisma.$transaction(async (tx) => {
       // Credit-note-backed refund: validate + guard double-refund atomically.
@@ -504,9 +508,7 @@ export class RefundsService {
     // If the caller named a customer, it must match the credit note's customer so
     // a refund cannot be booked against another party's credit.
     if (input.customerId && note.customerId && note.customerId !== input.customerId) {
-      throw new BadRequestException(
-        'Credit note does not belong to the specified customer',
-      );
+      throw new BadRequestException('Credit note does not belong to the specified customer');
     }
 
     // Sum existing non-void refunds against this note (DRAFT + PAID both hold

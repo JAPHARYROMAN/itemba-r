@@ -11,7 +11,11 @@ const tabs = [
 export function PurchaseOrderTabs() {
   const pathname = usePathname();
   return (
-    <nav className="flex flex-wrap gap-1 border-b" style={{ borderColor: 'var(--aurora-border)' }} aria-label="Purchase order workspaces">
+    <nav
+      className="flex flex-wrap gap-1 border-b"
+      style={{ borderColor: 'var(--aurora-border)' }}
+      aria-label="Purchase order workspaces"
+    >
       {tabs.map((tab) => {
         const active = tab.href.endsWith('order-drafts')
           ? pathname.startsWith(tab.href)

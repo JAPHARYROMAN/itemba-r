@@ -555,8 +555,7 @@ export class ProfitService {
       const rowGrossProfit = roundMoney(rowRevenue - rowCogs);
       return {
         customerId: bucket.customerId,
-        customerName:
-          bucket.customerName ?? (bucket.customerId ? null : 'Unassigned / Walk-in'),
+        customerName: bucket.customerName ?? (bucket.customerId ? null : 'Unassigned / Walk-in'),
         revenue: rowRevenue,
         cogs: rowCogs,
         grossProfit: rowGrossProfit,

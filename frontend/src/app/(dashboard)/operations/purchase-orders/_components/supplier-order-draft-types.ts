@@ -63,7 +63,13 @@ export interface CompanyOption {
   email?: string | null;
   website?: string | null;
   logoUrl?: string | null;
-  group?: { name?: string | null; address?: string | null; phone?: string | null; email?: string | null; website?: string | null } | null;
+  group?: {
+    name?: string | null;
+    address?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    website?: string | null;
+  } | null;
   profile?: {
     registeredName?: string | null;
     brelaRegNumber?: string | null;
@@ -74,8 +80,17 @@ export interface CompanyOption {
   } | null;
 }
 
-export interface DivisionOption { id: string; name: string; code: string }
-export interface BranchOption { id: string; name: string; code?: string | null; divisionId: string }
+export interface DivisionOption {
+  id: string;
+  name: string;
+  code: string;
+}
+export interface BranchOption {
+  id: string;
+  name: string;
+  code?: string | null;
+  divisionId: string;
+}
 export interface SupplierOption {
   id: string;
   name: string;
@@ -94,5 +109,9 @@ export function money(value: number | string | null | undefined, currency = 'TZS
 
 export function dateOnly(value?: string | null) {
   if (!value) return '-';
-  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(value));
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(value));
 }

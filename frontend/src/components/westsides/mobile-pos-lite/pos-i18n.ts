@@ -63,8 +63,7 @@ const STRINGS = {
     sendNow: 'Send now',
     remove: 'Remove',
     removeConfirmTitle: 'Remove this sale?',
-    removeConfirmBody:
-      'Only a supervisor should do this. The sale will be deleted and never sent.',
+    removeConfirmBody: 'Only a supervisor should do this. The sale will be deleted and never sent.',
     confirmRemove: 'Yes, remove it',
     keepIt: 'Keep it',
     back: 'Back',
@@ -130,8 +129,7 @@ const STRINGS = {
     sendNow: 'Tuma sasa',
     remove: 'Ondoa',
     removeConfirmTitle: 'Uondoe mauzo haya?',
-    removeConfirmBody:
-      'Msimamizi pekee ndiye afanye hivi. Mauzo haya yatafutwa na hayatatumwa.',
+    removeConfirmBody: 'Msimamizi pekee ndiye afanye hivi. Mauzo haya yatafutwa na hayatatumwa.',
     confirmRemove: 'Ndiyo, ondoa',
     keepIt: 'Yaache',
     back: 'Rudi',

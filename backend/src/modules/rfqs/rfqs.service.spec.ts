@@ -85,10 +85,7 @@ describe('RfqsService.create rfqNumber generation', () => {
   it('nests supplier rows from rfqSuppliers or the suppliers alias', async () => {
     const { service, prisma } = makeService();
 
-    await service.create(
-      createDto({ suppliers: [{ supplierId: 'sup-1' }] }),
-      user,
-    );
+    await service.create(createDto({ suppliers: [{ supplierId: 'sup-1' }] }), user);
 
     expect(prisma.requestForQuotation.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -101,12 +98,14 @@ describe('RfqsService.create rfqNumber generation', () => {
 
   it('retries with a fresh generated number on a unique collision', async () => {
     const { service, prisma, codes } = makeService();
-    codes.next
-      .mockResolvedValueOnce('RFQ-2026-00001')
-      .mockResolvedValueOnce('RFQ-2026-00002');
+    codes.next.mockResolvedValueOnce('RFQ-2026-00001').mockResolvedValueOnce('RFQ-2026-00002');
     prisma.requestForQuotation.create
       .mockRejectedValueOnce(p2002())
-      .mockImplementationOnce(async ({ data }: any) => ({ id: 'rfq-1', ...data, rfqSuppliers: [] }));
+      .mockImplementationOnce(async ({ data }: any) => ({
+        id: 'rfq-1',
+        ...data,
+        rfqSuppliers: [],
+      }));
 
     const item = await service.create(createDto(), user);
 
@@ -118,9 +117,9 @@ describe('RfqsService.create rfqNumber generation', () => {
     const { service, prisma, codes } = makeService();
     prisma.requestForQuotation.create.mockRejectedValueOnce(p2002());
 
-    await expect(
-      service.create(createDto({ rfqNumber: 'RFQ-DUP' }), user),
-    ).rejects.toThrow(BadRequestException);
+    await expect(service.create(createDto({ rfqNumber: 'RFQ-DUP' }), user)).rejects.toThrow(
+      BadRequestException,
+    );
     // A supplied number is never retried.
     expect(prisma.requestForQuotation.create).toHaveBeenCalledTimes(1);
     expect(codes.next).not.toHaveBeenCalled();
@@ -203,9 +202,7 @@ describe('RfqsService company scoping', () => {
       new ForbiddenException('You do not have access to this company'),
     );
 
-    await expect(service.update('rfq-1', { title: 'x' }, user)).rejects.toThrow(
-      ForbiddenException,
-    );
+    await expect(service.update('rfq-1', { title: 'x' }, user)).rejects.toThrow(ForbiddenException);
     expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
       user,
       'company-2',

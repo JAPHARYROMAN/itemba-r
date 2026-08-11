@@ -119,7 +119,10 @@ describe('FinancialStatementsService.generate routing', () => {
 
   it('enforces WRITE company scope before generating', async () => {
     const h = makeHarness();
-    await h.service.generate({ ...BASE_DTO, statementType: FinancialStatementType.TRIAL_BALANCE }, writeUser());
+    await h.service.generate(
+      { ...BASE_DTO, statementType: FinancialStatementType.TRIAL_BALANCE },
+      writeUser(),
+    );
     expect(h.companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
       expect.anything(),
       'company-a',

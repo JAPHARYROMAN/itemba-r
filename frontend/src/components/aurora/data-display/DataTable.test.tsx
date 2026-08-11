@@ -75,9 +75,7 @@ describe('DataTable export toolbar', () => {
 
   it('prefers a custom onExportPdf handler over the built-in one', async () => {
     const onExportPdf = vi.fn();
-    render(
-      <DataTable columns={columns} data={data} exportPdf onExportPdf={onExportPdf} />,
-    );
+    render(<DataTable columns={columns} data={data} exportPdf onExportPdf={onExportPdf} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Export to PDF' }));
 

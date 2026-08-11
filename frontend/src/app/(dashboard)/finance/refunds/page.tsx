@@ -240,7 +240,9 @@ function RefundCreateModal({
     if (selectedNote) {
       const refundable = creditNoteRefundable(selectedNote);
       if (amt > refundable) {
-        setError(`Amount cannot exceed the credit note's refundable value ${fmtMoney(refundable, form.currency)}`);
+        setError(
+          `Amount cannot exceed the credit note's refundable value ${fmtMoney(refundable, form.currency)}`,
+        );
         return;
       }
     }
@@ -268,7 +270,11 @@ function RefundCreateModal({
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(await parseError(res, 'Failed to create refund'));
-      showToast('success', 'Refund created', 'A DRAFT refund was created. Pay it to post the GL entry.');
+      showToast(
+        'success',
+        'Refund created',
+        'A DRAFT refund was created. Pay it to post the GL entry.',
+      );
       onSaved();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
@@ -375,7 +381,10 @@ function RefundCreateModal({
               <span>Already applied</span>
               <span className="font-mono">{fmtMoney(selectedNote.appliedAmount, currency)}</span>
             </div>
-            <div className="flex justify-between font-semibold" style={{ color: 'var(--aurora-text)' }}>
+            <div
+              className="flex justify-between font-semibold"
+              style={{ color: 'var(--aurora-text)' }}
+            >
               <span>Refundable in cash</span>
               <span className="font-mono">
                 {fmtMoney(creditNoteRefundable(selectedNote), currency)}
@@ -696,10 +705,7 @@ function RefundDetailModal({ refund, onClose }: { refund: Refund; onClose: () =>
             <dt className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
               {label}
             </dt>
-            <dd
-              className="text-sm break-words font-mono"
-              style={{ color: 'var(--aurora-text)' }}
-            >
+            <dd className="text-sm break-words font-mono" style={{ color: 'var(--aurora-text)' }}>
               {value}
             </dd>
           </div>

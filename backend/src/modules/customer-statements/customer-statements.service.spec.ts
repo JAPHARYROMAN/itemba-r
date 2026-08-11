@@ -82,18 +82,17 @@ const REFUNDS = [
   },
 ];
 
-function makeService(overrides?: {
-  customer?: any;
-  companyScope?: any;
-}) {
+function makeService(overrides?: { customer?: any; companyScope?: any }) {
   const assertCanAccessCompany = jest.fn().mockResolvedValue(undefined);
   const prisma: any = {
     customer: {
-      findFirst: jest.fn().mockResolvedValue(
-        overrides?.customer === undefined
-          ? { id: CUSTOMER, name: 'Acme Ltd', email: 'ap@acme.io' }
-          : overrides.customer,
-      ),
+      findFirst: jest
+        .fn()
+        .mockResolvedValue(
+          overrides?.customer === undefined
+            ? { id: CUSTOMER, name: 'Acme Ltd', email: 'ap@acme.io' }
+            : overrides.customer,
+        ),
     },
     receivable: { findMany: jest.fn().mockResolvedValue(RECEIVABLES) },
     customerPayment: { findMany: jest.fn().mockResolvedValue(PAYMENTS) },
@@ -126,13 +125,7 @@ describe('CustomerStatementsService.buildStatement', () => {
     expect(s.openingBalance.toFixed(2)).toBe('0.00');
     // in-period lines exclude the two pre-period movements (INV-0, PMT-0)
     expect(s.lineCount).toBe(5);
-    expect(s.lines.map((l) => l.reference)).toEqual([
-      'INV-1',
-      'PMT-1',
-      'INV-2',
-      'CN-1',
-      'RF-1',
-    ]);
+    expect(s.lines.map((l) => l.reference)).toEqual(['INV-1', 'PMT-1', 'INV-2', 'CN-1', 'RF-1']);
   });
 
   it('reconciles opening + totalDebits - totalCredits === closingBalance', async () => {
@@ -271,9 +264,7 @@ describe('CustomerStatementsService.buildStatement', () => {
   });
 
   it('enforces company access before returning data', async () => {
-    const assertCanAccessCompany = jest
-      .fn()
-      .mockRejectedValue(new Error('forbidden'));
+    const assertCanAccessCompany = jest.fn().mockRejectedValue(new Error('forbidden'));
     const { service } = makeService({ companyScope: { assertCanAccessCompany } });
     await expect(service.buildStatement(SEL, USER)).rejects.toThrow('forbidden');
     expect(assertCanAccessCompany).toHaveBeenCalledWith(USER, COMPANY, AccessLevel.READ);

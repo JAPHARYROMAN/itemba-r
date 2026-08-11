@@ -112,7 +112,9 @@ describe('RecordBookService', () => {
 
     expect(result.totalSalesAmount).toBe(1000);
     expect(result.receipts[0].amount).toBe(1000);
-    expect(auditLogs.log).toHaveBeenCalledWith(expect.objectContaining({ action: 'RECORD_BOOK_DAILY_SALE_CREATE' }));
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'RECORD_BOOK_DAILY_SALE_CREATE' }),
+    );
   });
 
   it('soft-deletes draft daily sales and keeps the audit record', async () => {
@@ -131,11 +133,15 @@ describe('RecordBookService', () => {
     });
 
     await expect(service.removeDailySale('sale-1', user)).resolves.toEqual({ success: true });
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'sale-1' },
-      data: expect.objectContaining({ deletedAt: expect.any(Date), updatedById: user.id }),
-    }));
-    expect(auditLogs.log).toHaveBeenCalledWith(expect.objectContaining({ action: 'RECORD_BOOK_DAILY_SALE_DELETE' }));
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'sale-1' },
+        data: expect.objectContaining({ deletedAt: expect.any(Date), updatedById: user.id }),
+      }),
+    );
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'RECORD_BOOK_DAILY_SALE_DELETE' }),
+    );
   });
 
   it('does not delete finalized daily sales', async () => {
@@ -151,7 +157,9 @@ describe('RecordBookService', () => {
       },
     });
 
-    await expect(service.removeDailySale('sale-1', user)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.removeDailySale('sale-1', user)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('rejects restoring a daily sale when its active date key is already occupied', async () => {
@@ -171,6 +179,8 @@ describe('RecordBookService', () => {
       recordBookDailySale: { findFirst, update: jest.fn() },
     });
 
-    await expect(service.restoreDailySale('sale-1', user)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.restoreDailySale('sale-1', user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
   });
 });

@@ -97,7 +97,7 @@ export function RecordSalesOrderPaymentModal({
         if (cancelled) return;
         setAccounts(rows);
         setCashAccountId((current) =>
-          current && rows.some((account) => account.id === current) ? current : rows[0]?.id ?? '',
+          current && rows.some((account) => account.id === current) ? current : (rows[0]?.id ?? ''),
         );
       })
       .catch((err) => {
@@ -164,10 +164,7 @@ export function RecordSalesOrderPaymentModal({
       open
       onClose={onClose}
       title="Record Sales Order Payment"
-      subtitle={[
-        orderLabel || null,
-        `Outstanding: ${money(outstanding, currency)}`,
-      ]
+      subtitle={[orderLabel || null, `Outstanding: ${money(outstanding, currency)}`]
         .filter(Boolean)
         .join(' - ')}
       size="md"

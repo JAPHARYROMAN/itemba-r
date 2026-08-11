@@ -1,9 +1,4 @@
-import {
-  IsBoolean,
-  IsObject,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { IsBoolean, IsObject, IsOptional, IsString } from 'class-validator';
 
 export class UpdateCustomerSegmentDto {
   // companyId is accepted so the service can reject attempts to move a record

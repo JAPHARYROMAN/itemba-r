@@ -1,16 +1,5 @@
-import {
-  ContactEntityType,
-  CommunicationType,
-  CommunicationDirection,
-} from '@prisma/client';
-import {
-  IsBoolean,
-  IsDateString,
-  IsEnum,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { ContactEntityType, CommunicationType, CommunicationDirection } from '@prisma/client';
+import { IsBoolean, IsDateString, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 /**
  * Typed input for creating a communication log. Replaces the previous

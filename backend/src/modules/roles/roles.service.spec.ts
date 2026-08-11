@@ -69,11 +69,7 @@ describe('RolesService — permission cache invalidation', () => {
       holders: ['user-a', 'user-b', 'user-a'], // duplicate to prove de-dup
     });
 
-    await service.update(
-      'role-1',
-      { permissionIds: ['perm-1'] } as any,
-      GROUP_ADMIN,
-    );
+    await service.update('role-1', { permissionIds: ['perm-1'] } as any, GROUP_ADMIN);
 
     expect(prisma.userRole.findMany).toHaveBeenCalledWith({
       where: { roleId: 'role-1' },

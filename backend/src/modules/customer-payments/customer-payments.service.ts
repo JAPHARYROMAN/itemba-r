@@ -173,7 +173,11 @@ export class CustomerPaymentsService {
     }
 
     // Cash/bank account belongs to the company; type drives the GL debit role.
-    const cashAccount = await this.resolveCashAccount(this.prisma, dto.companyId, dto.cashAccountId);
+    const cashAccount = await this.resolveCashAccount(
+      this.prisma,
+      dto.companyId,
+      dto.cashAccountId,
+    );
 
     // Guard against mixing currencies on the cash ledger: we increment the cash
     // account's running balance by the payment amount below, so the receipt
@@ -228,7 +232,9 @@ export class CustomerPaymentsService {
         }
 
         const nextOutstanding = outstanding.minus(alloc.amount).toDecimalPlaces(2);
-        const nextPaid = new Prisma.Decimal(locked.paidAmount).plus(alloc.amount).toDecimalPlaces(2);
+        const nextPaid = new Prisma.Decimal(locked.paidAmount)
+          .plus(alloc.amount)
+          .toDecimalPlaces(2);
         const nextStatus = nextOutstanding.isZero() ? 'PAID' : 'PARTIALLY_PAID';
 
         const updated = await tx.receivable.update({
@@ -625,7 +631,12 @@ export class CustomerPaymentsService {
    */
   private async reversePaymentJournal(
     tx: Prisma.TransactionClient,
-    payment: { id: string; companyId: string; paymentNumber: string; journalEntryId: string | null },
+    payment: {
+      id: string;
+      companyId: string;
+      paymentNumber: string;
+      journalEntryId: string | null;
+    },
     userId: string,
   ): Promise<{ id: string; journalNumber: string } | null> {
     const original = payment.journalEntryId

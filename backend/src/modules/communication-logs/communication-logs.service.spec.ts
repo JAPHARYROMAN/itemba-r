@@ -205,7 +205,11 @@ describe('CommunicationLogsService', () => {
         data: { status: 'CLOSED' },
       });
       expect(auditLogs.log).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'CLOSE', entityType: 'CommunicationLog', entityId: 'log-1' }),
+        expect.objectContaining({
+          action: 'CLOSE',
+          entityType: 'CommunicationLog',
+          entityId: 'log-1',
+        }),
       );
       expect((result as any).status).toBe('CLOSED');
     });

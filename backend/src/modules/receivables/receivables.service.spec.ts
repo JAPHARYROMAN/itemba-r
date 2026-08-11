@@ -34,9 +34,7 @@ function makeService(
     cashAccount: {
       findFirst: jest
         .fn()
-        .mockResolvedValue(
-          opts.cashAccount ?? { companyId: 'company-1', accountType: 'CASH' },
-        ),
+        .mockResolvedValue(opts.cashAccount ?? { companyId: 'company-1', accountType: 'CASH' }),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     chartOfAccount: {
@@ -46,9 +44,7 @@ function makeService(
       // wrongly coalesce the null back to a found account.
       findFirst: jest
         .fn()
-        .mockResolvedValue(
-          'badDebtAccount' in opts ? opts.badDebtAccount : { id: 'bad-debt-acc' },
-        ),
+        .mockResolvedValue('badDebtAccount' in opts ? opts.badDebtAccount : { id: 'bad-debt-acc' }),
     },
   } as any;
 
@@ -148,9 +144,7 @@ describe('ReceivablesService.recordPayment GL settlement', () => {
   });
 
   it('rejects a payment against a WRITTEN_OFF receivable and posts no journal', async () => {
-    const { service, tx, postingEngine } = makeService(
-      lockedReceivable({ status: 'WRITTEN_OFF' }),
-    );
+    const { service, tx, postingEngine } = makeService(lockedReceivable({ status: 'WRITTEN_OFF' }));
 
     await expect(
       service.recordPayment('rec-1', { amount: 100 } as any, user),
@@ -196,9 +190,7 @@ describe('ReceivablesService.writeOff bad-debt journal', () => {
     await service.writeOff('rec-1', { reason: 'uncollectible' } as any, user);
 
     const [postingInput] = postingEngine.postLines.mock.calls[0];
-    const expenseLine = postingInput.lines.find(
-      (l: any) => l.accountId === 'GENERAL_EXPENSE-acc',
-    );
+    const expenseLine = postingInput.lines.find((l: any) => l.accountId === 'GENERAL_EXPENSE-acc');
     expect(Number(expenseLine.debit)).toBe(500);
   });
 
@@ -216,9 +208,9 @@ describe('ReceivablesService.writeOff bad-debt journal', () => {
   it('rejects writing off an already-PAID receivable', async () => {
     const { service, tx, postingEngine } = makeService(lockedReceivable({ status: 'PAID' }));
 
-    await expect(
-      service.writeOff('rec-1', { reason: 'x' } as any, user),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.writeOff('rec-1', { reason: 'x' } as any, user)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
     expect(postingEngine.postLines).not.toHaveBeenCalled();
     expect(tx.receivable.update).not.toHaveBeenCalled();
   });

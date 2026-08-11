@@ -55,28 +55,28 @@ describe('SupplierOrderDraftSharingService', () => {
       'SOD-2026-000001 - Supplier Order Draft',
       expect.stringContaining('Please review this order draft.'),
       expect.stringContaining('Document: SOD-2026-000001'),
-      [expect.objectContaining({
-        filename: 'SOD-2026-000001.pdf',
-        content: Buffer.from('pdf'),
-        contentType: 'application/pdf',
-      })],
+      [
+        expect.objectContaining({
+          filename: 'SOD-2026-000001.pdf',
+          content: Buffer.from('pdf'),
+          contentType: 'application/pdf',
+        }),
+      ],
       ['accounts@example.com'],
     );
-    expect(auditLogs.log).toHaveBeenCalledWith(expect.objectContaining({
-      action: 'SUPPLIER_ORDER_DRAFT_SHARE_EMAIL',
-      entityId: 'draft-1',
-      metadata: expect.objectContaining({ sent: true, recipient: 'supplier@example.com' }),
-    }));
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'SUPPLIER_ORDER_DRAFT_SHARE_EMAIL',
+        entityId: 'draft-1',
+        metadata: expect.objectContaining({ sent: true, recipient: 'supplier@example.com' }),
+      }),
+    );
     expect(result.sent).toBe(true);
   });
 
   it('reports an actionable fallback when SMTP delivery is unavailable', async () => {
     const { service } = setup(false);
-    const result = await service.emailPdf(
-      'draft-1',
-      { to: 'supplier@example.com' },
-      user,
-    );
+    const result = await service.emailPdf('draft-1', { to: 'supplier@example.com' }, user);
 
     expect(result.sent).toBe(false);
     expect(result.message).toContain('mail-app fallback');

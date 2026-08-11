@@ -96,9 +96,9 @@ describe('PrintEngineService PDF and Excel materialization', () => {
       new Error('You do not have access to this company'),
     );
 
-    await expect(
-      service.renderPdf({ templateId: 'tmpl-1' }, { id: 'user-1' }),
-    ).rejects.toThrow(/access to this company/);
+    await expect(service.renderPdf({ templateId: 'tmpl-1' }, { id: 'user-1' })).rejects.toThrow(
+      /access to this company/,
+    );
 
     // Called with the template's owning companyId at READ level, and no
     // GeneratedDocument was persisted for the blocked (cross-company) render.

@@ -8,7 +8,14 @@ describe('computeThreeWayMatch', () => {
       invoice: {
         totalAmount: 50,
         lines: [
-          { productId: 'p1', quantity: 10, unitPrice: 5, lineTotal: 50, discountAmount: 0, taxAmount: 0 },
+          {
+            productId: 'p1',
+            quantity: 10,
+            unitPrice: 5,
+            lineTotal: 50,
+            discountAmount: 0,
+            taxAmount: 0,
+          },
         ],
       },
       purchaseOrderLines: poLines,
@@ -25,7 +32,14 @@ describe('computeThreeWayMatch', () => {
         // Billed 10 @ 6 = 60 against a PO priced 10 @ 5 = 50 → matched-line
         // variance of 10.
         lines: [
-          { productId: 'p1', quantity: 10, unitPrice: 6, lineTotal: 60, discountAmount: 0, taxAmount: 0 },
+          {
+            productId: 'p1',
+            quantity: 10,
+            unitPrice: 6,
+            lineTotal: 60,
+            discountAmount: 0,
+            taxAmount: 0,
+          },
         ],
       },
       purchaseOrderLines: poLines,
@@ -45,7 +59,14 @@ describe('computeThreeWayMatch', () => {
       invoice: {
         totalAmount: 300,
         lines: [
-          { productId: 'p1', quantity: 10, unitPrice: 5, lineTotal: 50, discountAmount: 0, taxAmount: 0 },
+          {
+            productId: 'p1',
+            quantity: 10,
+            unitPrice: 5,
+            lineTotal: 50,
+            discountAmount: 0,
+            taxAmount: 0,
+          },
           { productId: null, description: 'Freight', quantity: 0, unitPrice: 0, lineTotal: 250 },
         ],
       },
@@ -64,7 +85,14 @@ describe('computeThreeWayMatch', () => {
       invoice: {
         totalAmount: 50,
         lines: [
-          { productId: 'p1', quantity: 10, unitPrice: 5, lineTotal: 50, discountAmount: 0, taxAmount: 0 },
+          {
+            productId: 'p1',
+            quantity: 10,
+            unitPrice: 5,
+            lineTotal: 50,
+            discountAmount: 0,
+            taxAmount: 0,
+          },
         ],
       },
       purchaseOrderLines: [
@@ -81,7 +109,14 @@ describe('computeThreeWayMatch', () => {
       invoice: {
         totalAmount: 50,
         lines: [
-          { productId: 'p1', quantity: 10, unitPrice: 5, lineTotal: 50, discountAmount: 0, taxAmount: 0 },
+          {
+            productId: 'p1',
+            quantity: 10,
+            unitPrice: 5,
+            lineTotal: 50,
+            discountAmount: 0,
+            taxAmount: 0,
+          },
         ],
       },
       purchaseOrderLines: poLines,

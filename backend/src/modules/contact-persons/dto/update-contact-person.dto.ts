@@ -1,10 +1,4 @@
-import {
-  IsBoolean,
-  IsEmail,
-  IsEnum,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsOptional, IsString } from 'class-validator';
 import { ContactEntityType } from '@prisma/client';
 
 export class UpdateContactPersonDto {

@@ -82,7 +82,14 @@ function statusFor(index: number, current: number): StepStatus {
 }
 
 const CheckIcon = () => (
-  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} aria-hidden="true">
+  <svg
+    className="h-3.5 w-3.5"
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+    strokeWidth={3}
+    aria-hidden="true"
+  >
     <path strokeLinecap="round" strokeLinejoin="round" d="m5 13 4 4L19 7" />
   </svg>
 );
@@ -122,10 +129,7 @@ export function Stepper({
   const isControlled = current !== undefined;
   const total = steps.length;
 
-  const clamp = useCallback(
-    (i: number) => Math.max(0, Math.min(total - 1, i)),
-    [total],
-  );
+  const clamp = useCallback((i: number) => Math.max(0, Math.min(total - 1, i)), [total]);
 
   const [internalStep, setInternalStep] = useState(() => clamp(defaultStep));
   const [validating, setValidating] = useState(false);
@@ -145,10 +149,7 @@ export function Stepper({
     [activeIndex, clamp, isControlled, onStepChange, steps],
   );
 
-  const goTo = useCallback(
-    (index: number) => setStep(index),
-    [setStep],
-  );
+  const goTo = useCallback((index: number) => setStep(index), [setStep]);
 
   const back = useCallback(() => {
     if (isFirst) return;
@@ -212,7 +213,10 @@ export function Stepper({
       {/* ─ Progress header ─ */}
       <div className="mb-5">
         <div className="mb-3 flex items-baseline justify-between">
-          <p className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--aurora-text-muted)' }}>
+          <p
+            className="text-xs font-medium uppercase tracking-wide"
+            style={{ color: 'var(--aurora-text-muted)' }}
+          >
             Step {activeIndex + 1} of {total}
           </p>
           {activeStep.optional && (
@@ -227,11 +231,14 @@ export function Stepper({
             const status = statusFor(index, activeIndex);
             const isCompleted = status === 'completed';
             const isActive = status === 'active';
-            const canJump =
-              allowStepNavigation && isCompleted && !busy && index !== activeIndex;
+            const canJump = allowStepNavigation && isCompleted && !busy && index !== activeIndex;
 
             const markerStyle: React.CSSProperties = isCompleted
-              ? { background: 'var(--aurora-primary)', borderColor: 'var(--aurora-primary)', color: '#fff' }
+              ? {
+                  background: 'var(--aurora-primary)',
+                  borderColor: 'var(--aurora-primary)',
+                  color: '#fff',
+                }
               : isActive
                 ? {
                     background: 'var(--aurora-primary-subtle)',
@@ -280,7 +287,10 @@ export function Stepper({
                       {step.title}
                     </span>
                     {isActive && step.description && (
-                      <span className="truncate text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                      <span
+                        className="truncate text-xs"
+                        style={{ color: 'var(--aurora-text-muted)' }}
+                      >
                         {step.description}
                       </span>
                     )}

@@ -23,10 +23,7 @@ export class EntityCodeGeneratorController {
 
   @Post('backfill')
   @RequirePermissions('doc_sequences.update')
-  runBackfill(
-    @CurrentUser() user: AuthUser,
-    @Query('companyId') companyId?: string,
-  ) {
+  runBackfill(@CurrentUser() user: AuthUser, @Query('companyId') companyId?: string) {
     return this.backfill.backfillAll(user, { companyId });
   }
 }

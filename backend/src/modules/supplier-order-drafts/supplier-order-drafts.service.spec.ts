@@ -72,10 +72,12 @@ function makeService() {
     supplierOrderDraft: { findFirst, create, update, count: jest.fn(), groupBy: jest.fn() },
     supplierOrderDraftLine: { deleteMany: jest.fn() },
     ...sideEffects,
-    $transaction: jest.fn(async (callback) => callback({
-      supplierOrderDraft: { create, update },
-      supplierOrderDraftLine: { deleteMany: jest.fn() },
-    })),
+    $transaction: jest.fn(async (callback) =>
+      callback({
+        supplierOrderDraft: { create, update },
+        supplierOrderDraftLine: { deleteMany: jest.fn() },
+      }),
+    ),
   };
   const companyScope = {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
@@ -84,7 +86,12 @@ function makeService() {
   const codes = { next: jest.fn().mockResolvedValue('SOD-2026-000001') };
   const audit = { log: jest.fn().mockResolvedValue(undefined) };
   return {
-    service: new SupplierOrderDraftsService(prisma, companyScope as any, codes as any, audit as any),
+    service: new SupplierOrderDraftsService(
+      prisma,
+      companyScope as any,
+      codes as any,
+      audit as any,
+    ),
     prisma,
     create,
     update,
@@ -99,23 +106,35 @@ function makeService() {
 describe('SupplierOrderDraftsService', () => {
   it('creates an entirely manual unpriced request without transactional side effects', async () => {
     const { service, create, sideEffects } = makeService();
-    await service.create({
-      companyId: 'company-1',
-      supplierName: 'One-off Supplier',
-      draftDate: '2026-07-22',
-      currency: CurrencyCode.TZS,
-      lines: [{ description: 'Custom fabricated shelf', quantity: 4, unitLabel: 'sets', unitPrice: null }],
-    }, user);
-
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        supplierId: null,
+    await service.create(
+      {
+        companyId: 'company-1',
         supplierName: 'One-off Supplier',
-        hasUnpricedLines: true,
-        totalAmount: 0,
-        lines: { create: [expect.objectContaining({ unitPrice: null, lineTotal: null })] },
+        draftDate: '2026-07-22',
+        currency: CurrencyCode.TZS,
+        lines: [
+          {
+            description: 'Custom fabricated shelf',
+            quantity: 4,
+            unitLabel: 'sets',
+            unitPrice: null,
+          },
+        ],
+      },
+      user,
+    );
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          supplierId: null,
+          supplierName: 'One-off Supplier',
+          hasUnpricedLines: true,
+          totalAmount: 0,
+          lines: { create: [expect.objectContaining({ unitPrice: null, lineTotal: null })] },
+        }),
       }),
-    }));
+    );
     expect(sideEffects.inventoryMovement.create).not.toHaveBeenCalled();
     expect(sideEffects.payable.create).not.toHaveBeenCalled();
     expect(sideEffects.journalEntry.create).not.toHaveBeenCalled();
@@ -125,47 +144,113 @@ describe('SupplierOrderDraftsService', () => {
   it('freezes saved supplier details into the document', async () => {
     const { service, prisma, create } = makeService();
     prisma.supplier.findFirst.mockResolvedValue({
-      id: 'supplier-1', name: 'Vendor Ltd', address: 'Tunduma', contactPerson: 'Buyer Desk',
-      tin: 'TIN-1', vrn: 'VRN-1', phone: '255700000000', email: 'vendor@example.com',
+      id: 'supplier-1',
+      name: 'Vendor Ltd',
+      address: 'Tunduma',
+      contactPerson: 'Buyer Desk',
+      tin: 'TIN-1',
+      vrn: 'VRN-1',
+      phone: '255700000000',
+      email: 'vendor@example.com',
     });
-    await service.create({
-      companyId: 'company-1', supplierId: 'supplier-1', draftDate: '2026-07-22', currency: CurrencyCode.TZS,
-      lines: [{ description: 'Paint', quantity: 2, unitLabel: 'tin', unitPrice: 20_000 }],
-    }, user);
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
-      supplierId: 'supplier-1', supplierName: 'Vendor Ltd', supplierAddress: 'Tunduma', supplierTin: 'TIN-1', supplierVrn: 'VRN-1',
-    }) }));
+    await service.create(
+      {
+        companyId: 'company-1',
+        supplierId: 'supplier-1',
+        draftDate: '2026-07-22',
+        currency: CurrencyCode.TZS,
+        lines: [{ description: 'Paint', quantity: 2, unitLabel: 'tin', unitPrice: 20_000 }],
+      },
+      user,
+    );
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          supplierId: 'supplier-1',
+          supplierName: 'Vendor Ltd',
+          supplierAddress: 'Tunduma',
+          supplierTin: 'TIN-1',
+          supplierVrn: 'VRN-1',
+        }),
+      }),
+    );
   });
 
   it('calculates priced lines and labels the document partial when another line is unpriced', async () => {
     const { service, create } = makeService();
-    await service.create({
-      companyId: 'company-1', supplierName: 'Vendor', draftDate: '2026-07-22', currency: CurrencyCode.TZS,
-      lines: [
-        { description: 'Priced', quantity: 2, unitLabel: 'pcs', unitPrice: 1000, discountAmount: 100, taxAmount: 50 },
-        { description: 'Pending quote', quantity: 1, unitLabel: 'lot', unitPrice: null },
-      ],
-    }, user);
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
-      subtotal: 2000, discountAmount: 100, taxAmount: 50, totalAmount: 1950, hasUnpricedLines: true,
-    }) }));
+    await service.create(
+      {
+        companyId: 'company-1',
+        supplierName: 'Vendor',
+        draftDate: '2026-07-22',
+        currency: CurrencyCode.TZS,
+        lines: [
+          {
+            description: 'Priced',
+            quantity: 2,
+            unitLabel: 'pcs',
+            unitPrice: 1000,
+            discountAmount: 100,
+            taxAmount: 50,
+          },
+          { description: 'Pending quote', quantity: 1, unitLabel: 'lot', unitPrice: null },
+        ],
+      },
+      user,
+    );
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal: 2000,
+          discountAmount: 100,
+          taxAmount: 50,
+          totalAmount: 1950,
+          hasUnpricedLines: true,
+        }),
+      }),
+    );
   });
 
   it('rejects discount or tax on an unpriced line', async () => {
     const { service } = makeService();
-    await expect(service.create({
-      companyId: 'company-1', supplierName: 'Vendor', draftDate: '2026-07-22', currency: CurrencyCode.TZS,
-      lines: [{ description: 'Pending quote', quantity: 1, unitLabel: 'lot', unitPrice: null, taxAmount: 100 }],
-    }, user)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.create(
+        {
+          companyId: 'company-1',
+          supplierName: 'Vendor',
+          draftDate: '2026-07-22',
+          currency: CurrencyCode.TZS,
+          lines: [
+            {
+              description: 'Pending quote',
+              quantity: 1,
+              unitLabel: 'lot',
+              unitPrice: null,
+              taxAmount: 100,
+            },
+          ],
+        },
+        user,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('makes sent drafts read-only until reopened', async () => {
     const { service, findFirst } = makeService();
     findFirst.mockResolvedValue(draft({ status: SupplierOrderDraftStatus.SENT }));
-    await expect(service.update('draft-1', {
-      companyId: 'company-1', supplierName: 'Vendor', draftDate: '2026-07-22', currency: CurrencyCode.TZS,
-      lines: [{ description: 'Item', quantity: 1, unitLabel: 'pcs', unitPrice: 100 }],
-    }, user)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.update(
+        'draft-1',
+        {
+          companyId: 'company-1',
+          supplierName: 'Vendor',
+          draftDate: '2026-07-22',
+          currency: CurrencyCode.TZS,
+          lines: [{ description: 'Item', quantity: 1, unitLabel: 'pcs', unitPrice: 100 }],
+        },
+        user,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('moves a draft to SENT without creating an actual purchase transaction', async () => {
@@ -174,7 +259,14 @@ describe('SupplierOrderDraftsService', () => {
     update.mockResolvedValue(draft({ status: SupplierOrderDraftStatus.SENT, sentAt: new Date() }));
     const result = await service.send('draft-1', user);
     expect(result.status).toBe(SupplierOrderDraftStatus.SENT);
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: SupplierOrderDraftStatus.SENT, sentAt: expect.any(Date) }) }));
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: SupplierOrderDraftStatus.SENT,
+          sentAt: expect.any(Date),
+        }),
+      }),
+    );
     expect(sideEffects.inventoryMovement.create).not.toHaveBeenCalled();
     expect(sideEffects.payable.create).not.toHaveBeenCalled();
     expect(sideEffects.journalEntry.create).not.toHaveBeenCalled();
@@ -189,25 +281,29 @@ describe('SupplierOrderDraftsService', () => {
 
   it('reopens a completed lifecycle state as an editable draft and clears transition dates', async () => {
     const { service, findFirst, update } = makeService();
-    findFirst.mockResolvedValue(draft({
-      status: SupplierOrderDraftStatus.ACCEPTED,
-      sentAt: new Date(),
-      acceptedAt: new Date(),
-    }));
+    findFirst.mockResolvedValue(
+      draft({
+        status: SupplierOrderDraftStatus.ACCEPTED,
+        sentAt: new Date(),
+        acceptedAt: new Date(),
+      }),
+    );
     update.mockResolvedValue(draft({ status: SupplierOrderDraftStatus.DRAFT }));
 
     const result = await service.reopen('draft-1', user);
 
     expect(result.status).toBe(SupplierOrderDraftStatus.DRAFT);
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        status: SupplierOrderDraftStatus.DRAFT,
-        sentAt: null,
-        acceptedAt: null,
-        declinedAt: null,
-        cancelledAt: null,
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: SupplierOrderDraftStatus.DRAFT,
+          sentAt: null,
+          acceptedAt: null,
+          declinedAt: null,
+          cancelledAt: null,
+        }),
       }),
-    }));
+    );
   });
 
   it('allows soft deletion only while the document is a draft', async () => {
@@ -217,20 +313,18 @@ describe('SupplierOrderDraftsService', () => {
 
     findFirst.mockResolvedValueOnce(draft());
     await expect(service.remove('draft-1', user)).resolves.toEqual({ success: true });
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'draft-1' },
-      data: { deletedAt: expect.any(Date) },
-    }));
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'draft-1' },
+        data: { deletedAt: expect.any(Date) },
+      }),
+    );
   });
 
   it('enforces company access when reading a draft', async () => {
     const { service, findFirst, companyScope } = makeService();
     findFirst.mockResolvedValue(draft());
     await service.findOne('draft-1', user);
-    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
-      user,
-      'company-1',
-      'READ',
-    );
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'company-1', 'READ');
   });
 });

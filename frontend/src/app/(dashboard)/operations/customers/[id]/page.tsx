@@ -270,13 +270,7 @@ function agingBucket(dueDate: string): AgingKey {
   return '90+ days';
 }
 
-const AGING_ORDER: AgingKey[] = [
-  'Current',
-  '1-30 days',
-  '31-60 days',
-  '61-90 days',
-  '90+ days',
-];
+const AGING_ORDER: AgingKey[] = ['Current', '1-30 days', '31-60 days', '61-90 days', '90+ days'];
 
 const AGING_TONE: Record<AgingKey, string> = {
   Current: 'text-emerald-300',
@@ -325,7 +319,11 @@ function buildServerAging(detail: CustomerAgingDetail): { rows: AgingRow[]; tota
     counts[SERVER_BUCKET_LABEL[receivable.bucket]] += 1;
   }
   return {
-    rows: AGING_ORDER.map((key) => ({ key, amount: Number(amounts[key] ?? 0), count: counts[key] })),
+    rows: AGING_ORDER.map((key) => ({
+      key,
+      amount: Number(amounts[key] ?? 0),
+      count: counts[key],
+    })),
     total: Number(detail.total ?? 0),
   };
 }
@@ -681,9 +679,7 @@ export default function CustomerDetailPage() {
         // back to summary.openReceivableBalance (an unbounded aggregate sum) so
         // the headline still reconciles with the Open AR StatCard even though the
         // client-side buckets only cover the control-center's capped slice.
-        const totalOutstanding = aging.isServer
-          ? aging.total
-          : summary.openReceivableBalance;
+        const totalOutstanding = aging.isServer ? aging.total : summary.openReceivableBalance;
         // Only meaningful in the fallback path: if the true total exceeds the
         // bucketed sum, older open invoices exist but weren't in the capped
         // control-center slice. Never partial once server aging is in play.
@@ -716,73 +712,76 @@ export default function CustomerDetailPage() {
               </div>
             ) : (
               <>
-            <div className="mt-4 flex flex-wrap items-baseline justify-between gap-2">
-              <p className="text-xs font-medium uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
-                {aging.isServer
-                  ? `Aging (${aging.listedCount} ${aging.listedCount === 1 ? 'invoice' : 'invoices'})`
-                  : `Aging (latest ${aging.listedCount} ${aging.listedCount === 1 ? 'invoice' : 'invoices'})`}
-              </p>
-              {isPartial && (
-                <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                  Breakdown covers the most-recent invoices only.
-                </p>
-              )}
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-5">
-              {aging.rows.map((row) => {
-                const pct = aging.total > 0 ? (row.amount / aging.total) * 100 : 0;
-                return (
-                  <div
-                    key={row.key}
-                    className="rounded-lg border p-4"
-                    style={{ borderColor: 'var(--aurora-border)' }}
+                <div className="mt-4 flex flex-wrap items-baseline justify-between gap-2">
+                  <p
+                    className="text-xs font-medium uppercase"
+                    style={{ color: 'var(--aurora-text-muted)' }}
                   >
-                    <p
-                      className="text-xs uppercase"
-                      style={{ color: 'var(--aurora-text-muted)' }}
-                    >
-                      {row.key}
+                    {aging.isServer
+                      ? `Aging (${aging.listedCount} ${aging.listedCount === 1 ? 'invoice' : 'invoices'})`
+                      : `Aging (latest ${aging.listedCount} ${aging.listedCount === 1 ? 'invoice' : 'invoices'})`}
+                  </p>
+                  {isPartial && (
+                    <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                      Breakdown covers the most-recent invoices only.
                     </p>
-                    <p className={`mt-1 text-lg font-semibold ${AGING_TONE[row.key]}`}>
-                      {money(row.amount)}
-                    </p>
-                    <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                      {row.count} {row.count === 1 ? 'invoice' : 'invoices'} · {pct.toFixed(0)}%
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
-            <div
-              className="mt-4 flex h-2 w-full overflow-hidden rounded-full"
-              style={{ background: 'var(--aurora-border)' }}
-              role="img"
-              aria-label="A/R aging distribution"
-            >
-              {aging.rows.map((row) => {
-                const pct = aging.total > 0 ? (row.amount / aging.total) * 100 : 0;
-                if (pct <= 0) return null;
-                return (
-                  <div
-                    key={row.key}
-                    className={AGING_TONE[row.key]}
-                    style={{ width: `${pct}%`, background: 'currentColor' }}
-                    title={`${row.key}: ${money(row.amount)}`}
-                  />
-                );
-              })}
-            </div>
-            {isPartial && (
-              <p className="mt-3 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                Buckets total {money(aging.total)} across the listed invoices ·{' '}
-                <span className="font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
-                  + {money(unaccounted)} in older invoices not shown
-                </span>
-              </p>
+                  )}
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-5">
+                  {aging.rows.map((row) => {
+                    const pct = aging.total > 0 ? (row.amount / aging.total) * 100 : 0;
+                    return (
+                      <div
+                        key={row.key}
+                        className="rounded-lg border p-4"
+                        style={{ borderColor: 'var(--aurora-border)' }}
+                      >
+                        <p
+                          className="text-xs uppercase"
+                          style={{ color: 'var(--aurora-text-muted)' }}
+                        >
+                          {row.key}
+                        </p>
+                        <p className={`mt-1 text-lg font-semibold ${AGING_TONE[row.key]}`}>
+                          {money(row.amount)}
+                        </p>
+                        <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                          {row.count} {row.count === 1 ? 'invoice' : 'invoices'} · {pct.toFixed(0)}%
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div
+                  className="mt-4 flex h-2 w-full overflow-hidden rounded-full"
+                  style={{ background: 'var(--aurora-border)' }}
+                  role="img"
+                  aria-label="A/R aging distribution"
+                >
+                  {aging.rows.map((row) => {
+                    const pct = aging.total > 0 ? (row.amount / aging.total) * 100 : 0;
+                    if (pct <= 0) return null;
+                    return (
+                      <div
+                        key={row.key}
+                        className={AGING_TONE[row.key]}
+                        style={{ width: `${pct}%`, background: 'currentColor' }}
+                        title={`${row.key}: ${money(row.amount)}`}
+                      />
+                    );
+                  })}
+                </div>
+                {isPartial && (
+                  <p className="mt-3 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                    Buckets total {money(aging.total)} across the listed invoices ·{' '}
+                    <span className="font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+                      + {money(unaccounted)} in older invoices not shown
+                    </span>
+                  </p>
+                )}
+              </>
             )}
-          </>
-        )}
-      </Card>
+          </Card>
         );
       })()}
 

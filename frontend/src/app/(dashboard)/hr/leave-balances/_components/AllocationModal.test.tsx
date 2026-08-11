@@ -83,7 +83,9 @@ afterEach(() => {
 async function fillCreateForm() {
   fireEvent.change(screen.getByLabelText('Company'), { target: { value: 'c-1' } });
   await waitFor(() =>
-    expect((screen.getByLabelText('Employee') as HTMLSelectElement).options.length).toBeGreaterThan(1),
+    expect((screen.getByLabelText('Employee') as HTMLSelectElement).options.length).toBeGreaterThan(
+      1,
+    ),
   );
   fireEvent.change(screen.getByLabelText('Employee'), { target: { value: 'e-1' } });
   fireEvent.change(screen.getByLabelText('Leave Type'), { target: { value: 'lt-1' } });

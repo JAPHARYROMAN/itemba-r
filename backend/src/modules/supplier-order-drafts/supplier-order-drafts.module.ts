@@ -12,7 +12,12 @@ import { SupplierOrderDraftsService } from './supplier-order-drafts.service';
 @Module({
   imports: [PrismaModule, AuditLogsModule, DocumentsModule, GeneratedDocumentsModule],
   controllers: [SupplierOrderDraftsController],
-  providers: [SupplierOrderDraftsService, SupplierOrderDraftSharingService, CompanyScopeService, EmailService],
+  providers: [
+    SupplierOrderDraftsService,
+    SupplierOrderDraftSharingService,
+    CompanyScopeService,
+    EmailService,
+  ],
   exports: [SupplierOrderDraftsService],
 })
 export class SupplierOrderDraftsModule {}

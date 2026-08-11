@@ -204,10 +204,7 @@ export function SupplierFormModal({
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [categories, categorySearch]);
 
-  const groupedCategories = useMemo(
-    () => categoryGroups(filteredCategories),
-    [filteredCategories],
-  );
+  const groupedCategories = useMemo(() => categoryGroups(filteredCategories), [filteredCategories]);
 
   const toggleCategory = (id: string) =>
     setForm((current) => ({
@@ -355,9 +352,20 @@ export function SupplierFormModal({
           onChange={(event) => set('legalName', event.target.value)}
         />
 
-        <SectionTitle title="Contact & Tax" description="Information used on purchasing documents." />
-        <FormInput label="TIN" value={form.tin} onChange={(event) => set('tin', event.target.value)} />
-        <FormInput label="VRN" value={form.vrn} onChange={(event) => set('vrn', event.target.value)} />
+        <SectionTitle
+          title="Contact & Tax"
+          description="Information used on purchasing documents."
+        />
+        <FormInput
+          label="TIN"
+          value={form.tin}
+          onChange={(event) => set('tin', event.target.value)}
+        />
+        <FormInput
+          label="VRN"
+          value={form.vrn}
+          onChange={(event) => set('vrn', event.target.value)}
+        />
         <FormInput
           label="Phone"
           value={form.phone}
@@ -385,7 +393,10 @@ export function SupplierFormModal({
           title="Product Categories"
           description="Controls which product categories this supplier can serve."
         />
-        <div className="md:col-span-2 rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
+        <div
+          className="md:col-span-2 rounded-lg border p-3"
+          style={{ borderColor: 'var(--aurora-border)' }}
+        >
           <FormInput
             label="Search Categories"
             value={categorySearch}
@@ -395,7 +406,10 @@ export function SupplierFormModal({
           <div className="mt-3 max-h-64 space-y-4 overflow-auto pr-1">
             {Object.entries(groupedCategories).map(([type, rows]) => (
               <div key={type}>
-                <p className="mb-2 text-xs font-semibold uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                <p
+                  className="mb-2 text-xs font-semibold uppercase"
+                  style={{ color: 'var(--aurora-text-muted)' }}
+                >
                   {humanize(type)}
                 </p>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

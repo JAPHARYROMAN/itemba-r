@@ -328,7 +328,6 @@ export const SETTINGS_CATALOG: SettingEntry[] = [
     status: 'BUILT_IN',
   },
 
-
   // ── SYSTEM ───────────────────────────────────────────────────────────────
   {
     id: 'sys.audit-logs',

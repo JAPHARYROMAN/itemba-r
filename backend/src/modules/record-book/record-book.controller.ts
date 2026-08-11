@@ -37,11 +37,7 @@ export class RecordBookController {
 
   @Get('export')
   @RequirePermissions('record_book.export')
-  export(
-    @Query() query: ExportRecordBookDto,
-    @CurrentUser() user: AuthUser,
-    @Res() res: Response,
-  ) {
+  export(@Query() query: ExportRecordBookDto, @CurrentUser() user: AuthUser, @Res() res: Response) {
     return this.service.export(query, user, res);
   }
 

@@ -39,7 +39,7 @@ function receivable(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 describe('FinancialReportsService.getCustomerAgingDetail', () => {
-  it('buckets a customer\'s open receivables using the shared boundaries', async () => {
+  it("buckets a customer's open receivables using the shared boundaries", async () => {
     const { service } = makeService([
       receivable({ id: 'r-current', dueDate: dueDaysAgo(0), outstandingAmount: 10 }),
       receivable({ id: 'r-future', dueDate: dueDaysAgo(-5), outstandingAmount: 5 }),
@@ -130,9 +130,9 @@ describe('FinancialReportsService.getCustomerAgingDetail', () => {
   it('rejects an invalid asOf date instead of silently mis-bucketing', async () => {
     const { service, findMany } = makeService([]);
 
-    await expect(
-      service.getCustomerAgingDetail('co-1', 'cust-1', 'garbage', user),
-    ).rejects.toThrow('Invalid asOf date');
+    await expect(service.getCustomerAgingDetail('co-1', 'cust-1', 'garbage', user)).rejects.toThrow(
+      'Invalid asOf date',
+    );
     // Fail-closed: no query runs once the date is rejected.
     expect(findMany).not.toHaveBeenCalled();
   });

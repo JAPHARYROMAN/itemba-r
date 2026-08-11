@@ -16,7 +16,14 @@ function makeService(overrides: { existingMatch?: any; purchaseOrder?: any; grn?
     supplierId: 'supplier-1',
     totalAmount: 50,
     lines: [
-      { productId: 'p1', quantity: 10, unitPrice: 5, lineTotal: 50, discountAmount: 0, taxAmount: 0 },
+      {
+        productId: 'p1',
+        quantity: 10,
+        unitPrice: 5,
+        lineTotal: 50,
+        discountAmount: 0,
+        taxAmount: 0,
+      },
     ],
   };
 

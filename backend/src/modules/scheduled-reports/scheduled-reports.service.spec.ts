@@ -225,9 +225,7 @@ describe('ScheduledReportsService — group-level run() (companyId=null)', () =>
     const { service } = makeService({
       scheduledReport: { findFirst: jest.fn().mockResolvedValue(null) },
     });
-    await expect(service.run('missing', groupPrincipal)).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(service.run('missing', groupPrincipal)).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('run() does NOT double-advance nextRunAt when it is already in the future (worker path)', async () => {

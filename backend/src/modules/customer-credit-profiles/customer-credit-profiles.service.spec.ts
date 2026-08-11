@@ -44,12 +44,14 @@ function existingProfile(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeService(opts: {
-  profile?: Record<string, any>;
-  customer?: Record<string, any> | null;
-  accessibleCompanyIds?: string[];
-  assertCanAccessCompany?: jest.Mock;
-} = {}) {
+function makeService(
+  opts: {
+    profile?: Record<string, any>;
+    customer?: Record<string, any> | null;
+    accessibleCompanyIds?: string[];
+    assertCanAccessCompany?: jest.Mock;
+  } = {},
+) {
   const profileDelegate = {
     findFirst: jest.fn(async () => existingProfile()),
     findMany: jest.fn(async () => [existingProfile()]),
@@ -60,9 +62,7 @@ function makeService(opts: {
   };
 
   const customer =
-    opts.customer === undefined
-      ? { id: 'customer-1', companyId: 'company-1' }
-      : opts.customer;
+    opts.customer === undefined ? { id: 'customer-1', companyId: 'company-1' } : opts.customer;
 
   const prisma: any = {
     customerCreditProfile: profileDelegate,
@@ -71,11 +71,8 @@ function makeService(opts: {
 
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const companyScope = {
-    assertCanAccessCompany:
-      opts.assertCanAccessCompany ?? jest.fn().mockResolvedValue(undefined),
-    accessibleCompanyIds: jest
-      .fn()
-      .mockResolvedValue(opts.accessibleCompanyIds ?? ['company-1']),
+    assertCanAccessCompany: opts.assertCanAccessCompany ?? jest.fn().mockResolvedValue(undefined),
+    accessibleCompanyIds: jest.fn().mockResolvedValue(opts.accessibleCompanyIds ?? ['company-1']),
   } as any;
 
   const service = new CustomerCreditProfilesService(prisma, auditLogs, companyScope);
@@ -148,17 +145,17 @@ describe('CustomerCreditProfilesService.create — no phantom createdById column
 
   it('rejects when companyId is missing', async () => {
     const { service, prisma } = makeService();
-    await expect(
-      service.create({ customerId: 'customer-1' } as any, user),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.create({ customerId: 'customer-1' } as any, user)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
     expect(prisma.customerCreditProfile.create).not.toHaveBeenCalled();
   });
 
   it('rejects when customerId is missing', async () => {
     const { service, prisma } = makeService();
-    await expect(
-      service.create({ companyId: 'company-1' } as any, user),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.create({ companyId: 'company-1' } as any, user)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
     expect(prisma.customerCreditProfile.create).not.toHaveBeenCalled();
   });
 
@@ -166,16 +163,9 @@ describe('CustomerCreditProfilesService.create — no phantom createdById column
     const assertCanAccessCompany = jest.fn().mockResolvedValue(undefined);
     const { service } = makeService({ assertCanAccessCompany });
 
-    await service.create(
-      { companyId: 'company-1', customerId: 'customer-1' } as any,
-      user,
-    );
+    await service.create({ companyId: 'company-1', customerId: 'customer-1' } as any, user);
 
-    expect(assertCanAccessCompany).toHaveBeenCalledWith(
-      user,
-      'company-1',
-      AccessLevel.WRITE,
-    );
+    expect(assertCanAccessCompany).toHaveBeenCalledWith(user, 'company-1', AccessLevel.WRITE);
   });
 
   it('rejects a customer that does not belong to the supplied company', async () => {
@@ -184,10 +174,7 @@ describe('CustomerCreditProfilesService.create — no phantom createdById column
     });
 
     await expect(
-      service.create(
-        { companyId: 'company-1', customerId: 'customer-1' } as any,
-        user,
-      ),
+      service.create({ companyId: 'company-1', customerId: 'customer-1' } as any, user),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.customerCreditProfile.create).not.toHaveBeenCalled();
   });
@@ -195,10 +182,7 @@ describe('CustomerCreditProfilesService.create — no phantom createdById column
   it('rejects a missing customer', async () => {
     const { service, prisma } = makeService({ customer: null });
     await expect(
-      service.create(
-        { companyId: 'company-1', customerId: 'ghost' } as any,
-        user,
-      ),
+      service.create({ companyId: 'company-1', customerId: 'ghost' } as any, user),
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(prisma.customerCreditProfile.create).not.toHaveBeenCalled();
   });
@@ -223,30 +207,20 @@ describe('CustomerCreditProfilesService.findOne — company scoping', () => {
     const assertCanAccessCompany = jest.fn().mockResolvedValue(undefined);
     const { service } = makeService({ assertCanAccessCompany });
     await service.findOne('ccp-1', user);
-    expect(assertCanAccessCompany).toHaveBeenCalledWith(
-      user,
-      'company-1',
-      AccessLevel.READ,
-    );
+    expect(assertCanAccessCompany).toHaveBeenCalledWith(user, 'company-1', AccessLevel.READ);
   });
 
   it('propagates a forbidden access assertion (cross-tenant read blocked)', async () => {
-    const assertCanAccessCompany = jest
-      .fn()
-      .mockRejectedValue(new NotFoundException('forbidden'));
+    const assertCanAccessCompany = jest.fn().mockRejectedValue(new NotFoundException('forbidden'));
     const { service } = makeService({ assertCanAccessCompany });
-    await expect(service.findOne('ccp-1', user)).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(service.findOne('ccp-1', user)).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('throws NotFound when the profile does not exist', async () => {
     const { service } = makeService({
       profile: { findFirst: jest.fn(async () => null) },
     });
-    await expect(service.findOne('missing', user)).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(service.findOne('missing', user)).rejects.toBeInstanceOf(NotFoundException);
   });
 });
 
@@ -277,11 +251,7 @@ describe('CustomerCreditProfilesService.update — scoping & immutable identity'
     const assertCanAccessCompany = jest.fn().mockResolvedValue(undefined);
     const { service } = makeService({ assertCanAccessCompany });
     await service.update('ccp-1', { creditLimit: 10 } as any, user);
-    expect(assertCanAccessCompany).toHaveBeenCalledWith(
-      user,
-      'company-1',
-      AccessLevel.WRITE,
-    );
+    expect(assertCanAccessCompany).toHaveBeenCalledWith(user, 'company-1', AccessLevel.WRITE);
   });
 
   it('is a no-op (returns existing) when the dto has no mutable fields', async () => {

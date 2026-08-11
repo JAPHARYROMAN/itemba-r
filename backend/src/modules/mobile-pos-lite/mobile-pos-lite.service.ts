@@ -194,18 +194,24 @@ export class MobilePosLiteService {
 
     return {
       terminal: this.serializeTerminal(terminal),
-      activation: this.activationPayload(terminal.terminalCode, activationCode, activationExpiresAt),
+      activation: this.activationPayload(
+        terminal.terminalCode,
+        activationCode,
+        activationExpiresAt,
+      ),
     };
   }
 
   async updateTerminal(id: string, dto: UpdateMobilePosTerminalDto, user: AuthUser) {
     this.assertCanManage(user);
     const existing = await this.findTerminalForManagement(id, user);
-    const paymentInputs: PaymentInput[] = dto.paymentMethods ?? existing.paymentMethods.map((payment) => ({
-      paymentMethod: payment.paymentMethod as (typeof MOBILE_POS_LITE_RECEIPT_METHODS)[number],
-      cashAccountId: payment.cashAccountId,
-      label: payment.label ?? undefined,
-    }));
+    const paymentInputs: PaymentInput[] =
+      dto.paymentMethods ??
+      existing.paymentMethods.map((payment) => ({
+        paymentMethod: payment.paymentMethod as (typeof MOBILE_POS_LITE_RECEIPT_METHODS)[number],
+        cashAccountId: payment.cashAccountId,
+        label: payment.label ?? undefined,
+      }));
     const configuration = await this.validateConfiguration({
       companyId: existing.companyId,
       divisionId: existing.divisionId,
@@ -259,8 +265,13 @@ export class MobilePosLiteService {
   async updateTerminalStatus(id: string, status: MobilePosTerminalStatus, user: AuthUser) {
     this.assertCanManage(user);
     const existing = await this.findTerminalForManagement(id, user);
-    if (existing.status === MobilePosTerminalStatus.REVOKED && status !== MobilePosTerminalStatus.REVOKED) {
-      throw new BadRequestException('A revoked terminal must be replaced with a newly activated device');
+    if (
+      existing.status === MobilePosTerminalStatus.REVOKED &&
+      status !== MobilePosTerminalStatus.REVOKED
+    ) {
+      throw new BadRequestException(
+        'A revoked terminal must be replaced with a newly activated device',
+      );
     }
     const updated = await this.prisma.mobilePosTerminal.update({
       where: { id: existing.id },
@@ -325,7 +336,9 @@ export class MobilePosLiteService {
     }
     await this.assertAssignedUserCanSell(terminal, user);
     if (!terminal.activationExpiresAt || terminal.activationExpiresAt.getTime() < Date.now()) {
-      throw new BadRequestException('This activation code has expired. Ask the group admin for a new code.');
+      throw new BadRequestException(
+        'This activation code has expired. Ask the group admin for a new code.',
+      );
     }
     if (!secureHashMatch(terminal.activationTokenHash, dto.activationCode)) {
       throw new ForbiddenException('Invalid Mobile POS activation code');
@@ -348,7 +361,9 @@ export class MobilePosLiteService {
       },
     });
     if (claimed.count !== 1) {
-      throw new ConflictException('This activation code has already been used. Ask the group admin for a new code.');
+      throw new ConflictException(
+        'This activation code has already been used. Ask the group admin for a new code.',
+      );
     }
 
     const active = await this.requireTerminal(dto.terminalCode, dto.deviceSecret, user);
@@ -363,7 +378,11 @@ export class MobilePosLiteService {
     return this.sessionPayload(active);
   }
 
-  async session(terminalCode: string | undefined, deviceSecret: string | undefined, user: AuthUser) {
+  async session(
+    terminalCode: string | undefined,
+    deviceSecret: string | undefined,
+    user: AuthUser,
+  ) {
     const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
     return this.sessionPayload(terminal);
   }
@@ -415,7 +434,10 @@ export class MobilePosLiteService {
       take: term ? 12 : 1500,
     });
     const balances = await this.prisma.inventoryBalance.findMany({
-      where: { branchId: terminal.branchId, productId: { in: products.map((product) => product.id) } },
+      where: {
+        branchId: terminal.branchId,
+        productId: { in: products.map((product) => product.id) },
+      },
       select: { productId: true, quantityOnHand: true, quantityReserved: true },
     });
     const availability = new Map(
@@ -471,7 +493,14 @@ export class MobilePosLiteService {
           },
         ],
       },
-      select: { id: true, name: true, customerCode: true, phone: true, creditLimit: true, currentBalance: true },
+      select: {
+        id: true,
+        name: true,
+        customerCode: true,
+        phone: true,
+        creditLimit: true,
+        currentBalance: true,
+      },
       orderBy: { name: 'asc' },
       take: 12,
     });
@@ -506,7 +535,9 @@ export class MobilePosLiteService {
         select: { id: true },
       });
       if (!selectedCustomer) {
-        throw new BadRequestException('The selected customer is not available for this terminal branch');
+        throw new BadRequestException(
+          'The selected customer is not available for this terminal branch',
+        );
       }
     }
 
@@ -516,7 +547,9 @@ export class MobilePosLiteService {
           (configured) => configured.isEnabled && configured.paymentMethod === paymentMethod,
         );
     if (!isCredit && !payment) {
-      throw new ForbiddenException('This payment method is not enabled on this Mobile POS terminal');
+      throw new ForbiddenException(
+        'This payment method is not enabled on this Mobile POS terminal',
+      );
     }
 
     const lines = await this.resolveSaleLines(terminal, dto.lines);
@@ -619,7 +652,9 @@ export class MobilePosLiteService {
     }
     await this.assertAssignedUserCanSell(terminal, user);
     if (!secureHashMatch(terminal.deviceSecretHash, deviceSecret)) {
-      throw new ForbiddenException('This device is not registered for the selected Mobile POS terminal');
+      throw new ForbiddenException(
+        'This device is not registered for the selected Mobile POS terminal',
+      );
     }
     return terminal;
   }
@@ -674,23 +709,31 @@ export class MobilePosLiteService {
         select: { id: true, divisionId: true, branchId: true },
       }),
     ]);
-    if (!division) throw new BadRequestException('Division does not belong to the selected company');
+    if (!division)
+      throw new BadRequestException('Division does not belong to the selected company');
     if (!branch) throw new BadRequestException('Branch does not belong to the selected division');
     if (!salesperson?.userId) {
-      throw new BadRequestException('The selected sales rep must be an active employee linked to a user account');
+      throw new BadRequestException(
+        'The selected sales rep must be an active employee linked to a user account',
+      );
     }
     if (
       (salesperson.divisionId && salesperson.divisionId !== dto.divisionId) ||
       (salesperson.branchId && salesperson.branchId !== dto.branchId)
     ) {
-      throw new BadRequestException('The selected sales rep is not assigned to this division and branch');
+      throw new BadRequestException(
+        'The selected sales rep is not assigned to this division and branch',
+      );
     }
-    if (!generalCustomer) throw new BadRequestException('General Customer does not belong to the selected company');
+    if (!generalCustomer)
+      throw new BadRequestException('General Customer does not belong to the selected company');
     if (
       (generalCustomer.divisionId && generalCustomer.divisionId !== dto.divisionId) ||
       (generalCustomer.branchId && generalCustomer.branchId !== dto.branchId)
     ) {
-      throw new BadRequestException('General Customer does not belong to the selected division and branch');
+      throw new BadRequestException(
+        'General Customer does not belong to the selected division and branch',
+      );
     }
 
     const paymentMethods = await this.validatePaymentMethods(
@@ -724,7 +767,9 @@ export class MobilePosLiteService {
       select: { id: true, companyId: true, divisionId: true, branchId: true, accountType: true },
     });
     if (accounts.length !== paymentInputs.length) {
-      throw new BadRequestException('One or more configured receipt accounts are inactive or missing');
+      throw new BadRequestException(
+        'One or more configured receipt accounts are inactive or missing',
+      );
     }
     const accountsById = new Map(accounts.map((account) => [account.id, account]));
 
@@ -738,11 +783,18 @@ export class MobilePosLiteService {
         throw new BadRequestException('Receipt account type does not match its payment method');
       }
       if (account.accountType === CashAccountType.BANK) {
-        if ((account.divisionId && account.divisionId !== divisionId) || (account.branchId && account.branchId !== branchId)) {
-          throw new BadRequestException('Bank account does not belong to the selected terminal scope');
+        if (
+          (account.divisionId && account.divisionId !== divisionId) ||
+          (account.branchId && account.branchId !== branchId)
+        ) {
+          throw new BadRequestException(
+            'Bank account does not belong to the selected terminal scope',
+          );
         }
       } else if (account.divisionId !== divisionId || account.branchId !== branchId) {
-        throw new BadRequestException('Cash or mobile-money account must belong to the selected division and branch');
+        throw new BadRequestException(
+          'Cash or mobile-money account must belong to the selected division and branch',
+        );
       }
       return payment;
     });

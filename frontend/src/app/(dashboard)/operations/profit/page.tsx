@@ -509,8 +509,7 @@ export default function OperationsProfitPage() {
               variant="secondary"
               size="sm"
               disabled={
-                actionLoading ||
-                (viewMode === 'customer' && (!companyId || customers.length === 0))
+                actionLoading || (viewMode === 'customer' && (!companyId || customers.length === 0))
               }
               onClick={() =>
                 void downloadExport(
@@ -624,239 +623,243 @@ export default function OperationsProfitPage() {
       ) : (
         <>
           {viewMode === 'product' && (
-          <>
-          {(summary?.linesMissingCost ?? 0) > 0 && (
-            <div
-              role="status"
-              aria-live="polite"
-              className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
-            >
-              <strong>Gross profit may be overstated.</strong> {summary?.linesMissingCost} sales
-              line
-              {(summary?.linesMissingCost ?? 0) === 1 ? '' : 's'} (
-              {fmtMoney(summary?.revenueMissingCost)} revenue) have no recorded cost, so their cost
-              is counted as zero. Resolve the cost gaps below for an accurate figure.
-            </div>
-          )}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <StatCard
-              label="Revenue"
-              value={fmtMoney(summary?.revenue)}
-              hint={
-                (summary?.linesMissingCost ?? 0) > 0
-                  ? `${summary?.linesMissingCost} line(s) without cost`
-                  : undefined
-              }
-              countUp={false}
-            />
-            <StatCard label="COGS" value={fmtMoney(summary?.cogs)} countUp={false} />
-            <StatCard
-              label="Gross Profit"
-              value={fmtMoney(summary?.grossProfit)}
-              variant={(summary?.grossProfit ?? 0) >= 0 ? 'green' : 'red'}
-              hint={(summary?.linesMissingCost ?? 0) > 0 ? 'May be overstated' : undefined}
-              countUp={false}
-            />
-            <StatCard
-              label="Gross Margin"
-              value={`${fmtNumber(summary?.grossMarginPct)}%`}
-              variant={(summary?.grossMarginPct ?? 0) >= 0 ? 'green' : 'red'}
-              countUp={false}
-            />
-            <StatCard
-              label="Blocked Cost Gaps"
-              value={summary?.costGaps ?? 0}
-              variant={(summary?.costGaps ?? 0) > 0 ? 'red' : 'green'}
-            />
-          </div>
-
-          <Card padding="none" className="overflow-hidden">
-            <div className="border-b px-4 py-3" style={{ borderColor: 'var(--aurora-border)' }}>
-              <h2 className="text-sm font-semibold">Product profitability</h2>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-[920px] w-full text-sm">
-                <caption className="sr-only">Product profitability</caption>
-                <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
-                  <tr
-                    className="text-left text-xs uppercase"
-                    style={{ color: 'var(--aurora-text-muted)' }}
-                  >
-                    <th scope="col" className="px-4 py-3">
-                      Product
-                    </th>
-                    <th scope="col" className="px-4 py-3 text-right">
-                      Qty
-                    </th>
-                    <th scope="col" className="px-4 py-3 text-right">
-                      Revenue
-                    </th>
-                    <th scope="col" className="px-4 py-3 text-right">
-                      COGS
-                    </th>
-                    <th scope="col" className="px-4 py-3 text-right">
-                      Profit
-                    </th>
-                    <th scope="col" className="px-4 py-3 text-right">
-                      Margin
-                    </th>
-                    <th scope="col" className="px-4 py-3 text-right">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {products.length === 0 ? (
-                    <tr>
-                      <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={7}>
-                        No confirmed sales in this filter.
-                      </td>
-                    </tr>
-                  ) : (
-                    products.map((row) => (
-                      <tr
-                        key={row.productId}
-                        className="border-t"
-                        style={{ borderColor: 'var(--aurora-border)' }}
-                      >
-                        <td className="px-4 py-3">
-                          <div className="font-medium">{row.productName}</div>
-                          <div className="text-xs text-slate-500">{row.productCode ?? '-'}</div>
-                          {row.hasMissingCost && (
-                            <span className="mt-0.5 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-                              cost missing
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {fmtNumber(row.quantity, 4)}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {fmtMoney(row.revenue)}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(row.cogs)}</td>
-                        <td
-                          className={`px-4 py-3 text-right tabular-nums ${
-                            row.grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'
-                          }`}
-                        >
-                          {fmtMoney(row.grossProfit)}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {fmtNumber(row.grossMarginPct)}%
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <Btn
-                            variant="secondary"
-                            size="xs"
-                            aria-label={`Drilldown into ${row.productName}`}
-                            aria-expanded={selectedProduct?.productId === row.productId}
-                            aria-controls="profit-product-ledger"
-                            onClick={() => setSelectedProduct(row)}
-                          >
-                            Drilldown
-                          </Btn>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
-          {selectedProduct && (
-            <div id="profit-product-ledger">
-              <Card padding="none" className="overflow-hidden">
+            <>
+              {(summary?.linesMissingCost ?? 0) > 0 && (
                 <div
-                  className="flex items-center justify-between border-b px-4 py-3"
-                  style={{ borderColor: 'var(--aurora-border)' }}
+                  role="status"
+                  aria-live="polite"
+                  className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
                 >
-                  <div>
-                    <h2 className="text-sm font-semibold">{selectedProduct.productName} ledger</h2>
-                    <p className="text-xs text-slate-500">
-                      Sales orders, cost source, COGS, and margin.
-                    </p>
-                  </div>
-                  <Btn variant="ghost" size="xs" onClick={() => setSelectedProduct(null)}>
-                    Close
-                  </Btn>
+                  <strong>Gross profit may be overstated.</strong> {summary?.linesMissingCost} sales
+                  line
+                  {(summary?.linesMissingCost ?? 0) === 1 ? '' : 's'} (
+                  {fmtMoney(summary?.revenueMissingCost)} revenue) have no recorded cost, so their
+                  cost is counted as zero. Resolve the cost gaps below for an accurate figure.
                 </div>
-                {ledgerLoading ? (
-                  <div className="p-4">
-                    <PageSpinner />
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-[900px] w-full text-sm">
-                      <caption className="sr-only">{`${selectedProduct.productName} sales ledger`}</caption>
-                      <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
-                        <tr
-                          className="text-left text-xs uppercase"
-                          style={{ color: 'var(--aurora-text-muted)' }}
-                        >
-                          <th scope="col" className="px-4 py-3">
-                            Order
-                          </th>
-                          <th scope="col" className="px-4 py-3">
-                            Customer
-                          </th>
-                          <th scope="col" className="px-4 py-3 text-right">
-                            Qty
-                          </th>
-                          <th scope="col" className="px-4 py-3 text-right">
-                            Price
-                          </th>
-                          <th scope="col" className="px-4 py-3 text-right">
-                            Cost
-                          </th>
-                          <th scope="col" className="px-4 py-3 text-right">
-                            Profit
-                          </th>
-                          <th scope="col" className="px-4 py-3">
-                            Source
-                          </th>
+              )}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                <StatCard
+                  label="Revenue"
+                  value={fmtMoney(summary?.revenue)}
+                  hint={
+                    (summary?.linesMissingCost ?? 0) > 0
+                      ? `${summary?.linesMissingCost} line(s) without cost`
+                      : undefined
+                  }
+                  countUp={false}
+                />
+                <StatCard label="COGS" value={fmtMoney(summary?.cogs)} countUp={false} />
+                <StatCard
+                  label="Gross Profit"
+                  value={fmtMoney(summary?.grossProfit)}
+                  variant={(summary?.grossProfit ?? 0) >= 0 ? 'green' : 'red'}
+                  hint={(summary?.linesMissingCost ?? 0) > 0 ? 'May be overstated' : undefined}
+                  countUp={false}
+                />
+                <StatCard
+                  label="Gross Margin"
+                  value={`${fmtNumber(summary?.grossMarginPct)}%`}
+                  variant={(summary?.grossMarginPct ?? 0) >= 0 ? 'green' : 'red'}
+                  countUp={false}
+                />
+                <StatCard
+                  label="Blocked Cost Gaps"
+                  value={summary?.costGaps ?? 0}
+                  variant={(summary?.costGaps ?? 0) > 0 ? 'red' : 'green'}
+                />
+              </div>
+
+              <Card padding="none" className="overflow-hidden">
+                <div className="border-b px-4 py-3" style={{ borderColor: 'var(--aurora-border)' }}>
+                  <h2 className="text-sm font-semibold">Product profitability</h2>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-[920px] w-full text-sm">
+                    <caption className="sr-only">Product profitability</caption>
+                    <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
+                      <tr
+                        className="text-left text-xs uppercase"
+                        style={{ color: 'var(--aurora-text-muted)' }}
+                      >
+                        <th scope="col" className="px-4 py-3">
+                          Product
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-right">
+                          Qty
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-right">
+                          Revenue
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-right">
+                          COGS
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-right">
+                          Profit
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-right">
+                          Margin
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-right">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {products.length === 0 ? (
+                        <tr>
+                          <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={7}>
+                            No confirmed sales in this filter.
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {ledger.map((row) => (
+                      ) : (
+                        products.map((row) => (
                           <tr
-                            key={`${row.salesOrderId}-${row.orderDate}`}
+                            key={row.productId}
                             className="border-t"
                             style={{ borderColor: 'var(--aurora-border)' }}
                           >
                             <td className="px-4 py-3">
-                              <div className="font-medium">{row.salesOrderNumber}</div>
-                              <div className="text-xs text-slate-500">
-                                {new Date(row.orderDate).toLocaleDateString('en-GB')}
-                              </div>
+                              <div className="font-medium">{row.productName}</div>
+                              <div className="text-xs text-slate-500">{row.productCode ?? '-'}</div>
+                              {row.hasMissingCost && (
+                                <span className="mt-0.5 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                                  cost missing
+                                </span>
+                              )}
                             </td>
-                            <td className="px-4 py-3">{row.customerName ?? 'Walk-in'}</td>
                             <td className="px-4 py-3 text-right tabular-nums">
                               {fmtNumber(row.quantity, 4)}
                             </td>
                             <td className="px-4 py-3 text-right tabular-nums">
-                              {fmtMoney(row.unitPrice)}
+                              {fmtMoney(row.revenue)}
                             </td>
                             <td className="px-4 py-3 text-right tabular-nums">
-                              {fmtMoney(row.unitCostAtSale)}
+                              {fmtMoney(row.cogs)}
+                            </td>
+                            <td
+                              className={`px-4 py-3 text-right tabular-nums ${
+                                row.grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'
+                              }`}
+                            >
+                              {fmtMoney(row.grossProfit)}
                             </td>
                             <td className="px-4 py-3 text-right tabular-nums">
-                              {fmtMoney(row.grossProfitAmount)}
+                              {fmtNumber(row.grossMarginPct)}%
                             </td>
-                            <td className="px-4 py-3">
-                              {row.profitCostSource?.replace(/_/g, ' ') ?? '-'}
+                            <td className="px-4 py-3 text-right">
+                              <Btn
+                                variant="secondary"
+                                size="xs"
+                                aria-label={`Drilldown into ${row.productName}`}
+                                aria-expanded={selectedProduct?.productId === row.productId}
+                                aria-controls="profit-product-ledger"
+                                onClick={() => setSelectedProduct(row)}
+                              >
+                                Drilldown
+                              </Btn>
                             </td>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </Card>
-            </div>
-          )}
-          </>
+
+              {selectedProduct && (
+                <div id="profit-product-ledger">
+                  <Card padding="none" className="overflow-hidden">
+                    <div
+                      className="flex items-center justify-between border-b px-4 py-3"
+                      style={{ borderColor: 'var(--aurora-border)' }}
+                    >
+                      <div>
+                        <h2 className="text-sm font-semibold">
+                          {selectedProduct.productName} ledger
+                        </h2>
+                        <p className="text-xs text-slate-500">
+                          Sales orders, cost source, COGS, and margin.
+                        </p>
+                      </div>
+                      <Btn variant="ghost" size="xs" onClick={() => setSelectedProduct(null)}>
+                        Close
+                      </Btn>
+                    </div>
+                    {ledgerLoading ? (
+                      <div className="p-4">
+                        <PageSpinner />
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-[900px] w-full text-sm">
+                          <caption className="sr-only">{`${selectedProduct.productName} sales ledger`}</caption>
+                          <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
+                            <tr
+                              className="text-left text-xs uppercase"
+                              style={{ color: 'var(--aurora-text-muted)' }}
+                            >
+                              <th scope="col" className="px-4 py-3">
+                                Order
+                              </th>
+                              <th scope="col" className="px-4 py-3">
+                                Customer
+                              </th>
+                              <th scope="col" className="px-4 py-3 text-right">
+                                Qty
+                              </th>
+                              <th scope="col" className="px-4 py-3 text-right">
+                                Price
+                              </th>
+                              <th scope="col" className="px-4 py-3 text-right">
+                                Cost
+                              </th>
+                              <th scope="col" className="px-4 py-3 text-right">
+                                Profit
+                              </th>
+                              <th scope="col" className="px-4 py-3">
+                                Source
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {ledger.map((row) => (
+                              <tr
+                                key={`${row.salesOrderId}-${row.orderDate}`}
+                                className="border-t"
+                                style={{ borderColor: 'var(--aurora-border)' }}
+                              >
+                                <td className="px-4 py-3">
+                                  <div className="font-medium">{row.salesOrderNumber}</div>
+                                  <div className="text-xs text-slate-500">
+                                    {new Date(row.orderDate).toLocaleDateString('en-GB')}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">{row.customerName ?? 'Walk-in'}</td>
+                                <td className="px-4 py-3 text-right tabular-nums">
+                                  {fmtNumber(row.quantity, 4)}
+                                </td>
+                                <td className="px-4 py-3 text-right tabular-nums">
+                                  {fmtMoney(row.unitPrice)}
+                                </td>
+                                <td className="px-4 py-3 text-right tabular-nums">
+                                  {fmtMoney(row.unitCostAtSale)}
+                                </td>
+                                <td className="px-4 py-3 text-right tabular-nums">
+                                  {fmtMoney(row.grossProfitAmount)}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {row.profitCostSource?.replace(/_/g, ' ') ?? '-'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </Card>
+                </div>
+              )}
+            </>
           )}
 
           {viewMode === 'customer' && (
@@ -880,8 +883,8 @@ export default function OperationsProfitPage() {
                       <strong>Gross profit may be overstated.</strong>{' '}
                       {customerSummary?.linesMissingCost} sales line
                       {(customerSummary?.linesMissingCost ?? 0) === 1 ? '' : 's'} (
-                      {fmtMoney(customerSummary?.revenueMissingCost)} revenue) have no recorded cost,
-                      so their cost is counted as zero.
+                      {fmtMoney(customerSummary?.revenueMissingCost)} revenue) have no recorded
+                      cost, so their cost is counted as zero.
                     </div>
                   )}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -895,13 +898,19 @@ export default function OperationsProfitPage() {
                       }
                       countUp={false}
                     />
-                    <StatCard label="COGS" value={fmtMoney(customerSummary?.cogs)} countUp={false} />
+                    <StatCard
+                      label="COGS"
+                      value={fmtMoney(customerSummary?.cogs)}
+                      countUp={false}
+                    />
                     <StatCard
                       label="Gross Profit"
                       value={fmtMoney(customerSummary?.grossProfit)}
                       variant={(customerSummary?.grossProfit ?? 0) >= 0 ? 'green' : 'red'}
                       hint={
-                        (customerSummary?.linesMissingCost ?? 0) > 0 ? 'May be overstated' : undefined
+                        (customerSummary?.linesMissingCost ?? 0) > 0
+                          ? 'May be overstated'
+                          : undefined
                       }
                       countUp={false}
                     />

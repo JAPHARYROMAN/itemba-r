@@ -67,7 +67,11 @@ describe('CustomerSegmentsService company scoping', () => {
       const result = await service.findOne('seg1', user);
 
       expect(result).toEqual({ id: 'seg1', companyId: 'c1' });
-      expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'c1', AccessLevel.READ);
+      expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+        user,
+        'c1',
+        AccessLevel.READ,
+      );
     });
 
     it('throws NotFound (no existence leak) for a foreign-tenant record', async () => {
@@ -95,7 +99,11 @@ describe('CustomerSegmentsService company scoping', () => {
         user,
       );
 
-      expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'c1', AccessLevel.WRITE);
+      expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+        user,
+        'c1',
+        AccessLevel.WRITE,
+      );
       // GLOBAL counter (no companyId) → global uniqueness for the @unique column.
       expect(codes.next).toHaveBeenCalledWith(
         expect.objectContaining({ entityType: 'CustomerSegment' }),
@@ -123,7 +131,11 @@ describe('CustomerSegmentsService company scoping', () => {
         user,
       );
 
-      expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'c1', AccessLevel.WRITE);
+      expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+        user,
+        'c1',
+        AccessLevel.WRITE,
+      );
       // Caller supplied a code → generator not consulted (backward-compat).
       expect(codes.next).not.toHaveBeenCalled();
       const data = prisma.customerSegment.create.mock.calls[0][0].data;
@@ -229,9 +241,16 @@ describe('CustomerSegmentsService company scoping', () => {
 
       await service.remove('seg1', user);
 
-      expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'c1', AccessLevel.WRITE);
+      expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+        user,
+        'c1',
+        AccessLevel.WRITE,
+      );
       expect(prisma.customerSegment.update).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'seg1' }, data: expect.objectContaining({ deletedAt: expect.any(Date) }) }),
+        expect.objectContaining({
+          where: { id: 'seg1' },
+          data: expect.objectContaining({ deletedAt: expect.any(Date) }),
+        }),
       );
     });
   });
@@ -244,7 +263,11 @@ describe('CustomerSegmentsService company scoping', () => {
 
       await service.addMember('seg1', { customerId: 'cust1' } as any, user);
 
-      expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'c1', AccessLevel.WRITE);
+      expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+        user,
+        'c1',
+        AccessLevel.WRITE,
+      );
       expect(prisma.customerSegmentMembership.upsert).toHaveBeenCalled();
     });
 
@@ -278,7 +301,11 @@ describe('CustomerSegmentsService company scoping', () => {
 
       await service.removeMember('seg1', 'cust1', user);
 
-      expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'c1', AccessLevel.WRITE);
+      expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+        user,
+        'c1',
+        AccessLevel.WRITE,
+      );
       expect(prisma.customerSegmentMembership.deleteMany).toHaveBeenCalledWith({
         where: { customerSegmentId: 'seg1', customerId: 'cust1' },
       });
