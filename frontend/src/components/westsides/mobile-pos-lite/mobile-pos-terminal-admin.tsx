@@ -38,6 +38,8 @@ type Terminal = {
   status: 'ACTIVE' | 'SUSPENDED' | 'REVOKED';
   creditEnabled: boolean;
   offlineCashEnabled: boolean;
+  /** Kaunta rollout pilot flag: 1 = classic shell, 2 = Kaunta shell. */
+  uiVersion?: number;
   activatedAt?: string | null;
   lastSeenAt?: string | null;
   company: ScopeOption;
@@ -279,6 +281,24 @@ export function MobilePosTerminalAdmin() {
       showToast(
         'error',
         'Could not update terminal',
+        error instanceof Error ? error.message : undefined,
+      );
+    }
+  }
+
+  async function setPilotUi(id: string, enable: boolean) {
+    try {
+      await backendPatch(`/mobile-pos-lite/terminals/${id}`, { uiVersion: enable ? 2 : 1 });
+      await refreshTerminals();
+      showToast(
+        'success',
+        enable ? 'Kaunta pilot enabled' : 'Kaunta pilot disabled',
+        'The phone picks it up on its next session refresh.',
+      );
+    } catch (error) {
+      showToast(
+        'error',
+        'Could not update the pilot flag',
         error instanceof Error ? error.message : undefined,
       );
     }
@@ -614,6 +634,17 @@ export function MobilePosTerminalAdmin() {
                       onClick={() => void changeStatus(terminal.id, 'ACTIVE')}
                     >
                       Activate
+                    </Btn>
+                  )}
+                  {terminal.status !== 'REVOKED' && (
+                    <Btn
+                      type="button"
+                      size="sm"
+                      variant={(terminal.uiVersion ?? 1) >= 2 ? 'warning' : 'secondary'}
+                      onClick={() => void setPilotUi(terminal.id, (terminal.uiVersion ?? 1) < 2)}
+                      title="Kaunta reform pilot: run the new POS shell on this terminal only"
+                    >
+                      {(terminal.uiVersion ?? 1) >= 2 ? 'Kaunta pilot: ON' : 'Kaunta pilot: OFF'}
                     </Btn>
                   )}
                   {terminal.status !== 'REVOKED' && (

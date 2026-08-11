@@ -13,6 +13,15 @@ const SESSION_REFRESH_RETRY_MS = 30 * 1000;
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
+  /**
+   * True when the last boot/refresh attempt failed because the server could
+   * not be REACHED (fetch threw — offline, captive portal, backend down), and
+   * no authoritative rejection (401 response, session-expired, logout) has
+   * happened since. Distinguishes "we don't know who you are because the
+   * network is gone" from "the server said no". Reset to false by any
+   * successful auth AND by any authoritative rejection.
+   */
+  authOffline: boolean;
   /** Returns true if the current user has ALL of the listed permissions. */
   hasPermission: (...perms: string[]) => boolean;
   /** Returns true if the current user has ANY of the listed roles. */
@@ -27,6 +36,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authOffline, setAuthOffline] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -51,10 +61,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (res.ok) {
         const data = await res.json();
         setUser(data.data ?? data.user ?? data);
+        setAuthOffline(false);
         return true;
       }
+      // The server ANSWERED (e.g. 401): an authoritative signal, not a
+      // connection gap — never treat it as offline.
+      setAuthOffline(false);
     } catch {
-      // Retryable network/backend failure. Keep any existing user state.
+      // fetch threw (TypeError): the server was unreachable — offline, captive
+      // portal, or backend down. navigator.onLine can lie "true" behind a
+      // captive portal, so the thrown fetch alone is sufficient evidence of a
+      // connection problem. Retryable; keep any existing user state.
+      setAuthOffline(true);
       return false;
     }
     return false;
@@ -79,9 +97,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           armRefreshTimer();
           return true;
         }
+        // The server REJECTED the refresh — authoritative. Clear the offline
+        // grace so auth gates treat this as a genuine signed-out state.
+        setAuthOffline(false);
         armRefreshTimer(SESSION_REFRESH_RETRY_MS);
         return false;
       } catch {
+        // Server unreachable — connection-shaped failure, not a rejection.
+        setAuthOffline(true);
         armRefreshTimer(SESSION_REFRESH_RETRY_MS);
         return false;
       } finally {
@@ -126,9 +149,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     window.addEventListener('focus', refreshOnResume);
+    // Reconnect: retry auth as soon as the browser reports connectivity so an
+    // offline-grace state (see authOffline) resolves authoritatively — either
+    // the session is restored or a real rejection resumes normal redirects.
+    // Single-flight via refreshInFlightRef; 'online' fires once per transition.
+    window.addEventListener('online', refreshOnResume);
     document.addEventListener('visibilitychange', refreshOnVisibility);
     return () => {
       window.removeEventListener('focus', refreshOnResume);
+      window.removeEventListener('online', refreshOnResume);
       document.removeEventListener('visibilitychange', refreshOnVisibility);
     };
   }, [pathname, silentRefresh]);
@@ -140,6 +169,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const onExpired = () => {
       if (PUBLIC_PATHS.has(pathname ?? '')) return;
       setUser(null);
+      // A backend 401 that survived a refresh attempt is authoritative.
+      setAuthOffline(false);
       router.replace('/login?expired=1');
     };
     window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
@@ -153,6 +184,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     setUser(null);
+    // Explicit user sign-out is authoritative — never leave grace behind it.
+    setAuthOffline(false);
     if (refreshTimerRef.current) {
       clearTimeout(refreshTimerRef.current);
       refreshTimerRef.current = null;
@@ -177,7 +210,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <AuthContext.Provider value={{ user, loading, hasPermission, hasRole, refreshUser, logout }}>
+    <AuthContext.Provider
+      value={{ user, loading, authOffline, hasPermission, hasRole, refreshUser, logout }}
+    >
       {children}
     </AuthContext.Provider>
   );

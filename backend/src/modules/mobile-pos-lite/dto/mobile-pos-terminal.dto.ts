@@ -4,10 +4,13 @@ import {
   IsBoolean,
   IsEnum,
   IsIn,
+  IsInt,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -88,6 +91,13 @@ export class UpdateMobilePosTerminalDto {
   @IsOptional()
   @IsBoolean()
   offlineCashEnabled?: boolean;
+
+  /** Kaunta rollout pilot flag: 1 = classic shell, 2 = Kaunta shell. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2)
+  uiVersion?: number;
 
   @IsOptional()
   @IsArray()

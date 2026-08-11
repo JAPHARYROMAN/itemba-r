@@ -303,6 +303,7 @@ export class MobilePosLiteService {
           generalCustomerId: dto.generalCustomerId ?? existing.generalCustomerId,
           creditEnabled: dto.creditEnabled ?? existing.creditEnabled,
           offlineCashEnabled: dto.offlineCashEnabled ?? existing.offlineCashEnabled,
+          uiVersion: dto.uiVersion ?? existing.uiVersion,
           configVersion: { increment: 1 },
           ...(dto.paymentMethods
             ? {
@@ -1349,6 +1350,7 @@ export class MobilePosLiteService {
         name: terminal.name,
         configVersion: terminal.configVersion,
         offlineCashEnabled: terminal.offlineCashEnabled,
+        uiVersion: terminal.uiVersion,
       },
       // Stock-in purchases are gated on the rep's own permission set, not on
       // terminal configuration: managers holding mobile_pos_lite.purchase see
@@ -1383,6 +1385,7 @@ export class MobilePosLiteService {
       configVersion: terminal.configVersion,
       creditEnabled: terminal.creditEnabled,
       offlineCashEnabled: terminal.offlineCashEnabled,
+      uiVersion: terminal.uiVersion,
       deviceName: terminal.deviceName,
       activatedAt: terminal.activatedAt,
       lastSeenAt: terminal.lastSeenAt,

@@ -40,10 +40,18 @@ function titleForPath(pathname: string): string | null {
   return best ? (best as { label: string }).label : null;
 }
 
-// A user whose every permission sits in this set is a POS-only sales rep:
-// their whole app is Itemba POS, and the ERP shell should never appear.
-// Office users always hold other permissions, so they are never redirected.
-const POS_ONLY_PERMISSIONS = new Set(['mobile_pos_lite.use']);
+// A user whose every permission sits in this set is a POS-only user: their
+// whole app is Itemba POS, and the ERP shell should never appear. Office
+// users always hold other permissions, so they are never redirected.
+// Includes the manager-tier POS codes (owner decision, 2026-08-11): a
+// phone-only branch manager who can also receive stock and count inventory
+// still lives entirely in the POS. (.stock_count ships with the Stoo phase;
+// listing it now is inert until the permission is seeded.)
+const POS_ONLY_PERMISSIONS = new Set([
+  'mobile_pos_lite.use',
+  'mobile_pos_lite.purchase',
+  'mobile_pos_lite.stock_count',
+]);
 
 function isPosOnlyUser(user: { permissions: string[] } | null | undefined): boolean {
   return (
@@ -53,19 +61,39 @@ function isPosOnlyUser(user: { permissions: string[] } | null | undefined): bool
   );
 }
 
-function AuthGate({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+export function AuthGate({ children }: { children: React.ReactNode }) {
+  const { user, loading, authOffline } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const isPublicDashboardPath = PUBLIC_DASHBOARD_PATHS.has(pathname ?? '');
 
+  // SECURITY: offline grace for the mobile POS ONLY. On an offline PWA cold
+  // start the auth boot cannot reach /api/auth/* (the service worker
+  // deliberately never caches /api/*), so user stays null for a
+  // connection-shaped reason, not because the server rejected the session.
+  // Redirecting then would send the rep to /login — a route the service
+  // worker does not cache — dead-ending an offline-capable POS on the browser
+  // error page. In the grace state we render the POS instead: it binds to its
+  // terminal, restores its cached session from IndexedDB, and queues sales
+  // locally; its API calls fail harmlessly until connectivity returns.
+  // This is gated on authOffline, which auth-context sets ONLY for unreachable
+  // servers (fetch threw) and clears on any authoritative answer — so a real
+  // 401/refresh-denial still redirects even on /mobile-pos, and every
+  // non-POS path keeps the unconditional redirect. Server-side enforcement is
+  // untouched: middleware still requires token cookies on live navigations and
+  // the backend authenticates every API call; this grace only decides which
+  // offline-rendered shell (POS vs login) the browser shows.
+  const posOfflineGrace =
+    !loading && !user && authOffline && (pathname?.startsWith('/mobile-pos') ?? false);
+
   useEffect(() => {
     if (isPublicDashboardPath) return;
     if (loading || user) return;
+    if (posOfflineGrace) return;
     const query = typeof window !== 'undefined' ? window.location.search.replace(/^\?/, '') : '';
     const returnPath = `${pathname ?? '/'}${query ? `?${query}` : ''}`;
     router.replace(`/login?from=${encodeURIComponent(returnPath)}`);
-  }, [isPublicDashboardPath, loading, pathname, router, user]);
+  }, [isPublicDashboardPath, loading, pathname, posOfflineGrace, router, user]);
 
   useEffect(() => {
     if (loading || !isPosOnlyUser(user)) return;
@@ -74,6 +102,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   }, [loading, pathname, router, user]);
 
   if (isPublicDashboardPath) return <>{children}</>;
+
+  if (posOfflineGrace) return <>{children}</>;
 
   if (loading || !user || (isPosOnlyUser(user) && !pathname?.startsWith('/mobile-pos'))) {
     return (

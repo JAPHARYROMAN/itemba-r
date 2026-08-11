@@ -48,6 +48,8 @@ type Session = {
     name: string;
     configVersion: number;
     offlineCashEnabled: boolean;
+    /** Kaunta rollout pilot flag: 1 = classic shell, 2 = Kaunta shell (Phase 2+). */
+    uiVersion?: number;
   };
   company: { id: string; name: string; code: string };
   division: { id: string; name: string; code: string };

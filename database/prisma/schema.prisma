@@ -11452,6 +11452,9 @@ model MobilePosTerminal {
   creditEnabled       Boolean                 @default(false)
   offlineCashEnabled  Boolean                 @default(false)
   configVersion       Int                     @default(1)
+  /// Kaunta rollout pilot flag: 1 = classic shell, 2 = Kaunta shell.
+  /// Lets 1-2 pilot branches run each reform phase for a week before fleet-wide.
+  uiVersion           Int                     @default(1)
   activationTokenHash String?
   activationExpiresAt DateTime?
   deviceSecretHash    String?
