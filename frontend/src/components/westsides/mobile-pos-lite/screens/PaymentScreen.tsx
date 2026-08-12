@@ -29,6 +29,7 @@ export function PaymentScreen({
   completeSale,
   t,
   setScreen,
+  slabMode = false,
 }: {
   shellClass: string;
   session: Session;
@@ -54,6 +55,11 @@ export function PaymentScreen({
   completeSale: () => Promise<void>;
   t: PosTranslate;
   setScreen: (screen: PosScreen) => void;
+  /**
+   * Kaunta shell mode: the bottom slab owns KAMILISHA MAUZO, so the screen's
+   * own submit button is hidden. Classic passes nothing — byte-identical.
+   */
+  slabMode?: boolean;
 }) {
   return (
     <main
@@ -282,14 +288,16 @@ export function PaymentScreen({
             {notice}
           </p>
         )}
-        <button
-          type="button"
-          onClick={() => void completeSale()}
-          disabled={busy}
-          className="mt-8 min-h-16 w-full rounded-lg bg-brand-600 px-5 text-lg font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {busy ? t('completing') : `${t('completeSale')} · ${money(total)}`}
-        </button>
+        {!slabMode && (
+          <button
+            type="button"
+            onClick={() => void completeSale()}
+            disabled={busy}
+            className="mt-8 min-h-16 w-full rounded-lg bg-brand-600 px-5 text-lg font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy ? t('completing') : `${t('completeSale')} · ${money(total)}`}
+          </button>
+        )}
       </div>
     </main>
   );

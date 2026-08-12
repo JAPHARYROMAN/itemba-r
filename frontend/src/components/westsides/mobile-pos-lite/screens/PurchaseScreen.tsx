@@ -29,6 +29,7 @@ export function PurchaseScreen({
   recordPurchase,
   t,
   setScreen,
+  slabMode = false,
 }: {
   shellClass: string;
   online: boolean;
@@ -51,6 +52,11 @@ export function PurchaseScreen({
   recordPurchase: () => Promise<void>;
   t: PosTranslate;
   setScreen: (screen: PosScreen) => void;
+  /**
+   * Kaunta shell mode: the bottom slab owns the POKEA verb, so the screen's
+   * own record button is hidden. Classic passes nothing — byte-identical.
+   */
+  slabMode?: boolean;
 }) {
   return (
     <main
@@ -269,16 +275,18 @@ export function PurchaseScreen({
         <p className="mt-4 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
           {t('purchaseStockNote')}
         </p>
-        <button
-          type="button"
-          onClick={() => void recordPurchase()}
-          disabled={busy || !online || purchaseCart.length === 0}
-          className="mt-4 min-h-16 w-full rounded-lg bg-brand-600 px-5 text-lg font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {busy
-            ? t('recording')
-            : t('recordPurchase') + (purchaseTotal > 0 ? ' - ' + money(purchaseTotal) : '')}
-        </button>
+        {!slabMode && (
+          <button
+            type="button"
+            onClick={() => void recordPurchase()}
+            disabled={busy || !online || purchaseCart.length === 0}
+            className="mt-4 min-h-16 w-full rounded-lg bg-brand-600 px-5 text-lg font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy
+              ? t('recording')
+              : t('recordPurchase') + (purchaseTotal > 0 ? ' - ' + money(purchaseTotal) : '')}
+          </button>
+        )}
       </div>
     </main>
   );

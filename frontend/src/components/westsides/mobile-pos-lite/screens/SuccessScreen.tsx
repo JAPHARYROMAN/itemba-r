@@ -22,6 +22,7 @@ export function SuccessScreen({
   shareReceipt,
   beginSale,
   setScreen,
+  slabMode = false,
 }: {
   shellClass: string;
   session: Session;
@@ -38,22 +39,31 @@ export function SuccessScreen({
   shareReceipt: () => Promise<void>;
   beginSale: () => void;
   setScreen: (screen: PosScreen) => void;
+  /**
+   * Kaunta shell mode: the slab owns MAUZO MAPYA, the sync token owns the
+   * status chrome, and Kaunta has no home screen — so the header and the
+   * new-sale/home buttons are hidden; SHIRIKI RISITI stays as the secondary
+   * action above the slab. Classic passes nothing — byte-identical.
+   */
+  slabMode?: boolean;
 }) {
   return (
     <main
       className={`min-h-screen px-4 py-4${shellClass}`}
       style={{ background: 'var(--aurora-bg)' }}
     >
-      <MobilePosHeader
-        session={session}
-        online={online}
-        pendingCount={pendingCount}
-        syncing={syncing}
-        onLogout={leaveTerminal}
-        lang={lang}
-        setLang={setLang}
-        t={t}
-      />
+      {!slabMode && (
+        <MobilePosHeader
+          session={session}
+          online={online}
+          pendingCount={pendingCount}
+          syncing={syncing}
+          onLogout={leaveTerminal}
+          lang={lang}
+          setLang={setLang}
+          t={t}
+        />
+      )}
       <section className="mx-auto mt-12 max-w-md text-center">
         <div
           className="mx-auto flex h-20 w-20 items-center justify-center rounded-full"
@@ -84,21 +94,25 @@ export function SuccessScreen({
         >
           <Share2 size={19} aria-hidden="true" /> {t('shareReceipt')}
         </button>
-        <button
-          type="button"
-          onClick={beginSale}
-          className="mt-3 min-h-16 w-full rounded-lg bg-brand-600 px-5 text-lg font-bold text-white transition hover:bg-brand-700"
-        >
-          {t('newSale')}
-        </button>
-        <button
-          type="button"
-          onClick={() => setScreen('home')}
-          className="mt-3 min-h-12 w-full rounded-lg text-base font-semibold"
-          style={{ color: 'var(--aurora-primary-text)' }}
-        >
-          {t('home')}
-        </button>
+        {!slabMode && (
+          <>
+            <button
+              type="button"
+              onClick={beginSale}
+              className="mt-3 min-h-16 w-full rounded-lg bg-brand-600 px-5 text-lg font-bold text-white transition hover:bg-brand-700"
+            >
+              {t('newSale')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setScreen('home')}
+              className="mt-3 min-h-12 w-full rounded-lg text-base font-semibold"
+              style={{ color: 'var(--aurora-primary-text)' }}
+            >
+              {t('home')}
+            </button>
+          </>
+        )}
       </section>
     </main>
   );

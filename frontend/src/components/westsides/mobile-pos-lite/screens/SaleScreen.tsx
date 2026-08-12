@@ -21,6 +21,7 @@ export function SaleScreen({
   setNotice,
   t,
   setScreen,
+  slabMode = false,
 }: {
   shellClass: string;
   online: boolean;
@@ -36,6 +37,13 @@ export function SaleScreen({
   setNotice: (notice: string) => void;
   t: PosTranslate;
   setScreen: (screen: PosScreen) => void;
+  /**
+   * Kaunta shell mode: the bottom slab owns the LIPA verb, so the screen's
+   * own sticky pay bar is hidden and the search box no longer steals focus on
+   * boot (a focused input collapses the slab). Classic passes nothing —
+   * behavior is byte-identical.
+   */
+  slabMode?: boolean;
 }) {
   return (
     <main
@@ -73,7 +81,7 @@ export function SaleScreen({
             onChange={(event) => setQuery(event.target.value)}
             className="aurora-input min-h-16 w-full rounded-lg py-3 pl-12 pr-4 text-lg"
             placeholder={t('productSearchPlaceholder')}
-            autoFocus
+            autoFocus={!slabMode}
           />
         </div>
         {query.trim().length > 0 && query.trim().length < 2 && (
@@ -243,7 +251,7 @@ export function SaleScreen({
           </section>
         )}
       </div>
-      {cart.length > 0 && (
+      {cart.length > 0 && !slabMode && (
         <div
           className="fixed inset-x-0 bottom-0 border-t p-4"
           style={{

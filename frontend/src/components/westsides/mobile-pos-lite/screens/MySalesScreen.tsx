@@ -11,6 +11,7 @@ export function MySalesScreen({
   daySummary,
   t,
   setScreen,
+  slabMode = false,
 }: {
   shellClass: string;
   online: boolean;
@@ -18,13 +19,16 @@ export function MySalesScreen({
   daySummary: DaySummary | null;
   t: PosTranslate;
   setScreen: (screen: PosScreen) => void;
+  /**
+   * Kaunta shell mode: rendered embedded inside the Leo day-book wrapper —
+   * no page chrome of its own (no <main>, no back button); the rail and slab
+   * own navigation. Classic passes nothing — byte-identical.
+   */
+  slabMode?: boolean;
 }) {
-  return (
-    <main
-      className={`min-h-screen px-4 py-4${shellClass}`}
-      style={{ background: 'var(--aurora-bg)' }}
-    >
-      <div className="mx-auto max-w-md">
+  const body = (
+    <div className="mx-auto max-w-md">
+      {!slabMode && (
         <button
           type="button"
           onClick={() => setScreen('home')}
@@ -33,114 +37,125 @@ export function MySalesScreen({
         >
           <ArrowLeft size={18} /> {t('back')}
         </button>
-        <h1 className="mt-4 text-2xl font-bold" style={{ color: 'var(--aurora-text)' }}>
-          {t('mySalesToday')}
-        </h1>
-        {!online ? (
-          <p
-            className="mt-4 rounded-lg px-4 py-3 text-sm font-semibold"
-            style={{
-              background: 'var(--aurora-warning-subtle)',
-              color: 'var(--aurora-warning-text)',
-            }}
-          >
-            {t('needsNetwork')}
-          </p>
-        ) : dayLoading ? (
-          <div className="mt-8 text-center">
-            <RotateCw
-              className="mx-auto h-6 w-6 animate-spin"
-              style={{ color: 'var(--aurora-primary)' }}
-              aria-hidden="true"
-            />
-          </div>
-        ) : daySummary ? (
-          <>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div
-                className="rounded-lg border p-4"
-                style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
+      )}
+      <h1 className="mt-4 text-2xl font-bold" style={{ color: 'var(--aurora-text)' }}>
+        {t('mySalesToday')}
+      </h1>
+      {!online ? (
+        <p
+          className="mt-4 rounded-lg px-4 py-3 text-sm font-semibold"
+          style={{
+            background: 'var(--aurora-warning-subtle)',
+            color: 'var(--aurora-warning-text)',
+          }}
+        >
+          {t('needsNetwork')}
+        </p>
+      ) : dayLoading ? (
+        <div className="mt-8 text-center">
+          <RotateCw
+            className="mx-auto h-6 w-6 animate-spin"
+            style={{ color: 'var(--aurora-primary)' }}
+            aria-hidden="true"
+          />
+        </div>
+      ) : daySummary ? (
+        <>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div
+              className="rounded-lg border p-4"
+              style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
+            >
+              <p
+                className="text-xs font-semibold uppercase"
+                style={{ color: 'var(--aurora-text-muted)' }}
               >
-                <p
-                  className="text-xs font-semibold uppercase"
-                  style={{ color: 'var(--aurora-text-muted)' }}
-                >
-                  {t('salesCountLabel')}
-                </p>
-                <p className="mt-1 text-2xl font-bold" style={{ color: 'var(--aurora-text)' }}>
-                  {daySummary.count}
-                </p>
-              </div>
-              <div
-                className="rounded-lg border p-4"
-                style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
-              >
-                <p
-                  className="text-xs font-semibold uppercase"
-                  style={{ color: 'var(--aurora-text-muted)' }}
-                >
-                  {t('totalLabel')}
-                </p>
-                <p className="mt-1 text-xl font-bold" style={{ color: 'var(--aurora-text)' }}>
-                  {money(daySummary.totalAmount)}
-                </p>
-              </div>
+                {t('salesCountLabel')}
+              </p>
+              <p className="mt-1 text-2xl font-bold" style={{ color: 'var(--aurora-text)' }}>
+                {daySummary.count}
+              </p>
             </div>
-            <section className="mt-4 space-y-2">
-              {daySummary.sales.length === 0 && (
-                <p
-                  className="rounded-lg border px-4 py-6 text-center text-sm font-medium"
-                  style={{
-                    borderColor: 'var(--aurora-border)',
-                    color: 'var(--aurora-text-secondary)',
-                  }}
-                >
-                  {t('noSalesToday')}
-                </p>
-              )}
-              {daySummary.sales.map((sale) => (
-                <div
-                  key={sale.id}
-                  className="flex items-center justify-between rounded-lg border p-3"
-                  style={{
-                    background: 'var(--aurora-card)',
-                    borderColor: 'var(--aurora-border)',
-                  }}
-                >
-                  <div className="min-w-0">
-                    <p
-                      className="truncate text-sm font-semibold"
-                      style={{ color: 'var(--aurora-text)' }}
-                    >
-                      {sale.salesOrderNumber}
-                      {sale.customerName ? ` - ${sale.customerName}` : ''}
-                    </p>
-                    <p className="mt-0.5 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                      {pendingTime(sale.createdAt)} - {sale.paymentMethod}
-                    </p>
-                  </div>
+            <div
+              className="rounded-lg border p-4"
+              style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
+            >
+              <p
+                className="text-xs font-semibold uppercase"
+                style={{ color: 'var(--aurora-text-muted)' }}
+              >
+                {t('totalLabel')}
+              </p>
+              <p className="mt-1 text-xl font-bold" style={{ color: 'var(--aurora-text)' }}>
+                {money(daySummary.totalAmount)}
+              </p>
+            </div>
+          </div>
+          <section className="mt-4 space-y-2">
+            {daySummary.sales.length === 0 && (
+              <p
+                className="rounded-lg border px-4 py-6 text-center text-sm font-medium"
+                style={{
+                  borderColor: 'var(--aurora-border)',
+                  color: 'var(--aurora-text-secondary)',
+                }}
+              >
+                {t('noSalesToday')}
+              </p>
+            )}
+            {daySummary.sales.map((sale) => (
+              <div
+                key={sale.id}
+                className="flex items-center justify-between rounded-lg border p-3"
+                style={{
+                  background: 'var(--aurora-card)',
+                  borderColor: 'var(--aurora-border)',
+                }}
+              >
+                <div className="min-w-0">
                   <p
-                    className="ml-3 flex-shrink-0 text-sm font-bold"
+                    className="truncate text-sm font-semibold"
                     style={{ color: 'var(--aurora-text)' }}
                   >
-                    {money(Number(sale.totalAmount))}
+                    {sale.salesOrderNumber}
+                    {sale.customerName ? ` - ${sale.customerName}` : ''}
+                  </p>
+                  <p className="mt-0.5 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                    {pendingTime(sale.createdAt)} - {sale.paymentMethod}
                   </p>
                 </div>
-              ))}
-            </section>
-          </>
-        ) : (
-          <p
-            className="mt-4 rounded-lg px-4 py-3 text-sm"
-            style={{
-              background: 'var(--aurora-danger-subtle)',
-              color: 'var(--aurora-danger-text)',
-            }}
-          >
-            {t('couldNotComplete')}
-          </p>
-        )}
-      </div>
+                <p
+                  className="ml-3 flex-shrink-0 text-sm font-bold"
+                  style={{ color: 'var(--aurora-text)' }}
+                >
+                  {money(Number(sale.totalAmount))}
+                </p>
+              </div>
+            ))}
+          </section>
+        </>
+      ) : (
+        <p
+          className="mt-4 rounded-lg px-4 py-3 text-sm"
+          style={{
+            background: 'var(--aurora-danger-subtle)',
+            color: 'var(--aurora-danger-text)',
+          }}
+        >
+          {t('couldNotComplete')}
+        </p>
+      )}
+    </div>
+  );
+
+  if (slabMode) return body;
+
+  return (
+    <main
+      className={`min-h-screen px-4 py-4${shellClass}`}
+      style={{ background: 'var(--aurora-bg)' }}
+    >
+      {body}
     </main>
   );
 }

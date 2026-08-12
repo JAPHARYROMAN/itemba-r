@@ -14,6 +14,7 @@ import {
   type PendingMobilePosLiteSale,
 } from '@/lib/mobile-pos-lite-store';
 import { useAuth } from '@/hooks/use-auth';
+import { KauntaShell } from './KauntaShell';
 import { usePosBootstrap } from './hooks/use-pos-bootstrap';
 import { usePosCart } from './hooks/use-pos-cart';
 import { usePosOutbox } from './hooks/use-pos-outbox';
@@ -84,11 +85,13 @@ export function MobilePosLite() {
   const [daySummary, setDaySummary] = useState<DaySummary | null>(null);
   const [dayLoading, setDayLoading] = useState(false);
 
-  // Kaunta pilot (design-direction §2.1): the .pos-shell token scope applies
-  // only when this terminal's uiVersion says so. Pre-session screens (boot
-  // splash) render classic; pilot terminals flip once the session (network or
-  // IndexedDB cache) arrives — an accepted one-beat flash during rollout.
-  const shellClass = (session?.terminal.uiVersion ?? 1) >= 2 ? ' pos-shell' : '';
+  // Kaunta pilot (design-direction §2.1/§3): uiVersion >= 2 terminals mount
+  // the KauntaShell below (which scopes .pos-shell itself), so the classic
+  // dispatch only ever runs with an empty shellClass. Pre-session screens
+  // (boot splash) render classic; pilot terminals flip once the session
+  // (network or IndexedDB cache) arrives — an accepted one-beat flash.
+  const kauntaEnabled = (session?.terminal.uiVersion ?? 1) >= 2;
+  const shellClass = kauntaEnabled ? ' pos-shell' : '';
 
   const pendingCount = pendingSales.length;
 
@@ -401,6 +404,81 @@ export function MobilePosLite() {
           )}
         </div>
       </main>
+    );
+  }
+
+  // Kaunta shell pilot: uiVersion >= 2 replaces the classic screen dispatch
+  // entirely — hash router, top module rail, bottom slab, boot-into-Mauzo.
+  // Both shells consume the same hooks/handlers above; the classic flow below
+  // stays byte-identical for every other terminal.
+  if (kauntaEnabled) {
+    return (
+      <KauntaShell
+        session={session}
+        binding={binding}
+        online={online}
+        screen={screen}
+        lang={lang}
+        setLang={setLang}
+        t={t}
+        leaveTerminal={leaveTerminal}
+        notice={notice}
+        setNotice={setNotice}
+        busy={busy}
+        cart={cart}
+        query={query}
+        setQuery={setQuery}
+        quickPicks={quickPicks}
+        matches={matches}
+        addProduct={addProduct}
+        setQuantity={setQuantity}
+        cartCount={cartCount}
+        total={total}
+        beginSale={beginSale}
+        paymentMethod={paymentMethod}
+        setPaymentMethod={setPaymentMethod}
+        customer={customer}
+        setCustomer={setCustomer}
+        customers={customers}
+        setCustomers={setCustomers}
+        customerQuery={customerQuery}
+        setCustomerQuery={setCustomerQuery}
+        receivedValue={receivedValue}
+        setReceivedValue={setReceivedValue}
+        receivedAmount={receivedAmount}
+        selectedPayment={selectedPayment}
+        paymentReference={paymentReference}
+        setPaymentReference={setPaymentReference}
+        completeSale={completeSale}
+        saleResult={saleResult}
+        shareReceipt={shareReceipt}
+        supplier={supplier}
+        setSupplier={setSupplier}
+        supplierQuery={supplierQuery}
+        setSupplierQuery={setSupplierQuery}
+        suppliers={suppliers}
+        setSuppliers={setSuppliers}
+        purchaseQuery={purchaseQuery}
+        setPurchaseQuery={setPurchaseQuery}
+        purchaseMatches={purchaseMatches}
+        addPurchaseProduct={addPurchaseProduct}
+        purchaseCart={purchaseCart}
+        setPurchaseCart={setPurchaseCart}
+        setPurchaseQuantity={setPurchaseQuantity}
+        purchaseTotal={purchaseTotal}
+        recordPurchase={recordPurchase}
+        beginPurchase={beginPurchase}
+        daySummary={daySummary}
+        dayLoading={dayLoading}
+        openMySales={openMySales}
+        pendingSales={pendingSales}
+        pendingCount={pendingCount}
+        syncing={syncing}
+        syncPendingSales={syncPendingSales}
+        removePending={removePending}
+        confirmRemoveId={confirmRemoveId}
+        setConfirmRemoveId={setConfirmRemoveId}
+      />
     );
   }
 
