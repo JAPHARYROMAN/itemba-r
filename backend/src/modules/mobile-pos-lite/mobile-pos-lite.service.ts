@@ -12,6 +12,7 @@ import {
   CurrencyCode,
   MobilePosTerminalStatus,
   Prisma,
+  ProductType,
   PurchaseType,
   SalesOrderStatus,
   SalesPaymentMethod,
@@ -65,6 +66,16 @@ function isStockItem(product: {
   if (product.trackInventory === false) return false;
   return !STOCK_EXEMPT_PRODUCT_TYPES.has(String(product.productType ?? '').toUpperCase());
 }
+
+/** Problems-first ordering for the Stoo stock screen (spec-inventory §1.1). */
+const STOCK_STATUS_RANK = {
+  OVERSOLD: 0,
+  OUT_OF_STOCK: 1,
+  LOW_STOCK: 2,
+  IN_STOCK: 3,
+} as const;
+
+type StockStatus = keyof typeof STOCK_STATUS_RANK;
 
 /**
  * PurchaseOrder has no idempotencyKey column (unlike SalesOrder), so the POS
@@ -585,6 +596,127 @@ export class MobilePosLiteService {
         };
       })
       .filter((product): product is NonNullable<typeof product> => product !== null);
+  }
+
+  /**
+   * Branch stock for the Stoo screen (spec-inventory §1.1). Direct Prisma,
+   * mirroring the products() precedent — deliberately NOT a wrapper over
+   * InventoryBalancesService.liveStock(), whose projection carries
+   * averageCost/totalValue/riskValue and filters in memory with no take.
+   *
+   * REVIEW-BLOCKING RULE: this endpoint must NEVER return cost or value
+   * fields (averageCost, totalValue, unitCost, riskValue, ...). Rep phones
+   * get stolen; branch quantities are operational, valuations are not. Any
+   * change that widens this payload needs an owner decision, not a review nod.
+   *
+   * products() is untouched on purpose: its drop-unpriced filter is
+   * load-bearing for the sale flow, while Stoo INCLUDES unpriced items — a
+   * stocked product without a price is exactly what the screen should expose
+   * (edge case 1).
+   */
+  async stock(
+    terminalCode: string | undefined,
+    deviceSecret: string | undefined,
+    search: string | undefined,
+    user: AuthUser,
+  ) {
+    const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
+    const term = search?.trim() ?? '';
+
+    const searchTerms: Prisma.ProductWhereInput[] = [
+      { barcode: { equals: term, mode: 'insensitive' } },
+      { productCode: { contains: term, mode: 'insensitive' } },
+      { sku: { contains: term, mode: 'insensitive' } },
+      { name: { contains: term, mode: 'insensitive' } },
+    ];
+    const products = await this.prisma.product.findMany({
+      where: {
+        companyId: terminal.companyId,
+        status: 'ACTIVE',
+        // isStockItem() in where-clause form: only products whose movement
+        // would post an inventory change belong on the stock screen.
+        trackInventory: true,
+        productType: { notIn: [ProductType.SERVICE, ProductType.NON_STOCK_ITEM] },
+        AND: [
+          { OR: [{ divisionId: terminal.divisionId }, { divisionId: null }] },
+          ...(term ? [{ OR: searchTerms }] : []),
+        ],
+      },
+      select: {
+        id: true,
+        name: true,
+        productCode: true,
+        sku: true,
+        barcode: true,
+        baseUnitId: true,
+        imageUrl: true,
+        defaultSellingPrice: true,
+        retailPrice: true,
+        wholesalePrice: true,
+        reorderLevel: true,
+        minimumStockLevel: true,
+        baseUnit: { select: { id: true, name: true, symbol: true } },
+        productFamily: {
+          select: { defaultSellingPrice: true, retailPrice: true, wholesalePrice: true },
+        },
+      },
+      orderBy: { name: 'asc' },
+      // The catalog's accepted 1500-item bound (spec-inventory edge case 10).
+      take: 1500,
+    });
+    const balances = await this.prisma.inventoryBalance.findMany({
+      where: {
+        branchId: terminal.branchId,
+        productId: { in: products.map((product) => product.id) },
+      },
+      select: { productId: true, quantityOnHand: true, quantityReserved: true },
+    });
+    const balancesByProduct = new Map(balances.map((balance) => [balance.productId, balance]));
+
+    const items = products.map((product) => {
+      const balance = balancesByProduct.get(product.id);
+      // No balance row = this branch never moved the product: honest zeros.
+      const quantityOnHand = Number(balance?.quantityOnHand ?? 0);
+      const quantityReserved = Number(balance?.quantityReserved ?? 0);
+      // Unclamped on purpose: the server always sends the oversold truth;
+      // the client gates the rep-facing presentation (spec-inventory §2).
+      const available = quantityOnHand - quantityReserved;
+      // The annotateBalance/liveStock threshold predicate.
+      const threshold = Number(product.reorderLevel ?? product.minimumStockLevel ?? 10);
+      const status: StockStatus =
+        available < 0
+          ? 'OVERSOLD'
+          : available === 0
+            ? 'OUT_OF_STOCK'
+            : available <= threshold
+              ? 'LOW_STOCK'
+              : 'IN_STOCK';
+      return {
+        productId: product.id,
+        name: product.name,
+        code: product.productCode ?? product.sku ?? product.barcode ?? '',
+        barcode: product.barcode,
+        unitId: product.baseUnitId,
+        unitSymbol: product.baseUnit?.symbol ?? '',
+        imageUrl: product.imageUrl ?? null,
+        // Nullable: unpriced products stay in (they never reach the sale flow).
+        sellingPrice: effectiveSellingPrice(product),
+        quantityOnHand,
+        quantityReserved,
+        available,
+        threshold,
+        status,
+      };
+    });
+    // Problems-first: OVERSOLD → OUT_OF_STOCK → LOW_STOCK → IN_STOCK. sort()
+    // is stable, so the DB's name-asc order survives within each band.
+    items.sort((a, b) => STOCK_STATUS_RANK[a.status] - STOCK_STATUS_RANK[b.status]);
+
+    return {
+      asOf: new Date().toISOString(),
+      branch: { id: terminal.branchId, name: terminal.branch?.name ?? '' },
+      items,
+    };
   }
 
   async customers(
@@ -1524,6 +1656,10 @@ export class MobilePosLiteService {
       // terminal configuration: managers holding mobile_pos_lite.purchase see
       // the purchase flow, ordinary cashiers/salespeople do not.
       purchasesEnabled: user.permissions?.includes('mobile_pos_lite.purchase') ?? false,
+      // Same shape for stock counts (spec-inventory §1.3): permission-derived,
+      // so no configVersion bump. Phase 4 uses it only as a presentation gate
+      // (manager view on Stoo); the Hesabu flow itself ships in Phase 5.
+      stockCountsEnabled: user.permissions?.includes('mobile_pos_lite.stock_count') ?? false,
       company: terminal.company,
       division: terminal.division,
       branch: terminal.branch,

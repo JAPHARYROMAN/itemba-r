@@ -9,7 +9,16 @@ import {
   type ReactNode,
   type SetStateAction,
 } from 'react';
-import { BookOpen, Check, RotateCw, Settings, ShoppingCart, Truck, WifiOff } from 'lucide-react';
+import {
+  BookOpen,
+  Check,
+  Package,
+  RotateCw,
+  Settings,
+  ShoppingCart,
+  Truck,
+  WifiOff,
+} from 'lucide-react';
 import {
   getDaylogEntry,
   posDaylogDate,
@@ -19,6 +28,7 @@ import {
   type PosDaylogEntry,
   type PosDaylogSent,
 } from '@/lib/mobile-pos-lite-store';
+import { usePosStock } from './hooks/use-pos-stock';
 import { tick } from './pos-haptics';
 import { type PosLang } from './pos-i18n';
 import { useKauntaRouter, type KauntaRoute } from './pos-router';
@@ -40,6 +50,7 @@ import { MipangilioScreen } from './screens/MipangilioScreen';
 import { PaymentScreen } from './screens/PaymentScreen';
 import { PurchaseScreen } from './screens/PurchaseScreen';
 import { SaleScreen } from './screens/SaleScreen';
+import { StooScreen } from './screens/StooScreen';
 import { SuccessScreen } from './screens/SuccessScreen';
 
 /**
@@ -166,16 +177,23 @@ export function KauntaShell(props: KauntaShellProps) {
   } = props;
   const purchasesEnabled = Boolean(session.purchasesEnabled);
 
+  // The Stoo branch-stock snapshot (spec-inventory §2). Mounting the hook
+  // here IS the pre-warm: the rail renders → the conditional fetch fires once
+  // (a no-op while the cached snapshot is under the 10-minute max age).
+  const stock = usePosStock({ binding });
+
   // Handler mirrors, refreshed after every render: read from router callbacks
   // and the route-entry effect below (declaration order keeps this mirror
   // running first in each commit).
   const beginSaleRef = useRef(beginSale);
   const beginPurchaseRef = useRef(beginPurchase);
   const openMySalesRef = useRef(openMySales);
+  const ensureStockRef = useRef(stock.ensureFresh);
   useEffect(() => {
     beginSaleRef.current = beginSale;
     beginPurchaseRef.current = beginPurchase;
     openMySalesRef.current = openMySales;
+    ensureStockRef.current = stock.ensureFresh;
   });
 
   // Leaving Risiti by ANY exit — slab verb, sync token, hardware back — begins
@@ -278,6 +296,9 @@ export function KauntaShell(props: KauntaShellProps) {
     const wasLeo = prev === 'leo' || prev === 'leo/foleni';
     if (route === 'manunuzi' && prev !== 'manunuzi') beginPurchaseRef.current();
     if (inLeo && !wasLeo) void openMySalesRef.current();
+    // Stoo open: the conditional fetch (missing-or-stale only, §2 fetch
+    // policy) — usually a no-op because the rail-render pre-warm already ran.
+    if (route === 'stoo' && prev !== 'stoo') ensureStockRef.current();
     if (route === 'leo/foleni') {
       const anchor = document.getElementById(LEO_FOLENI_ANCHOR_ID);
       // jsdom has no scrollIntoView; a missing anchor (empty queue) is fine.
@@ -389,6 +410,18 @@ export function KauntaShell(props: KauntaShellProps) {
           // Day total only when known (spec-leo §6): live fetch, else the
           // rep-guarded daylog cache — never a fabricated number. Staleness
           // context renders on the Leo screen, never on the slab.
+          amount: daySummary ? daySummary.totalAmount : (cachedSent?.totalAmount ?? null),
+          onPress: () => navigate('mauzo'),
+        };
+      case 'stoo':
+        // The slab law holds on Stoo (spec-leo §6): never verb-less — MAUZO
+        // MAPYA back to the money path, day total only when known. ANZA
+        // KUHESABU deliberately does NOT ship until Hesabu exists (Phase 5);
+        // the slab must never point at a dead screen.
+        return {
+          verb: t('newSale'),
+          disabled: false,
+          inFlight: false,
           amount: daySummary ? daySummary.totalAmount : (cachedSent?.totalAmount ?? null),
           onPress: () => navigate('mauzo'),
         };
@@ -517,6 +550,18 @@ export function KauntaShell(props: KauntaShellProps) {
         removePending={props.removePending}
         retryPendingSale={props.retryPendingSale}
         retryDay={() => void openMySalesRef.current()}
+        t={t}
+      />
+    );
+  } else if (route === 'stoo') {
+    content = (
+      <StooScreen
+        shellClass={SCREEN_PAD}
+        session={props.session}
+        online={props.online}
+        snapshot={stock.snapshot}
+        loading={stock.loading}
+        refresh={stock.refresh}
         t={t}
       />
     );
@@ -658,8 +703,11 @@ function KauntaRail({
 }) {
   const tabs: Array<{ to: KauntaRoute; label: string; icon: typeof ShoppingCart }> = [
     { to: 'mauzo', label: t('railMauzo'), icon: ShoppingCart },
+    // Stoo (Phase 4): every `mobile_pos_lite.use` holder — no gate. The rail
+    // must never show a dead tab, which is also why Hesabu has no tab here.
+    // Order is the design-direction §3 contract: Mauzo · Stoo · Leo (· Manunuzi).
+    { to: 'stoo', label: t('stockTab'), icon: Package },
     { to: 'leo', label: t('railLeo'), icon: BookOpen },
-    // Phase 4 adds Stoo here; the rail must never show a dead tab.
     ...(purchasesEnabled
       ? [{ to: 'manunuzi' as KauntaRoute, label: t('railManunuzi'), icon: Truck }]
       : []),

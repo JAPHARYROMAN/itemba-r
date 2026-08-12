@@ -14,6 +14,7 @@ import {
 } from './dto/mobile-pos-lite-session.dto';
 import { CreateMobilePosLiteSaleDto } from './dto/mobile-pos-lite-sale.dto';
 import { CreateMobilePosLitePurchaseDto } from './dto/mobile-pos-lite-purchase.dto';
+import { QueryMobilePosLiteStockDto } from './dto/mobile-pos-lite-stock.dto';
 import { MobilePosLiteService } from './mobile-pos-lite.service';
 
 @Controller('mobile-pos-lite')
@@ -93,6 +94,23 @@ export class MobilePosLiteController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.products(terminalCode, deviceSecret, undefined, user);
+  }
+
+  /**
+   * Branch stock for the Stoo screen (spec-inventory §1.1). The terminal
+   * headers pin the branch server-side — the client can never choose one.
+   * REVIEW-BLOCKING RULE: this route must never return cost or value fields
+   * (averageCost/totalValue/unitCost/riskValue); see the service method.
+   */
+  @Get('stock')
+  @RequirePermissions('mobile_pos_lite.use')
+  stock(
+    @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
+    @Headers('x-mobile-pos-device') deviceSecret: string | undefined,
+    @Query() query: QueryMobilePosLiteStockDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.stock(terminalCode, deviceSecret, query.search, user);
   }
 
   @Get('customers')

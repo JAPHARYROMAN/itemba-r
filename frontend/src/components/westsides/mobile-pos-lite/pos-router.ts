@@ -9,11 +9,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * pushState (`/mobile-pos/malipo`) would dead-end every offline reload and
  * 404 an online refresh; hashes never reach the server or the SW match.
  *
- * Hash map (Phase 2b subset — Stoo ships Phase 4, so `#stoo`/`#hesabu` are
- * deliberately NOT registered yet and normalize to the root like any unknown
+ * Hash map (Phase 4 subset — Hesabu ships Phase 5, so `#hesabu` is
+ * deliberately NOT registered yet and normalizes to the root like any unknown
  * hash): `#mauzo` (root/default) · `#malipo` · `#risiti` · `#leo` ·
- * `#leo/foleni` · `#manunuzi` (gated on `session.purchasesEnabled`) ·
- * `#mipangilio`.
+ * `#leo/foleni` · `#stoo` (all `mobile_pos_lite.use` holders) · `#manunuzi`
+ * (gated on `session.purchasesEnabled`) · `#mipangilio`.
  *
  * Stack discipline — the history stack is never deeper than [#mauzo, screen]:
  * - Forward from the root PUSHES; forward between non-root screens REPLACES.
@@ -39,6 +39,7 @@ export type KauntaRoute =
   | 'risiti'
   | 'leo'
   | 'leo/foleni'
+  | 'stoo'
   | 'manunuzi'
   | 'mipangilio';
 
@@ -48,6 +49,7 @@ const ALL_ROUTES: ReadonlySet<string> = new Set([
   'risiti',
   'leo',
   'leo/foleni',
+  'stoo',
   'manunuzi',
   'mipangilio',
 ]);
@@ -57,6 +59,7 @@ const MODULE_ROUTES: ReadonlySet<KauntaRoute> = new Set<KauntaRoute>([
   'mauzo',
   'leo',
   'leo/foleni',
+  'stoo',
   'manunuzi',
   'mipangilio',
 ]);

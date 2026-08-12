@@ -61,6 +61,9 @@ const h = vi.hoisted(() => {
     frequents: new Map<string, Record<string, number>>(),
     outbox: [] as Pending[],
     daylog: new Map<string, DaylogEntry>(),
+    // v4 stocks store (Phase 4): the shell pre-warms the Stoo snapshot on
+    // mount, so the mocked module contract must carry the accessors.
+    stocks: new Map<string, unknown>(),
   };
 
   const posDaylogDate = (now: Date = new Date()) => {
@@ -71,6 +74,11 @@ const h = vi.hoisted(() => {
 
   const store = {
     posDaylogDate,
+    // Stocks (v4, Phase 4): same contract as the real module.
+    readCachedStock: vi.fn(async (terminalCode: string) => state.stocks.get(terminalCode) ?? null),
+    writeCachedStock: vi.fn(async (terminalCode: string, snapshot: unknown) => {
+      state.stocks.set(terminalCode, snapshot);
+    }),
     getDaylogEntry: vi.fn(
       async (terminalCode: string, date: string) =>
         state.daylog.get(`${terminalCode}:${date}`) ?? null,
@@ -295,6 +303,7 @@ function buildHarness(options: HarnessOptions = {}) {
   h.state.frequents = new Map();
   h.state.outbox = [...(options.outbox ?? [])];
   h.state.daylog = new Map();
+  h.state.stocks = new Map();
 
   setNavigatorOnLine(options.onLine ?? true);
 
@@ -326,6 +335,9 @@ function buildHarness(options: HarnessOptions = {}) {
     if (path === '/mobile-pos-lite/customers') return [];
     if (path === '/mobile-pos-lite/suppliers') return behavior.suppliers();
     if (path === '/mobile-pos-lite/my-sales-today') return behavior.mySalesToday();
+    // Phase 4: the shell pre-warms the Stoo snapshot on mount.
+    if (path === '/mobile-pos-lite/stock')
+      return { asOf: new Date().toISOString(), branch: { id: 'b1', name: 'Tawi' }, items: [] };
     throw new Error(`Unexpected GET ${path} in kaunta ritual test`);
   });
   h.backendPost.mockImplementation(async (path: string, payload: unknown) => {

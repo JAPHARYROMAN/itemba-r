@@ -269,6 +269,13 @@ const ALL_PERMISSIONS: PermDef[] = [
     isGroupControl: false,
   },
   {
+    code: 'mobile_pos_lite.stock_count',
+    description: 'Record stock counts from a Mobile POS Lite terminal',
+    module: 'mobile_pos_lite',
+    action: 'stock_count',
+    isGroupControl: false,
+  },
+  {
     code: 'mobile_pos_lite.manage',
     description: 'Provision and manage Mobile POS Lite terminals',
     module: 'mobile_pos_lite',
@@ -1536,9 +1543,9 @@ const ROLES: RoleDef[] = [
         'final_qa',
       ),
       notGroupCtrl,
-      // Mobile POS Lite stock-in purchases (manager-level; not granted to
-      // cashiers/salespeople by default).
-      (p) => p.code === 'mobile_pos_lite.purchase',
+      // Mobile POS Lite stock-in purchases + stock counts (manager-level; not
+      // granted to cashiers/salespeople by default).
+      (p) => p.code === 'mobile_pos_lite.purchase' || p.code === 'mobile_pos_lite.stock_count',
     ),
   },
   {
@@ -1588,9 +1595,9 @@ const ROLES: RoleDef[] = [
           'external_payments',
           'external_messages',
         )(p) && readExport(p),
-      // Mobile POS Lite stock-in purchases (manager-level; not granted to
-      // cashiers/salespeople by default).
-      (p) => p.code === 'mobile_pos_lite.purchase',
+      // Mobile POS Lite stock-in purchases + stock counts (manager-level; not
+      // granted to cashiers/salespeople by default).
+      (p) => p.code === 'mobile_pos_lite.purchase' || p.code === 'mobile_pos_lite.stock_count',
     ),
   },
   {

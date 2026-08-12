@@ -82,6 +82,9 @@ function makeService() {
     product: {
       findMany: jest.fn().mockResolvedValue([stockProduct()]),
     },
+    inventoryBalance: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     purchaseOrder: {
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([{ id: 'po-1' }]),
@@ -496,6 +499,187 @@ describe('MobilePosLiteService createSale customer attach', () => {
       ),
     ).rejects.toThrow('not available for this terminal branch');
     expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+  });
+});
+
+/** Row shape returned by the stock() product query (spec-inventory §1.1). */
+function stockScreenProduct(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'product-1',
+    name: 'Maize Flour',
+    productCode: 'MF-1',
+    sku: null,
+    barcode: null,
+    baseUnitId: 'unit-1',
+    imageUrl: null,
+    defaultSellingPrice: '5000',
+    retailPrice: null,
+    wholesalePrice: null,
+    reorderLevel: null,
+    minimumStockLevel: null,
+    baseUnit: { id: 'unit-1', name: 'Piece', symbol: 'pc' },
+    productFamily: null,
+    ...overrides,
+  };
+}
+
+function balanceRow(productId: string, quantityOnHand: number, quantityReserved: number) {
+  return {
+    productId,
+    quantityOnHand: String(quantityOnHand),
+    quantityReserved: String(quantityReserved),
+  };
+}
+
+describe('MobilePosLiteService stock', () => {
+  it('scopes the query to stock items of the terminal division (including division-null)', async () => {
+    const { service, prisma } = makeService();
+    prisma.product.findMany.mockResolvedValue([]);
+
+    await service.stock(TERMINAL_CODE, DEVICE_SECRET, undefined, repUser());
+
+    expect(prisma.product.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          companyId: 'company-1',
+          status: 'ACTIVE',
+          // isStockItem() semantics in where-clause form.
+          trackInventory: true,
+          productType: { notIn: ['SERVICE', 'NON_STOCK_ITEM'] },
+          AND: [{ OR: [{ divisionId: 'division-1' }, { divisionId: null }] }],
+        }),
+        orderBy: { name: 'asc' },
+        take: 1500,
+      }),
+    );
+    // Balances are joined for the TERMINAL's branch — never a client choice.
+    expect(prisma.inventoryBalance.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ branchId: 'branch-1' }),
+      }),
+    );
+  });
+
+  it('computes status boundaries: negative → OVERSOLD, zero → OUT, at-threshold → LOW, above → IN', async () => {
+    const { service, prisma } = makeService();
+    prisma.product.findMany.mockResolvedValue([
+      stockScreenProduct({ id: 'p-neg', name: 'A Neg' }),
+      stockScreenProduct({ id: 'p-zero', name: 'B Zero' }),
+      stockScreenProduct({ id: 'p-at', name: 'C AtThreshold', reorderLevel: '5' }),
+      stockScreenProduct({ id: 'p-above', name: 'D Above', minimumStockLevel: '4' }),
+    ]);
+    prisma.inventoryBalance.findMany.mockResolvedValue([
+      balanceRow('p-neg', 2, 5), // available -3
+      balanceRow('p-zero', 3, 3), // available 0
+      balanceRow('p-at', 5, 0), // available 5 = reorderLevel 5 → LOW_STOCK
+      balanceRow('p-above', 5, 0), // available 5 > minimumStockLevel 4 → IN_STOCK
+    ]);
+
+    const result = await service.stock(TERMINAL_CODE, DEVICE_SECRET, undefined, repUser());
+    const byId = new Map(result.items.map((item: any) => [item.productId, item]));
+
+    expect(byId.get('p-neg')).toMatchObject({ available: -3, status: 'OVERSOLD' });
+    expect(byId.get('p-zero')).toMatchObject({ available: 0, status: 'OUT_OF_STOCK' });
+    expect(byId.get('p-at')).toMatchObject({ available: 5, threshold: 5, status: 'LOW_STOCK' });
+    expect(byId.get('p-above')).toMatchObject({ available: 5, threshold: 4, status: 'IN_STOCK' });
+  });
+
+  it('includes unpriced products with sellingPrice null', async () => {
+    const { service, prisma } = makeService();
+    prisma.product.findMany.mockResolvedValue([
+      stockScreenProduct({
+        id: 'p-unpriced',
+        defaultSellingPrice: null,
+        retailPrice: null,
+        wholesalePrice: null,
+      }),
+    ]);
+    prisma.inventoryBalance.findMany.mockResolvedValue([balanceRow('p-unpriced', 7, 0)]);
+
+    const result = await service.stock(TERMINAL_CODE, DEVICE_SECRET, undefined, repUser());
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ productId: 'p-unpriced', sellingPrice: null });
+  });
+
+  it('treats a missing balance row as zeros → OUT_OF_STOCK with the default threshold 10', async () => {
+    const { service, prisma } = makeService();
+    prisma.product.findMany.mockResolvedValue([stockScreenProduct({ id: 'p-norow' })]);
+    prisma.inventoryBalance.findMany.mockResolvedValue([]);
+
+    const result = await service.stock(TERMINAL_CODE, DEVICE_SECRET, undefined, repUser());
+
+    expect(result.items[0]).toMatchObject({
+      quantityOnHand: 0,
+      quantityReserved: 0,
+      available: 0,
+      threshold: 10,
+      status: 'OUT_OF_STOCK',
+    });
+  });
+
+  it('sorts problems-first (OVERSOLD → OUT → LOW → IN) preserving name order within a band', async () => {
+    const { service, prisma } = makeService();
+    // DB order is name-asc; statuses are deliberately shuffled across it.
+    prisma.product.findMany.mockResolvedValue([
+      stockScreenProduct({ id: 'p-a', name: 'Asali' }), // IN (20 available)
+      stockScreenProduct({ id: 'p-b', name: 'Bia' }), // OVERSOLD
+      stockScreenProduct({ id: 'p-c', name: 'Chai' }), // LOW (5 ≤ 10)
+      stockScreenProduct({ id: 'p-d', name: 'Dagaa' }), // OUT (no row)
+      stockScreenProduct({ id: 'p-e', name: 'Embe' }), // LOW (5 ≤ 10)
+    ]);
+    prisma.inventoryBalance.findMany.mockResolvedValue([
+      balanceRow('p-a', 20, 0),
+      balanceRow('p-b', 0, 2),
+      balanceRow('p-c', 5, 0),
+      balanceRow('p-e', 5, 0),
+    ]);
+
+    const result = await service.stock(TERMINAL_CODE, DEVICE_SECRET, undefined, repUser());
+
+    expect(result.items.map((item: any) => item.productId)).toEqual([
+      'p-b', // OVERSOLD first
+      'p-d', // OUT_OF_STOCK
+      'p-c', // LOW_STOCK — Chai before Embe (name order kept in the band)
+      'p-e',
+      'p-a', // IN_STOCK last
+    ]);
+  });
+
+  it('returns branch identity + asOf and NEVER serializes cost/value fields (review-blocking)', async () => {
+    const { service, prisma } = makeService();
+    prisma.product.findMany.mockResolvedValue([stockScreenProduct()]);
+    prisma.inventoryBalance.findMany.mockResolvedValue([balanceRow('product-1', 7, 2)]);
+
+    const result = await service.stock(TERMINAL_CODE, DEVICE_SECRET, undefined, repUser());
+
+    expect(result.branch).toEqual({ id: 'branch-1', name: 'Branch' });
+    expect(typeof result.asOf).toBe('string');
+    expect(Number.isNaN(Date.parse(result.asOf))).toBe(false);
+
+    const serialized = JSON.parse(JSON.stringify(result));
+    for (const item of serialized.items) {
+      for (const forbidden of ['averageCost', 'totalValue', 'unitCost', 'riskValue']) {
+        expect(item).not.toHaveProperty(forbidden);
+      }
+      expect(Object.keys(item).sort()).toEqual(
+        [
+          'available',
+          'barcode',
+          'code',
+          'imageUrl',
+          'name',
+          'productId',
+          'quantityOnHand',
+          'quantityReserved',
+          'sellingPrice',
+          'status',
+          'threshold',
+          'unitId',
+          'unitSymbol',
+        ].sort(),
+      );
+    }
   });
 });
 

@@ -17,6 +17,12 @@ export type Session = {
   rep: { id: string; name: string };
   paymentMethods: Array<{ code: string; label: string; requiresReference: boolean }>;
   purchasesEnabled?: boolean;
+  /**
+   * Permission-derived like purchasesEnabled (`mobile_pos_lite.stock_count`).
+   * Phase 4 consumes it only as the Stoo manager-view presentation gate;
+   * the Hesabu count flow it will gate ships in Phase 5.
+   */
+  stockCountsEnabled?: boolean;
 };
 
 export type Customer = {

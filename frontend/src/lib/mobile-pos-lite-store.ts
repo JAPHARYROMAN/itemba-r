@@ -50,6 +50,13 @@ export type MobilePosLiteCachedSession = {
   branch: { id: string; name: string; code: string };
   rep: { id: string; name: string };
   paymentMethods: Array<{ code: string; label: string; requiresReference: boolean }>;
+  /**
+   * Permission-derived flags (spec-inventory §1.3): the runtime session object
+   * is structured-cloned into IDB wholesale, so these survive offline
+   * cold-start automatically — typing them here just makes that honest.
+   */
+  purchasesEnabled?: boolean;
+  stockCountsEnabled?: boolean;
 };
 
 const DB_NAME = 'itemba-mobile-pos-lite';
@@ -349,6 +356,52 @@ export async function updatePendingMobilePosLiteSaleError(id: string, lastError:
   );
   if (!existing) return;
   await transaction(OUTBOX, 'readwrite', (store) => store.put({ ...existing, lastError }));
+}
+
+/* ─── Stocks (spec-inventory §5): the Stoo branch-stock snapshot ─────────── */
+
+/** One row of `GET /mobile-pos-lite/stock` — mirrors the endpoint item shape exactly. */
+export type PosStockItem = {
+  productId: string;
+  name: string;
+  code: string;
+  barcode: string | null;
+  unitId: string;
+  unitSymbol: string;
+  /** Backend-relative image path (`/products/:id/image`) — null when no photo. */
+  imageUrl: string | null;
+  /** Nullable: Stoo includes unpriced products (they never reach the sale flow). */
+  sellingPrice: number | null;
+  quantityOnHand: number;
+  quantityReserved: number;
+  /** onHand − reserved, UNCLAMPED — the client gates the rep presentation. */
+  available: number;
+  threshold: number;
+  status: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' | 'OVERSOLD';
+};
+
+/**
+ * The cached `/stock` response. `fetchedAt` is CLIENT time (Date.now() at the
+ * moment the response landed) — the freshness clock keys off it, never off
+ * the server `asOf`, so device clock skew degrades chrome, not truth.
+ */
+export type PosStockSnapshot = {
+  items: PosStockItem[];
+  asOf: string;
+  fetchedAt: number;
+};
+
+export async function readCachedStock(terminalCode: string): Promise<PosStockSnapshot | null> {
+  return (
+    (await transaction<PosStockSnapshot | undefined>(STOCKS, 'readonly', (store) =>
+      store.get(terminalCode),
+    )) ?? null
+  );
+}
+
+/** One snapshot per terminal; every successful fetch overwrites wholesale. */
+export async function writeCachedStock(terminalCode: string, snapshot: PosStockSnapshot) {
+  await transaction(STOCKS, 'readwrite', (store) => store.put(snapshot, terminalCode));
 }
 
 /* ─── Daylog (spec-leo §3): the persisted day log behind the Leo day book ─── */

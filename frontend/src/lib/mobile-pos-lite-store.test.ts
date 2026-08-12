@@ -5,7 +5,10 @@ import {
   missingRequiredStores,
   openDatabase,
   posDaylogDate,
+  readCachedStock,
+  writeCachedStock,
   writeDaylogSent,
+  type PosStockSnapshot,
 } from './mobile-pos-lite-store';
 
 // v4 schema (the single Kaunta migration): stocks/drafts/daylog join the
@@ -401,5 +404,69 @@ describe('daylog', () => {
     expect(keys).toContain(`${TERMINAL}:2026-08-12`);
     // Another terminal's rows age out through its OWN writes, never ours.
     expect(keys).toContain('T-OTHER:2026-08-01');
+  });
+});
+
+/* ------------------------------------------------------------------------ *
+ * Stocks (v4, Phase 4): the Stoo branch-stock snapshot — keyed by
+ * terminalCode (out-of-line), one snapshot per terminal, overwrite wholesale.
+ * ------------------------------------------------------------------------ */
+describe('stocks', () => {
+  /** Fresh v4 database over the same scripted IndexedDB fake. */
+  function stocksHarness() {
+    const harness = makeFactory({ version: 4, stores: [...ALL_STORES] });
+    vi.stubGlobal('indexedDB', harness.factory);
+    return harness;
+  }
+
+  function makeSnapshot(overrides: Partial<PosStockSnapshot> = {}): PosStockSnapshot {
+    return {
+      asOf: '2026-08-12T09:00:00.000Z',
+      fetchedAt: 1_786_500_000_000,
+      items: [
+        {
+          productId: 'p1',
+          name: 'Maize Flour',
+          code: 'MF-1',
+          barcode: null,
+          unitId: 'u1',
+          unitSymbol: 'pc',
+          imageUrl: null,
+          sellingPrice: 5000,
+          quantityOnHand: 7,
+          quantityReserved: 2,
+          available: 5,
+          threshold: 10,
+          status: 'LOW_STOCK',
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  it('returns null for a terminal with no cached snapshot (honest miss, never a fabricated empty)', async () => {
+    stocksHarness();
+    expect(await readCachedStock('T-001')).toBeNull();
+  });
+
+  it('round-trips a snapshot per terminalCode', async () => {
+    stocksHarness();
+    const snapshot = makeSnapshot();
+    await writeCachedStock('T-001', snapshot);
+    expect(await readCachedStock('T-001')).toEqual(snapshot);
+    // Keys are per-terminal: another terminal still misses.
+    expect(await readCachedStock('T-OTHER')).toBeNull();
+  });
+
+  it('overwrites the previous snapshot wholesale on every write', async () => {
+    stocksHarness();
+    await writeCachedStock('T-001', makeSnapshot());
+    const fresher = makeSnapshot({
+      asOf: '2026-08-12T10:00:00.000Z',
+      fetchedAt: 1_786_500_060_000,
+      items: [],
+    });
+    await writeCachedStock('T-001', fresher);
+    expect(await readCachedStock('T-001')).toEqual(fresher);
   });
 });

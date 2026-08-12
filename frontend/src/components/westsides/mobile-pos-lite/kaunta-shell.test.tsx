@@ -66,6 +66,9 @@ const h = vi.hoisted(() => {
     frequents: new Map<string, Record<string, number>>(),
     outbox: [] as Pending[],
     daylog: new Map<string, DaylogEntry>(),
+    // v4 stocks store (Phase 4): the shell pre-warms the Stoo snapshot on
+    // mount, so the mocked module contract must carry the accessors.
+    stocks: new Map<string, unknown>(),
   };
 
   // Mirrors the real module's device-local YYYY-MM-DD day key.
@@ -76,6 +79,11 @@ const h = vi.hoisted(() => {
   };
 
   const store = {
+    // Stocks (v4, Phase 4): same contract as the real module.
+    readCachedStock: vi.fn(async (terminalCode: string) => state.stocks.get(terminalCode) ?? null),
+    writeCachedStock: vi.fn(async (terminalCode: string, snapshot: unknown) => {
+      state.stocks.set(terminalCode, snapshot);
+    }),
     // Daylog (v4): same contract as the real module — the Kaunta shell reads
     // it on every route change and the sale/purchase paths bump it.
     posDaylogDate,
@@ -286,6 +294,7 @@ function buildHarness(options: HarnessOptions = {}) {
   h.state.frequents = new Map();
   h.state.outbox = [...(options.outbox ?? [])];
   h.state.daylog = new Map();
+  h.state.stocks = new Map();
 
   setNavigatorOnLine(options.onLine ?? true);
 
@@ -301,6 +310,9 @@ function buildHarness(options: HarnessOptions = {}) {
     if (path === '/mobile-pos-lite/customers') return [];
     if (path === '/mobile-pos-lite/suppliers') return [];
     if (path === '/mobile-pos-lite/my-sales-today') return { count: 0, totalAmount: 0, sales: [] };
+    // Phase 4: the shell pre-warms the Stoo snapshot on mount.
+    if (path === '/mobile-pos-lite/stock')
+      return { asOf: new Date().toISOString(), branch: { id: 'b1', name: 'Tawi' }, items: [] };
     throw new Error(`Unexpected GET ${path} in kaunta shell test`);
   });
   h.backendPost.mockImplementation(async (path: string, payload: unknown) => {
@@ -370,11 +382,12 @@ describe('KAUNTA-1: uiVersion=2 boots into Mauzo with rail + slab', () => {
     // No home screen: the big classic CTA does not exist anywhere.
     expect(screen.queryByRole('button', { name: 'Mauzo Mapya' })).not.toBeInTheDocument();
 
-    // Rail: Mauzo + Leo tabs and the Mipangilio gear (Stoo must NOT exist yet).
+    // Rail: Mauzo + Leo + Stoo tabs (Stoo shipped in Phase 4, visible to all
+    // mobile_pos_lite.use holders) and the Mipangilio gear.
     expect(screen.getByRole('button', { name: 'Mauzo' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Leo' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stoo' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Mipangilio' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Stoo' })).not.toBeInTheDocument();
 
     // Slab: LIPA disabled while the cart is empty; sync token clean (green).
     const lipa = screen.getByRole('button', { name: 'LIPA' });
