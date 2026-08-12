@@ -63,7 +63,7 @@ Dark-mode default (sunlight wins) · bottom tab bar (the slab owns the bottom) �
    **→ RESOLVED 2026-08-11 (owner): CUT from v1 entirely** — list, detail overlay, and `GET /mobile-pos-lite/purchases` all dropped (no 10-row fallback). spec-purchases annotated in place; direction §12-1 records it.
 2. **Usiku dark mode:** direction says ship day one; critique says defer to Phase 5 (near-zero users under a forced-light default, doubles visual QA). Recommend: **defer**.
    **→ RESOLVED 2026-08-11 (owner): DEFERRED** to a Phase-5 toggle-on after Mchana QA. The §2.1 token table stays in the direction; no theme row in Mipangilio until the toggle ships (spec-leo §5).
-3. **Pilot branches:** name the 1–2 branches that pilot each phase for a week.
+3. **Pilot branches:** **RESOLVED 2026-08-11 — Uzunguni and Kariakoo.** Deployment note: production currently has no *branch* records by these names (branches: Kisimani Main, Beverages Warehouse, Hardware Store, Logistics HQ, Main Farm, Main Fuel Station, Construction Site 1; "Uzunguni Inn" exists as a licensed business unit). Owner confirmed 2026-08-11: these are NEW shops being set up — their terminals get "Kaunta pilot: ON" at activation (admin toggle, or ops request). No existing terminal is flagged.
    **→ still OPEN — needed before Phase 1 begins** (the terminal `uiVersion` flag can land without the names).
 4. **Phone-only managers:** should `mobile_pos_lite.purchase`/`.stock_count` holders with no other permissions get the POS-only lock (no ERP shell)? Recommend: **yes** — add both codes to `POS_ONLY_PERMISSIONS`.
    **→ RESOLVED 2026-08-11 (owner): YES** — both codes join `POS_ONLY_PERMISSIONS` in `(dashboard)/layout.tsx`; phone-only managers get the POS shell.
