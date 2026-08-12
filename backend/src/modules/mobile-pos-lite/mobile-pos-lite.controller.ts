@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import {
@@ -114,6 +115,28 @@ export class MobilePosLiteController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.createSale(terminalCode, deviceSecret, dto, user);
+  }
+
+  /**
+   * Letterhead receipt PDF for a sale recorded on this terminal.
+   * Non-passthrough @Res() so the PDF bytes bypass the TransformInterceptor's
+   * { data } envelope, same as generated-documents table-pdf.
+   */
+  @Get('sales/:id/receipt')
+  @RequirePermissions('mobile_pos_lite.use')
+  async saleReceipt(
+    @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
+    @Headers('x-mobile-pos-device') deviceSecret: string | undefined,
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    const receipt = await this.service.saleReceipt(terminalCode, deviceSecret, id, user);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${receipt.fileName}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(receipt.buffer);
   }
 
   @Get('my-sales-today')

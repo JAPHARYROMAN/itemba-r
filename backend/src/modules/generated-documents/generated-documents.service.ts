@@ -275,6 +275,43 @@ export class GeneratedDocumentsService {
     return { buffer, fileName, generatedDocumentId: generatedDocument.id };
   }
 
+  /**
+   * Additive shared letterhead renderer for modules that stream their own
+   * branded PDFs (e.g. Mobile POS Lite receipts) without persisting a
+   * GeneratedDocument/Document pair. Sources the organization block exactly
+   * like every business PDF in this module (company profile + branch with the
+   * ITEMBA letterhead fallbacks), attaches the logo image, and returns the
+   * rendered bytes. Callers own persistence, auditing, and response headers.
+   */
+  async renderLetterheadPdf(
+    source: { companyId?: string | null; branchId?: string | null },
+    pdf: Omit<BusinessPdfModel, 'organization'>,
+    user: AuthUser,
+  ): Promise<Buffer> {
+    if (source.companyId) {
+      // Same guard as generateTablePdf: letterhead content (TIN, VRN, address,
+      // logo) must never leak across companies the caller cannot read.
+      await this.companyScope.assertCanAccessCompany(user, source.companyId, AccessLevel.READ);
+    }
+    const [company, branch] = await Promise.all([
+      source.companyId
+        ? this.prisma.company.findFirst({
+            where: { id: source.companyId, deletedAt: null },
+            select: companySelect().select,
+          })
+        : null,
+      source.branchId
+        ? this.prisma.branch.findFirst({
+            where: { id: source.branchId, deletedAt: null },
+            select: branchSelect().select,
+          })
+        : null,
+    ]);
+    const org = organization(company, branch);
+    await this.attachLogoImage(org, user);
+    return buildBusinessPdf({ ...pdf, organization: org });
+  }
+
   async download(id: string, user: AuthUser, ipAddress?: string) {
     const item = await this.prisma.generatedDocument.findFirst({
       where: { id, deletedAt: null },

@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { MobilePosLiteService } from './mobile-pos-lite.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -94,13 +94,22 @@ function makeService() {
       findFirst: jest.fn().mockResolvedValue({ id: 'seq-1' }),
       create: jest.fn().mockResolvedValue({}),
     },
+    customer: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
+    salesOrder: {
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
   };
   const companyScope: any = {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
     assertGroupScoped: jest.fn(),
   };
   const auditLogs: any = { log: jest.fn().mockResolvedValue(undefined) };
-  const salesOrders: any = {};
+  const salesOrders: any = {
+    mobilePosLiteQuickSale: jest.fn().mockResolvedValue({ id: 'so-1' }),
+  };
   const purchaseOrders: any = {
     create: jest.fn().mockResolvedValue(chainOrder({ status: 'DRAFT' })),
     confirm: jest.fn().mockResolvedValue(chainOrder()),
@@ -113,6 +122,9 @@ function makeService() {
     post: jest.fn().mockResolvedValue({ id: 'grn-1', status: 'POSTED' }),
   };
   const codes: any = { next: jest.fn().mockResolvedValue('GRN-2026-000001') };
+  const generatedDocuments: any = {
+    renderLetterheadPdf: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4 test')),
+  };
 
   const service = new MobilePosLiteService(
     prisma,
@@ -122,9 +134,19 @@ function makeService() {
     purchaseOrders,
     goodsReceivedNotes,
     codes,
+    generatedDocuments,
   );
 
-  return { service, prisma, purchaseOrders, goodsReceivedNotes, codes, auditLogs };
+  return {
+    service,
+    prisma,
+    salesOrders,
+    purchaseOrders,
+    goodsReceivedNotes,
+    codes,
+    auditLogs,
+    generatedDocuments,
+  };
 }
 
 function purchaseDto(overrides: Record<string, unknown> = {}) {
@@ -334,5 +356,275 @@ describe('MobilePosLiteService createPurchase', () => {
       service.createPurchase(TERMINAL_CODE, DEVICE_SECRET, purchaseDto(), repUser()),
     ).rejects.toThrow('does not have a purchase cost');
     expect(purchaseOrders.create).not.toHaveBeenCalled();
+  });
+});
+
+function saleProduct(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'product-1',
+    name: 'Maize Flour',
+    baseUnitId: 'unit-1',
+    defaultSellingPrice: '5000',
+    retailPrice: null,
+    wholesalePrice: null,
+    productFamily: null,
+    ...overrides,
+  };
+}
+
+function saleDto(overrides: Record<string, unknown> = {}) {
+  return {
+    paymentMethod: 'CASH',
+    idempotencyKey: IDEMPOTENCY_KEY,
+    lines: [{ productId: 'product-1', quantity: 2 }],
+    ...overrides,
+  } as any;
+}
+
+function cashTerminalRow(overrides: Record<string, unknown> = {}) {
+  return {
+    ...terminalRow(),
+    generalCustomerId: 'customer-1',
+    paymentMethods: [
+      { paymentMethod: 'CASH', isEnabled: true, cashAccountId: 'cash-1', label: null },
+    ],
+    ...overrides,
+  };
+}
+
+describe('MobilePosLiteService customers', () => {
+  it('searches customers on a terminal WITHOUT credit enabled (no longer credit-gated)', async () => {
+    const { service, prisma } = makeService();
+    // terminalRow() has creditEnabled: false — the search must still run.
+    prisma.customer.findMany.mockResolvedValue([
+      {
+        id: 'customer-9',
+        name: 'Asha Juma',
+        customerCode: 'CUST-9',
+        phone: '0712000000',
+        creditLimit: '0',
+        currentBalance: '0',
+      },
+    ]);
+
+    const result = await service.customers(TERMINAL_CODE, DEVICE_SECRET, 'ash', repUser());
+
+    expect(prisma.customer.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ companyId: 'company-1', status: 'ACTIVE' }),
+      }),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(expect.objectContaining({ id: 'customer-9', name: 'Asha Juma' }));
+  });
+
+  it('still requires at least two search characters', async () => {
+    const { service, prisma } = makeService();
+
+    await expect(service.customers(TERMINAL_CODE, DEVICE_SECRET, 'a', repUser())).resolves.toEqual(
+      [],
+    );
+    expect(prisma.customer.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('MobilePosLiteService createSale customer attach', () => {
+  it('persists an attached customer on a CASH sale', async () => {
+    const { service, prisma, salesOrders } = makeService();
+    prisma.mobilePosTerminal.findFirst.mockResolvedValue(cashTerminalRow());
+    prisma.customer.findFirst.mockResolvedValue({ id: 'customer-9' });
+    prisma.product.findMany.mockResolvedValue([saleProduct()]);
+
+    await service.createSale(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      saleDto({ customerId: 'customer-9' }),
+      repUser(),
+    );
+
+    // The attached customer is validated against the terminal scope...
+    expect(prisma.customer.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'customer-9',
+          companyId: 'company-1',
+          status: 'ACTIVE',
+        }),
+      }),
+    );
+    // ...and stamped on the quick sale instead of the general customer.
+    expect(salesOrders.mobilePosLiteQuickSale).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customerId: 'customer-9',
+        salesType: 'CASH_SALE',
+        paymentMethod: 'CASH',
+        cashAccountId: 'cash-1',
+      }),
+      expect.objectContaining({ id: 'rep-1' }),
+      'terminal-1',
+      TERMINAL_CODE,
+    );
+  });
+
+  it('falls back to the terminal general customer when no customer is attached', async () => {
+    const { service, prisma, salesOrders } = makeService();
+    prisma.mobilePosTerminal.findFirst.mockResolvedValue(cashTerminalRow());
+    prisma.product.findMany.mockResolvedValue([saleProduct()]);
+
+    await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+
+    expect(prisma.customer.findFirst).not.toHaveBeenCalled();
+    expect(salesOrders.mobilePosLiteQuickSale).toHaveBeenCalledWith(
+      expect.objectContaining({ customerId: 'customer-1' }),
+      expect.anything(),
+      'terminal-1',
+      TERMINAL_CODE,
+    );
+  });
+
+  it('rejects an attached customer outside the terminal scope', async () => {
+    const { service, prisma, salesOrders } = makeService();
+    prisma.mobilePosTerminal.findFirst.mockResolvedValue(cashTerminalRow());
+    prisma.customer.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.createSale(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        saleDto({ customerId: 'customer-9' }),
+        repUser(),
+      ),
+    ).rejects.toThrow('not available for this terminal branch');
+    expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+  });
+});
+
+describe('MobilePosLiteService saleReceipt', () => {
+  function saleRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'so-1',
+      salesOrderNumber: 'SO-2026-000123',
+      orderDate: new Date('2026-08-12T06:30:00Z'),
+      createdAt: new Date('2026-08-12T06:30:00Z'),
+      totalAmount: '12500',
+      paymentMethod: 'CASH',
+      paymentReference: null,
+      customerName: null,
+      customer: { name: 'Asha Juma' },
+      lines: [
+        {
+          description: 'Maize Flour',
+          quantity: '2',
+          unitPrice: '5000',
+          lineTotal: '10000',
+          product: { name: 'Maize Flour' },
+        },
+        {
+          description: 'Soda',
+          quantity: '1',
+          unitPrice: '2500',
+          lineTotal: '2500',
+          product: { name: 'Soda' },
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  it('rejects a sale recorded on another terminal', async () => {
+    const { service, prisma, generatedDocuments } = makeService();
+    // The terminal-bound where clause finds nothing for foreign sales.
+    prisma.salesOrder.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.saleReceipt(TERMINAL_CODE, DEVICE_SECRET, 'so-other', repUser()),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(prisma.salesOrder.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'so-other',
+          companyId: 'company-1',
+          mobilePosTerminalId: 'terminal-1',
+        }),
+      }),
+    );
+    expect(generatedDocuments.renderLetterheadPdf).not.toHaveBeenCalled();
+  });
+
+  it('renders the letterhead receipt with bilingual labels, lines, and JUMLA total', async () => {
+    const { service, prisma, generatedDocuments } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(saleRow());
+
+    const result = await service.saleReceipt(TERMINAL_CODE, DEVICE_SECRET, 'so-1', repUser());
+
+    expect(generatedDocuments.renderLetterheadPdf).toHaveBeenCalledWith(
+      { companyId: 'company-1', branchId: 'branch-1' },
+      expect.objectContaining({
+        title: 'RISITI / RECEIPT',
+        subtitle: 'Asha Juma',
+        reference: 'SO-2026-000123',
+        meta: expect.arrayContaining([
+          { label: 'Namba ya Risiti / Receipt No', value: 'SO-2026-000123' },
+          { label: 'Tawi / Branch', value: 'Branch' },
+          { label: 'Muuzaji / Served By', value: 'Rep One' },
+        ]),
+      }),
+      expect.objectContaining({ id: 'rep-1' }),
+    );
+
+    const model = generatedDocuments.renderLetterheadPdf.mock.calls[0][1];
+    const [transaction, items, thanks] = model.sections;
+    expect(transaction.items).toEqual([
+      { label: 'Mteja / Customer', value: 'Asha Juma' },
+      { label: 'Malipo / Payment Method', value: 'Taslimu / Cash' },
+    ]);
+    expect(items.table.headers).toEqual([
+      'Bidhaa / Item',
+      'Idadi / Qty',
+      'Bei / Unit Price',
+      'Jumla / Total',
+    ]);
+    expect(items.table.rows).toEqual([
+      ['Maize Flour', '2', 'TZS 5,000', 'TZS 10,000'],
+      ['Soda', '1', 'TZS 2,500', 'TZS 2,500'],
+    ]);
+    expect(items.totals).toEqual([{ label: 'JUMLA / TOTAL', value: 'TZS 12,500', emphasis: true }]);
+    expect(thanks.paragraphs).toEqual(['Asante kwa biashara yako! / Thank you for your business!']);
+
+    expect(result.fileName).toBe('RISITI-SO-2026-000123.pdf');
+    expect(Buffer.isBuffer(result.buffer)).toBe(true);
+  });
+
+  it('includes the payment reference when the sale carries one', async () => {
+    const { service, prisma, generatedDocuments } = makeService();
+    prisma.mobilePosTerminal.findFirst.mockResolvedValue(
+      cashTerminalRow({
+        paymentMethods: [
+          {
+            paymentMethod: 'MOBILE_MONEY',
+            isEnabled: true,
+            cashAccountId: 'momo-1',
+            label: 'M-Pesa Till 12345',
+          },
+        ],
+      }),
+    );
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      saleRow({ paymentMethod: 'MOBILE_MONEY', paymentReference: 'TX-778899' }),
+    );
+
+    await service.saleReceipt(TERMINAL_CODE, DEVICE_SECRET, 'so-1', repUser());
+
+    const model = generatedDocuments.renderLetterheadPdf.mock.calls[0][1];
+    expect(model.sections[0].items).toEqual(
+      expect.arrayContaining([
+        {
+          label: 'Malipo / Payment Method',
+          value: 'Pesa za Simu / Mobile Money (M-Pesa Till 12345)',
+        },
+        { label: 'Kumbukumbu ya Malipo / Payment Reference', value: 'TX-778899' },
+      ]),
+    );
   });
 });

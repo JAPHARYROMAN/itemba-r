@@ -22,6 +22,8 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { SalesOrdersService } from '../sales-orders/sales-orders.service';
 import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
 import { GoodsReceivedNotesService } from '../goods-received-notes/goods-received-notes.service';
+import { GeneratedDocumentsService } from '../generated-documents/generated-documents.service';
+import type { BusinessPdfSection } from '../generated-documents/pdf-builder';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
@@ -163,6 +165,52 @@ function effectiveSellingPrice(product: {
   );
 }
 
+/** Whole-shilling TZS format for receipts (POS prices are whole shillings). */
+function tzsWhole(amount: unknown) {
+  return `TZS ${new Intl.NumberFormat('en-TZ', { maximumFractionDigits: 0 }).format(
+    Math.round(Number(amount ?? 0)),
+  )}`;
+}
+
+function receiptQty(amount: unknown) {
+  return new Intl.NumberFormat('en-GB', { maximumFractionDigits: 3 }).format(Number(amount ?? 0));
+}
+
+function receiptDateTime(value: Date) {
+  return new Intl.DateTimeFormat('en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Africa/Nairobi',
+  }).format(value);
+}
+
+/** Bilingual sw/en payment method label, with the terminal's custom label (e.g. a till number) appended. */
+function bilingualPaymentMethod(
+  paymentMethod: SalesPaymentMethod | null | undefined,
+  configuredLabel?: string | null,
+) {
+  const base = (() => {
+    switch (paymentMethod) {
+      case SalesPaymentMethod.CASH:
+        return 'Taslimu / Cash';
+      case SalesPaymentMethod.MOBILE_MONEY:
+        return 'Pesa za Simu / Mobile Money';
+      case SalesPaymentMethod.BANK_TRANSFER:
+        return 'Benki / Bank Transfer';
+      case SalesPaymentMethod.CREDIT:
+        return 'Mkopo / Credit';
+      default:
+        return String(paymentMethod ?? 'N/A');
+    }
+  })();
+  const custom = configuredLabel?.trim();
+  return custom ? `${base} (${custom})` : base;
+}
+
+function receiptFileStem(reference: string) {
+  return reference.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'RECEIPT';
+}
+
 function paymentLabel(paymentMethod: SalesPaymentMethod, configuredLabel?: string | null) {
   if (configuredLabel?.trim()) return configuredLabel.trim();
   switch (paymentMethod) {
@@ -189,6 +237,7 @@ export class MobilePosLiteService {
     private readonly purchaseOrders: PurchaseOrdersService,
     private readonly goodsReceivedNotes: GoodsReceivedNotesService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly generatedDocuments: GeneratedDocumentsService,
   ) {}
 
   async findTerminals(query: QueryMobilePosTerminalDto, user: AuthUser) {
@@ -545,7 +594,9 @@ export class MobilePosLiteService {
     user: AuthUser,
   ) {
     const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
-    if (!terminal.creditEnabled) return [];
+    // Customer lookup works on every terminal so any sale (cash, mobile money,
+    // credit) can be attached to a named customer. creditEnabled only governs
+    // whether CREDIT is offered as a payment method (sessionPayload/createSale).
     const term = search?.trim() ?? '';
     if (term.length < 2) return [];
 
@@ -810,7 +861,10 @@ export class MobilePosLiteService {
     if (isCredit && !dto.customerId) {
       throw new BadRequestException('Select the customer before completing a credit sale');
     }
-    if (isCredit) {
+    // Any attached customer — required for credit, optional for cash/mobile
+    // money — must belong to the terminal's company and branch scope (the same
+    // scope the customer search offers).
+    if (dto.customerId) {
       const selectedCustomer = await this.prisma.customer.findFirst({
         where: {
           id: dto.customerId,
@@ -847,7 +901,10 @@ export class MobilePosLiteService {
         companyId: terminal.companyId,
         divisionId: terminal.divisionId,
         branchId: terminal.branchId,
-        customerId: isCredit ? dto.customerId : terminal.generalCustomerId,
+        // Credit always carries dto.customerId (validated above); cash/mobile
+        // money sales record an attached customer when one was chosen and fall
+        // back to the terminal's general customer otherwise.
+        customerId: dto.customerId ?? terminal.generalCustomerId,
         salesType: isCredit ? SalesType.CREDIT_SALE : SalesType.CASH_SALE,
         orderDate: new Date().toISOString(),
         currency: CurrencyCode.TZS,
@@ -877,6 +934,117 @@ export class MobilePosLiteService {
       newValue: { terminalCode: terminal.terminalCode, paymentMethod },
     });
     return sale;
+  }
+
+  /**
+   * Letterhead receipt PDF for a sale recorded on THIS terminal. Terminal-bound
+   * by construction: the sale must carry the activated terminal's id on
+   * SalesOrder.mobilePosTerminalId, so a rep can never pull another terminal's
+   * receipts. Rendering reuses the shared business-PDF letterhead engine
+   * (generated-documents renderLetterheadPdf -> buildBusinessPdf); nothing is
+   * persisted — the receipt is regenerated on demand.
+   */
+  async saleReceipt(
+    terminalCode: string | undefined,
+    deviceSecret: string | undefined,
+    saleId: string,
+    user: AuthUser,
+  ) {
+    const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
+    const sale = await this.prisma.salesOrder.findFirst({
+      where: {
+        id: saleId,
+        companyId: terminal.companyId,
+        mobilePosTerminalId: terminal.id,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        salesOrderNumber: true,
+        orderDate: true,
+        createdAt: true,
+        totalAmount: true,
+        paymentMethod: true,
+        paymentReference: true,
+        customerName: true,
+        customer: { select: { name: true } },
+        lines: {
+          select: {
+            description: true,
+            quantity: true,
+            unitPrice: true,
+            lineTotal: true,
+            product: { select: { name: true } },
+          },
+        },
+      },
+    });
+    if (!sale) {
+      throw new NotFoundException('Sale not found for this Mobile POS terminal');
+    }
+
+    const receiptNumber = sale.salesOrderNumber ?? sale.id.slice(0, 8).toUpperCase();
+    const customerName =
+      sale.customer?.name ?? sale.customerName ?? terminal.generalCustomer?.name ?? 'N/A';
+    const configuredLabel = terminal.paymentMethods.find(
+      (payment) => payment.paymentMethod === sale.paymentMethod,
+    )?.label;
+    const paymentReference = sale.paymentReference?.trim();
+
+    const sections: BusinessPdfSection[] = [
+      {
+        title: 'Muamala / Transaction',
+        items: [
+          { label: 'Mteja / Customer', value: customerName },
+          {
+            label: 'Malipo / Payment Method',
+            value: bilingualPaymentMethod(sale.paymentMethod, configuredLabel),
+          },
+          ...(paymentReference
+            ? [{ label: 'Kumbukumbu ya Malipo / Payment Reference', value: paymentReference }]
+            : []),
+        ],
+      },
+      {
+        title: 'Bidhaa / Items',
+        table: {
+          headers: ['Bidhaa / Item', 'Idadi / Qty', 'Bei / Unit Price', 'Jumla / Total'],
+          numericColumns: [1, 2, 3],
+          columnWeights: [3, 1, 1.5, 1.5],
+          rows: sale.lines.map((line) => [
+            line.description || line.product?.name || 'N/A',
+            receiptQty(line.quantity),
+            tzsWhole(line.unitPrice),
+            tzsWhole(line.lineTotal),
+          ]),
+        },
+        totals: [{ label: 'JUMLA / TOTAL', value: tzsWhole(sale.totalAmount), emphasis: true }],
+      },
+      {
+        title: 'Asante / Thank You',
+        paragraphs: ['Asante kwa biashara yako! / Thank you for your business!'],
+      },
+    ];
+
+    const buffer = await this.generatedDocuments.renderLetterheadPdf(
+      { companyId: terminal.companyId, branchId: terminal.branchId },
+      {
+        title: 'RISITI / RECEIPT',
+        subtitle: customerName,
+        reference: receiptNumber,
+        generatedAt: new Date(),
+        meta: [
+          { label: 'Namba ya Risiti / Receipt No', value: receiptNumber },
+          { label: 'Tarehe / Date', value: receiptDateTime(sale.createdAt ?? sale.orderDate) },
+          { label: 'Tawi / Branch', value: terminal.branch?.name ?? 'N/A' },
+          { label: 'Muuzaji / Served By', value: terminal.assignedUser?.fullName ?? 'N/A' },
+        ],
+        sections,
+      },
+      user,
+    );
+
+    return { buffer, fileName: `RISITI-${receiptFileStem(receiptNumber)}.pdf` };
   }
 
   private async resolveSaleLines(terminal: Terminal, lines: CreateMobilePosLiteSaleDto['lines']) {
