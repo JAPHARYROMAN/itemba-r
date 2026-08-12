@@ -56,15 +56,52 @@ const h = vi.hoisted(() => {
     lineSummary?: string;
   };
 
+  type DaylogSent = { repId: string; count: number; totalAmount: number; fetchedAt: number };
+  type DaylogEntry = { terminalCode: string; date: string; tallyCount: number; sent?: DaylogSent };
+
   const state = {
     binding: null as Binding | null,
     catalogs: new Map<string, unknown[]>(),
     sessions: new Map<string, unknown>(),
     frequents: new Map<string, Record<string, number>>(),
     outbox: [] as Pending[],
+    daylog: new Map<string, DaylogEntry>(),
+  };
+
+  // Mirrors the real module's device-local YYYY-MM-DD day key.
+  const posDaylogDate = (now: Date = new Date()) => {
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${now.getFullYear()}-${month}-${day}`;
   };
 
   const store = {
+    // Daylog (v4): same contract as the real module — the Kaunta shell reads
+    // it on every route change and the sale/purchase paths bump it.
+    posDaylogDate,
+    getDaylogEntry: vi.fn(
+      async (terminalCode: string, date: string) =>
+        state.daylog.get(`${terminalCode}:${date}`) ?? null,
+    ),
+    bumpDaylogTally: vi.fn(async (terminalCode: string) => {
+      const date = posDaylogDate();
+      const key = `${terminalCode}:${date}`;
+      const existing = state.daylog.get(key);
+      const entry: DaylogEntry = existing
+        ? { ...existing, tallyCount: existing.tallyCount + 1 }
+        : { terminalCode, date, tallyCount: 1 };
+      state.daylog.set(key, entry);
+      return entry;
+    }),
+    writeDaylogSent: vi.fn(async (terminalCode: string, date: string, sent: DaylogSent) => {
+      const key = `${terminalCode}:${date}`;
+      const existing = state.daylog.get(key);
+      const entry: DaylogEntry = existing
+        ? { ...existing, sent }
+        : { terminalCode, date, tallyCount: 0, sent };
+      state.daylog.set(key, entry);
+      return entry;
+    }),
     getMobilePosLiteBinding: vi.fn(async () => state.binding),
     clearMobilePosLiteBinding: vi.fn(async () => {
       state.binding = null;
@@ -248,6 +285,7 @@ function buildHarness(options: HarnessOptions = {}) {
   h.state.sessions = new Map(options.cachedSession ? [[TERMINAL, options.cachedSession]] : []);
   h.state.frequents = new Map();
   h.state.outbox = [...(options.outbox ?? [])];
+  h.state.daylog = new Map();
 
   setNavigatorOnLine(options.onLine ?? true);
 

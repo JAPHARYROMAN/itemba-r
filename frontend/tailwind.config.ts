@@ -118,6 +118,11 @@ const config: Config = {
         skeleton: 'auroraSkeleton 1.5s ease-in-out infinite',
         'spin-slow': 'spin 2s linear infinite',
         'pulse-subtle': 'auroraPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        // Kaunta MUHURI (design direction §2.4): the stamp slam. `both` keeps
+        // the −3° resting tilt after the slam; the global reduced-motion
+        // kill-switches (media query + html.motion-reduced) collapse the
+        // duration like every other animation here.
+        'pos-stamp': 'posStamp 0.25s cubic-bezier(0.16, 1, 0.3, 1) both',
       },
       keyframes: {
         auroraFadeIn: {
@@ -181,6 +186,10 @@ const config: Config = {
         auroraPulse: {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0.7' },
+        },
+        posStamp: {
+          '0%': { transform: 'scale(1.6) rotate(-6deg)', opacity: '0' },
+          '100%': { transform: 'scale(1) rotate(-3deg)', opacity: '1' },
         },
       },
       transitionTimingFunction: {

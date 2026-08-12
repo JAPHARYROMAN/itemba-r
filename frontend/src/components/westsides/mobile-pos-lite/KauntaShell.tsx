@@ -10,11 +10,16 @@ import {
   type SetStateAction,
 } from 'react';
 import { BookOpen, Check, RotateCw, Settings, ShoppingCart, Truck, WifiOff } from 'lucide-react';
-import type {
-  MobilePosLiteBinding,
-  MobilePosLiteProduct,
-  PendingMobilePosLiteSale,
+import {
+  getDaylogEntry,
+  posDaylogDate,
+  type MobilePosLiteBinding,
+  type MobilePosLiteProduct,
+  type PendingMobilePosLiteSale,
+  type PosDaylogEntry,
+  type PosDaylogSent,
 } from '@/lib/mobile-pos-lite-store';
+import { tick } from './pos-haptics';
 import { type PosLang } from './pos-i18n';
 import { useKauntaRouter, type KauntaRoute } from './pos-router';
 import type {
@@ -29,6 +34,7 @@ import type {
   Supplier,
 } from './pos-types';
 import { money } from './pos-utils';
+import { MuhuriStamp } from './pos-ui';
 import { LeoScreen, LEO_FOLENI_ANCHOR_ID } from './screens/LeoScreen';
 import { MipangilioScreen } from './screens/MipangilioScreen';
 import { PaymentScreen } from './screens/PaymentScreen';
@@ -97,6 +103,7 @@ type KauntaShellProps = {
   // Receipt
   saleResult: SaleResult | null;
   shareReceipt: () => Promise<void>;
+  receiptBusy: boolean;
   // Purchases
   supplier: Supplier | null;
   setSupplier: (supplier: Supplier | null) => void;
@@ -124,13 +131,17 @@ type KauntaShellProps = {
   syncing: boolean;
   syncPendingSales: (current: MobilePosLiteBinding) => Promise<void>;
   removePending: (id: string) => Promise<void>;
+  retryPendingSale: (item: PendingMobilePosLiteSale) => Promise<'sent' | 'rejected' | 'connection'>;
   confirmRemoveId: string | null;
   setConfirmRemoveId: (id: string | null) => void;
+  // Catalog (Mipangilio re-sync row)
+  syncCatalog: (current: MobilePosLiteBinding) => Promise<void>;
 };
 
 export function KauntaShell(props: KauntaShellProps) {
   const {
     session,
+    binding,
     online,
     screen,
     t,
@@ -149,6 +160,9 @@ export function KauntaShell(props: KauntaShellProps) {
     daySummary,
     openMySales,
     pendingCount,
+    syncing,
+    addProduct,
+    setQuantity,
   } = props;
   const purchasesEnabled = Boolean(session.purchasesEnabled);
 
@@ -174,6 +188,17 @@ export function KauntaShell(props: KauntaShellProps) {
 
   const { route, navigate } = useKauntaRouter({ purchasesEnabled, onExit });
 
+  // The Kaunta purchase success moment (design direction §5.2): recordPurchase
+  // has no receipt screen, so the MZIGO UMEPOKELEWA seal slams onto a floating
+  // card over the counter for a beat. Haptic + tally already fired at local
+  // commit inside recordPurchase itself.
+  const [purchaseStamped, setPurchaseStamped] = useState(false);
+  useEffect(() => {
+    if (!purchaseStamped) return;
+    const timer = window.setTimeout(() => setPurchaseStamped(false), 2600);
+    return () => window.clearTimeout(timer);
+  }, [purchaseStamped]);
+
   // Bridge: handler-driven classic screen transitions become route moves.
   const prevScreenRef = useRef(screen);
   useEffect(() => {
@@ -183,9 +208,65 @@ export function KauntaShell(props: KauntaShellProps) {
     // completeSale landed (sent or queued): forward to the receipt. The router
     // REPLACES #malipo, so hardware back can never re-open the payment screen.
     if (screen === 'success') navigate('risiti');
-    // recordPurchase landed: classic goes home; Kaunta's home is the counter.
-    else if (screen === 'home' && prev === 'purchase') navigate('mauzo');
+    // recordPurchase landed: classic goes home; Kaunta's home is the counter,
+    // and this transition only ever means a completed purchase (the shell's
+    // own back paths bypass the classic screen cell) — stamp it.
+    else if (screen === 'home' && prev === 'purchase') {
+      setPurchaseStamped(true);
+      navigate('mauzo');
+    }
   }, [screen, navigate]);
+
+  // The day log behind the slab total and Leo (spec-leo §3/§6): reload today's
+  // entry whenever anything that writes it may have fired — route moves (a
+  // stamp precedes every route change), a fresh day summary (writeDaylogSent),
+  // or an outbox change (queued-sale stamps). Failures render as "no data".
+  const [daylogEntry, setDaylogEntry] = useState<PosDaylogEntry | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getDaylogEntry(binding.terminalCode, posDaylogDate())
+      .then((entry) => {
+        if (!cancelled) setDaylogEntry(entry);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [binding.terminalCode, route, daySummary, pendingCount]);
+  const tallyCount = daylogEntry?.tallyCount ?? 0;
+  // Shared-phone guard (spec-leo §2.5): another rep's cached money is never
+  // shown as this rep's — a guarded snapshot renders like no snapshot at all.
+  const cachedSent: PosDaylogSent | null =
+    daylogEntry?.sent && daylogEntry.sent.repId === session.rep.id ? daylogEntry.sent : null;
+
+  // Re-fetch the day summary when a flush finishes while the book is open, so
+  // "Zimetumwa" moves the moment the queue drains (spec-leo §1 data flow).
+  const prevSyncingRef = useRef(syncing);
+  useEffect(() => {
+    const wasSyncing = prevSyncingRef.current;
+    prevSyncingRef.current = syncing;
+    if (wasSyncing && !syncing && (route === 'leo' || route === 'leo/foleni')) {
+      void openMySalesRef.current();
+    }
+  }, [syncing, route]);
+
+  // Kaunta-only counter haptics (design direction §2.5): tick on add-to-cart
+  // and on quantity commits (the +/− steppers and QuantityInput both land in
+  // setQuantity). Removal (qty 0) is not a tick — nothing was counted.
+  const addProductWithTick = useCallback(
+    (product: MobilePosLiteProduct) => {
+      tick();
+      addProduct(product);
+    },
+    [addProduct],
+  );
+  const setQuantityWithTick = useCallback(
+    (productId: string, next: number) => {
+      if (next > 0) tick();
+      setQuantity(productId, next);
+    },
+    [setQuantity],
+  );
 
   // Route-entry effects: fresh purchase form per Manunuzi entry (mirrors the
   // classic home→purchases path), day fetch per Leo entry, foleni anchoring.
@@ -305,8 +386,10 @@ export function KauntaShell(props: KauntaShellProps) {
           verb: t('newSale'),
           disabled: false,
           inFlight: false,
-          // Day total only when known (live fetch); the daylog cache is Phase 3.
-          amount: daySummary ? daySummary.totalAmount : null,
+          // Day total only when known (spec-leo §6): live fetch, else the
+          // rep-guarded daylog cache — never a fabricated number. Staleness
+          // context renders on the Leo screen, never on the slab.
+          amount: daySummary ? daySummary.totalAmount : (cachedSent?.totalAmount ?? null),
           onPress: () => navigate('mauzo'),
         };
       case 'mipangilio':
@@ -383,6 +466,7 @@ export function KauntaShell(props: KauntaShellProps) {
         saleResult={props.saleResult}
         total={props.total}
         shareReceipt={props.shareReceipt}
+        receiptBusy={props.receiptBusy}
         beginSale={props.beginSale}
         setScreen={backToMauzo}
       />
@@ -425,12 +509,15 @@ export function KauntaShell(props: KauntaShellProps) {
         syncing={props.syncing}
         pendingSales={props.pendingSales}
         pendingCount={props.pendingCount}
+        tallyCount={tallyCount}
+        cachedSent={cachedSent}
         confirmRemoveId={props.confirmRemoveId}
         setConfirmRemoveId={props.setConfirmRemoveId}
         syncPendingSales={props.syncPendingSales}
         removePending={props.removePending}
+        retryPendingSale={props.retryPendingSale}
+        retryDay={() => void openMySalesRef.current()}
         t={t}
-        setScreen={backToMauzo}
       />
     );
   } else if (route === 'mipangilio') {
@@ -438,10 +525,12 @@ export function KauntaShell(props: KauntaShellProps) {
       <MipangilioScreen
         shellClass={SCREEN_PAD}
         session={props.session}
+        binding={props.binding}
         online={props.online}
         lang={props.lang}
         setLang={props.setLang}
         leaveTerminal={props.leaveTerminal}
+        syncCatalog={props.syncCatalog}
         t={t}
       />
     );
@@ -455,9 +544,9 @@ export function KauntaShell(props: KauntaShellProps) {
         setQuery={props.setQuery}
         quickPicks={props.quickPicks}
         matches={props.matches}
-        addProduct={props.addProduct}
+        addProduct={addProductWithTick}
         cart={props.cart}
-        setQuantity={props.setQuantity}
+        setQuantity={setQuantityWithTick}
         cartCount={props.cartCount}
         total={props.total}
         setNotice={props.setNotice}
@@ -471,6 +560,24 @@ export function KauntaShell(props: KauntaShellProps) {
     <div className="pos-shell min-h-screen" style={{ background: 'var(--aurora-bg)' }}>
       {showRail && (
         <KauntaRail route={route} purchasesEnabled={purchasesEnabled} onNavigate={navigate} t={t} />
+      )}
+      <KauntaRibbon online={online} syncing={syncing} railShown={showRail} t={t} />
+      {purchaseStamped && (
+        <div
+          className="pointer-events-none fixed inset-x-0 top-16 z-50 flex justify-center px-4"
+          role="status"
+        >
+          <div
+            className="rounded-xl border px-5 py-4"
+            style={{
+              background: 'var(--aurora-card)',
+              borderColor: 'var(--aurora-border)',
+              boxShadow: 'var(--aurora-shadow-lg)',
+            }}
+          >
+            <MuhuriStamp variant="solid" label={t('stampMzigo')} />
+          </div>
+        </div>
       )}
       {content}
       <KauntaSlab
@@ -491,6 +598,51 @@ export function KauntaShell(props: KauntaShellProps) {
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Status ribbon (direction §5, spec-sales §1.3): rendered only when the world
+ * is non-clean — a calm grey chip offline ("offline is weather", never amber
+ * or red), a brass chip while the outbox is flushing. Offline wins when both
+ * hold (nothing can be flushing without a network anyway).
+ */
+function KauntaRibbon({
+  online,
+  syncing,
+  railShown,
+  t,
+}: {
+  online: boolean;
+  syncing: boolean;
+  railShown: boolean;
+  t: PosTranslate;
+}) {
+  if (online && !syncing) return null;
+  return (
+    <div
+      className={`sticky ${railShown ? 'top-11' : 'top-0'} z-30 flex justify-center px-3 py-1.5`}
+      role="status"
+      style={{ background: 'var(--aurora-bg)' }}
+    >
+      {!online ? (
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold"
+          style={{ background: 'var(--aurora-bg-subtle)', color: 'var(--aurora-text-secondary)' }}
+        >
+          <WifiOff size={13} aria-hidden="true" />
+          {t('ribbonOffline')}
+        </span>
+      ) : (
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold"
+          style={{ background: 'var(--aurora-accent-subtle)', color: 'var(--aurora-accent-text)' }}
+        >
+          <RotateCw size={13} className="animate-spin" aria-hidden="true" />
+          {t('ribbonSending')}
+        </span>
+      )}
+    </div>
+  );
+}
 
 /** Top module rail (direction §3): 44px, duotone icon chip + one Swahili word. */
 function KauntaRail({

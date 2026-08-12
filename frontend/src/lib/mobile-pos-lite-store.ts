@@ -54,23 +54,37 @@ export type MobilePosLiteCachedSession = {
 
 const DB_NAME = 'itemba-mobile-pos-lite';
 /**
- * CURRENT schema level for this code. v4 — which adds the planned `stocks`,
- * `drafts`, and `daylog` stores — lands in a later phase as ONE migration for
- * that release (one-migration rule: each release bumps the version at most
- * once and only ADDS stores/indexes, never renames or removes them, so any
- * older cached shell still finds every store it knows about in a newer
- * database).
+ * CURRENT schema level for this code. v4 is the ONE migration for the Kaunta
+ * reform (design-direction §12.3): it creates `stocks`, `drafts` and `daylog`
+ * together. `daylog` is used from Phase 3 (Leo day book); `stocks` and
+ * `drafts` stay empty until Phases 4–5 — pre-created empty stores are
+ * harmless, and the one-migration rule holds (each release bumps the version
+ * at most once and only ADDS stores/indexes, never renames or removes them,
+ * so any older cached shell still finds every store it knows about in a
+ * newer database).
  */
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const BINDINGS = 'bindings';
 const CATALOGS = 'catalogs';
 const OUTBOX = 'outbox';
 const SESSIONS = 'sessions';
 const FREQUENTS = 'frequents';
+const STOCKS = 'stocks';
+const DRAFTS = 'drafts';
+const DAYLOG = 'daylog';
 const ACTIVE_BINDING = 'active';
 
 /** Object stores this code level requires before it can serve any request. */
-const REQUIRED_STORES = [BINDINGS, CATALOGS, OUTBOX, SESSIONS, FREQUENTS] as const;
+const REQUIRED_STORES = [
+  BINDINGS,
+  CATALOGS,
+  OUTBOX,
+  SESSIONS,
+  FREQUENTS,
+  STOCKS,
+  DRAFTS,
+  DAYLOG,
+] as const;
 
 /** Minimal structural view of DOMStringList so the check is unit-testable. */
 type StoreNameList = { contains(name: string): boolean };
@@ -97,6 +111,11 @@ function applySchema(database: IDBDatabase) {
   }
   if (!database.objectStoreNames.contains(SESSIONS)) database.createObjectStore(SESSIONS);
   if (!database.objectStoreNames.contains(FREQUENTS)) database.createObjectStore(FREQUENTS);
+  // v4 (the single Kaunta migration): stocks/drafts land unused until
+  // Phases 4–5; daylog backs the Leo day book from Phase 3.
+  if (!database.objectStoreNames.contains(STOCKS)) database.createObjectStore(STOCKS);
+  if (!database.objectStoreNames.contains(DRAFTS)) database.createObjectStore(DRAFTS);
+  if (!database.objectStoreNames.contains(DAYLOG)) database.createObjectStore(DAYLOG);
 }
 
 /** Wrap an open request, wiring the handlers that keep upgrades from hanging. */
@@ -330,4 +349,110 @@ export async function updatePendingMobilePosLiteSaleError(id: string, lastError:
   );
   if (!existing) return;
   await transaction(OUTBOX, 'readwrite', (store) => store.put({ ...existing, lastError }));
+}
+
+/* ─── Daylog (spec-leo §3): the persisted day log behind the Leo day book ─── */
+
+/** Last successful `my-sales-today` snapshot — server truth, never client math. */
+export type PosDaylogSent = {
+  /** Shared-phone guard (spec-leo §2.5): another rep's total is never shown. */
+  repId: string;
+  count: number;
+  totalAmount: number;
+  /** Epoch ms — the staleness stamp ("mwisho kuonekana {time}"). */
+  fetchedAt: number;
+};
+
+export type PosDaylogEntry = {
+  terminalCode: string;
+  /** Device-local YYYY-MM-DD (single-timezone EAT fleet — spec-leo §7.3). */
+  date: string;
+  /** Finished jobs stamped on THIS phone this day — accrues on local commit. */
+  tallyCount: number;
+  /** Absent until the first successful my-sales-today fetch of the day. */
+  sent?: PosDaylogSent;
+};
+
+/** Device-local calendar date as YYYY-MM-DD — the daylog's day key. */
+export function posDaylogDate(now: Date = new Date()): string {
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function daylogKey(terminalCode: string, date: string) {
+  return `${terminalCode}:${date}`;
+}
+
+/**
+ * Retention (spec-leo §3): every tally write prunes this terminal's rows older
+ * than seven days — the daylog is a glance cache, never a shadow ledger.
+ */
+const DAYLOG_RETENTION_DAYS = 7;
+
+async function pruneDaylog(terminalCode: string) {
+  const cutoff = daylogKey(
+    terminalCode,
+    posDaylogDate(new Date(Date.now() - DAYLOG_RETENTION_DAYS * 24 * 60 * 60 * 1000)),
+  );
+  const keys = await transaction<IDBValidKey[]>(DAYLOG, 'readonly', (store) => store.getAllKeys());
+  // Keys are `${terminalCode}:YYYY-MM-DD`, so a plain string compare inside
+  // one terminal's prefix IS a date compare. Other terminals' rows are left
+  // alone (they age out through their own writes).
+  const stale = keys.filter(
+    (key): key is string =>
+      typeof key === 'string' && key.startsWith(`${terminalCode}:`) && key < cutoff,
+  );
+  for (const key of stale) {
+    await transaction(DAYLOG, 'readwrite', (store) => store.delete(key));
+  }
+}
+
+export async function getDaylogEntry(
+  terminalCode: string,
+  date: string,
+): Promise<PosDaylogEntry | null> {
+  return (
+    (await transaction<PosDaylogEntry | undefined>(DAYLOG, 'readonly', (store) =>
+      store.get(daylogKey(terminalCode, date)),
+    )) ?? null
+  );
+}
+
+/**
+ * One stamp, one mark (design-direction §5): fired at the MUHURI local-commit
+ * moment — sale sent AND sale queued AND purchase. Failures must never block
+ * a sale: callers fire-and-forget with `.catch(() => undefined)`.
+ */
+export async function bumpDaylogTally(terminalCode: string): Promise<PosDaylogEntry> {
+  const date = posDaylogDate();
+  const existing = await getDaylogEntry(terminalCode, date);
+  const entry: PosDaylogEntry = existing
+    ? { ...existing, tallyCount: existing.tallyCount + 1 }
+    : { terminalCode, date, tallyCount: 1 };
+  await transaction(DAYLOG, 'readwrite', (store) =>
+    store.put(entry, daylogKey(terminalCode, date)),
+  );
+  await pruneDaylog(terminalCode);
+  return entry;
+}
+
+/**
+ * Upsert the day's `sent` snapshot. Fired ONLY from a successful
+ * `my-sales-today` fetch handler — totals are server-authoritative and a
+ * client-summed total would drift from server pricing (spec-leo §3).
+ */
+export async function writeDaylogSent(
+  terminalCode: string,
+  date: string,
+  sent: PosDaylogSent,
+): Promise<PosDaylogEntry> {
+  const existing = await getDaylogEntry(terminalCode, date);
+  const entry: PosDaylogEntry = existing
+    ? { ...existing, sent }
+    : { terminalCode, date, tallyCount: 0, sent };
+  await transaction(DAYLOG, 'readwrite', (store) =>
+    store.put(entry, daylogKey(terminalCode, date)),
+  );
+  return entry;
 }

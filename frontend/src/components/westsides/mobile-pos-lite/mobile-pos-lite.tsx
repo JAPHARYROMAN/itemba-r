@@ -6,10 +6,14 @@ import { RotateCw } from 'lucide-react';
 import { showToast } from '@/components/ui';
 import { backendGet, backendPost } from '@/lib/api-client';
 import {
+  bumpDaylogTally,
   bumpMobilePosLiteFrequents,
   clearMobilePosLiteBinding,
   enqueueMobilePosLiteSale,
+  posDaylogDate,
   removePendingMobilePosLiteSale,
+  updatePendingMobilePosLiteSaleError,
+  writeDaylogSent,
   type MobilePosLiteProduct,
   type PendingMobilePosLiteSale,
 } from '@/lib/mobile-pos-lite-store';
@@ -18,7 +22,9 @@ import { KauntaShell } from './KauntaShell';
 import { usePosBootstrap } from './hooks/use-pos-bootstrap';
 import { usePosCart } from './hooks/use-pos-cart';
 import { usePosOutbox } from './hooks/use-pos-outbox';
+import { reject, stampHeld, stampSent } from './pos-haptics';
 import { usePosLang } from './pos-i18n';
+import { sharePdfReceipt } from './pos-receipt';
 import type {
   Customer,
   DaySummary,
@@ -49,6 +55,7 @@ export function MobilePosLite() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
+  const [receiptBusy, setReceiptBusy] = useState(false);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   // Owned here, not by a hook: the bootstrap boot effect writes these three
   // cells (initial frequents, session-default payment method, boot errors)
@@ -95,8 +102,12 @@ export function MobilePosLite() {
 
   const pendingCount = pendingSales.length;
 
+  // Customer live-search for every payment method (owner request, 2026-08-12):
+  // CREDIT still requires a pick at completion; CASH/MOBILE_MONEY attach one
+  // optionally so the sale lands on the customer's account instead of the
+  // terminal's walk-in customer.
   useEffect(() => {
-    if (!binding || !online || paymentMethod !== 'CREDIT' || customerQuery.trim().length < 2) {
+    if (!binding || !online || customerQuery.trim().length < 2) {
       setCustomers([]);
       return;
     }
@@ -113,7 +124,7 @@ export function MobilePosLite() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [binding, customerQuery, online, paymentMethod]);
+  }, [binding, customerQuery, online]);
 
   const selectedPayment = session?.paymentMethods.find((method) => method.code === paymentMethod);
 
@@ -164,6 +175,13 @@ export function MobilePosLite() {
         headers: terminalHeaders(binding),
       });
       setSaleResult(result);
+      // Kaunta MUHURI local commit (design direction §5): stamp haptic + one
+      // tally mark. Still inside the slab tap's user-gesture continuation, so
+      // vibrate is permitted; the daylog write must never block the sale.
+      if (kauntaEnabled) {
+        stampSent();
+        void bumpDaylogTally(binding.terminalCode).catch(() => undefined);
+      }
       setScreen('success');
     } catch (error) {
       const canQueue =
@@ -190,6 +208,12 @@ export function MobilePosLite() {
       await refreshPendingSales(binding);
       setSaleResult({ id: pending.id, totalAmount: total });
       setNotice(t('savedOffline'));
+      // The queued sale is a finished job too: distinct held haptic, same
+      // tally mark (the documented decision — the tally counts ALL stamps).
+      if (kauntaEnabled) {
+        stampHeld();
+        void bumpDaylogTally(binding.terminalCode).catch(() => undefined);
+      }
       setScreen('success');
     } finally {
       setBusy(false);
@@ -294,7 +318,15 @@ export function MobilePosLite() {
         },
         { headers: terminalHeaders(binding) },
       );
-      showToast('success', t('purchaseComplete'), t('purchaseStockNote'));
+      // Kaunta gets the MUHURI (MZIGO UMEPOKELEWA overlay in the shell) with
+      // the sent haptic + tally mark instead of the classic toast — one
+      // completion ritual, not two.
+      if (kauntaEnabled) {
+        stampSent();
+        void bumpDaylogTally(binding.terminalCode).catch(() => undefined);
+      } else {
+        showToast('success', t('purchaseComplete'), t('purchaseStockNote'));
+      }
       if (binding) void syncCatalog(binding).catch(() => undefined);
       setScreen('home');
     } catch (error) {
@@ -317,6 +349,17 @@ export function MobilePosLite() {
         headers: terminalHeaders(binding),
       });
       setDaySummary(summary);
+      // Kaunta day log (spec-leo §3): EVERY successful my-sales-today fetch
+      // snapshots the server truth so Leo can render the day total offline.
+      // repId is the shared-phone guard; failure never surfaces to the rep.
+      if (kauntaEnabled && session) {
+        void writeDaylogSent(binding.terminalCode, posDaylogDate(), {
+          repId: session.rep.id,
+          count: summary.count,
+          totalAmount: summary.totalAmount,
+          fetchedAt: Date.now(),
+        }).catch(() => undefined);
+      }
     } catch {
       setDaySummary(null);
     } finally {
@@ -325,12 +368,59 @@ export function MobilePosLite() {
   }
 
   /**
-   * Plain-text receipt shared via the phone's own share sheet (WhatsApp/SMS is
-   * how TZ customers expect proof of purchase) — clipboard fallback elsewhere.
-   * The cart is still populated on the success screen; it clears on New Sale.
+   * Retry ONE rejected sale from the ritual sheet (spec-sales §5.3): re-post
+   * the frozen payload verbatim (same idempotency key — a server that already
+   * has it replays, never double-posts). Kaunta-shell-only caller; classic
+   * queue semantics are untouched.
+   */
+  async function retryPendingSale(
+    item: PendingMobilePosLiteSale,
+  ): Promise<'sent' | 'rejected' | 'connection'> {
+    if (!binding) return 'connection';
+    try {
+      await backendPost('/mobile-pos-lite/sales', item.payload, {
+        headers: terminalHeaders(binding),
+      });
+    } catch (error) {
+      // Connection-shaped failure: the network died, not the sale — leave the
+      // row exactly as it was; the normal sync loop owns it from here.
+      if (isConnectionProblem(error)) return 'connection';
+      await updatePendingMobilePosLiteSaleError(
+        item.id,
+        error instanceof Error ? error.message : t('couldNotComplete'),
+      );
+      await refreshPendingSales(binding);
+      // Rejected again: the reject haptic — still inside the ritual button's
+      // user-gesture continuation.
+      reject();
+      return 'rejected';
+    }
+    await removePendingMobilePosLiteSale(item.id);
+    await refreshPendingSales(binding);
+    return 'sent';
+  }
+
+  /**
+   * Receipt sharing, PDF-first: server-confirmed sales fetch the letterhead
+   * PDF and hand it to the phone's share sheet (download where files can't be
+   * shared). Held/offline sales — and any PDF failure — fall back to the
+   * plain-text share below (WhatsApp/SMS is how TZ customers expect proof of
+   * purchase; clipboard fallback elsewhere). The cart is still populated on
+   * the success screen; it clears on New Sale.
    */
   async function shareReceipt() {
-    if (!session) return;
+    if (!session || receiptBusy) return;
+    if (binding && online && saleResult?.id) {
+      setReceiptBusy(true);
+      // A connection or share-sheet failure resolves null — the plain-text
+      // share below still delivers a receipt, so nothing is surfaced here.
+      const delivered = await sharePdfReceipt(binding, saleResult).catch(() => null);
+      setReceiptBusy(false);
+      if (delivered === 'downloaded') {
+        showToast('success', t('shareReceipt'), t('receiptDownloaded'));
+      }
+      if (delivered) return;
+    }
     const text = [
       session.company.name,
       session.branch.name,
@@ -452,6 +542,7 @@ export function MobilePosLite() {
         completeSale={completeSale}
         saleResult={saleResult}
         shareReceipt={shareReceipt}
+        receiptBusy={receiptBusy}
         supplier={supplier}
         setSupplier={setSupplier}
         supplierQuery={supplierQuery}
@@ -476,8 +567,10 @@ export function MobilePosLite() {
         syncing={syncing}
         syncPendingSales={syncPendingSales}
         removePending={removePending}
+        retryPendingSale={retryPendingSale}
         confirmRemoveId={confirmRemoveId}
         setConfirmRemoveId={setConfirmRemoveId}
+        syncCatalog={syncCatalog}
       />
     );
   }
@@ -578,6 +671,7 @@ export function MobilePosLite() {
         saleResult={saleResult}
         total={total}
         shareReceipt={shareReceipt}
+        receiptBusy={receiptBusy}
         beginSale={beginSale}
         setScreen={setScreen}
       />

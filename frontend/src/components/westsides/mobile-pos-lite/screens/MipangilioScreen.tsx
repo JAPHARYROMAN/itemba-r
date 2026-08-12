@@ -1,36 +1,69 @@
 'use client';
 
-import { LogOut } from 'lucide-react';
+import { useState } from 'react';
+import { LogOut, RotateCw } from 'lucide-react';
+import { showToast } from '@/components/ui';
+import type { MobilePosLiteBinding } from '@/lib/mobile-pos-lite-store';
+import { isHapticsEnabled, setHapticsEnabled, tick } from '../pos-haptics';
 import { type PosLang } from '../pos-i18n';
 import type { PosTranslate, Session } from '../pos-types';
 
 /**
- * Mipangilio — Kaunta settings, minimal v1 (spec-leo §5, Phase 2b subset):
- * the identity card (who am I — restores what the deleted home header showed),
- * the language toggle, an app-version row, and logout via the existing
- * `leaveTerminal`. The haptics toggle, catalog re-sync row and logout confirm
- * sheet arrive with Phase 3; the theme row is deliberately absent until the
- * Phase-5 Usiku toggle (a settings row that does nothing teaches that settings
- * do nothing). Logout is disabled offline — login needs a network anyway, and
- * a half-logged-out shared phone offline is worse than a handed-over phone.
+ * Mipangilio — Kaunta settings (spec-leo §5): the identity card (who am I —
+ * restores what the deleted home header showed), the language toggle, the
+ * haptics toggle (persisted `itemba-pos-haptics`, default on), the catalog
+ * re-sync row (offline-disabled, success toast), an app-version row, and
+ * logout via the existing `leaveTerminal`. The theme row is deliberately
+ * absent until the Phase-5 Usiku toggle (a settings row that does nothing
+ * teaches that settings do nothing). Logout is disabled offline — login needs
+ * a network anyway, and a half-logged-out shared phone offline is worse than
+ * a handed-over phone.
  */
 export function MipangilioScreen({
   shellClass,
   session,
+  binding,
   online,
   lang,
   setLang,
   leaveTerminal,
+  syncCatalog,
   t,
 }: {
   shellClass: string;
   session: Session;
+  binding: MobilePosLiteBinding;
   online: boolean;
   lang: PosLang;
   setLang: (lang: PosLang) => void;
   leaveTerminal: () => Promise<void>;
+  syncCatalog: (current: MobilePosLiteBinding) => Promise<void>;
   t: PosTranslate;
 }) {
+  const [haptics, setHaptics] = useState(isHapticsEnabled);
+  const [resyncing, setResyncing] = useState(false);
+
+  function toggleHaptics() {
+    const next = !haptics;
+    setHapticsEnabled(next);
+    setHaptics(next);
+    // A demo buzz when switching ON — we are inside the tap's gesture stack.
+    if (next) tick();
+  }
+
+  async function resyncCatalog() {
+    if (resyncing) return;
+    setResyncing(true);
+    try {
+      await syncCatalog(binding);
+      showToast('success', t('settingsResync'), t('settingsResyncDone'));
+    } catch {
+      showToast('error', t('settingsResync'), t('couldNotComplete'));
+    } finally {
+      setResyncing(false);
+    }
+  }
+
   const identityRows: Array<{ label: string; value: string }> = [
     { label: t('settingsRep'), value: session.rep.name },
     {
@@ -105,6 +138,69 @@ export function MipangilioScreen({
               </button>
             ))}
           </div>
+        </section>
+        <section
+          className="mt-3 rounded-lg border px-4 py-3"
+          style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
+        >
+          <div className="flex min-h-11 items-center justify-between gap-3">
+            <span
+              className="text-sm font-semibold"
+              style={{ color: 'var(--aurora-text-secondary)' }}
+            >
+              {t('settingsHaptics')}
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={haptics}
+              aria-label={t('settingsHaptics')}
+              onClick={toggleHaptics}
+              className="relative h-7 w-12 flex-shrink-0 rounded-full transition-colors"
+              style={{
+                background: haptics ? 'var(--aurora-primary)' : 'var(--aurora-bg-subtle)',
+                boxShadow: haptics ? undefined : 'inset 0 0 0 1px var(--aurora-border)',
+              }}
+            >
+              <span
+                aria-hidden="true"
+                className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${haptics ? 'left-6' : 'left-1'}`}
+                style={{ boxShadow: 'var(--aurora-shadow)' }}
+              />
+            </button>
+          </div>
+          <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+            {t('settingsHapticsNote')}
+          </p>
+        </section>
+        <section
+          className="mt-3 rounded-lg border px-4 py-3"
+          style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
+        >
+          <button
+            type="button"
+            onClick={() => void resyncCatalog()}
+            disabled={!online || resyncing}
+            className="inline-flex min-h-11 w-full items-center justify-between gap-3 text-left disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span
+              className="text-sm font-semibold"
+              style={{ color: 'var(--aurora-text-secondary)' }}
+            >
+              {t('settingsResync')}
+            </span>
+            <RotateCw
+              size={17}
+              className={resyncing ? 'animate-spin' : ''}
+              style={{ color: 'var(--aurora-primary)' }}
+              aria-hidden="true"
+            />
+          </button>
+          {!online && (
+            <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              {t('needsNetwork')}
+            </p>
+          )}
         </section>
         <section
           className="mt-3 flex min-h-14 items-center justify-between gap-3 rounded-lg border px-4"

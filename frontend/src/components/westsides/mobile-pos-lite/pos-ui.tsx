@@ -55,6 +55,44 @@ export function QuantityInput({
   );
 }
 
+/**
+ * The MUHURI stamp (design direction §5.2) — the brass seal that slams onto a
+ * finished job's summary card. Kaunta-shell-only surface; classic screens
+ * never render it. Variants:
+ * - `solid`  — arrived at the office (IMELIPWA / MZIGO UMEPOKELEWA)
+ * - `hollow` — held on this phone (IMEHIFADHIWA), custody not warning
+ *
+ * The slam motion (`animate-pos-stamp`) and the one `--aurora-glow-accent`
+ * bloom are decorative — both die under the global reduced-motion
+ * kill-switches — while the label is real text for screen readers. Haptics
+ * are the caller's job (they must fire at local commit inside the user
+ * gesture, not at render).
+ */
+export function MuhuriStamp({ variant, label }: { variant: 'solid' | 'hollow'; label: string }) {
+  return (
+    <span
+      className="animate-pos-stamp inline-flex max-w-full items-center justify-center rounded-lg border-2 px-4 py-2 text-xl font-extrabold uppercase tracking-widest"
+      style={
+        variant === 'solid'
+          ? {
+              background: 'var(--aurora-accent)',
+              borderColor: 'var(--aurora-accent)',
+              color: 'var(--aurora-accent-subtle)',
+              boxShadow: 'var(--aurora-glow-accent)',
+            }
+          : {
+              background: 'transparent',
+              borderColor: 'var(--aurora-accent)',
+              color: 'var(--aurora-accent-text)',
+              boxShadow: 'var(--aurora-glow-accent)',
+            }
+      }
+    >
+      {label}
+    </span>
+  );
+}
+
 export function MobilePosHeader({
   session,
   online,

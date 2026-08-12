@@ -126,10 +126,14 @@ export function PaymentScreen({
             );
           })}
         </div>
-        {paymentMethod === 'CREDIT' && (
+        {/* Customer attaches to every method (owner request, 2026-08-12):
+            mandatory for CREDIT, optional elsewhere so the sale can land on a
+            known account. The search needs the network, so offline non-CREDIT
+            hides the section — offline CASH stays the fast custody path. */}
+        {(paymentMethod === 'CREDIT' || online) && (
           <div className="mt-6">
             <label className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
-              {t('customer')}
+              {paymentMethod === 'CREDIT' ? t('customer') : t('customerOptional')}
             </label>
             {customer ? (
               <button
@@ -161,7 +165,7 @@ export function PaymentScreen({
                     onChange={(event) => setCustomerQuery(event.target.value)}
                     className="aurora-input min-h-14 w-full rounded-lg py-3 pl-11 pr-4 text-base"
                     placeholder={t('customerSearchPlaceholder')}
-                    autoFocus
+                    autoFocus={paymentMethod === 'CREDIT'}
                   />
                 </div>
                 {customerQuery.trim().length > 0 && customerQuery.trim().length < 2 && (
