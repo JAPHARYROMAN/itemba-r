@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { RotateCw } from 'lucide-react';
 import { showToast } from '@/components/ui';
@@ -22,6 +22,7 @@ import { KauntaShell } from './KauntaShell';
 import { usePosBootstrap } from './hooks/use-pos-bootstrap';
 import { usePosCart } from './hooks/use-pos-cart';
 import { usePosOutbox } from './hooks/use-pos-outbox';
+import { posPurchaseFailureMessage, posSaleFailureMessage } from './pos-errors';
 import { reject, stampHeld, stampSent } from './pos-haptics';
 import { usePosLang } from './pos-i18n';
 import { sharePdfReceipt } from './pos-receipt';
@@ -189,7 +190,26 @@ export function MobilePosLite() {
         session.terminal.offlineCashEnabled &&
         isConnectionProblem(error);
       if (!canQueue) {
-        setNotice(error instanceof Error ? error.message : t('couldNotComplete'));
+        // Kaunta only, and the same opt-in shape `recordPurchase` uses below:
+        // the ONE place a failed KAMILISHA MAUZO becomes words, classified once
+        // here because the screen sees a string and cannot tell a status from
+        // it. Before this the raw sentence went straight into the notice cell,
+        // and PaymentScreen prints that cell verbatim in a red danger box — so
+        // the module's highest-volume refusals ("Credit sale exceeds Asha
+        // Duka's credit limit…", "Insufficient stock at branch/location…")
+        // reached a Swahili-first rep in English, while the identical sentences
+        // arriving through the outbox were mapped two screens away.
+        //
+        // WORDING ONLY: the cart, the customer and the screen are untouched,
+        // exactly as before. Classic (uiVersion 1) keeps the raw message, so
+        // the fleet running today is byte-identical.
+        setNotice(
+          kauntaEnabled
+            ? posSaleFailureMessage(error, t)
+            : error instanceof Error
+              ? error.message
+              : t('couldNotComplete'),
+        );
         return;
       }
       const pending: PendingMobilePosLiteSale = {
@@ -293,9 +313,44 @@ export function MobilePosLite() {
     setScreen('purchase');
   }
 
-  async function recordPurchase() {
+  /**
+   * The exact sentence the last POKEA failure put in the shared notice cell.
+   * Only `recordPurchase` writes it, and only the effect below reads it, so
+   * clearing is always about a purchase and can never wipe a sale's notice —
+   * `notice` is one cell shared with Malipo, and Kaunta can sit on Mauzo with
+   * `screen` still reading 'purchase', which makes a screen-shaped guard wrong.
+   */
+  const purchaseNoticeRef = useRef('');
+  const purchaseFormEmpty = purchaseCart.length === 0 && supplier === null;
+  // Kaunta only: a purchase rejection describes THE SLIP that was refused, and
+  // emptying the form is the discard ritual (§3.1 as amended by critique D3) —
+  // the slip goes and its frozen key with it. The card that named the refused
+  // delivery must go at the same moment: "Mzigo huu ulishapokelewa…" standing
+  // over the supplier picker and the first line of the NEXT lorry is a
+  // statement about a slip that no longer exists, and the manager has no way
+  // to tell whether it is about the delivery she is typing now.
+  useEffect(() => {
+    if (!kauntaEnabled || !purchaseFormEmpty) return;
+    const refusal = purchaseNoticeRef.current;
+    if (!refusal) return;
+    purchaseNoticeRef.current = '';
+    // Only ever retracts its own sentence: anything else in the cell belongs to
+    // another screen and is left exactly where it is.
+    setNotice((current) => (current === refusal ? '' : current));
+  }, [kauntaEnabled, purchaseFormEmpty]);
+
+  /**
+   * @param idempotencyKey the kikaratasi's FROZEN key (Kaunta only): a retry
+   * after a lost response must reuse it so the server resumes its
+   * `[MPL-PURCHASE:<key>]` chain instead of receiving the delivery twice.
+   * Classic passes nothing and mints one per attempt, exactly as before.
+   */
+  async function recordPurchase(idempotencyKey?: string) {
     if (!binding || purchaseCart.length === 0 || busy) return;
     if (!supplier) {
+      // Tracked like a rejection because it ages the same way: it describes the
+      // lines on screen, so it must not outlive them.
+      purchaseNoticeRef.current = t('selectSupplierFirst');
       setNotice(t('selectSupplierFirst'));
       return;
     }
@@ -306,7 +361,7 @@ export function MobilePosLite() {
         '/mobile-pos-lite/purchases',
         {
           supplierId: supplier.id,
-          idempotencyKey: newIdempotencyKey(),
+          idempotencyKey: idempotencyKey ?? newIdempotencyKey(),
           lines: purchaseCart.map((line) => {
             const cost = Number(line.unitCost.replace(/\D/g, ''));
             return {
@@ -330,7 +385,33 @@ export function MobilePosLite() {
       if (binding) void syncCatalog(binding).catch(() => undefined);
       setScreen('home');
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : t('couldNotComplete'));
+      // Kaunta only (§3.1 "Error handling"): the ONE place a POKEA failure
+      // becomes words. `posPurchaseFailureMessage` answers all three cases —
+      // the server's own sentence in Swahili where there is a row, the
+      // wait-and-retry copy where nothing actually refused the attempt (a lost
+      // response, a proxy 502, an unreadable shape), and "mwite msimamizi" for
+      // a real refusal this phone cannot act on.
+      //
+      // It replaces an `isConnectionProblem` branch that recognised only
+      // `!navigator.onLine` and fetch TypeErrors, and fell through to
+      // `error.message` for everything else — so a gateway 502 and both
+      // purchase chain conflicts arrived at a Swahili-speaking manager as
+      // English, in a red danger box, over a delivery the branch may already
+      // have received. Classifying HERE rather than on the screen is what makes
+      // that closable: the screen sees a string and cannot tell a status from
+      // it, and a screen-side "map or fall back" would flatten Pokea's own
+      // Swahili (`selectSupplierFirst`, `slipSaveFailed`) along with it.
+      //
+      // WORDING ONLY. Every failure leaves this function the same way it always
+      // did: the form stands, the slip and its frozen key are untouched, and
+      // nothing navigates. Classic (uiVersion 1) keeps the raw message.
+      const message = kauntaEnabled
+        ? posPurchaseFailureMessage(error, t)
+        : error instanceof Error
+          ? error.message
+          : t('couldNotComplete');
+      purchaseNoticeRef.current = message;
+      setNotice(message);
     } finally {
       setBusy(false);
     }

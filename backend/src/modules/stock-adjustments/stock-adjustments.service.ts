@@ -376,157 +376,171 @@ export class StockAdjustmentsService {
     // mid-loop failure rolls back every balance change, and atomically claim the document
     // (guarded on status === APPROVED) up front so concurrent/retried posts cannot
     // double-apply the variances.
-    const record = await this.prisma.$transaction(async (tx) => {
-      const claimed = await tx.stockAdjustment.updateMany({
-        where: { id, status: 'APPROVED' },
-        data: { status: 'POSTED', postedById: userId, postedAt: new Date() },
-      });
-      if (claimed.count === 0) {
-        throw new BadRequestException('Only APPROVED adjustments can be posted');
-      }
+    //
+    // The explicit timeout is load-bearing, not decoration. Every non-zero
+    // variance line costs roughly ten round-trips in here (two balance value
+    // reads, createMovement's scope/reference/cost checks, a code-sequence hit,
+    // the movement insert, the balance upsert and its FOR UPDATE re-read), and
+    // a physical stock count — desktop or from the Mobile POS Lite Hesabu
+    // screen — is hundreds of lines. Prisma's 5s interactive-transaction
+    // default would abort those with P2028 partway through: correct (it rolls
+    // back), but it makes a real closing count impossible to post and leaves
+    // the adjustment sitting at APPROVED for a human to puzzle over. 60s
+    // matches the ceiling the payroll posting transactions use.
+    const record = await this.prisma.$transaction(
+      async (tx) => {
+        const claimed = await tx.stockAdjustment.updateMany({
+          where: { id, status: 'APPROVED' },
+          data: { status: 'POSTED', postedById: userId, postedAt: new Date() },
+        });
+        if (claimed.count === 0) {
+          throw new BadRequestException('Only APPROVED adjustments can be posted');
+        }
 
-      // Inbound adjustments (count-ups) create a stock movement that must carry a
-      // unit cost > 0 for stock products (assertInventoryMovementHasCost). Adjustment
-      // lines hold no cost of their own (physical counts), so value the added units
-      // at the product's current weighted-average cost when it already holds valued
-      // stock, otherwise at the product (then family) default purchase cost.
-      const inboundProductIds = [
-        ...new Set(
-          existing.lines
-            .filter((line) => Number(line.varianceQuantity) > 0)
-            .map((line) => line.productId),
-        ),
-      ];
-      const costProducts = inboundProductIds.length
-        ? await tx.product.findMany({
-            where: {
-              id: { in: inboundProductIds },
-              companyId: existing.companyId,
-              deletedAt: null,
-            },
-            select: {
-              id: true,
-              name: true,
-              defaultPurchasePrice: true,
-              productFamily: { select: { defaultPurchasePrice: true } },
-            },
-          })
-        : [];
-      const costProductById = new Map(costProducts.map((product) => [product.id, product]));
-      const balanceRows = inboundProductIds.length
-        ? await tx.inventoryBalance.findMany({
-            where: {
-              companyId: existing.companyId,
-              branchId: existing.branchId,
-              productId: { in: inboundProductIds },
-            },
-            select: { productId: true, averageCost: true },
-          })
-        : [];
-      const avgCostByProduct = new Map(
-        balanceRows.map((row) => [row.productId, Number(row.averageCost)]),
-      );
+        // Inbound adjustments (count-ups) create a stock movement that must carry a
+        // unit cost > 0 for stock products (assertInventoryMovementHasCost). Adjustment
+        // lines hold no cost of their own (physical counts), so value the added units
+        // at the product's current weighted-average cost when it already holds valued
+        // stock, otherwise at the product (then family) default purchase cost.
+        const inboundProductIds = [
+          ...new Set(
+            existing.lines
+              .filter((line) => Number(line.varianceQuantity) > 0)
+              .map((line) => line.productId),
+          ),
+        ];
+        const costProducts = inboundProductIds.length
+          ? await tx.product.findMany({
+              where: {
+                id: { in: inboundProductIds },
+                companyId: existing.companyId,
+                deletedAt: null,
+              },
+              select: {
+                id: true,
+                name: true,
+                defaultPurchasePrice: true,
+                productFamily: { select: { defaultPurchasePrice: true } },
+              },
+            })
+          : [];
+        const costProductById = new Map(costProducts.map((product) => [product.id, product]));
+        const balanceRows = inboundProductIds.length
+          ? await tx.inventoryBalance.findMany({
+              where: {
+                companyId: existing.companyId,
+                branchId: existing.branchId,
+                productId: { in: inboundProductIds },
+              },
+              select: { productId: true, averageCost: true },
+            })
+          : [];
+        const avgCostByProduct = new Map(
+          balanceRows.map((row) => [row.productId, Number(row.averageCost)]),
+        );
 
-      // ITMB (GL audit fix): a stock adjustment relieves/adds inventory subledger
-      // VALUE via applyMovementToBalance but must post the matching GL swing in
-      // the SAME transaction so the GL Inventory Asset stays reconciled to the
-      // subledger and the shrinkage loss / count-up gain hits P&L. We measure the
-      // EXACT value change by reading inventoryBalance.totalValue immediately
-      // before and after each movement (the movement math floors relieved value
-      // at zero and forces value to zero when qty hits zero, so qty*avgCost is not
-      // always the true delta). The net of those deltas becomes the Inventory
-      // Asset GL leg; the offset goes to the inventory-adjustment variance
-      // account (Dr on a net loss / count-down, Cr on a net gain / count-up).
-      const postingBranchId = branchId; // asserted non-null before the tx
-      let inventoryValueDelta = new Prisma.Decimal(0); // >0 = inventory grew
+        // ITMB (GL audit fix): a stock adjustment relieves/adds inventory subledger
+        // VALUE via applyMovementToBalance but must post the matching GL swing in
+        // the SAME transaction so the GL Inventory Asset stays reconciled to the
+        // subledger and the shrinkage loss / count-up gain hits P&L. We measure the
+        // EXACT value change by reading inventoryBalance.totalValue immediately
+        // before and after each movement (the movement math floors relieved value
+        // at zero and forces value to zero when qty hits zero, so qty*avgCost is not
+        // always the true delta). The net of those deltas becomes the Inventory
+        // Asset GL leg; the offset goes to the inventory-adjustment variance
+        // account (Dr on a net loss / count-down, Cr on a net gain / count-up).
+        const postingBranchId = branchId; // asserted non-null before the tx
+        let inventoryValueDelta = new Prisma.Decimal(0); // >0 = inventory grew
 
-      for (const line of existing.lines) {
-        const variance = Number(line.varianceQuantity);
-        if (variance === 0) continue;
+        for (const line of existing.lines) {
+          const variance = Number(line.varianceQuantity);
+          if (variance === 0) continue;
 
-        const movementType = variance > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
-        // Outbound adjustments relieve value at the existing average cost, so the
-        // caller supplies no cost; inbound adjustments resolve one (WAC -> default).
-        let unitCost: number | undefined;
-        if (variance > 0) {
-          const lineUnitCost = line.unitCost != null ? Number(line.unitCost) : 0;
-          if (lineUnitCost > 0) {
-            unitCost = lineUnitCost;
-          } else {
-            const wac = avgCostByProduct.get(line.productId) ?? 0;
-            if (wac > 0) {
-              unitCost = wac;
+          const movementType = variance > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
+          // Outbound adjustments relieve value at the existing average cost, so the
+          // caller supplies no cost; inbound adjustments resolve one (WAC -> default).
+          let unitCost: number | undefined;
+          if (variance > 0) {
+            const lineUnitCost = line.unitCost != null ? Number(line.unitCost) : 0;
+            if (lineUnitCost > 0) {
+              unitCost = lineUnitCost;
             } else {
-              const product = costProductById.get(line.productId);
-              unitCost =
-                product?.defaultPurchasePrice != null
-                  ? Number(product.defaultPurchasePrice)
-                  : product?.productFamily?.defaultPurchasePrice != null
-                    ? Number(product.productFamily.defaultPurchasePrice)
-                    : undefined;
-              if (!unitCost || unitCost <= 0) {
-                throw new BadRequestException(
-                  `Stock add for ${product?.name ?? line.productId} must include a unit cost greater than zero`,
-                );
+              const wac = avgCostByProduct.get(line.productId) ?? 0;
+              if (wac > 0) {
+                unitCost = wac;
+              } else {
+                const product = costProductById.get(line.productId);
+                unitCost =
+                  product?.defaultPurchasePrice != null
+                    ? Number(product.defaultPurchasePrice)
+                    : product?.productFamily?.defaultPurchasePrice != null
+                      ? Number(product.productFamily.defaultPurchasePrice)
+                      : undefined;
+                if (!unitCost || unitCost <= 0) {
+                  throw new BadRequestException(
+                    `Stock add for ${product?.name ?? line.productId} must include a unit cost greater than zero`,
+                  );
+                }
               }
             }
           }
+
+          const beforeValue = await this.readBalanceValue(
+            tx,
+            existing.companyId,
+            line.productId,
+            postingBranchId,
+          );
+
+          await this.inventoryMovements.createMovement({
+            companyId: existing.companyId,
+            productId: line.productId,
+            movementType: movementType as any,
+            quantity: Math.abs(variance),
+            unitId: line.unitId,
+            unitCost,
+            movementDate: new Date(),
+            createdById: userId,
+            referenceType: 'StockAdjustment',
+            referenceId: existing.id,
+            divisionId: existing.divisionId ?? undefined,
+            branchId: existing.branchId ?? undefined,
+            tx,
+          });
+
+          const afterValue = await this.readBalanceValue(
+            tx,
+            existing.companyId,
+            line.productId,
+            postingBranchId,
+          );
+          inventoryValueDelta = inventoryValueDelta.plus(afterValue.minus(beforeValue));
         }
 
-        const beforeValue = await this.readBalanceValue(
-          tx,
-          existing.companyId,
-          line.productId,
-          postingBranchId,
-        );
+        // Only touch the GL when a real value swing occurred. Zero-value moves
+        // (e.g. a cost-less count-up onto empty stock, or an outbound floored to
+        // zero) leave inventory value unchanged and need no journal entry.
+        const netDelta = inventoryValueDelta.toDecimalPlaces(2);
+        if (!netDelta.isZero()) {
+          await this.postAdjustmentLedger(tx, {
+            companyId: existing.companyId,
+            divisionId: existing.divisionId ?? null,
+            branchId: postingBranchId,
+            adjustmentId: existing.id,
+            adjustmentNumber: existing.adjustmentNumber,
+            transactionDate: new Date(),
+            inventoryValueDelta: netDelta,
+            userId,
+          });
+        }
 
-        await this.inventoryMovements.createMovement({
-          companyId: existing.companyId,
-          productId: line.productId,
-          movementType: movementType as any,
-          quantity: Math.abs(variance),
-          unitId: line.unitId,
-          unitCost,
-          movementDate: new Date(),
-          createdById: userId,
-          referenceType: 'StockAdjustment',
-          referenceId: existing.id,
-          divisionId: existing.divisionId ?? undefined,
-          branchId: existing.branchId ?? undefined,
-          tx,
+        return tx.stockAdjustment.update({
+          where: { id },
+          data: { status: 'POSTED', postedById: userId, postedAt: new Date() },
         });
-
-        const afterValue = await this.readBalanceValue(
-          tx,
-          existing.companyId,
-          line.productId,
-          postingBranchId,
-        );
-        inventoryValueDelta = inventoryValueDelta.plus(afterValue.minus(beforeValue));
-      }
-
-      // Only touch the GL when a real value swing occurred. Zero-value moves
-      // (e.g. a cost-less count-up onto empty stock, or an outbound floored to
-      // zero) leave inventory value unchanged and need no journal entry.
-      const netDelta = inventoryValueDelta.toDecimalPlaces(2);
-      if (!netDelta.isZero()) {
-        await this.postAdjustmentLedger(tx, {
-          companyId: existing.companyId,
-          divisionId: existing.divisionId ?? null,
-          branchId: postingBranchId,
-          adjustmentId: existing.id,
-          adjustmentNumber: existing.adjustmentNumber,
-          transactionDate: new Date(),
-          inventoryValueDelta: netDelta,
-          userId,
-        });
-      }
-
-      return tx.stockAdjustment.update({
-        where: { id },
-        data: { status: 'POSTED', postedById: userId, postedAt: new Date() },
-      });
-    });
+      },
+      { timeout: 60_000 },
+    );
 
     await this.auditLogs.log({
       action: 'STOCK_ADJUSTMENT_POST',

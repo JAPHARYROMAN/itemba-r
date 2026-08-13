@@ -3368,6 +3368,14 @@ model StockAdjustment {
   postedById       String?
   postedAt         DateTime?
   notes            String?
+  /// Client-supplied idempotency token for the Mobile POS Lite stock-count
+  /// chain, stamped on the row immediately after create. The unique index is
+  /// what decides which of two concurrent creates under one key owns it — a
+  /// read-then-write twin check cannot, because Postgres stamps createdAt at
+  /// transaction start, so the transaction that started earlier can commit
+  /// later and both readers can conclude they won. Unique per company; many
+  /// NULLs allowed (every non-POS adjustment leaves it NULL).
+  idempotencyKey   String?
   deletedAt        DateTime?
   createdAt        DateTime              @default(now())
   updatedAt        DateTime              @updatedAt
@@ -3382,6 +3390,7 @@ model StockAdjustment {
   lines StockAdjustmentLine[]
 
   @@unique([companyId, adjustmentNumber])
+  @@unique([companyId, idempotencyKey])
   @@index([companyId])
   @@index([status])
   @@map("stock_adjustments")
@@ -3647,6 +3656,13 @@ model PurchaseOrder {
   supplierInvoiceNumber String?
   supplierInvoiceDate   DateTime?
   notes               String?
+  /// Client-supplied idempotency token for the Mobile POS Lite purchase chain,
+  /// stamped on the row immediately after create. Same reason the stock-count
+  /// twin carries one: the unique index, not a best-effort read, is what stops
+  /// two concurrent requests under one key from each driving their own order
+  /// and receiving the same lorry twice. Unique per company; many NULLs allowed
+  /// (every desktop-created purchase order leaves it NULL).
+  idempotencyKey      String?
   payableId           String?
   journalEntryId      String?
   deletedAt           DateTime?
@@ -3670,6 +3686,7 @@ model PurchaseOrder {
   productBatches ProductBatch[]
 
   @@unique([companyId, purchaseOrderNumber])
+  @@unique([companyId, idempotencyKey])
   @@index([companyId])
   @@index([supplierId])
   @@index([status])

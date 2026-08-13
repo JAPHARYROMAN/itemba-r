@@ -72,6 +72,8 @@ const h = vi.hoisted(() => {
     outbox: [] as Pending[],
     daylog: new Map<string, DaylogEntry>(),
     stocks: new Map<string, unknown>(),
+    // v4 drafts store (Phase 5): the shell sweeps orphan drafts on mount.
+    drafts: new Map<string, unknown>(),
   };
 
   const posDaylogDate = (now: Date = new Date()) => {
@@ -86,6 +88,32 @@ const h = vi.hoisted(() => {
     readCachedStock: vi.fn(async (terminalCode: string) => state.stocks.get(terminalCode) ?? null),
     writeCachedStock: vi.fn(async (terminalCode: string, snapshot: unknown) => {
       state.stocks.set(terminalCode, snapshot);
+    }),
+    // Drafts (v4, Phase 5): the count sheet's and the kikaratasi's accessors.
+    // Stoo never enters Hesabu or Pokea; the mount-time orphan sweep and the
+    // boot draft read still need the contract.
+    readCountDraft: vi.fn(
+      async (terminalCode: string) => state.drafts.get(`${terminalCode}:count`) ?? null,
+    ),
+    writeCountDraft: vi.fn(async (terminalCode: string, draft: unknown) => {
+      state.drafts.set(`${terminalCode}:count`, draft);
+    }),
+    clearCountDraft: vi.fn(async (terminalCode: string) => {
+      state.drafts.delete(`${terminalCode}:count`);
+    }),
+    readPurchaseDraft: vi.fn(
+      async (terminalCode: string) => state.drafts.get(`${terminalCode}:purchase`) ?? null,
+    ),
+    savePurchaseDraft: vi.fn(async (terminalCode: string, draft: unknown) => {
+      state.drafts.set(`${terminalCode}:purchase`, draft);
+    }),
+    deletePurchaseDraft: vi.fn(async (terminalCode: string) => {
+      state.drafts.delete(`${terminalCode}:purchase`);
+    }),
+    sweepOrphanDrafts: vi.fn(async (terminalCode: string) => {
+      const orphans = [...state.drafts.keys()].filter((key) => !key.startsWith(`${terminalCode}:`));
+      for (const key of orphans) state.drafts.delete(key);
+      return orphans;
     }),
     getDaylogEntry: vi.fn(
       async (terminalCode: string, date: string) =>
@@ -347,6 +375,7 @@ function buildHarness(options: HarnessOptions = {}) {
   h.state.outbox = [];
   h.state.daylog = new Map();
   h.state.stocks = new Map(options.cachedStock ? [[TERMINAL, options.cachedStock]] : []);
+  h.state.drafts = new Map();
 
   setNavigatorOnLine(options.onLine ?? true);
 
@@ -446,14 +475,14 @@ describe('STOO-1: rail tab and routing', () => {
     expect(window.location.hash).toBe('#mauzo');
   });
 
-  it('carries the slab MAUZO MAPYA verb on Stoo (never verb-less, never ANZA KUHESABU)', async () => {
-    buildHarness({ session: kauntaSession({ stockCountsEnabled: true, purchasesEnabled: true }) });
+  it('carries the slab MAUZO MAPYA verb on Stoo for a rep (never verb-less, never ANZA KUHESABU)', async () => {
+    // Phase 5 gives managers the count verb here; a plain use-holder must
+    // still never see a verb pointing at a screen their permission forbids.
+    buildHarness({ session: kauntaSession({ purchasesEnabled: true }) });
     const user = userEvent.setup();
     await mountKaunta();
     await openStoo(user);
 
-    // Even for managers, Phase 4 ships no count entry — the slab must never
-    // point at a dead screen.
     expect(screen.queryByText('ANZA KUHESABU')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Mauzo Mapya' }));
     await screen.findByRole('heading', { name: 'Ongeza bidhaa' });

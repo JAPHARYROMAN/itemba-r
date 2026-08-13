@@ -404,6 +404,151 @@ export async function writeCachedStock(terminalCode: string, snapshot: PosStockS
   await transaction(STOCKS, 'readwrite', (store) => store.put(snapshot, terminalCode));
 }
 
+/* ─── Drafts (spec-inventory §5): the Hesabu count sheet ─────────────────── */
+
+/**
+ * The count draft, keyed `` `${terminalCode}:count` `` — one draft per module
+ * per terminal, enforced by the fixed key (`` :purchase `` is the kikaratasi's
+ * reserved key in the same store).
+ *
+ * `lines` maps productId → counted quantity, and the ABSENCE of a key is the
+ * load-bearing state: absent means "not counted", 0 means "counted, the shelf
+ * was empty". The two must stay distinct from the input through the draft, the
+ * review and the payload — collapsing them would post a phantom variance.
+ * `capturedAt` is the first edit (the confirm screen shows it because a
+ * variance can be surprising even when correct); `updatedAt` moves on every
+ * autosave.
+ *
+ * `names` snapshots productId → product name for the same reason
+ * `PosPurchaseDraft.lines` carries `name`: a resumed sheet outlives the stock
+ * snapshot it was typed against, and a counted line whose product has since
+ * left that snapshot must still be NAMEABLE to be removable (spec-inventory §7
+ * case 5). Without it a cold restart asks the manager to delete a 36-character
+ * UUID she can neither recognise nor report to the office. The field is
+ * OPTIONAL and purely additive: a draft written before it existed still loads,
+ * and a line it does not cover falls back to its productId.
+ *
+ * `idempotencyKey` is the load-bearing field, exactly as it is on
+ * `PosPurchaseDraft`. It is ABSENT until the first TUMA HESABU (nothing has
+ * been attempted, so there is nothing to resume) and frozen from that attempt
+ * until the count posts or the manager discards the sheet — surviving app
+ * kill, eviction and cold start, because that is the only window in which a
+ * lost response can be answered. A count re-sent under a FRESH key misses the
+ * server's `[MPL-COUNT:<key>]` marker and posts a second adjustment carrying
+ * the sheet's ABSOLUTE quantities against a baseline that has moved since —
+ * inventing stock that was sold in between, with two unlinked adjustments and
+ * a receipt that looks exactly right. Also optional, also additive: a draft
+ * written before this field existed loads and resumes unchanged (it simply
+ * carries no attempt to resume).
+ */
+export type PosCountDraft = {
+  type: 'count';
+  lines: Record<string, number>;
+  names?: Record<string, string>;
+  idempotencyKey?: string;
+  capturedAt: number;
+  updatedAt: number;
+};
+
+function countDraftKey(terminalCode: string) {
+  return `${terminalCode}:count`;
+}
+
+export async function readCountDraft(terminalCode: string): Promise<PosCountDraft | null> {
+  return (
+    (await transaction<PosCountDraft | undefined>(DRAFTS, 'readonly', (store) =>
+      store.get(countDraftKey(terminalCode)),
+    )) ?? null
+  );
+}
+
+/** Autosaved on every committed edit — counting happens where signal dies. */
+export async function writeCountDraft(terminalCode: string, draft: PosCountDraft) {
+  await transaction(DRAFTS, 'readwrite', (store) => store.put(draft, countDraftKey(terminalCode)));
+}
+
+export async function clearCountDraft(terminalCode: string) {
+  await transaction(DRAFTS, 'readwrite', (store) => store.delete(countDraftKey(terminalCode)));
+}
+
+/* ─── Drafts (spec-purchases §6): the Manunuzi kikaratasi ────────────────── */
+
+/**
+ * The purchase draft, keyed `` `${terminalCode}:purchase` `` — the count
+ * sheet's sibling in the same store, one draft per module per terminal.
+ *
+ * `idempotencyKey` is the load-bearing field: it is minted when the draft is
+ * created and frozen until the delivery posts or the manager empties the form.
+ * A key regenerated on retry turns one lost response into two deliveries —
+ * the frozen one lets the server resume its `[MPL-PURCHASE:<key>]` chain.
+ *
+ * `lines` carries its own name/unitSymbol snapshot so a restored slip renders
+ * without the catalog (a re-sync between save and restore must not blank the
+ * form); the server re-resolves every productId at post time regardless.
+ * `notes` mirrors the POST body's optional field — no Pokea input writes it
+ * yet, and the draft must not be the reason it cannot. `savedAt` is display
+ * only: nothing gates on a slip's age (the 48h expiry is CUT per critique D3).
+ */
+export type PosPurchaseDraft = {
+  type: 'purchase';
+  terminalCode: string;
+  idempotencyKey: string;
+  supplierId: string | null;
+  supplierName: string | null;
+  lines: Array<{
+    productId: string;
+    name: string;
+    unitSymbol: string;
+    quantity: number;
+    unitCost?: number;
+  }>;
+  notes?: string;
+  savedAt: number;
+};
+
+function purchaseDraftKey(terminalCode: string) {
+  return `${terminalCode}:purchase`;
+}
+
+export async function readPurchaseDraft(terminalCode: string): Promise<PosPurchaseDraft | null> {
+  return (
+    (await transaction<PosPurchaseDraft | undefined>(DRAFTS, 'readonly', (store) =>
+      store.get(purchaseDraftKey(terminalCode)),
+    )) ?? null
+  );
+}
+
+/** Autosaved 500ms after any edit — a dead battery must not cost twenty lines. */
+export async function savePurchaseDraft(terminalCode: string, draft: PosPurchaseDraft) {
+  await transaction(DRAFTS, 'readwrite', (store) =>
+    store.put(draft, purchaseDraftKey(terminalCode)),
+  );
+}
+
+export async function deletePurchaseDraft(terminalCode: string) {
+  await transaction(DRAFTS, 'readwrite', (store) => store.delete(purchaseDraftKey(terminalCode)));
+}
+
+/**
+ * Orphan sweep (spec-purchases §8 case 7): drafts survive a binding reset by
+ * design, but a terminal revoked and replaced under a NEW code strands the old
+ * rows — this device can never submit them, and no screen can reach them. Boot
+ * deletes every draft outside the active terminal's prefix, count sheets and
+ * kikaratasi alike: the sweep is keyed by terminal, never by module, so every
+ * draft type added to this store is covered the day it ships. Returns the
+ * removed keys (tests read them; no caller needs the value).
+ */
+export async function sweepOrphanDrafts(activeTerminalCode: string): Promise<string[]> {
+  const keys = await transaction<IDBValidKey[]>(DRAFTS, 'readonly', (store) => store.getAllKeys());
+  const orphans = keys.filter(
+    (key): key is string => typeof key === 'string' && !key.startsWith(`${activeTerminalCode}:`),
+  );
+  for (const key of orphans) {
+    await transaction(DRAFTS, 'readwrite', (store) => store.delete(key));
+  }
+  return orphans;
+}
+
 /* ─── Daylog (spec-leo §3): the persisted day log behind the Leo day book ─── */
 
 /** Last successful `my-sales-today` snapshot — server truth, never client math. */

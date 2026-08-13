@@ -30,6 +30,7 @@ export function PurchaseScreen({
   t,
   setScreen,
   slabMode = false,
+  slipParked = false,
 }: {
   shellClass: string;
   online: boolean;
@@ -57,6 +58,12 @@ export function PurchaseScreen({
    * own record button is hidden. Classic passes nothing — byte-identical.
    */
   slabMode?: boolean;
+  /**
+   * Kaunta only: a kikaratasi for this terminal is on the phone, so the lines
+   * on screen are backed by a saved slip. Says so calmly — this is the copy
+   * that explains a form the manager did not just type.
+   */
+  slipParked?: boolean;
 }) {
   return (
     <main
@@ -75,15 +82,33 @@ export function PurchaseScreen({
         <h1 className="mt-4 text-2xl font-bold" style={{ color: 'var(--aurora-text)' }}>
           {t('purchases')}
         </h1>
-        {!online && (
-          <p
-            className="mt-3 rounded-lg px-4 py-3 text-sm font-semibold"
-            style={{
-              background: 'var(--aurora-warning-subtle)',
-              color: 'var(--aurora-warning-text)',
-            }}
-          >
-            {t('needsNetwork')}
+        {!online &&
+          (slabMode ? (
+            // Kaunta: offline is weather, not a warning (§3.1) — a calm note
+            // that the form still works and the slip lands on the phone.
+            <p
+              className="mt-3 rounded-lg px-4 py-3 text-sm"
+              style={{
+                background: 'var(--aurora-bg-subtle)',
+                color: 'var(--aurora-text-secondary)',
+              }}
+            >
+              {t('purchaseOfflineNote')}
+            </p>
+          ) : (
+            <p
+              className="mt-3 rounded-lg px-4 py-3 text-sm font-semibold"
+              style={{
+                background: 'var(--aurora-warning-subtle)',
+                color: 'var(--aurora-warning-text)',
+              }}
+            >
+              {t('needsNetwork')}
+            </p>
+          ))}
+        {slabMode && slipParked && (
+          <p className="mt-3 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+            {t('slipSaved')}
           </p>
         )}
         <div className="mt-4">
@@ -122,6 +147,14 @@ export function PurchaseScreen({
                   placeholder={t('supplierSearchPlaceholder')}
                 />
               </div>
+              {slabMode && !online && (
+                // Supplier search is the one part of Pokea that genuinely needs
+                // the network (§3.1); saying so beats an input that answers
+                // nothing. A supplier already chosen survives in the chip above.
+                <p className="mt-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                  {t('needsNetwork')}
+                </p>
+              )}
               <div className="mt-2 space-y-2">
                 {suppliers.map((result) => (
                   <button
@@ -264,6 +297,18 @@ export function PurchaseScreen({
             </div>
           </section>
         )}
+        {/*
+          The notice cell arrives ready to read and is printed verbatim. Round 3
+          mapped it here instead, which could only ever be half a fix: this
+          component is handed a STRING, so it cannot tell a 502 from a refusal,
+          and anything the map did not recognise fell through as the backend's
+          English in a red danger box. It also had to pass its OWN Swahili
+          through untouched (`selectSupplierFirst`, `slipSaveFailed`), which is
+          exactly why a screen-side "map or fall back" is impossible. The
+          decision moved to `recordPurchase`, which still holds the error —
+          see `posPurchaseFailureMessage`. Classic (uiVersion 1) is unchanged:
+          it always printed this cell exactly as it came.
+        */}
         {notice && (
           <p
             className="mt-4 rounded-lg px-4 py-3 text-sm"

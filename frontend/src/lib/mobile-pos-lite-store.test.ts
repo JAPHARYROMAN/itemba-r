@@ -1,13 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   bumpDaylogTally,
+  clearCountDraft,
+  deletePurchaseDraft,
   getDaylogEntry,
   missingRequiredStores,
   openDatabase,
   posDaylogDate,
   readCachedStock,
+  readCountDraft,
+  readPurchaseDraft,
+  savePurchaseDraft,
+  sweepOrphanDrafts,
   writeCachedStock,
+  writeCountDraft,
   writeDaylogSent,
+  type PosCountDraft,
+  type PosPurchaseDraft,
   type PosStockSnapshot,
 } from './mobile-pos-lite-store';
 
@@ -468,5 +477,234 @@ describe('stocks', () => {
     });
     await writeCachedStock('T-001', fresher);
     expect(await readCachedStock('T-001')).toEqual(fresher);
+  });
+});
+
+/* ------------------------------------------------------------------------ *
+ * Drafts (v4, Phase 5): the Hesabu count sheet — keyed `${terminalCode}:count`
+ * (out-of-line), one draft per module per terminal, plus the boot-time orphan
+ * sweep for drafts a re-coded terminal left behind.
+ * ------------------------------------------------------------------------ */
+describe('count drafts', () => {
+  /** Fresh v4 database over the same scripted IndexedDB fake. */
+  function draftsHarness() {
+    const harness = makeFactory({ version: 4, stores: [...ALL_STORES] });
+    vi.stubGlobal('indexedDB', harness.factory);
+    return harness;
+  }
+
+  function makeDraft(overrides: Partial<PosCountDraft> = {}): PosCountDraft {
+    return {
+      type: 'count',
+      lines: { 'p-soda': 12, 'p-unga': 0 },
+      capturedAt: 1_786_500_000_000,
+      updatedAt: 1_786_500_060_000,
+      ...overrides,
+    };
+  }
+
+  it('returns null for a terminal with no draft', async () => {
+    draftsHarness();
+    expect(await readCountDraft('T-001')).toBeNull();
+  });
+
+  it('round-trips under the terminal-scoped count key, keeping 0 distinct from absent', async () => {
+    const harness = draftsHarness();
+    await writeCountDraft('T-001', makeDraft());
+    const stored = await readCountDraft('T-001');
+    // 0 is a counted line ("the shelf was empty"); a not-counted product has
+    // no key at all. Collapsing the two would post a phantom variance.
+    expect(stored?.lines).toEqual({ 'p-soda': 12, 'p-unga': 0 });
+    expect(stored?.lines).not.toHaveProperty('p-chumvi');
+    expect([...(harness.data.get('drafts')?.keys() ?? [])]).toEqual(['T-001:count']);
+    // The key is per-terminal: another terminal still misses.
+    expect(await readCountDraft('T-OTHER')).toBeNull();
+  });
+
+  it('overwrites the sheet wholesale on every autosave', async () => {
+    draftsHarness();
+    await writeCountDraft('T-001', makeDraft());
+    const later = makeDraft({ lines: { 'p-soda': 3 }, updatedAt: 1_786_500_120_000 });
+    await writeCountDraft('T-001', later);
+    expect(await readCountDraft('T-001')).toEqual(later);
+  });
+
+  it('carries the product names beside the quantities, the way the kikaratasi does', async () => {
+    // A resumed sheet outlives the snapshot it was typed against. Without a
+    // name of its own, a line whose product has since left the stoo can only
+    // be shown as a raw productId — and removing it (§7 case 5) is the one
+    // thing the manager must be able to do, on a line she cannot recognise.
+    draftsHarness();
+    await writeCountDraft(
+      'T-001',
+      makeDraft({ names: { 'p-soda': 'Soda Baridi', 'p-unga': 'Unga wa Ngano' } }),
+    );
+    expect((await readCountDraft('T-001'))?.names).toEqual({
+      'p-soda': 'Soda Baridi',
+      'p-unga': 'Unga wa Ngano',
+    });
+  });
+
+  it('carries the frozen idempotency key, the way the kikaratasi does', async () => {
+    // The load-bearing field. It is written by the FIRST send attempt and must
+    // survive app kill, eviction and cold start, because that is exactly the
+    // window in which a lost response has to be answered: the same key resumes
+    // the server's `[MPL-COUNT:<key>]` chain, while a fresh one re-posts the
+    // sheet's ABSOLUTE quantities over a baseline that has moved since —
+    // inventing stock that was sold in between, on a second adjustment nothing
+    // links to the first.
+    draftsHarness();
+    await writeCountDraft('T-001', makeDraft({ idempotencyKey: 'abcdef0123456789' }));
+    expect((await readCountDraft('T-001'))?.idempotencyKey).toBe('abcdef0123456789');
+  });
+
+  it('still loads a draft written before the name snapshot or the key existed', async () => {
+    // Both fields are additive by contract: every phone in the field already
+    // holds sheets without them, and a resume that threw those away would cost
+    // exactly the overnight count the draft exists to protect. A draft with no
+    // key simply carries no send attempt to resume, which is the truth about it.
+    draftsHarness();
+    // Byte-identical to what the pre-change autosave wrote: no `names` key and
+    // no `idempotencyKey`. It must type-check (both are optional) and read back
+    // whole.
+    const legacy = {
+      type: 'count',
+      lines: { 'p-soda': 12 },
+      capturedAt: 1_786_500_000_000,
+      updatedAt: 1_786_500_000_000,
+    } satisfies PosCountDraft;
+    await writeCountDraft('T-001', legacy);
+
+    const stored = await readCountDraft('T-001');
+    expect(stored).toEqual(legacy);
+    expect(stored?.names).toBeUndefined();
+    expect(stored?.idempotencyKey).toBeUndefined();
+  });
+
+  it('clearCountDraft removes only that terminal’s count draft', async () => {
+    draftsHarness();
+    await writeCountDraft('T-001', makeDraft());
+    await writeCountDraft('T-OTHER', makeDraft());
+    await clearCountDraft('T-001');
+    expect(await readCountDraft('T-001')).toBeNull();
+    expect(await readCountDraft('T-OTHER')).not.toBeNull();
+  });
+
+  it('sweeps drafts belonging to any other terminal code, keeping every draft of the active one', async () => {
+    const harness = draftsHarness();
+    await writeCountDraft('T-001', makeDraft());
+    await writeCountDraft('T-OLD', makeDraft());
+    // The kikaratasi's reserved key shares the store; the sweep is by
+    // terminal prefix, never by module.
+    harness.data.get('drafts')?.set('T-001:purchase', { type: 'purchase' });
+    harness.data.get('drafts')?.set('T-OLD:purchase', { type: 'purchase' });
+
+    expect(await sweepOrphanDrafts('T-001')).toEqual(['T-OLD:count', 'T-OLD:purchase']);
+    expect([...(harness.data.get('drafts')?.keys() ?? [])]).toEqual([
+      'T-001:count',
+      'T-001:purchase',
+    ]);
+  });
+
+  it('sweeps nothing when every draft belongs to the active terminal', async () => {
+    draftsHarness();
+    await writeCountDraft('T-001', makeDraft());
+    expect(await sweepOrphanDrafts('T-001')).toEqual([]);
+    expect(await readCountDraft('T-001')).not.toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------------ *
+ * Drafts (v4, Phase 5): the Manunuzi kikaratasi — the count sheet's sibling
+ * on the same store under `${terminalCode}:purchase`, carrying the frozen
+ * idempotency key that keeps one lost response from becoming two deliveries.
+ * ------------------------------------------------------------------------ */
+describe('purchase drafts', () => {
+  /** Fresh v4 database over the same scripted IndexedDB fake. */
+  function draftsHarness() {
+    const harness = makeFactory({ version: 4, stores: [...ALL_STORES] });
+    vi.stubGlobal('indexedDB', harness.factory);
+    return harness;
+  }
+
+  function makeSlip(overrides: Partial<PosPurchaseDraft> = {}): PosPurchaseDraft {
+    return {
+      type: 'purchase',
+      terminalCode: 'T-001',
+      idempotencyKey: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+      supplierId: 's-1',
+      supplierName: 'Azam Distributors',
+      lines: [
+        {
+          productId: 'p-soda',
+          name: 'Soda Baridi',
+          unitSymbol: 'pc',
+          quantity: 24,
+          unitCost: 1500,
+        },
+        { productId: 'p-unga', name: 'Unga wa Ngano', unitSymbol: 'kg', quantity: 3 },
+      ],
+      savedAt: 1_786_500_000_000,
+      ...overrides,
+    };
+  }
+
+  it('returns null for a terminal with no slip', async () => {
+    draftsHarness();
+    expect(await readPurchaseDraft('T-001')).toBeNull();
+  });
+
+  it('round-trips under the terminal-scoped purchase key, beside the count sheet', async () => {
+    const harness = draftsHarness();
+    await writeCountDraft('T-001', { type: 'count', lines: {}, capturedAt: 1, updatedAt: 1 });
+    await savePurchaseDraft('T-001', makeSlip());
+
+    const stored = await readPurchaseDraft('T-001');
+    expect(stored).toEqual(makeSlip());
+    // A line with no typed cost carries no unitCost at all — the server
+    // resolves the fallback, and a 0 must never be sent (§8 case 5).
+    expect(stored?.lines[1]).not.toHaveProperty('unitCost');
+    // One draft per module per terminal, enforced by the two fixed keys.
+    expect([...(harness.data.get('drafts')?.keys() ?? [])]).toEqual([
+      'T-001:count',
+      'T-001:purchase',
+    ]);
+    expect(await readPurchaseDraft('T-OTHER')).toBeNull();
+  });
+
+  it('overwrites the slip wholesale on every autosave, key included', async () => {
+    draftsHarness();
+    await savePurchaseDraft('T-001', makeSlip());
+    const later = makeSlip({ lines: [], supplierId: null, supplierName: null, savedAt: 2 });
+    await savePurchaseDraft('T-001', later);
+    expect(await readPurchaseDraft('T-001')).toEqual(later);
+  });
+
+  it('deletePurchaseDraft removes only that terminal’s slip, never its count sheet', async () => {
+    draftsHarness();
+    await savePurchaseDraft('T-001', makeSlip());
+    await savePurchaseDraft('T-OTHER', makeSlip({ terminalCode: 'T-OTHER' }));
+    await writeCountDraft('T-001', {
+      type: 'count',
+      lines: { 'p-soda': 2 },
+      capturedAt: 1,
+      updatedAt: 1,
+    });
+
+    await deletePurchaseDraft('T-001');
+    expect(await readPurchaseDraft('T-001')).toBeNull();
+    expect(await readCountDraft('T-001')).not.toBeNull();
+    expect(await readPurchaseDraft('T-OTHER')).not.toBeNull();
+  });
+
+  it('the orphan sweep takes a re-coded terminal’s slip with it (§8 case 7)', async () => {
+    draftsHarness();
+    await savePurchaseDraft('T-001', makeSlip());
+    await savePurchaseDraft('T-OLD', makeSlip({ terminalCode: 'T-OLD' }));
+
+    expect(await sweepOrphanDrafts('T-001')).toEqual(['T-OLD:purchase']);
+    expect(await readPurchaseDraft('T-OLD')).toBeNull();
+    // The active terminal's slip survives a binding reset by design.
+    expect(await readPurchaseDraft('T-001')).not.toBeNull();
   });
 });

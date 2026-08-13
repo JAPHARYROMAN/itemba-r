@@ -14,6 +14,7 @@ import {
 } from './dto/mobile-pos-lite-session.dto';
 import { CreateMobilePosLiteSaleDto } from './dto/mobile-pos-lite-sale.dto';
 import { CreateMobilePosLitePurchaseDto } from './dto/mobile-pos-lite-purchase.dto';
+import { CreateMobilePosLiteStockCountDto } from './dto/mobile-pos-lite-stock-count.dto';
 import { QueryMobilePosLiteStockDto } from './dto/mobile-pos-lite-stock.dto';
 import { MobilePosLiteService } from './mobile-pos-lite.service';
 
@@ -187,5 +188,23 @@ export class MobilePosLiteController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.createPurchase(terminalCode, deviceSecret, dto, user);
+  }
+
+  /**
+   * Physical stock count from the shelf (spec-inventory §1.2). The core
+   * stock-adjustment services enforce company-scope WRITE only, so THIS
+   * decorator is the sole permission gate on the count chain; the terminal
+   * headers pin the branch the count is read and posted against.
+   * REVIEW-BLOCKING RULE: no cost or value field may enter or leave this route.
+   */
+  @Post('stock-counts')
+  @RequirePermissions('mobile_pos_lite.stock_count')
+  createStockCount(
+    @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
+    @Headers('x-mobile-pos-device') deviceSecret: string | undefined,
+    @Body() dto: CreateMobilePosLiteStockCountDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.createStockCount(terminalCode, deviceSecret, dto, user);
   }
 }

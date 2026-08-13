@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type Dispatch,
@@ -12,6 +13,7 @@ import {
 import {
   BookOpen,
   Check,
+  FileText,
   Package,
   RotateCw,
   Settings,
@@ -28,6 +30,8 @@ import {
   type PosDaylogEntry,
   type PosDaylogSent,
 } from '@/lib/mobile-pos-lite-store';
+import { usePosCount } from './hooks/use-pos-count';
+import { usePosSlip } from './hooks/use-pos-slip';
 import { usePosStock } from './hooks/use-pos-stock';
 import { tick } from './pos-haptics';
 import { type PosLang } from './pos-i18n';
@@ -45,6 +49,7 @@ import type {
 } from './pos-types';
 import { money } from './pos-utils';
 import { MuhuriStamp } from './pos-ui';
+import { HesabuScreen } from './screens/HesabuScreen';
 import { LeoScreen, LEO_FOLENI_ANCHOR_ID } from './screens/LeoScreen';
 import { MipangilioScreen } from './screens/MipangilioScreen';
 import { PaymentScreen } from './screens/PaymentScreen';
@@ -130,7 +135,13 @@ type KauntaShellProps = {
   setPurchaseCart: Dispatch<SetStateAction<PurchaseLine[]>>;
   setPurchaseQuantity: (productId: string, next: number) => void;
   purchaseTotal: number;
-  recordPurchase: () => Promise<void>;
+  /**
+   * Kaunta passes the kikaratasi's frozen key so every attempt on one slip
+   * rides the same `[MPL-PURCHASE:<key>]` marker — the server resumes or
+   * refuses, and the delivery is never received twice; classic passes nothing
+   * and mints per attempt, unchanged.
+   */
+  recordPurchase: (idempotencyKey?: string) => Promise<void>;
   beginPurchase: () => void;
   // Leo (day book)
   daySummary: DaySummary | null;
@@ -176,11 +187,41 @@ export function KauntaShell(props: KauntaShellProps) {
     setQuantity,
   } = props;
   const purchasesEnabled = Boolean(session.purchasesEnabled);
+  // Hesabu is manager-gated (spec-inventory §6): no verb, no screen, no route
+  // without it — and a session refresh that revokes it lands the manager back
+  // on Stoo, exactly like a revoked Manunuzi tab disappearing.
+  const stockCountsEnabled = Boolean(session.stockCountsEnabled);
 
   // The Stoo branch-stock snapshot (spec-inventory §2). Mounting the hook
   // here IS the pre-warm: the rail renders → the conditional fetch fires once
   // (a no-op while the cached snapshot is under the 10-minute max age).
   const stock = usePosStock({ binding });
+  // The products Hesabu can render right now (null = no snapshot at all). The
+  // count sheet outlives the snapshot it was typed against, so the hook needs
+  // this to know which counted lines the manager can still see — and refuse to
+  // review or send the ones she cannot (spec-inventory §7 case 5). Names ride
+  // along because a vanished line still has to be nameable.
+  const countableProducts = useMemo(
+    () =>
+      stock.snapshot
+        ? new Map(stock.snapshot.items.map((item) => [item.productId, item.name]))
+        : null,
+    [stock.snapshot],
+  );
+  // The Hesabu count sheet (spec-inventory §3): mounted at shell level because
+  // the slab owns its verbs. Mount is also the drafts orphan sweep — one sweep
+  // covers both draft modules, since it keys off the terminal prefix alone.
+  const count = usePosCount({ binding, online, visibleProducts: countableProducts });
+  // The Manunuzi kikaratasi (spec-purchases §3.1/§6): same reason, plus the
+  // ribbon badge and the frozen key both live above the Pokea screen.
+  const slip = usePosSlip({
+    binding,
+    purchasesEnabled,
+    supplier: props.supplier,
+    setSupplier: props.setSupplier,
+    purchaseCart,
+    setPurchaseCart: props.setPurchaseCart,
+  });
 
   // Handler mirrors, refreshed after every render: read from router callbacks
   // and the route-entry effect below (declaration order keeps this mirror
@@ -189,11 +230,19 @@ export function KauntaShell(props: KauntaShellProps) {
   const beginPurchaseRef = useRef(beginPurchase);
   const openMySalesRef = useRef(openMySales);
   const ensureStockRef = useRef(stock.ensureFresh);
+  const enterCountRef = useRef(count.enter);
+  const enterSlipRef = useRef(slip.enter);
+  const slipCompletedRef = useRef(slip.completed);
+  const slipSendKeyRef = useRef(slip.sendKey);
   useEffect(() => {
     beginSaleRef.current = beginSale;
     beginPurchaseRef.current = beginPurchase;
     openMySalesRef.current = openMySales;
     ensureStockRef.current = stock.ensureFresh;
+    enterCountRef.current = count.enter;
+    enterSlipRef.current = slip.enter;
+    slipCompletedRef.current = slip.completed;
+    slipSendKeyRef.current = slip.sendKey;
   });
 
   // Leaving Risiti by ANY exit — slab verb, sync token, hardware back — begins
@@ -204,7 +253,7 @@ export function KauntaShell(props: KauntaShellProps) {
     if (from === 'risiti') beginSaleRef.current();
   }, []);
 
-  const { route, navigate } = useKauntaRouter({ purchasesEnabled, onExit });
+  const { route, navigate } = useKauntaRouter({ purchasesEnabled, stockCountsEnabled, onExit });
 
   // The Kaunta purchase success moment (design direction §5.2): recordPurchase
   // has no receipt screen, so the MZIGO UMEPOKELEWA seal slams onto a floating
@@ -230,6 +279,9 @@ export function KauntaShell(props: KauntaShellProps) {
     // and this transition only ever means a completed purchase (the shell's
     // own back paths bypass the classic screen cell) — stamp it.
     else if (screen === 'home' && prev === 'purchase') {
+      // Success clears the slip and only success does (§3.1): a rejected or
+      // timed-out delivery keeps both the draft and its frozen key.
+      slipCompletedRef.current();
       setPurchaseStamped(true);
       navigate('mauzo');
     }
@@ -294,11 +346,19 @@ export function KauntaShell(props: KauntaShellProps) {
     prevRouteRef.current = route;
     const inLeo = route === 'leo' || route === 'leo/foleni';
     const wasLeo = prev === 'leo' || prev === 'leo/foleni';
-    if (route === 'manunuzi' && prev !== 'manunuzi') beginPurchaseRef.current();
+    // Pokea open: a fresh form (mirroring the classic home→purchases path),
+    // then the parked kikaratasi restored into it — online or offline, with no
+    // prompt and no expiry gate (§3.1 as amended by critique D3).
+    if (route === 'manunuzi' && prev !== 'manunuzi') {
+      beginPurchaseRef.current();
+      enterSlipRef.current();
+    }
     if (inLeo && !wasLeo) void openMySalesRef.current();
     // Stoo open: the conditional fetch (missing-or-stale only, §2 fetch
     // policy) — usually a no-op because the rail-render pre-warm already ran.
     if (route === 'stoo' && prev !== 'stoo') ensureStockRef.current();
+    // Hesabu open: read the saved sheet and offer resume/discard.
+    if (route === 'hesabu' && prev !== 'hesabu') enterCountRef.current();
     if (route === 'leo/foleni') {
       const anchor = document.getElementById(LEO_FOLENI_ANCHOR_ID);
       // jsdom has no scrollIntoView; a missing anchor (empty queue) is fine.
@@ -361,6 +421,41 @@ export function KauntaShell(props: KauntaShellProps) {
     [navigate],
   );
 
+  /**
+   * POKEA, in two steps that must stay in this order: park the key, then send
+   * the delivery under it. `slip.sendKey()` resolves null when the phone
+   * refused the write, and a delivery must never leave under a key the phone is
+   * not holding — the response can die, the PWA can be evicted, and the next
+   * entry would mint a fresh key, miss the marker and receive the same lorry a
+   * second time. So the refusal blocks the send and is SAID: the hook has
+   * already shaken the slab and fired the reject haptic (as it does for the
+   * offline save verb), and the words go in the notice cell the same way,
+   * because a badge quietly failing to appear is not telling her anything.
+   * This mirrors the count's freeze gate — the same refusal, the same ritual.
+   *
+   * The ref is the double-tap guard the await now needs: `busy` cannot rise
+   * until `recordPurchase` starts, so without it a second tap during the write
+   * would put two requests on the wire under one key.
+   */
+  const sendingSlipRef = useRef(false);
+  const sendSlip = useCallback(async () => {
+    if (sendingSlipRef.current) return;
+    sendingSlipRef.current = true;
+    try {
+      const key = await slipSendKeyRef.current();
+      if (key === null) {
+        // Not the save verb's sentence: she tapped POKEA, so the thing she has
+        // to be told is that the DELIVERY did not go — same words the count
+        // refuses a send with.
+        setNotice(t('slipSendBlocked'));
+        return;
+      }
+      await recordPurchase(key);
+    } finally {
+      sendingSlipRef.current = false;
+    }
+  }, [recordPurchase, setNotice, t]);
+
   // The slab contract (direction §5, spec-leo §6): exactly one primary verb
   // per screen — disabled, never hidden — plus the money that matters now.
   const slab = ((): {
@@ -393,13 +488,49 @@ export function KauntaShell(props: KauntaShellProps) {
           onPress: () => navigate('mauzo'),
         };
       case 'manunuzi':
+        // Offline the verb becomes HIFADHI KIKARATASI — still blue, still the
+        // one thing to press (§3.1): offline is custody, not an error, so the
+        // slab never goes dead here. Posting stays online-only by design.
+        if (!online) {
+          return {
+            verb: t('slabSaveSlip'),
+            disabled: !slip.hasContent,
+            inFlight: false,
+            amount: purchaseTotal > 0 ? purchaseTotal : null,
+            onPress: () =>
+              void slip.save().then((saved) => {
+                // Navigation is the acknowledgement that the slip is on the
+                // phone; an unsaved form must stay in front of the manager —
+                // and be TOLD. A refused write that looks exactly like a
+                // successful one sends her away from work the phone dropped,
+                // which is the one thing the kikaratasi is built to prevent.
+                if (saved) {
+                  setNotice('');
+                  navigate('mauzo');
+                } else {
+                  setNotice(t('slipSaveFailed'));
+                }
+              }),
+          };
+        }
         return {
           verb: t('slabPokea'),
           busyLabel: t('recording'),
-          disabled: busy || !online || purchaseCart.length === 0,
+          disabled: busy || purchaseCart.length === 0,
           inFlight: busy,
           amount: purchaseTotal > 0 ? purchaseTotal : null,
-          onPress: () => void recordPurchase(),
+          // Taking the key here is what freezes it (see usePosSlip): every
+          // later attempt on this slip rides the same one, edited or not, so a
+          // lost response is answered by the server — replayed when the slip
+          // is unchanged, refused as already-received when it is not — instead
+          // of being guessed at on the phone and posted twice.
+          //
+          // …which is only true while the phone is HOLDING that key, so the
+          // send waits on the write and a refused write refuses the send —
+          // the same gate the count's freeze carries, said in the same place:
+          // the manager should not have to know which module she is in. The
+          // delivery leaves only after the key is durably down.
+          onPress: () => void sendSlip(),
         };
       case 'leo':
       case 'leo/foleni':
@@ -414,16 +545,72 @@ export function KauntaShell(props: KauntaShellProps) {
           onPress: () => navigate('mauzo'),
         };
       case 'stoo':
-        // The slab law holds on Stoo (spec-leo §6): never verb-less — MAUZO
-        // MAPYA back to the money path, day total only when known. ANZA
-        // KUHESABU deliberately does NOT ship until Hesabu exists (Phase 5);
-        // the slab must never point at a dead screen.
+        // The slab law holds on Stoo (spec-leo §6): never verb-less. Managers
+        // get ANZA KUHESABU (spec-inventory §2.6); everyone else gets MAUZO
+        // MAPYA back to the money path, with the day total only when known.
+        return stockCountsEnabled
+          ? {
+              verb: t('countStart'),
+              disabled: false,
+              inFlight: false,
+              amount: null,
+              onPress: () => navigate('hesabu'),
+            }
+          : {
+              verb: t('newSale'),
+              disabled: false,
+              inFlight: false,
+              amount: daySummary ? daySummary.totalAmount : (cachedSent?.totalAmount ?? null),
+              onPress: () => navigate('mauzo'),
+            };
+      case 'hesabu':
+        // Count mode carries no money on the slab — a count is quantities, and
+        // brass is for shillings. KAGUA HESABU unlocks with the first counted
+        // line; TUMA HESABU is the online moment (offline the verb is dead and
+        // the screen says why — a count never enters the outbox).
+        if (!stockCountsEnabled) {
+          // Permission revoked mid-count: Stoo renders below, so the slab
+          // carries Stoo's rep verb for the one commit before the router
+          // settles the route onto #stoo.
+          return {
+            verb: t('newSale'),
+            disabled: false,
+            inFlight: false,
+            amount: daySummary ? daySummary.totalAmount : (cachedSent?.totalAmount ?? null),
+            onPress: () => navigate('mauzo'),
+          };
+        }
+        if (count.step === 'done') {
+          return {
+            verb: t('newSale'),
+            disabled: false,
+            inFlight: false,
+            amount: null,
+            onPress: () => navigate('mauzo'),
+          };
+        }
+        // Both verbs die while the sheet cannot be sent as it stands
+        // (`count.blocked`): a counted line is off-screen, so the review it
+        // would open cannot show the whole sheet and the confirm's variance
+        // total would be summed over fewer lines than the payload carries; or
+        // no snapshot loaded at all; or the sheet is longer than one count may
+        // carry. The screen names whichever it is, and names the remedy.
+        if (count.step === 'review') {
+          return {
+            verb: t('countSubmit'),
+            busyLabel: t('countSubmitting'),
+            disabled: count.submitting || !online || count.blocked,
+            inFlight: count.submitting,
+            amount: null,
+            onPress: count.openConfirm,
+          };
+        }
         return {
-          verb: t('newSale'),
-          disabled: false,
+          verb: t('countReview'),
+          disabled: count.countedCount === 0 || count.blocked,
           inFlight: false,
-          amount: daySummary ? daySummary.totalAmount : (cachedSent?.totalAmount ?? null),
-          onPress: () => navigate('mauzo'),
+          amount: null,
+          onPress: count.openReview,
         };
       case 'mipangilio':
         return {
@@ -450,6 +637,11 @@ export function KauntaShell(props: KauntaShellProps) {
 
   // The rail rides module screens only; Malipo/Risiti are focused flow.
   const showRail = route !== 'malipo' && route !== 'risiti';
+  // The sync-legibility law (direction §5): every piece of unsent local data is
+  // exactly one counted token in one fixed place. On Pokea the form IS that
+  // place — a badge there would only point at what is already on screen — so
+  // the ribbon carries the slip everywhere else, a restart included.
+  const slipBadge = slip.parked && route !== 'manunuzi';
 
   let content: ReactNode;
   if (route === 'malipo') {
@@ -508,6 +700,7 @@ export function KauntaShell(props: KauntaShellProps) {
     content = (
       <PurchaseScreen
         slabMode
+        slipParked={slip.parked}
         shellClass={SCREEN_PAD}
         online={props.online}
         notice={props.notice}
@@ -553,7 +746,31 @@ export function KauntaShell(props: KauntaShellProps) {
         t={t}
       />
     );
-  } else if (route === 'stoo') {
+  } else if (route === 'hesabu' && stockCountsEnabled) {
+    content = (
+      <HesabuScreen
+        shellClass={SCREEN_PAD}
+        online={props.online}
+        snapshot={stock.snapshot}
+        refresh={stock.refresh}
+        // The no-snapshot card's retry is a verb: it needs the hook's flight
+        // and its answer, or a failed second attempt repaints nothing at all.
+        stockLoading={stock.loading}
+        stockLoadFailed={stock.loadFailed}
+        pendingCount={props.pendingCount}
+        syncing={props.syncing}
+        sendQueue={() => void props.syncPendingSales(props.binding)}
+        count={count}
+        onBackToStoo={() => navigate('stoo')}
+        t={t}
+      />
+    );
+  } else if (route === 'stoo' || route === 'hesabu') {
+    // The `hesabu` fall-through is the revoked-permission path: the flag went
+    // away under a manager standing in count mode, so the screen behind it
+    // renders instead of an error (the missing verb is the message). The
+    // router settles the route onto `stoo` on the same flag change, so this
+    // bridges one commit — but it bridges it, rather than blanking the screen.
     content = (
       <StooScreen
         shellClass={SCREEN_PAD}
@@ -606,7 +823,13 @@ export function KauntaShell(props: KauntaShellProps) {
       {showRail && (
         <KauntaRail route={route} purchasesEnabled={purchasesEnabled} onNavigate={navigate} t={t} />
       )}
-      <KauntaRibbon online={online} syncing={syncing} railShown={showRail} t={t} />
+      <KauntaRibbon
+        online={online}
+        syncing={syncing}
+        slipBadge={slipBadge}
+        railShown={showRail}
+        t={t}
+      />
       {purchaseStamped && (
         <div
           className="pointer-events-none fixed inset-x-0 top-16 z-50 flex justify-center px-4"
@@ -634,6 +857,7 @@ export function KauntaShell(props: KauntaShellProps) {
         busyLabel={slab.busyLabel}
         disabled={slab.disabled}
         inFlight={slab.inFlight}
+        shake={count.shake || slip.shake}
         onVerb={slab.onPress}
         onSyncTap={() => navigate('leo/foleni')}
         t={t}
@@ -647,28 +871,32 @@ export function KauntaShell(props: KauntaShellProps) {
 /**
  * Status ribbon (direction §5, spec-sales §1.3): rendered only when the world
  * is non-clean — a calm grey chip offline ("offline is weather", never amber
- * or red), a brass chip while the outbox is flushing. Offline wins when both
- * hold (nothing can be flushing without a network anyway).
+ * or red), a brass chip while the outbox is flushing. Offline wins between
+ * those two when both hold (nothing can be flushing without a network anyway).
+ * The parked kikaratasi rides alongside either of them as its own brass chip:
+ * a slip is custody, and custody is always brass, never a warning.
  */
 function KauntaRibbon({
   online,
   syncing,
+  slipBadge,
   railShown,
   t,
 }: {
   online: boolean;
   syncing: boolean;
+  slipBadge: boolean;
   railShown: boolean;
   t: PosTranslate;
 }) {
-  if (online && !syncing) return null;
+  if (online && !syncing && !slipBadge) return null;
   return (
     <div
-      className={`sticky ${railShown ? 'top-11' : 'top-0'} z-30 flex justify-center px-3 py-1.5`}
+      className={`sticky ${railShown ? 'top-11' : 'top-0'} z-30 flex justify-center gap-2 px-3 py-1.5`}
       role="status"
       style={{ background: 'var(--aurora-bg)' }}
     >
-      {!online ? (
+      {!online && (
         <span
           className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold"
           style={{ background: 'var(--aurora-bg-subtle)', color: 'var(--aurora-text-secondary)' }}
@@ -676,13 +904,27 @@ function KauntaRibbon({
           <WifiOff size={13} aria-hidden="true" />
           {t('ribbonOffline')}
         </span>
-      ) : (
+      )}
+      {online && syncing && (
         <span
           className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold"
           style={{ background: 'var(--aurora-accent-subtle)', color: 'var(--aurora-accent-text)' }}
         >
           <RotateCw size={13} className="animate-spin" aria-hidden="true" />
           {t('ribbonSending')}
+        </span>
+      )}
+      {slipBadge && (
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold"
+          style={{
+            background: 'var(--aurora-accent-subtle)',
+            color: 'var(--aurora-accent-text)',
+            boxShadow: 'inset 0 0 0 1px var(--aurora-accent)',
+          }}
+        >
+          <FileText size={13} aria-hidden="true" />
+          {t('slipBadge')}
         </span>
       )}
     </div>
@@ -712,7 +954,12 @@ function KauntaRail({
       ? [{ to: 'manunuzi' as KauntaRoute, label: t('railManunuzi'), icon: Truck }]
       : []),
   ];
-  const isActive = (to: KauntaRoute) => to === route || (to === 'leo' && route === 'leo/foleni');
+  // Count mode keeps Stoo lit: Hesabu is that module's second face, not a
+  // fourth tab (the rail must never grow a tab the back-map has no room for).
+  const isActive = (to: KauntaRoute) =>
+    to === route ||
+    (to === 'leo' && route === 'leo/foleni') ||
+    (to === 'stoo' && route === 'hesabu');
 
   return (
     <nav
@@ -845,6 +1092,7 @@ function KauntaSlab({
   busyLabel,
   disabled,
   inFlight,
+  shake,
   onVerb,
   onSyncTap,
   t,
@@ -857,13 +1105,15 @@ function KauntaSlab({
   busyLabel?: string;
   disabled: boolean;
   inFlight: boolean;
+  /** A server rejection just landed: the offending control shakes, never a toast. */
+  shake: boolean;
   onVerb: () => void;
   onSyncTap: () => void;
   t: PosTranslate;
 }) {
   return (
     <div
-      className="fixed inset-x-0 bottom-0 z-40 border-t"
+      className={`fixed inset-x-0 bottom-0 z-40 border-t${shake ? ' animate-shake' : ''}`}
       style={{
         background: 'var(--aurora-card)',
         borderColor: 'var(--aurora-border)',

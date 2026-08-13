@@ -391,8 +391,9 @@ function FreshnessChip({
 /**
  * 44px lazy photo tile with the designed brass initial-letter fallback
  * (design §6): `onError` and offline collapse to the initial, never a hole.
+ * Exported for Hesabu, which is this list re-rendered in count mode.
  */
-function StockTile({
+export function StockTile({
   name,
   imageUrl,
   size,

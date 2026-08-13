@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -23,6 +24,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { SalesOrdersService } from '../sales-orders/sales-orders.service';
 import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
 import { GoodsReceivedNotesService } from '../goods-received-notes/goods-received-notes.service';
+import { StockAdjustmentsService } from '../stock-adjustments/stock-adjustments.service';
 import { GeneratedDocumentsService } from '../generated-documents/generated-documents.service';
 import type { BusinessPdfSection } from '../generated-documents/pdf-builder';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
@@ -39,6 +41,7 @@ import {
 import { ActivateMobilePosTerminalDto } from './dto/mobile-pos-lite-session.dto';
 import { CreateMobilePosLiteSaleDto } from './dto/mobile-pos-lite-sale.dto';
 import { CreateMobilePosLitePurchaseDto } from './dto/mobile-pos-lite-purchase.dto';
+import { CreateMobilePosLiteStockCountDto } from './dto/mobile-pos-lite-stock-count.dto';
 
 const ACTIVATION_TTL_MS = 20 * 60 * 1000;
 
@@ -78,13 +81,94 @@ const STOCK_STATUS_RANK = {
 type StockStatus = keyof typeof STOCK_STATUS_RANK;
 
 /**
- * PurchaseOrder has no idempotencyKey column (unlike SalesOrder), so the POS
- * purchase flow anchors replay protection on a structured marker embedded in
- * the purchase order's notes at create time. The marker is written atomically
- * with the PO row, so a retried request can find and resume the original chain.
+ * The POS purchase flow stamps the client's key on PurchaseOrder.idempotencyKey
+ * (company-scoped UNIQUE) immediately after create, and that column is the
+ * authority: see claimPurchaseKey. This marker is still written into the notes
+ * atomically with the row, for two reasons that have nothing to do with racing
+ * — the office reads it on the document when it has to match an abandoned chain
+ * against a second attempt, and it is what resolves rows created before the
+ * column existed.
  */
 function purchaseIdempotencyMarker(idempotencyKey: string) {
   return `[MPL-PURCHASE:${idempotencyKey}]`;
+}
+
+/**
+ * Strip anything marker-shaped out of client-supplied text before it is joined
+ * into a field a marker also lives in.
+ *
+ * `notes` is free text from the phone and the markers are a CONTROL SURFACE:
+ * the purchase lookup's fallback arm matches them with `contains`, so a hostile
+ * or compromised terminal that writes `[MPL-PURCHASE:<another terminal's key>]`
+ * into its own slip could otherwise make that key resolve to ITS order — the
+ * victim's next POKEA either 409s on a delivery it has nothing to do with, or
+ * is driven to receive the attacker's lines instead of the lorry in front of
+ * her. A payload must not be able to write the token that protects it.
+ *
+ * Stripped rather than rejected: the manager typed a note, not an attack, and a
+ * new 400 on this path would reach her as an unmapped English card. The bracket
+ * token is the only thing removed.
+ *
+ * Belt and braces with the two structural guards, on purpose. The key column
+ * closes this for every row this module creates from now on (a stamped row can
+ * never be matched by its notes), and the count path has no notes field at all
+ * — but the sanitiser is what makes the guarantee hold at the point the text
+ * enters, rather than depending on a query staying shaped the way it is today.
+ */
+const MOBILE_POS_MARKER_TEXT = /\[MPL-[^\]]*\]?/gi;
+
+function sanitizeClientNotes(notes: string | undefined | null): string {
+  return (notes ?? '').replace(MOBILE_POS_MARKER_TEXT, '').trim();
+}
+
+/** A company-scoped unique index said no: somebody else owns this key. */
+function isUniqueViolation(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
+/**
+ * Second marker written beside the idempotency one at create: a fingerprint of
+ * what the MANAGER typed on the slip.
+ *
+ * The content guard below has to answer one question — is this retry the same
+ * delivery? — and the recorded PurchaseOrder alone cannot answer it for costs.
+ * A recorded unitCost of 50000 is either a number she typed or the product
+ * default resolved at create time, and the two are indistinguishable in the
+ * row. So the guard used to compare only the costs a retry STATES, which makes
+ * CLEARING a wrongly-typed cost read as a match: the correction is dropped and
+ * the delivery replays at the typo. Comparing the RESOLVED cost instead would
+ * break the opposite case the guard's doc protects — the office moving a
+ * default between attempts must never turn a safe replay into a failure.
+ *
+ * Recording the intent settles both. The fingerprint covers the supplier, the
+ * per-product quantity, and whether a unit cost was stated at all and what it
+ * was — never a server-resolved cost — so an omitted-versus-present cost is a
+ * real difference and a repriced product is not.
+ */
+const PURCHASE_CONTENT_MARKER_PREFIX = '[MPL-PURCHASE-CONTENT:';
+
+function purchaseContentMarker(dto: CreateMobilePosLitePurchaseDto) {
+  const byProduct = new Map<string, { quantity: number; unitCost: number | null }>();
+  for (const line of dto.lines) {
+    const existing = byProduct.get(line.productId);
+    byProduct.set(line.productId, {
+      // Same aggregation resolvePurchaseLines applies: repeated lines for one
+      // product are one bigger line, and the last stated cost wins (two
+      // DIFFERENT stated costs never survive create — resolvePurchaseLines
+      // rejects them).
+      quantity: (existing?.quantity ?? 0) + Number(line.quantity),
+      unitCost: line.unitCost != null ? Number(line.unitCost) : (existing?.unitCost ?? null),
+    });
+  }
+  const canonical = JSON.stringify({
+    supplierId: dto.supplierId,
+    lines: Array.from(byProduct, ([productId, line]) => ({
+      productId,
+      quantity: line.quantity,
+      unitCost: line.unitCost,
+    })).sort((a, b) => a.productId.localeCompare(b.productId)),
+  });
+  return `${PURCHASE_CONTENT_MARKER_PREFIX}${sha256(canonical).slice(0, 32)}]`;
 }
 
 /** The slice of a PurchaseOrder the purchase chain needs to resume/replay. */
@@ -97,7 +181,24 @@ interface PurchaseChainOrder {
   status: string;
   purchaseOrderNumber: string;
   totalAmount: unknown;
+  /** Carries both markers; read by the content guard, never by the chain steps. */
+  notes: string | null;
   lines: Array<{ productId: string; unitId: string; quantity: unknown; unitCost: unknown }>;
+}
+
+/** Where a purchase chain stopped, recorded on every exit short of a receipt. */
+type PurchaseChainStep = 'create' | 'confirm' | 'receive' | 'approve' | 'post' | 'resume';
+
+/**
+ * What the chain has done so far, carried by reference so the settle path can
+ * name the step and the document an interrupted delivery left behind — without
+ * a settle call at every rethrow, which is what let the purchase chain exit
+ * silently five different ways.
+ */
+interface PurchaseChainProgress {
+  step: PurchaseChainStep;
+  orderStatus: string;
+  grn: { id: string; status: string; grnNumber: string } | null;
 }
 
 const PURCHASE_CHAIN_SELECT = {
@@ -109,8 +210,156 @@ const PURCHASE_CHAIN_SELECT = {
   status: true,
   purchaseOrderNumber: true,
   totalAmount: true,
+  notes: true,
   lines: { select: { productId: true, unitId: true, quantity: true, unitCost: true } },
 } satisfies Prisma.PurchaseOrderSelect;
+
+/**
+ * The count flow stamps StockAdjustment.idempotencyKey (company-scoped UNIQUE)
+ * the same way the purchase flow does, and the same way for the same reason.
+ * This marker is still written into the adjustment's notes atomically with the
+ * row: it is what the office matches a document against, and what resolves rows
+ * created before the column existed. `reject()` APPENDS its reason to notes, so
+ * the fallback must search it with `contains` — the marker survives anything
+ * appended after it. Nothing client-supplied is ever joined into this field
+ * (the count DTO has no notes), which is what keeps the count path immune to
+ * the marker-planting the purchase path sanitises for.
+ */
+function stockCountIdempotencyMarker(idempotencyKey: string) {
+  return `[MPL-COUNT:${idempotencyKey}]`;
+}
+
+/** Where a count chain stopped, recorded on every non-POSTED exit. */
+type StockCountChainStep = 'create' | 'submit' | 'approve' | 'post' | 'resume';
+
+/**
+ * How old a CAPTURE may be and still be posted by this wrapper.
+ *
+ * post() applies the varianceQuantity frozen at create (counted − system read
+ * at that moment), not the counted number itself, and that is the right thing
+ * to apply: every sale, receipt and transfer between the capture and the post
+ * moves the books and the shelf together, so a delta stays true across them
+ * while re-deriving the system side on resume would silently erase them — a
+ * count of 50 taken before 40 units were sold would set the balance back to 50.
+ * Re-resolving the system side on a resume is therefore NOT the fix for a stale
+ * capture; it is a worse bug wearing the fix's clothes.
+ *
+ * What age really costs is the premise that the shelf and the books moved
+ * TOGETHER. Cross a night or a trading session and the same discrepancy can be
+ * corrected twice — a desktop count, another terminal's count, or a manual
+ * adjustment fixes the shrinkage at 07:00 and this frozen delta applies it
+ * again at 08:00 — or moved unrecorded (breakage, an unlogged transfer). No
+ * evidence available to this wrapper can tell those apart after the fact.
+ *
+ * So the capture gets a life. Six hours covers every honest retry the design
+ * invites — a storeroom count sent when the signal comes back, a count re-sent
+ * after a pool blip, a phone restarted at the counter — and refuses the one the
+ * copy on the phone can otherwise invite forever ("hesabu yako ipo salama
+ * kwenye simu hii"): last night's sheet sent this morning.
+ *
+ * THE LIFE IS MEASURED ON TWO DIFFERENT CLOCKS, because the interval at risk is
+ * capture -> post and no single clock spans it:
+ *
+ *   - CREATE (assertCaptureStillCountable, before anything exists): the gap
+ *     between the shelf being counted and this request arriving, measured on
+ *     dto.countedAt, the draft's own first-edit stamp. This is the side the
+ *     scenario above actually lives on. Capture is offline-first by design —
+ *     storerooms have no signal, the draft has no expiry, and the phone will
+ *     restore a sheet of any age — so a count taken at 18:00 and sent at 08:00
+ *     has NO row until the morning send, and its variance would be frozen
+ *     against a balance the night's trading has already moved: every overnight
+ *     sale re-appears as stock found on the shelf. Nothing is created, so
+ *     nothing is stranded and no audit row is owed; the refusal is one of this
+ *     wrapper's pre-create validations, and a recount is the only honest
+ *     recovery for a physical count that has gone cold.
+ *
+ *   - RESUME (isStaleCapture, once a row exists): the gap between that row
+ *     being created and this attempt trying to POST it, measured on the row's
+ *     own createdAt. The variance is already frozen, so what this bounds is how
+ *     long a frozen delta may wait before it is applied.
+ *
+ * Both sides obey the same rule: an age that cannot be established never
+ * refuses. countedAt is optional and phone clocks drift, so an absent,
+ * unparseable, or future-dated capture stamp falls through as "age unknown".
+ * That leaves a phone whose clock is badly WRONG able to buy itself more time —
+ * accepted deliberately: this endpoint already trusts the same phone for the
+ * counted numbers themselves, the confirm sheet prints the capture date and
+ * time for the manager before she sends, and the alternative (refusing on an
+ * unproven age) fails the recount too and strands a real shelf count.
+ *
+ * Nothing is destroyed by either refusal. On the resume side the row stays live
+ * at its own status, visible on the desktop adjustments list with an audit row
+ * naming it, so the office can still post it deliberately — exactly the human
+ * judgement an automatic post cannot supply.
+ */
+const STOCK_COUNT_MAX_CAPTURE_AGE_HOURS = 6;
+const STOCK_COUNT_MAX_CAPTURE_AGE_MS = STOCK_COUNT_MAX_CAPTURE_AGE_HOURS * 60 * 60 * 1000;
+
+/** Reason code every POS-originated count carries, so the office can filter them. */
+const MOBILE_POS_STOCK_COUNT_REASON = 'MOBILE_POS_STOCK_COUNT';
+
+/**
+ * Counts auto-post: the manager standing at the shelf is the human in the loop
+ * (blind entry, then a review step showing variance, then a threshold-gated
+ * confirm), exactly the trust level the POS purchase chain already carries.
+ *
+ * THE ESCAPE: flip this to false and the chain stops after submit(), leaving
+ * every POS count at PENDING_APPROVAL for a desktop approver holding
+ * inventory.adjustments.approve/post. Nothing else changes — the resume path
+ * treats PENDING_APPROVAL as a terminal state either way. Typed `boolean` on
+ * purpose so flipping it does not statically kill the branches below.
+ */
+const AUTO_POST_MOBILE_POS_STOCK_COUNTS: boolean = true;
+
+/** The slice of a StockAdjustment the count chain needs to resume/replay. */
+interface StockCountChainAdjustment {
+  id: string;
+  companyId: string;
+  status: string;
+  adjustmentNumber: string;
+  /**
+   * When this capture entered the system — the age the resume bound is measured
+   * against. Optional in the type because it is the ONLY field here that can
+   * decide to refuse work: a row whose createdAt somehow did not come back must
+   * fall through as "age unknown, do not refuse", never as "age zero" and never
+   * as a refusal (rule 1 of the settle path).
+   */
+  createdAt?: Date | string | null;
+  lines: Array<{
+    productId: string;
+    systemQuantity: unknown;
+    countedQuantity: unknown;
+    varianceQuantity: unknown;
+  }>;
+}
+
+/**
+ * What the count-up cost precondition reads off a product — the same two
+ * fields post() values an inbound adjustment line from. `unknown` because
+ * Prisma hands Decimals back here, exactly like the chain interfaces above.
+ */
+interface StockCountCostProduct {
+  name: string;
+  defaultPurchasePrice: unknown;
+  productFamily: { defaultPurchasePrice: unknown } | null;
+}
+
+/** Quantities only — a POS count response never carries unitCost (see stockCountResult). */
+const STOCK_COUNT_CHAIN_SELECT = {
+  id: true,
+  companyId: true,
+  status: true,
+  adjustmentNumber: true,
+  createdAt: true,
+  lines: {
+    select: {
+      productId: true,
+      systemQuantity: true,
+      countedQuantity: true,
+      varianceQuantity: true,
+    },
+  },
+} satisfies Prisma.StockAdjustmentSelect;
 
 const TERMINAL_INCLUDE = {
   company: { select: { id: true, name: true, code: true } },
@@ -249,7 +498,22 @@ export class MobilePosLiteService {
     private readonly goodsReceivedNotes: GoodsReceivedNotesService,
     private readonly codes: EntityCodeGeneratorService,
     private readonly generatedDocuments: GeneratedDocumentsService,
+    private readonly stockAdjustments: StockAdjustmentsService,
   ) {}
+
+  /**
+   * What the count chain actually reads. The module-level flag is the
+   * deployment switch; this mirror gives the PENDING_APPROVAL path a test seam
+   * that does not need a rebuild to exercise.
+   */
+  private readonly autoPostStockCounts = AUTO_POST_MOBILE_POS_STOCK_COUNTS;
+
+  /**
+   * Only ever used where the audit trail itself is unwritable — the database
+   * that would carry the record is the database that just failed. See
+   * settleNonPostedStockCount.
+   */
+  private readonly logger = new Logger(MobilePosLiteService.name);
 
   async findTerminals(query: QueryMobilePosTerminalDto, user: AuthUser) {
     this.assertCanManage(user);
@@ -875,34 +1139,57 @@ export class MobilePosLiteService {
     user: AuthUser,
   ) {
     const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
-
-    const supplier = await this.prisma.supplier.findFirst({
-      where: {
-        id: dto.supplierId,
-        companyId: terminal.companyId,
-        status: 'ACTIVE',
-        AND: [
-          { OR: [{ divisionId: terminal.divisionId }, { divisionId: null }] },
-          { OR: [{ branchId: terminal.branchId }, { branchId: null }] },
-        ],
-      },
-      select: { id: true },
-    });
-    if (!supplier) {
-      throw new BadRequestException(
-        'The selected supplier is not available for this terminal branch',
-      );
-    }
-
-    const lines = await this.resolvePurchaseLines(terminal, dto.lines);
     const marker = purchaseIdempotencyMarker(dto.idempotencyKey);
 
-    // Replay/resume: a purchase order carrying this marker means the same
-    // request already ran (fully or partially). Drive it to completion instead
-    // of creating a duplicate — an offline-retried purchase never double-receives.
-    let order = await this.findPurchaseByMarker(terminal.companyId, marker);
+    // Replay/resume BEFORE validation, exactly like createStockCount and for
+    // exactly the same reason: a purchase order carrying this marker means the
+    // same request already ran (fully or partially), and the branch really does
+    // have the crates. Re-validating first meant a product deactivated
+    // overnight — or a supplier moved to another branch, or a cleared default
+    // purchase price on a line she typed no cost for — turned a safe replay
+    // into a 400 for a delivery that was already received, once per retry tap.
+    // Idempotency resolution comes first; later data changes can then only
+    // affect requests that still have work to do.
+    let order = await this.findPurchaseByKey(terminal.companyId, dto.idempotencyKey);
+
+    if (order) {
+      // The key matched — but a matching key is only a claim that this is the
+      // SAME delivery, and the phone can no longer be trusted to guarantee it.
+      // Verify before replaying. See assertPurchaseMatchesRecordedOrder.
+      await this.assertPurchaseMatchesOrSettle(order, dto, terminal, user);
+    }
 
     if (!order) {
+      const supplier = await this.prisma.supplier.findFirst({
+        where: {
+          id: dto.supplierId,
+          companyId: terminal.companyId,
+          status: 'ACTIVE',
+          AND: [
+            { OR: [{ divisionId: terminal.divisionId }, { divisionId: null }] },
+            { OR: [{ branchId: terminal.branchId }, { branchId: null }] },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!supplier) {
+        throw new BadRequestException(
+          'The selected supplier is not available for this terminal branch',
+        );
+      }
+
+      const lines = await this.resolvePurchaseLines(terminal, dto.lines);
+      const notes = [
+        // Sanitised, not trimmed only: the manager's note lands in the same
+        // field as the markers below, and a payload may not write the token
+        // that protects it. See sanitizeClientNotes.
+        sanitizeClientNotes(dto.notes),
+        `Created from Mobile POS Lite (${terminal.terminalCode})`,
+        marker,
+        purchaseContentMarker(dto),
+      ]
+        .filter(Boolean)
+        .join('\n');
       const created = await this.purchaseOrders.create(
         {
           companyId: terminal.companyId,
@@ -912,18 +1199,12 @@ export class MobilePosLiteService {
           purchaseType: PurchaseType.STOCK_PURCHASE,
           orderDate: new Date().toISOString(),
           currency: CurrencyCode.TZS,
-          notes: [
-            dto.notes?.trim(),
-            `Created from Mobile POS Lite (${terminal.terminalCode})`,
-            marker,
-          ]
-            .filter(Boolean)
-            .join('\n'),
+          notes,
           lines,
         },
         user,
       );
-      order = {
+      const record: PurchaseChainOrder = {
         id: created.id,
         companyId: created.companyId,
         divisionId: created.divisionId,
@@ -932,31 +1213,56 @@ export class MobilePosLiteService {
         status: created.status,
         purchaseOrderNumber: created.purchaseOrderNumber,
         totalAmount: created.totalAmount,
+        notes,
         lines: created.lines,
       };
+      order = record;
 
-      // Best-effort duplicate-create race check: with no unique index available
-      // on the marker, two concurrent requests with the same key can both pass
-      // the pre-check and create twin DRAFT POs. Deterministically keep the
-      // earliest one; the loser soft-deletes its own (still stockless) draft
-      // and resumes the winner's chain.
-      const twins = await this.prisma.purchaseOrder.findMany({
-        where: { companyId: terminal.companyId, notes: { contains: marker } },
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        select: { id: true },
-      });
-      if (twins.length > 1 && twins[0].id !== order.id) {
-        await this.prisma.purchaseOrder.delete({ where: { id: order.id } });
-        order = await this.findPurchaseByMarker(terminal.companyId, marker);
-        if (!order) {
-          throw new ConflictException(
-            'This purchase is being recorded by another request. Retry in a moment.',
-          );
+      // From here on a PO exists, so every exit is settled: a connection drop
+      // in this window leaves a marker-anchored DRAFT order that nothing would
+      // otherwise record. It has received nothing and the frozen key resumes
+      // it, but the office must still be able to recognise it.
+      try {
+        // Claim the key. The DATABASE decides the winner of a create race now:
+        // the twin check this replaced was two reads, and a read cannot settle
+        // it — Postgres stamps createdAt at transaction START, so the request
+        // that started earlier can commit later and each side can see a set in
+        // which it is the earliest. Two live orders under one key each received
+        // the same lorry.
+        if (!(await this.claimPurchaseKey(record.id, dto.idempotencyKey))) {
+          const winner = await this.findPurchaseByKey(terminal.companyId, dto.idempotencyKey);
+          if (winner && winner.id !== record.id) {
+            // The loser drops its own (still stockless) draft and resumes the
+            // winner's chain. Looked up BEFORE deleting, so a lookup that comes
+            // back empty cannot leave this request with nothing at all.
+            await this.prisma.purchaseOrder.delete({ where: { id: record.id } });
+            order = winner;
+          }
+          // No winner visible while the index says the key is taken means the
+          // holder is soft-deleted (only a stockless order can be). Keep our
+          // own live order and drive it: it has received nothing twice, its
+          // notes still carry the marker, and refusing here would strand a
+          // delivery that is standing at the door.
         }
+      } catch (error) {
+        await this.settleUnfinishedPurchase(record, terminal, user, error, {
+          step: 'create',
+          orderStatus: String(record.status),
+          grn: null,
+        });
+        throw error;
+      }
+
+      if (order !== record) {
+        // Same rule as the pre-check above: about to drive somebody else's
+        // order, so verify it is this delivery before touching it. Outside the
+        // settle-the-loser block on purpose — the row this refusal is ABOUT is
+        // the winner, and that is the one the office has to be able to see.
+        await this.assertPurchaseMatchesOrSettle(order, dto, terminal, user);
       }
     }
 
-    const result = await this.resumePurchaseChain(order, terminal, user);
+    const result = await this.resumePurchaseChain(order, terminal, user, marker);
 
     await this.prisma.mobilePosTerminal.update({
       where: { id: terminal.id },
@@ -973,6 +1279,184 @@ export class MobilePosLiteService {
         terminalCode: terminal.terminalCode,
         purchaseOrderNumber: result.purchaseOrderNumber,
         grnNumber: result.grnNumber,
+      },
+    });
+    return result;
+  }
+
+  /**
+   * Manager-recorded physical stock count. Reuses the core inventory chain — a
+   * StockAdjustment driven create -> submit -> approve -> post — by calling
+   * StockAdjustmentsService with the authenticated manager. That service scopes
+   * by company access only (create asserts company WRITE, every other step goes
+   * through findOne(..., WRITE); the inventory.adjustments.* permission codes
+   * live on its controller), so the controller-level
+   * mobile_pos_lite.stock_count is the sole permission gate on this path.
+   *
+   * The client sends counted quantities and nothing else: the system side is
+   * read here from inventoryBalance.quantityOnHand for the TERMINAL's branch on
+   * the attempt that CREATES the count, so no cost ever travels to or from the
+   * phone and nothing the client believes about stock can reach the books. What
+   * post() then applies is the variance frozen at that moment, which is why a
+   * capture also has a life: see STOCK_COUNT_MAX_CAPTURE_AGE_HOURS, enforced on
+   * both sides of that freeze — assertCaptureStillCountable before a row exists
+   * (capture -> create), isStaleCapture before an existing one is posted
+   * (create -> post).
+   *
+   * Atomicity: as with purchases, each step is atomic inside the core service's
+   * own transaction and the chain as a whole is not one DB transaction. Every
+   * retry carrying the same idempotencyKey RESUMES the interrupted chain from
+   * its recorded state, and post()'s atomic APPROVED->POSTED claim makes a
+   * second stock movement against the same count impossible.
+   *
+   * Because the chain is not one transaction, an interrupted chain leaves a row
+   * behind at whatever state it reached. That row is NOT an orphan: the client
+   * freezes its idempotency key on the first send and persists it with the
+   * draft until a 2xx or an explicit discard, so the next attempt finds this
+   * row by marker and drives it on. The wrapper's job is therefore to keep it
+   * resumable and to make it visible, and it has exactly three duties:
+   *   - assertCaptureStillCountable / resolveStockCountLines /
+   *     assertCountUpsCanBeValued refuse BEFORE anything is created. This is
+   *     the only place that can know a request can never succeed as it stands,
+   *     and by construction it has nothing to undo;
+   *   - assertCountMatchesRecordedAdjustment refuses to replay a marker hit
+   *     whose numbers are not the numbers just sent, because a frozen key is a
+   *     claim of sameness and only the server can check it;
+   *   - settleNonPostedStockCount writes an audit row on EVERY exit from the
+   *     chain that did not reach POSTED — create, submit, approve, post, or a
+   *     row moved out from under it — naming the step, so the office can tell
+   *     an abandoned chain from a routine pending count, and it still writes
+   *     one when its own evidence queries fail. It never destroys a row and
+   *     never closes a key: whatever happened after the row existed is a
+   *     property of the moment or of the company's configuration as far as this
+   *     wrapper can know, so it stays resumable and the office keeps something
+   *     to post.
+   * The one thing none of this can promise is a record when the database is
+   * unreachable altogether; there the frozen key alone carries the guarantee,
+   * which is exactly what it exists for.
+   */
+  async createStockCount(
+    terminalCode: string | undefined,
+    deviceSecret: string | undefined,
+    dto: CreateMobilePosLiteStockCountDto,
+    user: AuthUser,
+  ) {
+    const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
+    const marker = stockCountIdempotencyMarker(dto.idempotencyKey);
+
+    // Replay/resume BEFORE validation: an adjustment carrying this key means
+    // the same request already ran (fully or partially). Drive it to completion
+    // instead of counting twice — and a product deactivated since the original
+    // request must not turn a safe retry into a 400.
+    let adjustment = await this.findStockCountByKey(terminal.companyId, dto.idempotencyKey);
+
+    if (adjustment) {
+      // The key matched — but a matching key is only a CLAIM that this is the
+      // same sheet, and the phone can no longer be trusted to guarantee it (its
+      // key is frozen across edits on purpose, so a corrected sheet rides the
+      // original key). Verify before replaying. See
+      // assertCountMatchesRecordedAdjustment.
+      await this.assertCountMatchesOrSettle(adjustment, dto, terminal, user);
+    }
+
+    if (!adjustment) {
+      // The capture's life, create side: this is a FIRST send, so the variance
+      // is about to be frozen against the balance as it stands NOW, and a sheet
+      // counted before the shop traded would re-book every sale since as stock
+      // found on the shelf. Refused before anything exists — nothing to strand,
+      // nothing to settle, and a recount is the honest recovery.
+      // See STOCK_COUNT_MAX_CAPTURE_AGE_HOURS.
+      this.assertCaptureStillCountable(dto);
+
+      const lines = await this.resolveStockCountLines(terminal, dto.lines);
+      const created = await this.stockAdjustments.create(
+        {
+          companyId: terminal.companyId,
+          divisionId: terminal.divisionId,
+          branchId: terminal.branchId,
+          reason: MOBILE_POS_STOCK_COUNT_REASON,
+          notes:
+            `${marker} Stock count from terminal ${terminal.terminalCode}` +
+            (dto.countedAt ? ` captured ${dto.countedAt}` : ''),
+          lines,
+        },
+        user,
+      );
+      const record: StockCountChainAdjustment = {
+        id: created.id,
+        companyId: created.companyId,
+        status: created.status,
+        adjustmentNumber: created.adjustmentNumber,
+        createdAt: created.createdAt,
+        lines: created.lines,
+      };
+      adjustment = record;
+
+      // Everything from here to the chain runs INSIDE the settle path, because
+      // the row now exists: a connection drop in the twin window (the ordinary
+      // failure, since it is the same pool the create just used) would
+      // otherwise leave a marker-anchored DRAFT with no record that a terminal
+      // count stopped there — the one hole in "an audit row on every exit".
+      try {
+        // Claim the key, verbatim the purchase mechanic and for the same
+        // reason: the twin check this replaced was two reads racing each other,
+        // and two reads cannot decide it — Postgres stamps createdAt at
+        // transaction START, so each side of a create race could see itself as
+        // the earliest and drive its own row, applying one shelf's variance
+        // twice. The unique index decides it in one write.
+        if (!(await this.claimStockCountKey(record.id, dto.idempotencyKey))) {
+          const winner = await this.findStockCountByKey(terminal.companyId, dto.idempotencyKey);
+          if (winner && winner.id !== record.id) {
+            // The loser retires its own (still unposted) draft and resumes the
+            // winner's chain. Soft, because that is what deletion means for
+            // this entity — the create already wrote an audit log pointing at
+            // the row — and looked up BEFORE the retire, so an empty lookup
+            // cannot leave this request holding nothing.
+            await this.prisma.stockAdjustment.update({
+              where: { id: record.id },
+              data: { deletedAt: new Date() },
+            });
+            adjustment = winner;
+          }
+          // No live winner while the index says the key is taken means the
+          // holder was soft-deleted, and only a DRAFT or REJECTED adjustment
+          // can be: it applied nothing. Keep our own row and drive it rather
+          // than refuse a count the manager is standing over.
+        }
+      } catch (error) {
+        await this.settleNonPostedStockCount(record, terminal, user, error, 'create', {
+          status: record.status,
+          notes: null,
+        });
+        throw error;
+      }
+
+      if (adjustment !== record) {
+        // Same rule as the pre-check above: about to drive somebody else's row,
+        // so verify it is this sheet before touching it. Outside the
+        // settle-the-loser block on purpose — the row this refusal is ABOUT is
+        // the winner, and that is the one the office has to be able to see.
+        await this.assertCountMatchesOrSettle(adjustment, dto, terminal, user);
+      }
+    }
+
+    const result = await this.resumeStockCountChain(adjustment, terminal, user);
+
+    await this.prisma.mobilePosTerminal.update({
+      where: { id: terminal.id },
+      data: { lastSeenAt: new Date() },
+    });
+    await this.auditLogs.log({
+      action: 'MOBILE_POS_LITE_STOCK_COUNT_COMPLETED',
+      entityType: 'StockAdjustment',
+      entityId: result.id,
+      userId: user.id,
+      companyId: terminal.companyId,
+      severity: AuditSeverity.MEDIUM,
+      newValue: {
+        terminalCode: terminal.terminalCode,
+        adjustmentNumber: result.adjustmentNumber,
+        status: result.status,
       },
     });
     return result;
@@ -1291,13 +1775,176 @@ export class MobilePosLiteService {
     });
   }
 
-  private async findPurchaseByMarker(
+  /**
+   * The content guard on a replayed purchase.
+   *
+   * A marker hit used to be taken as proof that the incoming body is the same
+   * delivery, and resumePurchaseChain then drove the RECORDED order without
+   * looking at the dto at all. That is only safe while the client guarantees
+   * one key per slip content, and it cannot: whichever way the phone's key
+   * policy leans, one of the two failure modes is live. Freeze the key across
+   * edits and a corrected slip is silently discarded — the sugar the manager
+   * added after the lost response never arrives, and the muhuri stamps anyway.
+   * Re-mint on edit and the marker misses, so the SAME delivery is recorded a
+   * SECOND time: two POs, two GRNs, two payables against the supplier, stock
+   * the branch never received, and nothing linking the pair.
+   *
+   * So the server decides. When the recorded order and the incoming body
+   * disagree on anything the manager actually typed — the supplier, which
+   * products, how many, or a cost she entered herself — this is not a replay
+   * and it is not a new delivery either: it is a slip that was already received
+   * once, being re-sent changed. Neither replaying nor creating is right, so
+   * refuse and point at the office, which can see both documents.
+   *
+   * Server-RESOLVED costs are deliberately not compared: a line that carried no
+   * unitCost is priced from the product (then family) default at resolve time,
+   * and the office moving that default between the original send and a retry
+   * must not turn a legitimate replay into a conflict.
+   *
+   * That is why the comparison is made against the CONTENT MARKER written at
+   * create (purchaseContentMarker) whenever the recorded order carries one: the
+   * marker fingerprints what the manager typed, so a cost she REMOVED — the
+   * ordinary correction after typing 50000 for 5000 — is a real difference and
+   * 409s like any other edit, while a repriced product still replays. The
+   * structural comparison below is the fallback for orders created before the
+   * marker existed; it cannot see a cleared cost (an empty explicit-cost set
+   * matches vacuously), which is precisely the hole the marker closes.
+   */
+  private assertPurchaseMatchesRecordedOrder(
+    order: PurchaseChainOrder,
+    dto: CreateMobilePosLitePurchaseDto,
+  ) {
+    if (order.notes?.includes(PURCHASE_CONTENT_MARKER_PREFIX)) {
+      if (!order.notes.includes(purchaseContentMarker(dto))) {
+        throw new ConflictException(
+          'The earlier slip for this delivery was already received — check with the office before recording it again.',
+        );
+      }
+      return;
+    }
+
+    const quantities = new Map<string, number>();
+    const explicitCosts = new Map<string, number>();
+    for (const line of dto.lines) {
+      quantities.set(line.productId, (quantities.get(line.productId) ?? 0) + Number(line.quantity));
+      if (line.unitCost != null) explicitCosts.set(line.productId, Number(line.unitCost));
+    }
+
+    const recorded = new Map(
+      order.lines.map((line) => [
+        line.productId,
+        { quantity: Number(line.quantity), unitCost: Number(line.unitCost) },
+      ]),
+    );
+
+    const matches =
+      order.supplierId === dto.supplierId &&
+      recorded.size === quantities.size &&
+      Array.from(quantities).every(
+        ([productId, quantity]) => recorded.get(productId)?.quantity === quantity,
+      ) &&
+      Array.from(explicitCosts).every(
+        ([productId, unitCost]) => recorded.get(productId)?.unitCost === unitCost,
+      );
+
+    if (!matches) {
+      throw new ConflictException(
+        'The earlier slip for this delivery was already received — check with the office before recording it again.',
+      );
+    }
+  }
+
+  /**
+   * The content guard with the office's copy of the argument attached.
+   *
+   * The refusal names the office as the recovery ("ulizia ofisi kabla ya kutuma
+   * tena"), so the office has to be able to SEE it: a terminal holding a slip
+   * it believes was never received is disputing a delivery this company has
+   * recorded as complete, and from the desktop that GRN looks like any other
+   * posted receipt. Without this line the sentence sends the manager to a desk
+   * that has no idea why she is there. The count path settles the identical
+   * case, and resumePurchaseChain's contract — every exit that is not a
+   * received delivery is settled first — is only true with this here.
+   */
+  private async assertPurchaseMatchesOrSettle(
+    order: PurchaseChainOrder,
+    dto: CreateMobilePosLitePurchaseDto,
+    terminal: Terminal,
+    user: AuthUser,
+  ) {
+    try {
+      this.assertPurchaseMatchesRecordedOrder(order, dto);
+    } catch (error) {
+      await this.settleUnfinishedPurchase(order, terminal, user, error, {
+        step: 'resume',
+        orderStatus: String(order.status),
+        grn: null,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Stamp this key on the order we just created, and let the unique index
+   * decide whether we own it. `true` means we do; `false` means somebody else
+   * got there first and this request is the loser of a create race.
+   *
+   * Written as a claim rather than checked as a read on purpose: a read cannot
+   * settle a create race at all (see the call site), and this is the only step
+   * in the chain whose outcome is decided by the database rather than by
+   * whichever query happened to run first.
+   */
+  private async claimPurchaseKey(orderId: string, idempotencyKey: string): Promise<boolean> {
+    try {
+      await this.prisma.purchaseOrder.update({
+        where: { id: orderId },
+        data: { idempotencyKey },
+      });
+      return true;
+    } catch (error) {
+      if (isUniqueViolation(error)) return false;
+      throw error;
+    }
+  }
+
+  /**
+   * The order this key already created, if any.
+   *
+   * The stamped column is the authority. The notes marker is a FALLBACK, for
+   * the rows this module created before that column existed — a phone can be
+   * holding a frozen key across the deploy, and failing to resume such an order
+   * receives the same lorry a second time — and for the narrow window where the
+   * stamp itself failed.
+   *
+   * The fallback only ever matches rows that carry NO key of their own, which
+   * is what stops a marker planted in somebody's free text from taking a
+   * stamped order's place: every order this module records from now on is
+   * stamped, so its notes are no longer a way in. Client text is sanitised at
+   * the other end too (sanitizeClientNotes).
+   */
+  private async findPurchaseByKey(
     companyId: string,
-    marker: string,
+    idempotencyKey: string,
   ): Promise<PurchaseChainOrder | null> {
+    const marker = purchaseIdempotencyMarker(idempotencyKey);
     return this.prisma.purchaseOrder.findFirst({
-      where: { companyId, notes: { contains: marker } },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      where: {
+        companyId,
+        OR: [
+          { idempotencyKey },
+          { AND: [{ idempotencyKey: null }, { notes: { contains: marker } }] },
+        ],
+      },
+      // Stamped first, and only then the oldest: the row that OWNS the key is
+      // the one to drive. Without this a loser whose own delete failed could
+      // outrank the winner on createdAt — it is the earlier row by definition,
+      // since the race is lost by committing second — and a later retry would
+      // drive the stockless twin and receive the same lorry all over again.
+      orderBy: [
+        { idempotencyKey: { sort: 'asc', nulls: 'last' } },
+        { createdAt: 'asc' },
+        { id: 'asc' },
+      ],
       select: PURCHASE_CHAIN_SELECT,
     });
   }
@@ -1309,8 +1956,48 @@ export class MobilePosLiteService {
    * after a mid-chain crash, and on a full replay (where it short-circuits to
    * the recorded result). Concurrent retries that lose a state-transition race
    * re-read the entity and continue instead of failing.
+   *
+   * Every exit that is not a received delivery goes through
+   * settleUnfinishedPurchase first, for exactly the reason the count chain has
+   * one: an interrupted chain leaves a CONFIRMED purchase order with a DRAFT or
+   * APPROVED goods-received note behind it, and that GRN is indistinguishable
+   * on the desktop from any other receipt waiting to be posted. The office
+   * posts it as routine the next morning; meanwhile the phone's own recovery
+   * from a stuck slip is to empty the form, which drops the frozen key, so the
+   * same lorry is re-typed under a fresh key and received a SECOND time — two
+   * GRNs, two payables, double stock, and nothing linking the pair. The audit
+   * row (and the idempotency marker now written into the GRN's notes) is what
+   * lets the office tell an abandoned chain from a real pending one.
    */
-  private async resumePurchaseChain(order: PurchaseChainOrder, terminal: Terminal, user: AuthUser) {
+  private async resumePurchaseChain(
+    order: PurchaseChainOrder,
+    terminal: Terminal,
+    user: AuthUser,
+    marker: string,
+  ) {
+    const progress: PurchaseChainProgress = {
+      step: 'resume',
+      orderStatus: String(order.status),
+      grn: null,
+    };
+    try {
+      return await this.drivePurchaseChain(order, terminal, user, marker, progress);
+    } catch (error) {
+      // One wrapper around the whole chain rather than a settle at each throw
+      // site: a step added later cannot forget to record itself, which is the
+      // hole this had before — every rethrow in here was silent.
+      await this.settleUnfinishedPurchase(order, terminal, user, error, progress);
+      throw error;
+    }
+  }
+
+  private async drivePurchaseChain(
+    order: PurchaseChainOrder,
+    terminal: Terminal,
+    user: AuthUser,
+    marker: string,
+    progress: PurchaseChainProgress,
+  ) {
     let status = String(order.status);
     if (status === 'CANCELLED' || status === 'VOIDED') {
       throw new ConflictException(
@@ -1319,6 +2006,7 @@ export class MobilePosLiteService {
     }
 
     if (status === 'DRAFT') {
+      progress.step = 'confirm';
       try {
         await this.purchaseOrders.confirm(order.id, user);
         status = 'CONFIRMED';
@@ -1331,6 +2019,7 @@ export class MobilePosLiteService {
         if (!fresh || fresh.status === 'DRAFT') throw error;
         status = fresh.status;
       }
+      progress.orderStatus = status;
     }
 
     let grn = await this.prisma.goodsReceivedNote.findFirst({
@@ -1338,6 +2027,7 @@ export class MobilePosLiteService {
       orderBy: { createdAt: 'asc' },
       select: { id: true, status: true, grnNumber: true },
     });
+    progress.grn = grn ? { ...grn, status: String(grn.status) } : null;
 
     if (!grn) {
       if (status === 'RECEIVED') {
@@ -1345,6 +2035,7 @@ export class MobilePosLiteService {
         // an operations user). Never receive again — replay what exists.
         return this.purchaseResult(order, null);
       }
+      progress.step = 'receive';
       const grnNumber = await this.nextGrnNumber(order.companyId);
       const created = await this.goodsReceivedNotes.create(
         {
@@ -1355,7 +2046,10 @@ export class MobilePosLiteService {
           supplierId: order.supplierId ?? undefined,
           grnNumber,
           receivedDate: new Date().toISOString(),
-          notes: `Created from Mobile POS Lite (${terminal.terminalCode})`,
+          // The marker rides into the GRN too. The office reads an abandoned
+          // receipt here, not on the PO, and a receipt that names the key can
+          // be matched against the audit row and against any second attempt.
+          notes: `Created from Mobile POS Lite (${terminal.terminalCode}) ${marker}`,
           lines: order.lines.map((line) => ({
             productId: line.productId,
             unitId: line.unitId,
@@ -1369,9 +2063,11 @@ export class MobilePosLiteService {
         user,
       );
       grn = { id: created.id, status: created.status, grnNumber: created.grnNumber };
+      progress.grn = { ...grn, status: String(grn.status) };
     }
 
     if (String(grn.status) === 'DRAFT') {
+      progress.step = 'approve';
       try {
         await this.goodsReceivedNotes.approve(grn.id, user);
         grn = { ...grn, status: 'APPROVED' as typeof grn.status };
@@ -1383,8 +2079,10 @@ export class MobilePosLiteService {
         if (!fresh || String(fresh.status) === 'DRAFT') throw error;
         grn = { ...grn, status: fresh.status };
       }
+      progress.grn = { ...grn, status: String(grn.status) };
     }
     if (String(grn.status) === 'APPROVED') {
+      progress.step = 'post';
       try {
         await this.goodsReceivedNotes.post(grn.id, user);
         grn = { ...grn, status: 'POSTED' as typeof grn.status };
@@ -1396,8 +2094,10 @@ export class MobilePosLiteService {
         if (!fresh || String(fresh.status) !== 'POSTED') throw error;
         grn = { ...grn, status: fresh.status };
       }
+      progress.grn = { ...grn, status: String(grn.status) };
     }
     if (String(grn.status) !== 'POSTED') {
+      progress.step = 'resume';
       throw new ConflictException(
         'The goods received note behind this purchase is no longer postable',
       );
@@ -1406,12 +2106,791 @@ export class MobilePosLiteService {
     return this.purchaseResult(order, grn.grnNumber);
   }
 
+  /**
+   * The purchase chain's twin of settleNonPostedStockCount, and it obeys the
+   * same two rules: it destroys nothing, and it never lets its own failure
+   * replace the manager's. It only ever writes a line.
+   *
+   * What that line has to carry is where the delivery stopped and what it left
+   * behind, because the two are what tell an abandoned chain from a routine
+   * one: a chain that stopped at `confirm` left no receipt at all and the next
+   * send resumes it, while one that stopped at `post` left an APPROVED GRN that
+   * a desk will post as ordinary work — the same crates, received twice, if the
+   * phone has meanwhile re-typed the lorry under a new key.
+   */
+  private async settleUnfinishedPurchase(
+    order: PurchaseChainOrder,
+    terminal: Terminal,
+    user: AuthUser,
+    error: unknown,
+    progress: PurchaseChainProgress,
+  ) {
+    const failedBecause = error instanceof Error ? error.message : String(error);
+    try {
+      await this.auditLogs.log({
+        action: 'MOBILE_POS_LITE_PURCHASE_NOT_RECEIVED',
+        entityType: 'PurchaseOrder',
+        entityId: order.id,
+        userId: user.id,
+        companyId: order.companyId,
+        severity: AuditSeverity.HIGH,
+        oldValue: { status: progress.orderStatus },
+        newValue: {
+          terminalCode: terminal.terminalCode,
+          purchaseOrderNumber: order.purchaseOrderNumber,
+          stoppedAt: progress.step,
+          grnId: progress.grn?.id ?? null,
+          grnNumber: progress.grn?.grnNumber ?? null,
+          grnStatus: progress.grn?.status ?? null,
+          failedBecause,
+        },
+      });
+    } catch (logError) {
+      // Last resort, exactly like the count's: the manager's own failure is
+      // what must reach her, so this never propagates and never masks it. The
+      // process log at least lets an operator find the chain by its PO number.
+      this.logger.error(
+        `Mobile POS purchase ${order.purchaseOrderNumber} stopped at ${progress.step} and its audit log could not be written: ${
+          logError instanceof Error ? logError.message : String(logError)
+        }. Original failure: ${failedBecause}`,
+      );
+    }
+  }
+
   private purchaseResult(order: PurchaseChainOrder, grnNumber: string | null) {
     return {
       id: order.id,
       purchaseOrderNumber: order.purchaseOrderNumber,
       grnNumber,
       totalAmount: Number(order.totalAmount),
+    };
+  }
+
+  /**
+   * Turn counted lines into stock-adjustment lines. Every field the core DTO
+   * needs beyond the counted number is resolved here from the terminal's own
+   * scope, so nothing the phone sends can widen it.
+   */
+  private async resolveStockCountLines(
+    terminal: Terminal,
+    lines: CreateMobilePosLiteStockCountDto['lines'],
+  ) {
+    const countedByProduct = new Map<string, number>();
+    for (const line of lines) {
+      // Counts do not sum like sale/purchase quantities do: two lines for one
+      // product are contradictory counts of the same shelf, not a bigger count.
+      if (countedByProduct.has(line.productId)) {
+        throw new BadRequestException(
+          `Product ${line.productId} was counted more than once in this stock count`,
+        );
+      }
+      countedByProduct.set(line.productId, Number(line.countedQuantity));
+    }
+    const productIds = Array.from(countedByProduct.keys());
+
+    const products = await this.prisma.product.findMany({
+      where: {
+        id: { in: productIds },
+        companyId: terminal.companyId,
+        status: 'ACTIVE',
+        AND: [{ OR: [{ divisionId: terminal.divisionId }, { divisionId: null }] }],
+      },
+      select: {
+        id: true,
+        name: true,
+        baseUnitId: true,
+        productType: true,
+        trackInventory: true,
+        // Read for the count-up precondition below, never for the payload: no
+        // buying cost may ride on a POS count in either direction.
+        defaultPurchasePrice: true,
+        productFamily: { select: { defaultPurchasePrice: true } },
+      },
+    });
+    const productsById = new Map(products.map((product) => [product.id, product]));
+
+    // Rejections NAME the product: the draft on the phone is keyed by
+    // productId, so a rep can only drop the offending line and resubmit if the
+    // error says which line it is.
+    for (const productId of productIds) {
+      const product = productsById.get(productId);
+      if (!product) {
+        throw new BadRequestException(`Product ${productId} is not available for this terminal`);
+      }
+      if (!isStockItem(product)) {
+        throw new BadRequestException(
+          `${product.name} (${productId}) is not a stock item and cannot be counted`,
+        );
+      }
+    }
+
+    // Server-authoritative system side, read for the TERMINAL's branch. It is
+    // quantityOnHand and NOT onHand - reserved: a physical count counts
+    // physical stock, so reservations are irrelevant here (unlike Stoo's
+    // `available`). The client never sends this number, and the review-step
+    // preview it computed against its own snapshot is only ever a preview.
+    const balances = await this.prisma.inventoryBalance.findMany({
+      where: { branchId: terminal.branchId, productId: { in: productIds } },
+      select: { productId: true, quantityOnHand: true },
+    });
+    const onHandByProduct = new Map(
+      balances.map((balance) => [balance.productId, Number(balance.quantityOnHand)]),
+    );
+
+    // Built from the counted map itself, never re-looked-up with a `?? 0`
+    // fallback: 0 is a real count here, so a fallback zero and a counted zero
+    // must never be able to look alike.
+    const resolved = Array.from(countedByProduct, ([productId, countedQuantity]) => ({
+      productId,
+      // No balance row = this branch never moved the product: honest zero, and
+      // the whole counted quantity is the variance.
+      systemQuantity: onHandByProduct.get(productId) ?? 0,
+      countedQuantity,
+      unitId: productsById.get(productId)!.baseUnitId,
+      // unitCost is deliberately absent: post() values a count-up from the
+      // product's weighted-average cost (then the default purchase price), and
+      // no buying cost may ever ride on a POS payload.
+    }));
+
+    await this.assertCountUpsCanBeValued(terminal, resolved, productsById);
+
+    return resolved;
+  }
+
+  /**
+   * The count-up precondition, checked BEFORE anything is created.
+   *
+   * post() values an inbound (variance > 0) line at the branch weighted-average
+   * cost, then the product's defaultPurchasePrice, then the family's, and
+   * throws `Stock add for <name> must include a unit cost greater than zero`
+   * when none of them is > 0 (stock-adjustments.service.ts, inbound branch of
+   * the post transaction). That throw lands AFTER this wrapper has already
+   * driven create -> submit -> approve, and post()'s transaction only rolls
+   * back its own APPROVED->POSTED claim — so the count would settle at APPROVED
+   * with every line intact: an orphan a desktop user could post by hand,
+   * applying every variance a second time while the phone (which re-mints its
+   * key as soon as the sheet is edited) sends a second count. Resolving the
+   * SAME precedence here turns that into one clear 400 naming the product,
+   * with nothing created. spec-inventory §7 case 2 also depends on this being
+   * a cost check and not a balance check: a product with no inventoryBalance
+   * row counts up fine as long as a default price values it.
+   *
+   * Only count-UPS need a cost — post() skips zero-variance lines and relieves
+   * a count-down at the balance's own average — so this can only run once the
+   * system side above is known. averageCost is read in its own query rather
+   * than merged into the quantityOnHand read: these numbers are a precondition
+   * that never reaches the returned lines, the response, or the phone, and
+   * keeping the two reads apart keeps that visibly true.
+   */
+  private async assertCountUpsCanBeValued(
+    terminal: Terminal,
+    lines: Array<{ productId: string; systemQuantity: number; countedQuantity: number }>,
+    productsById: Map<string, StockCountCostProduct>,
+  ) {
+    const countUpProductIds = lines
+      .filter((line) => line.countedQuantity > line.systemQuantity)
+      .map((line) => line.productId);
+    if (!countUpProductIds.length) return;
+
+    const costRows = await this.prisma.inventoryBalance.findMany({
+      where: { branchId: terminal.branchId, productId: { in: countUpProductIds } },
+      select: { productId: true, averageCost: true },
+    });
+    const averageCostByProduct = new Map(
+      costRows.map((row) => [row.productId, Number(row.averageCost)]),
+    );
+
+    for (const productId of countUpProductIds) {
+      const product = productsById.get(productId)!;
+      // Valued stock at this branch already prices the added units.
+      if ((averageCostByProduct.get(productId) ?? 0) > 0) continue;
+      // Mirrors post() including its ordering subtlety: a product default that
+      // EXISTS but is zero wins over the family price and then fails the > 0
+      // test — the family is consulted only when the product's own price is
+      // null. positivePrice() would quietly fall through, which would put the
+      // rejection back inside post() where it strands the count.
+      const fallback =
+        product.defaultPurchasePrice != null
+          ? Number(product.defaultPurchasePrice)
+          : product.productFamily?.defaultPurchasePrice != null
+            ? Number(product.productFamily.defaultPurchasePrice)
+            : undefined;
+      if (!fallback || fallback <= 0) {
+        // Named like every other rejection on this path: the draft on the phone
+        // is keyed by productId, and the manager cannot supply a cost from the
+        // POS, so the copy has to point at the office.
+        throw new BadRequestException(
+          `${product.name} (${productId}) has no buying price on record and cannot be counted up — the office must set one first`,
+        );
+      }
+    }
+  }
+
+  /**
+   * The content guard on a replayed count — the count's twin of
+   * assertPurchaseMatchesRecordedOrder, and it exists for the same reason.
+   *
+   * A marker hit used to be taken as proof that the incoming body is the same
+   * sheet, and resumeStockCountChain then drove the RECORDED adjustment without
+   * looking at the dto at all. That is only safe while the client guarantees
+   * one key per sheet content, and it cannot: the key is now frozen from the
+   * first send until a 2xx or an explicit discard — it has to be, or a phone
+   * that lost the response mints a second key and counts the branch twice — so
+   * an edit made WHILE waiting rides the original key. Without this guard the
+   * ordinary correction is silently destroyed: the manager keys 50 for a shelf
+   * of 5, the response is lost, she spots it and fixes it, taps TUMA again, and
+   * the wrapper posts the recorded +45 and stamps the muhuri over it. She sees
+   * success; the shelf and the books now disagree by 45 units with no record
+   * that anyone ever disagreed.
+   *
+   * So the server decides. When the recorded count and the incoming body
+   * disagree on ANY counted number — a line's quantity, a line she added, a
+   * line she removed — this is neither a replay nor a new count: it is a sheet
+   * that was already sent, being sent changed. Refuse and point at the office,
+   * which can see the recorded document; the phone's own recovery is a fresh
+   * count, which is worth exactly as much as this one and costs a re-key.
+   *
+   * Unlike the purchase guard this needs no separate content marker, and the
+   * difference is worth stating so nobody "harmonises" them later: every number
+   * compared here is verbatim client input stored on the row. A purchase line's
+   * unitCost may be a server-resolved default, indistinguishable in the row
+   * from a typed one, which is why that guard fingerprints the intent instead.
+   * A count line's countedQuantity is never resolved from anything, and the
+   * recorded lines are built from the counted map itself (one line per product,
+   * created for every product sent and for no other), so the recorded row IS
+   * the canonical statement of what was sent. systemQuantity and
+   * varianceQuantity are deliberately not compared: they are the server's side
+   * of the arithmetic and move on their own.
+   */
+  private assertCountMatchesRecordedAdjustment(
+    adjustment: StockCountChainAdjustment,
+    dto: CreateMobilePosLiteStockCountDto,
+  ) {
+    const submitted = new Map<string, number>();
+    let duplicated = false;
+    for (const line of dto.lines) {
+      // A repeated productId cannot match a recorded row (resolveStockCountLines
+      // refuses one line per product on the way in, so no recorded count has a
+      // twin line). Flagged rather than thrown: on this path the body is being
+      // compared, not validated, and "this is not the sheet that was recorded"
+      // is the true answer.
+      if (submitted.has(line.productId)) duplicated = true;
+      submitted.set(line.productId, Number(line.countedQuantity));
+    }
+
+    const recorded = new Map(
+      adjustment.lines.map((line) => [line.productId, Number(line.countedQuantity)]),
+    );
+
+    // Size equality plus one-directional membership is a full comparison of
+    // both directions: an omitted line and an added line are each a size
+    // difference, and a changed line fails the value test. `0` is a real count,
+    // so nothing here may fall back to a zero.
+    const matches =
+      !duplicated &&
+      recorded.size === submitted.size &&
+      Array.from(submitted).every(
+        ([productId, countedQuantity]) => recorded.get(productId) === countedQuantity,
+      );
+
+    if (!matches) {
+      throw new ConflictException(
+        'This count was already sent with different numbers — check with the office before sending it again.',
+      );
+    }
+  }
+
+  /**
+   * The count's twin of assertPurchaseMatchesOrSettle: the refusal names the
+   * office as the recovery, so the office has to be able to see it. This row's
+   * numbers are DISPUTED by the manager who took them, which is precisely what
+   * a desk needs to know before deciding whether to post the recorded document
+   * by hand.
+   */
+  private async assertCountMatchesOrSettle(
+    adjustment: StockCountChainAdjustment,
+    dto: CreateMobilePosLiteStockCountDto,
+    terminal: Terminal,
+    user: AuthUser,
+  ) {
+    try {
+      this.assertCountMatchesRecordedAdjustment(adjustment, dto);
+    } catch (error) {
+      await this.settleNonPostedStockCount(adjustment, terminal, user, error, 'resume', {
+        status: adjustment.status,
+        notes: null,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Stamp this key on the adjustment we just created and let the unique index
+   * decide whether we own it — the count's twin of claimPurchaseKey, and the
+   * only step in this chain whose winner is decided by the database rather than
+   * by whichever read happened to run first. `false` means we lost the race.
+   */
+  private async claimStockCountKey(adjustmentId: string, idempotencyKey: string): Promise<boolean> {
+    try {
+      await this.prisma.stockAdjustment.update({
+        where: { id: adjustmentId },
+        data: { idempotencyKey },
+      });
+      return true;
+    } catch (error) {
+      if (isUniqueViolation(error)) return false;
+      throw error;
+    }
+  }
+
+  /**
+   * The adjustment this key already created, if any. Column first, notes marker
+   * only for rows that carry no key of their own — see findPurchaseByKey for
+   * why the fallback exists and why it is scoped that way. `contains`, not
+   * equals: reject() APPENDS its reason to notes, and a rejected count must
+   * still be found by its key or it would be counted a second time.
+   */
+  private async findStockCountByKey(
+    companyId: string,
+    idempotencyKey: string,
+  ): Promise<StockCountChainAdjustment | null> {
+    const marker = stockCountIdempotencyMarker(idempotencyKey);
+    return this.prisma.stockAdjustment.findFirst({
+      where: {
+        companyId,
+        deletedAt: null,
+        OR: [
+          { idempotencyKey },
+          { AND: [{ idempotencyKey: null }, { notes: { contains: marker } }] },
+        ],
+      },
+      // Stamped first, then the oldest — see findPurchaseByKey: the row that
+      // owns the key is the row to drive, whatever the clock says.
+      orderBy: [
+        { idempotencyKey: { sort: 'asc', nulls: 'last' } },
+        { createdAt: 'asc' },
+        { id: 'asc' },
+      ],
+      select: STOCK_COUNT_CHAIN_SELECT,
+    });
+  }
+
+  /**
+   * Drive a marker-anchored stock count to its terminal state: DRAFT ->
+   * PENDING_APPROVAL -> APPROVED -> POSTED. Every step is state-guarded inside
+   * the core service, so this is safe on a fresh count, on a resume after a
+   * mid-chain crash, and on a full replay (where it short-circuits to the
+   * recorded result). Concurrent retries that lose a state-transition race
+   * re-read the entity and continue instead of failing.
+   *
+   * Every exit that is NOT a POSTED (or escape-flag PENDING_APPROVAL) result
+   * goes through settleNonPostedStockCount first, whichever step it stopped at,
+   * so the row is never left both unfinished and unrecorded.
+   */
+  private async resumeStockCountChain(
+    adjustment: StockCountChainAdjustment,
+    terminal: Terminal,
+    user: AuthUser,
+  ) {
+    let status = String(adjustment.status);
+    if (status === 'REJECTED' || status === 'CANCELLED') {
+      const rejected = new ConflictException(
+        'The original stock count behind this idempotency key was rejected',
+      );
+      // A desk rejected this count. Nothing of ours is stranded and nothing is
+      // ours to reopen — but the office still gets the line saying a terminal
+      // kept trying to send it, so no exit from this chain is silent.
+      await this.settleNonPostedStockCount(adjustment, terminal, user, rejected, 'resume', {
+        status,
+        notes: null,
+      });
+      throw rejected;
+    }
+
+    // The capture's life, checked before any step that can APPLY it. A replay
+    // of an already-POSTED count is never refused (it applies nothing, and the
+    // phone needs that 2xx to release its draft), and with the auto-post escape
+    // flag off this wrapper applies nothing at all, so the age is the desk's
+    // business rather than ours.
+    if (this.autoPostStockCounts && status !== 'POSTED' && this.isStaleCapture(adjustment)) {
+      const stale = new ConflictException(
+        `This count was captured more than ${STOCK_COUNT_MAX_CAPTURE_AGE_HOURS} hours ago and can no longer be sent from the phone — count the shelf again, or ask the office to post this one.`,
+      );
+      // Left exactly where it is, at its own live status, and named in the log:
+      // refusing to post it automatically is not the same as deciding it is
+      // worthless, and the office can see the document and the shelf.
+      await this.settleNonPostedStockCount(adjustment, terminal, user, stale, 'resume', {
+        status,
+        notes: null,
+      });
+      throw stale;
+    }
+
+    if (status === 'DRAFT') {
+      try {
+        await this.stockAdjustments.submit(adjustment.id, user);
+        status = 'PENDING_APPROVAL';
+      } catch (error) {
+        // A concurrent retry may have submitted it first — continue if so.
+        const observed = await this.observeStockCount(adjustment.id);
+        if (!observed || String(observed.status) === 'DRAFT') {
+          await this.settleNonPostedStockCount(
+            adjustment,
+            terminal,
+            user,
+            error,
+            'submit',
+            observed,
+          );
+          throw error;
+        }
+        status = String(observed.status);
+      }
+    }
+
+    // Escape flag OFF: the wrapper's job ends at submit. Whatever the count
+    // rests at — PENDING_APPROVAL, or a state a desktop approver has since
+    // moved it to — is reported as terminal, never as an error.
+    if (!this.autoPostStockCounts) {
+      return this.stockCountResult(adjustment, status);
+    }
+
+    if (status === 'PENDING_APPROVAL') {
+      try {
+        await this.stockAdjustments.approve(adjustment.id, user);
+        status = 'APPROVED';
+      } catch (error) {
+        const observed = await this.observeStockCount(adjustment.id);
+        if (!observed || String(observed.status) === 'PENDING_APPROVAL') {
+          await this.settleNonPostedStockCount(
+            adjustment,
+            terminal,
+            user,
+            error,
+            'approve',
+            observed,
+          );
+          throw error;
+        }
+        status = String(observed.status);
+      }
+    }
+    if (status === 'APPROVED') {
+      try {
+        await this.stockAdjustments.post(adjustment.id, user);
+        status = 'POSTED';
+      } catch (error) {
+        const observed = await this.observeStockCount(adjustment.id);
+        if (observed && String(observed.status) === 'POSTED') {
+          // A concurrent retry — or a post whose commit outlived the response —
+          // already applied it. Report the recorded truth.
+          status = String(observed.status);
+        } else {
+          // Everything post() does lives in ONE transaction, so a failure out
+          // of it rolls the movements AND the APPROVED->POSTED claim back and
+          // leaves the count sitting at APPROVED with all its lines. That row
+          // is resumable — the next request carrying the same key drives it —
+          // but until it is driven it reads to the office like a routine
+          // pending count, so it gets a log. It is never destroyed here,
+          // whatever post() said: see settleNonPostedStockCount's rule 2.
+          await this.settleNonPostedStockCount(adjustment, terminal, user, error, 'post', observed);
+          throw error;
+        }
+      }
+    }
+    if (status !== 'POSTED') {
+      // Reached only when someone else moved the row out from under the chain
+      // (a desktop revert, a reject) between our steps. Nothing of ours is
+      // stranded — the row is live and visible at its own status — but the
+      // office still gets a line in the log saying a terminal count stopped
+      // here, so no non-POSTED exit from this chain is silent.
+      await this.settleNonPostedStockCount(
+        adjustment,
+        terminal,
+        user,
+        new ConflictException('The stock count behind this request is no longer postable'),
+        'resume',
+        { status, notes: null },
+      );
+      throw new ConflictException('The stock count behind this request is no longer postable');
+    }
+
+    return this.stockCountResult(adjustment, status);
+  }
+
+  /**
+   * Re-read the row this chain is driving — for the state guards, and for the
+   * settle path's evidence.
+   *
+   * `null` means one of three things, and every caller must treat all three the
+   * same way, as NO evidence: the row is gone; the row is soft-deleted, which
+   * the `deletedAt: null` filter here is what makes true (the twin-detect loser
+   * is deleted this way, and a soft delete does not change `status`, so an
+   * unfiltered read would return it still looking APPROVED); or the read itself
+   * failed, which is the ORDINARY case, because the connection that just killed
+   * the step is usually still down.
+   *
+   * Nothing is ever destroyed on the strength of a null — nothing on this path
+   * destroys anything at all any more — and a failed re-read never replaces the
+   * manager's real failure with a second, less informative one.
+   */
+  private async observeStockCount(
+    id: string,
+  ): Promise<{ status: string; notes: string | null } | null> {
+    try {
+      return await this.prisma.stockAdjustment.findFirst({
+        where: { id, deletedAt: null },
+        select: { status: true, notes: true },
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Settle EVERY exit from the count chain that did not reach POSTED — create,
+   * submit, approve, post, or a row moved out from under the chain — and leave
+   * the office a record.
+   *
+   * Two rules, and they are the whole design:
+   *
+   * 1. LEAVE IT RESUMABLE. Always. The client's idempotency key is frozen and
+   *    persisted with the draft from the first send until a 2xx or an explicit
+   *    discard, so an unfinished chain is not an orphan: the next attempt finds
+   *    it by marker and drives it on, and the content guard makes sure it is
+   *    the same sheet. Nothing here may destroy or refuse work to defend
+   *    against a scenario the frozen key already handles.
+   *
+   * 2. THIS WRAPPER CANNOT PRONOUNCE A VERDICT ON A REQUEST AFTER THE ROW
+   *    EXISTS, so it no longer tries. Two earlier rounds tried and both were
+   *    wrong in the same direction. Round 2 retired on movement evidence alone,
+   *    so a P2028 timeout or a 2s pool wait — which roll back exactly like a
+   *    refusal — destroyed a valid 350-line closing count. Round 3 added "and
+   *    the failure was a 400/422", on the premise that such a verdict is a
+   *    property of the request rather than of the moment. That premise is false
+   *    for most of the 400s post() can actually raise: a missing or duplicated
+   *    inventory-adjustment-variance account is company CONFIGURATION (the
+   *    resolver's own copy ends "and retry"), and "Insufficient stock at
+   *    branch/location …" against a stored count-down delta is pure MOMENT — it
+   *    clears the second stock arrives. Retiring on those meant a pilot company
+   *    with an unseeded chart of accounts destroyed and permanently refused
+   *    every count the shop sent, with nothing left for the office to post
+   *    after a one-minute fix.
+   *    The only place that can honestly say "this can never succeed as it
+   *    stands" is this wrapper's OWN pre-create validation — resolveStockCountLines
+   *    and assertCountUpsCanBeValued — and it runs before anything exists, so
+   *    it has nothing to retire. Everything reaching this function has a row
+   *    behind it and is therefore environmental or moment-dependent as far as
+   *    we can know. It gets a log and keeps its life.
+   *
+   * The movement count is still read at the post step, but only as EVIDENCE FOR
+   * THE OFFICE and never as an input to a decision: post() writes every
+   * movement it applies inside the same transaction that claims
+   * APPROVED->POSTED, so `0` says the rollback was total while any rows at all
+   * say the work is out there and the document disagrees with it — the
+   * difference between "resend it" and "look at this today".
+   *
+   * The log is what tells the office an abandoned chain from a routine pending
+   * count, so it is attempted on every path INCLUDING the ones where the settle
+   * path's own queries fail — which is the ordinary case, since they run on the
+   * connection that just failed. Honest limit: the audit row needs that same
+   * database. When even the log cannot be written, nothing is recorded and the
+   * guarantee is carried entirely by rule 1 — the row is untouched and the
+   * frozen key resumes it rather than building a second count.
+   */
+  private async settleNonPostedStockCount(
+    adjustment: StockCountChainAdjustment,
+    terminal: Terminal,
+    user: AuthUser,
+    error: unknown,
+    step: StockCountChainStep,
+    observed: { status: string; notes: string | null } | null,
+  ) {
+    const failedBecause = error instanceof Error ? error.message : String(error);
+    let appliedMovements: number | null = null;
+    let settleFailed: string | null = null;
+
+    if (step === 'post') {
+      try {
+        appliedMovements = await this.prisma.inventoryMovement.count({
+          where: {
+            companyId: adjustment.companyId,
+            referenceType: 'StockAdjustment',
+            referenceId: adjustment.id,
+          },
+        });
+      } catch (settleError) {
+        // The evidence query rides the same connection the post step just
+        // failed against, so this is a normal outcome, not an exception. Record
+        // that the evidence is unmeasured and fall through to the log.
+        appliedMovements = null;
+        settleFailed = settleError instanceof Error ? settleError.message : String(settleError);
+      }
+    }
+
+    try {
+      await this.logStockCountNotPosted(adjustment, terminal, user, {
+        step,
+        observedStatus: observed ? String(observed.status) : 'UNKNOWN',
+        appliedMovements,
+        failedBecause,
+        settleFailed,
+      });
+    } catch (logError) {
+      // Last resort. The manager's own failure is what must reach her, so this
+      // never propagates and never masks the original: it goes to the process
+      // log so an operator can still find the abandoned chain by its marker.
+      this.logger.error(
+        `Stock count ${adjustment.adjustmentNumber} stopped at ${step} and its audit log could not be written: ${
+          logError instanceof Error ? logError.message : String(logError)
+        }. Original failure: ${failedBecause}`,
+      );
+    }
+  }
+
+  /**
+   * The office's only way to tell an abandoned chain from a genuine pending
+   * count: a row left at DRAFT / PENDING_APPROVAL / APPROVED reads exactly like
+   * any other terminal count waiting for a desk. Written on every exit from the
+   * chain that did not reach POSTED, at whichever step it stopped.
+   *
+   * `step` is what makes the row actionable: a count that stopped at `create`
+   * or `submit` has moved nothing and needs no desk at all — the phone's next
+   * send resumes it — while one that stopped at `post` with movements applied
+   * is a real inventory event whose document says otherwise.
+   */
+  private async logStockCountNotPosted(
+    adjustment: StockCountChainAdjustment,
+    terminal: Terminal,
+    user: AuthUser,
+    detail: {
+      step: StockCountChainStep;
+      observedStatus: string;
+      appliedMovements: number | null;
+      failedBecause: string;
+      settleFailed?: string | null;
+    },
+  ) {
+    await this.auditLogs.log({
+      action: 'MOBILE_POS_LITE_STOCK_COUNT_NOT_POSTED',
+      entityType: 'StockAdjustment',
+      entityId: adjustment.id,
+      userId: user.id,
+      companyId: adjustment.companyId,
+      severity: AuditSeverity.HIGH,
+      oldValue: { status: detail.observedStatus },
+      newValue: {
+        terminalCode: terminal.terminalCode,
+        adjustmentNumber: adjustment.adjustmentNumber,
+        stoppedAt: detail.step,
+        appliedMovements: detail.appliedMovements,
+        failedBecause: detail.failedBecause,
+        // Present only when the settle path's own queries failed, so the office
+        // can read `appliedMovements: null` as unmeasured rather than zero.
+        settleFailed: detail.settleFailed ?? null,
+      },
+    });
+  }
+
+  /**
+   * The capture's life, CREATE side: nothing exists yet, so the interval at
+   * risk is the one between the shelf being counted and this request arriving,
+   * and the only clock that spans it is the client's own capture stamp.
+   *
+   * This is the side the harm actually lives on. Capture is offline-first by
+   * design — the storeroom has no signal, the draft never expires, and the
+   * phone will restore a sheet of any age — so a sheet counted at 18:00 and
+   * sent at 08:00 reaches a server that has never seen it, and
+   * resolveStockCountLines will freeze its variance against THIS MORNING's
+   * balance: every unit sold overnight comes back as stock found on the shelf,
+   * with a receipt showing exactly the numbers she expects. No row exists, so
+   * nothing is stranded, nothing is destroyed and no audit row is owed — this
+   * is a pre-create validation like the two beside it.
+   *
+   * Trusting a client timestamp here is deliberate and bounded: it can only
+   * REFUSE work, never buy any (an absent, unparseable or future-dated stamp
+   * falls through as "age unknown" and is driven normally, the same rule the
+   * resume side obeys), the same phone is already trusted for the counted
+   * numbers themselves, and the confirm sheet prints the capture date and time
+   * to the manager before she sends. The resume side deliberately does NOT read
+   * it: there the row's own createdAt is the better clock and a client number
+   * could buy a stale freeze more time. See STOCK_COUNT_MAX_CAPTURE_AGE_HOURS.
+   *
+   * Skipped entirely while the auto-post escape flag is off, exactly like the
+   * resume bound: this wrapper then applies nothing and the age is the desk's
+   * judgement to make on a document it can see.
+   */
+  private assertCaptureStillCountable(dto: CreateMobilePosLiteStockCountDto) {
+    if (!this.autoPostStockCounts) return;
+    const age = this.captureAgeMs(dto);
+    if (age == null || age <= STOCK_COUNT_MAX_CAPTURE_AGE_MS) return;
+    throw new ConflictException(
+      `This count was captured more than ${STOCK_COUNT_MAX_CAPTURE_AGE_HOURS} hours ago and can no longer be sent from the phone — count the shelf again.`,
+    );
+  }
+
+  /**
+   * The capture's age on the create path, in milliseconds, or null when it
+   * cannot be established (an unknown age never refuses).
+   *
+   * `capturedAgoMs` wins when the phone sent it, because it is the interval
+   * measured on ONE clock: `countedAt` against `Date.now()` is two clocks, and
+   * their skew is added to the age. Only the slow direction refuses, so a
+   * device sitting hours behind would have every count it takes — including the
+   * recount the refusal asks for — rejected as stale. Falling back to the
+   * two-clock comparison keeps a phone that sends no elapsed time bounded, and
+   * a future-dated stamp still reads as unknown rather than as age zero.
+   */
+  private captureAgeMs(dto: CreateMobilePosLiteStockCountDto): number | null {
+    if (typeof dto.capturedAgoMs === 'number' && Number.isFinite(dto.capturedAgoMs)) {
+      return Math.max(0, dto.capturedAgoMs);
+    }
+    if (!dto.countedAt) return null;
+    const capturedAt = new Date(dto.countedAt).getTime();
+    if (!Number.isFinite(capturedAt)) return null;
+    const elapsed = Date.now() - capturedAt;
+    return elapsed < 0 ? null : elapsed;
+  }
+
+  /**
+   * The capture's life, RESUME side: a row already exists, so what is bounded
+   * here is the gap between the variance being frozen on it and this attempt
+   * trying to POST it. See STOCK_COUNT_MAX_CAPTURE_AGE_HOURS for why age is
+   * what matters and why re-deriving the system side would be worse than
+   * useless.
+   *
+   * `createdAt` is the row's own timestamp, never the client's `countedAt`: on
+   * this side the freeze has already happened, so a client-supplied number
+   * could only buy a stale delta more time (or, sent wrong, refuse a count the
+   * server itself created minutes ago). The capture -> create gap that number
+   * describes is bounded on the other side, before the row exists, by
+   * assertCaptureStillCountable. An absent or unparseable timestamp means the
+   * age is UNKNOWN, and an unknown age never refuses.
+   */
+  private isStaleCapture(adjustment: StockCountChainAdjustment): boolean {
+    if (adjustment.createdAt == null) return false;
+    const createdAt = new Date(adjustment.createdAt).getTime();
+    if (!Number.isFinite(createdAt)) return false;
+    return Date.now() - createdAt > STOCK_COUNT_MAX_CAPTURE_AGE_MS;
+  }
+
+  /**
+   * Lines come back so the success screen can show SERVER-TRUTH variance: the
+   * client's review-step preview was computed against a possibly-stale
+   * snapshot. Quantities only — the same review-blocking no-cost/no-value rule
+   * that governs the Stoo endpoint applies here (rep phones get stolen).
+   */
+  private stockCountResult(adjustment: StockCountChainAdjustment, status: string) {
+    return {
+      id: adjustment.id,
+      adjustmentNumber: adjustment.adjustmentNumber,
+      status,
+      lines: adjustment.lines.map((line) => ({
+        productId: line.productId,
+        systemQuantity: Number(line.systemQuantity),
+        countedQuantity: Number(line.countedQuantity),
+        varianceQuantity: Number(line.varianceQuantity),
+      })),
     };
   }
 

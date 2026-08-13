@@ -69,6 +69,8 @@ const h = vi.hoisted(() => {
     // v4 stocks store (Phase 4): the shell pre-warms the Stoo snapshot on
     // mount, so the mocked module contract must carry the accessors.
     stocks: new Map<string, unknown>(),
+    // v4 drafts store (Phase 5): the shell sweeps orphan drafts on mount.
+    drafts: new Map<string, unknown>(),
   };
 
   // Mirrors the real module's device-local YYYY-MM-DD day key.
@@ -83,6 +85,32 @@ const h = vi.hoisted(() => {
     readCachedStock: vi.fn(async (terminalCode: string) => state.stocks.get(terminalCode) ?? null),
     writeCachedStock: vi.fn(async (terminalCode: string, snapshot: unknown) => {
       state.stocks.set(terminalCode, snapshot);
+    }),
+    // Drafts (v4, Phase 5): the count sheet's and the kikaratasi's accessors.
+    // This suite never enters Hesabu and never saves a slip; the mount-time
+    // orphan sweep and the Pokea draft read still need the contract.
+    readCountDraft: vi.fn(
+      async (terminalCode: string) => state.drafts.get(`${terminalCode}:count`) ?? null,
+    ),
+    writeCountDraft: vi.fn(async (terminalCode: string, draft: unknown) => {
+      state.drafts.set(`${terminalCode}:count`, draft);
+    }),
+    clearCountDraft: vi.fn(async (terminalCode: string) => {
+      state.drafts.delete(`${terminalCode}:count`);
+    }),
+    readPurchaseDraft: vi.fn(
+      async (terminalCode: string) => state.drafts.get(`${terminalCode}:purchase`) ?? null,
+    ),
+    savePurchaseDraft: vi.fn(async (terminalCode: string, draft: unknown) => {
+      state.drafts.set(`${terminalCode}:purchase`, draft);
+    }),
+    deletePurchaseDraft: vi.fn(async (terminalCode: string) => {
+      state.drafts.delete(`${terminalCode}:purchase`);
+    }),
+    sweepOrphanDrafts: vi.fn(async (terminalCode: string) => {
+      const orphans = [...state.drafts.keys()].filter((key) => !key.startsWith(`${terminalCode}:`));
+      for (const key of orphans) state.drafts.delete(key);
+      return orphans;
     }),
     // Daylog (v4): same contract as the real module — the Kaunta shell reads
     // it on every route change and the sale/purchase paths bump it.
@@ -295,6 +323,7 @@ function buildHarness(options: HarnessOptions = {}) {
   h.state.outbox = [...(options.outbox ?? [])];
   h.state.daylog = new Map();
   h.state.stocks = new Map();
+  h.state.drafts = new Map();
 
   setNavigatorOnLine(options.onLine ?? true);
 

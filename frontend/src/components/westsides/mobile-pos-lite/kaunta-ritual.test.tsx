@@ -64,6 +64,8 @@ const h = vi.hoisted(() => {
     // v4 stocks store (Phase 4): the shell pre-warms the Stoo snapshot on
     // mount, so the mocked module contract must carry the accessors.
     stocks: new Map<string, unknown>(),
+    // v4 drafts store (Phase 5): the shell sweeps orphan drafts on mount.
+    drafts: new Map<string, unknown>(),
   };
 
   const posDaylogDate = (now: Date = new Date()) => {
@@ -78,6 +80,32 @@ const h = vi.hoisted(() => {
     readCachedStock: vi.fn(async (terminalCode: string) => state.stocks.get(terminalCode) ?? null),
     writeCachedStock: vi.fn(async (terminalCode: string, snapshot: unknown) => {
       state.stocks.set(terminalCode, snapshot);
+    }),
+    // Drafts (v4, Phase 5): the count sheet's and the kikaratasi's accessors.
+    // This suite never enters Hesabu; the mount-time orphan sweep, the Pokea
+    // draft read and the post-success clear all need the contract.
+    readCountDraft: vi.fn(
+      async (terminalCode: string) => state.drafts.get(`${terminalCode}:count`) ?? null,
+    ),
+    writeCountDraft: vi.fn(async (terminalCode: string, draft: unknown) => {
+      state.drafts.set(`${terminalCode}:count`, draft);
+    }),
+    clearCountDraft: vi.fn(async (terminalCode: string) => {
+      state.drafts.delete(`${terminalCode}:count`);
+    }),
+    readPurchaseDraft: vi.fn(
+      async (terminalCode: string) => state.drafts.get(`${terminalCode}:purchase`) ?? null,
+    ),
+    savePurchaseDraft: vi.fn(async (terminalCode: string, draft: unknown) => {
+      state.drafts.set(`${terminalCode}:purchase`, draft);
+    }),
+    deletePurchaseDraft: vi.fn(async (terminalCode: string) => {
+      state.drafts.delete(`${terminalCode}:purchase`);
+    }),
+    sweepOrphanDrafts: vi.fn(async (terminalCode: string) => {
+      const orphans = [...state.drafts.keys()].filter((key) => !key.startsWith(`${terminalCode}:`));
+      for (const key of orphans) state.drafts.delete(key);
+      return orphans;
     }),
     getDaylogEntry: vi.fn(
       async (terminalCode: string, date: string) =>
@@ -304,6 +332,7 @@ function buildHarness(options: HarnessOptions = {}) {
   h.state.outbox = [...(options.outbox ?? [])];
   h.state.daylog = new Map();
   h.state.stocks = new Map();
+  h.state.drafts = new Map();
 
   setNavigatorOnLine(options.onLine ?? true);
 
@@ -828,5 +857,101 @@ describe('RITUAL-7: Mipangilio — haptics toggle and catalog re-sync', () => {
     await user.click(screen.getByRole('button', { name: 'Mipangilio' }));
     await screen.findByRole('heading', { name: 'Mipangilio' });
     expect(screen.getByRole('button', { name: /Pakua bidhaa upya/ })).toBeDisabled();
+  });
+});
+
+/* ------------------------------------------------------------------------ *
+ * RITUAL-8
+ * ------------------------------------------------------------------------ */
+describe('RITUAL-8: a refused live sale speaks Swahili on Malipo', () => {
+  /**
+   * What `backendPost` throws for a non-2xx, in a suite whose `@/lib/api-client`
+   * mock is `{ backendGet, backendPost }` and therefore has no `ApiError` class
+   * to import. `posRefusalStatus` reads `.status` as a PROPERTY for exactly this
+   * reason (see its doc), so the shape is the contract; pos-errors.test.ts
+   * certifies the same behaviour against the genuine class.
+   */
+  function refused(message: string, status: number) {
+    return Object.assign(new Error(message), { status, payload: { message } });
+  }
+
+  const RAW_STOCK = 'Insufficient stock at branch/location b-1: requested 5, available 2';
+
+  it('maps the rejection instead of painting the server’s English in the danger box', async () => {
+    // The rejected-SALE ritual is the first purpose named in pos-errors.ts, and
+    // it had no consumer on the live path: `completeSale` wrote
+    // `error.message` straight into the notice cell, so the highest-volume
+    // refusal in the module reached a Swahili-first rep as English — while the
+    // identical sentence arriving through the outbox was mapped (RITUAL-5).
+    const harness = buildHarness();
+    harness.behavior.salesPost = async () => {
+      throw refused(RAW_STOCK, 400);
+    };
+    const user = userEvent.setup();
+    await mountKaunta();
+
+    await user.click(screen.getByRole('button', { name: /^Soda Baridi/ }));
+    await user.click(screen.getByRole('button', { name: 'LIPA' }));
+    await screen.findByRole('heading', { name: 'Malipo' });
+    await user.click(screen.getByRole('button', { name: 'KAMILISHA MAUZO' }));
+
+    expect(await screen.findByText('Stoo haitoshi kwa bidhaa hii')).toBeInTheDocument();
+    expect(screen.queryByText(RAW_STOCK)).not.toBeInTheDocument();
+    // Nothing else moves: the cart is still on Malipo and nothing was stamped.
+    expect(screen.getByRole('heading', { name: 'Malipo' })).toBeInTheDocument();
+    expect(h.state.outbox).toHaveLength(0);
+    expect(h.store.bumpDaylogTally).not.toHaveBeenCalled();
+  });
+
+  it('never invites a second tap when nothing refused the sale', async () => {
+    // A 502 over a sale that may well have committed. The sale path is the one
+    // send surface with NO frozen key — completeSale mints a fresh
+    // idempotencyKey per attempt — so "jaribu tena" here would be an
+    // instruction that books the sale twice, and "haikukubaliwa" would state a
+    // refusal that did not happen.
+    const harness = buildHarness();
+    harness.behavior.salesPost = async () => {
+      throw refused('Request failed: 502', 502);
+    };
+    const user = userEvent.setup();
+    await mountKaunta();
+
+    await user.click(screen.getByRole('button', { name: /^Soda Baridi/ }));
+    await user.click(screen.getByRole('button', { name: 'LIPA' }));
+    await screen.findByRole('heading', { name: 'Malipo' });
+    await user.click(screen.getByRole('button', { name: 'KAMILISHA MAUZO' }));
+
+    expect(
+      await screen.findByText(
+        'Haikukamilika — hatujui kama mauzo yameingia. Usitume tena; mwite msimamizi ahakiki.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Request failed: 502')).not.toBeInTheDocument();
+    expect(screen.queryByText('Haikukubaliwa — mwite msimamizi')).not.toBeInTheDocument();
+  });
+
+  it('leaves the CLASSIC shell exactly as the fleet runs it today', async () => {
+    // The one test in this suite that is deliberately NOT Kaunta: the mapping
+    // is an opt-in on `kauntaEnabled`, so a uiVersion 1 terminal must still put
+    // the server's own sentence in the notice cell, byte for byte. Pinned here
+    // because the change that could break it is the one above.
+    const pilot = kauntaSession();
+    const harness = buildHarness({
+      session: { ...pilot, terminal: { ...pilot.terminal, uiVersion: 1 } },
+    });
+    harness.behavior.salesPost = async () => {
+      throw refused(RAW_STOCK, 400);
+    };
+    const user = userEvent.setup();
+    render(<MobilePosLite />);
+    await screen.findByRole('button', { name: 'Mauzo Mapya' });
+
+    await user.click(screen.getByRole('button', { name: 'Mauzo Mapya' }));
+    await user.click(screen.getByRole('button', { name: /^Soda Baridi/ }));
+    await user.click(screen.getByRole('button', { name: 'Lipa' }));
+    await user.click(screen.getByRole('button', { name: /Maliza Mauzo/ }));
+
+    expect(await screen.findByText(RAW_STOCK)).toBeInTheDocument();
+    expect(screen.queryByText('Stoo haitoshi kwa bidhaa hii')).not.toBeInTheDocument();
   });
 });

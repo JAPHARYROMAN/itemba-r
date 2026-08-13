@@ -170,3 +170,26 @@ describe('StockAdjustmentsService approval revert', () => {
     expect(prisma.stockAdjustment.update).not.toHaveBeenCalled();
   });
 });
+
+describe('StockAdjustmentsService post durability', () => {
+  it('opens the posting transaction with an explicit long timeout, not Prisma 5s default', async () => {
+    const { service, prisma } = makeService();
+    // A count of a few hundred lines runs ~10 round-trips per line inside this
+    // one transaction. On Prisma's 5s interactive default it dies with P2028
+    // partway through, which rolls back correctly but leaves the adjustment at
+    // APPROVED — a stranded, hand-postable orphan of exactly the shape the
+    // Mobile POS Lite count wrapper exists to make impossible.
+    prisma.$transaction = jest.fn(async (callback: any) =>
+      callback({
+        stockAdjustment: {
+          updateMany: jest.fn(async () => ({ count: 1 })),
+          update: jest.fn(async () => ({ id: 'sa-1', companyId: 'company-1', status: 'POSTED' })),
+        },
+      }),
+    );
+
+    await service.post('sa-1', user);
+
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { timeout: 60_000 });
+  });
+});
