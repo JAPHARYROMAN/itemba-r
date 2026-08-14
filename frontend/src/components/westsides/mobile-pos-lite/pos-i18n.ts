@@ -241,6 +241,13 @@ const STRINGS = {
     settingsHapticsNote: 'A small buzz when a job finishes.',
     settingsResync: 'Re-download products',
     settingsResyncDone: 'Products re-downloaded',
+    // Kaunta Mipangilio (Phase 5): the Mchana/Usiku theme row. Both themes
+    // keep their Swahili names in English too — they are the modes' names,
+    // not a translation, so the note glosses them instead.
+    settingsTheme: 'Theme',
+    settingsThemeMchana: 'Mchana',
+    settingsThemeUsiku: 'Usiku',
+    settingsThemeNote: 'Mchana (day) for bright sunlight; Usiku (night) for evenings and indoors.',
     // Activation
     setupTitle: 'Set up this POS',
     setupSubtitle: 'Use the code issued by your supervisor.',
@@ -576,6 +583,11 @@ const STRINGS = {
     settingsHapticsNote: 'Simu itatetema kidogo kazi ikikamilika.',
     settingsResync: 'Pakua bidhaa upya',
     settingsResyncDone: 'Bidhaa zimepakuliwa upya',
+    // Kaunta Mipangilio (Phase 5): safu ya Mchana/Usiku
+    settingsTheme: 'Mandhari',
+    settingsThemeMchana: 'Mchana',
+    settingsThemeUsiku: 'Usiku',
+    settingsThemeNote: 'Mchana kwa jua kali; Usiku kwa jioni na ndani ya duka.',
     // Activation
     setupTitle: 'Sajili POS hii',
     setupSubtitle: 'Tumia namba uliyopewa na msimamizi wako.',

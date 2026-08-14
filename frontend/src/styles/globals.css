@@ -1154,8 +1154,8 @@ html.motion-reduced *::after {
    flag — the component adds .pos-shell to its <main> when the session says
    uiVersion >= 2. Mchana (warm paper/ink) is FORCED regardless of the app
    theme: reps work in Dar sunlight on low-nit LCDs, so `.dark .pos-shell`
-   pins the same values. Usiku (ink-navy option) ships as a Phase-5 toggle:
-   .pos-shell[data-pos-theme='usiku'] — deferred per owner decision.
+   pins the same values. Usiku (ink-navy option) is the opt-in Phase-5 theme
+   below: .pos-shell[data-pos-theme='usiku'].
    Four-color law: brass(accent)=money/custody · blue(primary)=press me ·
    green=arrived · red=needs a human. Amber survives only for genuine
    inline cautions. */
@@ -1202,4 +1202,119 @@ html.motion-reduced *::after {
   --aurora-danger: #ef4444;
   --aurora-danger-bg: #fee2e2;
   --aurora-danger-text: #7f1d1d;
+}
+
+/* ─── Usiku (Phase 5) — the opt-in dark theme ────────────────────────────────
+   design-direction.md §2.1 token table, Usiku column. Purely additive: it
+   only ever applies when the POS itself has been switched to Usiku
+   (`itemba-pos-theme`, POS-local, default Mchana — see pos-theme.ts), so
+   Mchana's rendered values are untouched. `.dark .pos-shell[...]` repeats the
+   block for the same reason the Mchana block pins `.dark`: one POS theme must
+   render one way, whatever the host ERP theme says. (The plain selector already
+   wins on source order at equal specificity; the explicit `.dark` twin means it
+   keeps winning if this file is ever reordered.)
+   Four-color law is unchanged in Usiku: brass = money/custody, blue = press me,
+   green = arrived, red = needs a human, amber = genuine inline caution only. */
+.pos-shell[data-pos-theme='usiku'],
+.dark .pos-shell[data-pos-theme='usiku'] {
+  /* Surfaces — ink navy (§2.1) */
+  --aurora-bg: #0b1b2b;
+  --aurora-bg-subtle: #12233a;
+  --aurora-card: #12253a;
+  --aurora-card-elevated: #1a3049;
+  /* Not tabulated. Mchana's scrim is ink-navy at 45% over paper; the same
+     scrim over navy would barely darken anything, so the sheet behind it
+     would not recede. Deep ink at 70% (the .dark convention) restores the
+     separation. */
+  --aurora-overlay: rgb(4 10 18 / 0.7);
+
+  /* Ink — warm white, so the paper theme's warmth survives the flip */
+  --aurora-text: #f4efe6;
+  --aurora-text-secondary: #a8b3c4;
+  /* Not tabulated. Mchana's muted (#64748b) is only 3.3:1 on the Usiku card —
+     under AA for the helper lines that use it (settingsHapticsNote, the
+     freshness clock, the offline notes). Lifted one step up the same
+     slate-blue ramp as -text-secondary: 5.35:1 on the card, still visibly
+     dimmer than secondary (7.33:1). */
+  --aurora-text-muted: #8b99aa;
+
+  /* Borders — §2.3: "Mchana: borderless cards + soft shadow; Usiku: 1px
+     --aurora-border retained (shadows die on navy)". So in Usiku the border
+     is not decoration, it IS the elevation: every card edge, the rail's
+     bottom rule and the slab's top rule are drawn by it. Mchana's warm
+     #eae3d6 would be a near-white hairline on navy (a fence, not an edge),
+     and the base dark theme's #1e2d40 nearly vanishes against this lighter
+     navy card. These two are chosen against #12253a: 2.01:1 for the everyday
+     edge (Mchana's is 1.28:1 on white — Usiku's carries more weight because
+     it does more work) and 3.02:1 for -strong, which clears the 3:1
+     non-text-contrast bar for any boundary that has to be seen. */
+  --aurora-border: #3a5570;
+  --aurora-border-strong: #55708c;
+
+  /* Blue = press me. Dark-mode brand blue (§2.1); the rest of the ramp is the
+     matching dark family so hover/subtle/text stay in step with it. */
+  --aurora-primary: #3b82f6;
+  --aurora-primary-hover: #60a5fa;
+  --aurora-primary-subtle: #1e3a5f;
+  --aurora-primary-text: #93c5fd;
+
+  /* Brass = money & custody (§2.1). The brass contrast rule is UNCHANGED in
+     Usiku — brass text only at Title size (22px)+ or as -accent-text on an
+     -accent-subtle chip. It reads 9.3:1 on the card here, but the rule is
+     discipline, not a contrast workaround, and it is not relaxed because the
+     ground got darker. */
+  --aurora-accent: #fbbf24;
+  --aurora-accent-hover: #fcd34d;
+  --aurora-accent-subtle: #422006;
+  --aurora-accent-text: #fde68a;
+
+  /* Status trios — the DARK values, not the light ones the Mchana block pins.
+     §2.1 says "unchanged dark values" for this column, and it has to: Mchana
+     pins success-bg #d1fae5 / warning-bg #fef3c7 / danger-bg #fee2e2, which
+     on navy are glaring light patches, and their partner texts (#064e3b,
+     #78350f, #7f1d1d) are near-black — dark ink on a light chip floating on a
+     dark screen. Flipping each pair restores the intended reading (light text
+     on a deep tint of its own hue) at 6.4:1 / 10.4:1 / 8.5:1. The hue anchors
+     (#10b981 / #f59e0b / #ef4444) are identical in both directions, so green
+     still means arrived and red still means needs-a-human — the meanings do
+     not move, only the surfaces they sit on. */
+  --aurora-success: #10b981;
+  --aurora-success-bg: #064e3b;
+  --aurora-success-text: #6ee7b7;
+  --aurora-warning: #f59e0b;
+  --aurora-warning-bg: #451a03;
+  --aurora-warning-text: #fcd34d;
+  --aurora-danger: #ef4444;
+  --aurora-danger-bg: #450a0a;
+  --aurora-danger-text: #fca5a5;
+  /* The three -subtle aliases (declared on `:root`, ~line 52) are
+     `var(--aurora-*-bg)`, and a custom property's var() is substituted where
+     it is DECLARED, not where it is used: `:root` resolves them against
+     `:root`'s own -bg values and the RESULT inherits down. A descendant that
+     re-points -bg — which is every `.pos-shell` — therefore does NOT move
+     them; `.dark` only appears to because it lands on the same element as
+     `:root`. Verified in a real browser: without these three lines Usiku's
+     status chips render mint/amber/pink on navy, the exact failure this
+     column exists to prevent (they are 25 of the POS's usages). Re-declaring
+     them here re-runs the substitution on this element, against the values
+     directly above. Mchana is left exactly as it is — additive only. */
+  --aurora-success-subtle: var(--aurora-success-bg);
+  --aurora-warning-subtle: var(--aurora-warning-bg);
+  --aurora-danger-subtle: var(--aurora-danger-bg);
+
+  /* Glows — the two budgeted moments (§2.3): brass bloom on the MUHURI stamp,
+     blue glow on the slab while a request is in flight. Both are pinned to
+     the dark values because the light ones are built from the LIGHT palette's
+     hues (rgb(217 119 6) brass-600, rgb(37 99 235) brand-600) — in Usiku the
+     stamp is #fbbf24 and the slab verb is #3b82f6, so an unpinned glow would
+     halo those in the wrong colour. */
+  --aurora-glow-accent: 0 0 0 1px rgb(251 191 36 / 0.3), 0 8px 24px -6px rgb(251 191 36 / 0.35);
+  --aurora-glow-primary: 0 0 0 1px rgb(59 130 246 / 0.3), 0 8px 24px -6px rgb(59 130 246 / 0.35);
+
+  /* Shadows — the dark family. NOT an attempt to restore elevation (§2.3 gave
+     that job to the 1px border precisely because shadows die on navy); this
+     only keeps Usiku deterministic, since an unpinned shadow would come from
+     :root or .dark depending on the host ERP theme. */
+  --aurora-shadow: 0 4px 12px -2px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+  --aurora-shadow-lg: 0 10px 30px -4px rgb(0 0 0 / 0.5), 0 4px 8px -4px rgb(0 0 0 / 0.4);
 }

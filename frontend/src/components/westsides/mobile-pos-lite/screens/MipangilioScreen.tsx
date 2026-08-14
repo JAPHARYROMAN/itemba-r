@@ -6,18 +6,21 @@ import { showToast } from '@/components/ui';
 import type { MobilePosLiteBinding } from '@/lib/mobile-pos-lite-store';
 import { isHapticsEnabled, setHapticsEnabled, tick } from '../pos-haptics';
 import { type PosLang } from '../pos-i18n';
+import { setPosTheme, usePosTheme } from '../pos-theme';
 import type { PosTranslate, Session } from '../pos-types';
 
 /**
  * Mipangilio — Kaunta settings (spec-leo §5): the identity card (who am I —
  * restores what the deleted home header showed), the language toggle, the
  * haptics toggle (persisted `itemba-pos-haptics`, default on), the catalog
- * re-sync row (offline-disabled, success toast), an app-version row, and
- * logout via the existing `leaveTerminal`. The theme row is deliberately
- * absent until the Phase-5 Usiku toggle (a settings row that does nothing
- * teaches that settings do nothing). Logout is disabled offline — login needs
- * a network anyway, and a half-logged-out shared phone offline is worse than
- * a handed-over phone.
+ * re-sync row (offline-disabled, success toast), the Mchana/Usiku theme row
+ * (persisted `itemba-pos-theme`, default Mchana), an app-version row, and
+ * logout via the existing `leaveTerminal`. The theme row was held back until
+ * Usiku actually existed — spec-leo §5 item 5 refused a dead "Usiku inakuja"
+ * placeholder because a settings row that does nothing teaches that settings
+ * do nothing, and said its appearance IS the announcement. This is that
+ * appearance. Logout is disabled offline — login needs a network anyway, and
+ * a half-logged-out shared phone offline is worse than a handed-over phone.
  */
 export function MipangilioScreen({
   shellClass,
@@ -42,6 +45,11 @@ export function MipangilioScreen({
 }) {
   const [haptics, setHaptics] = useState(isHapticsEnabled);
   const [resyncing, setResyncing] = useState(false);
+  // Read straight from the theme store rather than mirroring it in local
+  // state: the shell subscribes to the same store, so one write re-themes the
+  // shell and re-labels this row from a single source of truth.
+  const theme = usePosTheme();
+  const usiku = theme === 'usiku';
 
   function toggleHaptics() {
     const next = !haptics;
@@ -49,6 +57,14 @@ export function MipangilioScreen({
     setHaptics(next);
     // A demo buzz when switching ON — we are inside the tap's gesture stack.
     if (next) tick();
+  }
+
+  function toggleTheme() {
+    // Immediate: the write notifies the shell, the shell swaps one attribute,
+    // and the CSS variables repaint every surface. No haptic here — §2.5's
+    // scarcity rule keeps the four patterns for money and custody moments,
+    // and the whole screen changing colour is its own confirmation.
+    setPosTheme(usiku ? 'mchana' : 'usiku');
   }
 
   async function resyncCatalog() {
@@ -201,6 +217,59 @@ export function MipangilioScreen({
               {t('needsNetwork')}
             </p>
           )}
+        </section>
+        {/* Mchana/Usiku (spec-leo §5 item 5): the same row shape as the
+            haptics switch above — role, control, touch target, persistence,
+            immediate effect — with both theme names flanking the track so the
+            rep reads WHICH mode she is in, not just on/off. Swahili names in
+            both catalogs: they are the modes' names, not a translation. */}
+        <section
+          className="mt-3 rounded-lg border px-4 py-3"
+          style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
+        >
+          <div className="flex min-h-11 items-center justify-between gap-3">
+            <span
+              className="text-sm font-semibold"
+              style={{ color: 'var(--aurora-text-secondary)' }}
+            >
+              {t('settingsTheme')}
+            </span>
+            <div className="flex items-center gap-2">
+              <span
+                className="text-sm font-bold"
+                style={{ color: usiku ? 'var(--aurora-text-muted)' : 'var(--aurora-text)' }}
+              >
+                {t('settingsThemeMchana')}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={usiku}
+                aria-label={t('settingsTheme')}
+                onClick={toggleTheme}
+                className="relative h-7 w-12 flex-shrink-0 rounded-full transition-colors"
+                style={{
+                  background: usiku ? 'var(--aurora-primary)' : 'var(--aurora-bg-subtle)',
+                  boxShadow: usiku ? undefined : 'inset 0 0 0 1px var(--aurora-border)',
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${usiku ? 'left-6' : 'left-1'}`}
+                  style={{ boxShadow: 'var(--aurora-shadow)' }}
+                />
+              </button>
+              <span
+                className="text-sm font-bold"
+                style={{ color: usiku ? 'var(--aurora-text)' : 'var(--aurora-text-muted)' }}
+              >
+                {t('settingsThemeUsiku')}
+              </span>
+            </div>
+          </div>
+          <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+            {t('settingsThemeNote')}
+          </p>
         </section>
         <section
           className="mt-3 flex min-h-14 items-center justify-between gap-3 rounded-lg border px-4"

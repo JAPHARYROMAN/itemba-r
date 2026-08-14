@@ -35,6 +35,7 @@ import { usePosSlip } from './hooks/use-pos-slip';
 import { usePosStock } from './hooks/use-pos-stock';
 import { tick } from './pos-haptics';
 import { type PosLang } from './pos-i18n';
+import { applyPosThemeChrome, usePosTheme } from './pos-theme';
 import { useKauntaRouter, type KauntaRoute } from './pos-router';
 import type {
   CartLine,
@@ -367,6 +368,18 @@ export function KauntaShell(props: KauntaShellProps) {
       }
     }
   }, [route]);
+
+  // Mchana or Usiku (direction §2.1). The value rides one attribute on the
+  // wrapper that already carries `.pos-shell`, so the CSS variable overrides
+  // re-paint every surface below — no screen component takes a theme prop, no
+  // screen code re-renders differently, and the classic shell (which never
+  // carries `.pos-shell` at all) never sees the attribute. Only pilot
+  // terminals reach this component, so only they can be in Usiku.
+  const theme = usePosTheme();
+  // The address bar / status bar follows the POS's chosen theme, not the
+  // phone's — see pos-theme.ts. Undone on unmount, so logout hands the chrome
+  // back to the page's static Mchana `themeColor`.
+  useEffect(() => applyPosThemeChrome(theme), [theme]);
 
   // Keyboard rule (direction §3): a focused text input collapses the slab to a
   // 28px strip. Primary signal is the visualViewport shrinking under the soft
@@ -819,7 +832,11 @@ export function KauntaShell(props: KauntaShellProps) {
   }
 
   return (
-    <div className="pos-shell min-h-screen" style={{ background: 'var(--aurora-bg)' }}>
+    <div
+      className="pos-shell min-h-screen"
+      data-pos-theme={theme}
+      style={{ background: 'var(--aurora-bg)' }}
+    >
       {showRail && (
         <KauntaRail route={route} purchasesEnabled={purchasesEnabled} onNavigate={navigate} t={t} />
       )}
