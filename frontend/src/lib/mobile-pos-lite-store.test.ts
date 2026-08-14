@@ -346,9 +346,20 @@ describe('daylog', () => {
     vi.useRealTimers();
   });
 
-  it('formats the device-local day key as YYYY-MM-DD', () => {
-    expect(posDaylogDate(new Date('2026-08-12T23:59:00'))).toBe('2026-08-12');
-    expect(posDaylogDate(new Date('2026-01-05T00:00:01'))).toBe('2026-01-05');
+  it('formats the day key in the BUSINESS timezone, not the device’s', () => {
+    // ONE authority on where a trading day begins, and it is the same constant
+    // the backend pins (`MOBILE_POS_BUSINESS_TIMEZONE`). EAT is UTC+3 with no
+    // DST, so a business day runs 21:00Z → 21:00Z whatever zone the phone is
+    // set to. The boundary IS the fix: the phone said EAT and the server said
+    // UTC, so a rep who closed at 00:30 was refused outright for an ordinary
+    // act and every trading day was silently cut at 03:00 local.
+    expect(posDaylogDate(new Date('2026-08-12T20:59:59Z'))).toBe('2026-08-12');
+    expect(posDaylogDate(new Date('2026-08-12T21:00:00Z'))).toBe('2026-08-13');
+    // 01:30 EAT: a duka that trades past eleven at night is the normal case
+    // here, and the sale rung at that hour belongs to the day its own receipt
+    // names — the receipts are rendered in this same zone.
+    expect(posDaylogDate(new Date('2026-08-12T22:30:00Z'))).toBe('2026-08-13');
+    expect(posDaylogDate(new Date('2026-01-04T21:00:00Z'))).toBe('2026-01-05');
   });
 
   it('returns null for a day with no entry', async () => {

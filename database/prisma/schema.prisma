@@ -11517,6 +11517,58 @@ model MobilePosTerminalPayment {
   @@map("mobile_pos_terminal_payments")
 }
 
+/// End-of-day sales report submitted from a Mobile POS Lite terminal
+/// (spec-history-reports §1.3). Relation-free — plain ids plus name snapshots —
+/// deliberately mirroring WestsidesDailyClose: the record must outlive a renamed
+/// branch, a reassigned terminal and a deactivated rep, and the migration stays
+/// purely additive. Every figure except declaredHeld* is computed server-side
+/// from SalesOrder rows; the declared pair is what the PHONE was still holding,
+/// which is the one fact the server cannot know, and it is named so on the
+/// record and on the paper.
+///
+/// Deliberately NOT unique on (terminalId, businessDate): a rep may legitimately
+/// close twice — a shift handover, or she sold more after closing — and refusing
+/// the second close either strands her or forces the first report to be a lie.
+/// Rows are timestamped snapshots; the newest for a terminal-day is the day's
+/// truth and the earlier ones are its history.
+model MobilePosDayReport {
+  id                 String   @id @default(uuid())
+  companyId          String
+  divisionId         String?
+  branchId           String
+  branchName         String
+  terminalId         String
+  terminalCode       String
+  terminalName       String
+  repUserId          String
+  repName            String
+  businessDate       DateTime @db.Date
+  salesCount         Int
+  grossTotal         Decimal  @db.Decimal(18, 2)
+  itemsSoldQuantity  Decimal  @db.Decimal(18, 4)
+  /// [{ paymentMethod, label, count, amount }]
+  byMethod           Json
+  /// [{ productId, name, quantity, amount }] — capped at 50, see itemsTruncated
+  items              Json
+  itemsTruncated     Boolean  @default(false)
+  declaredHeldCount  Int      @default(0)
+  declaredHeldAmount Decimal  @default(0) @db.Decimal(18, 2)
+  /// Client-supplied idempotency token, written by the INSERT itself. NOT NULL
+  /// on purpose: sales_orders and purchase_orders keep theirs nullable because
+  /// desktop-created rows share those tables and Postgres treats NULLs as
+  /// distinct — this table has no non-POS writer, so the nullable form would
+  /// only weaken the guarantee.
+  idempotencyKey     String
+  submittedAt        DateTime @default(now())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([companyId, idempotencyKey])
+  @@index([companyId, businessDate])
+  @@index([terminalId, businessDate])
+  @@map("mobile_pos_day_reports")
+}
+
 model OfflineSyncBatch {
   id             String                 @id @default(uuid())
   batchNumber    String                 @unique

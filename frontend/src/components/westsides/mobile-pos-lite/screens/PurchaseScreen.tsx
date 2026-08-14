@@ -1,7 +1,7 @@
 'use client';
 
 import type { Dispatch, SetStateAction } from 'react';
-import { ArrowLeft, Minus, Plus, Search, Trash2 } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Minus, Plus, Search, Trash2 } from 'lucide-react';
 import type { MobilePosLiteProduct } from '@/lib/mobile-pos-lite-store';
 import type { PosScreen, PosTranslate, PurchaseLine, Supplier } from '../pos-types';
 import { money } from '../pos-utils';
@@ -31,6 +31,7 @@ export function PurchaseScreen({
   setScreen,
   slabMode = false,
   slipParked = false,
+  openHistory,
 }: {
   shellClass: string;
   online: boolean;
@@ -64,6 +65,15 @@ export function PurchaseScreen({
    * that explains a form the manager did not just type.
    */
   slipParked?: boolean;
+  /**
+   * Kaunta only: → `#manunuzi/historia`, the branch's 7-day receiving book.
+   * OPT-IN AND DEFAULTING OFF — classic (uiVersion 1) passes nothing, so the
+   * row is not rendered there and the classic shell is untouched. This is also
+   * the permission gate in practice: the shell only passes it on a session
+   * that carries `mobile_pos_lite.purchase`, so a rep can never be shown a
+   * control leading to an endpoint that would refuse her.
+   */
+  openHistory?: () => void;
 }) {
   return (
     <main
@@ -320,6 +330,27 @@ export function PurchaseScreen({
         <p className="mt-4 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
           {t('purchaseStockNote')}
         </p>
+        {/* Historia ya Manunuzi — the same full-width secondary row Leo carries
+         * for the sales book (spec-history-reports §2.1). Rendered only when
+         * the shell hands the callback down, which it does only for a session
+         * holding `mobile_pos_lite.purchase`: no dead control ever appears. */}
+        {openHistory && (
+          <button
+            type="button"
+            onClick={openHistory}
+            className="mt-4 flex min-h-14 w-full items-center justify-between gap-3 rounded-lg border px-4 text-left"
+            style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
+          >
+            <span className="text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
+              {t('purchaseHistoryTitle')}
+            </span>
+            <ChevronRight
+              size={19}
+              style={{ color: 'var(--aurora-text-secondary)' }}
+              aria-hidden="true"
+            />
+          </button>
+        )}
         {!slabMode && (
           <button
             type="button"

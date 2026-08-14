@@ -443,6 +443,12 @@ export const NAV: NavItem[] = [
         permission: 'mobile_pos_lite.manage',
       },
       {
+        href: '/westsides/mobile-pos/day-reports',
+        label: 'Mobile POS Day Reports',
+        iconKey: 'fileText',
+        permission: 'mobile_pos_lite.manage',
+      },
+      {
         href: '/westsides/customers',
         label: 'Customers',
         iconKey: 'users',

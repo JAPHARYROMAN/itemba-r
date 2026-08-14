@@ -16,6 +16,10 @@ import { CreateMobilePosLiteSaleDto } from './dto/mobile-pos-lite-sale.dto';
 import { CreateMobilePosLitePurchaseDto } from './dto/mobile-pos-lite-purchase.dto';
 import { CreateMobilePosLiteStockCountDto } from './dto/mobile-pos-lite-stock-count.dto';
 import { QueryMobilePosLiteStockDto } from './dto/mobile-pos-lite-stock.dto';
+import {
+  CreateMobilePosLiteDayReportDto,
+  QueryMobilePosLiteDayReportsDto,
+} from './dto/mobile-pos-lite-day-report.dto';
 import { MobilePosLiteService } from './mobile-pos-lite.service';
 
 @Controller('mobile-pos-lite')
@@ -156,6 +160,95 @@ export class MobilePosLiteController {
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.send(receipt.buffer);
+  }
+
+  /**
+   * This rep's own sales over the history window (spec-history-reports §1.1),
+   * for Historia ya Mauzo. Same path as the POST above; the verbs disambiguate.
+   * There is deliberately no `days` parameter — the window is a server
+   * constant.
+   * REVIEW-BLOCKING RULE: selling prices are allowed here (they are already on
+   * the phone in the catalog and on every printed receipt); cost and margin
+   * NEVER are. See the service method.
+   */
+  @Get('sales')
+  @RequirePermissions('mobile_pos_lite.use')
+  salesHistory(
+    @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
+    @Headers('x-mobile-pos-device') deviceSecret: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.salesHistory(terminalCode, deviceSecret, user);
+  }
+
+  /**
+   * What this branch received through the POS over the history window
+   * (spec-history-reports §1.2), for Historia ya Manunuzi. Gated on
+   * mobile_pos_lite.purchase — the same manager gate that guards recording a
+   * delivery — never on .use.
+   * REVIEW-BLOCKING RULE — THE COST-BLINDNESS LAW: this route must NEVER return
+   * a cost, total or value field of any kind (unitCost, lineTotal, totalAmount,
+   * subtotal, paidAmount, averageCost, margin, or anything derived from them),
+   * and it carries no window total. A stolen phone must reveal nothing about
+   * what this business pays its suppliers. See the service method.
+   */
+  @Get('purchases')
+  @RequirePermissions('mobile_pos_lite.purchase')
+  purchaseHistory(
+    @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
+    @Headers('x-mobile-pos-device') deviceSecret: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.purchaseHistory(terminalCode, deviceSecret, user);
+  }
+
+  /**
+   * The end-of-day close (spec-history-reports §1.3). The body carries only an
+   * idempotency key, the day being closed and the phone's declared held
+   * figures; every number the office reads is recomputed server-side.
+   */
+  @Post('day-reports')
+  @RequirePermissions('mobile_pos_lite.use')
+  createDayReport(
+    @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
+    @Headers('x-mobile-pos-device') deviceSecret: string | undefined,
+    @Body() dto: CreateMobilePosLiteDayReportDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.createDayReport(terminalCode, deviceSecret, dto, user);
+  }
+
+  /**
+   * The office's read surface for submitted day reports
+   * (spec-history-reports §1.5). A desktop call: no terminal headers, the
+   * existing terminal-admin gate, and company scope from the AuthUser.
+   */
+  @Get('day-reports')
+  @RequirePermissions('mobile_pos_lite.manage')
+  dayReports(@Query() query: QueryMobilePosLiteDayReportsDto, @CurrentUser() user: AuthUser) {
+    return this.service.dayReports(query, user);
+  }
+
+  /**
+   * Letterhead day-report PDF for a report submitted from this terminal.
+   * Non-passthrough @Res() so the PDF bytes bypass the TransformInterceptor's
+   * { data } envelope, byte-for-byte the shape of sales/:id/receipt above.
+   */
+  @Get('day-reports/:id/pdf')
+  @RequirePermissions('mobile_pos_lite.use')
+  async dayReportPdf(
+    @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
+    @Headers('x-mobile-pos-device') deviceSecret: string | undefined,
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    const report = await this.service.dayReportPdf(terminalCode, deviceSecret, id, user);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${report.fileName}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(report.buffer);
   }
 
   @Get('my-sales-today')

@@ -135,6 +135,8 @@ function makeService() {
     },
     goodsReceivedNote: {
       findFirst: jest.fn().mockResolvedValue(null),
+      // The purchase history's receipt-number join (spec-history-reports §1.2).
+      findMany: jest.fn().mockResolvedValue([]),
     },
     stockAdjustment: {
       findFirst: jest.fn().mockResolvedValue(null),
@@ -159,11 +161,42 @@ function makeService() {
     },
     salesOrder: {
       findFirst: jest.fn().mockResolvedValue(null),
+      // Sales history + the day report's server-side recomputation. The
+      // aggregate is the UNBOUNDED one both of them take their headline
+      // figures from, so it defaults to an empty day rather than to the list.
+      findMany: jest.fn().mockResolvedValue([]),
+      aggregate: jest.fn().mockResolvedValue({ _count: { _all: 0 }, _sum: { totalAmount: null } }),
+      groupBy: jest.fn().mockResolvedValue([]),
+    },
+    // The day report's product breakdown AND its items-sold total, summed by
+    // the database over the whole day. Unbounded on purpose: a figure the
+    // letterhead prints in `Muhtasari / Summary` must not come from a page.
+    salesOrderLine: {
+      groupBy: jest.fn().mockResolvedValue([]),
+    },
+    mobilePosDayReport: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+      // The row is echoed back from the data the chain wrote, so the response
+      // assertions below are reading what would actually have been stored —
+      // above all the idempotency key the INSERT itself carries.
+      create: jest.fn().mockImplementation(({ data }: any) =>
+        Promise.resolve({
+          id: 'report-1',
+          submittedAt: new Date('2026-08-14T15:42:11.000Z'),
+          createdAt: new Date('2026-08-14T15:42:11.000Z'),
+          updatedAt: new Date('2026-08-14T15:42:11.000Z'),
+          ...data,
+        }),
+      ),
     },
   };
   const companyScope: any = {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
     assertGroupScoped: jest.fn(),
+    // The office list resolves its company scope from the AuthUser, never from
+    // a client-supplied companyId (spec-history-reports §1.5).
+    companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-1' }),
   };
   const auditLogs: any = { log: jest.fn().mockResolvedValue(undefined) };
   const salesOrders: any = {
@@ -206,6 +239,7 @@ function makeService() {
   return {
     service,
     prisma,
+    companyScope,
     salesOrders,
     purchaseOrders,
     goodsReceivedNotes,
@@ -2889,5 +2923,1322 @@ describe('MobilePosLiteController stock-counts route', () => {
     controller.createStockCount(TERMINAL_CODE, DEVICE_SECRET, dto, user);
 
     expect(service.createStockCount).toHaveBeenCalledWith(TERMINAL_CODE, DEVICE_SECRET, dto, user);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Historia (sales + purchase viewing) and Funga Siku (the end-of-day report)
+// — spec-history-reports. Everything below is additive.
+// ───────────────────────────────────────────────────────────────────────────────
+
+const DAY_REPORT_KEY = 'offline-day-report-key-0001';
+
+/**
+ * THE BUSINESS TIMEZONE, restated here on purpose.
+ *
+ * These expectations are computed from the zone by NAME, never from the
+ * machine's own and never from a hard-coded +3, so the suite asserts the same
+ * boundary whether it runs on a UTC container, a developer's laptop in EAT, or
+ * a CI box in California. That independence IS the regression: the shipped
+ * container sets no TZ, and reading the day from the process's zone is what cut
+ * every trading day at 03:00 EAT and refused every close made before it.
+ */
+const BUSINESS_TZ = 'Africa/Nairobi';
+
+const businessClock = new Intl.DateTimeFormat('en-GB', {
+  timeZone: BUSINESS_TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+});
+
+function businessFields(value: Date) {
+  const parts = businessClock.formatToParts(value);
+  const read = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return {
+    year: read('year'),
+    month: read('month'),
+    day: read('day'),
+    hour: read('hour'),
+    minute: read('minute'),
+    second: read('second'),
+  };
+}
+
+/** The `YYYY-MM-DD` business day `offsetDays` days back from now. */
+function localDateKey(offsetDays = 0) {
+  const at = businessFields(new Date());
+  const day = new Date(Date.UTC(at.year, at.month - 1, at.day - offsetDays));
+  return day.toISOString().slice(0, 10);
+}
+
+/** The instant midnight begins in the business zone on that calendar day. */
+function businessMidnight(dayKey: string) {
+  const wallClock = Date.parse(`${dayKey}T00:00:00.000Z`);
+  const offsetAt = (instant: Date) => {
+    const at = businessFields(instant);
+    return (
+      Date.UTC(at.year, at.month - 1, at.day, at.hour, at.minute, at.second) - instant.getTime()
+    );
+  };
+  const guess = new Date(wallClock - offsetAt(new Date(wallClock)));
+  return new Date(wallClock - offsetAt(guess));
+}
+
+/** Business-zone midnight today, and the two boundaries both history lists sit between. */
+function historyBoundaries() {
+  const today = localDateKey();
+  return {
+    dayStart: businessMidnight(today),
+    // Today counts as day 1, so "siku 7" is today plus the six before it.
+    from: businessMidnight(localDateKey(6)),
+    dayEnd: businessMidnight(localDateKey(-1)),
+  };
+}
+
+/**
+ * A SalesOrder row as the sales-history select block reads it.
+ */
+function historySaleRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'so-1',
+    salesOrderNumber: 'SO-2026-0912',
+    createdAt: new Date('2026-08-14T09:14:00.000Z'),
+    paymentMethod: 'CASH',
+    paymentReference: null,
+    customerName: null,
+    totalAmount: '18000',
+    customer: { name: 'Mama Asha' },
+    lines: [
+      {
+        productId: 'product-1',
+        description: 'Embe Dodo',
+        quantity: '3',
+        unitPrice: '6000',
+        lineTotal: '18000',
+        product: { name: 'Embe Dodo' },
+        unit: { symbol: 'pc' },
+      },
+    ],
+    ...overrides,
+  };
+}
+
+/**
+ * A PurchaseOrder row carrying NON-ZERO buying costs at both levels. The point
+ * of the fixture is that the leak is available to leak: unitCost, lineTotal and
+ * totalAmount are all present on the object the service reads, so a payload
+ * built by spreading a Prisma row would carry them and the key-set assertion
+ * below would catch it.
+ */
+function historyPurchaseRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'po-1',
+    purchaseOrderNumber: 'PO-2026-0141',
+    createdAt: new Date('2026-08-13T09:14:00.000Z'),
+    subtotal: '480000',
+    totalAmount: '480000',
+    paidAmount: '0',
+    outstandingAmount: '480000',
+    supplier: { name: 'Azam Distributors' },
+    lines: [
+      {
+        productId: 'product-1',
+        description: 'Embe Dodo',
+        quantity: '24',
+        unitCost: '20000',
+        lineTotal: '480000',
+        product: { name: 'Embe Dodo' },
+        unit: { symbol: 'pc' },
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function dayReportDto(overrides: Record<string, unknown> = {}) {
+  return {
+    idempotencyKey: DAY_REPORT_KEY,
+    businessDate: localDateKey(),
+    heldCount: 0,
+    heldAmount: 0,
+    ...overrides,
+  } as any;
+}
+
+/** A stored MobilePosDayReport, as the replay and PDF paths read it back. */
+function dayReportRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'report-1',
+    companyId: 'company-1',
+    divisionId: 'division-1',
+    branchId: 'branch-1',
+    branchName: 'Branch',
+    terminalId: 'terminal-1',
+    terminalCode: TERMINAL_CODE,
+    terminalName: 'Counter 1',
+    repUserId: 'rep-1',
+    repName: 'Rep One',
+    businessDate: new Date(`${localDateKey()}T00:00:00.000Z`),
+    salesCount: 23,
+    grossTotal: '412000',
+    itemsSoldQuantity: '87',
+    byMethod: [{ paymentMethod: 'CASH', label: 'Fedha', count: 19, amount: 331000 }],
+    items: [{ productId: 'product-1', name: 'Embe Dodo', quantity: 14, amount: 84000 }],
+    itemsTruncated: false,
+    declaredHeldCount: 0,
+    declaredHeldAmount: '0',
+    idempotencyKey: DAY_REPORT_KEY,
+    submittedAt: new Date('2026-08-14T15:42:11.000Z'),
+    createdAt: new Date('2026-08-14T15:42:11.000Z'),
+    updatedAt: new Date('2026-08-14T15:42:11.000Z'),
+    ...overrides,
+  };
+}
+
+/**
+ * One row of the day report's product breakdown as `salesOrderLine.groupBy`
+ * returns it: the DATABASE's sum for a product over the whole window, not a
+ * page of orders summed in JS.
+ */
+function dayReportLineGroup(
+  productId: string,
+  quantity: string | number,
+  lineTotal: string | number,
+) {
+  return { productId, _sum: { quantity: String(quantity), lineTotal: String(lineTotal) } };
+}
+
+/**
+ * Every key in a serialised payload, recursively.
+ *
+ * KEYS ONLY, never values: a product legitimately named "Total Motor Oil" must
+ * not fail the build. This is what makes the cost assertions survive the change
+ * they exist for — a column added to PurchaseOrderLine or SalesOrderLine next
+ * year cannot slip through a suite that still passes, because the assertion is
+ * over the whole set rather than over a list of today's field names.
+ */
+function allKeys(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(allKeys);
+  if (value && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) => [
+      key,
+      ...allKeys(nested),
+    ]);
+  }
+  return [];
+}
+
+describe('MobilePosLiteService salesHistory', () => {
+  it('scopes to this terminal and this rep over the 7-day local-midnight window', async () => {
+    const { service, prisma } = makeService();
+    const { from, dayEnd } = historyBoundaries();
+
+    const result = await service.salesHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+
+    const expectedWhere = {
+      companyId: 'company-1',
+      mobilePosTerminalId: 'terminal-1',
+      // Per-rep, exactly like mySalesToday: sales are personal accountability.
+      createdById: 'rep-1',
+      status: { in: ['CONFIRMED', 'PARTIALLY_PAID', 'PAID'] },
+      orderDate: { gte: from, lt: dayEnd },
+    };
+    expect(prisma.salesOrder.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expectedWhere }),
+    );
+    expect(prisma.salesOrder.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expectedWhere,
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      }),
+    );
+    expect(result.days).toBe(7);
+    expect(result.from).toBe(from.toISOString());
+  });
+
+  it('takes the headline figures from the UNBOUNDED aggregate, never from the truncated list', async () => {
+    const { service, prisma } = makeService();
+    // 900 sales in the window; the list carries the newest 200. If the totals
+    // came from the rows a rep would be told she sold a fraction of her week.
+    prisma.salesOrder.aggregate.mockResolvedValue({
+      _count: { _all: 900 },
+      _sum: { totalAmount: '4120000' },
+    });
+    prisma.salesOrder.findMany.mockResolvedValue([historySaleRow()]);
+
+    const result = await service.salesHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+
+    expect(result.count).toBe(900);
+    expect(result.totalAmount).toBe(4120000);
+    expect(result.sales).toHaveLength(1);
+  });
+
+  it('serializes selling prices and NEVER cost or margin (review-blocking)', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.aggregate.mockResolvedValue({
+      _count: { _all: 1 },
+      _sum: { totalAmount: '18000' },
+    });
+    prisma.salesOrder.findMany.mockResolvedValue([historySaleRow()]);
+
+    const result = await service.salesHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+    const serialized = JSON.parse(JSON.stringify(result));
+
+    expect(Object.keys(serialized).sort()).toEqual([
+      'count',
+      'days',
+      'from',
+      'sales',
+      'totalAmount',
+    ]);
+    expect(Object.keys(serialized.sales[0]).sort()).toEqual([
+      'createdAt',
+      'customerName',
+      'id',
+      'lines',
+      'paymentMethod',
+      'paymentReference',
+      'salesOrderNumber',
+      'totalAmount',
+    ]);
+    expect(Object.keys(serialized.sales[0].lines[0]).sort()).toEqual([
+      'lineTotal',
+      'name',
+      'productId',
+      'quantity',
+      'unitPrice',
+      'unitSymbol',
+    ]);
+    // Selling-side numbers ride on purpose — they are already on the phone in
+    // the catalog and on every printed receipt. The buying side never does.
+    expect(serialized.sales[0].lines[0]).toMatchObject({ unitPrice: 6000, lineTotal: 18000 });
+    expect(allKeys(serialized).filter((key) => /cost|margin|profit|cogs/i.test(key))).toEqual([]);
+    for (const forbidden of [
+      'unitCostAtSale',
+      'cogsAmount',
+      'grossProfitAmount',
+      'grossMarginPct',
+    ]) {
+      expect(serialized.sales[0].lines[0]).not.toHaveProperty(forbidden);
+    }
+  });
+
+  it('never uses include, at any level', async () => {
+    const { service, prisma } = makeService();
+
+    await service.salesHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+
+    const [args] = prisma.salesOrder.findMany.mock.calls[0];
+    expect(args.include).toBeUndefined();
+    expect(args.select.lines.include).toBeUndefined();
+    expect(Object.keys(args.select.lines.select).sort()).toEqual([
+      'description',
+      'lineTotal',
+      'product',
+      'productId',
+      'quantity',
+      'unit',
+      'unitPrice',
+    ]);
+  });
+
+  it('prefers the linked customer name, falls back to the snapshot, then to null', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findMany.mockResolvedValue([
+      historySaleRow({ id: 'so-linked' }),
+      historySaleRow({ id: 'so-snapshot', customer: null, customerName: 'Mzee Juma' }),
+      historySaleRow({ id: 'so-none', customer: null, customerName: null }),
+    ]);
+
+    const result = await service.salesHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+
+    expect(result.sales.map((sale: any) => sale.customerName)).toEqual([
+      'Mama Asha',
+      'Mzee Juma',
+      null,
+    ]);
+  });
+
+  it('names a line from the product, then the description, then empty', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findMany.mockResolvedValue([
+      historySaleRow({
+        lines: [
+          { ...historySaleRow().lines[0], product: null, description: 'Free text line' },
+          { ...historySaleRow().lines[0], product: null, description: null, unit: null },
+        ],
+      }),
+    ]);
+
+    const result = await service.salesHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+
+    expect(result.sales[0].lines.map((line: any) => line.name)).toEqual(['Free text line', '']);
+    expect(result.sales[0].lines[1].unitSymbol).toBe('');
+  });
+});
+
+describe('MobilePosLiteService purchaseHistory', () => {
+  it('scopes to the terminal BRANCH, POS-originated rows only, over the 7-day window', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findMany.mockResolvedValue([]);
+    const { from, dayEnd } = historyBoundaries();
+
+    const result = await service.purchaseHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+
+    expect(prisma.purchaseOrder.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          companyId: 'company-1',
+          // Branch, not rep: receiving is a branch activity and the manager
+          // sees the branch's whole POS receiving book.
+          branchId: 'branch-1',
+          purchaseType: 'STOCK_PURCHASE',
+          deletedAt: null,
+          // Marker-filtered: desktop-ERP purchases at the same branch are not
+          // this screen's book.
+          notes: { contains: '[MPL-PURCHASE:' },
+          createdAt: { gte: from, lt: dayEnd },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+    );
+    expect(result.days).toBe(7);
+    expect(result.from).toBe(from.toISOString());
+    expect(result.purchases).toEqual([]);
+    // Nothing to join receipts for — the second query is skipped entirely.
+    expect(prisma.goodsReceivedNote.findMany).not.toHaveBeenCalled();
+  });
+
+  it('never uses include, so no cost column can ride out on a relation', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findMany.mockResolvedValue([historyPurchaseRow()]);
+
+    await service.purchaseHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+
+    const [args] = prisma.purchaseOrder.findMany.mock.calls[0];
+    expect(args.include).toBeUndefined();
+    expect(Object.keys(args.select).sort()).toEqual([
+      'createdAt',
+      'id',
+      'lines',
+      'purchaseOrderNumber',
+      'supplier',
+    ]);
+    expect(args.select.lines.include).toBeUndefined();
+    expect(Object.keys(args.select.lines.select).sort()).toEqual([
+      'description',
+      'product',
+      'productId',
+      'quantity',
+      'unit',
+    ]);
+    // The receipt-number join is cost-free too.
+    const [grnArgs] = prisma.goodsReceivedNote.findMany.mock.calls[0];
+    expect(grnArgs.include).toBeUndefined();
+    expect(Object.keys(grnArgs.select).sort()).toEqual(['grnNumber', 'purchaseOrderId', 'status']);
+  });
+
+  it('returns the EXACT key set and no cost, total or value field anywhere (review-blocking)', async () => {
+    const { service, prisma } = makeService();
+    // The fixture carries real buying costs at both levels — the leak is
+    // available to leak.
+    prisma.purchaseOrder.findMany.mockResolvedValue([historyPurchaseRow()]);
+    prisma.goodsReceivedNote.findMany.mockResolvedValue([
+      { purchaseOrderId: 'po-1', grnNumber: 'GRN-2026-0139', status: 'POSTED' },
+    ]);
+
+    const result = await service.purchaseHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+    const serialized = JSON.parse(JSON.stringify(result));
+
+    // Top level: no window total, and there never will be one.
+    expect(Object.keys(serialized).sort()).toEqual(['count', 'days', 'from', 'purchases']);
+    expect(Object.keys(serialized.purchases[0]).sort()).toEqual([
+      'grnNumber',
+      'id',
+      'lines',
+      'purchaseOrderNumber',
+      'recordedAt',
+      'status',
+      'supplierName',
+    ]);
+    expect(Object.keys(serialized.purchases[0].lines[0]).sort()).toEqual([
+      'name',
+      'productId',
+      'quantity',
+      'unitSymbol',
+    ]);
+    // And recursively, so a field added to PurchaseOrder or PurchaseOrderLine
+    // next year cannot slip through a suite that still passes.
+    expect(
+      allKeys(serialized).filter((key) =>
+        /cost|price|amount|total|value|margin|profit|cogs/i.test(key),
+      ),
+    ).toEqual([]);
+    expect(serialized.purchases[0]).toEqual({
+      id: 'po-1',
+      purchaseOrderNumber: 'PO-2026-0141',
+      grnNumber: 'GRN-2026-0139',
+      supplierName: 'Azam Distributors',
+      recordedAt: '2026-08-13T09:14:00.000Z',
+      status: 'COMPLETE',
+      lines: [{ productId: 'product-1', name: 'Embe Dodo', quantity: 24, unitSymbol: 'pc' }],
+    });
+  });
+
+  it('surfaces an interrupted chain honestly as INCOMPLETE with a null GRN number', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findMany.mockResolvedValue([
+      historyPurchaseRow({ id: 'po-done' }),
+      historyPurchaseRow({ id: 'po-stuck' }),
+      historyPurchaseRow({ id: 'po-none' }),
+    ]);
+    prisma.goodsReceivedNote.findMany.mockResolvedValue([
+      { purchaseOrderId: 'po-done', grnNumber: 'GRN-1', status: 'POSTED' },
+      // An APPROVED-but-unposted receipt moved no stock, so the delivery is not
+      // complete and hiding it would make a stock movement unexplainable.
+      { purchaseOrderId: 'po-stuck', grnNumber: 'GRN-2', status: 'APPROVED' },
+    ]);
+
+    const result = await service.purchaseHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+
+    expect(
+      result.purchases.map((purchase: any) => [purchase.id, purchase.status, purchase.grnNumber]),
+    ).toEqual([
+      ['po-done', 'COMPLETE', 'GRN-1'],
+      ['po-stuck', 'INCOMPLETE', null],
+      ['po-none', 'INCOMPLETE', null],
+    ]);
+  });
+
+  it('empties a deleted supplier to a blank name rather than crashing the screen', async () => {
+    const { service, prisma } = makeService();
+    // The relation is onDelete: SetNull and there is no snapshot column.
+    prisma.purchaseOrder.findMany.mockResolvedValue([historyPurchaseRow({ supplier: null })]);
+
+    const result = await service.purchaseHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+
+    expect(result.purchases[0].supplierName).toBe('');
+  });
+});
+
+/**
+ * REGRESSION — HISTORY_REVIEW_FINDINGS, `resolveClosableBusinessDate` /
+ * `computeDayReport` (the day boundary), spec-history-reports §1.0 and §1.3.
+ *
+ * Every instant below is written in UTC and every expectation is an ABSOLUTE
+ * instant, so the assertions describe one boundary rather than the boundary of
+ * whichever machine runs them. The shipped container sets no TZ and runs UTC,
+ * and CI runs UTC, so a revert to `new Date(v.getFullYear(), …)` fails here on
+ * exactly the two clocks that matter. (On a laptop already set to EAT the two
+ * implementations coincide — which is precisely how this shipped.)
+ */
+describe('MobilePosLiteService business-day boundary', () => {
+  /**
+   * 00:30 on 15 August in Dar es Salaam. The container's own clock still reads
+   * 14 August 21:30 at this instant: the three-hour disagreement that refused a
+   * rep her close for the first three hours of every day and cut the trading
+   * day at 03:00 local.
+   */
+  const HALF_PAST_MIDNIGHT_EAT = new Date('2026-08-14T21:30:00.000Z');
+  const MIDNIGHT_14_AUG_EAT = new Date('2026-08-13T21:00:00.000Z');
+  const MIDNIGHT_15_AUG_EAT = new Date('2026-08-14T21:00:00.000Z');
+  const MIDNIGHT_16_AUG_EAT = new Date('2026-08-15T21:00:00.000Z');
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('accepts a close at 00:30 EAT for the day the phone is actually in', async () => {
+    jest.useFakeTimers({ now: HALF_PAST_MIDNIGHT_EAT });
+    const { service, prisma } = makeService();
+
+    const result = await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      dayReportDto({ businessDate: '2026-08-15' }),
+      repUser(),
+    );
+
+    // Read from the container's own zone this was a hard 400 — "Only today or
+    // yesterday can be closed from a Mobile POS terminal" — for an ordinary
+    // act, with no recovery until 03:00.
+    expect(result.businessDate).toBe('2026-08-15');
+    const [{ data }] = prisma.mobilePosDayReport.create.mock.calls[0];
+    expect(data.businessDate).toEqual(new Date('2026-08-15T00:00:00.000Z'));
+  });
+
+  it('computes the day over business-zone midnight, so nothing is cut at 03:00', async () => {
+    jest.useFakeTimers({ now: HALF_PAST_MIDNIGHT_EAT });
+    const { service, prisma } = makeService();
+
+    await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      dayReportDto({ businessDate: '2026-08-15' }),
+      repUser(),
+    );
+
+    // A sale rung at 01:00 EAT on the 15th falls inside the 15th's window, the
+    // same day its own receipt prints. Under the process's zone this window ran
+    // 03:00–03:00 and that sale was filed under the 14th.
+    expect(prisma.salesOrder.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orderDate: { gte: MIDNIGHT_15_AUG_EAT, lt: MIDNIGHT_16_AUG_EAT },
+        }),
+      }),
+    );
+  });
+
+  it('reaches yesterday from after midnight, and no further', async () => {
+    jest.useFakeTimers({ now: HALF_PAST_MIDNIGHT_EAT });
+    const { service, prisma } = makeService();
+
+    // The whole point of the yesterday window: she traded until 23:50, lost
+    // signal, and is closing on the bus at 00:30 — or she is closing a day that
+    // ended offline, the next morning. Both are this call.
+    await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      dayReportDto({ businessDate: '2026-08-14' }),
+      repUser(),
+    );
+    expect(prisma.salesOrder.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orderDate: { gte: MIDNIGHT_14_AUG_EAT, lt: MIDNIGHT_15_AUG_EAT },
+        }),
+      }),
+    );
+
+    // Two days back is a device clock, not a work day.
+    const older = makeService();
+    await expect(
+      older.service.createDayReport(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        dayReportDto({ businessDate: '2026-08-13' }),
+        repUser(),
+      ),
+    ).rejects.toThrow('Only today or yesterday can be closed from a Mobile POS terminal');
+
+    // And tomorrow is still tomorrow at 00:30, business zone or not.
+    const ahead = makeService();
+    await expect(
+      ahead.service.createDayReport(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        dayReportDto({ businessDate: '2026-08-16' }),
+        repUser(),
+      ),
+    ).rejects.toThrow('Only today or yesterday can be closed from a Mobile POS terminal');
+  });
+
+  it('cuts both history windows on the same business-zone midnights', async () => {
+    jest.useFakeTimers({ now: HALF_PAST_MIDNIGHT_EAT });
+    const { service, prisma } = makeService();
+
+    prisma.purchaseOrder.findMany.mockResolvedValue([historyPurchaseRow()]);
+    await service.salesHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+    await service.purchaseHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+
+    // Today (the 15th in EAT) plus the six before it, ending at the 16th's
+    // midnight — so the sale she rang ten minutes ago is in her own history.
+    expect(prisma.salesOrder.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orderDate: { gte: new Date('2026-08-08T21:00:00.000Z'), lt: MIDNIGHT_16_AUG_EAT },
+        }),
+      }),
+    );
+    expect(prisma.purchaseOrder.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdAt: { gte: new Date('2026-08-08T21:00:00.000Z'), lt: MIDNIGHT_16_AUG_EAT },
+        }),
+      }),
+    );
+  });
+
+  it('files the report under the calendar day the paper prints, not the instant the window opens', async () => {
+    jest.useFakeTimers({ now: HALF_PAST_MIDNIGHT_EAT });
+    const { service, prisma } = makeService();
+
+    const result = await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      dayReportDto({ businessDate: '2026-08-15' }),
+      repUser(),
+    );
+
+    // The @db.Date column keeps a calendar day (UTC midnight); the sales window
+    // opens three hours earlier in absolute time. Both mean 15 August, which is
+    // what the letterhead's `Tarehe / Date` row reads.
+    const [{ data }] = prisma.mobilePosDayReport.create.mock.calls[0];
+    expect(data.businessDate).toEqual(new Date('2026-08-15T00:00:00.000Z'));
+    expect(result.reference).toBe(`${TERMINAL_CODE}-20260815`);
+  });
+});
+
+describe('MobilePosLiteService createDayReport', () => {
+  it('recomputes every figure server-side and stores the key on the INSERT itself', async () => {
+    const { service, prisma, auditLogs } = makeService();
+    prisma.mobilePosTerminal.findFirst.mockResolvedValue(
+      cashTerminalRow({
+        paymentMethods: [
+          { paymentMethod: 'CASH', isEnabled: true, cashAccountId: 'cash-1', label: 'Fedha' },
+        ],
+      }),
+    );
+    prisma.salesOrder.aggregate.mockResolvedValue({
+      _count: { _all: 3 },
+      _sum: { totalAmount: '39000' },
+    });
+    prisma.salesOrder.groupBy.mockResolvedValue([
+      { paymentMethod: 'CASH', _count: { _all: 2 }, _sum: { totalAmount: '30000' } },
+      { paymentMethod: 'CREDIT', _count: { _all: 1 }, _sum: { totalAmount: '9000' } },
+    ]);
+    prisma.salesOrderLine.groupBy.mockResolvedValue([
+      dayReportLineGroup('product-1', '5', '30000'),
+      dayReportLineGroup('product-2', '1', '9000'),
+    ]);
+    prisma.product.findMany.mockResolvedValue([
+      { id: 'product-1', name: 'Embe Dodo' },
+      { id: 'product-2', name: 'Sukari' },
+    ]);
+
+    const result = await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      dayReportDto({ heldCount: 2, heldAmount: 26000 }),
+      repUser(),
+    );
+
+    const [{ data }] = prisma.mobilePosDayReport.create.mock.calls[0];
+    expect(data.idempotencyKey).toBe(DAY_REPORT_KEY);
+    expect(data.terminalId).toBe('terminal-1');
+    expect(data.repUserId).toBe('rep-1');
+    // The window the figures were computed over is the terminal's own scope.
+    expect(prisma.salesOrder.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          companyId: 'company-1',
+          mobilePosTerminalId: 'terminal-1',
+          createdById: 'rep-1',
+          status: { in: ['CONFIRMED', 'PARTIALLY_PAID', 'PAID'] },
+        }),
+      }),
+    );
+
+    // The headline figures ARE the underlying sales.
+    expect(result.salesCount).toBe(3);
+    expect(result.grossTotal).toBe(39000);
+    expect(result.itemsSoldQuantity).toBe(6);
+    // ...and the breakdown adds back up to the gross, so the paper is legible.
+    expect(result.byMethod).toEqual([
+      { paymentMethod: 'CASH', label: 'Fedha', count: 2, amount: 30000 },
+      // CREDIT has no configured payment row and honestly gets a null label.
+      { paymentMethod: 'CREDIT', label: null, count: 1, amount: 9000 },
+    ]);
+    expect(result.byMethod.reduce((sum: number, row: any) => sum + row.amount, 0)).toBe(
+      result.grossTotal,
+    );
+    // Items aggregate per product, newest-value first.
+    expect(result.items).toEqual([
+      { productId: 'product-1', name: 'Embe Dodo', quantity: 5, amount: 30000 },
+      { productId: 'product-2', name: 'Sukari', quantity: 1, amount: 9000 },
+    ]);
+    expect(result.itemsTruncated).toBe(false);
+    // The ONLY client-declared numbers on the record, stored under names that
+    // say so.
+    expect(result.declaredHeldCount).toBe(2);
+    expect(result.declaredHeldAmount).toBe(26000);
+    expect(result.reference).toBe(`${TERMINAL_CODE}-${localDateKey().replace(/-/g, '')}`);
+
+    expect(prisma.mobilePosTerminal.update).toHaveBeenCalled();
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'MOBILE_POS_LITE_DAY_REPORT_SUBMITTED',
+        entityType: 'MobilePosDayReport',
+        entityId: 'report-1',
+      }),
+    );
+  });
+
+  it('closes a zero-sale day honestly rather than refusing it', async () => {
+    const { service, prisma } = makeService();
+
+    const result = await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      dayReportDto(),
+      repUser(),
+    );
+
+    expect(result.salesCount).toBe(0);
+    expect(result.grossTotal).toBe(0);
+    expect(result.itemsSoldQuantity).toBe(0);
+    expect(result.byMethod).toEqual([]);
+    expect(result.items).toEqual([]);
+    expect(prisma.mobilePosDayReport.create).toHaveBeenCalled();
+  });
+
+  it('accepts yesterday — a rep who lost signal at 20:00 closes on the bus', async () => {
+    const { service, prisma } = makeService();
+
+    const result = await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      dayReportDto({ businessDate: localDateKey(1) }),
+      repUser(),
+    );
+
+    expect(result.businessDate).toBe(localDateKey(1));
+    const [{ data }] = prisma.mobilePosDayReport.create.mock.calls[0];
+    expect(data.businessDate).toEqual(new Date(`${localDateKey(1)}T00:00:00.000Z`));
+  });
+
+  it('refuses a day older than yesterday before anything exists, with the mapped sentence', async () => {
+    const { service, prisma } = makeService();
+
+    await expect(
+      service.createDayReport(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        dayReportDto({ businessDate: localDateKey(2) }),
+        repUser(),
+      ),
+    ).rejects.toThrow('Only today or yesterday can be closed from a Mobile POS terminal');
+
+    // Nothing was created, so nothing is stranded and no audit row is owed.
+    expect(prisma.mobilePosDayReport.findFirst).not.toHaveBeenCalled();
+    expect(prisma.mobilePosDayReport.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a future day and a calendar date that does not exist', async () => {
+    const { service } = makeService();
+
+    await expect(
+      service.createDayReport(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        dayReportDto({ businessDate: localDateKey(-1) }),
+        repUser(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    // 31 February matches the DTO regex and rolls forward to 3 March; the
+    // round-trip check is what stops it filing under a day nobody worked.
+    await expect(
+      service.createDayReport(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        dayReportDto({ businessDate: `${localDateKey().slice(0, 4)}-02-31` }),
+        repUser(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('replays a matching key: the stored record back, and no second row', async () => {
+    const { service, prisma } = makeService();
+    prisma.mobilePosDayReport.findFirst.mockResolvedValue(
+      dayReportRow({ declaredHeldCount: 2, declaredHeldAmount: '26000' }),
+    );
+
+    const result = await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      // The outbox drained between the failed attempt and this retry, so the
+      // phone now declares nothing held...
+      dayReportDto({ heldCount: 0, heldAmount: 0 }),
+      repUser(),
+    );
+
+    // ...and the record does NOT move. Mutating a report the office may already
+    // have read and printed is worse than a five-minute-stale disclosure; a rep
+    // who wants the corrected picture closes again under a fresh key.
+    expect(result.declaredHeldCount).toBe(2);
+    expect(result.declaredHeldAmount).toBe(26000);
+    expect(result.id).toBe('report-1');
+    expect(result.salesCount).toBe(23);
+    expect(prisma.mobilePosDayReport.create).not.toHaveBeenCalled();
+    // A replay recomputes nothing: the office already has these numbers.
+    expect(prisma.salesOrder.aggregate).not.toHaveBeenCalled();
+  });
+
+  it('refuses a key re-used for a DIFFERENT day, and writes the row the office needs', async () => {
+    const { service, prisma, auditLogs } = makeService();
+    prisma.mobilePosDayReport.findFirst.mockResolvedValue(
+      dayReportRow({ businessDate: new Date(`${localDateKey(1)}T00:00:00.000Z`) }),
+    );
+
+    await expect(
+      service.createDayReport(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        dayReportDto({ businessDate: localDateKey() }),
+        repUser(),
+      ),
+    ).rejects.toThrow('This day report key was already used for a different day or terminal');
+
+    // The refusal names the office as the recovery, so the office has to be
+    // able to see it.
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'MOBILE_POS_LITE_DAY_REPORT_CONFLICT',
+        entityType: 'MobilePosDayReport',
+        entityId: 'report-1',
+      }),
+    );
+    expect(prisma.mobilePosDayReport.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a key re-used from a different terminal or by a different rep', async () => {
+    const { service, prisma } = makeService();
+    prisma.mobilePosDayReport.findFirst.mockResolvedValue(
+      dayReportRow({ terminalId: 'terminal-9' }),
+    );
+    await expect(
+      service.createDayReport(TERMINAL_CODE, DEVICE_SECRET, dayReportDto(), repUser()),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    const second = makeService();
+    second.prisma.mobilePosDayReport.findFirst.mockResolvedValue(
+      dayReportRow({ repUserId: 'rep-9' }),
+    );
+    await expect(
+      second.service.createDayReport(TERMINAL_CODE, DEVICE_SECRET, dayReportDto(), repUser()),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('lets the DATABASE settle a create race: a unique violation resolves to the winner', async () => {
+    const { service, prisma } = makeService();
+    // Both racers read an empty table — Postgres stamps createdAt at
+    // transaction START, so a read cannot decide this. The index can.
+    prisma.mobilePosDayReport.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(dayReportRow());
+    prisma.mobilePosDayReport.create.mockRejectedValue(uniqueViolation());
+
+    const result = await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      dayReportDto(),
+      repUser(),
+    );
+
+    expect(result.id).toBe('report-1');
+    expect(result.salesCount).toBe(23);
+    // The loser created nothing, so there is no row to retire — unlike the
+    // purchase and count chains, this key is written by the INSERT itself.
+    expect(prisma.mobilePosDayReport.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-verifies the winner of a race before returning it', async () => {
+    const { service, prisma } = makeService();
+    prisma.mobilePosDayReport.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(dayReportRow({ terminalId: 'terminal-9' }));
+    prisma.mobilePosDayReport.create.mockRejectedValue(uniqueViolation());
+
+    await expect(
+      service.createDayReport(TERMINAL_CODE, DEVICE_SECRET, dayReportDto(), repUser()),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rethrows a non-unique insert failure untouched, leaving the frozen key safe to retry', async () => {
+    const { service, prisma } = makeService();
+    prisma.mobilePosDayReport.create.mockRejectedValue(new Error('connection terminated'));
+
+    await expect(
+      service.createDayReport(TERMINAL_CODE, DEVICE_SECRET, dayReportDto(), repUser()),
+    ).rejects.toThrow('connection terminated');
+
+    // No row exists, nothing was destroyed, and the identical retry is safe.
+    expect(prisma.mobilePosDayReport.findFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it('caps the item breakdown at 50 and says so, without touching the headline figures', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.aggregate.mockResolvedValue({
+      _count: { _all: 60 },
+      _sum: { totalAmount: '600000' },
+    });
+    prisma.salesOrderLine.groupBy.mockResolvedValue(
+      Array.from({ length: 60 }, (_unused, index) =>
+        dayReportLineGroup(`product-${index}`, '1', String(1000 * (index + 1))),
+      ),
+    );
+    prisma.product.findMany.mockResolvedValue(
+      Array.from({ length: 60 }, (_unused, index) => ({
+        id: `product-${index}`,
+        name: `Bidhaa ${index}`,
+      })),
+    );
+
+    const result = await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      dayReportDto(),
+      repUser(),
+    );
+
+    expect(result.items).toHaveLength(50);
+    // Sorted by value, so the cap drops the smallest lines.
+    expect(result.items[0].amount).toBe(60000);
+    expect(result.itemsTruncated).toBe(true);
+    // The DISPLAY cap never touched a total: the day was ranked whole first, so
+    // items sold counts all 60 products even though 50 rows are printed.
+    expect(result.salesCount).toBe(60);
+    expect(result.grossTotal).toBe(600000);
+    expect(result.itemsSoldQuantity).toBe(60);
+    // Names are looked up only for the rows that will be printed.
+    expect(prisma.product.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { in: expect.arrayContaining([expect.any(String)]) },
+          companyId: 'company-1',
+        }),
+        select: { id: true, name: true },
+      }),
+    );
+    expect(prisma.product.findMany.mock.calls[0][0].where.id.in).toHaveLength(50);
+  });
+
+  /**
+   * REGRESSION — spec-history-reports §1.3, HISTORY_REVIEW_FINDINGS
+   * `itemsSoldQuantity` (both rows).
+   *
+   * The figure used to be summed in JS over a findMany capped at 500 orders
+   * while being printed in `Muhtasari / Summary` beside two exact aggregates,
+   * under a paragraph promising the totals above were complete. It now comes
+   * from a line-level groupBy with no take at all, over exactly the order
+   * predicate the headline aggregate uses. Before the change this test fails on
+   * the `take` assertion — the day's lines were read a page at a time.
+   */
+  it('sums items sold from an UNBOUNDED line aggregate, never from a page of orders', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.aggregate.mockResolvedValue({
+      _count: { _all: 900 },
+      _sum: { totalAmount: '9000000' },
+    });
+    prisma.salesOrderLine.groupBy.mockResolvedValue([
+      dayReportLineGroup('product-1', '1801.5', '5400000'),
+      dayReportLineGroup('product-2', '600', '3600000'),
+    ]);
+    prisma.product.findMany.mockResolvedValue([
+      { id: 'product-1', name: 'Embe Dodo' },
+      { id: 'product-2', name: 'Sukari' },
+    ]);
+
+    const result = await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      dayReportDto(),
+      repUser(),
+    );
+
+    const [call] = prisma.salesOrderLine.groupBy.mock.calls[0];
+    // No `take`, no `skip`, no cursor: nothing here can be a page.
+    expect(call.take).toBeUndefined();
+    expect(call.skip).toBeUndefined();
+    expect(call).toEqual({
+      by: ['productId'],
+      where: {
+        salesOrder: {
+          companyId: 'company-1',
+          mobilePosTerminalId: 'terminal-1',
+          createdById: 'rep-1',
+          status: { in: ['CONFIRMED', 'PARTIALLY_PAID', 'PAID'] },
+          orderDate: { gte: expect.any(Date), lt: expect.any(Date) },
+        },
+      },
+      _sum: { quantity: true, lineTotal: true },
+    });
+    // A 900-order day: the old 500-order page would have undercounted this.
+    expect(result.itemsSoldQuantity).toBe(2401.5);
+    // ...and the day's whole book fits in the printed list, so the paper makes
+    // no truncation claim at all.
+    expect(result.itemsTruncated).toBe(false);
+    // The line scope IS the headline scope — the two can never drift.
+    const [aggregateCall] = prisma.salesOrder.aggregate.mock.calls[0];
+    expect(call.where.salesOrder).toEqual(aggregateCall.where);
+    // Nothing reads whole orders for this any more.
+    expect(prisma.salesOrder.findMany).not.toHaveBeenCalled();
+  });
+
+  /**
+   * REGRESSION — the same finding, from the paper's side. The Items paragraph
+   * used to read "Orodha hii imefupishwa; jumla hapo juu ni kamili", which was
+   * false for the one Summary figure the 500-order bound could move. With every
+   * Summary figure unbounded the sentence is true, and it now also says what
+   * was dropped.
+   */
+  it('prints a truncation note that vouches only for figures no bound can move', async () => {
+    const { service, prisma, generatedDocuments } = makeService();
+    prisma.mobilePosDayReport.findFirst.mockResolvedValue(
+      dayReportRow({ itemsTruncated: true, itemsSoldQuantity: '2401.5' }),
+    );
+
+    await service.dayReportPdf(TERMINAL_CODE, DEVICE_SECRET, 'report-1', repUser());
+
+    const [, document] = generatedDocuments.renderLetterheadPdf.mock.calls[0];
+    const summary = document.sections.find((s: any) => s.title === 'Muhtasari / Summary');
+    expect(summary.items).toEqual([
+      { label: 'Mauzo / Sales', value: '23' },
+      { label: 'Jumla / Gross Total', value: 'TZS 412,000' },
+      { label: 'Bidhaa zilizouzwa / Items Sold', value: '2,401.5' },
+    ]);
+    const items = document.sections.find((s: any) => s.title === 'Bidhaa / Items');
+    expect(items.paragraphs).toEqual([
+      'Orodha hii inaonyesha bidhaa 50 zenye thamani kubwa zaidi; jumla hapo juu ni kamili. / This list shows the 50 highest-value items; the totals above are complete.',
+    ]);
+  });
+});
+
+describe('MobilePosLiteService dayReports office list', () => {
+  it('scopes to the companies the AuthUser can reach, never to a client-supplied one', async () => {
+    const { service, prisma, companyScope } = makeService();
+    prisma.mobilePosDayReport.findMany.mockResolvedValue([dayReportRow()]);
+
+    const result = await service.dayReports({ terminalId: 'terminal-1' } as any, repUser());
+
+    expect(companyScope.assertGroupScoped).toHaveBeenCalled();
+    expect(companyScope.companyWhereFor).toHaveBeenCalledWith(repUser());
+    expect(prisma.mobilePosDayReport.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { companyId: 'company-1', terminalId: 'terminal-1' },
+        orderBy: { submittedAt: 'desc' },
+        take: 100,
+      }),
+    );
+    expect(result[0]).toMatchObject({ id: 'report-1', salesCount: 23, grossTotal: 412000 });
+  });
+
+  it('filters an inclusive business-date range', async () => {
+    const { service, prisma } = makeService();
+
+    await service.dayReports({ from: '2026-08-01', to: '2026-08-14' } as any, repUser());
+
+    expect(prisma.mobilePosDayReport.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          businessDate: {
+            gte: new Date('2026-08-01T00:00:00.000Z'),
+            // The office asks for a day, not for the instant it begins.
+            lt: new Date('2026-08-15T00:00:00.000Z'),
+          },
+        }),
+      }),
+    );
+  });
+});
+
+describe('MobilePosLiteService dayReportPdf', () => {
+  it('rejects a report submitted from another terminal', async () => {
+    const { service, prisma, generatedDocuments } = makeService();
+    prisma.mobilePosDayReport.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.dayReportPdf(TERMINAL_CODE, DEVICE_SECRET, 'report-other', repUser()),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(prisma.mobilePosDayReport.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'report-other',
+          companyId: 'company-1',
+          terminalId: 'terminal-1',
+        }),
+      }),
+    );
+    expect(generatedDocuments.renderLetterheadPdf).not.toHaveBeenCalled();
+  });
+
+  it('renders the letterhead report from the STORED record, bilingually', async () => {
+    const { service, prisma, generatedDocuments } = makeService();
+    prisma.mobilePosDayReport.findFirst.mockResolvedValue(dayReportRow());
+
+    const result = await service.dayReportPdf(TERMINAL_CODE, DEVICE_SECRET, 'report-1', repUser());
+
+    expect(generatedDocuments.renderLetterheadPdf).toHaveBeenCalledWith(
+      { companyId: 'company-1', branchId: 'branch-1' },
+      expect.objectContaining({
+        title: 'RIPOTI YA SIKU / DAY SALES REPORT',
+        subtitle: 'Rep One',
+        reference: `${TERMINAL_CODE}-${localDateKey().replace(/-/g, '')}`,
+        meta: expect.arrayContaining([
+          { label: 'Tawi / Branch', value: 'Branch' },
+          { label: 'Muuzaji / Sales Rep', value: 'Rep One' },
+        ]),
+      }),
+      expect.objectContaining({ id: 'rep-1' }),
+    );
+
+    const model = generatedDocuments.renderLetterheadPdf.mock.calls[0][1];
+    const [summary, methods, items] = model.sections;
+    expect(summary.items).toEqual([
+      { label: 'Mauzo / Sales', value: '23' },
+      { label: 'Jumla / Gross Total', value: 'TZS 412,000' },
+      { label: 'Bidhaa zilizouzwa / Items Sold', value: '87' },
+    ]);
+    expect(methods.table.headers).toEqual(['Njia / Method', 'Idadi / Count', 'Jumla / Total']);
+    expect(methods.table.rows).toEqual([['Fedha', '19', 'TZS 331,000']]);
+    expect(methods.totals).toEqual([
+      { label: 'JUMLA / TOTAL', value: 'TZS 412,000', emphasis: true },
+    ]);
+    expect(items.table.rows).toEqual([['Embe Dodo', '14', 'TZS 84,000']]);
+    expect(Buffer.isBuffer(result.buffer)).toBe(true);
+    // The submit time disambiguates a second close of the same day.
+    expect(result.fileName).toBe(
+      `RIPOTI-${TERMINAL_CODE}-${localDateKey().replace(/-/g, '')}-1842.pdf`,
+    );
+  });
+
+  it('prints the held section if and ONLY if the phone declared something held', async () => {
+    const held = makeService();
+    held.prisma.mobilePosDayReport.findFirst.mockResolvedValue(
+      dayReportRow({ declaredHeldCount: 2, declaredHeldAmount: '26000' }),
+    );
+    await held.service.dayReportPdf(TERMINAL_CODE, DEVICE_SECRET, 'report-1', repUser());
+
+    const heldModel = held.generatedDocuments.renderLetterheadPdf.mock.calls[0][1];
+    const heldSection = heldModel.sections.find(
+      (section: any) => section.title === 'Mauzo Yaliyo Mkononi / Sales Still On The Phone',
+    );
+    expect(heldSection.items).toEqual([
+      { label: 'Mauzo / Sales', value: '2' },
+      { label: 'Kiasi / Amount', value: 'TZS 26,000' },
+    ]);
+    // The sentence is what makes the report honest: not in the total, and
+    // declared by the phone.
+    expect(heldSection.paragraphs).toEqual([
+      'Hazijajumuishwa kwenye jumla hapo juu. Idadi hii imetolewa na simu. / Not included in the total above. This figure is declared by the phone.',
+    ]);
+
+    const clean = makeService();
+    clean.prisma.mobilePosDayReport.findFirst.mockResolvedValue(dayReportRow());
+    await clean.service.dayReportPdf(TERMINAL_CODE, DEVICE_SECRET, 'report-1', repUser());
+
+    const cleanModel = clean.generatedDocuments.renderLetterheadPdf.mock.calls[0][1];
+    expect(cleanModel.sections.some((section: any) => /Mkononi/.test(section.title))).toBe(false);
+  });
+
+  it('says a zero-sale day was empty instead of printing headers over nothing', async () => {
+    const { service, prisma, generatedDocuments } = makeService();
+    prisma.mobilePosDayReport.findFirst.mockResolvedValue(
+      dayReportRow({
+        salesCount: 0,
+        grossTotal: '0',
+        itemsSoldQuantity: '0',
+        byMethod: [],
+        items: [],
+      }),
+    );
+
+    await service.dayReportPdf(TERMINAL_CODE, DEVICE_SECRET, 'report-1', repUser());
+
+    const model = generatedDocuments.renderLetterheadPdf.mock.calls[0][1];
+    const [, methods, items] = model.sections;
+    expect(methods.table).toBeUndefined();
+    expect(methods.paragraphs).toEqual([
+      'Hakuna mauzo yaliyorekodiwa siku hii. / No sales were recorded on this day.',
+    ]);
+    expect(items.paragraphs).toEqual([
+      'Hakuna bidhaa zilizouzwa siku hii. / No items were sold on this day.',
+    ]);
+  });
+
+  it('says so on the paper when the item list was capped', async () => {
+    const { service, prisma, generatedDocuments } = makeService();
+    prisma.mobilePosDayReport.findFirst.mockResolvedValue(dayReportRow({ itemsTruncated: true }));
+
+    await service.dayReportPdf(TERMINAL_CODE, DEVICE_SECRET, 'report-1', repUser());
+
+    const model = generatedDocuments.renderLetterheadPdf.mock.calls[0][1];
+    // Names the rows that were dropped — the smallest — and vouches only for
+    // the Summary figures, every one of which is now an unbounded aggregate.
+    expect(model.sections[2].paragraphs).toEqual([
+      'Orodha hii inaonyesha bidhaa 50 zenye thamani kubwa zaidi; jumla hapo juu ni kamili. / This list shows the 50 highest-value items; the totals above are complete.',
+    ]);
+  });
+});
+
+describe('MobilePosLiteController history and day-report routes', () => {
+  it('gates GET /sales on mobile_pos_lite.use', () => {
+    expect(
+      Reflect.getMetadata(PERMISSIONS_KEY, MobilePosLiteController.prototype.salesHistory),
+    ).toEqual(['mobile_pos_lite.use']);
+  });
+
+  it('gates GET /purchases on mobile_pos_lite.purchase — the manager gate, never .use', () => {
+    const gate = Reflect.getMetadata(
+      PERMISSIONS_KEY,
+      MobilePosLiteController.prototype.purchaseHistory,
+    );
+    // A .use-only rep is refused by the guard before the handler runs; this is
+    // the same gate that already guards recording a delivery.
+    expect(gate).toEqual(['mobile_pos_lite.purchase']);
+    expect(gate).not.toContain('mobile_pos_lite.use');
+  });
+
+  it('gates the day report and its paper on mobile_pos_lite.use, and the office list on .manage', () => {
+    expect(
+      Reflect.getMetadata(PERMISSIONS_KEY, MobilePosLiteController.prototype.createDayReport),
+    ).toEqual(['mobile_pos_lite.use']);
+    expect(
+      Reflect.getMetadata(PERMISSIONS_KEY, MobilePosLiteController.prototype.dayReportPdf),
+    ).toEqual(['mobile_pos_lite.use']);
+    expect(
+      Reflect.getMetadata(PERMISSIONS_KEY, MobilePosLiteController.prototype.dayReports),
+    ).toEqual(['mobile_pos_lite.manage']);
+  });
+
+  it('passes the terminal headers straight through on every device-facing route', () => {
+    const service: any = {
+      salesHistory: jest.fn().mockResolvedValue({}),
+      purchaseHistory: jest.fn().mockResolvedValue({}),
+      createDayReport: jest.fn().mockResolvedValue({}),
+    };
+    const controller = new MobilePosLiteController(service);
+    const user = repUser();
+    const dto = dayReportDto();
+
+    controller.salesHistory(TERMINAL_CODE, DEVICE_SECRET, user);
+    controller.purchaseHistory(TERMINAL_CODE, DEVICE_SECRET, user);
+    controller.createDayReport(TERMINAL_CODE, DEVICE_SECRET, dto, user);
+
+    expect(service.salesHistory).toHaveBeenCalledWith(TERMINAL_CODE, DEVICE_SECRET, user);
+    expect(service.purchaseHistory).toHaveBeenCalledWith(TERMINAL_CODE, DEVICE_SECRET, user);
+    expect(service.createDayReport).toHaveBeenCalledWith(TERMINAL_CODE, DEVICE_SECRET, dto, user);
+  });
+
+  it('streams the day-report PDF with the same header set as the receipt route', async () => {
+    const service: any = {
+      dayReportPdf: jest
+        .fn()
+        .mockResolvedValue({ buffer: Buffer.from('%PDF-1.4'), fileName: 'RIPOTI-X-1842.pdf' }),
+    };
+    const controller = new MobilePosLiteController(service);
+    const res: any = { setHeader: jest.fn(), send: jest.fn() };
+
+    await controller.dayReportPdf(TERMINAL_CODE, DEVICE_SECRET, 'report-1', repUser(), res);
+
+    // Non-passthrough @Res(), so the bytes bypass the TransformInterceptor
+    // envelope — byte-for-byte the shape of sales/:id/receipt.
+    expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      'inline; filename="RIPOTI-X-1842.pdf"',
+    );
+    expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'private, no-store');
+    expect(res.setHeader).toHaveBeenCalledWith('X-Content-Type-Options', 'nosniff');
+    expect(res.send).toHaveBeenCalledWith(expect.any(Buffer));
   });
 });

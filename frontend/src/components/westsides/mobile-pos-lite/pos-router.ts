@@ -13,7 +13,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * `#leo/foleni` · `#stoo` (all `mobile_pos_lite.use` holders) · `#hesabu`
  * (Phase 5 count mode; entered from Stoo, gated on the session's
  * `stockCountsEnabled`) · `#manunuzi` (gated on `session.purchasesEnabled`) ·
- * `#mipangilio`.
+ * `#historia` · `#funga` · `#ripoti` (spec-history-reports; entered from Leo,
+ * `mobile_pos_lite.use`) · `#manunuzi/historia` (entered from Manunuzi and
+ * gated on the SAME `purchasesEnabled` its parent is) · `#mipangilio`.
  *
  * Stack discipline — the history stack is never deeper than [#mauzo, screen]:
  * - Forward from the root PUSHES; forward between non-root screens REPLACES.
@@ -52,6 +54,10 @@ export type KauntaRoute =
   | 'stoo'
   | 'hesabu'
   | 'manunuzi'
+  | 'historia'
+  | 'manunuzi/historia'
+  | 'funga'
+  | 'ripoti'
   | 'mipangilio';
 
 const ALL_ROUTES: ReadonlySet<string> = new Set([
@@ -63,12 +69,20 @@ const ALL_ROUTES: ReadonlySet<string> = new Set([
   'stoo',
   'hesabu',
   'manunuzi',
+  'historia',
+  'manunuzi/historia',
+  'funga',
+  'ripoti',
   'mipangilio',
 ]);
 
 /**
- * Screens a hash may land on directly; `#malipo`/`#risiti`/`#hesabu` are
- * flow-interior and normalize to their parent below.
+ * Screens a hash may land on directly; `#malipo`/`#risiti`/`#hesabu` and the
+ * four spec-history-reports screens are flow-interior and normalize to their
+ * parent below. None of the history/report screens is a module route on
+ * purpose: all four are reached from the module whose book they are, and a
+ * cold boot or a forward-button trip must land on a parent that fetches rather
+ * than on a screen whose data was never asked for.
  */
 const MODULE_ROUTES: ReadonlySet<KauntaRoute> = new Set<KauntaRoute>([
   'mauzo',
@@ -84,6 +98,13 @@ const FLOW_PARENT: Partial<Record<KauntaRoute, KauntaRoute>> = {
   malipo: 'mauzo',
   risiti: 'mauzo',
   hesabu: 'stoo',
+  // spec-history-reports §2.2. Leo is the day book, so both the sales history
+  // and the closing ritual unwind to it; the purchase history belongs to
+  // Manunuzi, whose gate it therefore inherits (see bootRouteFromHash).
+  historia: 'leo',
+  'manunuzi/historia': 'manunuzi',
+  funga: 'leo',
+  ripoti: 'leo',
 };
 
 function routeFromHash(hash: string): KauntaRoute | null {
@@ -95,13 +116,23 @@ function routeFromHash(hash: string): KauntaRoute | null {
  * The cold-boot (and popstate) normalizer: unknown/empty → root;
  * flow-interior → its back-map parent; gated modules → root unless the session
  * allows.
+ *
+ * THE GATE RUNS AFTER THE PARENT RESOLUTION, and the order is load-bearing
+ * (spec-history-reports §2.2). Until `#manunuzi/historia` existed, every
+ * flow-interior route returned early — before the `purchasesEnabled` check —
+ * and that was correct only by accident, because `#hesabu`'s parent `stoo` is
+ * ungated. A hand-typed or restored `#manunuzi/historia` under the old shape
+ * would have resolved a rep's boot straight onto `#manunuzi`, past the gate
+ * that is the whole reason the purchase book is managers-only. Resolving
+ * first and gating the RESULT means a flow-interior route inherits its
+ * parent's permission by construction, whatever is added below it next.
  */
 export function bootRouteFromHash(hash: string, opts: { purchasesEnabled: boolean }): KauntaRoute {
   const raw = routeFromHash(hash);
   if (!raw) return 'mauzo';
-  if (!MODULE_ROUTES.has(raw)) return FLOW_PARENT[raw] ?? 'mauzo';
-  if (raw === 'manunuzi' && !opts.purchasesEnabled) return 'mauzo';
-  return raw;
+  const resolved = MODULE_ROUTES.has(raw) ? raw : (FLOW_PARENT[raw] ?? 'mauzo');
+  if (resolved === 'manunuzi' && !opts.purchasesEnabled) return 'mauzo';
+  return resolved;
 }
 
 /** Same pathname + query (QR login params survive), only the hash changes. */
@@ -215,7 +246,13 @@ export function useKauntaRouter({
   // pushes the screen already in front of her, and the press reads as dead.
   useEffect(() => {
     if (route === 'hesabu' && !stockCountsEnabled) navigate('stoo');
-  }, [navigate, route, stockCountsEnabled]);
+    // The same rule for the purchase book (spec-history-reports §2.2): a
+    // session refresh that drops `mobile_pos_lite.purchase` under a manager
+    // standing in the receiving history must not leave the route naming a
+    // screen the shell no longer renders. Mauzo, not Manunuzi — the module she
+    // came from is gated by the same flag that just went away.
+    if (route === 'manunuzi/historia' && !purchasesEnabled) navigate('mauzo');
+  }, [navigate, purchasesEnabled, route, stockCountsEnabled]);
 
   return { route, navigate };
 }

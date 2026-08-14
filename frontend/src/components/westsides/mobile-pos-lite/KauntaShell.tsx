@@ -31,6 +31,8 @@ import {
   type PosDaylogSent,
 } from '@/lib/mobile-pos-lite-store';
 import { usePosCount } from './hooks/use-pos-count';
+import { resolveClosePreview, usePosDayReport } from './hooks/use-pos-day-report';
+import { usePosSalesHistory, usePosPurchaseHistory } from './hooks/use-pos-history';
 import { usePosSlip } from './hooks/use-pos-slip';
 import { usePosStock } from './hooks/use-pos-stock';
 import { tick } from './pos-haptics';
@@ -50,11 +52,15 @@ import type {
 } from './pos-types';
 import { money } from './pos-utils';
 import { MuhuriStamp } from './pos-ui';
+import { FungaSikuScreen } from './screens/FungaSikuScreen';
 import { HesabuScreen } from './screens/HesabuScreen';
+import { HistoriaScreen } from './screens/HistoriaScreen';
 import { LeoScreen, LEO_FOLENI_ANCHOR_ID } from './screens/LeoScreen';
+import { ManunuziHistoriaScreen } from './screens/ManunuziHistoriaScreen';
 import { MipangilioScreen } from './screens/MipangilioScreen';
 import { PaymentScreen } from './screens/PaymentScreen';
 import { PurchaseScreen } from './screens/PurchaseScreen';
+import { RipotiScreen } from './screens/RipotiScreen';
 import { SaleScreen } from './screens/SaleScreen';
 import { StooScreen } from './screens/StooScreen';
 import { SuccessScreen } from './screens/SuccessScreen';
@@ -256,6 +262,41 @@ export function KauntaShell(props: KauntaShellProps) {
 
   const { route, navigate } = useKauntaRouter({ purchasesEnabled, stockCountsEnabled, onExit });
 
+  // Historia (spec-history-reports §3.1/§3.2). Neither list is cached, so both
+  // hooks are pure fetch state; `active` is what lets each one's `online`
+  // listener refetch only the screen actually in front of the rep, and
+  // `purchasesEnabled` is the manager gate — a rep's phone never issues the
+  // purchase request at all, so the screen behind it cannot be reached by a 403.
+  const salesHistory = usePosSalesHistory({ binding, active: route === 'historia' });
+  const purchaseHistory = usePosPurchaseHistory({
+    binding,
+    purchasesEnabled,
+    active: route === 'manunuzi/historia',
+  });
+  // Funga Siku (§4): the module's only write. Mounted at shell level because
+  // the slab owns the verb and the frozen key must outlive the screen. `repId`
+  // is the shared-phone guard on every cached figure the close reads.
+  const dayReport = usePosDayReport({
+    binding,
+    online,
+    pendingSales: props.pendingSales,
+    repId: session.rep.id,
+    t,
+  });
+
+  // Mirrors for the route-entry and post-flush effects below, which must fire
+  // on a route/flush change alone and never re-run because a fetcher's state
+  // moved. Declared here rather than in the block above because these three
+  // hooks depend on `route` and so are mounted after the router.
+  const salesHistoryRef = useRef(salesHistory);
+  const purchaseHistoryRef = useRef(purchaseHistory);
+  const enterDayReportRef = useRef(dayReport.enter);
+  useEffect(() => {
+    salesHistoryRef.current = salesHistory;
+    purchaseHistoryRef.current = purchaseHistory;
+    enterDayReportRef.current = dayReport.enter;
+  });
+
   // The Kaunta purchase success moment (design direction §5.2): recordPurchase
   // has no receipt screen, so the MZIGO UMEPOKELEWA seal slams onto a floating
   // card over the counter for a beat. Haptic + tally already fired at local
@@ -310,6 +351,23 @@ export function KauntaShell(props: KauntaShellProps) {
   const cachedSent: PosDaylogSent | null =
     daylogEntry?.sent && daylogEntry.sent.repId === session.rep.id ? daylogEntry.sent : null;
 
+  // THE FIGURES FOR THE DAY BEING CLOSED, resolved once for both the Funga Siku
+  // card and the slab money above it. `daySummary` and `cachedSent` are both
+  // TODAY's, so they are handed over only while today is the day in the header;
+  // another day gets its own stored snapshot, or nothing at all — which the
+  // screen renders as "—" and names in words. One resolution, two consumers, so
+  // the slab and the card can never disagree about whose money is on screen.
+  const closePreview = useMemo(
+    () =>
+      resolveClosePreview({
+        isToday: !dayReport.isYesterday,
+        daySummary,
+        cachedSent,
+        dayCache: dayReport.selectedDay.cache,
+      }),
+    [dayReport.isYesterday, dayReport.selectedDay.cache, daySummary, cachedSent],
+  );
+
   // Re-fetch the day summary when a flush finishes while the book is open, so
   // "Zimetumwa" moves the moment the queue drains (spec-leo §1 data flow).
   const prevSyncingRef = useRef(syncing);
@@ -319,6 +377,11 @@ export function KauntaShell(props: KauntaShellProps) {
     if (wasSyncing && !syncing && (route === 'leo' || route === 'leo/foleni')) {
       void openMySalesRef.current();
     }
+    // The same rule for the sales history (spec-history-reports §3.1 fetch
+    // policy): a flush that drains the outbox moves rows from the held half of
+    // that list to the sent half, and the list has to say so without her
+    // leaving and re-entering.
+    if (wasSyncing && !syncing && route === 'historia') salesHistoryRef.current.refresh();
   }, [syncing, route]);
 
   // Kaunta-only counter haptics (design direction §2.5): tick on add-to-cart
@@ -353,8 +416,22 @@ export function KauntaShell(props: KauntaShellProps) {
     if (route === 'manunuzi' && prev !== 'manunuzi') {
       beginPurchaseRef.current();
       enterSlipRef.current();
+      // Pre-warm the receiving book, like Stoo and Leo: `ensure` fetches only
+      // when nothing has landed yet, so re-entering Pokea all afternoon costs
+      // one request, not one per entry.
+      purchaseHistoryRef.current.ensure();
     }
     if (inLeo && !wasLeo) void openMySalesRef.current();
+    // Historia open: always refetch. The payload is small, the screen is not
+    // the boot path, and nothing is cached — so there is no max-age throttle
+    // to reason about and no stale list to reconcile against.
+    if (route === 'historia' && prev !== 'historia') salesHistoryRef.current.refresh();
+    if (route === 'manunuzi/historia' && prev !== 'manunuzi/historia') {
+      purchaseHistoryRef.current.refresh();
+    }
+    // Funga Siku open: resume an outstanding close — today's, or yesterday's
+    // when today has none (§4-7), under its own frozen businessDate.
+    if (route === 'funga' && prev !== 'funga') enterDayReportRef.current();
     // Stoo open: the conditional fetch (missing-or-stale only, §2 fetch
     // policy) — usually a no-op because the rail-render pre-warm already ran.
     if (route === 'stoo' && prev !== 'stoo') ensureStockRef.current();
@@ -468,6 +545,33 @@ export function KauntaShell(props: KauntaShellProps) {
       sendingSlipRef.current = false;
     }
   }, [recordPurchase, setNotice, t]);
+
+  /**
+   * FUNGA SIKU. The ONE path to the stamp, shared by the slab verb and the
+   * held-sales confirm, and it forwards to `#ripoti` on a 2xx AND ONLY on a
+   * 2xx — there is no optimistic navigation, so no screen can claim the office
+   * has a report it does not. A failure leaves her exactly where she is, with
+   * the mapped Swahili above the slab, the frozen key intact and the identical
+   * retry safe.
+   *
+   * The ref is the double-tap guard the awaits need: `dayReport.submitting`
+   * cannot rise until the hook starts, and the hook's own guard already
+   * refuses a concurrent call, so this only keeps a second tap from queuing a
+   * second navigation behind the first.
+   */
+  const closingRef = useRef(false);
+  const closeDay = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    void dayReport
+      .submit()
+      .then((sent) => {
+        if (sent) navigate('ripoti');
+      })
+      .finally(() => {
+        closingRef.current = false;
+      });
+  }, [dayReport, navigate]);
 
   // The slab contract (direction §5, spec-leo §6): exactly one primary verb
   // per screen — disabled, never hidden — plus the money that matters now.
@@ -625,6 +729,56 @@ export function KauntaShell(props: KauntaShellProps) {
           amount: null,
           onPress: count.openReview,
         };
+      case 'historia':
+        // A glance surface: the verb sends her back to the money path, and the
+        // money is the day total, the Leo rule (never the 7-day window total —
+        // the slab carries the money that matters NOW).
+        return {
+          verb: t('newSale'),
+          disabled: false,
+          inFlight: false,
+          amount: daySummary ? daySummary.totalAmount : (cachedSent?.totalAmount ?? null),
+          onPress: () => navigate('mauzo'),
+        };
+      case 'manunuzi/historia':
+        // NO MONEY ON THIS SLAB. A cost-free screen carries no money, and
+        // inventing one here would be the leak wearing a different hat.
+        return {
+          verb: t('slabNewDelivery'),
+          disabled: false,
+          inFlight: false,
+          amount: null,
+          onPress: () => navigate('manunuzi'),
+        };
+      case 'funga':
+        // Offline the close cannot happen at all: both halves of it — a record
+        // the office can see and a letterhead PDF — require the office, and a
+        // report computed by a phone is not a report. The verb is DISABLED and
+        // the screen says why; it is never hidden and never silently a no-op.
+        return {
+          verb: t('reportClose'),
+          busyLabel: t('reportSubmitting'),
+          disabled: !online || dayReport.submitting,
+          inFlight: dayReport.submitting,
+          // The money of the day in the header, never today's under yesterday's
+          // date — and null (no money on the slab) when the phone has none for
+          // that day, which is the same "—" the card shows.
+          amount: closePreview.totalAmount,
+          // A non-empty outbox earns ONE deliberate confirm; an empty one earns
+          // none — a day report creates no financial fact and does not deserve
+          // friction (spec-history-reports §3.3).
+          onPress: () => (pendingCount > 0 ? dayReport.openConfirm() : closeDay()),
+        };
+      case 'ripoti':
+        // The counter is the job. SHIRIKI RIPOTI is the secondary ON the
+        // screen, so the slab keeps its one primary verb.
+        return {
+          verb: t('newSale'),
+          disabled: false,
+          inFlight: false,
+          amount: dayReport.report ? dayReport.report.grossTotal : null,
+          onPress: () => navigate('mauzo'),
+        };
       case 'mipangilio':
         return {
           verb: t('newSale'),
@@ -733,11 +887,73 @@ export function KauntaShell(props: KauntaShellProps) {
         setPurchaseQuantity={props.setPurchaseQuantity}
         purchaseTotal={props.purchaseTotal}
         recordPurchase={props.recordPurchase}
+        // The receiving-book door. Handed down only on a session that carries
+        // the purchase permission — which is every session that can reach this
+        // screen at all — so the row is never a dead control.
+        openHistory={purchasesEnabled ? () => navigate('manunuzi/historia') : undefined}
         t={t}
         setScreen={backToMauzo}
       />
     );
-  } else if (route === 'leo' || route === 'leo/foleni') {
+  } else if (route === 'manunuzi/historia' && purchasesEnabled) {
+    content = (
+      <ManunuziHistoriaScreen
+        shellClass={SCREEN_PAD}
+        online={props.online}
+        history={purchaseHistory.data}
+        loading={purchaseHistory.loading}
+        failed={purchaseHistory.failed}
+        refresh={purchaseHistory.refresh}
+        t={t}
+      />
+    );
+  } else if (route === 'historia') {
+    content = (
+      <HistoriaScreen
+        shellClass={SCREEN_PAD}
+        session={props.session}
+        online={props.online}
+        history={salesHistory.data}
+        loading={salesHistory.loading}
+        failed={salesHistory.failed}
+        pendingSales={props.pendingSales}
+        refresh={salesHistory.refresh}
+        t={t}
+      />
+    );
+  } else if (route === 'funga') {
+    content = (
+      <FungaSikuScreen
+        shellClass={SCREEN_PAD}
+        session={props.session}
+        binding={props.binding}
+        online={props.online}
+        preview={closePreview}
+        pendingSales={props.pendingSales}
+        syncing={props.syncing}
+        syncPendingSales={props.syncPendingSales}
+        dayReport={dayReport}
+        closeDay={closeDay}
+        t={t}
+      />
+    );
+  } else if (route === 'ripoti' && dayReport.report) {
+    content = (
+      <RipotiScreen
+        shellClass={SCREEN_PAD}
+        report={dayReport.report}
+        sharing={dayReport.sharing}
+        shareNotice={dayReport.shareNotice}
+        share={() => void dayReport.share()}
+        t={t}
+      />
+    );
+  } else if (route === 'leo' || route === 'leo/foleni' || route === 'ripoti') {
+    // The `ripoti` fall-through is the no-report path: the route can only be
+    // reached programmatically after a 2xx, and a cold boot normalises the
+    // hash to Leo — but a forward-button trip can name it with nothing behind
+    // it, and Leo (its back-map parent) is the honest thing to render rather
+    // than a blank screen or a stamp over numbers we do not have.
     content = (
       <LeoScreen
         shellClass={SCREEN_PAD}
@@ -756,6 +972,8 @@ export function KauntaShell(props: KauntaShellProps) {
         removePending={props.removePending}
         retryPendingSale={props.retryPendingSale}
         retryDay={() => void openMySalesRef.current()}
+        openHistory={() => navigate('historia')}
+        openClose={() => navigate('funga')}
         t={t}
       />
     );
@@ -874,7 +1092,7 @@ export function KauntaShell(props: KauntaShellProps) {
         busyLabel={slab.busyLabel}
         disabled={slab.disabled}
         inFlight={slab.inFlight}
-        shake={count.shake || slip.shake}
+        shake={count.shake || slip.shake || dayReport.shake}
         onVerb={slab.onPress}
         onSyncTap={() => navigate('leo/foleni')}
         t={t}

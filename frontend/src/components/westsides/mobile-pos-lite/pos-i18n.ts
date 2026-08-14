@@ -234,8 +234,58 @@ const STRINGS = {
       'This slip is not saved on this phone — the delivery cannot be received until it is. Try again.',
     slipBadge: 'Slip',
     purchaseOfflineNote: 'No network — fill the form; the slip will be saved on this phone.',
+    slabNewDelivery: 'NEW DELIVERY',
     purchaseSendFailedRetry:
       'It did not go through — the network dropped. The form is still here; wait a moment, then tap RECEIVE again.',
+    // Kaunta Historia + Funga Siku (spec-history-reports §5), translated from
+    // the Swahili below.
+    historyTitle: 'Sales history',
+    historyDays: 'Last 7 days',
+    historyEmpty: 'No sales in the last 7 days.',
+    historyLoadError: 'Could not load history',
+    historyHeldChip: 'On the phone',
+    historyHeldTotal: 'On the phone {count} · {amount}',
+    purchaseHistoryTitle: 'Purchase history',
+    purchaseHistoryEmpty: 'No deliveries in the last 7 days.',
+    purchaseHistoryLoadError: 'Could not load purchase history',
+    purchaseIncomplete: 'Not finished — the office will complete it',
+    poNumberLabel: 'Order number',
+    grnNumberLabel: 'Goods received number',
+    purchaseNoCostsNote: 'Buying prices are not shown on the phone.',
+    reportClose: 'CLOSE THE DAY',
+    reportTitle: 'Close the day',
+    reportForDate: 'Report for {date}',
+    reportPickDay: 'Which day are you closing?',
+    reportDayToday: 'Today · {date}',
+    reportDayYesterday: 'Yesterday · {date}',
+    reportDayUnclosed: '{date} has not been closed yet.',
+    reportDayAlreadyClosed:
+      'This day was already closed. Closing it again sends the office a newer report that replaces the earlier one.',
+    reportNoFiguresForDay:
+      'This phone has no figures for this day. The office reads the full records when you send.',
+    reportGross: 'Gross sales',
+    reportByMethod: 'By payment method',
+    reportItemsSold: 'Items sold',
+    reportPreviewNote: 'Estimate — the office reads the full records when you send',
+    reportHeldTitle: 'Sales still on this phone',
+    reportHeldNote:
+      '{count} sales have not been sent yet. Send them now to include them; otherwise the report records them as still on the phone.',
+    reportConfirmHeld: 'This report will not include {count} sales still on this phone. Continue?',
+    reportConfirmAnyway: 'Yes, close the day',
+    reportSubmitting: 'Sending the report…',
+    reportNeedsNetwork: 'Closing the day needs a network connection',
+    reportKeySaveFailed: 'The phone could not save the report — try again.',
+    reportSendFailedRetry: 'The report did not go out — try again; it cannot be sent twice.',
+    stampSikuImefungwa: 'DAY CLOSED',
+    reportSentNote: 'The report reached the office.',
+    slabShareReport: 'SHARE REPORT',
+    reportPdfFailed: 'The paper could not be prepared — the report is at the office. Try again.',
+    reportDownloaded: 'Report downloaded — attach it to any message.',
+    reportNotLocked: 'Closing the day does not stop you selling.',
+    reportYesterdayNote:
+      "You are closing yesterday. Sales you sent this morning belong to today's book.",
+    reportConflict: 'This report belongs to a different day or terminal — ask the office.',
+    errReportDateClosed: 'This day cannot be closed — ask the office.',
     // Kaunta Mipangilio (Phase 3): haptics toggle, catalog re-sync
     settingsHaptics: 'Vibration',
     settingsHapticsNote: 'A small buzz when a job finishes.',
@@ -570,6 +620,11 @@ const STRINGS = {
       'Kikaratasi hiki hakijahifadhiwa kwenye simu hii — mzigo hauwezi kupokelewa hadi kihifadhiwe. Jaribu tena.',
     slipBadge: 'Kikaratasi',
     purchaseOfflineNote: 'Hakuna mtandao — jaza fomu; kikaratasi kitahifadhiwa kwenye simu.',
+    // The Manunuzi slab verb on the purchase-history screen. Named in
+    // spec-history-reports §2.3 as reused, but no such key existed — POKEA is
+    // the verb ON the form, and from the history book the verb has to be
+    // "start a new one", the way Risiti's MAUZO MAPYA reads.
+    slabNewDelivery: 'MZIGO MPYA',
     // A POKEA whose answer never arrived (§3.1 "Error handling"). Nothing is
     // known to be wrong with the delivery — the request may even have landed —
     // so the copy must not read as a refusal, and it claims no custody either
@@ -578,6 +633,84 @@ const STRINGS = {
     // is the only promise that is always true.
     purchaseSendFailedRetry:
       'Haikukamilika — mtandao umekatika. Fomu ipo hapa; subiri kidogo, kisha gonga POKEA tena.',
+    // Kaunta Historia ya Mauzo (spec-history-reports §5): the rep's own 7 days.
+    // The window is a SERVER constant, so the copy states it as a fact rather
+    // than as a filter she chose.
+    historyTitle: 'Historia ya Mauzo',
+    historyDays: 'Siku 7 zilizopita',
+    historyEmpty: 'Hakuna mauzo katika siku 7 zilizopita.',
+    historyLoadError: 'Imeshindikana kupakua historia',
+    // A row still in this phone's outbox has no order number; this chip takes
+    // its place, so the list never invents one and never looks like it is
+    // hiding the difference between sent and held.
+    historyHeldChip: 'Mkononi',
+    historyHeldTotal: 'Mkononi {count} · {amount}',
+    // Kaunta Historia ya Manunuzi (§5): managers only, and COST-FREE by law
+    // (§0). There is no total key here and there never may be one.
+    purchaseHistoryTitle: 'Historia ya Manunuzi',
+    purchaseHistoryEmpty: 'Hakuna mzigo katika siku 7 zilizopita.',
+    purchaseHistoryLoadError: 'Imeshindikana kupakua historia ya manunuzi',
+    // Brass, never red: no action of hers can finish an interrupted chain, and
+    // red is reserved for a server rejection that needs a person.
+    purchaseIncomplete: 'Haijakamilika — itamaliziwa ofisini',
+    poNumberLabel: 'Namba ya oda',
+    grnNumberLabel: 'Namba ya kupokea',
+    // Not decoration: a manager who cannot find the buying price must learn
+    // the absence is deliberate, or she reports the screen as broken and
+    // someone "fixes" it by putting 30 days of supplier costs on a phone.
+    purchaseNoCostsNote: 'Bei za ununuzi hazionyeshwi kwenye simu.',
+    // Kaunta Funga Siku + Ripoti (§5): the closing ritual and its paper.
+    reportClose: 'FUNGA SIKU',
+    reportTitle: 'Funga Siku',
+    reportForDate: 'Ripoti ya {date}',
+    // The date control (§3.3). The day being closed is a CHOICE she can see and
+    // change, between exactly the two days the server accepts — before this
+    // there was no date control at all, and a day that ended with no signal
+    // could never be closed from the phone.
+    reportPickDay: 'Unafunga siku gani?',
+    reportDayToday: 'Leo · {date}',
+    reportDayYesterday: 'Jana · {date}',
+    // Said on the screen, not only in the picker: the day she worked must never
+    // go unclosed AND unmentioned while she signs off an empty one.
+    reportDayUnclosed: 'Siku ya {date} bado haijafungwa.',
+    reportDayAlreadyClosed:
+      'Siku hii ilishafungwa. Ukifunga tena, ofisi itasoma ripoti mpya badala ya ile ya awali.',
+    // Honest ignorance, in words. The phone keeps no figures for a day it did
+    // not fetch, and "Makadirio" over another day's money would not be an
+    // estimate — it would be the wrong day's total.
+    reportNoFiguresForDay:
+      'Simu haina hesabu za siku hii. Ofisi itasoma rekodi kamili wakati wa kutuma.',
+    reportGross: 'Jumla ya mauzo',
+    reportByMethod: 'Kwa njia ya malipo',
+    reportItemsSold: 'Bidhaa zilizouzwa',
+    reportPreviewNote: 'Makadirio — ofisi itasoma rekodi kamili wakati wa kutuma',
+    reportHeldTitle: 'Mauzo yaliyo mkononi',
+    reportHeldNote:
+      'Mauzo {count} bado hayajatumwa. Tuma sasa ili yaingie kwenye ripoti; yasipotumwa yataandikwa kwenye ripoti kama yaliyo mkononi.',
+    reportConfirmHeld: 'Ripoti hii haitajumuisha mauzo {count} yaliyo mkononi. Endelea?',
+    reportConfirmAnyway: 'Ndiyo, funga siku',
+    reportSubmitting: 'Inatuma ripoti…',
+    reportNeedsNetwork: 'Kufunga siku kunahitaji mtandao',
+    // The refused write (§4-2). The phone would not keep the key, so the
+    // report did NOT go out — said plainly, because a badge quietly failing to
+    // appear is not telling her anything.
+    reportKeySaveFailed: 'Simu haikuhifadhi ripoti — jaribu tena.',
+    // …and the honest copy for everything the phone cannot prove. The frozen
+    // key is what makes the identical retry safe, so that is what it names.
+    reportSendFailedRetry: 'Ripoti haikutoka — jaribu tena; haiwezi kutumwa mara mbili.',
+    stampSikuImefungwa: 'SIKU IMEFUNGWA',
+    reportSentNote: 'Ripoti imefika ofisini.',
+    slabShareReport: 'SHIRIKI RIPOTI',
+    // The record is already at the office, so the paper failing is never a
+    // reason to re-send anything — the copy says both halves.
+    reportPdfFailed: 'Karatasi haikupatikana — ripoti ipo ofisini. Jaribu tena.',
+    reportDownloaded: 'Ripoti imepakuliwa — ambatisha kwenye ujumbe wowote.',
+    reportNotLocked: 'Kufunga siku hakuzuii kuuza.',
+    reportYesterdayNote:
+      'Unafunga siku ya jana. Mauzo uliyotuma leo asubuhi yataingia kwenye kitabu cha leo.',
+    // Mapped day-report rejections (§5, certified in pos-errors.ts)
+    reportConflict: 'Ripoti hii ni ya siku au kituo kingine — ulizia ofisi.',
+    errReportDateClosed: 'Siku hii haiwezi kufungwa — ulizia ofisi.',
     // Kaunta Mipangilio (Phase 3): haptics toggle, catalog re-sync
     settingsHaptics: 'Mtetemo',
     settingsHapticsNote: 'Simu itatetema kidogo kazi ikikamilika.',

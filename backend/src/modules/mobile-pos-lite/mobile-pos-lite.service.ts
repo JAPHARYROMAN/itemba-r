@@ -11,6 +11,7 @@ import {
   AuditSeverity,
   CashAccountType,
   CurrencyCode,
+  MobilePosDayReport,
   MobilePosTerminalStatus,
   Prisma,
   ProductType,
@@ -42,6 +43,10 @@ import { ActivateMobilePosTerminalDto } from './dto/mobile-pos-lite-session.dto'
 import { CreateMobilePosLiteSaleDto } from './dto/mobile-pos-lite-sale.dto';
 import { CreateMobilePosLitePurchaseDto } from './dto/mobile-pos-lite-purchase.dto';
 import { CreateMobilePosLiteStockCountDto } from './dto/mobile-pos-lite-stock-count.dto';
+import {
+  CreateMobilePosLiteDayReportDto,
+  QueryMobilePosLiteDayReportsDto,
+} from './dto/mobile-pos-lite-day-report.dto';
 
 const ACTIVATION_TTL_MS = 20 * 60 * 1000;
 
@@ -54,6 +59,216 @@ const CONFIRMED_SALES_STATUSES = [
   SalesOrderStatus.PARTIALLY_PAID,
   SalesOrderStatus.PAID,
 ] as const;
+
+/**
+ * How far back both history lists reach (spec-history-reports §1.0, owner
+ * decision 2026-08-14). Today counts as day 1, so "siku 7" is today plus the
+ * six before it.
+ *
+ * A SERVER constant, deliberately NOT a `days` query parameter on either route:
+ * a client-supplied window is a knob nobody turns and a widening waiting to
+ * happen, and the purchase list is the one payload in this module that a stolen
+ * phone must never be able to stretch. The owner set 7, so 7 lives here.
+ */
+const MOBILE_POS_HISTORY_DAYS = 7;
+
+/**
+ * Newest-first bound on the sales history list. ~28 sales/day for a week, and
+ * the list is ordered desc, so truncation drops the OLDEST rows rather than the
+ * ones a rep is looking for. The headline count/total come from an UNBOUNDED
+ * aggregate over the same where, so a truncated list can never produce a wrong
+ * total — the same discipline stock() applies to its 1500.
+ */
+const MOBILE_POS_SALES_HISTORY_TAKE = 200;
+
+/** Same bound, same reasoning, for the branch's POS receiving book. */
+const MOBILE_POS_PURCHASE_HISTORY_TAKE = 100;
+
+/**
+ * How many product rows survive into the stored day-report breakdown. This is
+ * the ONLY bound left on that record, and it cannot corrupt a figure the paper
+ * presents as a total: salesCount, grossTotal and itemsSoldQuantity all come
+ * from unbounded aggregates, and when the cap bites the row carries
+ * `itemsTruncated: true` so the paper can say so out loud.
+ */
+const MOBILE_POS_DAY_REPORT_ITEM_CAP = 50;
+
+/**
+ * THE BUSINESS TIMEZONE — the single authority on where a trading day begins
+ * and ends anywhere in this module.
+ *
+ * REVIEW-BLOCKING: nothing here may decide a day boundary from the PROCESS's
+ * zone (`new Date(v.getFullYear(), v.getMonth(), v.getDate())`, `process.env.TZ`)
+ * or from an instant the client chose. Use `businessDayKeyOf` and
+ * `businessDayWindow`, which read this constant and nothing else.
+ *
+ * Why it is pinned in code rather than configured:
+ *
+ * - The server process's zone is INCIDENTAL. Nothing sets TZ — no `ENV TZ` in
+ *   `backend/Dockerfile`, none on the backend service in
+ *   `docker-compose.production.yml`, no `process.env.TZ` anywhere in
+ *   `backend/src` — so node:20-alpine runs UTC while every rendered time in
+ *   this module is pinned to Africa/Nairobi. A boundary read from it cut the
+ *   trading day at 03:00 EAT and refused outright every close made between
+ *   midnight and 03:00. A duka that trades past eleven at night is the normal
+ *   case here, not the edge case.
+ * - The DEVICE's zone is a claim, not an authority. A phone's clock can be
+ *   wrong, and the whole reason the server owns WHETHER a day is closable is
+ *   that it must not inherit the phone's idea of what day it is.
+ * - Setting TZ on the container would fix this module by silently moving every
+ *   OTHER module's local-day arithmetic at the same time — `mySalesToday`,
+ *   which the CLASSIC shell reads, and the westsides daily close among them.
+ *   That is a far larger blast radius than this boundary needs, and it is
+ *   invisible in the source: one redeploy onto a host, base image or compose
+ *   file that does not carry the variable re-breaks it exactly as before, with
+ *   nothing in review to catch it. A constant cannot be lost in a deploy.
+ * - There is no company or branch timezone column to read. The only `timezone`
+ *   in the schema is `UserPreference.timezone`, a per-user DISPLAY preference
+ *   the user edits herself; a trading day that moves when a rep changes her
+ *   profile is worse than one pinned to the wrong zone.
+ *
+ * So it is a constant, and it is the SAME zone the module already pins for
+ * every rendered time (`receiptDateTime`, `reportFileTime`, and the letterhead
+ * builder): the day a report is filed under and the clock printed on the
+ * receipts inside it now read the same string, so they cannot disagree.
+ * Africa/Nairobi is EAT, UTC+3, no DST and none since 1936;
+ * Africa/Dar_es_Salaam is a link to the same zone, and naming one zone twice is
+ * how two halves of a boundary drift apart.
+ */
+const MOBILE_POS_BUSINESS_TIMEZONE = 'Africa/Nairobi';
+
+/**
+ * How far back a terminal may reach when it closes a day, counted in business
+ * days. 1 = today or yesterday.
+ *
+ * Yesterday is not a courtesy: with the boundary above, a rep who traded until
+ * 23:50 and closes at 00:30 is closing YESTERDAY, and so is one whose day ended
+ * with no signal and who closes over breakfast. Both are ordinary. It stops at
+ * yesterday because the phone offers exactly those two days, because a day
+ * older than that is a device clock rather than a work day, and because the
+ * office can always read the records themselves — the report is a snapshot, not
+ * a financial fact, so nothing is lost by refusing to mint one for a day nobody
+ * can still remember.
+ */
+const MOBILE_POS_CLOSABLE_DAYS_BACK = 1;
+
+/**
+ * The business zone's wall clock for an instant, read through ICU rather than
+ * through the process's own zone. `h23` so midnight is hour 0 and not hour 24.
+ */
+const businessZoneClock = new Intl.DateTimeFormat('en-GB', {
+  timeZone: MOBILE_POS_BUSINESS_TIMEZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+});
+
+function businessZoneFields(value: Date) {
+  const parts = businessZoneClock.formatToParts(value);
+  const read = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return {
+    year: read('year'),
+    month: read('month'),
+    day: read('day'),
+    hour: read('hour'),
+    minute: read('minute'),
+    second: read('second'),
+  };
+}
+
+/** The `YYYY-MM-DD` business day an instant falls on. */
+function businessDayKeyOf(value: Date) {
+  const at = businessZoneFields(value);
+  return `${String(at.year).padStart(4, '0')}-${String(at.month).padStart(2, '0')}-${String(
+    at.day,
+  ).padStart(2, '0')}`;
+}
+
+/**
+ * The business zone's offset from UTC at a given instant, in ms. Read from the
+ * zone's own rules rather than hard-coded to +3, so the arithmetic below does
+ * not quietly depend on EAT never gaining a DST rule.
+ */
+function businessZoneOffsetMs(value: Date) {
+  const at = businessZoneFields(value);
+  const wallClockReadAsUtc = Date.UTC(
+    at.year,
+    at.month - 1,
+    at.day,
+    at.hour,
+    at.minute,
+    at.second,
+    value.getUTCMilliseconds(),
+  );
+  return wallClockReadAsUtc - value.getTime();
+}
+
+/** The instant midnight begins, in the business zone, on calendar day `dayKey`. */
+function businessDayStart(dayKey: string) {
+  const wallClock = Date.parse(`${dayKey}T00:00:00.000Z`);
+  // Two passes: the naive guess can land on the far side of an offset change,
+  // and the second pass re-reads the offset where midnight actually is.
+  const guess = new Date(wallClock - businessZoneOffsetMs(new Date(wallClock)));
+  return new Date(wallClock - businessZoneOffsetMs(guess));
+}
+
+/** Calendar arithmetic on a `YYYY-MM-DD` key, done where no zone can bend it. */
+function shiftBusinessDayKey(dayKey: string, days: number) {
+  const day = new Date(`${dayKey}T00:00:00.000Z`);
+  day.setUTCDate(day.getUTCDate() + days);
+  return day.toISOString().slice(0, 10);
+}
+
+/**
+ * The half-open instant window a business day covers: [midnight, next
+ * midnight) in the business zone. Every `orderDate` filter in this module is
+ * built from this and from nothing else.
+ */
+function businessDayWindow(dayKey: string) {
+  return {
+    dayStart: businessDayStart(dayKey),
+    dayEnd: businessDayStart(shiftBusinessDayKey(dayKey, 1)),
+  };
+}
+
+/**
+ * A `@db.Date` column carries a calendar day, not an instant, so it is written
+ * and read at UTC midnight and formatted back with UTC getters. Local midnight
+ * would be stored as the PREVIOUS day east of Greenwich (21:00Z in Tanzania),
+ * which is how a report for the 14th ends up filed under the 13th.
+ *
+ * This is deliberately a different INSTANT from the one the sales window opens
+ * at: the window opens at midnight in the business zone (21:00Z the evening
+ * before), because that is the boundary every figure in this module is computed
+ * over. Both describe the same calendar day, which is the only thing a
+ * `@db.Date` column is allowed to mean.
+ */
+function utcCalendarDate(businessDate: string) {
+  return new Date(`${businessDate}T00:00:00.000Z`);
+}
+
+function businessDateKey(value: Date | string) {
+  return new Date(value).toISOString().slice(0, 10);
+}
+
+/**
+ * The day report's figures are summed in JS from Prisma Decimals, so they are
+ * snapped back to the precision their columns actually hold before they are
+ * stored: Decimal(18,2) for money, Decimal(18,4) for quantities. Without this a
+ * day of 0.1-kilo lines arrives at the office as 3.0000000000000004.
+ */
+function round2(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function round4(value: number) {
+  return Math.round(value * 10000) / 10000;
+}
 
 /**
  * Product types that never carry stock value, mirroring the predicate the GRN
@@ -89,8 +304,10 @@ type StockStatus = keyof typeof STOCK_STATUS_RANK;
  * against a second attempt, and it is what resolves rows created before the
  * column existed.
  */
+const PURCHASE_IDEMPOTENCY_MARKER_PREFIX = '[MPL-PURCHASE:';
+
 function purchaseIdempotencyMarker(idempotencyKey: string) {
-  return `[MPL-PURCHASE:${idempotencyKey}]`;
+  return `${PURCHASE_IDEMPOTENCY_MARKER_PREFIX}${idempotencyKey}]`;
 }
 
 /**
@@ -361,6 +578,47 @@ const STOCK_COUNT_CHAIN_SELECT = {
   },
 } satisfies Prisma.StockAdjustmentSelect;
 
+/**
+ * One row of the day report's payment breakdown, as stored in `byMethod`.
+ * Exported because the serialised report is a controller return type.
+ */
+export interface DayReportMethodTotal {
+  paymentMethod: string;
+  /** The TERMINAL's own configured label. CREDIT has no payment row, so null. */
+  label: string | null;
+  count: number;
+  amount: number;
+}
+
+/** One row of the day report's product breakdown, as stored in `items`. */
+export interface DayReportItemTotal {
+  productId: string;
+  name: string;
+  quantity: number;
+  amount: number;
+}
+
+/**
+ * The calendar day a close is closing, in the three forms the chain needs it:
+ * `key` for the record and the reference, `storedAt` for the `@db.Date` column,
+ * and the BUSINESS-zone window the sales figures are computed over.
+ */
+interface DayReportWindow {
+  key: string;
+  storedAt: Date;
+  dayStart: Date;
+  dayEnd: Date;
+}
+
+/**
+ * Json columns come back as Prisma.JsonValue. A stored breakdown is always an
+ * array — createDayReport is the only writer — but a row hand-edited in the
+ * database must degrade to an empty list rather than crash a rep's PDF.
+ */
+function readDayReportJson<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
 const TERMINAL_INCLUDE = {
   company: { select: { id: true, name: true, code: true } },
   division: { select: { id: true, name: true, code: true } },
@@ -469,6 +727,31 @@ function bilingualPaymentMethod(
 
 function receiptFileStem(reference: string) {
   return reference.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'RECEIPT';
+}
+
+/** Just the date, for the day report's `Tarehe / Date` meta row. */
+function receiptDate(value: Date) {
+  return new Intl.DateTimeFormat('en-GB', {
+    dateStyle: 'medium',
+    timeZone: 'UTC',
+  }).format(value);
+}
+
+/**
+ * hhmm of the submit, for the day report's file name: a rep may legitimately
+ * close the same day twice (a shift handover), and two files called
+ * RIPOTI-<terminal>-<date>.pdf in one share sheet is one of them silently
+ * overwriting the other.
+ */
+function reportFileTime(value: Date) {
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Africa/Nairobi',
+  })
+    .format(value)
+    .replace(/\D+/g, '');
 }
 
 function paymentLabel(paymentMethod: SalesPaymentMethod, configuredLabel?: string | null) {
@@ -1033,7 +1316,19 @@ export class MobilePosLiteService {
     const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
 
     // Local-day boundary, mirroring westsides-reports dailyClose: truncate to
-    // the server's local midnight (UTC+3 for Tanzania in production).
+    // the server PROCESS's local midnight.
+    //
+    // KNOWN AND DELIBERATELY UNTOUCHED. This once claimed the process runs at
+    // "UTC+3 for Tanzania in production"; nothing in the deployment enforces
+    // that and node:20-alpine runs UTC, so today's Leo total is really cut at
+    // 03:00 EAT. It is left alone because the CLASSIC shell (uiVersion 1),
+    // which the whole fleet runs, reads this endpoint, and moving its boundary
+    // would change what every terminal in the field shows tonight — a fleet
+    // decision, not a POS-report one (spec-history-reports §1.8). The day
+    // REPORT and both history lists no longer share this boundary: they use
+    // MOBILE_POS_BUSINESS_TIMEZONE, so the record the office reads is right
+    // even while this preview is three hours out. Fixing this properly means
+    // moving mySalesToday onto businessDayWindow in a release of its own.
     const now = new Date();
     const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000);
@@ -1081,6 +1376,249 @@ export class MobilePosLiteService {
         createdAt: order.createdAt,
         customerName: order.customerName ?? undefined,
       })),
+    };
+  }
+
+  /**
+   * This rep's own sales on this terminal over the history window
+   * (spec-history-reports §1.1), for the Historia ya Mauzo screen. Sits beside
+   * mySalesToday and reuses its scoping decisions verbatim — same terminal,
+   * same rep, same confirmed statuses — because the two screens are the same
+   * book at two zoom levels. The one place they deliberately differ is the day
+   * boundary: this window is cut at midnight in the BUSINESS zone (see
+   * historyWindow and MOBILE_POS_BUSINESS_TIMEZONE) while mySalesToday still
+   * reads the process's, for the fleet reason its own comment gives.
+   *
+   * REVIEW-BLOCKING RULE: this endpoint may show SELLING prices and never
+   * COST or margin. unitPrice/lineTotal/totalAmount are the numbers the catalog
+   * already caches on the phone and the receipt already prints, so they are no
+   * new exposure — and a rep who cannot see what she charged cannot answer the
+   * customer standing in front of her. SalesOrderLine also carries
+   * unitCostAtSale, cogsAmount, grossProfitAmount and grossMarginPct; none of
+   * them is ever selected. `include:` is BANNED here at every level, so a field
+   * added to either model tomorrow cannot ride out to a phone. Any change that
+   * widens this payload needs an owner decision, not a review nod.
+   */
+  async salesHistory(
+    terminalCode: string | undefined,
+    deviceSecret: string | undefined,
+    user: AuthUser,
+  ) {
+    const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
+    const { from, dayEnd } = this.historyWindow();
+
+    // Per-REP scope, exactly like mySalesToday: sales are personal
+    // accountability. (The purchase history is branch-scoped instead, and
+    // purchaseHistory says why.)
+    const where: Prisma.SalesOrderWhereInput = {
+      companyId: terminal.companyId,
+      mobilePosTerminalId: terminal.id,
+      createdById: user.id,
+      status: { in: [...CONFIRMED_SALES_STATUSES] },
+      orderDate: { gte: from, lt: dayEnd },
+    };
+
+    const [totals, orders] = await Promise.all([
+      // Exact and UNBOUNDED: the headline numbers must not depend on the list's
+      // take, so a truncated list can never produce a wrong total.
+      this.prisma.salesOrder.aggregate({
+        where,
+        _count: { _all: true },
+        _sum: { totalAmount: true },
+      }),
+      this.prisma.salesOrder.findMany({
+        where,
+        select: {
+          id: true,
+          salesOrderNumber: true,
+          createdAt: true,
+          paymentMethod: true,
+          paymentReference: true,
+          customerName: true,
+          totalAmount: true,
+          customer: { select: { name: true } },
+          lines: {
+            select: {
+              productId: true,
+              description: true,
+              quantity: true,
+              unitPrice: true,
+              lineTotal: true,
+              product: { select: { name: true } },
+              unit: { select: { symbol: true } },
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: MOBILE_POS_SALES_HISTORY_TAKE,
+      }),
+    ]);
+
+    // Whether a sale is still queued on the phone is a CLIENT concern: the
+    // server cannot know what is sitting in an outbox and must not pretend to,
+    // so nothing on this payload refers to queued state and the merge happens
+    // on the device.
+    return {
+      days: MOBILE_POS_HISTORY_DAYS,
+      from: from.toISOString(),
+      count: totals._count._all,
+      totalAmount: Number(totals._sum.totalAmount ?? 0),
+      sales: orders.map((order) => ({
+        id: order.id,
+        salesOrderNumber: order.salesOrderNumber,
+        createdAt: order.createdAt,
+        paymentMethod: order.paymentMethod,
+        paymentReference: order.paymentReference ?? null,
+        customerName: order.customer?.name ?? order.customerName ?? null,
+        totalAmount: Number(order.totalAmount),
+        lines: order.lines.map((line) => ({
+          productId: line.productId,
+          name: line.product?.name ?? line.description ?? '',
+          quantity: Number(line.quantity),
+          unitSymbol: line.unit?.symbol ?? '',
+          unitPrice: Number(line.unitPrice),
+          lineTotal: Number(line.lineTotal),
+        })),
+      })),
+    };
+  }
+
+  /**
+   * What this BRANCH received through the POS over the history window
+   * (spec-history-reports §1.2), for the Historia ya Manunuzi screen.
+   *
+   * REVIEW-BLOCKING RULE — THE COST-BLINDNESS LAW. No cost, total or value
+   * field may appear anywhere on this payload. Not unitCost, not lineTotal, not
+   * totalAmount, not subtotal/taxAmount/discountAmount/paidAmount/
+   * outstandingAmount, not averageCost, not margin, not anything derived from
+   * them — and no window or per-purchase total either. A manager sees supplier,
+   * date, reference, goods-received number, products and quantities, and
+   * nothing else.
+   *
+   * The reason is the whole reason Historia was cut from v1 and the reason the
+   * owner revived it with the protection intact: manager phones get stolen out
+   * of hands, and a stolen phone must still reveal nothing about what this
+   * business pays its suppliers. PurchaseOrderLine carries unitCost, lineTotal,
+   * discountAmount and taxAmount; PurchaseOrder carries subtotal, totalAmount,
+   * paidAmount and outstandingAmount. So `include:` is BANNED on this route at
+   * EVERY level and the payload is assembled field by field from explicit
+   * `select` blocks, which is what stops a column added to either model next
+   * year from silently riding out to a phone. A test asserts the exact key set
+   * recursively (mobile-pos-lite.service.spec.ts). This is review-blocking on
+   * every future change to this method.
+   *
+   * Scoping, and why it differs from salesHistory:
+   * - BRANCH-scoped, not user-scoped. Receiving is a branch activity, so the
+   *   manager sees the branch's whole POS receiving book, a colleague's entries
+   *   included. Sales are personal accountability; deliveries are the branch's
+   *   stock.
+   * - MARKER-filtered. Desktop-ERP purchases at the same branch are excluded:
+   *   this screen is the POS book and the office sees everything in the ERP
+   *   proper. The marker is written atomically with the row at create and
+   *   client notes are sanitised (sanitizeClientNotes), so it cannot be planted
+   *   from a phone. Unindexed, but riding @@index([companyId]) plus a 7-day
+   *   branch window. Do NOT widen this company-wide.
+   * - INCOMPLETE surfaces honestly. An interrupted chain leaves a
+   *   marker-bearing PO with no POSTED GRN, and hiding it would make a stock
+   *   movement unexplainable to the manager who made it.
+   */
+  async purchaseHistory(
+    terminalCode: string | undefined,
+    deviceSecret: string | undefined,
+    user: AuthUser,
+  ) {
+    const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
+    const { from, dayEnd } = this.historyWindow();
+
+    const orders = await this.prisma.purchaseOrder.findMany({
+      where: {
+        companyId: terminal.companyId,
+        branchId: terminal.branchId,
+        purchaseType: PurchaseType.STOCK_PURCHASE,
+        deletedAt: null,
+        notes: { contains: PURCHASE_IDEMPOTENCY_MARKER_PREFIX },
+        createdAt: { gte: from, lt: dayEnd },
+      },
+      select: {
+        id: true,
+        purchaseOrderNumber: true,
+        createdAt: true,
+        // No snapshot column exists on PurchaseOrder for the POS path, and the
+        // relation is onDelete: SetNull — hence the ?? '' below.
+        supplier: { select: { name: true } },
+        lines: {
+          select: {
+            productId: true,
+            description: true,
+            quantity: true,
+            product: { select: { name: true } },
+            unit: { select: { symbol: true } },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: MOBILE_POS_PURCHASE_HISTORY_TAKE,
+    });
+
+    // Also cost-free. PurchaseOrder.status is deliberately NOT selected: a
+    // POSTED goods-received note is the only authority on whether stock
+    // actually moved, and every field not selected is a field that cannot leak.
+    const receipts = orders.length
+      ? await this.prisma.goodsReceivedNote.findMany({
+          where: { purchaseOrderId: { in: orders.map((order) => order.id) }, deletedAt: null },
+          select: { purchaseOrderId: true, grnNumber: true, status: true },
+        })
+      : [];
+    const postedByOrder = new Map<string, string>();
+    for (const receipt of receipts) {
+      if (receipt.status === 'POSTED' && receipt.purchaseOrderId) {
+        postedByOrder.set(receipt.purchaseOrderId, receipt.grnNumber);
+      }
+    }
+
+    return {
+      days: MOBILE_POS_HISTORY_DAYS,
+      from: from.toISOString(),
+      count: orders.length,
+      purchases: orders.map((order) => {
+        const grnNumber = postedByOrder.get(order.id) ?? null;
+        return {
+          id: order.id,
+          purchaseOrderNumber: order.purchaseOrderNumber,
+          grnNumber,
+          supplierName: order.supplier?.name ?? '',
+          // The moment the manager tapped POKEA, which is the moment she
+          // remembers. One field for both the window filter and the display, so
+          // the two can never disagree.
+          recordedAt: order.createdAt,
+          status: grnNumber ? 'COMPLETE' : 'INCOMPLETE',
+          lines: order.lines.map((line) => ({
+            productId: line.productId,
+            name: line.product?.name ?? line.description ?? '',
+            quantity: Number(line.quantity),
+            unitSymbol: line.unit?.symbol ?? '',
+          })),
+        };
+      }),
+    };
+  }
+
+  /**
+   * The window both history lists read: midnight in the BUSINESS zone,
+   * MOBILE_POS_HISTORY_DAYS - 1 days back, ending at tomorrow's midnight there.
+   *
+   * The boundary is walked as calendar days rather than by subtracting 6×24h
+   * from an instant, so the window's edges land on the same midnights the day
+   * report's do even if the zone ever gains a transition. Today counts as day
+   * 1, so "siku 7" is today plus the six before it.
+   */
+  private historyWindow() {
+    const today = businessDayKeyOf(new Date());
+    return {
+      from: businessDayStart(shiftBusinessDayKey(today, -(MOBILE_POS_HISTORY_DAYS - 1))),
+      dayEnd: businessDayStart(shiftBusinessDayKey(today, 1)),
     };
   }
 
@@ -1661,6 +2199,551 @@ export class MobilePosLiteService {
     );
 
     return { buffer, fileName: `RISITI-${receiptFileStem(receiptNumber)}.pdf` };
+  }
+
+  /**
+   * The end-of-day close a rep submits from Funga Siku (spec-history-reports
+   * §1.3) — the only write in this module.
+   *
+   * SERVER-AUTHORITATIVE. The client sends no totals, no lines, no method
+   * breakdown and no rep or terminal identity: every figure the office reads as
+   * fact is recomputed here from SalesOrder rows, and the terminal headers pin
+   * who and where. The only client-declared numbers on the whole record are
+   * declaredHeldCount/declaredHeldAmount — what the phone's outbox was still
+   * holding, which is the one thing this server genuinely cannot know — and
+   * they are named as declared on the record, in the response and on the paper.
+   *
+   * Why businessDate comes from the client at all: the phone's key is frozen
+   * against a specific day, so a retry at 00:01 for a close begun at 23:59 must
+   * still close YESTERDAY, and if the server picked the day the retry would
+   * silently close a different one. So the phone owns WHICH day it is closing
+   * and the server owns WHETHER that day is closable — today or yesterday in
+   * the BUSINESS zone (MOBILE_POS_BUSINESS_TIMEZONE), never in the process's
+   * incidental one and never on the phone's word, so a device clock two weeks
+   * out cannot mint a report for a day nobody worked. Yesterday is the ordinary
+   * case, not the exception: a rep who finished at 23:50 with no signal and
+   * closes on the bus at 00:10 is closing yesterday, and so is one whose day
+   * ended offline and who closes it over breakfast.
+   *
+   * REPLAY PROTECTION IS A DATABASE GUARANTEE. @@unique([companyId,
+   * idempotencyKey]) with the key written by the INSERT itself. A read-then-
+   * write twin check is not an option here for the reason the 20260813120000
+   * migration states: Postgres stamps createdAt at transaction START, so both
+   * racers can conclude they won. This is also a SINGLE-write claim, unlike the
+   * purchase and count chains — they have to create through a core service that
+   * does not take the key and then claim it in a second statement, so they have
+   * a window between "row exists" and "key claimed" and a loser row to retire.
+   * This model is ours, so the stronger form is available and is what we use:
+   * no window, no loser row, nothing to retire.
+   *
+   * A MARKER HIT IS VERIFIED BEFORE IT IS REPLAYED. A matching key is only a
+   * CLAIM that this is the same close — the key is frozen across a midnight
+   * rollover on purpose, so only the server can check it. Terminal, rep and the
+   * stored businessDate must all agree, or the request is refused with a
+   * conflict and an audit row the office can find.
+   *
+   * NOTHING IS EVER DESTROYED OR PERMANENTLY REFUSED. There is no downstream
+   * chain to strand: this record creates no financial fact, no stock movement
+   * and no GL entry — it is a snapshot of records that already exist. If
+   * anything after the insert fails (the lastSeenAt touch, the audit row), the
+   * row stands and the client's identical retry lands on the replay path and
+   * gets the same record back; if the insert itself fails, no row exists and the
+   * frozen key makes the retry safe. A SUBMITTED REPORT IS IMMUTABLE: a replay
+   * never rewrites the stored declared-held figures even if the outbox drained
+   * in between, because mutating a record the office may already have read and
+   * printed is worse than a five-minute-stale disclosure. A rep who wants the
+   * corrected picture closes again — a new key, a new row, a later submittedAt.
+   */
+  async createDayReport(
+    terminalCode: string | undefined,
+    deviceSecret: string | undefined,
+    dto: CreateMobilePosLiteDayReportDto,
+    user: AuthUser,
+  ) {
+    const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
+    // The only refusal that can happen before anything exists, and by
+    // construction it has nothing to undo.
+    const businessDay = this.resolveClosableBusinessDate(dto.businessDate);
+
+    const existing = await this.prisma.mobilePosDayReport.findFirst({
+      where: { companyId: terminal.companyId, idempotencyKey: dto.idempotencyKey },
+    });
+    if (existing) {
+      await this.assertDayReportMatchesOrLog(existing, terminal, businessDay, user);
+      return this.serializeDayReport(existing);
+    }
+
+    const computed = await this.computeDayReport(terminal, businessDay, user);
+    let report: MobilePosDayReport;
+    try {
+      report = await this.prisma.mobilePosDayReport.create({
+        data: {
+          companyId: terminal.companyId,
+          divisionId: terminal.divisionId,
+          branchId: terminal.branchId,
+          branchName: terminal.branch?.name ?? '',
+          terminalId: terminal.id,
+          terminalCode: terminal.terminalCode,
+          terminalName: terminal.name,
+          repUserId: user.id,
+          repName: terminal.assignedUser.fullName,
+          businessDate: businessDay.storedAt,
+          salesCount: computed.salesCount,
+          grossTotal: computed.grossTotal,
+          itemsSoldQuantity: computed.itemsSoldQuantity,
+          byMethod: computed.byMethod as unknown as Prisma.InputJsonValue,
+          items: computed.items as unknown as Prisma.InputJsonValue,
+          itemsTruncated: computed.itemsTruncated,
+          declaredHeldCount: dto.heldCount,
+          declaredHeldAmount: dto.heldAmount,
+          idempotencyKey: dto.idempotencyKey,
+        },
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      // The index said no: a concurrent request under this key committed first.
+      // Re-read it, verify it the same three ways, and return the winner —
+      // there is no loser row to retire, because our insert never landed.
+      const winner = await this.prisma.mobilePosDayReport.findFirst({
+        where: { companyId: terminal.companyId, idempotencyKey: dto.idempotencyKey },
+      });
+      if (!winner) throw error;
+      await this.assertDayReportMatchesOrLog(winner, terminal, businessDay, user);
+      return this.serializeDayReport(winner);
+    }
+
+    await this.prisma.mobilePosTerminal.update({
+      where: { id: terminal.id },
+      data: { lastSeenAt: new Date() },
+    });
+    await this.auditLogs.log({
+      action: 'MOBILE_POS_LITE_DAY_REPORT_SUBMITTED',
+      entityType: 'MobilePosDayReport',
+      entityId: report.id,
+      userId: user.id,
+      companyId: terminal.companyId,
+      severity: AuditSeverity.MEDIUM,
+      newValue: {
+        terminalCode: terminal.terminalCode,
+        businessDate: businessDay.key,
+        salesCount: computed.salesCount,
+        declaredHeldCount: dto.heldCount,
+      },
+    });
+    return this.serializeDayReport(report);
+  }
+
+  /**
+   * The office's read surface for submitted day reports
+   * (spec-history-reports §1.5). A DESKTOP call: no terminal headers, and the
+   * company scope is resolved from the AuthUser exactly like findTerminals —
+   * never a client-supplied companyId.
+   */
+  async dayReports(query: QueryMobilePosLiteDayReportsDto, user: AuthUser) {
+    this.assertCanManage(user);
+    const where: Prisma.MobilePosDayReportWhereInput = {
+      ...(await this.companyScope.companyWhereFor(user)),
+      ...(query.terminalId ? { terminalId: query.terminalId } : {}),
+      ...(query.from || query.to
+        ? {
+            businessDate: {
+              ...(query.from ? { gte: utcCalendarDate(query.from) } : {}),
+              // Inclusive `to`: the office asks for a day, not for the instant
+              // it begins.
+              ...(query.to
+                ? { lt: new Date(utcCalendarDate(query.to).getTime() + 24 * 3600 * 1000) }
+                : {}),
+            },
+          }
+        : {}),
+    };
+
+    const reports = await this.prisma.mobilePosDayReport.findMany({
+      where,
+      orderBy: { submittedAt: 'desc' },
+      take: 100,
+    });
+    return reports.map((report) => this.serializeDayReport(report));
+  }
+
+  /**
+   * The letterhead paper the rep hands to the phone's share sheet
+   * (spec-history-reports §1.4). Terminal-bound by construction — the report
+   * must carry the activated terminal's id — exactly as saleReceipt is bound
+   * through mobilePosTerminalId, so a rep can never pull another terminal's
+   * report.
+   *
+   * RENDERED FROM THE STORED RECORD, never from client state and never from a
+   * re-query. That is the whole reason this is a separate GET on a submitted id
+   * rather than a field on the POST response: the paper she hands over and the
+   * record the office reads are the same numbers by construction, and they stay
+   * the same numbers if she re-shares it a week later.
+   */
+  async dayReportPdf(
+    terminalCode: string | undefined,
+    deviceSecret: string | undefined,
+    reportId: string,
+    user: AuthUser,
+  ) {
+    const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
+    const record = await this.prisma.mobilePosDayReport.findFirst({
+      where: { id: reportId, companyId: terminal.companyId, terminalId: terminal.id },
+    });
+    if (!record) {
+      throw new NotFoundException('Day report not found for this Mobile POS terminal');
+    }
+    const report = this.serializeDayReport(record);
+
+    const sections: BusinessPdfSection[] = [
+      {
+        title: 'Muhtasari / Summary',
+        items: [
+          { label: 'Mauzo / Sales', value: String(report.salesCount) },
+          { label: 'Jumla / Gross Total', value: tzsWhole(report.grossTotal) },
+          { label: 'Bidhaa zilizouzwa / Items Sold', value: receiptQty(report.itemsSoldQuantity) },
+        ],
+      },
+      {
+        title: 'Malipo / Payment Methods',
+        ...(report.byMethod.length
+          ? {
+              table: {
+                headers: ['Njia / Method', 'Idadi / Count', 'Jumla / Total'],
+                numericColumns: [1, 2],
+                columnWeights: [3, 1, 1.5],
+                rows: report.byMethod.map((entry) => [
+                  entry.label ??
+                    bilingualPaymentMethod(entry.paymentMethod as SalesPaymentMethod, null),
+                  String(entry.count),
+                  tzsWhole(entry.amount),
+                ]),
+              },
+              totals: [
+                { label: 'JUMLA / TOTAL', value: tzsWhole(report.grossTotal), emphasis: true },
+              ],
+            }
+          : {
+              paragraphs: [
+                'Hakuna mauzo yaliyorekodiwa siku hii. / No sales were recorded on this day.',
+              ],
+            }),
+      },
+      {
+        title: 'Bidhaa / Items',
+        ...(report.items.length
+          ? {
+              table: {
+                headers: ['Bidhaa / Item', 'Idadi / Qty', 'Jumla / Total'],
+                numericColumns: [1, 2],
+                columnWeights: [3, 1, 1.5],
+                rows: report.items.map((item) => [
+                  item.name,
+                  receiptQty(item.quantity),
+                  tzsWhole(item.amount),
+                ]),
+              },
+              // Says exactly what was dropped and what was not. Every figure in
+              // Muhtasari above — sales, gross, items sold — now comes from an
+              // unbounded aggregate, so this sentence vouches for nothing a
+              // bound can move; the list itself is the day's whole breakdown
+              // ranked by value and cut at the cap.
+              ...(report.itemsTruncated
+                ? {
+                    paragraphs: [
+                      `Orodha hii inaonyesha bidhaa ${MOBILE_POS_DAY_REPORT_ITEM_CAP} zenye thamani kubwa zaidi; jumla hapo juu ni kamili. / This list shows the ${MOBILE_POS_DAY_REPORT_ITEM_CAP} highest-value items; the totals above are complete.`,
+                    ],
+                  }
+                : {}),
+            }
+          : {
+              paragraphs: ['Hakuna bidhaa zilizouzwa siku hii. / No items were sold on this day.'],
+            }),
+      },
+      // The section that makes the report honest: printed if and only if the
+      // phone declared something still in its outbox, saying both that it is
+      // NOT in the total above and that the phone is where the figure came
+      // from. A report that silently omitted unsent sales would be a lie.
+      ...(report.declaredHeldCount > 0
+        ? [
+            {
+              title: 'Mauzo Yaliyo Mkononi / Sales Still On The Phone',
+              items: [
+                { label: 'Mauzo / Sales', value: String(report.declaredHeldCount) },
+                { label: 'Kiasi / Amount', value: tzsWhole(report.declaredHeldAmount) },
+              ],
+              paragraphs: [
+                'Hazijajumuishwa kwenye jumla hapo juu. Idadi hii imetolewa na simu. / Not included in the total above. This figure is declared by the phone.',
+              ],
+            },
+          ]
+        : []),
+    ];
+
+    const buffer = await this.generatedDocuments.renderLetterheadPdf(
+      { companyId: record.companyId, branchId: record.branchId },
+      {
+        title: 'RIPOTI YA SIKU / DAY SALES REPORT',
+        subtitle: report.rep.name,
+        reference: report.reference,
+        generatedAt: new Date(),
+        meta: [
+          { label: 'Tarehe / Date', value: receiptDate(record.businessDate) },
+          {
+            label: 'Kituo / Terminal',
+            value: `${report.terminal.code} (${report.terminal.name})`,
+          },
+          { label: 'Tawi / Branch', value: report.branch.name || 'N/A' },
+          { label: 'Muuzaji / Sales Rep', value: report.rep.name || 'N/A' },
+          { label: 'Imetumwa / Submitted', value: receiptDateTime(record.submittedAt) },
+        ],
+        sections,
+      },
+      user,
+    );
+
+    return {
+      buffer,
+      fileName: `RIPOTI-${receiptFileStem(report.reference)}-${reportFileTime(record.submittedAt)}.pdf`,
+    };
+  }
+
+  /**
+   * The day the phone says it is closing, refused unless the server agrees it
+   * is closable. Returns it in the three forms the chain needs: the
+   * `YYYY-MM-DD` key, the UTC-midnight instant the `@db.Date` column stores,
+   * and the BUSINESS-zone window every sales figure is computed over.
+   *
+   * "Today or yesterday" is decided in the BUSINESS zone
+   * (MOBILE_POS_BUSINESS_TIMEZONE), never in the process's own. Read in UTC on
+   * a container that sets no TZ, this refused a rep in Dar who closed at 00:30
+   * — an ordinary act — for the three hours a night shift most needs, and it is
+   * the same three hours over which the trading day itself was being cut. Both
+   * ends now agree by construction: the phone's calendar day, the day this
+   * window opens on, and the date printed on the paper are the same day in the
+   * same zone.
+   *
+   * The round-trip check is not decoration: `2026-02-31` matches the DTO's
+   * regex and rolls silently forward to 3 March, which could otherwise land
+   * inside the window and file a report under a day that does not exist.
+   */
+  private resolveClosableBusinessDate(businessDate: string): DayReportWindow {
+    const [year, month, day] = businessDate.split('-').map(Number);
+    const asDay = new Date(Date.UTC(year, month - 1, day));
+    const isRealDate =
+      asDay.getUTCFullYear() === year &&
+      asDay.getUTCMonth() === month - 1 &&
+      asDay.getUTCDate() === day;
+    const today = Date.parse(`${businessDayKeyOf(new Date())}T00:00:00.000Z`);
+    const daysBack = Math.round((today - asDay.getTime()) / (24 * 3600 * 1000));
+    if (!isRealDate || daysBack < 0 || daysBack > MOBILE_POS_CLOSABLE_DAYS_BACK) {
+      throw new BadRequestException(
+        'Only today or yesterday can be closed from a Mobile POS terminal',
+      );
+    }
+    return {
+      key: businessDate,
+      storedAt: utcCalendarDate(businessDate),
+      ...businessDayWindow(businessDate),
+    };
+  }
+
+  /**
+   * Everything the office reads as fact, recomputed from SalesOrder rows over
+   * the same scope mySalesToday uses — this terminal, this rep, confirmed
+   * statuses — across the BUSINESS-zone day window.
+   *
+   * EVERY FIGURE THE PAPER PRESENTS AS A TOTAL COMES FROM AN UNBOUNDED
+   * AGGREGATE. `salesCount` and `grossTotal` from the order aggregate,
+   * `itemsSoldQuantity` and the per-product amounts from a line-level groupBy.
+   * itemsSoldQuantity used to be summed in JS over a findMany capped at 500
+   * orders while being printed in `Muhtasari / Summary` beside the two exact
+   * figures, directly under a sentence promising "jumla hapo juu ni kamili" —
+   * a financial document must not carry a number it quietly qualifies
+   * elsewhere, so the bound that could move it is gone rather than annotated.
+   * The ONLY bound left is the 50-row display cap on the item list, it can move
+   * no total, and `itemsTruncated` says when it bit.
+   */
+  private async computeDayReport(terminal: Terminal, businessDay: DayReportWindow, user: AuthUser) {
+    const where: Prisma.SalesOrderWhereInput = {
+      companyId: terminal.companyId,
+      mobilePosTerminalId: terminal.id,
+      createdById: user.id,
+      status: { in: [...CONFIRMED_SALES_STATUSES] },
+      orderDate: { gte: businessDay.dayStart, lt: businessDay.dayEnd },
+    };
+
+    // The line-level scope, expressed once: every line belonging to an order in
+    // the window above. A relation filter rather than a second copy of the
+    // predicate, so the two can never drift.
+    const lineWhere: Prisma.SalesOrderLineWhereInput = { salesOrder: where };
+
+    const [totals, methods, lineTotals] = await Promise.all([
+      // Unbounded and exact.
+      this.prisma.salesOrder.aggregate({
+        where,
+        _count: { _all: true },
+        _sum: { totalAmount: true },
+      }),
+      // The breakdown is what makes the gross legible: money in the pocket is
+      // the CASH row, not the total.
+      this.prisma.salesOrder.groupBy({
+        by: ['paymentMethod'],
+        where,
+        _count: { _all: true },
+        _sum: { totalAmount: true },
+      }),
+      // Also unbounded: the day's whole product breakdown, summed by the
+      // database rather than in JS over a page of orders. Nothing here is
+      // capped — the cap is applied to the DISPLAY list below, after the
+      // ranking, so the figure the Summary prints is the day's real one.
+      this.prisma.salesOrderLine.groupBy({
+        by: ['productId'],
+        where: lineWhere,
+        _sum: { quantity: true, lineTotal: true },
+      }),
+    ]);
+
+    const byMethod: DayReportMethodTotal[] = methods.map((method) => ({
+      paymentMethod: method.paymentMethod,
+      // The terminal's OWN configured label (a till number, say). CREDIT has no
+      // configured payment row at all and honestly gets null.
+      label:
+        terminal.paymentMethods.find((payment) => payment.paymentMethod === method.paymentMethod)
+          ?.label ?? null,
+      count: method._count._all,
+      amount: round2(Number(method._sum.totalAmount ?? 0)),
+    }));
+
+    const ranked = lineTotals
+      .map((line) => ({
+        productId: line.productId,
+        quantity: Number(line._sum.quantity ?? 0),
+        amount: Number(line._sum.lineTotal ?? 0),
+      }))
+      .sort((a, b) => b.amount - a.amount);
+    const itemsSoldQuantity = ranked.reduce((sum, item) => sum + item.quantity, 0);
+
+    // Names for the rows that will actually be printed, and only those. Product
+    // is a Restrict relation so the row cannot vanish under a sale, but a name
+    // that somehow will not resolve must not blank a paper: the id stands in.
+    const shown = ranked.slice(0, MOBILE_POS_DAY_REPORT_ITEM_CAP);
+    const named = shown.length
+      ? await this.prisma.product.findMany({
+          where: { id: { in: shown.map((item) => item.productId) }, companyId: terminal.companyId },
+          select: { id: true, name: true },
+        })
+      : [];
+    const nameById = new Map(named.map((product) => [product.id, product.name]));
+
+    const items: DayReportItemTotal[] = shown.map((item) => ({
+      productId: item.productId,
+      name: nameById.get(item.productId) ?? item.productId,
+      quantity: round4(item.quantity),
+      amount: round2(item.amount),
+    }));
+
+    return {
+      salesCount: totals._count._all,
+      grossTotal: round2(Number(totals._sum.totalAmount ?? 0)),
+      itemsSoldQuantity: round4(itemsSoldQuantity),
+      byMethod,
+      items,
+      // The one bound left, and it is a DISPLAY cap: the smallest rows are
+      // dropped from the printed list after the whole day has been ranked, so
+      // it can move no total on the record or on the paper. Disclosed anyway,
+      // because a shortened list should say it is one.
+      itemsTruncated: ranked.length > MOBILE_POS_DAY_REPORT_ITEM_CAP,
+    };
+  }
+
+  /**
+   * The three-way verification, with the office's copy of the argument
+   * attached.
+   *
+   * A frozen key is a CLAIM of sameness and only the server can check it, so a
+   * marker-matched replay is verified before it is replayed: same terminal,
+   * same rep, same business date. The refusal names the office as the recovery
+   * ("ulizia ofisi"), so the office has to be able to SEE it — exactly the
+   * reason assertPurchaseMatchesOrSettle writes a row. Nothing is destroyed and
+   * nothing is rewritten either way: the stored report is immutable.
+   */
+  private async assertDayReportMatchesOrLog(
+    record: MobilePosDayReport,
+    terminal: Terminal,
+    businessDay: DayReportWindow,
+    user: AuthUser,
+  ) {
+    const storedDate = businessDateKey(record.businessDate);
+    if (
+      record.terminalId === terminal.id &&
+      record.repUserId === user.id &&
+      storedDate === businessDay.key
+    ) {
+      return;
+    }
+    try {
+      await this.auditLogs.log({
+        action: 'MOBILE_POS_LITE_DAY_REPORT_CONFLICT',
+        entityType: 'MobilePosDayReport',
+        entityId: record.id,
+        userId: user.id,
+        companyId: record.companyId,
+        severity: AuditSeverity.HIGH,
+        oldValue: {
+          terminalCode: record.terminalCode,
+          businessDate: storedDate,
+          repUserId: record.repUserId,
+        },
+        newValue: {
+          terminalCode: terminal.terminalCode,
+          businessDate: businessDay.key,
+          repUserId: user.id,
+        },
+      });
+    } catch (logError) {
+      // Last resort, exactly like the purchase and count settles: the rep's own
+      // refusal is what must reach her, so this never propagates and never
+      // masks it. The process log at least lets an operator find the report.
+      this.logger.error(
+        `Mobile POS day report ${record.id} was re-claimed under a mismatched key and its audit log could not be written: ${
+          logError instanceof Error ? logError.message : String(logError)
+        }`,
+      );
+    }
+    throw new ConflictException(
+      'This day report key was already used for a different day or terminal',
+    );
+  }
+
+  /**
+   * The stored record as the phone, the paper and the office all read it.
+   *
+   * `reference` is computed rather than stored, and deliberately not a new
+   * document-number sequence: EntityCodeGeneratorService exists, but a report is
+   * not a numbered business document, and saleReceipt already sets the
+   * precedent of falling back to a derived reference.
+   */
+  private serializeDayReport(record: MobilePosDayReport) {
+    const businessDate = businessDateKey(record.businessDate);
+    return {
+      id: record.id,
+      businessDate,
+      reference: `${record.terminalCode}-${businessDate.replace(/-/g, '')}`,
+      submittedAt: record.submittedAt,
+      terminal: { id: record.terminalId, code: record.terminalCode, name: record.terminalName },
+      branch: { id: record.branchId, name: record.branchName },
+      rep: { id: record.repUserId, name: record.repName },
+      salesCount: record.salesCount,
+      grossTotal: Number(record.grossTotal),
+      itemsSoldQuantity: Number(record.itemsSoldQuantity),
+      byMethod: readDayReportJson<DayReportMethodTotal>(record.byMethod),
+      items: readDayReportJson<DayReportItemTotal>(record.items),
+      itemsTruncated: record.itemsTruncated,
+      // Named as declared everywhere they appear, because that is what they
+      // are: the phone's own statement about its outbox.
+      declaredHeldCount: record.declaredHeldCount,
+      declaredHeldAmount: Number(record.declaredHeldAmount),
+    };
   }
 
   private async resolveSaleLines(terminal: Terminal, lines: CreateMobilePosLiteSaleDto['lines']) {

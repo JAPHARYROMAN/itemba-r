@@ -85,6 +85,15 @@ import type { PosTranslate } from './pos-types';
  *     "This count was captured more than <n> hours ago and can no longer be
  *      sent from the phone — count the shelf again, or ask the office to post
  *      this one."
+ *   · createDayReport (spec-history-reports §1.3, the end-of-day close) — the
+ *     two refusals a phone can actually meet on that route. The first is the
+ *     three-way verification of a marker-matched replay (terminal, rep and
+ *     businessDate must all agree, because a frozen key is only a CLAIM of
+ *     sameness and only the server can check it); the second is the
+ *     today-or-yesterday window, which is what stops a device clock two weeks
+ *     out minting a report for a day nobody worked.
+ *     "This day report key was already used for a different day or terminal"
+ *     "Only today or yesterday can be closed from a Mobile POS terminal"
  * - backend/src/modules/mobile-pos-lite/dto/mobile-pos-lite-stock-count.dto.ts
  *   · the ValidationPipe, before the service is ever reached
  *     "A stock count can carry at most 500 products — send the rest as a
@@ -369,6 +378,29 @@ const ERROR_PATTERNS: ReadonlyArray<PosErrorRow> = [
   // can answer this phone emits its sentence — not when the working tree stops
   // emitting it. Delete this one the day that build is gone.
   { pattern: /is being recorded by another request/i, key: 'errStillSending' },
+  // Day report: a frozen key presented for a different day, terminal or rep
+  // ("This day report key was already used for a different day or terminal").
+  // The phone froze the key against ONE close on purpose — across a midnight
+  // rollover included — so a mismatch means the two ends disagree about which
+  // close this is, and neither replaying nor creating is right. The server
+  // refuses and writes an audit row naming the office, so the copy sends her
+  // exactly where the record it refused is visible.
+  //
+  // ORDERING (the file's near-collision rule): the tail "different day or
+  // terminal" is one word from the `terminalUnavailable` row's territory, but
+  // that row's alternatives are "terminal is not active", "device is not
+  // registered", "assigned to a different sales rep", "mobile pos user is not
+  // active" and "activate this mobile pos device" — none of them matches this
+  // sentence, and none of the rows above claims "day report key". Certified in
+  // pos-errors.test.ts both ways: this sentence maps here, AND no earlier row
+  // answers it.
+  { pattern: /day report key was already used/i, key: 'reportConflict' },
+  // Day report: a businessDate outside the server-local today-or-yesterday
+  // window ("Only today or yesterday can be closed from a Mobile POS
+  // terminal"). This is a permanent per-day refusal — no retry of any shape
+  // makes a two-week-old day closable from a phone — so the copy names the
+  // office rather than inviting a retry that will earn the identical answer.
+  { pattern: /can be closed from a mobile pos terminal/i, key: 'errReportDateClosed' },
   // NO `errAlreadySent` ROW. A /idempoten|duplicate/ row sat here for replayed
   // sends, but the sale path replays SILENTLY (sales-orders createAndConfirm
   // returns the original order rather than throwing), so the only live copy it
@@ -498,5 +530,33 @@ export function posSaleFailureMessage(error: unknown, t: PosTranslate): string {
   const raw = error instanceof Error ? error.message : '';
   return posErrorKey(raw) === 'errorFallback' && posRefusalStatus(error) === null
     ? t('saleSendFailedUnknown')
+    : posErrorMessage(raw, t);
+}
+
+/**
+ * The sentence a failed FUNGA SIKU puts on the Funga Siku screen
+ * (spec-history-reports §4-5). Same two questions in the same order as the
+ * purchase, the count and the sale — a recognised sentence is said in her
+ * language whatever carried it; anything unrecognised turns on whether the
+ * server actually refused.
+ *
+ * The unproven branch reads like the PURCHASE's, not the sale's, and for the
+ * same structural reason: the day report HAS A FROZEN KEY. `usePosDayReport`
+ * mints the key at the first send attempt, persists it in the daylog before
+ * the request leaves, and never moves it again until a 2xx — so the identical
+ * retry is answered by the server's `@@unique([companyId, idempotencyKey])`
+ * rather than guessed at on the phone, and "jaribu tena" is a true
+ * instruction. The sale's `saleSendFailedUnknown` exists precisely because
+ * `completeSale` mints a fresh key per attempt and cannot say that.
+ *
+ * Whatever this returns, the outcome is identical: the key is kept, the screen
+ * stays, nothing navigates, nothing is cleared, nothing is stamped. A
+ * connection-shaped failure and a 400 differ in one sentence of copy and in
+ * nothing else — classification chooses WORDING only, never what is stored.
+ */
+export function posDayReportFailureMessage(error: unknown, t: PosTranslate): string {
+  const raw = error instanceof Error ? error.message : '';
+  return posErrorKey(raw) === 'errorFallback' && posRefusalStatus(error) === null
+    ? t('reportSendFailedRetry')
     : posErrorMessage(raw, t);
 }

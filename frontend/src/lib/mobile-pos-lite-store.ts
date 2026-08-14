@@ -561,18 +561,128 @@ export type PosDaylogSent = {
   fetchedAt: number;
 };
 
+/**
+ * An end-of-day close for this date (spec-history-reports §4/§6).
+ *
+ * This rides the EXISTING `daylog` store rather than a new one, and the
+ * database stays at v4: IndexedDB values are schemaless, so an optional field
+ * on an existing store's value needs no `onupgradeneeded` change and no version
+ * bump. A daylog row written before this shipped loads unchanged and simply
+ * carries no close. The daylog is also semantically the right home — the close
+ * belongs to the day, the store is already keyed `${terminalCode}:${date}`,
+ * already pruned to 7 days, and already the thing that survives an app kill
+ * offline, which is exactly the window a frozen key has to live through.
+ */
+export type PosDaylogClose = {
+  /**
+   * FROZEN from the first send attempt until a 2xx or a new close. ABSENT
+   * means no attempt is outstanding — either none was ever made, or the report
+   * landed and the key was released with it.
+   */
+  idempotencyKey?: string;
+  /**
+   * Frozen WITH the key: a retry after midnight must still close the day it
+   * began on. If the phone re-derived the day at retry time, a close begun at
+   * 23:59 and retried at 00:01 would silently close a different day under a key
+   * the server has already anchored to the first one.
+   */
+  businessDate: string;
+  startedAt: number;
+  /** Set on 2xx — the id the PDF is fetched from, and the proof the day closed. */
+  reportId?: string;
+  submittedAt?: number;
+  /**
+   * THE INTENT, written when the rep opens Funga Siku for this day WITH NO
+   * SIGNAL. It carries no `idempotencyKey`, so nothing is frozen and nothing
+   * can be sent under it — the freeze-before-send discipline is satisfied, not
+   * bent, because nothing is being sent.
+   *
+   * It exists because the day it marks is otherwise unreachable: a rep who
+   * finished at 20:00 in a village shop and opened the close offline left NO
+   * trace at all under the first cut of this module, so the next morning the
+   * phone found nothing, silently offered to close TODAY, and the day she
+   * actually traded never reached the office. This row is what the morning
+   * resume finds (`usePosDayReport.enter`, spec-history-reports §4-7).
+   */
+  openedOffline?: boolean;
+};
+
 export type PosDaylogEntry = {
   terminalCode: string;
-  /** Device-local YYYY-MM-DD (single-timezone EAT fleet — spec-leo §7.3). */
+  /** The BUSINESS day (`YYYY-MM-DD` in POS_BUSINESS_TIMEZONE), never the device's. */
   date: string;
   /** Finished jobs stamped on THIS phone this day — accrues on local commit. */
   tallyCount: number;
   /** Absent until the first successful my-sales-today fetch of the day. */
   sent?: PosDaylogSent;
+  /** Absent until the first FUNGA SIKU attempt of the day (additive, §6). */
+  close?: PosDaylogClose;
 };
 
-/** Device-local calendar date as YYYY-MM-DD — the daylog's day key. */
+/**
+ * THE BUSINESS TIMEZONE — the phone's half of the single authority on where a
+ * trading day begins and ends. It is the SAME constant the backend pins
+ * (`MOBILE_POS_BUSINESS_TIMEZONE`, mobile-pos-lite.service.ts) and the same zone
+ * every rendered time in the module is already pinned to, so the day a report
+ * is filed under and the clock printed on the receipts inside it read the same
+ * string and cannot disagree.
+ *
+ * REVIEW-BLOCKING: nothing in the POS may decide a day boundary from the raw
+ * device clock's zone. The two authorities disagreed by three hours before this
+ * — the phone said EAT, the server said UTC — so a rep in Dar who closed at
+ * 00:30 was refused outright and every trading day was silently cut at 03:00
+ * local. A duka that trades past eleven at night is the normal case here.
+ *
+ * Africa/Nairobi is EAT, UTC+3, no DST and none since 1936;
+ * Africa/Dar_es_Salaam is a link to the same zone, and naming one zone twice is
+ * how two halves of a boundary drift apart.
+ */
+export const POS_BUSINESS_TIMEZONE = 'Africa/Nairobi';
+
+/**
+ * The business zone's calendar fields for an instant, read through ICU rather
+ * than through the device's own zone. Null when the engine carries no data for
+ * the zone — see the fallback in `posDaylogDate`.
+ */
+const businessZoneDay = (() => {
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: POS_BUSINESS_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+  } catch {
+    return null;
+  }
+})();
+
+/**
+ * The BUSINESS calendar date as `YYYY-MM-DD` — the daylog's day key, the day a
+ * close is filed under, and the `businessDate` the phone sends. Identical by
+ * construction to the server's `businessDayKeyOf`, which is what makes the
+ * today-or-yesterday window agree on both ends rather than by coincidence.
+ *
+ * A device whose ZONE is wrong is corrected here. A device whose CLOCK is wrong
+ * still degrades to a wrong day — the server refuses anything outside its own
+ * today-or-yesterday window and the refusal is mapped to actionable Swahili —
+ * but the phone never locks her out on its own account, and the explicit day
+ * picker (§3.3) is the recovery: it offers both days the server will accept.
+ */
 export function posDaylogDate(now: Date = new Date()): string {
+  if (businessZoneDay && !Number.isNaN(now.getTime())) {
+    const parts = businessZoneDay.formatToParts(now);
+    const read = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((part) => part.type === type)?.value ?? '';
+    const year = read('year');
+    const month = read('month');
+    const day = read('day');
+    if (year && month && day) return `${year.padStart(4, '0')}-${month}-${day}`;
+  }
+  // No ICU data for the zone (or an unreadable instant): the device's own
+  // calendar. A missing timezone database must never leave a rep unable to
+  // name a day — a boundary three hours out is recoverable, a dead screen is
+  // not.
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   return `${now.getFullYear()}-${month}-${day}`;
@@ -654,3 +764,51 @@ export async function writeDaylogSent(
   );
   return entry;
 }
+
+/**
+ * Upsert the day's `close` record — the frozen idempotency key of an
+ * end-of-day report (spec-history-reports §4/§6).
+ *
+ * RETURNS WHETHER THE WRITE ACTUALLY LANDED, and that return value is the
+ * whole point. This is deliberately unlike `bumpDaylogTally`, whose failure is
+ * fire-and-forget: a tally mark is bookkeeping, a frozen key is custody. A
+ * phone that would not keep the key is holding nothing to ask the server with,
+ * so `usePosDayReport.submit()` refuses to POST when this resolves false —
+ * posting anyway is the whole failure written out (the request lands, the
+ * answer is lost, the next attempt mints a fresh key, and the office gets two
+ * reports for one day with nothing linking them).
+ *
+ * Nothing is destroyed on failure: whatever close IS on the phone stays, with
+ * its own key intact, so a later successful write still resumes the same chain.
+ */
+export async function writeDaylogClose(
+  terminalCode: string,
+  date: string,
+  close: PosDaylogClose,
+): Promise<boolean> {
+  try {
+    const existing = await getDaylogEntry(terminalCode, date);
+    const entry: PosDaylogEntry = existing
+      ? { ...existing, close }
+      : { terminalCode, date, tallyCount: 0, close };
+    await transaction(DAYLOG, 'readwrite', (store) =>
+      store.put(entry, daylogKey(terminalCode, date)),
+    );
+    return true;
+  } catch {
+    // Storage refused (quota, private mode, an evicted database). The caller
+    // turns this into a refused send and says so — it is never swallowed into
+    // a screen that claims the report went out.
+    return false;
+  }
+}
+
+/*
+ * There is deliberately NO `readDaylogClose(terminalCode, date)` narrow reader.
+ * The close screen has to weigh a day's WHOLE row — the close record, the
+ * tally marks, and the rep-guarded `sent` snapshot together — to answer "does
+ * this day still need closing, and what may I honestly show for it?", and a
+ * reader that returned only the close is what let the first cut resolve the day
+ * from an idempotency key alone and lose a day that ended with no signal.
+ * `getDaylogEntry` is the reader; `usePosDayReport.readDay` is the judgement.
+ */

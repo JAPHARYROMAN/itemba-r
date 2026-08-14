@@ -23,6 +23,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '@/lib/api-client';
 import {
   POS_ERROR_MAPPED_KEYS,
+  posDayReportFailureMessage,
   posErrorKey,
   posErrorMessage,
   posPurchaseFailureMessage,
@@ -156,6 +157,19 @@ const CASES: Array<[raw: string, key: PosStringKey]> = [
   // mobile-pos-lite.service.ts resolvePurchaseLines — the cost rejections.
   ['Unga wa Ngano does not have a purchase cost — enter the unit cost', 'errNoPurchaseCost'],
   ['Provide a single unit cost per product', 'errOneCostPerProduct'],
+  // mobile-pos-lite.service.ts createDayReport — the two refusals the
+  // end-of-day close can actually earn (spec-history-reports §1.3/§5).
+  //
+  //   · the three-way verification of a marker-matched replay. The phone
+  //     freezes its key against ONE close, across a midnight rollover
+  //     included, so a key arriving for a different day, terminal or rep means
+  //     the two ends disagree about which close this is — and neither
+  //     replaying nor creating is right.
+  ['This day report key was already used for a different day or terminal', 'reportConflict'],
+  //   · the today-or-yesterday window. Yesterday is allowed because a rep who
+  //     finished at 23:50 with no signal and closes on the bus at 00:10 is the
+  //     normal case; anything outside it is a device clock, not a work day.
+  ['Only today or yesterday can be closed from a Mobile POS terminal', 'errReportDateClosed'],
 ];
 
 describe('posErrorKey — exact backend strings', () => {
@@ -374,6 +388,30 @@ describe('posErrorKey — exact backend strings', () => {
       posErrorKey('This purchase is being recorded by another request. Retry in a moment.'),
     ).toBe('errStillSending');
   });
+
+  it('the day-report refusals reach their own copy, and no earlier row claims them', () => {
+    // spec-history-reports §5's required ordering check. The conflict sentence
+    // ends "…for a different day or terminal", which sits one word from the
+    // terminalUnavailable row's territory — and that row is EARLIER in the
+    // table, so whichever matches first wins. Assert both halves: the rows
+    // answer their own sentences, AND every alternative of the row that could
+    // have stolen them still answers its own.
+    expect(
+      posErrorKey('This day report key was already used for a different day or terminal'),
+    ).toBe('reportConflict');
+    expect(posErrorKey('Only today or yesterday can be closed from a Mobile POS terminal')).toBe(
+      'errReportDateClosed',
+    );
+    for (const raw of [
+      'This Mobile POS terminal is not active',
+      'This device is not registered for the selected Mobile POS terminal',
+      'This Mobile POS terminal is assigned to a different sales rep',
+      'The assigned Mobile POS user is not active',
+      'Activate this Mobile POS device before selling',
+    ]) {
+      expect(posErrorKey(raw)).toBe('terminalUnavailable');
+    }
+  });
 });
 
 describe('posErrorMessage', () => {
@@ -583,6 +621,64 @@ describe('posSaleFailureMessage', () => {
     for (const raw of english) {
       expect(posSaleFailureMessage(apiError(raw, 409), t)).not.toContain(raw);
       expect(posSaleFailureMessage(new Error(raw), t)).not.toContain(raw);
+    }
+  });
+});
+
+describe('posDayReportFailureMessage', () => {
+  it('speaks Swahili for the two rejections a close can earn', () => {
+    expect(
+      posDayReportFailureMessage(
+        apiError('This day report key was already used for a different day or terminal', 409),
+        t,
+      ),
+    ).toBe('<reportConflict>');
+    expect(
+      posDayReportFailureMessage(
+        apiError('Only today or yesterday can be closed from a Mobile POS terminal', 400),
+        t,
+      ),
+    ).toBe('<errReportDateClosed>');
+    // A terminal rejection can land on this route too, and it already has copy.
+    expect(
+      posDayReportFailureMessage(apiError('This Mobile POS terminal is not active', 403), t),
+    ).toBe('<terminalUnavailable>');
+  });
+
+  it('invites the plain retry when nothing refused the close', () => {
+    // Unlike the sale, the day report HAS a frozen key: it is persisted before
+    // the request leaves and never moves until a 2xx, so an identical retry is
+    // settled by the server's unique index rather than guessed at here. That
+    // is what makes "jaribu tena" a true instruction on this surface.
+    expect(posDayReportFailureMessage(apiError('Request failed: 502', 502), t)).toBe(
+      '<reportSendFailedRetry>',
+    );
+    expect(posDayReportFailureMessage(new TypeError('Failed to fetch'), t)).toBe(
+      '<reportSendFailedRetry>',
+    );
+    expect(posDayReportFailureMessage('something threw', t)).toBe('<reportSendFailedRetry>');
+    expect(posDayReportFailureMessage(apiError('Request failed: 429', 429), t)).toBe(
+      '<reportSendFailedRetry>',
+    );
+  });
+
+  it('falls back to "call a supervisor" for a refusal with no row', () => {
+    expect(posDayReportFailureMessage(apiError('Some brand new day-report rule', 400), t)).toBe(
+      '<errorFallback>',
+    );
+  });
+
+  it('never returns the backend sentence itself', () => {
+    const english = [
+      'Request failed: 502',
+      'Failed to fetch',
+      'This day report key was already used for a different day or terminal',
+      'Only today or yesterday can be closed from a Mobile POS terminal',
+      'Something entirely new',
+    ];
+    for (const raw of english) {
+      expect(posDayReportFailureMessage(apiError(raw, 409), t)).not.toContain(raw);
+      expect(posDayReportFailureMessage(new Error(raw), t)).not.toContain(raw);
     }
   });
 });

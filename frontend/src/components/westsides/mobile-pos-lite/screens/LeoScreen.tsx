@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, ChevronDown, ChevronUp, RotateCw, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ChevronUp, RotateCw, Trash2 } from 'lucide-react';
 import type {
   MobilePosLiteBinding,
   PendingMobilePosLiteSale,
@@ -56,6 +56,8 @@ export function LeoScreen({
   removePending,
   retryPendingSale,
   retryDay,
+  openHistory,
+  openClose,
   t,
 }: {
   shellClass: string;
@@ -77,6 +79,14 @@ export function LeoScreen({
   retryPendingSale: (item: PendingMobilePosLiteSale) => Promise<'sent' | 'rejected' | 'connection'>;
   /** Re-fires the my-sales-today fetch in place (never leave-and-re-enter). */
   retryDay: () => void;
+  /**
+   * → `#historia`. Leo is today's page; the history is the pages before it, so
+   * the door lives here rather than growing a rail tab the back-map has no
+   * room for (spec-history-reports §2.1).
+   */
+  openHistory: () => void;
+  /** → `#funga`. Closing the day is ruling the line under the day's page. */
+  openClose: () => void;
   t: PosTranslate;
 }) {
   // The rejected-sale ritual sheet tracks an id, not a row: after a retry the
@@ -340,6 +350,40 @@ export function LeoScreen({
             </div>
           ) : null}
         </section>
+
+        {/* Historia — a full-width secondary row directly under the day list.
+         * Not a rail tab: the history is a glance surface reached from the
+         * book whose earlier pages it is (spec-history-reports §2.1). */}
+        <button
+          type="button"
+          onClick={openHistory}
+          className="mt-6 flex min-h-14 w-full items-center justify-between gap-3 rounded-lg border px-4 text-left"
+          style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
+        >
+          <span className="text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
+            {t('historyTitle')}
+          </span>
+          <ChevronRight
+            size={19}
+            style={{ color: 'var(--aurora-text-secondary)' }}
+            aria-hidden="true"
+          />
+        </button>
+
+        {/* Funga Siku — the closing ritual, a secondary button above the slab
+         * (the SHIRIKI RISITI precedent). The slab keeps its one primary verb. */}
+        <button
+          type="button"
+          onClick={openClose}
+          className="mt-3 inline-flex min-h-14 w-full items-center justify-center rounded-lg border px-5 text-base font-bold"
+          style={{
+            background: 'var(--aurora-card)',
+            borderColor: 'var(--aurora-border)',
+            color: 'var(--aurora-primary-text)',
+          }}
+        >
+          {t('reportClose')}
+        </button>
       </div>
 
       {ritualItem && (

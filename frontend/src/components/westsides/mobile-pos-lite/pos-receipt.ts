@@ -45,21 +45,49 @@ export function downloadReceiptFile(file: File) {
 }
 
 /**
- * Deliver the letterhead PDF via the share sheet, or download it where files
- * can't be shared (desktop browsers). Returns null when the PDF could not be
- * fetched so the caller can fall back to the text receipt; a share sheet the
- * user dismissed still counts as 'shared' (nothing to surface).
+ * Deliver ANY terminal-bound letterhead PDF via the share sheet, or download
+ * it where files can't be shared (desktop browsers). This is the receipt
+ * share's body with the URL and the fallback filename lifted out
+ * (spec-history-reports §3.4), so the end-of-day report reuses the fetch, the
+ * `canShareReceiptFile` probe and `downloadReceiptFile` verbatim rather than
+ * growing a second, subtly different copy of them.
+ *
+ * Returns null when the PDF could not be fetched, so each caller decides its
+ * own honest fallback — the sale falls back to the text receipt, the day
+ * report says the paper failed while the record stands at the office. A share
+ * sheet the user dismissed still counts as 'shared': closing a sheet is not a
+ * failure and there is nothing to surface.
  */
-export async function sharePdfReceipt(
+export async function sharePdfDocument(
   binding: MobilePosLiteBinding,
-  sale: SaleResult,
+  /** Full app path, e.g. `/api/backend/mobile-pos-lite/day-reports/<id>/pdf`. */
+  path: string,
+  fallbackName: string,
 ): Promise<'shared' | 'downloaded' | null> {
-  const file = await fetchReceiptPdf(binding, sale);
-  if (!file) return null;
+  const res = await fetch(path, { headers: terminalHeaders(binding), cache: 'no-store' });
+  if (!res.ok) return null;
+  const name = filenameFromDisposition(res.headers.get('Content-Disposition'), fallbackName);
+  const file = new File([await res.blob()], name, { type: 'application/pdf' });
   if (canShareReceiptFile(file)) {
+    // A dismissed sheet rejects; that is the user closing it, not an error.
     await navigator.share({ files: [file], title: file.name }).catch(() => undefined);
     return 'shared';
   }
   downloadReceiptFile(file);
   return 'downloaded';
+}
+
+/**
+ * The sale receipt's share — signature and behaviour unchanged; only the body
+ * now delegates to the generalised helper above.
+ */
+export async function sharePdfReceipt(
+  binding: MobilePosLiteBinding,
+  sale: SaleResult,
+): Promise<'shared' | 'downloaded' | null> {
+  return sharePdfDocument(
+    binding,
+    `/api/backend/mobile-pos-lite/sales/${sale.id}/receipt`,
+    `RISITI-${sale.salesOrderNumber ?? sale.receiptNumber ?? sale.id}.pdf`,
+  );
 }
