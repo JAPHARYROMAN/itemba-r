@@ -4925,6 +4925,12 @@ model DeliveryNote {
   receivedByPhone    String?
   status             DeliveryNoteStatus @default(DRAFT)
   notes              String?
+  /// SalesOrder id of the POS counter sale this note was auto-issued for.
+  /// NULL on every desk-created note. Company-scoped unique: one auto note per
+  /// counter sale, decided by the database and not by whichever query ran first.
+  /// Also the discriminator that keeps counter notes out of the office's
+  /// delivery worklists — a counter sale is a collection, not a dispatch.
+  counterSaleOrderId String?
   createdById        String
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
@@ -4939,6 +4945,7 @@ model DeliveryNote {
   lines       DeliveryNoteLine[]
 
   @@unique([companyId, deliveryNoteNumber])
+  @@unique([companyId, counterSaleOrderId])
   @@index([companyId])
   @@index([customerId])
   @@index([salesOrderId])

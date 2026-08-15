@@ -26,6 +26,7 @@ import { SalesOrdersService } from '../sales-orders/sales-orders.service';
 import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
 import { GoodsReceivedNotesService } from '../goods-received-notes/goods-received-notes.service';
 import { StockAdjustmentsService } from '../stock-adjustments/stock-adjustments.service';
+import { DeliveryNotesService } from '../delivery-notes/delivery-notes.service';
 import { GeneratedDocumentsService } from '../generated-documents/generated-documents.service';
 import type { BusinessPdfSection } from '../generated-documents/pdf-builder';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
@@ -47,6 +48,11 @@ import {
   CreateMobilePosLiteDayReportDto,
   QueryMobilePosLiteDayReportsDto,
 } from './dto/mobile-pos-lite-day-report.dto';
+import {
+  MobilePosLiteCounterDeliveryBackfillFailure,
+  MobilePosLiteCounterDeliveryBackfillReport,
+  QueryMobilePosLiteCounterDeliveryBackfillDto,
+} from './dto/mobile-pos-lite-counter-delivery-backfill.dto';
 
 const ACTIVATION_TTL_MS = 20 * 60 * 1000;
 
@@ -179,6 +185,22 @@ function businessZoneFields(value: Date) {
     minute: read('minute'),
     second: read('second'),
   };
+}
+
+/**
+ * Every company id a resolved company scope can actually reach.
+ *
+ * `companyWhereFor` returns one of three shapes — a single `companyId`, an
+ * `{ in: [...] }` list for a group user who named no company, or the
+ * `{ id: { in: [] } }` reach-nothing guard. Only the first is obvious enough to
+ * assert against by hand, which is exactly how the write-access check on the
+ * backfill came to cover the narrowing path and miss the wider default one.
+ */
+function scopedCompanyIds(scope: unknown): string[] {
+  const companyId = (scope as { companyId?: unknown })?.companyId;
+  if (typeof companyId === 'string') return [companyId];
+  const list = (companyId as { in?: unknown })?.in;
+  return Array.isArray(list) ? list.filter((id): id is string => typeof id === 'string') : [];
 }
 
 /** The `YYYY-MM-DD` business day an instant falls on. */
@@ -528,6 +550,86 @@ const MOBILE_POS_STOCK_COUNT_REASON = 'MOBILE_POS_STOCK_COUNT';
  */
 const AUTO_POST_MOBILE_POS_STOCK_COUNTS: boolean = true;
 
+/**
+ * THE COUNTER-DELIVERY SWITCH, and the revert.
+ *
+ * A counter sale is delivered at the instant it is paid — the customer carries
+ * the goods out — but fulfillment in this system is tracked ONLY by DeliveryNote
+ * rows, so without this every POS sale reads "Delivered: PENDING" for the life
+ * of the order. When true, a completed sale also drives a delivery note
+ * create -> dispatch -> deliver, which is what flips that stage to APPROVED and
+ * what corrects `ordersAwaitingDelivery` on the office dashboard.
+ *
+ * THE ESCAPE: flip to false and redeploy. Sales continue immediately, notes
+ * already written stay valid and correct, and the column and index behind them
+ * are additive and inert when nothing writes them — no migration rollback is
+ * involved in the revert. This constant IS the revert; that is why it ships in
+ * the build. Typed `boolean` on purpose so flipping it does not statically kill
+ * the branch below.
+ *
+ * What it can NEVER do, in either position: change the money, the stock, the
+ * receivable or the GL. The note is a document ABOUT the sale, written after
+ * every one of the sale's transactions has committed, behind a total wrapper.
+ */
+const RECORD_COUNTER_SALE_DELIVERY_NOTES: boolean = true;
+
+/**
+ * Per-request cap on the historical repair (spec-counter-delivery §4.2
+ * `take: 500`). A large tenant is repaired across several runs rather than in
+ * one request that a gateway would time out halfway through — and because every
+ * order is an independently committed chain, a run cut short loses nothing: the
+ * next run re-selects only what is still outstanding.
+ */
+const COUNTER_DELIVERY_BACKFILL_BATCH = 500;
+
+/** The slice of a DeliveryNote the counter-delivery chain needs to drive it. */
+interface CounterDeliveryNote {
+  id: string;
+  status: string;
+}
+
+/**
+ * What one pass of the counter-delivery chain actually did. The live sale path
+ * ignores this; the historical repair counts it into its run report, which is
+ * the operator's only view of what a run changed.
+ */
+type CounterDeliveryOutcome = 'created' | 'resumed' | 'skipped';
+
+/**
+ * Server-derived variations on the counter-delivery note, for the ONE caller
+ * that is not a live sale.
+ *
+ * Deliberately not a DTO and deliberately not reachable from a request body:
+ * every field here changes what a business document says, so only this service
+ * may set one. Empty — the default — is the live counter sale, unchanged.
+ */
+interface CounterDeliveryOptions {
+  /**
+   * Calendar date (YYYY-MM-DD) of the backfill run that issued this note,
+   * stamped into `notes` so that nobody, ever, mistakes a repaired historical
+   * note for one a person wrote at the counter that day. Absent on the live
+   * path, where the note IS written at the counter that day.
+   */
+  backfilledOn?: string;
+}
+
+/** The slice of a completed sale the counter-delivery chain reads. */
+interface CounterSale {
+  id: string;
+  salesOrderNumber?: string | null;
+  companyId: string;
+  branchId?: string | null;
+  customerId?: string | null;
+  customerName?: string | null;
+  orderDate: Date | string;
+  lines?: Array<{
+    productId: string;
+    description?: string | null;
+    quantity: unknown;
+    unitId: string;
+  }>;
+}
+
 /** The slice of a StockAdjustment the count chain needs to resume/replay. */
 interface StockCountChainAdjustment {
   id: string;
@@ -782,6 +884,9 @@ export class MobilePosLiteService {
     private readonly codes: EntityCodeGeneratorService,
     private readonly generatedDocuments: GeneratedDocumentsService,
     private readonly stockAdjustments: StockAdjustmentsService,
+    // LAST argument on purpose: every existing construction site (and the whole
+    // of mobile-pos-lite.service.spec.ts) keeps its argument order.
+    private readonly deliveryNotes: DeliveryNotesService,
   ) {}
 
   /**
@@ -790,6 +895,9 @@ export class MobilePosLiteService {
    * that does not need a rebuild to exercise.
    */
   private readonly autoPostStockCounts = AUTO_POST_MOBILE_POS_STOCK_COUNTS;
+
+  /** Same shape, same reason: the deployment switch with a test seam. */
+  private readonly recordCounterSaleDeliveryNotes = RECORD_COUNTER_SALE_DELIVERY_NOTES;
 
   /**
    * Only ever used where the audit trail itself is unwritable — the database
@@ -2087,7 +2195,489 @@ export class MobilePosLiteService {
       severity: AuditSeverity.MEDIUM,
       newValue: { terminalCode: terminal.terminalCode, paymentMethod },
     });
+
+    // The goods left the counter the moment this sale was paid, so the note
+    // that records it is written here — after every transaction the sale owns
+    // (create, confirm, the receivable, the cash receipt, the GL posting) has
+    // already committed, and outside all of them.
+    //
+    // THE MONEY AND THE STOCK ARE THE SALE; THE NOTE IS A DOCUMENT ABOUT IT.
+    // A note that cannot be written is logged and the sale still stands — never
+    // the reverse. This wrapper is TOTAL: recordCounterDelivery must not be able
+    // to throw out of createSale under any circumstances, because a throw here
+    // stops a real shop selling.
+    //
+    // Awaited, not detached: a detached promise loses the request's logging
+    // context, escapes the audit user, and risks an unhandled rejection taking
+    // the process down mid-trade. Three small round trips on a path that already
+    // makes several is the price of the failure being findable.
+    if (this.recordCounterSaleDeliveryNotes) {
+      try {
+        await this.recordCounterDelivery(sale as unknown as CounterSale, terminal, user);
+      } catch (error) {
+        await this.logCounterDeliveryNotRecorded(
+          sale as unknown as CounterSale,
+          terminal,
+          user,
+          error,
+        );
+      }
+    }
     return sale;
+  }
+
+  /**
+   * Record that a counter sale's goods were collected: one delivery note per
+   * sale, driven to DELIVERED.
+   *
+   * IDEMPOTENCY IS A DATABASE GUARANTEE HERE, NOT A READ. The POS sale chain is
+   * replay-safe by marker and offline queued sales replay by construction, so a
+   * second createSale for one physical sale is ordinary traffic. A read-then-
+   * write check cannot decide a create race — Postgres stamps createdAt at
+   * transaction START, so two concurrent requests can each read a set in which
+   * they are the winner; migration 20260813120000 exists because that exact bug
+   * received one lorry twice. The authority is
+   * `delivery_notes_companyId_counterSaleOrderId_key`. The findFirst below is a
+   * cheap fast path for the ordinary replay and NOTHING ELSE — the index is what
+   * decides.
+   *
+   * Keyed on the sales order rather than the sale's idempotencyKey because the
+   * invariant we want is "one auto-issued note per counter sale" and the order
+   * id states it directly: a replayed sale resolves through replayQuickSale() to
+   * the SAME SalesOrder row, so the second request arrives holding the same id
+   * and collides.
+   *
+   * NOTE ON STOCK, because it is the one thing that would make this dangerous:
+   * DeliveryNotesService has no inventory effects of any kind — no movement, no
+   * balance, no batch, no ledger. Stock is issued by the sale itself as
+   * SALE_ISSUE movements inside SalesOrdersService.confirm(). This chain
+   * therefore CANNOT double-decrement. A source-level guard in the spec fails the
+   * day that stops being true.
+   *
+   * NOTE ON PERMISSIONS: these are service-to-service calls into the service,
+   * never the controller. A rep holds `mobile_pos_lite.use` and nothing else;
+   * requiring `delivery_notes.create` would stop every terminal in the fleet
+   * from selling.
+   */
+  private async recordCounterDelivery(
+    sale: CounterSale,
+    // Only the code is read, and widening it to that is what lets the historical
+    // repair (§4) drive THIS chain instead of forking a second one: a backfilled
+    // order has a terminal code but no activated terminal session behind it.
+    terminal: Pick<Terminal, 'terminalCode'>,
+    user: AuthUser,
+    options: CounterDeliveryOptions = {},
+  ): Promise<CounterDeliveryOutcome> {
+    const lines = sale.lines ?? [];
+    if (lines.length === 0) {
+      // Nothing physically crossed the counter that we can describe. Do not
+      // write an empty note; leave the order as it is.
+      return 'skipped';
+    }
+
+    const existing = await this.prisma.deliveryNote.findFirst({
+      where: { companyId: sale.companyId, counterSaleOrderId: sale.id },
+      select: { id: true, status: true },
+    });
+    if (existing) {
+      const status = String(existing.status);
+      await this.driveCounterDeliveryChain({ id: existing.id, status }, sale, user);
+      // Already finished is not work done: the repair report must not claim to
+      // have healed a note it only looked at.
+      return status === 'DELIVERED' || status === 'CLOSED' ? 'skipped' : 'resumed';
+    }
+
+    let created: { id: string; status: string };
+    try {
+      const note = await this.deliveryNotes.create(
+        this.counterDeliveryDto(sale, terminal, user, lines, options),
+        user.id,
+        // Server-derived, never from a DTO: this is both the replay key and the
+        // discriminator that keeps the note off the office's worklists.
+        { counterSaleOrderId: sale.id },
+      );
+      created = { id: note.id, status: String(note.status) };
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      // Lost the create race. The row that OWNS the key is the one to drive —
+      // decided by the index, not by whichever read ran first.
+      const winner = await this.prisma.deliveryNote.findFirst({
+        where: { companyId: sale.companyId, counterSaleOrderId: sale.id },
+        select: { id: true, status: true },
+      });
+      if (!winner) throw error;
+      await this.driveCounterDeliveryChain(
+        { id: winner.id, status: String(winner.status) },
+        sale,
+        user,
+      );
+      return 'resumed';
+    }
+
+    await this.driveCounterDeliveryChain(created, sale, user);
+    return 'created';
+  }
+
+  /**
+   * The delivery-note payload for a counter sale. Everything here is a recorded
+   * fact; nothing is invented.
+   *
+   * Three rules this method exists to keep:
+   *
+   *  - `deliveredById` is `user.id`, the authenticated rep — NOT
+   *    `terminal.salespersonId`, which is an Employee id while
+   *    DeliveryNote.deliveredById is a foreign key to User. Passing the
+   *    salesperson id fails the FK on EVERY sale.
+   *  - `deliveryDate` is the sale's own orderDate, not `new Date()`. An
+   *    offline-queued sale replays later; pinning the note to the order's own
+   *    instant keeps "sold today" and "delivered today" agreeing, and keeps a
+   *    resumed chain from dating the note a day after the goods left.
+   *  - NO `salesOrderLineId` on the lines, ever. CreateDeliveryNoteLineDto
+   *    whitelists it and create() forwards it, but `delivery_note_lines` HAS NO
+   *    SUCH COLUMN — it is absent from the schema, from every migration, and
+   *    from the generated client. A defined value raises
+   *    PrismaClientValidationError at runtime. This path stays immune by never
+   *    emitting the key.
+   *
+   * driverName, vehicleNumber, deliveryAddress and receivedByPhone are all
+   * omitted. There was no driver, no vehicle, no destination and no phone.
+   * Filling any of them in would be forging delivery evidence — and it is also
+   * why the dashboard's "open notes missing driver/vehicle" worklist has to
+   * exclude counter notes.
+   */
+  private counterDeliveryDto(
+    sale: CounterSale,
+    terminal: Pick<Terminal, 'terminalCode'>,
+    user: AuthUser,
+    lines: NonNullable<CounterSale['lines']>,
+    options: CounterDeliveryOptions = {},
+  ) {
+    return {
+      companyId: sale.companyId,
+      branchId: sale.branchId ?? undefined,
+      salesOrderId: sale.id,
+      customerId: sale.customerId ?? undefined,
+      customerName: sale.customerName ?? undefined,
+      deliveryDate: new Date(sale.orderDate).toISOString(),
+      // The authenticated rep who handed the goods across the counter — a User
+      // id, which is what this FK points at. NOT terminal.salespersonId.
+      deliveredById: user.id,
+      // The historical repair says so on the document itself. A note issued
+      // months after the goods left must never read as one written at the time.
+      notes: options.backfilledOn
+        ? `Counter sale — goods collected at the counter (${terminal.terminalCode}). Recorded by backfill on ${options.backfilledOn}.`
+        : `Counter sale — goods collected at the counter (${terminal.terminalCode})`,
+      lines: lines.map((line) => ({
+        productId: line.productId,
+        description: line.description ?? undefined,
+        // The Prisma value is a Decimal; CreateDeliveryNoteLineDto wants a
+        // number, and create() writes it into BOTH orderedQuantity and
+        // deliveredQuantity — correct, because a counter sale is delivered in
+        // full by definition.
+        quantity: Number(line.quantity),
+        unitId: line.unitId,
+      })),
+    };
+  }
+
+  /**
+   * Drive a counter-sale note to DELIVERED: DRAFT -> DISPATCHED -> DELIVERED.
+   *
+   * Each transition is state-guarded inside DeliveryNotesService (dispatch
+   * refuses a non-DRAFT, deliver refuses a non-DISPATCHED), which is exactly
+   * what makes this safe to call on a fresh note, on a resume after a mid-chain
+   * crash, and on a full replay. Concurrent retries that lose a transition race
+   * re-read the row and continue instead of failing — the purchase chain's
+   * pattern, for the same reason.
+   *
+   * A note stranded at DRAFT or DISPATCHED by a crash is harmless: the
+   * counterSaleOrderId discriminator keeps it out of every delivery worklist
+   * whatever state it holds, and the next replay resumes it.
+   */
+  private async driveCounterDeliveryChain(
+    note: CounterDeliveryNote,
+    sale: CounterSale,
+    user: AuthUser,
+  ) {
+    let status = note.status;
+    if (status === 'DELIVERED' || status === 'CLOSED') return;
+    if (status === 'CANCELLED') {
+      // Somebody cancelled this note deliberately. Never resurrect it.
+      throw new ConflictException('The counter-sale delivery note for this sale was cancelled');
+    }
+
+    if (status === 'DRAFT') {
+      try {
+        await this.deliveryNotes.dispatch(note.id, user.id);
+        status = 'DISPATCHED';
+      } catch (error) {
+        const fresh = await this.prisma.deliveryNote.findFirst({
+          where: { id: note.id },
+          select: { status: true },
+        });
+        if (!fresh || String(fresh.status) === 'DRAFT') throw error;
+        status = String(fresh.status);
+      }
+    }
+
+    if (status === 'DISPATCHED' || status === 'IN_TRANSIT' || status === 'PARTIALLY_DELIVERED') {
+      try {
+        await this.deliveryNotes.deliver(
+          note.id,
+          // The one field where a walk-in matters. A counter sale has no
+          // signature and no named recipient, so we repeat the party the sale is
+          // already recorded against — for a walk-in that is the terminal's
+          // general customer, which is the shop's own record of "walk-in".
+          // NEVER invent a person: not the rep's name, not "Collected".
+          { receivedByName: sale.customerName ?? undefined },
+          user.id,
+        );
+        status = 'DELIVERED';
+      } catch (error) {
+        const fresh = await this.prisma.deliveryNote.findFirst({
+          where: { id: note.id },
+          select: { status: true },
+        });
+        if (!fresh || String(fresh.status) !== 'DELIVERED') throw error;
+        status = String(fresh.status);
+      }
+    }
+
+    if (status !== 'DELIVERED') {
+      throw new ConflictException('The counter-sale delivery note is no longer deliverable');
+    }
+  }
+
+  /**
+   * The counter-delivery twin of settleUnfinishedPurchase, and it obeys the same
+   * two rules: it destroys nothing, and it never lets its own failure replace
+   * the caller's. It only ever writes a line.
+   *
+   * Severity is MEDIUM, not HIGH: no money and no stock is at risk. One sales
+   * order is left reading "Delivered: PENDING" — the status quo this fix removes
+   * — and it is repaired by the next replay or the next backfill run.
+   */
+  private async logCounterDeliveryNotRecorded(
+    sale: CounterSale,
+    terminal: Terminal,
+    user: AuthUser,
+    error: unknown,
+  ) {
+    const reason = error instanceof Error ? error.message : String(error);
+    try {
+      await this.auditLogs.log({
+        action: 'MOBILE_POS_LITE_COUNTER_DELIVERY_NOT_RECORDED',
+        entityType: 'SalesOrder',
+        entityId: sale.id,
+        userId: user.id,
+        companyId: sale.companyId,
+        severity: AuditSeverity.MEDIUM,
+        newValue: {
+          terminalCode: terminal.terminalCode,
+          salesOrderNumber: sale.salesOrderNumber ?? null,
+          reason,
+        },
+      });
+    } catch (logError) {
+      // Last resort: the audit row lives in the database that just failed, which
+      // is exactly when this fallback matters. Nothing escapes — the rep's sale
+      // has already succeeded and must be returned.
+      this.logger.error(
+        `Mobile POS counter sale ${sale.salesOrderNumber ?? sale.id} could not record its delivery note and the audit log could not be written: ${
+          logError instanceof Error ? logError.message : String(logError)
+        }. Original failure: ${reason}`,
+      );
+    }
+  }
+
+  /**
+   * THE HISTORICAL HALF (spec-counter-delivery §4). Repair the counter sales
+   * that were rung before this module started recording collections, so they
+   * stop reading "Delivered: PENDING" forever.
+   *
+   * A historical SalesOrder never replays through createSale, so no other code
+   * path will ever issue notes for those orders. Without this method the fix
+   * lands for new sales only and `ordersAwaitingDelivery` on the office
+   * dashboard means two different things depending on the sale's date — the
+   * "worst of both worlds" §4.1 set out to avoid.
+   *
+   * WHY AN ENDPOINT AND NOT A MIGRATION. A SQL migration would have to hand-roll
+   * `DN-{YYYY}-#####` numbering outside EntityCodeGeneratorService (that is how
+   * you get duplicate delivery-note numbers and a broken
+   * `@@unique([companyId, deliveryNoteNumber])`), it would write business
+   * documents with no audit rows, and it would fire automatically at deploy —
+   * possibly mid-trade — instead of when a manager decides. This runs when a
+   * human with `mobile_pos_lite.manage` says so, outside trading hours.
+   *
+   * IT DRIVES THE SAME CHAIN THE LIVE SALE DRIVES. recordCounterDelivery, with a
+   * backfill stamp on the note text and the original rep as the acting user.
+   * A second implementation of "how a counter sale is recorded" would be a
+   * divergence between how history and how new sales are written, and the copy
+   * nobody remembers to update is always the one that rots. Numbering, audit
+   * rows, field discipline and — above all — the idempotency guarantee are
+   * therefore identical here by construction, not by review.
+   *
+   * SAFE TO INTERRUPT, SAFE TO RE-RUN. Every order is its own committed chain,
+   * so a run cut off by a timeout or a dropped connection loses only the orders
+   * it had not reached. Re-running repairs the remainder and nothing else,
+   * because "already done" is decided on three independent layers: the selection
+   * filter below excludes any order that already carries a counter note; the
+   * chain's own findFirst excludes it again; and
+   * `delivery_notes_companyId_counterSaleOrderId_key` rejects it AT THE DATABASE
+   * if both reads lose a race to a concurrent sale. Only the third is authority
+   * — a read cannot decide a create race — and the first two exist so the
+   * ordinary re-run is cheap and burns no DN- numbers.
+   *
+   * MOVES NO STOCK. DeliveryNotesService has no inventory effects of any kind;
+   * the SALE_ISSUE movements were written by SalesOrdersService.confirm() when
+   * the customer paid, months ago. That is what makes repairing history safe at
+   * all, and it is pinned by a source-level guard in the spec.
+   */
+  async counterDeliveryBackfill(
+    query: QueryMobilePosLiteCounterDeliveryBackfillDto,
+    user: AuthUser,
+  ): Promise<MobilePosLiteCounterDeliveryBackfillReport> {
+    // Same manager gate the route carries, asserted again in the service so the
+    // permission cannot be lost by a future refactor of the controller — and the
+    // same gate the operator script probes before it writes anything.
+    this.assertCanManage(user);
+    // This writes business documents, so EVERY company the run can reach must
+    // carry WRITE — not the READ that companyWhereFor alone settles for.
+    //
+    // Asserting only on the narrowing path made the default STRICTER to name
+    // than to omit: `?companyId=B` was refused for a group user holding only
+    // READ on B, while omitting the parameter wrote delivery notes into B and
+    // burned its DN- numbers, because companyWhereFor returns every accessible
+    // company at whatever level it was granted. Omitting it is what the
+    // operator script's own usage examples do, so the lenient path was also the
+    // usual one. Inert on a single-company install; wrong the day a group has a
+    // read-only member.
+    if (query.companyId) {
+      await this.companyScope.assertCanAccessCompany(user, query.companyId, AccessLevel.WRITE);
+    }
+    const scope = await this.companyScope.companyWhereFor(user, query.companyId);
+    for (const companyId of scopedCompanyIds(scope)) {
+      await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.WRITE);
+    }
+
+    const orders = await this.prisma.salesOrder.findMany({
+      where: {
+        // Never widen this. Every qualifier is load-bearing:
+        ...scope,
+        // POS origin, and the ONLY proof of it that a human cannot type. The
+        // terminal id is stamped server-side from an activated session; a notes
+        // marker, a CASH payment method or a "counter" sales type can all belong
+        // to a desktop order and prove nothing.
+        mobilePosTerminalId: { not: null },
+        // confirm() IS the counter event: it issues the SALE_ISSUE movements and
+        // takes the payment at the instant the customer pays and walks out, so a
+        // row in one of these states is a row whose stock has already left.
+        // DRAFT never charged anybody and never moved goods; CANCELLED/VOIDED
+        // means the counter reversed it. Neither gets a note, ever. CREDIT
+        // counter sales ARE here — the goods still walked out, only the money is
+        // owed, and those are the orders where fulfillment tracking matters most.
+        status: { in: [...CONFIRMED_SALES_STATUSES] },
+        // A soft-deleted or empty order describes no goods.
+        deletedAt: null,
+        lines: { some: {} },
+        // The no-existing-note guard, and the reason successive batches advance:
+        // as orders are repaired they leave the population, so batch 2 picks up
+        // where batch 1 stopped instead of re-reading the same 500 rows forever.
+        // Deliberately NOT filtered on the note's deletedAt — a soft-deleted
+        // counter note still owns its key and still means "already backfilled".
+        deliveryNotes: { none: { counterSaleOrderId: { not: null } } },
+      },
+      // Oldest first: the run repairs history in the order it happened, and an
+      // interrupted run leaves a contiguous unrepaired tail rather than holes.
+      orderBy: { orderDate: 'asc' },
+      take: COUNTER_DELIVERY_BACKFILL_BATCH,
+      select: {
+        id: true,
+        salesOrderNumber: true,
+        companyId: true,
+        branchId: true,
+        customerId: true,
+        customerName: true,
+        // The order's OWN instant. Dating a repaired note `new Date()` would
+        // back-date nothing and misdate everything.
+        orderDate: true,
+        // The rep who actually rang it — a recorded fact and a valid User FK.
+        createdById: true,
+        mobilePosTerminalId: true,
+        mobilePosTerminal: { select: { terminalCode: true } },
+        lines: { select: { productId: true, description: true, quantity: true, unitId: true } },
+      },
+    });
+
+    const backfilledOn = new Date().toISOString().slice(0, 10);
+    const failures: MobilePosLiteCounterDeliveryBackfillFailure[] = [];
+    let created = 0;
+    let resumed = 0;
+    let skipped = 0;
+
+    for (const order of orders) {
+      try {
+        const outcome = await this.recordCounterDelivery(
+          order,
+          // mobilePosTerminalId is non-null by the filter above, so the relation
+          // resolves; the fallback records the id rather than inventing a code.
+          {
+            terminalCode: order.mobilePosTerminal?.terminalCode ?? order.mobilePosTerminalId ?? '',
+          },
+          // The note is attributed to the rep who rang the sale, not to the
+          // manager running the repair: deliveredById and createdById are both a
+          // recorded fact about that day. WHO RAN THE REPAIR is recorded too —
+          // on the run's own audit row below, which is where it belongs.
+          { ...user, id: order.createdById },
+          { backfilledOn },
+        );
+        if (outcome === 'created') created += 1;
+        else if (outcome === 'resumed') resumed += 1;
+        else skipped += 1;
+      } catch (error) {
+        // One order's failure is counted and reported; it never aborts the run
+        // and never touches the orders after it. The failed order is left
+        // exactly as it was and the next run will try it again.
+        failures.push({
+          salesOrderId: order.id,
+          salesOrderNumber: order.salesOrderNumber ?? null,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const report: MobilePosLiteCounterDeliveryBackfillReport = {
+      scanned: orders.length,
+      created,
+      resumed,
+      skipped,
+      failed: failures.length,
+      failures,
+    };
+
+    try {
+      await this.auditLogs.log({
+        action: 'MOBILE_POS_LITE_COUNTER_DELIVERY_BACKFILL',
+        entityType: 'SalesOrder',
+        // The run is the subject, not any one order; the per-order evidence is
+        // in newValue and every note carries its own DELIVERY_NOTE_* rows.
+        entityId: 'counter-delivery-backfill',
+        userId: user.id,
+        companyId: query.companyId ?? user.companyId ?? undefined,
+        severity: AuditSeverity.MEDIUM,
+        newValue: { ...report, backfilledOn },
+      });
+    } catch (logError) {
+      // The notes are already written and correct. A failed audit row must not
+      // turn a successful repair into a 500 that sends the operator round again.
+      this.logger.error(
+        `Mobile POS counter-delivery backfill completed (created ${created}, resumed ${resumed}, failed ${failures.length}) but its audit row could not be written: ${
+          logError instanceof Error ? logError.message : String(logError)
+        }`,
+      );
+    }
+
+    return report;
   }
 
   /**

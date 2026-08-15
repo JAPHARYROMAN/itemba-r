@@ -16,7 +16,28 @@ export class CreateDeliveryNoteLineDto {
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
   @ApiProperty() @IsNumber() quantity!: number;
   @ApiProperty() @IsString() @IsNotEmpty() unitId!: string;
-  @ApiPropertyOptional() @IsOptional() @IsUUID() salesOrderLineId?: string;
+  /**
+   * ACCEPTED AND IGNORED. There is no `salesOrderLineId` column on
+   * `delivery_note_lines` — not in schema.prisma, not in any migration, not in
+   * the generated client — so nothing is stored and nothing reads it back.
+   *
+   * It stays on the DTO only because the global pipe runs
+   * `forbidNonWhitelisted`: the desktop delivery-note modal already sends this
+   * key on every line, and deleting the property here would turn those requests
+   * into a 400 instead of fixing them. Removing it for good is a coordinated
+   * frontend change, not a backend one.
+   *
+   * If a delivery line ever genuinely needs to point at the order line it
+   * fulfils, that wants a column, a migration and an actual reader — not a
+   * silent write. Until then this must never reach Prisma.
+   */
+  @ApiPropertyOptional({
+    deprecated: true,
+    description: 'Ignored. No such column exists on delivery_note_lines; nothing is stored.',
+  })
+  @IsOptional()
+  @IsUUID()
+  salesOrderLineId?: string;
 }
 
 export class CreateDeliveryNoteDto {

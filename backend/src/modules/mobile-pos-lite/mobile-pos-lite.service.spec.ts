@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { MobilePosLiteService } from './mobile-pos-lite.service';
 import { MobilePosLiteController } from './mobile-pos-lite.controller';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -123,6 +125,10 @@ function makeService() {
     },
     inventoryBalance: {
       findMany: jest.fn().mockResolvedValue([]),
+      // See productBatch below: present only so "stock moved exactly once" can
+      // be asserted as "these were never called from here".
+      update: jest.fn().mockResolvedValue({}),
+      upsert: jest.fn().mockResolvedValue({}),
     },
     purchaseOrder: {
       findFirst: jest.fn().mockResolvedValue(null),
@@ -150,6 +156,8 @@ function makeService() {
     // zero rows here proves nothing committed (default for a rolled-back post).
     inventoryMovement: {
       count: jest.fn().mockResolvedValue(0),
+      create: jest.fn().mockResolvedValue({}),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     documentNumberSequence: {
       findFirst: jest.fn().mockResolvedValue({ id: 'seq-1' }),
@@ -173,6 +181,19 @@ function makeService() {
     // letterhead prints in `Muhtasari / Summary` must not come from a page.
     salesOrderLine: {
       groupBy: jest.fn().mockResolvedValue([]),
+    },
+    // The counter-sale delivery note's fast path. Null means "no note for this
+    // sale yet" — the ordinary first sale. The company-scoped unique index on
+    // (companyId, counterSaleOrderId) is what actually decides a create race;
+    // this read only saves burning a DN- number on the ordinary replay.
+    deliveryNote: {
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
+    // Nothing in this module may write stock directly, and the counter-delivery
+    // chain least of all. Mocked so the double-stock assertion can prove they
+    // were never called — NOT because any path here is expected to reach them.
+    productBatch: {
+      update: jest.fn().mockResolvedValue({}),
     },
     mobilePosDayReport: {
       findFirst: jest.fn().mockResolvedValue(null),
@@ -200,7 +221,12 @@ function makeService() {
   };
   const auditLogs: any = { log: jest.fn().mockResolvedValue(undefined) };
   const salesOrders: any = {
-    mobilePosLiteQuickSale: jest.fn().mockResolvedValue({ id: 'so-1' }),
+    mobilePosLiteQuickSale: jest.fn().mockResolvedValue(completedSale()),
+  };
+  const deliveryNotes: any = {
+    create: jest.fn().mockResolvedValue({ id: 'dn-1', status: 'DRAFT' }),
+    dispatch: jest.fn().mockResolvedValue({ id: 'dn-1', status: 'DISPATCHED' }),
+    deliver: jest.fn().mockResolvedValue({ id: 'dn-1', status: 'DELIVERED' }),
   };
   const purchaseOrders: any = {
     create: jest.fn().mockResolvedValue(chainOrder({ status: 'DRAFT' })),
@@ -234,6 +260,7 @@ function makeService() {
     codes,
     generatedDocuments,
     stockAdjustments,
+    deliveryNotes,
   );
 
   return {
@@ -247,6 +274,38 @@ function makeService() {
     auditLogs,
     generatedDocuments,
     stockAdjustments,
+    deliveryNotes,
+  };
+}
+
+/**
+ * What salesOrders.mobilePosLiteQuickSale actually resolves with — the
+ * SalesOrdersService.findOne() record, carrying the company, branch, customer
+ * snapshot, order instant and lines. The counter-delivery note is built entirely
+ * from this plus the authenticated user and the resolved terminal, so the mock
+ * has to be the real shape or the test proves nothing.
+ */
+function completedSale(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'so-1',
+    salesOrderNumber: 'SO-2026-000001',
+    companyId: 'company-1',
+    branchId: 'branch-1',
+    customerId: 'customer-1',
+    customerName: 'Walk-in',
+    orderDate: new Date('2026-08-15T09:14:00.000Z'),
+    status: 'CONFIRMED',
+    lines: [
+      {
+        id: 'sol-1',
+        productId: 'product-1',
+        description: 'Maize Flour',
+        // A Prisma Decimal arrives as a string-ish value, never a JS number.
+        quantity: '2',
+        unitId: 'unit-1',
+      },
+    ],
+    ...overrides,
   };
 }
 
@@ -1099,6 +1158,857 @@ describe('MobilePosLiteService createSale customer attach', () => {
       ),
     ).rejects.toThrow('not available for this terminal branch');
     expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * THE COUNTER-SALE DELIVERY NOTE.
+ *
+ * A counter sale is delivered at the instant it is paid — the customer carries
+ * the goods out — but fulfillment in this system is tracked ONLY by DeliveryNote
+ * rows, so without this every POS sale read "Delivered: PENDING" for the life of
+ * the order. These tests pin the four things that make the fix safe on a shop
+ * that is trading right now:
+ *
+ *   1. exactly ONE note per sale, decided by the database and not by a read;
+ *   2. stock moves exactly ONCE — the note adds nothing;
+ *   3. a note that cannot be written NEVER takes the sale down;
+ *   4. nothing is invented on the document.
+ */
+describe('MobilePosLiteService createSale counter delivery note', () => {
+  function arrangeSale(harness: ReturnType<typeof makeService>) {
+    harness.prisma.mobilePosTerminal.findFirst.mockResolvedValue(cashTerminalRow());
+    harness.prisma.product.findMany.mockResolvedValue([saleProduct()]);
+    return harness;
+  }
+
+  /** The one audit row written when the note could not be recorded. */
+  function counterDeliveryFailureRows(auditLogs: any) {
+    return auditLogs.log.mock.calls
+      .map(([entry]: any[]) => entry)
+      .filter((entry: any) => entry?.action === 'MOBILE_POS_LITE_COUNTER_DELIVERY_NOT_RECORDED');
+  }
+
+  // CD-1
+  it('drives exactly one create -> dispatch -> deliver chain, keyed on the sales order', async () => {
+    const harness = arrangeSale(makeService());
+    const { service, deliveryNotes } = harness;
+
+    await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+
+    expect(deliveryNotes.create).toHaveBeenCalledTimes(1);
+    expect(deliveryNotes.dispatch).toHaveBeenCalledTimes(1);
+    expect(deliveryNotes.deliver).toHaveBeenCalledTimes(1);
+
+    // The order of the three calls is the lifecycle, not an accident: dispatch
+    // refuses a non-DRAFT note and deliver refuses a non-DISPATCHED one.
+    const createdAt = deliveryNotes.create.mock.invocationCallOrder[0];
+    const dispatchedAt = deliveryNotes.dispatch.mock.invocationCallOrder[0];
+    const deliveredAt = deliveryNotes.deliver.mock.invocationCallOrder[0];
+    expect(createdAt).toBeLessThan(dispatchedAt);
+    expect(dispatchedAt).toBeLessThan(deliveredAt);
+
+    const [dto, userId, context] = deliveryNotes.create.mock.calls[0];
+    expect(dto.salesOrderId).toBe('so-1');
+    expect(dto.companyId).toBe('company-1');
+    expect(dto.branchId).toBe('branch-1');
+    expect(userId).toBe('rep-1');
+    // The replay key AND the worklist discriminator, derived server-side from
+    // the sale and never from a request body.
+    expect(context).toEqual({ counterSaleOrderId: 'so-1' });
+  });
+
+  // CD-2
+  it('moves NO stock: the note writes no movement, balance or batch', async () => {
+    const harness = arrangeSale(makeService());
+    const { service, prisma } = harness;
+
+    await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+
+    // The sale issues its SALE_ISSUE movements inside SalesOrdersService.confirm(),
+    // which is mocked away here — so anything below firing would be the delivery
+    // note inventing a second decrement.
+    expect(prisma.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(prisma.inventoryMovement.createMany).not.toHaveBeenCalled();
+    expect(prisma.inventoryBalance.update).not.toHaveBeenCalled();
+    expect(prisma.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(prisma.productBatch.update).not.toHaveBeenCalled();
+  });
+
+  // CD-2, the durable half.
+  it('SOURCE GUARD: delivery-notes.service.ts has no stock effects at all', () => {
+    // This is the assertion that keeps the change safe over time. Creating a
+    // delivery note for a POS sale cannot double-decrement stock only because
+    // DeliveryNotesService is a pure document lifecycle — create (DRAFT) ->
+    // dispatch (DISPATCHED) -> deliver (DELIVERED) — with no inventory writes of
+    // any kind. The mock assertions above cannot notice the day somebody adds
+    // one; this can, and it fails loudly when they do.
+    const source = readFileSync(
+      join(__dirname, '..', 'delivery-notes', 'delivery-notes.service.ts'),
+      'utf8',
+    );
+
+    expect(source).not.toMatch(/inventoryMovement/);
+    expect(source).not.toMatch(/inventoryBalance/);
+    expect(source).not.toMatch(/productBatch/);
+    expect(source).not.toMatch(/stockLedger/);
+  });
+
+  // CD-3
+  it('REPLAY: a sale whose note already exists creates no second note', async () => {
+    const harness = arrangeSale(makeService());
+    const { service, prisma, deliveryNotes } = harness;
+    prisma.deliveryNote.findFirst.mockResolvedValue({ id: 'dn-1', status: 'DELIVERED' });
+
+    const result = await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+
+    expect(deliveryNotes.create).not.toHaveBeenCalled();
+    expect(deliveryNotes.dispatch).not.toHaveBeenCalled();
+    expect(deliveryNotes.deliver).not.toHaveBeenCalled();
+    // The replay still returns the original sale result to the rep.
+    expect(result).toEqual(expect.objectContaining({ id: 'so-1' }));
+  });
+
+  // CD-3, the offline case that makes replay ordinary traffic rather than an edge.
+  it('REPLAY: an offline-queued sale replayed on sync produces no second note', async () => {
+    const harness = arrangeSale(makeService());
+    const { service, prisma, salesOrders, deliveryNotes } = harness;
+
+    // First delivery of the queued sale: the note is written.
+    await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+    expect(deliveryNotes.create).toHaveBeenCalledTimes(1);
+
+    // The phone re-sends the same queued sale. replayQuickSale() resolves it to
+    // the SAME SalesOrder row, so the second request arrives holding the same
+    // sales-order id — which is exactly what the note's key is derived from.
+    prisma.deliveryNote.findFirst.mockResolvedValue({ id: 'dn-1', status: 'DELIVERED' });
+    const replayed = await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+
+    expect(deliveryNotes.create).toHaveBeenCalledTimes(1);
+    expect(replayed).toEqual(expect.objectContaining({ id: 'so-1' }));
+    expect(salesOrders.mobilePosLiteQuickSale).toHaveBeenCalledTimes(2);
+  });
+
+  // CD-4
+  it('CREATE RACE: a P2002 drives the row that owns the key, and never retries create', async () => {
+    const harness = arrangeSale(makeService());
+    const { service, prisma, deliveryNotes } = harness;
+    // Both racers read "no note yet" — a read cannot settle a create race, which
+    // is the whole reason the unique index exists.
+    prisma.deliveryNote.findFirst
+      .mockResolvedValueOnce(null)
+      // ...then the loser reads back the row that OWNS the key.
+      .mockResolvedValueOnce({ id: 'dn-winner', status: 'DRAFT' });
+    deliveryNotes.create.mockRejectedValueOnce(uniqueViolation());
+
+    const result = await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+
+    expect(deliveryNotes.create).toHaveBeenCalledTimes(1);
+    expect(deliveryNotes.dispatch).toHaveBeenCalledWith('dn-winner', 'rep-1');
+    expect(deliveryNotes.deliver).toHaveBeenCalledWith('dn-winner', expect.anything(), 'rep-1');
+    expect(result).toEqual(expect.objectContaining({ id: 'so-1' }));
+  });
+
+  // CD-5
+  it('FAILURE ISOLATION: a note that cannot be written never fails the sale', async () => {
+    const harness = arrangeSale(makeService());
+    const { service, deliveryNotes, auditLogs } = harness;
+    deliveryNotes.create.mockRejectedValue(new Error('delivery note exploded'));
+
+    // The money and the stock ARE the sale. The note is a document about it.
+    const result = await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+    expect(result).toEqual(expect.objectContaining({ id: 'so-1' }));
+
+    const failures = counterDeliveryFailureRows(auditLogs);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toEqual(
+      expect.objectContaining({
+        entityType: 'SalesOrder',
+        entityId: 'so-1',
+        companyId: 'company-1',
+        userId: 'rep-1',
+        newValue: expect.objectContaining({
+          salesOrderNumber: 'SO-2026-000001',
+          reason: 'delivery note exploded',
+        }),
+      }),
+    );
+
+    // The sale's own completion row is still written and unharmed.
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'MOBILE_POS_LITE_SALE_COMPLETED' }),
+    );
+  });
+
+  // CD-6
+  it('FAILURE ISOLATION: the sale still stands when the audit row ALSO fails', async () => {
+    const harness = arrangeSale(makeService());
+    const { service, deliveryNotes, auditLogs } = harness;
+    deliveryNotes.create.mockRejectedValue(new Error('delivery note exploded'));
+    // The audit row lives in the database that just failed, which is exactly
+    // when the fallback matters. Only the failure row rejects — the sale's own
+    // completion row is written before the chain runs and must be unaffected.
+    auditLogs.log.mockImplementation((entry: any) =>
+      entry?.action === 'MOBILE_POS_LITE_COUNTER_DELIVERY_NOT_RECORDED'
+        ? Promise.reject(new Error('audit down'))
+        : Promise.resolve(undefined),
+    );
+
+    await expect(
+      service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser()),
+    ).resolves.toEqual(expect.objectContaining({ id: 'so-1' }));
+  });
+
+  // CD-7
+  it('RESUME: a note stranded at DISPATCHED is driven to DELIVERED, not re-created', async () => {
+    const harness = arrangeSale(makeService());
+    const { service, prisma, deliveryNotes } = harness;
+    prisma.deliveryNote.findFirst.mockResolvedValue({ id: 'dn-7', status: 'DISPATCHED' });
+
+    await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+
+    expect(deliveryNotes.create).not.toHaveBeenCalled();
+    expect(deliveryNotes.dispatch).not.toHaveBeenCalled();
+    expect(deliveryNotes.deliver).toHaveBeenCalledTimes(1);
+    expect(deliveryNotes.deliver.mock.calls[0][0]).toBe('dn-7');
+  });
+
+  // CD-7, the other stranded state.
+  it('RESUME: a note stranded at DRAFT is dispatched and then delivered', async () => {
+    const harness = arrangeSale(makeService());
+    const { service, prisma, deliveryNotes } = harness;
+    prisma.deliveryNote.findFirst.mockResolvedValue({ id: 'dn-8', status: 'DRAFT' });
+
+    await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+
+    expect(deliveryNotes.create).not.toHaveBeenCalled();
+    expect(deliveryNotes.dispatch).toHaveBeenCalledWith('dn-8', 'rep-1');
+    expect(deliveryNotes.deliver).toHaveBeenCalledTimes(1);
+  });
+
+  // CD-8
+  it('a CANCELLED note is never resurrected, and the sale still returns', async () => {
+    const harness = arrangeSale(makeService());
+    const { service, prisma, deliveryNotes, auditLogs } = harness;
+    prisma.deliveryNote.findFirst.mockResolvedValue({ id: 'dn-x', status: 'CANCELLED' });
+
+    const result = await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+
+    expect(deliveryNotes.create).not.toHaveBeenCalled();
+    expect(deliveryNotes.dispatch).not.toHaveBeenCalled();
+    expect(deliveryNotes.deliver).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({ id: 'so-1' }));
+    // Somebody cancelled it deliberately; the office gets a line, not a new note.
+    expect(counterDeliveryFailureRows(auditLogs)).toHaveLength(1);
+  });
+
+  // CD-9 / CD-10
+  it('FIELD DISCIPLINE: nothing is invented on the document', async () => {
+    const harness = arrangeSale(makeService());
+    const { service, deliveryNotes } = harness;
+
+    await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+
+    const [dto] = deliveryNotes.create.mock.calls[0];
+
+    // The moment of the sale, not new Date(): an offline-queued sale replays
+    // later, and a note dated a day after the goods left is a lie.
+    expect(dto.deliveryDate).toBe(new Date('2026-08-15T09:14:00.000Z').toISOString());
+
+    // There was no driver, no vehicle and no destination. Writing any of them
+    // would be forging delivery evidence.
+    expect(dto.driverName).toBeUndefined();
+    expect(dto.vehicleNumber).toBeUndefined();
+    expect(dto.deliveryAddress).toBeUndefined();
+    expect(dto.receivedByPhone).toBeUndefined();
+
+    // CD-10: the authenticated rep, a User id. terminal.salespersonId is an
+    // EMPLOYEE id and DeliveryNote.deliveredById is an FK to User — passing it
+    // would fail the FK on every single sale in the fleet.
+    expect(dto.deliveredById).toBe('rep-1');
+    expect(dto.deliveredById).not.toBe('employee-1');
+
+    expect(dto.notes).toBe(`Counter sale — goods collected at the counter (${TERMINAL_CODE})`);
+
+    expect(dto.lines).toHaveLength(1);
+    for (const line of dto.lines) {
+      expect(line.productId).toBe('product-1');
+      expect(line.unitId).toBe('unit-1');
+      // The Prisma value is a Decimal; the DTO wants a JS number.
+      expect(typeof line.quantity).toBe('number');
+      expect(line.quantity).toBe(2);
+      // delivery_note_lines HAS NO salesOrderLineId COLUMN. A defined value
+      // raises PrismaClientValidationError at runtime; only an absent key is
+      // safe. This path stays immune by never emitting it.
+      expect(line).not.toHaveProperty('salesOrderLineId');
+    }
+  });
+
+  // CD-9, multi-line.
+  it('a multi-line sale carries every line onto the note, in order', async () => {
+    const harness = arrangeSale(makeService());
+    const { service, salesOrders, deliveryNotes } = harness;
+    salesOrders.mobilePosLiteQuickSale.mockResolvedValue(
+      completedSale({
+        lines: [
+          { productId: 'product-1', description: 'Maize Flour', quantity: '2', unitId: 'unit-1' },
+          { productId: 'product-2', description: 'Sugar', quantity: '5.5', unitId: 'unit-2' },
+          { productId: 'product-3', description: null, quantity: '1', unitId: 'unit-1' },
+        ],
+      }),
+    );
+
+    await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+
+    const [dto] = deliveryNotes.create.mock.calls[0];
+    expect(dto.lines).toEqual([
+      { productId: 'product-1', description: 'Maize Flour', quantity: 2, unitId: 'unit-1' },
+      { productId: 'product-2', description: 'Sugar', quantity: 5.5, unitId: 'unit-2' },
+      { productId: 'product-3', description: undefined, quantity: 1, unitId: 'unit-1' },
+    ]);
+    expect(deliveryNotes.deliver).toHaveBeenCalledTimes(1);
+  });
+
+  // CD-11
+  it('a CREDIT counter sale is delivered too — the goods still walked out', async () => {
+    const harness = makeService();
+    const { service, prisma, deliveryNotes } = harness;
+    prisma.mobilePosTerminal.findFirst.mockResolvedValue(cashTerminalRow({ creditEnabled: true }));
+    prisma.product.findMany.mockResolvedValue([saleProduct()]);
+    prisma.customer.findFirst.mockResolvedValue({ id: 'customer-9' });
+
+    await service.createSale(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      saleDto({ paymentMethod: 'CREDIT', customerId: 'customer-9' }),
+      repUser(),
+    );
+
+    // Only the money is owed. Excluding credit would leave exactly the orders
+    // where fulfillment tracking matters most reading "never delivered".
+    expect(deliveryNotes.create).toHaveBeenCalledTimes(1);
+    expect(deliveryNotes.deliver).toHaveBeenCalledTimes(1);
+  });
+
+  // CD-12
+  it('receivedByName repeats the party the sale is recorded against, and invents no person', async () => {
+    const harness = arrangeSale(makeService());
+    const { service, deliveryNotes } = harness;
+
+    await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+
+    const [noteId, deliverDto, userId] = deliveryNotes.deliver.mock.calls[0];
+    expect(noteId).toBe('dn-1');
+    expect(userId).toBe('rep-1');
+    // For a walk-in this is the terminal's general customer — the shop's own
+    // record of "walk-in". Never the rep's name, never "Collected".
+    expect(deliverDto).toEqual({ receivedByName: 'Walk-in' });
+    expect(deliverDto).not.toHaveProperty('receivedByPhone');
+  });
+
+  it('a sale with no lines writes no note at all', async () => {
+    const harness = arrangeSale(makeService());
+    const { service, salesOrders, deliveryNotes } = harness;
+    salesOrders.mobilePosLiteQuickSale.mockResolvedValue(completedSale({ lines: [] }));
+
+    const result = await service.createSale(TERMINAL_CODE, DEVICE_SECRET, saleDto(), repUser());
+
+    expect(deliveryNotes.create).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({ id: 'so-1' }));
+  });
+});
+
+// ─── The historical half: POST /mobile-pos-lite/counter-delivery-backfill ─────
+
+/** The office manager who runs the repair. Never a rep, never a terminal. */
+function officeManager(): AuthUser {
+  return { ...repUser(), id: 'manager-1', permissions: ['mobile_pos_lite.manage'] };
+}
+
+/**
+ * A historical POS sales order as the backfill's own SELECT returns it, plus two
+ * fixture-only fields the real query never selects:
+ *
+ *  - `status` / `deletedAt`, so the where-clause evaluator below can decide
+ *    whether the row would have been selected at all;
+ *  - `counterNotes`, standing in for "a delivery note already owns this order's
+ *    (companyId, counterSaleOrderId) key" — the NOT EXISTS guard, and what the
+ *    unique index enforces in the database.
+ *
+ * They are stripped before the row is handed to the service, so a test can never
+ * pass because the service read a field the real query does not return.
+ */
+function historicalOrder(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'so-312',
+    salesOrderNumber: 'SO-2026-000312',
+    companyId: 'company-1',
+    branchId: 'branch-1',
+    customerId: 'customer-1',
+    customerName: 'Walk-in',
+    orderDate: new Date('2026-08-14T08:05:00.000Z'),
+    createdById: 'rep-7',
+    mobilePosTerminalId: 'terminal-1',
+    mobilePosTerminal: { terminalCode: TERMINAL_CODE },
+    lines: [
+      { productId: 'product-1', description: 'Maize Flour', quantity: '3', unitId: 'unit-1' },
+    ],
+    status: 'CONFIRMED',
+    deletedAt: null,
+    counterNotes: 0,
+    ...overrides,
+  };
+}
+
+/**
+ * Evaluate the service's OWN where clause against a fixture row.
+ *
+ * This is the point of the fixture tests: the qualifiers are not asserted as a
+ * shape somebody could keep passing while it means nothing — they are executed.
+ * Drop `status` from the query and the DRAFT order flows through and writes a
+ * note; drop the NOT EXISTS guard and an order that already has one is repaired
+ * twice. Both fail here.
+ */
+function matchesBackfillWhere(where: any, order: any) {
+  if (where.companyId && where.companyId !== order.companyId) return false;
+  if (where.mobilePosTerminalId?.not === null && order.mobilePosTerminalId === null) return false;
+  if (where.status?.in && !where.status.in.includes(order.status)) return false;
+  if (where.deletedAt === null && order.deletedAt !== null) return false;
+  if (where.lines?.some && (order.lines ?? []).length === 0) return false;
+  if (
+    where.deliveryNotes?.none?.counterSaleOrderId?.not === null &&
+    (order.counterNotes ?? 0) > 0
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** Everything the real SELECT returns, and nothing it does not. */
+function asSelectedRow(order: any) {
+  const { status, deletedAt, counterNotes, ...selected } = order;
+  return selected;
+}
+
+/**
+ * Wire the prisma and delivery-note mocks to behave like the database this runs
+ * against: the population is filtered, ordered and capped by the service's own
+ * arguments, and — the part that makes re-runs mean anything — writing a note
+ * takes that order OUT of the population, exactly as the unique index does.
+ */
+function arrangeBackfill(harness: ReturnType<typeof makeService>, fixture: any[]) {
+  harness.prisma.salesOrder.findMany.mockImplementation(({ where, orderBy, take }: any) => {
+    const rows = fixture.filter((order) => matchesBackfillWhere(where, order));
+    if (orderBy?.orderDate === 'asc') {
+      rows.sort((a, b) => new Date(a.orderDate).getTime() - new Date(b.orderDate).getTime());
+    }
+    return Promise.resolve(rows.slice(0, take).map(asSelectedRow));
+  });
+  harness.deliveryNotes.create.mockImplementation((dto: any) => {
+    const row = fixture.find((order) => order.id === dto.salesOrderId);
+    if (row) row.counterNotes += 1;
+    return Promise.resolve({ id: `dn-${dto.salesOrderId}`, status: 'DRAFT' });
+  });
+  return harness;
+}
+
+/** The sales-order ids the run actually wrote a note for, in order. */
+function backfilledOrderIds(deliveryNotes: any) {
+  return deliveryNotes.create.mock.calls.map(([dto]: any[]) => dto.salesOrderId);
+}
+
+describe('MobilePosLiteService counterDeliveryBackfill', () => {
+  // CD-18
+  it('selects exactly the population spec §4.2 claims, oldest first, capped at 500', async () => {
+    const { service, prisma, companyScope } = makeService();
+
+    await service.counterDeliveryBackfill({}, officeManager());
+
+    // The manager gate, asserted in the service and not only on the route.
+    expect(companyScope.assertGroupScoped).toHaveBeenCalled();
+    // Company scope comes from the AuthUser, never from an unchecked parameter.
+    expect(companyScope.companyWhereFor).toHaveBeenCalledWith(officeManager(), undefined);
+
+    const [args] = prisma.salesOrder.findMany.mock.calls[0];
+    expect(args.where).toEqual({
+      companyId: 'company-1',
+      // The only server-derived proof of POS origin.
+      mobilePosTerminalId: { not: null },
+      // confirm() IS the counter event; DRAFT never charged anybody and
+      // CANCELLED/VOIDED means the counter reversed it.
+      status: { in: ['CONFIRMED', 'PARTIALLY_PAID', 'PAID'] },
+      deletedAt: null,
+      lines: { some: {} },
+      // The no-existing-note guard.
+      deliveryNotes: { none: { counterSaleOrderId: { not: null } } },
+    });
+    // Oldest first, so an interrupted run leaves a contiguous tail, not holes.
+    expect(args.orderBy).toEqual({ orderDate: 'asc' });
+    // A large history is repaired across several runs, never in one request.
+    expect(args.take).toBe(500);
+  });
+
+  // CD-18, executed rather than asserted as a shape.
+  it('never touches a desktop, DRAFT, CANCELLED, VOIDED, deleted, empty or already-noted order', async () => {
+    const harness = arrangeBackfill(makeService(), [
+      historicalOrder({ id: 'so-good-1', orderDate: new Date('2026-08-14T08:05:00.000Z') }),
+      historicalOrder({
+        id: 'so-good-2',
+        status: 'PAID',
+        orderDate: new Date('2026-08-15T09:14:00.000Z'),
+      }),
+      historicalOrder({
+        id: 'so-good-3',
+        status: 'PARTIALLY_PAID',
+        orderDate: new Date('2026-08-15T10:00:00.000Z'),
+      }),
+      // Rung on the desktop. No terminal stamp, so no proof the goods ever
+      // crossed a counter — and a cash desktop sale looks identical otherwise.
+      historicalOrder({ id: 'so-desktop', mobilePosTerminalId: null, mobilePosTerminal: null }),
+      // Never charged anybody; the goods never moved.
+      historicalOrder({ id: 'so-draft', status: 'DRAFT' }),
+      // The counter reversed these two.
+      historicalOrder({ id: 'so-cancelled', status: 'CANCELLED' }),
+      historicalOrder({ id: 'so-voided', status: 'VOIDED' }),
+      historicalOrder({ id: 'so-deleted', deletedAt: new Date('2026-08-14T12:00:00.000Z') }),
+      historicalOrder({ id: 'so-empty', lines: [] }),
+      // Already repaired: its key is owned, and a second note would be a
+      // duplicate fulfillment record on a one-item sale.
+      historicalOrder({ id: 'so-noted', counterNotes: 1 }),
+    ]);
+    const { service, deliveryNotes } = harness;
+
+    const report = await service.counterDeliveryBackfill({}, officeManager());
+
+    expect(backfilledOrderIds(deliveryNotes)).toEqual(['so-good-1', 'so-good-2', 'so-good-3']);
+    expect(report).toEqual({
+      scanned: 3,
+      created: 3,
+      resumed: 0,
+      skipped: 0,
+      failed: 0,
+      failures: [],
+    });
+  });
+
+  // CD-18, the chain each qualifying order gets.
+  it('drives the same create -> dispatch -> deliver chain the live sale drives', async () => {
+    const harness = arrangeBackfill(makeService(), [historicalOrder()]);
+    const { service, deliveryNotes } = harness;
+
+    await service.counterDeliveryBackfill({}, officeManager());
+
+    expect(deliveryNotes.create).toHaveBeenCalledTimes(1);
+    expect(deliveryNotes.dispatch).toHaveBeenCalledTimes(1);
+    expect(deliveryNotes.deliver).toHaveBeenCalledTimes(1);
+    expect(deliveryNotes.create.mock.invocationCallOrder[0]).toBeLessThan(
+      deliveryNotes.dispatch.mock.invocationCallOrder[0],
+    );
+    expect(deliveryNotes.dispatch.mock.invocationCallOrder[0]).toBeLessThan(
+      deliveryNotes.deliver.mock.invocationCallOrder[0],
+    );
+
+    // The same server-derived key the live path uses — which is why one shared
+    // unique index covers history and new sales alike.
+    const [, , context] = deliveryNotes.create.mock.calls[0];
+    expect(context).toEqual({ counterSaleOrderId: 'so-312' });
+    // receivedByName repeats the party the sale is recorded against; no person
+    // is invented for a collection nobody signed for.
+    expect(deliveryNotes.deliver.mock.calls[0][1]).toEqual({ receivedByName: 'Walk-in' });
+  });
+
+  // CD-19
+  it('RE-RUNNABLE: a second run over a repaired population writes nothing', async () => {
+    const fixture = [historicalOrder({ id: 'so-a' }), historicalOrder({ id: 'so-b' })];
+    const harness = arrangeBackfill(makeService(), fixture);
+    const { service, deliveryNotes } = harness;
+
+    const first = await service.counterDeliveryBackfill({}, officeManager());
+    expect(first).toMatchObject({ scanned: 2, created: 2, failed: 0 });
+    expect(deliveryNotes.create).toHaveBeenCalledTimes(2);
+
+    const second = await service.counterDeliveryBackfill({}, officeManager());
+
+    expect(second).toEqual({
+      scanned: 0,
+      created: 0,
+      resumed: 0,
+      skipped: 0,
+      failed: 0,
+      failures: [],
+    });
+    expect(deliveryNotes.create).toHaveBeenCalledTimes(2);
+  });
+
+  // CD-19, the layer that decides it when a read cannot.
+  it('RE-RUNNABLE: a create race is settled by the unique index, not by the scan', async () => {
+    const harness = arrangeBackfill(makeService(), [historicalOrder()]);
+    const { service, prisma, deliveryNotes } = harness;
+    // The order was selected as outstanding, then a concurrent replay of the
+    // same sale claimed the key before this run's INSERT landed. Postgres stamps
+    // createdAt at transaction START, so no read could have decided this.
+    deliveryNotes.create.mockRejectedValueOnce(uniqueViolation());
+    prisma.deliveryNote.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'dn-winner', status: 'DRAFT' });
+
+    const report = await service.counterDeliveryBackfill({}, officeManager());
+
+    // Not a failure and not a duplicate: the row that OWNS the key is driven.
+    expect(report).toMatchObject({ scanned: 1, created: 0, resumed: 1, failed: 0 });
+    expect(deliveryNotes.create).toHaveBeenCalledTimes(1);
+    expect(deliveryNotes.dispatch).toHaveBeenCalledWith('dn-winner', 'rep-7');
+  });
+
+  // CD-19, a note left stranded by a §3 failure is healed, never duplicated.
+  it('resumes a stranded note instead of creating a second one', async () => {
+    const harness = arrangeBackfill(makeService(), [historicalOrder()]);
+    const { service, prisma, deliveryNotes } = harness;
+    prisma.deliveryNote.findFirst.mockResolvedValue({ id: 'dn-stranded', status: 'DISPATCHED' });
+
+    const report = await service.counterDeliveryBackfill({}, officeManager());
+
+    expect(deliveryNotes.create).not.toHaveBeenCalled();
+    expect(deliveryNotes.deliver).toHaveBeenCalledTimes(1);
+    expect(deliveryNotes.deliver.mock.calls[0][0]).toBe('dn-stranded');
+    expect(report).toMatchObject({ created: 0, resumed: 1, skipped: 0, failed: 0 });
+  });
+
+  it('counts an already-DELIVERED note as skipped, not as work done', async () => {
+    const harness = arrangeBackfill(makeService(), [historicalOrder()]);
+    const { service, prisma, deliveryNotes } = harness;
+    prisma.deliveryNote.findFirst.mockResolvedValue({ id: 'dn-done', status: 'DELIVERED' });
+
+    const report = await service.counterDeliveryBackfill({}, officeManager());
+
+    expect(deliveryNotes.create).not.toHaveBeenCalled();
+    expect(deliveryNotes.dispatch).not.toHaveBeenCalled();
+    expect(deliveryNotes.deliver).not.toHaveBeenCalled();
+    expect(report).toMatchObject({ created: 0, resumed: 0, skipped: 1, failed: 0 });
+  });
+
+  // CD-20
+  it('NO INVENTED EVIDENCE: every field on a backfilled note is a recorded fact', async () => {
+    const harness = arrangeBackfill(makeService(), [historicalOrder()]);
+    const { service, deliveryNotes } = harness;
+
+    await service.counterDeliveryBackfill({}, officeManager());
+
+    const [dto, userId] = deliveryNotes.create.mock.calls[0];
+
+    // THE ORDER'S OWN DATE. `new Date()` here would back-date nothing and
+    // misdate everything — the whole point of a backfill is the old date.
+    expect(dto.deliveryDate).toBe(new Date('2026-08-14T08:05:00.000Z').toISOString());
+
+    // There was no driver, no vehicle, no destination and no phone. Writing one
+    // would be forging delivery evidence months after the fact.
+    expect(dto.driverName).toBeUndefined();
+    expect(dto.vehicleNumber).toBeUndefined();
+    expect(dto.deliveryAddress).toBeUndefined();
+    expect(dto.receivedByPhone).toBeUndefined();
+
+    // The rep who actually rang it — a recorded fact and a valid User FK — not
+    // the manager who happens to be running the repair today.
+    expect(dto.deliveredById).toBe('rep-7');
+    expect(dto.deliveredById).not.toBe('manager-1');
+    expect(userId).toBe('rep-7');
+
+    // The document says it was repaired, so nobody ever mistakes it for a note
+    // a person wrote at the counter that day.
+    expect(dto.notes).toBe(
+      `Counter sale — goods collected at the counter (${TERMINAL_CODE}). Recorded by backfill on ${new Date()
+        .toISOString()
+        .slice(0, 10)}.`,
+    );
+
+    expect(dto.customerName).toBe('Walk-in');
+    expect(dto.lines).toEqual([
+      { productId: 'product-1', description: 'Maize Flour', quantity: 3, unitId: 'unit-1' },
+    ]);
+    for (const line of dto.lines) {
+      expect(typeof line.quantity).toBe('number');
+      // delivery_note_lines HAS NO salesOrderLineId COLUMN — a defined value
+      // raises PrismaClientValidationError. The backfill inherits this path's
+      // immunity by driving the same builder.
+      expect(line).not.toHaveProperty('salesOrderLineId');
+    }
+  });
+
+  // CD-20, the run itself is attributed even though the documents are not.
+  it('records who ran the repair on the run audit row', async () => {
+    const harness = arrangeBackfill(makeService(), [historicalOrder()]);
+    const { service, auditLogs } = harness;
+
+    await service.counterDeliveryBackfill({}, officeManager());
+
+    const [entry] = auditLogs.log.mock.calls
+      .map(([row]: any[]) => row)
+      .filter((row: any) => row?.action === 'MOBILE_POS_LITE_COUNTER_DELIVERY_BACKFILL');
+    expect(entry).toEqual(
+      expect.objectContaining({
+        entityType: 'SalesOrder',
+        // The manager, not the rep the documents are attributed to.
+        userId: 'manager-1',
+        newValue: expect.objectContaining({ scanned: 1, created: 1, failed: 0 }),
+      }),
+    );
+  });
+
+  it('returns the report even when its own audit row cannot be written', async () => {
+    const harness = arrangeBackfill(makeService(), [historicalOrder()]);
+    const { service, auditLogs, deliveryNotes } = harness;
+    auditLogs.log.mockRejectedValue(new Error('audit down'));
+
+    // The notes are already written and correct; a failed log line must not turn
+    // a successful repair into a 500 that sends the operator round again.
+    const report = await service.counterDeliveryBackfill({}, officeManager());
+
+    expect(report).toMatchObject({ scanned: 1, created: 1 });
+    expect(deliveryNotes.deliver).toHaveBeenCalledTimes(1);
+  });
+
+  // CD-21
+  it('counts one order’s failure and still processes the rest of the batch', async () => {
+    const harness = arrangeBackfill(makeService(), [
+      historicalOrder({ id: 'so-a', orderDate: new Date('2026-08-14T08:00:00.000Z') }),
+      historicalOrder({
+        id: 'so-b',
+        salesOrderNumber: 'SO-2026-000313',
+        orderDate: new Date('2026-08-14T09:00:00.000Z'),
+      }),
+      historicalOrder({ id: 'so-c', orderDate: new Date('2026-08-14T10:00:00.000Z') }),
+    ]);
+    const { service, deliveryNotes } = harness;
+    const good = deliveryNotes.create.getMockImplementation()!;
+    deliveryNotes.create.mockImplementation((dto: any, ...rest: any[]) =>
+      dto.salesOrderId === 'so-b'
+        ? Promise.reject(new Error('delivery note exploded'))
+        : good(dto, ...rest),
+    );
+
+    const report = await service.counterDeliveryBackfill({}, officeManager());
+
+    // The run does not abort, and the failed order is left exactly as it was —
+    // the next run will pick it up again.
+    expect(report).toMatchObject({ scanned: 3, created: 2, failed: 1 });
+    expect(report.failures).toEqual([
+      {
+        salesOrderId: 'so-b',
+        salesOrderNumber: 'SO-2026-000313',
+        reason: 'delivery note exploded',
+      },
+    ]);
+    expect(backfilledOrderIds(deliveryNotes)).toEqual(['so-a', 'so-b', 'so-c']);
+    expect(deliveryNotes.deliver).toHaveBeenCalledTimes(2);
+  });
+
+  it('BATCH BOUNDARY: one request repairs at most 500 orders and the next takes the rest', async () => {
+    const fixture = Array.from({ length: 503 }, (_, index) =>
+      historicalOrder({
+        id: `so-${String(index).padStart(4, '0')}`,
+        salesOrderNumber: `SO-2026-${String(index).padStart(6, '0')}`,
+        // Oldest first, so the batch boundary is deterministic.
+        orderDate: new Date(Date.UTC(2026, 0, 1) + index * 60_000),
+      }),
+    );
+    const harness = arrangeBackfill(makeService(), fixture);
+    const { service, deliveryNotes } = harness;
+
+    const first = await service.counterDeliveryBackfill({}, officeManager());
+    expect(first).toMatchObject({ scanned: 500, created: 500, failed: 0 });
+    expect(backfilledOrderIds(deliveryNotes)[0]).toBe('so-0000');
+    expect(backfilledOrderIds(deliveryNotes)[499]).toBe('so-0499');
+
+    // The script keeps posting while a run makes progress; the second request
+    // sees a population 500 rows smaller and finishes it.
+    const second = await service.counterDeliveryBackfill({}, officeManager());
+    expect(second).toMatchObject({ scanned: 3, created: 3, failed: 0 });
+    expect(backfilledOrderIds(deliveryNotes).slice(500)).toEqual(['so-0500', 'so-0501', 'so-0502']);
+
+    const third = await service.counterDeliveryBackfill({}, officeManager());
+    expect(third).toMatchObject({ scanned: 0, created: 0 });
+  });
+
+  it('INTERRUPTED RUN: a re-run repairs the remainder and nothing else', async () => {
+    const fixture = [
+      historicalOrder({ id: 'so-a', orderDate: new Date('2026-08-14T08:00:00.000Z') }),
+      historicalOrder({ id: 'so-b', orderDate: new Date('2026-08-14T09:00:00.000Z') }),
+      historicalOrder({ id: 'so-c', orderDate: new Date('2026-08-14T10:00:00.000Z') }),
+    ];
+    const harness = arrangeBackfill(makeService(), fixture);
+    const { service, deliveryNotes } = harness;
+
+    // The connection dropped after so-b committed. Every order is its own
+    // committed chain, so the two that landed stand and the third did not start.
+    const good = deliveryNotes.create.getMockImplementation()!;
+    deliveryNotes.create.mockImplementation((dto: any, ...rest: any[]) =>
+      dto.salesOrderId === 'so-c'
+        ? Promise.reject(new Error('socket hang up'))
+        : good(dto, ...rest),
+    );
+    const interrupted = await service.counterDeliveryBackfill({}, officeManager());
+    expect(interrupted).toMatchObject({ created: 2, failed: 1 });
+
+    deliveryNotes.create.mockImplementation(good);
+    const resumedRun = await service.counterDeliveryBackfill({}, officeManager());
+
+    // Only what was still outstanding — the two that landed are not touched.
+    expect(resumedRun).toMatchObject({ scanned: 1, created: 1, failed: 0 });
+    expect(backfilledOrderIds(deliveryNotes).slice(3)).toEqual(['so-c']);
+  });
+
+  it('MOVES NO STOCK: repairing history writes no movement, balance or batch', async () => {
+    const harness = arrangeBackfill(makeService(), [
+      historicalOrder({ id: 'so-a' }),
+      historicalOrder({ id: 'so-b', orderDate: new Date('2026-08-14T09:00:00.000Z') }),
+    ]);
+    const { service, prisma } = harness;
+
+    await service.counterDeliveryBackfill({}, officeManager());
+
+    // The SALE_ISSUE movements were written by SalesOrdersService.confirm() when
+    // the customer paid. Anything below firing would be a SECOND decrement, on
+    // stock counted and sold months ago — the one failure that would be
+    // unrecoverable without a manual count.
+    expect(prisma.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(prisma.inventoryMovement.createMany).not.toHaveBeenCalled();
+    expect(prisma.inventoryBalance.update).not.toHaveBeenCalled();
+    expect(prisma.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(prisma.productBatch.update).not.toHaveBeenCalled();
+    // And nothing about the sales orders themselves is rewritten.
+    expect(prisma.salesOrder.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('a companyId narrows the run, and must carry WRITE on that company', async () => {
+    const harness = arrangeBackfill(makeService(), [historicalOrder()]);
+    const { service, prisma, companyScope } = harness;
+    companyScope.companyWhereFor.mockResolvedValue({ companyId: 'company-2' });
+
+    await service.counterDeliveryBackfill({ companyId: 'company-2' }, officeManager());
+
+    // Repairing history writes business documents, so READ is not enough.
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+      officeManager(),
+      'company-2',
+      'WRITE',
+    );
+    expect(companyScope.companyWhereFor).toHaveBeenCalledWith(officeManager(), 'company-2');
+    expect(prisma.salesOrder.findMany.mock.calls[0][0].where).toEqual(
+      expect.objectContaining({ companyId: 'company-2' }),
+    );
+  });
+
+  it('refuses a caller the company scope rejects, before anything is written', async () => {
+    const harness = arrangeBackfill(makeService(), [historicalOrder()]);
+    const { service, prisma, companyScope, deliveryNotes } = harness;
+    companyScope.assertCanAccessCompany.mockRejectedValue(new Error('no access to this company'));
+
+    await expect(
+      service.counterDeliveryBackfill({ companyId: 'company-9' }, officeManager()),
+    ).rejects.toThrow('no access to this company');
+
+    expect(prisma.salesOrder.findMany).not.toHaveBeenCalled();
+    expect(deliveryNotes.create).not.toHaveBeenCalled();
   });
 });
 
@@ -4240,5 +5150,31 @@ describe('MobilePosLiteController history and day-report routes', () => {
     expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'private, no-store');
     expect(res.setHeader).toHaveBeenCalledWith('X-Content-Type-Options', 'nosniff');
     expect(res.send).toHaveBeenCalledWith(expect.any(Buffer));
+  });
+
+  // CD-22
+  it('gates POST /counter-delivery-backfill on mobile_pos_lite.manage, never on .use', () => {
+    const gate = Reflect.getMetadata(
+      PERMISSIONS_KEY,
+      MobilePosLiteController.prototype.counterDeliveryBackfill,
+    );
+
+    // This writes business documents across a company's whole sales history.
+    // A rep's token holds .use and nothing else, and must never reach it.
+    expect(gate).toEqual(['mobile_pos_lite.manage']);
+    expect(gate).not.toContain('mobile_pos_lite.use');
+  });
+
+  // CD-22, the route is a desktop call and carries nothing a client chose.
+  it('passes only the query and the caller to the backfill — no terminal headers, no body', () => {
+    const service: any = { counterDeliveryBackfill: jest.fn().mockResolvedValue({}) };
+    const controller = new MobilePosLiteController(service);
+    const user = repUser();
+
+    controller.counterDeliveryBackfill({ companyId: 'company-1' }, user);
+
+    expect(service.counterDeliveryBackfill).toHaveBeenCalledWith({ companyId: 'company-1' }, user);
+    // Two arguments, so nothing a request body could carry can reach the run.
+    expect(service.counterDeliveryBackfill.mock.calls[0]).toHaveLength(2);
   });
 });

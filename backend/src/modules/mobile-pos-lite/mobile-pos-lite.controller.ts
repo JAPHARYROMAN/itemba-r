@@ -16,6 +16,7 @@ import { CreateMobilePosLiteSaleDto } from './dto/mobile-pos-lite-sale.dto';
 import { CreateMobilePosLitePurchaseDto } from './dto/mobile-pos-lite-purchase.dto';
 import { CreateMobilePosLiteStockCountDto } from './dto/mobile-pos-lite-stock-count.dto';
 import { QueryMobilePosLiteStockDto } from './dto/mobile-pos-lite-stock.dto';
+import { QueryMobilePosLiteCounterDeliveryBackfillDto } from './dto/mobile-pos-lite-counter-delivery-backfill.dto';
 import {
   CreateMobilePosLiteDayReportDto,
   QueryMobilePosLiteDayReportsDto,
@@ -299,5 +300,36 @@ export class MobilePosLiteController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.createStockCount(terminalCode, deviceSecret, dto, user);
+  }
+
+  /**
+   * The historical repair (spec-counter-delivery §4): issue the missing
+   * collection note for POS counter sales rung before this module recorded one,
+   * so they stop reading "Delivered: PENDING" forever.
+   *
+   * A DESKTOP CALL, NOT A TERMINAL ONE — no terminal headers, deliberately. This
+   * is a manager sitting in the office repairing history, not a rep at a
+   * counter, and the orders it touches belong to many terminals and many days.
+   *
+   * GUARDED ON `mobile_pos_lite.manage`, the terminal-admin gate, and NEVER on
+   * `.use`: this writes business documents across a company's whole sales
+   * history, which is not a thing a phone in a market may ask for. The service
+   * asserts the same gate again and scopes the population to what the caller may
+   * reach, so the decorator is not the only thing standing between a rep's token
+   * and history.
+   *
+   * There is no request body. Everything about the run is server-derived — the
+   * qualifying population, the batch cap, and every field on every note — and
+   * the only query parameter narrows the run to one company the caller already
+   * has WRITE on. Run it outside trading hours, on staging first; it is capped
+   * per request and safe to call repeatedly until it reports no progress.
+   */
+  @Post('counter-delivery-backfill')
+  @RequirePermissions('mobile_pos_lite.manage')
+  counterDeliveryBackfill(
+    @Query() query: QueryMobilePosLiteCounterDeliveryBackfillDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.counterDeliveryBackfill(query, user);
   }
 }

@@ -58,6 +58,28 @@ const OPEN_DELIVERY_STATUSES: DeliveryNoteStatus[] = [
   DeliveryNoteStatus.PARTIALLY_DELIVERED,
 ];
 
+/**
+ * THE DELIVERY-OPERATIONS FILTER, and the rule behind it.
+ *
+ * These panels are about goods DISPATCHED to a customer. A POS counter sale is
+ * not a dispatch — the customer carried the goods out at the moment of payment
+ * — so the delivery note auto-issued for it (counterSaleOrderId IS NOT NULL) is
+ * not delivery work and must not appear as any.
+ *
+ * REVIEW-BLOCKING: every `prisma.deliveryNote` query in this file spreads this.
+ * Two of them would be outright regressions without it — the `recent` panel
+ * (a shop at 30 counter sales a day would bury every real delivery on day one)
+ * and the missing-driver/vehicle data-quality worklist (a counter note has no
+ * driver and no vehicle BY DESIGN, so a note stranded mid-chain would land
+ * straight on the office's "fix these" list). The rest are belt-and-braces for
+ * exactly that stranded note, and they are consistent by policy.
+ *
+ * The ONE delivery figure that deliberately does NOT carry this is
+ * `ordersAwaitingDelivery`, which counts confirmed sales orders with no note at
+ * all. That number MUST fall — it falling is this fix landing.
+ */
+const NOT_A_COUNTER_SALE = { counterSaleOrderId: null } as const;
+
 const LOW_STOCK_THRESHOLD = 10;
 const MS_PER_DAY = 24 * 3600 * 1000;
 const READINESS_TARGET = 90;
@@ -576,13 +598,14 @@ export class WestsidesDashboardService {
       }),
       this.prisma.deliveryNote.groupBy({
         by: ['status'],
-        where: { companyId, ...branchFilter, deletedAt: null },
+        where: { companyId, ...branchFilter, ...NOT_A_COUNTER_SALE, deletedAt: null },
         _count: { id: true },
       }),
       this.prisma.deliveryNote.count({
         where: {
           companyId,
           ...branchFilter,
+          ...NOT_A_COUNTER_SALE,
           status: { in: OPEN_DELIVERY_STATUSES },
           deliveryDate: { lt: todayStart },
           deletedAt: null,
@@ -592,6 +615,7 @@ export class WestsidesDashboardService {
         where: {
           companyId,
           ...branchFilter,
+          ...NOT_A_COUNTER_SALE,
           status: { in: OPEN_DELIVERY_STATUSES },
           deliveryDate: { gte: todayStart, lt: tomorrowStart },
           deletedAt: null,
@@ -601,13 +625,14 @@ export class WestsidesDashboardService {
         where: {
           companyId,
           ...branchFilter,
+          ...NOT_A_COUNTER_SALE,
           status: DeliveryNoteStatus.DELIVERED,
           deliveryDate: { gte: todayStart, lt: tomorrowStart },
           deletedAt: null,
         },
       }),
       this.prisma.deliveryNote.findMany({
-        where: { companyId, ...branchFilter, deletedAt: null },
+        where: { companyId, ...branchFilter, ...NOT_A_COUNTER_SALE, deletedAt: null },
         orderBy: { deliveryDate: 'desc' },
         take: 8,
         select: {
@@ -891,7 +916,10 @@ export class WestsidesDashboardService {
         _count: { id: true },
       }),
       this.prisma.deliveryNote.aggregate({
-        where: { companyId, ...branchFilter, deletedAt: null },
+        // Without the filter this freshness signal reads "fresh" forever off
+        // counter traffic, and stops telling the office anything about whether
+        // real delivery data is being kept up to date.
+        where: { companyId, ...branchFilter, ...NOT_A_COUNTER_SALE, deletedAt: null },
         _max: { deliveryDate: true, updatedAt: true },
         _count: { id: true },
       }),
@@ -945,9 +973,14 @@ export class WestsidesDashboardService {
         where: { companyId, deletedAt: null },
       }),
       this.prisma.deliveryNote.count({
+        // MANDATORY here. Every counter note has no driver and no vehicle by
+        // design, so without the filter a note stranded mid-chain lands straight
+        // on the office's "fix these details" worklist for details that do not
+        // exist and never will.
         where: {
           companyId,
           ...branchFilter,
+          ...NOT_A_COUNTER_SALE,
           status: { in: OPEN_DELIVERY_STATUSES },
           deletedAt: null,
           OR: [

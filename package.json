@@ -14,6 +14,7 @@
     "verify:env": "node scripts/validate-env-contract.mjs && node scripts/validate-id-strategy.mjs && node scripts/validate-migration-safety.mjs && node scripts/validate-dto-contract.mjs && node scripts/validate-fe-be-contract.mjs",
     "verify:deploy": "node scripts/validate-env-contract.mjs && node scripts/validate-id-strategy.mjs && node scripts/validate-migration-safety.mjs && node scripts/validate-dto-contract.mjs && node scripts/validate-fe-be-contract.mjs && node scripts/validate-deployment.mjs",
     "verify:public-env": "node scripts/validate-public-env.mjs",
+    "verify:counter-delivery-backfill": "node --test scripts/backfill-counter-sale-delivery-notes.test.mjs",
     "verify:domain-dns": "node scripts/validate-domain-dns.mjs",
     "smoke:deploy": "node scripts/smoke-compose-deployment.mjs",
     "smoke:file-persistence": "node scripts/smoke-file-persistence.mjs",

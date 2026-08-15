@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
@@ -6,6 +7,29 @@ import { CreateDeliveryNoteDto } from './dto/create-delivery-note.dto';
 import { UpdateDeliveryNoteDto, DeliverDto } from './dto/update-delivery-note.dto';
 import { QueryDeliveryNoteDto } from './dto/query-delivery-note.dto';
 import { applyCompanyScopeWhere } from '../../common/services';
+
+/**
+ * Server-derived facts about WHY a delivery note is being created. Deliberately
+ * a separate argument rather than a DTO field, mirroring
+ * SalesOrdersService.create(dto, user, context) and its
+ * SalesOrderCreateContext.mobilePosTerminalId: nothing on this object may ever
+ * be sourced from a request body, so no client can claim to be a counter sale.
+ */
+export interface DeliveryNoteCreateContext {
+  /**
+   * SalesOrder id of the POS counter sale this note is auto-issued for.
+   *
+   * Two jobs, both structural:
+   *  - `delivery_notes_companyId_counterSaleOrderId_key` makes "one auto note
+   *    per counter sale" a database guarantee, so a replayed or raced sale
+   *    cannot produce a second note;
+   *  - it marks the note as a COLLECTION rather than a DISPATCH, which is what
+   *    keeps it out of every delivery worklist the office works from.
+   *
+   * Server-derived only. Never sourced from a DTO.
+   */
+  counterSaleOrderId?: string;
+}
 
 @Injectable()
 export class DeliveryNotesService {
@@ -15,7 +39,11 @@ export class DeliveryNotesService {
     private readonly codes: EntityCodeGeneratorService,
   ) {}
 
-  async create(dto: CreateDeliveryNoteDto, userId: string) {
+  async create(
+    dto: CreateDeliveryNoteDto,
+    userId: string,
+    context: DeliveryNoteCreateContext = {},
+  ) {
     const deliveryNoteNumber = await this.codes.next({ entityType: 'DeliveryNote', companyId: dto.companyId });
 
     const record = await this.prisma.$transaction(async (tx) => {
@@ -34,19 +62,37 @@ export class DeliveryNotesService {
           driverName: dto.driverName,
           status: 'DRAFT',
           notes: dto.notes,
+          // NULL on every desk-created note; the sales-order id on a POS counter
+          // sale. The unique index on (companyId, counterSaleOrderId) is what
+          // decides a create race, so this value is written by the INSERT itself
+          // rather than stamped afterwards.
+          counterSaleOrderId: context.counterSaleOrderId ?? null,
           createdById: userId,
         },
       });
       await tx.deliveryNoteLine.createMany({
-        data: dto.lines.map((l) => ({
-          deliveryNoteId: dn.id,
-          productId: l.productId,
-          description: l.description,
-          orderedQuantity: l.quantity,
-          deliveredQuantity: l.quantity,
-          unitId: l.unitId,
-          salesOrderLineId: l.salesOrderLineId,
-        })),
+        // `dto.lines[].salesOrderLineId` is accepted by the DTO and deliberately
+        // NOT written: `delivery_note_lines` has no such column, in the schema or
+        // in any migration. Prisma strips `undefined` but forwards a DEFINED
+        // value straight to the engine, which rejects the unknown argument — so
+        // emitting it here failed every desk-created note (the modal always
+        // sends a real sales-order line id). See CreateDeliveryNoteLineDto.
+        //
+        // The return-type annotation is load-bearing, and is why this went
+        // unnoticed for so long: an un-annotated `.map()` infers its element type
+        // FROM the literal, so there is nothing to check it against. Annotating
+        // the callback makes the literal contextually typed and fresh, which
+        // turns a non-column key into a build error instead of a 500.
+        data: dto.lines.map(
+          (l): Prisma.DeliveryNoteLineCreateManyInput => ({
+            deliveryNoteId: dn.id,
+            productId: l.productId,
+            description: l.description,
+            orderedQuantity: l.quantity,
+            deliveredQuantity: l.quantity,
+            unitId: l.unitId,
+          }),
+        ),
       });
       return dn;
     });
@@ -63,13 +109,26 @@ export class DeliveryNotesService {
   }
 
   async findAll(query: QueryDeliveryNoteDto, user?: any) {
-    const { page = 1, limit = 20, companyId, branchId, status, customerId } = query;
+    const {
+      page = 1,
+      limit = 20,
+      companyId,
+      branchId,
+      status,
+      customerId,
+      includeCounterSales,
+    } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
     applyCompanyScopeWhere(where, user, companyId);
     if (branchId) where.branchId = branchId;
     if (status) where.status = status;
     if (customerId) where.customerId = customerId;
+    // The delivery-notes list is the office's DISPATCH worklist. A POS counter
+    // sale is a collection — the customer already walked out with the goods —
+    // so its auto-issued note is not work anybody has to do, and by default it
+    // is not shown. Opt in explicitly to audit them.
+    if (!includeCounterSales) where.counterSaleOrderId = null;
 
     const [data, total] = await Promise.all([
       this.prisma.deliveryNote.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
@@ -131,15 +190,18 @@ export class DeliveryNotesService {
       if (dto.lines?.length) {
         await tx.deliveryNoteLine.deleteMany({ where: { deliveryNoteId: id } });
         await tx.deliveryNoteLine.createMany({
-          data: dto.lines.map((l) => ({
-            deliveryNoteId: id,
-            productId: l.productId,
-            description: l.description,
-            orderedQuantity: l.quantity,
-            deliveredQuantity: l.quantity,
-            unitId: l.unitId,
-            salesOrderLineId: l.salesOrderLineId,
-          })),
+          // Same phantom column as in create() — never written, and guarded the
+          // same way. See above.
+          data: dto.lines.map(
+            (l): Prisma.DeliveryNoteLineCreateManyInput => ({
+              deliveryNoteId: id,
+              productId: l.productId,
+              description: l.description,
+              orderedQuantity: l.quantity,
+              deliveredQuantity: l.quantity,
+              unitId: l.unitId,
+            }),
+          ),
         });
       }
       await tx.deliveryNote.update({

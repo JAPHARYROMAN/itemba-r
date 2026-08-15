@@ -1497,7 +1497,12 @@ export class WestsidesReportsService {
   async deliveryPerformance(query: QueryReportDto, user: AuthUser) {
     const { companyId, branchId } = query;
     const companyWhere = await this.companyWhere({ companyId }, user);
-    const where: any = { ...companyWhere, deletedAt: null };
+    // Delivery PERFORMANCE is about goods dispatched to a customer. A POS
+    // counter sale is a collection, not a dispatch, so its auto-issued note is
+    // excluded — and it must be, because this report flags DRAFT / DISPATCHED /
+    // PARTIALLY_DELIVERED as WARNING "need operational follow-up", which is
+    // exactly what a counter note stranded mid-chain would become.
+    const where: any = { ...companyWhere, counterSaleOrderId: null, deletedAt: null };
     if (branchId) where.branchId = branchId;
 
     const rows = await this.prisma.deliveryNote.groupBy({
