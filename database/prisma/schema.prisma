@@ -268,6 +268,23 @@ enum AuditSeverity {
   CRITICAL
 }
 
+/// How an audited action reached the system.
+///
+/// Distinct from severity, which rates how interesting an action is. This rates
+/// *who or what drove it*, which severity cannot express: the same action at the
+/// same severity means something different when a person clicked it than when an
+/// agent decided to.
+enum AuditChannel {
+  /// A person acting through the application UI.
+  WEB
+  /// An external system authenticating with an API key.
+  API
+  /// Msaidizi acting under a user's own permissions, on their instruction.
+  AGENT
+  /// Background jobs, schedulers, and migrations — no interactive actor.
+  SYSTEM
+}
+
 enum DocumentCategory {
   COMPANY_REGISTRATION
   BRELA_DOCUMENT
@@ -1790,6 +1807,14 @@ model AuditLog {
   ipAddress  String?
   userAgent  String?
   severity   AuditSeverity @default(LOW)
+  /// How the action reached the system. Rows written before this column existed
+  /// carry the WEB default and are NOT evidence of channel — treat pre-migration
+  /// history as unattributed rather than as confirmed human activity.
+  channel    AuditChannel  @default(WEB)
+  /// Correlates every entry produced by one agent run, so a run can be reviewed
+  /// and reversed as a unit rather than as scattered individual actions.
+  /// Null off the agent path.
+  agentSessionId String?
   createdAt  DateTime      @default(now())
 
   user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -1803,6 +1828,8 @@ model AuditLog {
   @@index([createdAt])
   @@index([companyId, entityType, createdAt])
   @@index([userId, createdAt])
+  @@index([channel, createdAt])
+  @@index([agentSessionId])
   @@map("audit_logs")
 }
 
