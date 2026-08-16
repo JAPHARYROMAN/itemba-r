@@ -76,6 +76,12 @@ export interface RunRequest {
    * if its deterministic id appears here.
    */
   confirmed?: string[];
+  /**
+   * A saved procedure's approved capability list, when this run is an invocation
+   * of one. Replaces the usual relevance-based narrowing: a procedure runs
+   * inside the set it was reviewed with, not inside whatever looks relevant.
+   */
+  restrictTo?: RegistryEntry[];
 }
 
 export interface RunResult {
@@ -263,6 +269,11 @@ export class MsaidiziService {
    * enabled tiers, then narrowed to those relevant to what was asked.
    */
   private registryFor(request: RunRequest): RegistryEntry[] {
+    // A procedure run is already bounded by the list a human approved. Narrowing
+    // it further by relevance would silently drop steps the procedure needs, so
+    // the approved set is used exactly as reviewed.
+    if (request.restrictTo) return request.restrictTo;
+
     const permitted = buildRegistry(
       this.manifest.capabilities(),
       request.user.permissions ?? [],

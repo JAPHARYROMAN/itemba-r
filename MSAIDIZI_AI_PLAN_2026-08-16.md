@@ -267,36 +267,106 @@ What it produced instead is the exemption list in the drift spec: six controller
 each with a written reason for why it sits outside the permission system. That list
 is now enforced rather than remembered.
 
-**Phase 1 — read-only agent.** Capability generation over the 554 GETs, tool search,
-domain pre-filter, auth closure, isolation specs. The user can ask anything about
-their data and get a grounded answer. No writes exist yet, so injection is still
-cosmetic — which makes this the right phase to harden the pattern.
+**Phase 1 — read-only agent. ✅ Shipped.** `backend/src/modules/msaidizi/`. The agent
+calls the API over HTTP with the caller's own bearer token, so guards, the global
+`ValidationPipe`, interceptors and the exception filter all run — there is no path
+around the pipeline for the tool layer to have to re-implement. Tools are generated
+from the manifest and filtered by permission *and* write mode, both as intersections.
 
-**Phase 2 — amber writes.** Reversible actions with undo. Ships the confirmation UX
-and the per-session write caps.
+Two deviations from this plan, both deliberate:
 
-**Phase 3 — red writes.** Confirmation-before-execution, and routing through
-`approval-workflows` wherever one already exists.
+- **Deterministic domain narrowing instead of tool search.** Tool search plus a Haiku
+  pre-filter is still the right end state, but narrowing is lexical and testable, and
+  it produces the same tool set for the same question — which matters when you are
+  trying to reproduce a bad run. `defer_loading` is implemented and off; turning it on
+  needs a tool-search tool declared alongside, or deferred tools are simply invisible.
+- **A hand-written loop instead of the SDK tool runner.** Confirmation is not an
+  inline approve/deny — it suspends the run, returns to the caller, and resumes on a
+  later request. That is a state machine, not a hook. Writing it out also put every
+  security property in code that is testable without an API key.
 
-**Phase 4 — saved procedures.** Plain-language authoring, compiled to reviewable step
-lists, invoked by name. The inline surfaces (§6) ship as the first pre-authored set.
+**Phase 2 — amber writes. ✅ Shipped, except undo.** `MSAIDIZI_WRITE_MODE=amber` emits
+write tools; per-run write caps bound them; every call is reported with its tier and
+arguments and lands in the audit trail under the run's `agentSessionId`, so
+`GET /audit-logs?agentSessionId=…` answers "what did this run do".
 
-Each phase is independently shippable and revertible, dark behind a flag until its
-isolation specs and degraded-state handling are green — the same discipline the POS
-reform used.
+**Automatic undo is deliberately not built.** Reversing a create means a delete, which
+is red tier; reversing an update means replaying `oldValue` over whatever has happened
+since. A generic inverse-operation engine in a financial system would be confidently
+wrong in exactly the cases that matter, and an undo that usually works is worse than
+none. The run is made reviewable instead, and a human reverses it.
+
+**Phase 3 — red writes. ✅ Shipped.** Confirmation is bound to the exact action: the id
+is derived from the session, tool and arguments, so approving "delete invoice 41"
+cannot authorise "delete invoice 42" — a different argument set is a different id.
+
+**The open question in §9.1 is now answered: do not route through `approval-workflows`.**
+That engine requires `entityType` + `entityId` — it approves entities that *exist*. An
+agent proposes an action whose entity does not exist yet, so routing through it would
+mean inventing synthetic entities to approve. Inline confirmation is the right shape.
+Where a red action genuinely *is* an approval submission, the agent just calls that
+endpoint like any other.
+
+**Phase 4 — saved procedures. ✅ Shipped.** A procedure is a name, the user's own
+instruction, and the capability list it was approved with. Compilation resolves the
+instruction against the author's current permissions and returns the list for review
+without saving. Creation re-derives that list server-side and intersects it, so a
+client cannot name capabilities it was never granted. Activation is a separate call
+and enforces maker-checker — an author cannot approve their own procedure, matching
+the rule the approval engine already uses.
+
+At run time two ceilings apply: the approved list, and the invoker's own permissions.
+A procedure is **a saved instruction, never a grant** — a clerk running a director's
+procedure does what the clerk may do. And the approved list does not widen when the
+manifest grows, so a procedure approved last month cannot silently acquire an endpoint
+that shipped last week.
+
+Each phase is independently revertible, and the whole module is dark unless
+`MSAIDIZI_ENABLED=true` with an API key — defaults are read-only.
 
 ---
 
 ## 9. Open questions
 
-1. **Confirmation UX for red tier.** Modal in-app, or route everything through
-   `approval-requests` so it lands in the existing inbox? The latter is less to build
-   and more consistent, but heavier for a manager acting on their own authority.
-2. **Language.** Swahili, English, or per-user via `user-preferences`? Affects prompt
-   design and the saved-procedure authoring surface, not architecture.
-3. **Whose permissions at execution time** for a saved procedure — the author's, or
-   the invoker's? Invoker's is safer and almost certainly correct, but it means a
-   procedure can partially fail for a less-privileged user; the compiled step list
-   should surface that at authoring time.
+**Resolved during the build:**
+
+1. ~~Confirmation UX for red tier~~ — **inline, not `approval-requests`.** That engine
+   approves entities that exist; an agent proposes actions whose entity does not exist
+   yet. See Phase 3 above.
+2. ~~Whose permissions for a saved procedure~~ — **the invoker's.** A procedure is a
+   saved instruction, never a grant. A run that resolves to no reachable capabilities
+   is refused outright rather than half-executed, since a partially-completed procedure
+   is worse than one that did not start.
+
+**Still open:**
+
+3. **Language.** The prompt currently instructs the model to answer in whatever
+   language the user writes in, which is a reasonable default but not a decision.
+   Swahili-first, English-first, or per-user via `user-preferences`? Affects prompt
+   design and procedure authoring, not architecture.
 4. **API key custody**, relative to the existing `api-keys` / `security-policies`
-   modules. Needed before Phase 1.
+   modules. Currently `ANTHROPIC_API_KEY` from the environment, never persisted or
+   logged. Fine for a single deployment; needs a decision before multi-tenant hosting,
+   because it is the one credential in the system that is not tenant-scoped.
+5. **Whether to enable tool search.** Needed once a user's permitted read set routinely
+   exceeds the 60-capability budget. Requires live testing against the API.
+
+---
+
+## 10. What has not been exercised
+
+Every security property is unit-tested against a scripted model client, which is why
+the loop was written by hand. But **no request has been made against the live
+Anthropic API** — there is no key in the build environment. Specifically unverified:
+
+- `AnthropicModelClient` — the request shape, `output_config.effort`, streaming, and
+  the `system` block array with its cache breakpoint.
+- The SSE endpoint end-to-end.
+- Whether the model actually holds the instruction/data boundary under a real
+  injection attempt. The fencing is in place and the prompt is explicit; whether it
+  *works* is an empirical question that needs a live adversarial pass.
+- Prompt-cache hit rates on the stable prefix.
+
+The first live run should be a read-only deployment with a deliberately hostile record
+planted in test data — a customer note containing an instruction — to confirm the
+agent reports it rather than obeys it.

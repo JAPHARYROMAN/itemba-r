@@ -268,6 +268,54 @@ enum AuditSeverity {
   CRITICAL
 }
 
+enum MsaidiziProcedureStatus {
+  /// Compiled from prose but not yet reviewed. Cannot be invoked.
+  DRAFT
+  /// Reviewed and approved. Invocable.
+  ACTIVE
+  /// Retired. Kept for the audit trail; cannot be invoked.
+  ARCHIVED
+}
+
+/// A named procedure a user taught Msaidizi once, so it need not be re-derived
+/// from prose on every run.
+///
+/// Re-interpreting free text each time is the thing this exists to avoid: it is
+/// unreviewable before the fact, varies run to run, and gives the agent the full
+/// breadth of the user's permissions for a task that needs a handful of them.
+/// A saved procedure is reviewed once, then bounded to the capabilities it
+/// declares — so what it may touch is knowable before anyone runs it.
+model MsaidiziProcedure {
+  id          String                 @id @default(uuid())
+  companyId   String?
+  name        String
+  /// The user's own words. This is what the agent is asked to carry out.
+  instruction String
+  /// Tool names the compile step resolved, and the ceiling on what a run may
+  /// call. A run cannot reach beyond this list even if the invoker's permissions
+  /// would otherwise allow it.
+  capabilities Json
+  /// Highest reversibility tier any declared capability carries. Denormalised so
+  /// a reviewer sees the blast radius without resolving every capability.
+  highestTier String                 @default("green")
+  status      MsaidiziProcedureStatus @default(DRAFT)
+  version     Int                    @default(1)
+  createdById String
+  approvedById String?
+  approvedAt  DateTime?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  deletedAt   DateTime?
+
+  company    Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  createdBy  User     @relation("MsaidiziProcedureAuthor", fields: [createdById], references: [id])
+  approvedBy User?    @relation("MsaidiziProcedureApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, name])
+  @@index([companyId, status])
+  @@map("msaidizi_procedures")
+}
+
 /// How an audited action reached the system.
 ///
 /// Distinct from severity, which rates how interesting an action is. This rates
@@ -613,6 +661,7 @@ model Company {
   generatedDocuments          GeneratedDocument[]
   documentNumberSequences     DocumentNumberSequence[]
   automationRules             AutomationRule[]
+  msaidiziProcedures          MsaidiziProcedure[]
 
   backgroundJobs         BackgroundJob[]
   cacheEntries           CacheEntry[]
@@ -1209,6 +1258,8 @@ model User {
   generatedDocsCreated          GeneratedDocument[]          @relation("GeneratedDocGeneratedBy")
   automationRulesCreated        AutomationRule[]             @relation("AutoRuleCreatedBy")
   automationRulesApproved       AutomationRule[]             @relation("AutoRuleApprovedBy")
+  msaidiziProceduresAuthored    MsaidiziProcedure[]          @relation("MsaidiziProcedureAuthor")
+  msaidiziProceduresApproved    MsaidiziProcedure[]          @relation("MsaidiziProcedureApprover")
   automationRunsStarted         AutomationRun[]              @relation("AutoRunStartedBy")
   backgroundJobsRequested       BackgroundJob[]              @relation("BackgroundJobRequestedBy")
   performanceTraces             PerformanceTrace[]           @relation("PerformanceTraceUser")
