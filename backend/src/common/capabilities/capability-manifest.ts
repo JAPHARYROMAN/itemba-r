@@ -13,10 +13,11 @@
  * the drift guard that keeps every endpoint classified.
  */
 
-import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { METHOD_METADATA, PATH_METADATA, ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
 import { RequestMethod } from '@nestjs/common';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { ROLES_KEY } from '../decorators/roles.decorator';
+import { AGENT_EXCLUDED_KEY } from '../decorators/agent-excluded.decorator';
 import { API_SCOPE_KEY } from '../decorators/require-api-scope.decorator';
 import { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY } from '../decorators/require-permissions.decorator';
 import { classifyTier, ReversibilityTier } from './reversibility';
@@ -52,6 +53,65 @@ export interface Capability {
   tier: ReversibilityTier;
   /** Why the tier was assigned — a rule name, or 'verb-default'. */
   tierReason: string;
+  /** Declared parameters, read from Nest's route-argument metadata. */
+  params: ParamSpec;
+  /** `@ApiOperation({ summary })` where the controller declares one. */
+  summary?: string;
+  /** `@AgentExcluded()` — never offered to the agent, whatever the permissions. */
+  agentExcluded: boolean;
+}
+
+export interface ParamSpec {
+  /** `:name` segments the route requires. */
+  path: string[];
+  /** Named `@Query('x')` parameters — the ones we can describe precisely. */
+  query: string[];
+  /**
+   * True when the handler takes the whole query object (`@Query()` with no key),
+   * so the accepted keys are not knowable from route metadata alone.
+   */
+  freeFormQuery: boolean;
+  /** True when the handler declares a `@Body()`. */
+  hasBody: boolean;
+}
+
+/** Nest's route-arg paramtype enum values we care about. */
+const PARAMTYPE_BODY = 3;
+const PARAMTYPE_QUERY = 4;
+const PARAMTYPE_PARAM = 5;
+
+const API_OPERATION_METADATA = 'swagger/apiOperation';
+
+/**
+ * Reads `@Body()` / `@Query()` / `@Param()` declarations for one handler.
+ *
+ * Metadata is keyed `${paramtype}:${index}` on the controller class under the
+ * handler's name, with `data` holding the argument name when one was given.
+ * Custom param decorators (e.g. `@CurrentUser()`) appear under hashed keys and
+ * are ignored — they are supplied by the framework, not by a caller.
+ */
+export function extractParams(controller: ControllerClass, handlerName: string): ParamSpec {
+  const raw = Reflect.getMetadata(ROUTE_ARGS_METADATA, controller, handlerName) as
+    | Record<string, { data?: unknown }>
+    | undefined;
+
+  const spec: ParamSpec = { path: [], query: [], freeFormQuery: false, hasBody: false };
+  if (!raw) return spec;
+
+  for (const [key, value] of Object.entries(raw)) {
+    const paramtype = Number(key.split(':')[0]);
+    const name = typeof value?.data === 'string' && value.data ? value.data : undefined;
+
+    if (paramtype === PARAMTYPE_PARAM && name) spec.path.push(name);
+    else if (paramtype === PARAMTYPE_QUERY) {
+      if (name) spec.query.push(name);
+      else spec.freeFormQuery = true;
+    } else if (paramtype === PARAMTYPE_BODY) spec.hasBody = true;
+  }
+
+  spec.path.sort();
+  spec.query.sort();
+  return spec;
 }
 
 /** A class with Nest controller metadata. */
@@ -140,6 +200,10 @@ export function extractCapabilities(controllers: ControllerClass[]): Capability[
         Reflect.getMetadata(IS_PUBLIC_KEY, handler) === true ||
         Reflect.getMetadata(IS_PUBLIC_KEY, controller) === true;
 
+      const operation = Reflect.getMetadata(API_OPERATION_METADATA, handler) as
+        | { summary?: string }
+        | undefined;
+
       const base: Omit<Capability, 'tier' | 'tierReason'> = {
         id: `${controller.name}.${handlerName}`,
         controller: controller.name,
@@ -151,6 +215,11 @@ export function extractCapabilities(controllers: ControllerClass[]): Capability[
         roles,
         apiScopes,
         guard: determineGuard(permissions, anyPermissions, roles, apiScopes, isPublic),
+        params: extractParams(controller, handlerName),
+        summary: operation?.summary,
+        agentExcluded:
+          Reflect.getMetadata(AGENT_EXCLUDED_KEY, handler) === true ||
+          Reflect.getMetadata(AGENT_EXCLUDED_KEY, controller) === true,
       };
 
       const { tier, reason } = classifyTier(base);
@@ -181,6 +250,10 @@ export function capabilitiesFor(
 ): Capability[] {
   const granted = new Set(grantedPermissions);
   return manifest.filter((cap) => {
+    // Excluded outright, before any permission reasoning: this answers "should
+    // an agent ever do this", which is independent of whether the user may.
+    if (cap.agentExcluded) return false;
+
     // Deliberately mirrors PermissionsGuard.canActivate rather than switching on
     // `guard`. A route may carry BOTH decorators, in which case the guard demands
     // every AND code *and* one OR code; keying off the single `guard` label would

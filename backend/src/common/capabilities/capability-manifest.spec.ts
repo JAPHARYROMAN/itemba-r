@@ -186,6 +186,8 @@ describe('capabilitiesFor — the agent envelope', () => {
       guard: 'permission',
       tier: 'amber',
       tierReason: 'write-verb',
+      params: { path: [], query: [], freeFormQuery: false, hasBody: false },
+      agentExcluded: false,
     };
 
     expect(capabilitiesFor([both], ['a.create'])).toEqual([]); // AND met, OR unmet

@@ -7,6 +7,7 @@ import {
   companyWhereForUser,
 } from '../../common/services/company-scope.service';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
+import { ambientAgentSessionId, ambientChannel } from '../../common/context/request-context';
 
 export interface AuditLogInput {
   action: string;
@@ -208,11 +209,17 @@ export class AuditLogsService {
 
   async log(input: AuditLogInput): Promise<void> {
     try {
+      // Attribution the caller did not supply comes from the ambient request
+      // context. That is what lets the ~100 existing log() call sites record an
+      // agent-driven action correctly without knowing Msaidizi exists.
+      const channel = input.channel ?? ambientChannel();
+      const agentSessionId = input.agentSessionId ?? ambientAgentSessionId();
+
       // An agent row without a correlation id is still written — losing the
       // action entirely would be worse — but it cannot be grouped into its run,
       // which defeats reviewing or reversing that run as a unit. That is a
       // caller bug, so say so loudly rather than degrading in silence.
-      if (input.channel === AuditChannel.AGENT && !input.agentSessionId) {
+      if (channel === AuditChannel.AGENT && !agentSessionId) {
         this.logger.warn(
           `Agent-channel audit entry without agentSessionId (action=${input.action}); ` +
             'this entry cannot be correlated to its run.',
@@ -238,10 +245,10 @@ export class AuditLogsService {
           ipAddress: input.ipAddress,
           userAgent: input.userAgent,
           severity: input.severity ?? deriveSeverity(input.action),
-          channel: input.channel ?? AuditChannel.WEB,
+          channel,
           // Only carried on the agent path; a session id without AGENT would
           // make the trail claim a correlation that does not exist.
-          agentSessionId: input.channel === AuditChannel.AGENT ? input.agentSessionId : undefined,
+          agentSessionId: channel === AuditChannel.AGENT ? agentSessionId : undefined,
         },
       });
     } catch (err) {

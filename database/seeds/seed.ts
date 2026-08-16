@@ -167,6 +167,10 @@ const ALL_PERMISSIONS: PermDef[] = [
   ...perms('users', ['read', 'create', 'update', 'delete', 'assign_roles']),
   ...perms('roles', ['read', 'create', 'update', 'delete']),
   ...perms('permissions', ['read', 'create', 'delete']),
+  // Msaidizi — permission to *use* the agent. It confers no data access of its
+  // own: the agent acts under whatever else the holder is granted, so this only
+  // decides who may talk to it, never what it can reach on their behalf.
+  ...perms('msaidizi', ['use']),
   ...perms('documents', ['read', 'create', 'update', 'delete', 'view', 'manage']),
   ...perms('reports', ['read', 'export']),
 
@@ -1332,6 +1336,9 @@ const ROLES: RoleDef[] = [
       readExport,
       (p) => p.module === 'record_book' && readExport(p),
       inModules('companies', 'company-profiles', 'divisions', 'branches'),
+      // Msaidizi grants no data access of its own — it acts within whatever this
+      // role already holds, which for a director is broad read.
+      inModules('msaidizi'),
       inModules(...ALL_ITEMBA_MODULES),
       inModules(
         ...ACCOUNTING_ENGINE_MODULES,
@@ -1517,6 +1524,8 @@ const ROLES: RoleDef[] = [
         'employees',
         'reports',
         'audit-logs',
+        // Msaidizi acts within this role's existing company-scoped grants.
+        'msaidizi',
         ...FINANCE_MODULES,
         ...OPERATIONS_MODULES,
         ...PETROLEUM_MODULES,

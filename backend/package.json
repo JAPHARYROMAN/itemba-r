@@ -32,6 +32,7 @@
     "seed": "cross-env NODE_PATH=./node_modules ts-node --project tsconfig.json --transpile-only ../database/seeds/seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
     "@nestjs/cache-manager": "^3.1.2",
     "@nestjs/common": "^11.1.19",
     "@nestjs/config": "^4.0.4",
