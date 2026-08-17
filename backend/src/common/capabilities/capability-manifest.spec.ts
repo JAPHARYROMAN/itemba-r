@@ -8,6 +8,14 @@
  *
  * If one of these fails on a route you just added, the fix is to decorate the
  * route, or to add it to the acknowledged exemption list below with a reason.
+ *
+ * MEMORY COST: loadAllControllers() requires every controller, which pulls the
+ * application's whole dependency graph into the Jest process. Under --runInBand
+ * that memory is held for the rest of the run, and it is why the test scripts
+ * pass --max-old-space-size=8192. Loading the real routing table is the point —
+ * a manifest built from a stubbed subset would not catch drift — so the cost is
+ * deliberate. If it grows further, split this suite into its own Jest project
+ * rather than narrowing what it loads.
  */
 
 import { extractCapabilities, capabilitiesFor, Capability } from './capability-manifest';
