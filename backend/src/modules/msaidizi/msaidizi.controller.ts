@@ -9,7 +9,17 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsArray, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsArray,
+  IsDefined,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
 import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -17,16 +27,41 @@ import { MsaidiziConfig } from './msaidizi.config';
 import { MsaidiziService, RunResult } from './msaidizi.service';
 import { ModelMessage } from './model-client';
 
+/**
+ * One prior turn, echoed back from the previous response's `messages`.
+ *
+ * This has to be a class with real decorators, not the `ModelMessage` interface.
+ * The global ValidationPipe runs `whitelist: true`, which strips any property it
+ * cannot see a decorator for — and an interface carries no metadata at runtime,
+ * so an undecorated `history` arrives as an array of empty objects and the model
+ * request fails with "messages.0: Input does not match the expected shape".
+ *
+ * `content` is deliberately only `@IsDefined()`. It is a string on user turns and
+ * an array of provider content blocks on assistant turns, and those blocks must
+ * survive the round trip byte-for-byte. Declaring a nested type here would make
+ * the pipe recurse and strip fields inside them — including the ones the API
+ * requires echoed back unchanged.
+ */
+export class ConversationMessageDto {
+  @IsIn(['user', 'assistant'])
+  role!: 'user' | 'assistant';
+
+  @IsDefined()
+  content!: unknown;
+}
+
 export class AskDto {
   @IsString()
   @MinLength(1)
   @MaxLength(8000)
   message!: string;
 
-  /** Opaque conversation state returned by the previous turn. */
+  /** Conversation state returned by the previous turn, echoed back verbatim. */
   @IsOptional()
   @IsArray()
-  history?: ModelMessage[];
+  @ValidateNested({ each: true })
+  @Type(() => ConversationMessageDto)
+  history?: ConversationMessageDto[];
 
   @IsOptional()
   @IsString()
@@ -82,7 +117,7 @@ export class MsaidiziController {
       authorization,
       sessionId: dto.sessionId,
       confirmed: dto.confirmed,
-      messages: [...history, { role: 'user', content: dto.message }],
+      messages: [...(history as ModelMessage[]), { role: 'user', content: dto.message }],
     });
   }
 
@@ -126,7 +161,10 @@ export class MsaidiziController {
           authorization,
           sessionId: dto.sessionId,
           confirmed: dto.confirmed,
-          messages: [...(dto.history ?? []), { role: 'user', content: dto.message }],
+          messages: [
+            ...((dto.history ?? []) as ModelMessage[]),
+            { role: 'user', content: dto.message },
+          ],
         },
         (event) => send(event.type, event),
       );
