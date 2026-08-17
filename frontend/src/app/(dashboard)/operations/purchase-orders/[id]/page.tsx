@@ -140,7 +140,7 @@ export default function PurchaseOrderDetailPage() {
       referenceType: 'PurchaseOrder',
       referenceId: id,
     });
-    return `/operations/inventory-movements?${params.toString()}`;
+    return `/inventory?tab=stock&view=movements&${params.toString()}`;
   }, [companyId, id]);
 
   // Export the rows behind the active data tab. Each tab maps to a flat row

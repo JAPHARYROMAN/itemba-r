@@ -10,8 +10,10 @@ import {
   PageHeader,
   PageSpinner,
   PageToolbar,
+  scopeToQueryString,
 } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
+import { useInventoryWorkspace } from '@/features/inventory/inventory-workspace-context';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -146,7 +148,7 @@ function buildHref(path: string, params: Record<string, string | null | undefine
     if (value) query.set(key, value);
   });
   const suffix = query.toString();
-  return suffix ? `${path}?${suffix}` : path;
+  return suffix ? `${path}${path.includes('?') ? '&' : '?'}${suffix}` : path;
 }
 
 function productActionHref(path: string, item: Item) {
@@ -215,7 +217,9 @@ function buildSummary(data: LiveResp | null): InventorySummary {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function LiveInventoryPage() {
+  const workspace = useInventoryWorkspace();
   const [companyId, setCompanyId] = useState('');
+  const [divisionId, setDivisionId] = useState('');
   const [branchId, setBranchId] = useState('');
   const [search, setSearch] = useState('');
   const [lowThreshold, setLowThreshold] = useState('10');
@@ -225,6 +229,16 @@ export default function LiveInventoryPage() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
+  const workspaceCompanyId = workspace?.scope.companyId;
+  const workspaceDivisionId = workspace?.scope.divisionId;
+  const workspaceBranchId = workspace?.scope.branchId;
+
+  useEffect(() => {
+    if (workspaceCompanyId === undefined) return;
+    setCompanyId(workspaceCompanyId);
+    setDivisionId(workspaceDivisionId ?? '');
+    setBranchId(workspaceBranchId ?? '');
+  }, [workspaceBranchId, workspaceCompanyId, workspaceDivisionId]);
 
   const {
     companyOptions,
@@ -242,6 +256,7 @@ export default function LiveInventoryPage() {
     setError('');
     try {
       const params = new URLSearchParams({ companyId });
+      if (divisionId) params.set('divisionId', divisionId);
       if (branchId) params.set('branchId', branchId);
       if (lowThreshold) params.set('lowThreshold', lowThreshold);
       if (search) params.set('search', search);
@@ -258,7 +273,7 @@ export default function LiveInventoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [companyId, branchId, lowThreshold, search]);
+  }, [companyId, divisionId, branchId, lowThreshold, search]);
 
   // Debounced reload on filter changes.
   useEffect(() => {
@@ -285,6 +300,8 @@ export default function LiveInventoryPage() {
   const selectedBranchLabel =
     branchOptions.find((option) => option.value === branchId)?.label ??
     (branchId ? 'Selected branch' : 'All branches');
+  const sharedScopeQuery = scopeToQueryString({ companyId, divisionId, branchId });
+  const sharedScopeSuffix = sharedScopeQuery ? `&${sharedScopeQuery}` : '';
   const lastLoadAgeMs = lastLoadedAt ? Date.now() - lastLoadedAt.getTime() : null;
   const freshnessTone: Tone = !lastLoadedAt
     ? 'neutral'
@@ -305,11 +322,13 @@ export default function LiveInventoryPage() {
       },
       {
         label: 'Scope control',
-        status: branchId ? 'Branch' : 'Company',
+        status: branchId ? 'Branch' : divisionId ? 'Division' : 'Company',
         detail: branchId
           ? `Showing ${selectedBranchLabel}.`
-          : `Showing every branch for ${selectedCompanyLabel}; use a branch filter before acting on a location-specific issue.`,
-        tone: branchId ? 'good' : 'info',
+          : divisionId
+            ? 'Showing every branch in the selected division; choose a branch before acting on a location-specific issue.'
+            : `Showing every branch for ${selectedCompanyLabel}; use a branch filter before acting on a location-specific issue.`,
+        tone: branchId || divisionId ? 'good' : 'info',
       },
       {
         label: 'Stock blockers',
@@ -321,7 +340,7 @@ export default function LiveInventoryPage() {
               ? `${fmtInt(data.totals.low)} SKU${data.totals.low === 1 ? '' : 's'} are below threshold.`
               : 'No low or out-of-stock blockers in the current view.',
         tone: data.totals.out > 0 ? 'danger' : data.totals.low > 0 ? 'warn' : 'good',
-        actionHref: '/westsides/reports',
+        actionHref: `/inventory?tab=reports&view=inventory-reports${sharedScopeSuffix}`,
         actionLabel: 'Open stock reports',
       },
       {
@@ -338,7 +357,7 @@ export default function LiveInventoryPage() {
             ? `${fmtInt(summary.staleSkus)} stocked SKU${summary.staleSkus === 1 ? '' : 's'} have not moved for 30+ days.`
             : 'No stale movement signal in the loaded stock list.',
         tone: summary.staleSkus > 0 ? 'warn' : 'good',
-        actionHref: '/westsides/reports',
+        actionHref: `/inventory?tab=reports&view=inventory-reports${sharedScopeSuffix}`,
         actionLabel: 'Review slow movers',
       },
     ];
@@ -346,11 +365,13 @@ export default function LiveInventoryPage() {
     autoRefresh,
     branchId,
     data,
+    divisionId,
     freshnessTone,
     lastLoadAgeMs,
     lastLoadedAt,
     selectedBranchLabel,
     selectedCompanyLabel,
+    sharedScopeSuffix,
     summary,
   ]);
 
@@ -370,9 +391,15 @@ export default function LiveInventoryPage() {
         breadcrumbs={[{ label: 'Westsides', href: '/westsides' }, { label: 'Live Inventory' }]}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <ActionLink href="/westsides/product-batches">Batches</ActionLink>
-            <ActionLink href="/westsides/stock-damage">Damage</ActionLink>
-            <ActionLink href="/westsides/reports">Reports</ActionLink>
+            <ActionLink href={`/inventory?tab=stock&view=batches${sharedScopeSuffix}`}>
+              Batches
+            </ActionLink>
+            <ActionLink href={`/inventory?tab=controls&view=damage${sharedScopeSuffix}`}>
+              Damage
+            </ActionLink>
+            <ActionLink href={`/inventory?tab=reports&view=inventory-reports${sharedScopeSuffix}`}>
+              Reports
+            </ActionLink>
           </div>
         }
       />
@@ -410,27 +437,31 @@ export default function LiveInventoryPage() {
           <PageToolbar
             filters={
               <>
-                <FilterField label="Company" className="w-64">
-                  <FormSelect
-                    value={companyId}
-                    onChange={(e) => {
-                      setCompanyId(e.target.value);
-                      setBranchId('');
-                    }}
-                    options={companyOptions}
-                    placeholder={orgLoading ? 'Loading companies' : 'Pick company'}
-                    disabled={orgLoading}
-                  />
-                </FilterField>
-                <FilterField label="Branch" className="w-56">
-                  <FormSelect
-                    value={branchId}
-                    onChange={(e) => setBranchId(e.target.value)}
-                    options={branchOptions}
-                    placeholder={companyId ? 'All branches' : 'Pick company first'}
-                    disabled={!companyId}
-                  />
-                </FilterField>
+                {!workspace && (
+                  <>
+                    <FilterField label="Company" className="w-64">
+                      <FormSelect
+                        value={companyId}
+                        onChange={(e) => {
+                          setCompanyId(e.target.value);
+                          setBranchId('');
+                        }}
+                        options={companyOptions}
+                        placeholder={orgLoading ? 'Loading companies' : 'Pick company'}
+                        disabled={orgLoading}
+                      />
+                    </FilterField>
+                    <FilterField label="Branch" className="w-56">
+                      <FormSelect
+                        value={branchId}
+                        onChange={(e) => setBranchId(e.target.value)}
+                        options={branchOptions}
+                        placeholder={companyId ? 'All branches' : 'Pick company first'}
+                        disabled={!companyId}
+                      />
+                    </FilterField>
+                  </>
+                )}
                 <FilterField label="SKU / product" className="w-56">
                   <input
                     type="text"
@@ -622,14 +653,14 @@ export default function LiveInventoryPage() {
                           strong
                         />
                         <div className="flex items-center gap-2">
-                          <LinkText href={productActionHref('/westsides/product-batches', item)}>
+                          <LinkText href={productActionHref('/inventory?tab=stock&view=batches', item)}>
                             Batches
                           </LinkText>
-                          <LinkText href={productActionHref('/westsides/stock-damage', item)}>
+                          <LinkText href={productActionHref('/inventory?tab=controls&view=damage', item)}>
                             Damage
                           </LinkText>
                           <LinkText
-                            href={buildHref('/westsides/reports', {
+                            href={buildHref('/inventory?tab=reports&view=inventory-reports', {
                               search: item.product.sku ?? item.product.name,
                             })}
                           >
@@ -657,21 +688,21 @@ export default function LiveInventoryPage() {
                 <ActionPanel
                   title="Review batch and expiry exposure"
                   body="Open product batches when a critical item needs expiry, lot, or remaining quantity checks."
-                  href="/westsides/product-batches"
+                  href="/inventory?tab=stock&view=batches"
                   cta="Open batches"
                   tone="info"
                 />
                 <ActionPanel
                   title="Record damage, breakage, or spoilage"
                   body="Route suspected shrinkage to the damage workflow before relying on available stock."
-                  href="/westsides/stock-damage"
+                  href="/inventory?tab=controls&view=damage"
                   cta="Open damage"
                   tone="danger"
                 />
                 <ActionPanel
                   title="Run inventory and controls reports"
                   body="Use batch status, stock damage, fast/slow moving, and profitability reports for follow-up."
-                  href="/westsides/reports"
+                  href="/inventory?tab=reports&view=inventory-reports"
                   cta="Open reports"
                   tone="good"
                 />
@@ -693,7 +724,7 @@ export default function LiveInventoryPage() {
               <InlineEmptyState
                 title="No balances found"
                 detail="No stock rows match the selected company, branch, threshold, and search filters."
-                action={<LinkText href="/westsides/product-batches">Check batches</LinkText>}
+                action={<LinkText href="/inventory?tab=stock&view=batches">Check batches</LinkText>}
               />
             ) : (
               <div>
@@ -838,17 +869,17 @@ export default function LiveInventoryPage() {
                                   <BodyCell>
                                     <div className="flex items-center gap-2">
                                       <LinkText
-                                        href={productActionHref('/westsides/product-batches', it)}
+                                        href={productActionHref('/inventory?tab=stock&view=batches', it)}
                                       >
                                         Batches
                                       </LinkText>
                                       <LinkText
-                                        href={productActionHref('/westsides/stock-damage', it)}
+                                        href={productActionHref('/inventory?tab=controls&view=damage', it)}
                                       >
                                         Damage
                                       </LinkText>
                                       <LinkText
-                                        href={buildHref('/westsides/reports', {
+                                        href={buildHref('/inventory?tab=reports&view=inventory-reports', {
                                           search: it.product.sku ?? it.product.name,
                                         })}
                                       >

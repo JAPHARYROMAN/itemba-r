@@ -26,6 +26,7 @@ export class InventoryBalancesController {
   live(
     @Query('companyId') companyId: string,
     @CurrentUser() user: AuthUser,
+    @Query('divisionId') divisionId?: string,
     @Query('branchId') branchId?: string,
     @Query('lowThreshold') lowThreshold?: string,
     @Query('search') search?: string,
@@ -33,6 +34,7 @@ export class InventoryBalancesController {
     return this.service.liveStock(
       {
         companyId,
+        divisionId,
         branchId,
         lowThreshold: lowThreshold ? Number(lowThreshold) : undefined,
         search,

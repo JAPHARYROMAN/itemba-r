@@ -30,6 +30,7 @@ import {
   backendPost,
   backendUpload,
 } from '@/lib/api-client';
+import { useInventoryWorkspace } from '@/features/inventory/inventory-workspace-context';
 
 interface Company {
   id: string;
@@ -306,6 +307,8 @@ function ProductModal({
   initial,
   companies,
   units,
+  defaultCompanyId,
+  defaultDivisionId,
   onClose,
   onSaved,
 }: {
@@ -313,6 +316,8 @@ function ProductModal({
   initial?: Product;
   companies: Company[];
   units: Unit[];
+  defaultCompanyId?: string;
+  defaultDivisionId?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -354,7 +359,11 @@ function ProductModal({
           status: initial.status,
           description: initial.description ?? '',
         }
-      : { ...BLANK },
+      : {
+          ...BLANK,
+          companyId: defaultCompanyId ?? '',
+          divisionId: defaultDivisionId ?? '',
+        },
   );
   const [categories, setCategories] = useState<Category[]>([]);
   const [families, setFamilies] = useState<ProductFamily[]>([]);
@@ -1200,6 +1209,7 @@ function DeleteConfirm({
 
 export default function ProductsPage() {
   const { hasPermission } = useAuth();
+  const workspace = useInventoryWorkspace();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -1210,6 +1220,7 @@ export default function ProductsPage() {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [companyId, setCompanyId] = useState('');
+  const [divisionId, setDivisionId] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [productFamilyId, setProductFamilyId] = useState('');
   const [productType, setProductType] = useState('');
@@ -1227,6 +1238,19 @@ export default function ProductsPage() {
   const canCreate = hasPermission('products.create');
   const canUpdate = hasPermission('products.update');
   const canDelete = hasPermission('products.delete');
+  const workspaceCompanyId = workspace?.scope.companyId;
+  const workspaceDivisionId = workspace?.scope.divisionId;
+  const workspaceBranchId = workspace?.scope.branchId;
+
+  useEffect(() => {
+    if (workspaceCompanyId === undefined) return;
+    setCompanyId(workspaceCompanyId);
+    setDivisionId(workspaceDivisionId ?? '');
+    setBranchId(workspaceBranchId ?? '');
+    setCategoryId('');
+    setProductFamilyId('');
+    setPage(1);
+  }, [workspaceBranchId, workspaceCompanyId, workspaceDivisionId]);
 
   // Debounce the search box (~300ms) so we only refetch once typing settles.
   useEffect(() => {
@@ -1290,6 +1314,7 @@ export default function ProductsPage() {
           query: {
             limit: 500,
             companyId: companyId || undefined,
+            divisionId: divisionId || undefined,
             categoryId: categoryId || undefined,
             isActive: true,
           },
@@ -1305,7 +1330,7 @@ export default function ProductsPage() {
     return () => {
       cancelled = true;
     };
-  }, [canView, companyId, categoryId]);
+  }, [canView, companyId, divisionId, categoryId]);
 
   // Branches power the per-branch stock columns; only relevant once a company is chosen.
   useEffect(() => {
@@ -1314,7 +1339,14 @@ export default function ProductsPage() {
       return;
     }
     let cancelled = false;
-    backendList<Branch>('/branches', { query: { companyId, activeOnly: true, limit: 500 } })
+    backendList<Branch>('/branches', {
+      query: {
+        companyId,
+        divisionId: divisionId || undefined,
+        activeOnly: true,
+        limit: 500,
+      },
+    })
       .then((records) => {
         if (!cancelled) setBranches(records);
       })
@@ -1324,7 +1356,7 @@ export default function ProductsPage() {
     return () => {
       cancelled = true;
     };
-  }, [canView, companyId]);
+  }, [canView, companyId, divisionId]);
 
   const load = useCallback(async () => {
     if (!canView) return;
@@ -1337,6 +1369,7 @@ export default function ProductsPage() {
           limit: 20,
           search: search.trim() || undefined,
           companyId: companyId || undefined,
+          divisionId: divisionId || undefined,
           categoryId: categoryId || undefined,
           productFamilyId: productFamilyId || undefined,
           productType: productType || undefined,
@@ -1359,6 +1392,7 @@ export default function ProductsPage() {
     page,
     search,
     companyId,
+    divisionId,
     categoryId,
     productFamilyId,
     productType,
@@ -1422,6 +1456,7 @@ export default function ProductsPage() {
       const numericNames = ['Selling', 'Purchase', 'On hand', 'Available'];
       const filterParts = [
         companyId ? companies.find((c) => c.id === companyId)?.name : '',
+        divisionId ? 'Selected division' : '',
         categoryId ? categories.find((c) => c.id === categoryId)?.name : '',
         productType ? productType.replace(/_/g, ' ') : '',
         status,
@@ -1481,6 +1516,8 @@ export default function ProductsPage() {
           mode="create"
           companies={companies}
           units={units}
+          defaultCompanyId={companyId || undefined}
+          defaultDivisionId={divisionId || undefined}
           onClose={() => setCreating(false)}
           onSaved={() => {
             setCreating(false);
@@ -1494,6 +1531,8 @@ export default function ProductsPage() {
           initial={editing}
           companies={companies}
           units={units}
+          defaultCompanyId={companyId || undefined}
+          defaultDivisionId={divisionId || undefined}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -1770,7 +1809,7 @@ export default function ProductsPage() {
                   <tr key={p.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono text-xs">
                       <Link
-                        href={`/operations/products/${p.id}`}
+                        href={`/inventory/products/${p.id}`}
                         className="text-blue-600 hover:underline"
                       >
                         {p.productCode ?? '—'}
@@ -1790,7 +1829,7 @@ export default function ProductsPage() {
                           />
                         )}
                         <Link
-                          href={`/operations/products/${p.id}`}
+                          href={`/inventory/products/${p.id}`}
                           className="text-blue-600 hover:underline"
                           title={`View ${p.name}`}
                         >

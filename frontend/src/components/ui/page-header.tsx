@@ -17,7 +17,7 @@ export function PageHeader({ title, subtitle, description, breadcrumbs, actions,
   const sub = subtitle ?? description;
   const act = actions ?? action;
   return (
-    <div className="flex items-start justify-between gap-4 mb-6">
+    <div data-page-header className="flex items-start justify-between gap-4 mb-6">
       <div className="min-w-0">
         {breadcrumbs && breadcrumbs.length > 0 && (
           <nav className="flex items-center gap-1 mb-1 text-[12px]" style={{ color: 'var(--aurora-text-muted)' }}>

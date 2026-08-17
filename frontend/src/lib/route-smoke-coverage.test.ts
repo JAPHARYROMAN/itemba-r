@@ -108,6 +108,18 @@ describe('route smoke coverage manifest', () => {
     // admin/engineering tooling and the not-yet-live integrations surface stay
     // reachable by URL only until the business needs them.
     const intentionallyHidden = new Set([
+      // Legacy inventory URLs redirect into the consolidated Inventory workspace.
+      // They remain on disk only to preserve live bookmarks and shared links.
+      '/operations/inventory',
+      '/operations/inventory-balances',
+      '/operations/inventory-movements',
+      '/operations/product-categories',
+      '/operations/products',
+      '/operations/stock-adjustments',
+      '/operations/units',
+      '/westsides/inventory/live',
+      '/westsides/product-batches',
+      '/westsides/stock-damage',
       '/api-gateway/logs',
       '/background-jobs',
       '/background-jobs/queues',

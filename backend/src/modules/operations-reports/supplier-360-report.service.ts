@@ -453,7 +453,7 @@ export class Supplier360ReportService {
           ...row,
           purchaseCount: row.orderIds.size,
           averageUnitCost: row.quantity ? row.weightedCost / row.quantity : 0,
-          sourceHref: `/operations/products/${row.productId}`,
+          sourceHref: `/inventory/products/${row.productId}`,
           orderIds: undefined,
           weightedCost: undefined,
         }))

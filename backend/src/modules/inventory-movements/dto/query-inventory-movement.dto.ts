@@ -4,6 +4,8 @@ import { InventoryMovementType } from '@prisma/client';
 
 export class QueryInventoryMovementDto {
   @IsOptional() @IsString() companyId?: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsString() productId?: string;
   @IsOptional() @IsString() locationId?: string;
   @IsOptional() @IsEnum(InventoryMovementType) movementType?: InventoryMovementType;

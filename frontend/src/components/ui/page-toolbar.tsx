@@ -24,7 +24,7 @@ export function PageToolbar({
   className = '',
 }: PageToolbarProps) {
   return (
-    <div className={`flex flex-wrap items-center gap-2 mb-4 ${className}`}>
+    <div data-page-toolbar className={`flex flex-wrap items-center gap-2 mb-4 ${className}`}>
       {/* Search */}
       {onSearch !== undefined && (
         <div className="relative flex-1 min-w-[160px] max-w-xs">

@@ -322,12 +322,21 @@ export class InventoryBalancesService {
    * field without breaking the response shape.
    */
   async liveStock(
-    query: { companyId?: string; branchId?: string; lowThreshold?: number; search?: string },
+    query: {
+      companyId?: string;
+      divisionId?: string;
+      branchId?: string;
+      lowThreshold?: number;
+      search?: string;
+    },
     user: AuthUser,
   ) {
     const lowThreshold = Number(query.lowThreshold ?? 10);
     const where: any = {};
     Object.assign(where, await this.companyScope.companyWhereFor(user, query.companyId));
+    if (query.divisionId) {
+      where.divisionId = query.divisionId;
+    }
     if (query.branchId) {
       where.branchId = query.branchId;
     }

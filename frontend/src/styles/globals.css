@@ -108,6 +108,22 @@
   --sidebar-section: #475569;
 }
 
+/* The consolidated Inventory workspace supplies its own title and scope bar.
+   Embedded legacy views retain their workflow controls without repeating page titles. */
+[data-inventory-embedded='true'] [data-page-header] {
+  display: none;
+}
+
+/* Scope selection is owned by the workspace. Legacy views keep their
+   task-specific filters, but cannot introduce a second company hierarchy. */
+[data-inventory-embedded='true'] [data-page-toolbar] [aria-label='Filter by company'],
+[data-inventory-embedded='true'] [data-page-toolbar] [aria-label='Filter by division'],
+[data-inventory-embedded='true'] [data-page-toolbar] [aria-label='Filter by branch'],
+[data-inventory-embedded='true'] [data-page-toolbar] [aria-label='Filter by branch or location'],
+[data-inventory-embedded='true'] [data-page-toolbar] [aria-label='Show stock on hand and available for a branch'] {
+  display: none;
+}
+
 /* ─── Dark Mode Tokens ──────────────────────────────────────────────────────── */
 .dark {
   color-scheme: dark;

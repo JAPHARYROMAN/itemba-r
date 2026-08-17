@@ -97,6 +97,8 @@ describe('InventoryMovementsService.summary', () => {
     await service.summary(
       {
         companyId: 'company-A',
+        divisionId: 'division-1',
+        branchId: 'branch-1',
         productId: 'product-9',
         movementType: 'PURCHASE_RECEIPT' as InventoryMovementType,
       },
@@ -106,6 +108,8 @@ describe('InventoryMovementsService.summary', () => {
     expect(companyScope.companyWhereFor).toHaveBeenCalledWith(user, 'company-A');
     const expectedWhere = {
       companyId: 'company-A',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
       productId: 'product-9',
       movementType: 'PURCHASE_RECEIPT',
     };

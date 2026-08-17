@@ -19,6 +19,7 @@ import {
   showToast,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useInventoryWorkspace } from '@/features/inventory/inventory-workspace-context';
 import {
   backendDelete,
   backendGet,
@@ -400,6 +401,7 @@ function FamilyModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const workspace = useInventoryWorkspace();
   const [form, setForm] = useState<FamilyForm>(() =>
     initial
       ? {
@@ -420,7 +422,7 @@ function FamilyModal({
       : {
           companyId: category.companyId ?? '',
           categoryId: category.id,
-          divisionId: '',
+          divisionId: workspace?.scope.divisionId ?? '',
           name: '',
           brand: '',
           description: '',
@@ -556,6 +558,7 @@ function FamilyModal({
 
 export default function ProductCategoriesPage() {
   const { hasPermission } = useAuth();
+  const workspace = useInventoryWorkspace();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<ProductCategory> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -583,6 +586,12 @@ export default function ProductCategoriesPage() {
   const [statusUpdatingId, setStatusUpdatingId] = useState('');
 
   const canView = hasPermission('product_categories.view');
+
+  useEffect(() => {
+    if (!workspace) return;
+    setCompanyId(workspace.scope.companyId);
+    setPage(1);
+  }, [workspace?.scope.companyId]);
   const canCreate = hasPermission('product_categories.manage');
 
   const loadFamiliesForCategory = useCallback(async (category: ProductCategory) => {

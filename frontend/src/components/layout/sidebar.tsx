@@ -118,12 +118,14 @@ export type NavLeaf = {
   label: string;
   iconKey: keyof typeof ICONS;
   permission?: string;
+  permissionsAny?: string[];
 };
 
 export type NavGroup = {
   label: string;
   iconKey: keyof typeof ICONS;
   permission?: string;
+  permissionsAny?: string[];
   children: NavLeaf[];
 };
 
@@ -260,46 +262,27 @@ export const NAV: NavItem[] = [
         permission: 'suppliers.view',
       },
       {
-        href: '/operations/products',
-        label: 'Products',
-        iconKey: 'fileText',
-        permission: 'products.view',
-      },
-      {
-        href: '/operations/product-categories',
-        label: 'Product Categories',
-        iconKey: 'clipboardList',
-        permission: 'product_categories.view',
-      },
-      {
-        href: '/operations/units',
-        label: 'Units of Measure',
-        iconKey: 'scale',
-        permission: 'units.view',
-      },
-      {
-        href: '/operations/inventory',
-        label: 'Inventory Overview',
+        href: '/inventory',
+        label: 'Inventory',
         iconKey: 'box',
-        permission: 'inventory.view',
-      },
-      {
-        href: '/operations/inventory-balances',
-        label: 'Inventory Balances',
-        iconKey: 'barChart',
-        permission: 'inventory.view',
-      },
-      {
-        href: '/operations/inventory-movements',
-        label: 'Inventory Movements',
-        iconKey: 'fileText',
-        permission: 'inventory.movements.view',
-      },
-      {
-        href: '/operations/stock-adjustments',
-        label: 'Stock Adjustments',
-        iconKey: 'clipboardList',
-        permission: 'inventory.adjustments.create',
+        permissionsAny: [
+          'inventory.view',
+          'inventory.movements.view',
+          'inventory.adjustments.create',
+          'inventory.adjustments.approve',
+          'inventory.adjustments.post',
+          'products.view',
+          'product_categories.view',
+          'units.view',
+          'product_batches.view',
+          'product_batches.manage',
+          'stock_damage.view',
+          'stock_damage.create',
+          'stock_damage.approve',
+          'stock_damage.post',
+          'operations.reports.view',
+          'westsides.reports.view',
+        ],
       },
       {
         href: '/operations/sales-orders',
@@ -455,12 +438,6 @@ export const NAV: NavItem[] = [
         permission: 'customers.view',
       },
       {
-        href: '/westsides/inventory/live',
-        label: 'Live Inventory',
-        iconKey: 'box',
-        permission: 'inventory.view',
-      },
-      {
         href: '/westsides/daily-close',
         label: 'Daily Close',
         iconKey: 'fileText',
@@ -477,18 +454,6 @@ export const NAV: NavItem[] = [
         label: 'Price Agreements',
         iconKey: 'scale',
         permission: 'customer_price_agreements.view',
-      },
-      {
-        href: '/westsides/product-batches',
-        label: 'Product Batches',
-        iconKey: 'box',
-        permission: 'product_batches.view',
-      },
-      {
-        href: '/westsides/stock-damage',
-        label: 'Stock Damage',
-        iconKey: 'clipboardList',
-        permission: 'stock_damage.view',
       },
       {
         href: '/westsides/returnable-packages',
@@ -1050,27 +1015,33 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     setExpanded((prev) => ({ ...prev, [label]: !prev[label] }));
   }
 
-  function canSee(permission?: string) {
-    if (!permission) return true;
-    return hasPermission(permission);
+  function canSee(permission?: string, permissionsAny?: string[]) {
+    if (permission && !hasPermission(permission)) return false;
+    if (permissionsAny?.length && !permissionsAny.some((candidate) => hasPermission(candidate))) {
+      return false;
+    }
+    return true;
   }
 
   // Permission gate for favorites: look up the route's declared permission from
   // the canonical NAV tree so a starred item the user can no longer access is
   // hidden (and, if it's stale, offer the star to unpin it).
-  function permissionForHref(href: string): string | undefined {
+  function permissionsForHref(href: string): Pick<NavLeaf, 'permission' | 'permissionsAny'> {
     for (const item of NAV) {
       if (isGroup(item)) {
         const child = item.children.find((c) => c.href === href);
-        if (child) return child.permission ?? item.permission;
+        if (child) return { permission: child.permission ?? item.permission, permissionsAny: child.permissionsAny };
       } else if (item.href === href) {
-        return item.permission;
+        return { permission: item.permission, permissionsAny: item.permissionsAny };
       }
     }
-    return undefined;
+    return {};
   }
 
-  const visibleFavorites = favorites.filter((f) => canSee(permissionForHref(f.href)));
+  const visibleFavorites = favorites.filter((f) => {
+    const gate = permissionsForHref(f.href);
+    return canSee(gate.permission, gate.permissionsAny);
+  });
 
   return (
     <>
@@ -1164,7 +1135,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           ) : (
             NAV.map((item) => {
               if (!isGroup(item)) {
-                if (!canSee(item.permission)) return null;
+                if (!canSee(item.permission, item.permissionsAny)) return null;
                 const active = isActive(item.href, pathname);
                 return (
                   <Link
@@ -1187,7 +1158,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               }
 
               // Group
-              const visibleChildren = item.children.filter((c) => canSee(c.permission));
+              const visibleChildren = item.children.filter((c) => canSee(c.permission, c.permissionsAny));
               // A group whose every child is permission-filtered is dead weight
               // even when the group itself has no permission gate — hide it.
               if (visibleChildren.length === 0) return null;

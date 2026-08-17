@@ -192,7 +192,7 @@ function buildHref(path: string, params: Record<string, string | null | undefine
     if (value) query.set(key, value);
   });
   const suffix = query.toString();
-  return suffix ? `${path}?${suffix}` : path;
+  return suffix ? `${path}${path.includes('?') ? '&' : '?'}${suffix}` : path;
 }
 
 const methodKey = (m: MethodLine) => `${m.paymentMethod}|${m.cashAccountId ?? ''}`;
@@ -1409,7 +1409,7 @@ export default function DailyClosePage() {
                       </Td>
                       <Td>
                         <InlineLink
-                          href={buildHref('/westsides/inventory/live', {
+                          href={buildHref('/inventory?tab=stock&view=live', {
                             search: p.sku ?? p.productName,
                           })}
                         >

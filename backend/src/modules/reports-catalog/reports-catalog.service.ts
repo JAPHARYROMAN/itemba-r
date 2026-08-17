@@ -1113,13 +1113,13 @@ export class ReportsCatalogService {
         },
         {
           label: 'Inventory movements',
-          href: '/operations/inventory-movements',
+          href: '/inventory?tab=stock&view=movements',
           target: 'inventory-movement',
           evidenceType: 'inventory_movement',
         },
         {
           label: 'Products',
-          href: '/operations/products',
+          href: '/inventory?tab=catalog&view=products',
           target: 'product',
           evidenceType: 'product_master',
         },
@@ -1229,11 +1229,11 @@ export class ReportsCatalogService {
     }
     if (entry.sector === 'OPERATIONS') {
       return [
-        { name: 'Products', module: 'Operations', sourcePath: '/operations/products' },
+        { name: 'Products', module: 'Operations', sourcePath: '/inventory?tab=catalog&view=products' },
         {
           name: 'Inventory Movements',
           module: 'Operations',
-          sourcePath: '/operations/inventory-movements',
+          sourcePath: '/inventory?tab=stock&view=movements',
         },
         { name: 'Sales Orders', module: 'Operations', sourcePath: '/operations/sales-orders' },
         {

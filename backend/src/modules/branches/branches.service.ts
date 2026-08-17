@@ -25,11 +25,20 @@ export class BranchesService {
     const where: Prisma.BranchWhereInput = { deletedAt: null };
     const divisionWhere: Prisma.DivisionWhereInput = { deletedAt: null };
 
-    if (args.divisionId) where.divisionId = args.divisionId;
+    if (args.divisionId) {
+      const division = await this.prisma.division.findFirst({
+        where: { id: args.divisionId, deletedAt: null },
+        select: { companyId: true },
+      });
+      if (!division) return [];
+      await this.companyScope.assertCanAccessCompany(user, division.companyId);
+      where.divisionId = args.divisionId;
+      divisionWhere.companyId = division.companyId;
+    }
     if (args.companyId) {
       await this.companyScope.assertCanAccessCompany(user, args.companyId);
       divisionWhere.companyId = args.companyId;
-    } else {
+    } else if (!args.divisionId) {
       const accessibleCompanyIds = await this.companyScope.accessibleCompanyIds(user);
       if (accessibleCompanyIds !== null) {
         divisionWhere.companyId = { in: accessibleCompanyIds };

@@ -13,6 +13,7 @@ import {
   EmptyState,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useInventoryWorkspace } from '@/features/inventory/inventory-workspace-context';
 import { backendList, backendPage } from '@/lib/api-client';
 import { rowsToCsv, downloadTextFile } from '@/lib/report-export';
 import { downloadTablePdf } from '@/lib/export-download';
@@ -208,11 +209,13 @@ function ReferenceCell({ mov }: { mov: InventoryMovement }) {
 
 export default function InventoryMovementsPage() {
   const { hasPermission } = useAuth();
+  const workspace = useInventoryWorkspace();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [data, setData] = useState<Paginated<InventoryMovement> | null>(null);
   const [loading, setLoading] = useState(true);
   const [companyId, setCompanyId] = useState('');
+  const [divisionId, setDivisionId] = useState('');
   const [locationId, setLocationId] = useState('');
   const [productId, setProductId] = useState('');
   const [movementType, setMovementType] = useState('');
@@ -223,8 +226,20 @@ export default function InventoryMovementsPage() {
   const [page, setPage] = useState(1);
   const [error, setError] = useState('');
   const [exportingPdf, setExportingPdf] = useState(false);
+  const embedded = Boolean(workspace);
+  const workspaceCompanyId = workspace?.scope.companyId;
+  const workspaceDivisionId = workspace?.scope.divisionId;
+  const workspaceBranchId = workspace?.scope.branchId;
 
   const canView = hasPermission('inventory.movements.view');
+
+  useEffect(() => {
+    if (workspaceCompanyId === undefined) return;
+    setCompanyId(workspaceCompanyId);
+    setDivisionId(workspaceDivisionId ?? '');
+    setLocationId(workspaceBranchId ?? '');
+    setPage(1);
+  }, [workspaceBranchId, workspaceCompanyId, workspaceDivisionId]);
 
   useEffect(() => {
     // Drill-through: hydrate filters from the URL — e.g. a balance row links here
@@ -232,11 +247,13 @@ export default function InventoryMovementsPage() {
     const params = new URLSearchParams(window.location.search);
     const get = (k: string) => params.get(k) ?? '';
     if (get('companyId')) setCompanyId(get('companyId'));
+    if (get('divisionId')) setDivisionId(get('divisionId'));
     if (get('productId')) setProductId(get('productId'));
     if (get('movementType')) setMovementType(get('movementType'));
     if (get('referenceType')) setReferenceType(get('referenceType'));
     if (get('referenceId')) setReferenceId(get('referenceId'));
     if (get('locationId')) setLocationId(get('locationId'));
+    else if (get('branchId')) setLocationId(get('branchId'));
   }, []);
 
   useEffect(() => {
@@ -266,7 +283,12 @@ export default function InventoryMovementsPage() {
     }
     let cancelled = false;
     backendList<Branch>('/branches', {
-      query: { companyId, activeOnly: true, limit: 200 },
+      query: {
+        companyId,
+        divisionId: embedded ? divisionId || undefined : undefined,
+        activeOnly: true,
+        limit: 200,
+      },
     })
       .then((rows) => {
         if (!cancelled) setBranches(rows);
@@ -277,7 +299,7 @@ export default function InventoryMovementsPage() {
     return () => {
       cancelled = true;
     };
-  }, [canView, companyId]);
+  }, [canView, companyId, divisionId, embedded]);
 
   const load = useCallback(async () => {
     if (!canView) return;
@@ -289,6 +311,8 @@ export default function InventoryMovementsPage() {
           page,
           limit: 20,
           companyId: companyId || undefined,
+          divisionId: divisionId || undefined,
+          branchId: locationId || undefined,
           locationId: locationId || undefined,
           productId: productId || undefined,
           movementType: movementType || undefined,
@@ -309,6 +333,7 @@ export default function InventoryMovementsPage() {
     canView,
     page,
     companyId,
+    divisionId,
     locationId,
     productId,
     movementType,
@@ -376,6 +401,7 @@ export default function InventoryMovementsPage() {
     const subtitle =
       [
         companyId ? companies.find((c) => c.id === companyId)?.name : '',
+        divisionId ? 'Selected division' : '',
         locationId
           ? branches.find((b) => b.id === locationId)?.name ?? ''
           : '',
@@ -494,6 +520,8 @@ export default function InventoryMovementsPage() {
               value={productId}
               onChange={(id) => reset(setProductId)(id)}
               companyId={companyId}
+              divisionId={divisionId}
+              branchId={locationId}
               placeholder="All products"
               className="w-56"
             />

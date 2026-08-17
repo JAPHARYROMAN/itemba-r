@@ -317,6 +317,8 @@ const REPORTS: ReportDef[] = [
   },
 ];
 
+const NON_INVENTORY_REPORTS = REPORTS.filter((report) => report.category !== 'Inventory');
+
 const SETTINGS_KEY = 'itemba.operations.readable-reports.v1';
 const META_KEY = '_reportMeta';
 const MONEY_RE =
@@ -703,7 +705,7 @@ export default function OperationsReportsPage() {
   const [dateTo, setDateTo] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
-  const [activeKey, setActiveKey] = useState(REPORTS[0].key);
+  const [activeKey, setActiveKey] = useState(NON_INVENTORY_REPORTS[0].key);
   const [hydrated, setHydrated] = useState(false);
   const [reportResult, setReportResult] = useState<NormalizedReport>({ rows: [], raw: null });
   const [loading, setLoading] = useState(false);
@@ -719,9 +721,10 @@ export default function OperationsReportsPage() {
     skipEmployees: true,
   });
 
-  const activeReport = REPORTS.find((report) => report.key === activeKey) ?? REPORTS[0];
+  const activeReport =
+    NON_INVENTORY_REPORTS.find((report) => report.key === activeKey) ?? NON_INVENTORY_REPORTS[0];
   const categories = useMemo(
-    () => Array.from(new Set(REPORTS.map((report) => report.category))),
+    () => Array.from(new Set(NON_INVENTORY_REPORTS.map((report) => report.category))),
     [],
   );
   const currentCompanyLabel = companyOptions.find((option) => option.value === companyId)?.label;
@@ -754,7 +757,10 @@ export default function OperationsReportsPage() {
         if (settings.dateTo) setDateTo(settings.dateTo);
         if (settings.statusFilter) setStatusFilter(settings.statusFilter);
         if (settings.paymentStatus) setPaymentStatus(settings.paymentStatus);
-        if (settings.activeKey && REPORTS.some((report) => report.key === settings.activeKey)) {
+        if (
+          settings.activeKey &&
+          NON_INVENTORY_REPORTS.some((report) => report.key === settings.activeKey)
+        ) {
           setActiveKey(settings.activeKey);
         }
       }
@@ -880,7 +886,7 @@ export default function OperationsReportsPage() {
   if (!canView) {
     return (
       <div className="p-6">
-        <PageHeader title="Operations Reports" subtitle="Stock, sales, and purchase analytics" />
+        <PageHeader title="Operations Reports" subtitle="Sales and purchase analytics" />
         <Card className="mt-8 p-10 text-center text-sm">
           <span style={{ color: 'var(--aurora-text-muted)' }}>Access Restricted</span>
         </Card>
@@ -894,7 +900,7 @@ export default function OperationsReportsPage() {
       <div className="no-print flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <PageHeader
           title="Operations Reports"
-          subtitle="Readable operational reports for inventory, stock adjustments, sales, purchases, customers, suppliers, and product performance."
+          subtitle="Readable operational reports for sales, purchases, customers, suppliers, and product performance."
         />
         <Link
           href="/operations/reports/suppliers"
@@ -925,7 +931,7 @@ export default function OperationsReportsPage() {
             >
               {categories.map((category) => (
                 <optgroup key={category} label={category}>
-                  {REPORTS.filter((report) => report.category === category).map((report) => (
+                  {NON_INVENTORY_REPORTS.filter((report) => report.category === category).map((report) => (
                     <option key={report.key} value={report.key}>
                       {report.title}
                     </option>

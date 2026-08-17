@@ -356,14 +356,14 @@ export default function OperationsDashboardPage() {
                 variant={riskVariant(data.suppliers.blocked, 'watch')}
               />
             </Link>
-            <Link href="/operations/products" className="block">
+            <Link href="/inventory?tab=catalog&view=products" className="block">
               <StatCard
                 label="Total Products"
                 value={fmtNum(data.products.total)}
                 hint={`${fmtNum(data.products.active)} active`}
               />
             </Link>
-            <Link href="/operations/inventory-balances?lowStock=1" className="block">
+            <Link href="/inventory?tab=stock&view=balances&lowStock=1" className="block">
               <StatCard
                 label="Out of Stock"
                 value={fmtNum(data.products.outOfStock)}

@@ -16,6 +16,7 @@ interface ProductPickerProps {
   onChange: (productId: string, product?: ProductPickerOption) => void;
   /** Company scope for the search (and the backend availability join). */
   companyId?: string;
+  divisionId?: string;
   branchId?: string;
   placeholder?: string;
   disabled?: boolean;
@@ -46,6 +47,7 @@ export function ProductPicker({
   value,
   onChange,
   companyId,
+  divisionId,
   branchId,
   placeholder = 'Search products…',
   disabled,
@@ -101,6 +103,7 @@ export function ProductPicker({
         query: {
           search: query.trim() || undefined,
           companyId: companyId || undefined,
+          divisionId: divisionId || undefined,
           branchId: branchId || undefined,
           limit: 20,
         },
@@ -121,7 +124,7 @@ export function ProductPicker({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query, open, companyId, branchId]);
+  }, [query, open, companyId, divisionId, branchId]);
 
   // Close on outside click.
   useEffect(() => {

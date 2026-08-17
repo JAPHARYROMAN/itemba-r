@@ -29,6 +29,7 @@ import {
   backendPost,
 } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useInventoryWorkspace } from '@/features/inventory/inventory-workspace-context';
 
 interface Company {
   id: string;
@@ -113,6 +114,7 @@ const emptyPaginated = <T,>(): Paginated<T> => ({ data: [], total: 0, page: 1, t
 
 interface AdjustmentForm {
   companyId: string;
+  divisionId: string;
   branchId: string;
   reason: string;
   notes: string;
@@ -129,6 +131,7 @@ const BLANK_LINE = (): AdjustmentLine => ({
 });
 const BLANK_FORM: AdjustmentForm = {
   companyId: '',
+  divisionId: '',
   branchId: '',
   reason: '',
   notes: '',
@@ -144,11 +147,22 @@ function CreateAdjustmentModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const workspace = useInventoryWorkspace();
   const [form, setForm] = useState<AdjustmentForm>({ ...BLANK_FORM });
   const [branches, setBranches] = useState<Branch[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!workspace) return;
+    setForm((current) => ({
+      ...current,
+      companyId: workspace.scope.companyId,
+      divisionId: workspace.scope.divisionId,
+      branchId: workspace.scope.branchId,
+    }));
+  }, [workspace?.scope.branchId, workspace?.scope.companyId, workspace?.scope.divisionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -262,6 +276,7 @@ function CreateAdjustmentModal({
     try {
       const body = {
         companyId: form.companyId,
+        ...(form.divisionId ? { divisionId: form.divisionId } : {}),
         branchId: form.branchId,
         reason: form.reason,
         notes: form.notes || undefined,
@@ -316,6 +331,7 @@ function CreateAdjustmentModal({
               setField('branchId', '');
             }}
             placeholder="Select company"
+            disabled={Boolean(workspace)}
           >
             {companies.map((c) => (
               <option key={c.id} value={c.id}>
@@ -329,6 +345,7 @@ function CreateAdjustmentModal({
             value={form.branchId}
             onChange={(e) => setField('branchId', e.target.value)}
             placeholder={form.companyId ? 'Select branch/location' : 'Select company first'}
+            disabled={!form.companyId || Boolean(workspace)}
           >
             {branches.map((branch) => (
               <option key={branch.id} value={branch.id}>
@@ -654,6 +671,7 @@ function DeleteConfirm({
 
 export default function StockAdjustmentsPage() {
   const { hasPermission } = useAuth();
+  const workspace = useInventoryWorkspace();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<StockAdjustment> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -677,6 +695,12 @@ export default function StockAdjustmentsPage() {
   const canCreate = hasPermission('inventory.adjustments.create');
   const canApprove = hasPermission('inventory.adjustments.approve');
   const canPost = hasPermission('inventory.adjustments.post');
+
+  useEffect(() => {
+    if (!workspace) return;
+    setCompanyId(workspace.scope.companyId);
+    setPage(1);
+  }, [workspace?.scope.companyId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1083,7 +1107,16 @@ export default function StockAdjustmentsPage() {
               {exportingPdf ? 'Exporting…' : 'Export PDF'}
             </Btn>
             {canCreate ? (
-              <Btn variant="primary" onClick={() => setCreating(true)}>
+              <Btn
+                variant="primary"
+                onClick={() => setCreating(true)}
+                disabled={Boolean(workspace && (!workspace.scope.companyId || !workspace.scope.branchId))}
+                title={
+                  workspace && (!workspace.scope.companyId || !workspace.scope.branchId)
+                    ? 'Select a company and branch above before creating an adjustment'
+                    : undefined
+                }
+              >
                 + New Adjustment
               </Btn>
             ) : null}
@@ -1206,7 +1239,7 @@ export default function StockAdjustmentsPage() {
                       )}
                       {a.status === 'POSTED' && (
                         <Link
-                          href={`/operations/inventory-movements?companyId=${encodeURIComponent(a.companyId)}&referenceType=StockAdjustment&referenceId=${encodeURIComponent(a.id)}`}
+                          href={`/inventory?tab=stock&view=movements&companyId=${encodeURIComponent(a.companyId)}&referenceType=StockAdjustment&referenceId=${encodeURIComponent(a.id)}`}
                           className="text-xs text-blue-600 hover:underline"
                           title="View the stock movements this adjustment posted"
                         >

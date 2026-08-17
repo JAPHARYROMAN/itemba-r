@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Btn, Card, FormInput, FormSelect, FormTextarea, Modal, PageHeader, ProductPicker, showToast } from '@/components/ui';
 import type { ProductPickerOption } from '@/components/ui';
 import { ApiError, backendPost } from '@/lib/api-client';
+import { useInventoryWorkspace } from '@/features/inventory/inventory-workspace-context';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -83,6 +84,7 @@ function listFromJson<T>(j: unknown): T[] {
 interface ModalProps { onClose: () => void; onSaved: () => void }
 
 function DamageModal({ onClose, onSaved }: ModalProps) {
+  const workspace = useInventoryWorkspace();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -96,6 +98,12 @@ function DamageModal({ onClose, onSaved }: ModalProps) {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!workspace) return;
+    setCompanyId(workspace.scope.companyId);
+    setBranchId(workspace.scope.branchId);
+  }, [workspace?.scope.branchId, workspace?.scope.companyId]);
 
   useEffect(() => {
     fetch('/api/backend/companies?limit=100')
@@ -151,10 +159,10 @@ function DamageModal({ onClose, onSaved }: ModalProps) {
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="danger" onClick={submit} loading={saving}>Report Damage</Btn></>}>
       {error && <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
       <div className="grid grid-cols-2 gap-4">
-        <FormSelect label="Company" required value={companyId} onChange={(e) => { setCompanyId(e.target.value); setProductId(''); }} placeholder="Select…">
+        <FormSelect label="Company" required value={companyId} onChange={(e) => { setCompanyId(e.target.value); setProductId(''); }} placeholder="Select…" disabled={Boolean(workspace)}>
           {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </FormSelect>
-        <FormSelect label="Branch" required value={branchId} onChange={(e) => setBranchId(e.target.value)} placeholder={companyId ? 'Select…' : 'Select company first'} disabled={!companyId}>
+        <FormSelect label="Branch" required value={branchId} onChange={(e) => setBranchId(e.target.value)} placeholder={companyId ? 'Select…' : 'Select company first'} disabled={!companyId || Boolean(workspace)}>
           {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </FormSelect>
         <div className="col-span-2">
@@ -198,6 +206,7 @@ const STATUS_ACTIONS: Record<string, { action: DamageAction; label: string; cls:
 };
 
 export default function StockDamagePage() {
+  const workspace = useInventoryWorkspace();
   const [items, setItems] = useState<StockDamage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -207,14 +216,17 @@ export default function StockDamagePage() {
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const res = await fetch('/api/backend/westsides/stock-damage?limit=100');
+      const params = new URLSearchParams({ limit: '100' });
+      if (workspace?.scope.companyId) params.set('companyId', workspace.scope.companyId);
+      if (workspace?.scope.branchId) params.set('branchId', workspace.scope.branchId);
+      const res = await fetch(`/api/backend/westsides/stock-damage?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to load stock damage records');
       const json = await res.json();
       setItems(json.data?.data ?? json.data ?? []);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error loading data');
     } finally { setLoading(false); }
-  }, []);
+  }, [workspace?.scope.branchId, workspace?.scope.companyId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -237,7 +249,16 @@ export default function StockDamagePage() {
     <div className="p-6 space-y-5">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <PageHeader title="Stock Damage & Breakage" subtitle="Report and manage stock damage, breakage, and expiry" />
-        <button onClick={() => setModalOpen(true)} className="text-sm bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md font-medium">
+        <button
+          onClick={() => setModalOpen(true)}
+          disabled={Boolean(workspace && (!workspace.scope.companyId || !workspace.scope.branchId))}
+          title={
+            workspace && (!workspace.scope.companyId || !workspace.scope.branchId)
+              ? 'Select a company and branch above before reporting damage'
+              : undefined
+          }
+          className="text-sm bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md font-medium disabled:cursor-not-allowed disabled:opacity-50"
+        >
           + Report Damage
         </button>
       </div>

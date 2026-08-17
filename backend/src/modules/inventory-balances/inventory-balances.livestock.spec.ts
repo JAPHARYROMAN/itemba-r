@@ -49,6 +49,25 @@ function makeService(balances: any[]) {
 const user = { id: 'u1', companyId: 'company-A', companyAccess: [] } as any;
 
 describe('InventoryBalancesService.liveStock risk KPIs', () => {
+  it('applies division and branch filters without weakening company scope', async () => {
+    const { service, findMany } = makeService([]);
+
+    await service.liveStock(
+      { companyId: 'company-A', divisionId: 'division-1', branchId: 'branch-1' },
+      user,
+    );
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          companyId: 'company-A',
+          divisionId: 'division-1',
+          branchId: 'branch-1',
+        },
+      }),
+    );
+  });
+
   it('#8: criticalCount counts distinct rows and equals criticalItems length', async () => {
     // One LOW + over-reserved row (would have been counted twice by the old
     // out+low+negative sum) plus one healthy OK row.

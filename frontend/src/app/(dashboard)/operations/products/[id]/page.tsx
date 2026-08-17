@@ -410,7 +410,7 @@ export default function ProductDetailPage() {
           title="Product"
           breadcrumbs={[
             { label: 'Operations', href: '/operations' },
-            { label: 'Products', href: '/operations/products' },
+            { label: 'Products', href: '/inventory?tab=catalog&view=products' },
             { label: 'Detail' },
           ]}
         />
@@ -457,12 +457,12 @@ export default function ProductDetailPage() {
         }
         breadcrumbs={[
           { label: 'Operations', href: '/operations' },
-          { label: 'Products', href: '/operations/products' },
+          { label: 'Products', href: '/inventory?tab=catalog&view=products' },
           { label: product.name },
         ]}
         actions={
           <>
-            <Link href="/operations/products">
+            <Link href="/inventory?tab=catalog&view=products">
               <Btn variant="secondary" size="sm">
                 Back to Products
               </Btn>
@@ -576,7 +576,7 @@ export default function ProductDetailPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             {hasPermission('inventory.adjustments.create') && (
-              <Link href={`/operations/stock-adjustments${scopedQuery}`}>
+              <Link href={`/inventory?tab=controls&view=adjustments${scopedQuery ? `&${scopedQuery.slice(1)}` : ''}`}>
                 <Btn variant="secondary" size="sm">
                   Adjust Stock
                 </Btn>
@@ -880,7 +880,7 @@ export default function ProductDetailPage() {
                 style={{ borderColor: 'var(--aurora-border)' }}
               >
                 <Link
-                  href={`/operations/inventory-movements${scopedQuery}`}
+                  href={`/inventory?tab=stock&view=movements${scopedQuery ? `&${scopedQuery.slice(1)}` : ''}`}
                   className="text-xs text-blue-600 hover:underline"
                 >
                   Open full ledger →

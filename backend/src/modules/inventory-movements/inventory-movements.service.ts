@@ -55,6 +55,8 @@ export class InventoryMovementsService {
   private async buildMovementWhere(query: QueryInventoryMovementDto, user: AuthUser) {
     const {
       companyId,
+      divisionId,
+      branchId,
       productId,
       locationId,
       movementType,
@@ -67,8 +69,9 @@ export class InventoryMovementsService {
     const where: any = {
       ...(await this.companyScope.companyWhereFor(user, companyId)),
     };
+    if (divisionId) where.divisionId = divisionId;
     if (productId) where.productId = productId;
-    if (locationId) where.branchId = locationId;
+    if (branchId || locationId) where.branchId = branchId || locationId;
     if (movementType) where.movementType = movementType;
     if (referenceType) where.referenceType = referenceType;
     if (referenceId) where.referenceId = referenceId;

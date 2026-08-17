@@ -872,7 +872,7 @@ export class DashboardService {
           title: `${b.product.productCode} has negative stock`,
           description: `${b.product.name} at ${b.branch?.code ?? 'unassigned'} is ${Number(b.quantityOnHand).toLocaleString()} units`,
           dueDate: null,
-          href: `/operations/products?search=${encodeURIComponent(b.product.productCode)}`,
+          href: `/inventory?tab=catalog&view=products&search=${encodeURIComponent(b.product.productCode)}`,
         })),
         ...unpostedAdjustments.map((a) => ({
           id: `adjustment-${a.id}`,
@@ -881,7 +881,7 @@ export class DashboardService {
           title: `${a.adjustmentNumber} is approved but not posted`,
           description: `${a.branch?.code ?? 'All branches'} · ${a.reason}`,
           dueDate: a.createdAt,
-          href: '/operations/stock-adjustments',
+          href: '/inventory?tab=controls&view=adjustments',
         })),
         ...approvalExceptions.map((a) => ({
           id: `approval-${a.id}`,

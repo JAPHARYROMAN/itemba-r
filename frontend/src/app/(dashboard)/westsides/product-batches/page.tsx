@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Btn, Card, FormInput, FormSelect, Modal, PageHeader, ProductPicker, showToast } from '@/components/ui';
 import type { ProductPickerOption } from '@/components/ui';
 import { ApiError, backendPost } from '@/lib/api-client';
+import { useInventoryWorkspace } from '@/features/inventory/inventory-workspace-context';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ function listFromJson<T>(j: unknown): T[] {
 interface ModalProps { onClose: () => void; onSaved: () => void }
 
 function BatchModal({ onClose, onSaved }: ModalProps) {
+  const workspace = useInventoryWorkspace();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -99,6 +101,12 @@ function BatchModal({ onClose, onSaved }: ModalProps) {
   const [initialQuantity, setInitialQuantity] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!workspace) return;
+    setCompanyId(workspace.scope.companyId);
+    setBranchId(workspace.scope.branchId);
+  }, [workspace?.scope.branchId, workspace?.scope.companyId]);
 
   useEffect(() => {
     fetch('/api/backend/companies?limit=100')
@@ -198,6 +206,7 @@ const TAB_ENDPOINT: Record<TabKey, string> = {
 };
 
 export default function ProductBatchesPage() {
+  const workspace = useInventoryWorkspace();
   const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [items, setItems] = useState<ProductBatch[]>([]);
   const [loading, setLoading] = useState(false);
@@ -207,14 +216,17 @@ export default function ProductBatchesPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const res = await fetch(`${TAB_ENDPOINT[activeTab]}?limit=100`);
+      const params = new URLSearchParams({ limit: '100' });
+      if (workspace?.scope.companyId) params.set('companyId', workspace.scope.companyId);
+      if (workspace?.scope.branchId) params.set('branchId', workspace.scope.branchId);
+      const res = await fetch(`${TAB_ENDPOINT[activeTab]}?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to load batches');
       const json = await res.json();
       setItems(json.data?.data ?? json.data ?? []);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error loading data');
     } finally { setLoading(false); }
-  }, [activeTab]);
+  }, [activeTab, workspace?.scope.branchId, workspace?.scope.companyId]);
 
   useEffect(() => { load(); }, [load]);
 

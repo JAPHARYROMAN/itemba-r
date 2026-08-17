@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Btn, Card, EmptyState, PageHeader, PageToolbar, SkeletonTable, StatCard } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet, backendList, backendPage } from '@/lib/api-client';
+import { useInventoryWorkspace } from '@/features/inventory/inventory-workspace-context';
 import { toFiniteNumber } from '@/lib/design-system/formatters';
 import { downloadTablePdf } from '@/lib/export-download';
 import { cellToString, downloadTextFile, rowsToCsv } from '@/lib/report-export';
@@ -186,6 +187,7 @@ function CostBadge({ balance }: { balance: InventoryBalance }) {
 
 export default function InventoryBalancesPage() {
   const { hasPermission } = useAuth();
+  const workspace = useInventoryWorkspace();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -209,6 +211,14 @@ export default function InventoryBalancesPage() {
   const [exporting, setExporting] = useState<false | 'csv' | 'pdf'>(false);
 
   const canView = hasPermission('inventory.view');
+
+  useEffect(() => {
+    if (!workspace) return;
+    setCompanyId(workspace.scope.companyId);
+    setDivisionId(workspace.scope.divisionId);
+    setBranchId(workspace.scope.branchId);
+    setPage(1);
+  }, [workspace?.scope.branchId, workspace?.scope.companyId, workspace?.scope.divisionId]);
 
   const query = useCallback(
     (extra?: Record<string, string | number>) => ({
@@ -300,6 +310,10 @@ export default function InventoryBalancesPage() {
     if (low) setStockStatusFilter('LOW_STOCK');
     const companyParam = params.get('companyId');
     if (companyParam) setCompanyId(companyParam);
+    const divisionParam = params.get('divisionId');
+    if (divisionParam) setDivisionId(divisionParam);
+    const branchParam = params.get('branchId');
+    if (branchParam) setBranchId(branchParam);
   }, []);
 
   const load = useCallback(async () => {
@@ -334,9 +348,9 @@ export default function InventoryBalancesPage() {
   };
 
   const resetFilters = () => {
-    setCompanyId('');
-    setDivisionId('');
-    setBranchId('');
+    setCompanyId(workspace?.scope.companyId ?? '');
+    setDivisionId(workspace?.scope.divisionId ?? '');
+    setBranchId(workspace?.scope.branchId ?? '');
     setCategoryId('');
     setProductFamilyId('');
     setSearchInput('');
@@ -695,14 +709,14 @@ export default function InventoryBalancesPage() {
                     <td className={`${tdCls} text-right`}>
                       <div className="flex flex-wrap justify-end gap-1">
                         <Link
-                          href={`/operations/inventory-movements?companyId=${encodeURIComponent(balance.companyId)}&productId=${encodeURIComponent(balance.productId)}`}
+                          href={`/inventory?tab=stock&view=movements&companyId=${encodeURIComponent(balance.companyId)}&productId=${encodeURIComponent(balance.productId)}`}
                           className="rounded-lg border px-2 py-1 text-xs"
                           style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
                         >
                           Movements
                         </Link>
                         <Link
-                          href={`/operations/products/${balance.productId}`}
+                          href={`/inventory/products/${balance.productId}`}
                           className="rounded-lg border px-2 py-1 text-xs"
                           style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text)' }}
                         >

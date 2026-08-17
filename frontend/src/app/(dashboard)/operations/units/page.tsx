@@ -16,6 +16,7 @@ import {
   FormTextarea,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useInventoryWorkspace } from '@/features/inventory/inventory-workspace-context';
 import {
   backendDelete,
   backendList,
@@ -111,12 +112,14 @@ function UnitModal({
   mode,
   initial,
   companies,
+  defaultCompanyId,
   onClose,
   onSaved,
 }: {
   mode: 'create' | 'edit';
   initial?: Unit;
   companies: Company[];
+  defaultCompanyId?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -130,7 +133,7 @@ function UnitModal({
           isBaseUnit: initial.isBaseUnit,
           status: initial.status ?? 'ACTIVE',
         }
-      : { ...BLANK_UNIT },
+      : { ...BLANK_UNIT, companyId: defaultCompanyId ?? '' },
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -454,6 +457,7 @@ function ConversionModal({
 
 export default function UnitsPage() {
   const { hasPermission } = useAuth();
+  const workspace = useInventoryWorkspace();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [allUnits, setAllUnits] = useState<Unit[]>([]);
   const [units, setUnits] = useState<Paginated<Unit> | null>(null);
@@ -665,6 +669,7 @@ export default function UnitsPage() {
         <UnitModal
           mode="create"
           companies={companies}
+          defaultCompanyId={workspace?.scope.companyId || undefined}
           onClose={() => setCreatingUnit(false)}
           onSaved={() => {
             setCreatingUnit(false);
@@ -677,6 +682,7 @@ export default function UnitsPage() {
           mode="edit"
           initial={editingUnit}
           companies={companies}
+          defaultCompanyId={workspace?.scope.companyId || undefined}
           onClose={() => setEditingUnit(null)}
           onSaved={() => {
             setEditingUnit(null);

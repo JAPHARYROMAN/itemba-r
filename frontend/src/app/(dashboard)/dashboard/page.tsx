@@ -792,7 +792,7 @@ export default function DashboardPage() {
               <WorkstreamCard
                 title="Stock Health"
                 description="Inventory value and the gaps that can block sales or posting."
-                href="/operations/products"
+                href="/inventory?tab=catalog&view=products"
                 icon="inventory"
               >
                 <MiniMetric label="Products" value={data.operations.inventory.activeProducts} />

@@ -14,6 +14,7 @@
   "/record-book/expenses/[id]": "/record-book/expenses/e2e-expense",
   "/operations/customers/[id]": "/operations/customers/e2e-customer",
   "/operations/products/[id]": "/operations/products/e2e-product",
+  "/inventory/products/[id]": "/inventory/products/e2e-product",
   "/operations/purchase-orders/[id]": "/operations/purchase-orders/e2e-purchase-order",
   "/operations/purchase-orders/[id]/print": "/operations/purchase-orders/e2e-purchase-order/print",
   "/operations/purchase-orders/order-drafts/[id]": "/operations/purchase-orders/order-drafts/e2e-supplier-order-draft",

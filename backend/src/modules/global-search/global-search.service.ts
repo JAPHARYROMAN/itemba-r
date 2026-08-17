@@ -307,7 +307,7 @@ export class GlobalSearchService {
           row.productFamily?.name,
           row.company?.code,
         ]),
-        href: `/operations/products?search=${encodeSearch(row.productCode)}`,
+        href: `/inventory?tab=catalog&view=products&search=${encodeSearch(row.productCode)}`,
         badge: row.status,
       })),
     };

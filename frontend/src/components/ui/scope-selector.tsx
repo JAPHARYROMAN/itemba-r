@@ -34,6 +34,7 @@ interface ScopeSelectorProps {
   onChange: (next: ScopeValue) => void;
   companyOnly?: boolean;
   divisionOnly?: boolean;
+  autoSelectSingleCompany?: boolean;
   disabled?: boolean;
   labels?: { company?: string; division?: string; branch?: string };
 }
@@ -50,6 +51,7 @@ export function ScopeSelector({
   onChange,
   companyOnly,
   divisionOnly,
+  autoSelectSingleCompany = false,
   disabled,
   labels,
 }: ScopeSelectorProps) {
@@ -60,8 +62,17 @@ export function ScopeSelector({
   useEffect(() => {
     fetch('/api/backend/companies?limit=100')
       .then((response) => response.json())
-      .then((json) => setCompanies(unwrapList<Company>(json)))
+      .then((json) => {
+        const rows = unwrapList<Company>(json);
+        setCompanies(rows);
+        if (autoSelectSingleCompany && !value.companyId && rows.length === 1) {
+          onChange({ companyId: rows[0].id, divisionId: '', branchId: '' });
+        }
+      })
       .catch(() => setCompanies([]));
+  // The company list is loaded once. The workspace opts into automatic
+  // selection only when it has exactly one permitted company.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -80,11 +91,17 @@ export function ScopeSelector({
       setBranches([]);
       return;
     }
-    fetch(`/api/backend/branches?divisionId=${encodeURIComponent(value.divisionId)}&limit=100`)
+    const params = new URLSearchParams({
+      companyId: value.companyId,
+      divisionId: value.divisionId,
+      activeOnly: 'true',
+      limit: '100',
+    });
+    fetch(`/api/backend/branches?${params}`)
       .then((response) => response.json())
       .then((json) => setBranches(unwrapList<Branch>(json)))
       .catch(() => setBranches([]));
-  }, [value.divisionId, companyOnly, divisionOnly]);
+  }, [value.companyId, value.divisionId, companyOnly, divisionOnly]);
 
   return (
     <div className="flex flex-wrap items-end gap-3">

@@ -142,7 +142,7 @@ export class WestsidesReportsService {
       .filter(([, value]) => value !== null && value !== undefined && value !== '')
       .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
       .join('&');
-    return query ? `${path}?${query}` : path;
+    return query ? `${path}${path.includes('?') ? '&' : '?'}${query}` : path;
   }
 
   private reportMeta(meta: ReportRowMeta) {
@@ -1176,7 +1176,7 @@ export class WestsidesReportsService {
           drillThrough: [
             {
               label: 'Open product',
-              href: this.route('/operations/products', {
+              href: this.route('/inventory?tab=catalog&view=products', {
                 search: product?.productCode ?? product?.sku ?? product?.name ?? row.productId,
               }),
               entityType: 'product',
@@ -1184,7 +1184,7 @@ export class WestsidesReportsService {
             },
             {
               label: 'Review live stock',
-              href: this.route('/westsides/inventory/live', {
+              href: this.route('/inventory?tab=stock&view=live', {
                 companyId: query.companyId,
                 branchId: query.branchId,
                 productId: row.productId,
@@ -1317,7 +1317,7 @@ export class WestsidesReportsService {
           drillThrough: [
             {
               label: 'Open product batches',
-              href: this.route('/westsides/product-batches', {
+              href: this.route('/inventory?tab=stock&view=batches', {
                 companyId: query.companyId,
                 branchId: query.branchId,
                 search: row.batchNumber,
@@ -1370,7 +1370,7 @@ export class WestsidesReportsService {
           drillThrough: [
             {
               label: 'Review stock damage',
-              href: this.route('/westsides/stock-damage', {
+              href: this.route('/inventory?tab=controls&view=damage', {
                 companyId: query.companyId,
                 branchId: query.branchId,
                 status: row.status,
@@ -1662,7 +1662,7 @@ export class WestsidesReportsService {
           drillThrough: [
             {
               label: 'Review live stock',
-              href: this.route('/westsides/inventory/live', {
+              href: this.route('/inventory?tab=stock&view=live', {
                 companyId: query.companyId,
                 branchId: query.branchId,
                 productId: row.productId,
@@ -1748,7 +1748,7 @@ export class WestsidesReportsService {
           drillThrough: [
             {
               label: 'Review live stock',
-              href: this.route('/westsides/inventory/live', {
+              href: this.route('/inventory?tab=stock&view=live', {
                 companyId: query.companyId,
                 branchId: query.branchId,
                 productId: row.productId,

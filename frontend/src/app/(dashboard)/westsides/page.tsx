@@ -436,11 +436,11 @@ const QUICK_LINKS = [
   { label: 'Customers', href: '/westsides/customers', tone: 'brand', group: 'Sell', icon: 'customers' },
   { label: 'Quotations', href: '/westsides/quotations', tone: 'neutral', group: 'Pipeline & pricing', icon: 'quotation' },
   { label: 'Price Lists', href: '/westsides/price-lists', tone: 'info', group: 'Pipeline & pricing', icon: 'calculator' },
-  { label: 'Live Inventory', href: '/westsides/inventory/live', tone: 'info', group: 'Stock & fulfilment', icon: 'inventory' },
-  { label: 'Product Batches', href: '/westsides/product-batches', tone: 'warn', group: 'Stock & fulfilment', icon: 'product' },
+  { label: 'Live Inventory', href: '/inventory?tab=stock&view=live', tone: 'info', group: 'Stock & fulfilment', icon: 'inventory' },
+  { label: 'Product Batches', href: '/inventory?tab=stock&view=batches', tone: 'warn', group: 'Stock & fulfilment', icon: 'product' },
   { label: 'Delivery Notes', href: '/westsides/delivery-notes', tone: 'neutral', group: 'Stock & fulfilment', icon: 'delivery' },
   { label: 'Daily Close', href: '/westsides/daily-close', tone: 'warn', group: 'Control & insight', icon: 'done' },
-  { label: 'Stock Damage', href: '/westsides/stock-damage', tone: 'danger', group: 'Control & insight', icon: 'alert' },
+  { label: 'Stock Damage', href: '/inventory?tab=controls&view=damage', tone: 'danger', group: 'Control & insight', icon: 'alert' },
   { label: 'Reports', href: '/westsides/reports', tone: 'brand', group: 'Control & insight', icon: 'report' },
 ] as const satisfies readonly {
   label: string;
@@ -806,7 +806,7 @@ export default function WestsidesCockpitPage() {
                 eyebrow="Stock risk"
                 title="Availability and shrinkage"
                 subtitle={`${formatCount(model.criticalSkus.length)} critical SKU${model.criticalSkus.length === 1 ? '' : 's'} in the watchlist`}
-                action={<TextLink href="/westsides/inventory/live">Live inventory</TextLink>}
+                action={<TextLink href="/inventory?tab=stock&view=live">Live inventory</TextLink>}
               />
               <div className="grid grid-cols-2 sm:grid-cols-4" style={BORDER}>
                 <InlineStat label="Out" value={formatCount(model.outOfStock)} tone="danger" />
@@ -1323,7 +1323,7 @@ function buildReadinessModel(
     },
     {
       label: 'Live inventory',
-      href: '/westsides/inventory/live',
+      href: '/inventory?tab=stock&view=live',
       description: 'Stockouts, low stock, reservation pressure, and value at risk.',
       tone: derived.outOfStock > 0 ? 'danger' : derived.lowStock > 0 ? 'warn' : 'good',
       count: derived.outOfStock + derived.lowStock,
@@ -1448,7 +1448,7 @@ function buildFallbackReadinessChecklist(derived: {
       score: stockScore,
       tone: stockScore >= 90 ? 'good' : derived.outOfStock > 0 ? 'danger' : 'warn',
       message: `${formatCount(derived.outOfStock)} out-of-stock and ${formatCount(derived.lowStock)} low-stock items.`,
-      href: '/westsides/inventory/live',
+      href: '/inventory?tab=stock&view=live',
       details: [
         metric('Out', formatCount(derived.outOfStock), derived.outOfStock > 0 ? 'danger' : 'good'),
         metric('Low', formatCount(derived.lowStock), derived.lowStock > 0 ? 'warn' : 'good'),
@@ -1558,7 +1558,7 @@ function buildExceptions(
           id: 'stock-out',
           title: 'Stockouts require allocation',
           description: `${formatCount(derived.outOfStock)} SKU${derived.outOfStock === 1 ? '' : 's'} out of stock.`,
-          href: '/westsides/inventory/live',
+          href: '/inventory?tab=stock&view=live',
           tone: 'danger',
         })
       : null,
@@ -1567,7 +1567,7 @@ function buildExceptions(
           id: 'low-stock',
           title: 'Low-stock replenishment queue',
           description: `${formatCount(derived.lowStock)} SKU${derived.lowStock === 1 ? '' : 's'} below threshold.`,
-          href: '/westsides/product-batches',
+          href: '/inventory?tab=stock&view=batches',
           tone: derived.outOfStock > 0 ? 'danger' : 'warn',
         })
       : null,
@@ -1603,7 +1603,7 @@ function buildExceptions(
           id: 'stock-damage',
           title: 'Stock damage approvals pending',
           description: `${formatCount(derived.pendingStockDamage)} damage item${derived.pendingStockDamage === 1 ? '' : 's'} need control review.`,
-          href: '/westsides/stock-damage',
+          href: '/inventory?tab=controls&view=damage',
           tone: 'danger',
         })
       : null,
@@ -1612,7 +1612,7 @@ function buildExceptions(
           id: 'expiring-batches',
           title: 'Expiring batches need sell-through',
           description: `${formatCount(derived.expiringBatches)} batch${derived.expiringBatches === 1 ? '' : 'es'} approaching expiry.`,
-          href: '/westsides/product-batches',
+          href: '/inventory?tab=stock&view=batches',
           tone: 'warn',
         })
       : null,
@@ -1663,7 +1663,7 @@ function buildActions(
           id: 'action-stock',
           label: 'Resolve stock alerts',
           description: `${formatCount(derived.outOfStock + derived.lowStock)} availability alert${derived.outOfStock + derived.lowStock === 1 ? '' : 's'} in the queue.`,
-          href: '/westsides/inventory/live',
+          href: '/inventory?tab=stock&view=live',
           tone: derived.outOfStock > 0 ? ('danger' as Tone) : ('warn' as Tone),
         }
       : null,
@@ -1690,7 +1690,7 @@ function buildActions(
           id: 'action-damage',
           label: 'Approve stock damage',
           description: `${formatCount(derived.pendingStockDamage)} pending damage record${derived.pendingStockDamage === 1 ? '' : 's'}.`,
-          href: '/westsides/stock-damage',
+          href: '/inventory?tab=controls&view=damage',
           tone: 'danger' as Tone,
         }
       : null,
@@ -1699,7 +1699,7 @@ function buildActions(
           id: 'action-expiry',
           label: 'Move expiring batches',
           description: `${formatCount(derived.expiringBatches)} expiring batch${derived.expiringBatches === 1 ? '' : 'es'} to review.`,
-          href: '/westsides/product-batches',
+          href: '/inventory?tab=stock&view=batches',
           tone: 'warn' as Tone,
         }
       : null,
@@ -2454,7 +2454,7 @@ function CriticalSkuRow({ sku }: { sku: CriticalSku }) {
   const tone: Tone = quantity <= 0 ? 'danger' : 'warn';
   return (
     <Link
-      href="/westsides/inventory/live"
+      href="/inventory?tab=stock&view=live"
       className="block rounded-lg border p-3"
       style={{ ...SURFACE, borderLeft: `3px solid ${TONE_STYLES[tone].solid}` }}
     >
@@ -2840,7 +2840,7 @@ function hrefForReadinessCheck(key: string) {
   if (value.includes('posting') || value.includes('finance') || value.includes('account'))
     return '/reports/financial';
   if (value.includes('stock') || value.includes('inventory') || value.includes('operation'))
-    return '/westsides/inventory/live';
+    return '/inventory?tab=stock&view=live';
   if (value.includes('delivery') || value.includes('fulfillment'))
     return '/westsides/delivery-notes';
   if (value.includes('credit') || value.includes('customer')) return '/westsides/customers';
@@ -2880,7 +2880,7 @@ function toneFromSeverity(severity?: string | null): Tone {
 function hrefForActionCategory(category?: string | null) {
   switch (String(category ?? '').toUpperCase()) {
     case 'STOCK':
-      return '/westsides/inventory/live';
+      return '/inventory?tab=stock&view=live';
     case 'PRICING':
       return '/westsides/price-lists';
     case 'FULFILLMENT':
