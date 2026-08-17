@@ -601,7 +601,11 @@ describe('KAUNTA-8: cold boot normalizes flow-interior hashes', () => {
 
     render(<MobilePosLite />);
     await screen.findByRole('heading', { name: 'Ongeza bidhaa' });
-    expect(window.location.hash).toBe('#mauzo');
+    // Same passive-effect gap as KAUNTA-5: the counter paints from the boot
+    // route before the canonicalizer rewrites `#malipo` to `#mauzo`, so waiting
+    // on the heading proves the screen, not the address bar. Assert the hash
+    // directly or this races under load.
+    await waitFor(() => expect(window.location.hash).toBe('#mauzo'));
     expect(screen.queryByRole('heading', { name: 'Malipo' })).not.toBeInTheDocument();
   });
 });
