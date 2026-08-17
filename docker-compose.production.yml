@@ -148,6 +148,31 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
       AT_API_KEY: ${AT_API_KEY:-}
+      # ── Msaidizi (agent layer) ────────────────────────────────────────────
+      # Off unless explicitly enabled, and read-only even then. Listed here
+      # rather than omitted: the config already defaults to disabled when the
+      # variable is absent, but without these lines a later operator could set
+      # MSAIDIZI_ENABLED=true in .env.production, restart, and find nothing
+      # happened — compose would never have forwarded it. An override that
+      # silently does nothing is worse than one that is visibly off.
+      MSAIDIZI_ENABLED: ${MSAIDIZI_ENABLED:-false}
+      MSAIDIZI_WRITE_MODE: ${MSAIDIZI_WRITE_MODE:-read-only}
+      # Not tenant-scoped, unlike every other credential here. Leave empty to
+      # keep the agent inert regardless of the flag above.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      MSAIDIZI_MODEL: ${MSAIDIZI_MODEL:-claude-opus-5}
+      MSAIDIZI_CLASSIFIER_MODEL: ${MSAIDIZI_CLASSIFIER_MODEL:-claude-haiku-4-5}
+      MSAIDIZI_EFFORT: ${MSAIDIZI_EFFORT:-medium}
+      # Per-run ceilings. A permission that allows an action does not allow it
+      # fifty times; these bound a runaway loop.
+      MSAIDIZI_MAX_WRITES_PER_SESSION: ${MSAIDIZI_MAX_WRITES_PER_SESSION:-10}
+      MSAIDIZI_MAX_TOOL_CALLS: ${MSAIDIZI_MAX_TOOL_CALLS:-40}
+      MSAIDIZI_MAX_TOKENS: ${MSAIDIZI_MAX_TOKENS:-32000}
+      MSAIDIZI_INVOKE_TIMEOUT_MS: ${MSAIDIZI_INVOKE_TIMEOUT_MS:-30000}
+      # Loopback defaults to http://127.0.0.1:${PORT}/${API_PREFIX}, which
+      # inside this container resolves to the backend itself — the same address
+      # the healthcheck above uses. Override only behind a proxy.
+      MSAIDIZI_LOOPBACK_URL: ${MSAIDIZI_LOOPBACK_URL:-}
       AT_USERNAME: ${AT_USERNAME:-}
       AT_SENDER_ID: ${AT_SENDER_ID:-}
       MPESA_CONSUMER_KEY: ${MPESA_CONSUMER_KEY:-}
