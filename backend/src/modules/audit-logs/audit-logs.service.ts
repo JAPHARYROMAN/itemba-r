@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AuditSeverity, Prisma } from '@prisma/client';
+import { AuditChannel, AuditSeverity, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import {
@@ -7,6 +7,7 @@ import {
   companyWhereForUser,
 } from '../../common/services/company-scope.service';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
+import { ambientAgentSessionId, ambientChannel } from '../../common/context/request-context';
 
 export interface AuditLogInput {
   action: string;
@@ -21,6 +22,21 @@ export interface AuditLogInput {
   userAgent?: string;
   /** Override auto-derived severity. */
   severity?: AuditSeverity;
+  /**
+   * What drove the action. Defaults to WEB — the overwhelming majority and the
+   * only channel that existed when this was introduced. Callers on a non-human
+   * path must set this explicitly: SYSTEM for jobs and schedulers, API for
+   * key-authenticated integration traffic, AGENT for Msaidizi.
+   *
+   * `userId` still records *whose authority* the action used; this records *what
+   * exercised it*. An agent run has both — the user's id and AGENT.
+   */
+  channel?: AuditChannel;
+  /**
+   * Correlates every entry from one agent run, so the run can be reviewed or
+   * reversed as a unit. Only meaningful with `channel: AGENT`.
+   */
+  agentSessionId?: string;
 }
 
 // ─── Severity classification ──────────────────────────────────────────────────
@@ -170,6 +186,10 @@ export interface AuditLogQuery {
   action?: string;
   entityType?: string;
   severity?: AuditSeverity;
+  /** Filter by what drove the action — e.g. AGENT to review one agent's work. */
+  channel?: AuditChannel;
+  /** Pull one agent run's entries together. */
+  agentSessionId?: string;
   dateFrom?: string;
   dateTo?: string;
   page?: number;
@@ -189,6 +209,23 @@ export class AuditLogsService {
 
   async log(input: AuditLogInput): Promise<void> {
     try {
+      // Attribution the caller did not supply comes from the ambient request
+      // context. That is what lets the ~100 existing log() call sites record an
+      // agent-driven action correctly without knowing Msaidizi exists.
+      const channel = input.channel ?? ambientChannel();
+      const agentSessionId = input.agentSessionId ?? ambientAgentSessionId();
+
+      // An agent row without a correlation id is still written — losing the
+      // action entirely would be worse — but it cannot be grouped into its run,
+      // which defeats reviewing or reversing that run as a unit. That is a
+      // caller bug, so say so loudly rather than degrading in silence.
+      if (channel === AuditChannel.AGENT && !agentSessionId) {
+        this.logger.warn(
+          `Agent-channel audit entry without agentSessionId (action=${input.action}); ` +
+            'this entry cannot be correlated to its run.',
+        );
+      }
+
       // Redact sensitive fields from any payload before they hit the trail.
       // Callers should feel free to pass full DTOs as oldValue/newValue.
       const oldValue = input.oldValue ? redactSensitiveFields(input.oldValue) : undefined;
@@ -208,6 +245,10 @@ export class AuditLogsService {
           ipAddress: input.ipAddress,
           userAgent: input.userAgent,
           severity: input.severity ?? deriveSeverity(input.action),
+          channel,
+          // Only carried on the agent path; a session id without AGENT would
+          // make the trail claim a correlation that does not exist.
+          agentSessionId: channel === AuditChannel.AGENT ? agentSessionId : undefined,
         },
       });
     } catch (err) {
@@ -223,6 +264,8 @@ export class AuditLogsService {
       ...(q.userId && { userId: q.userId }),
       ...(q.entityType && { entityType: q.entityType }),
       ...(q.severity && { severity: q.severity }),
+      ...(q.channel && { channel: q.channel }),
+      ...(q.agentSessionId && { agentSessionId: q.agentSessionId }),
       ...(q.action && { action: { contains: q.action, mode: 'insensitive' as const } }),
       ...(q.search && {
         OR: [

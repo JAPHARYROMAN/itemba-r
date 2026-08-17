@@ -1,6 +1,6 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { AuditSeverity } from '@prisma/client';
+import { AuditChannel, AuditSeverity } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Min } from 'class-validator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -23,6 +23,8 @@ export class AuditLogsController {
     @Query('action') action?: string,
     @Query('entityType') entityType?: string,
     @Query('severity') severity?: AuditSeverity,
+    @Query('channel') channel?: AuditChannel,
+    @Query('agentSessionId') agentSessionId?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('page') page?: string,
@@ -37,6 +39,8 @@ export class AuditLogsController {
         action,
         entityType,
         severity,
+        channel,
+        agentSessionId,
         dateFrom,
         dateTo,
         page: page ? parseInt(page, 10) : 1,

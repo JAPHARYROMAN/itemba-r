@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CacheModule } from '@nestjs/cache-manager';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
@@ -133,6 +133,8 @@ import { ApiRequestLogsModule } from './modules/api-request-logs/api-request-log
 import { MobileSessionsModule } from './modules/mobile-sessions/mobile-sessions.module';
 import { OfflineSyncModule } from './modules/offline-sync/offline-sync.module';
 import { MobilePosLiteModule } from './modules/mobile-pos-lite/mobile-pos-lite.module';
+import { MsaidiziModule } from './modules/msaidizi/msaidizi.module';
+import { RequestContextMiddleware } from './common/middleware/request-context.middleware';
 import { ExternalPaymentsModule } from './modules/external-payments/external-payments.module';
 import { ExternalMessagesModule } from './modules/external-messages/external-messages.module';
 import { MessageTemplatesModule } from './modules/message-templates/message-templates.module';
@@ -418,6 +420,8 @@ import { RolesGuard } from './common/guards/roles.guard';
     RefundsModule,
     // ── UX Backend Wave 2b — Customer Payments ─────────────────────────────────
     CustomerPaymentsModule,
+    // ── Msaidizi — agent layer (inert unless MSAIDIZI_ENABLED=true) ────────────
+    MsaidiziModule,
     // M16 - QA, Launch Readiness, Documentation, Training, Support
   ],
   controllers: [HealthController],
@@ -429,4 +433,11 @@ import { RolesGuard } from './common/guards/roles.guard';
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // Middleware, not an interceptor: this runs before the guards, so an audit
+    // entry written for a *rejected* request is still attributed to the right
+    // channel. An interceptor would run too late to cover that case.
+    consumer.apply(RequestContextMiddleware).forRoutes('*');
+  }
+}
