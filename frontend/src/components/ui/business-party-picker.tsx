@@ -104,7 +104,15 @@ export function BusinessPartyPicker({
   const popupRef = useRef<HTMLDivElement>(null);
   const resolvedForRef = useRef('');
   const onResolvedRef = useRef(onResolved);
-  onResolvedRef.current = onResolved;
+  // Kept current in an effect, not during render: writing a ref while
+  // rendering is not safe under concurrent rendering, where a render may be
+  // thrown away or replayed, and the React Compiler rejects it outright.
+  // Declared above the effects that read it so it re-syncs first within the
+  // same commit — effects run in declaration order — leaving every reader
+  // below with the same callback the render-time assignment gave them.
+  useEffect(() => {
+    onResolvedRef.current = onResolved;
+  });
   const [query, setQuery] = useState('');
   const [selectedLabel, setSelectedLabel] = useState('');
   const [open, setOpen] = useState(false);

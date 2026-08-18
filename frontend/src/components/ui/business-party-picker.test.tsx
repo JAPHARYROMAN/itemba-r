@@ -150,4 +150,86 @@ describe('BusinessPartyPicker', () => {
     expect(backendGet).toHaveBeenCalledWith('/customers/customer-alpha');
     expect(onResolved).toHaveBeenCalledWith(alphaCustomer);
   });
+
+  /**
+   * onResolved is held in a ref so it is not a dependency of the resolve
+   * effect. The ref used to be assigned during render and is now re-synced in
+   * an effect. This covers the asynchronous path, where the callback fires
+   * from a .then() — ordering cannot matter there, because every effect in
+   * the commit has run long before the promise settles. The test below covers
+   * the path where ordering does matter.
+   */
+  it('calls the latest onResolved after a re-render, not the one from first render', async () => {
+    backendGet.mockImplementation((path: string) =>
+      Promise.resolve(path.endsWith('customer-zebra') ? zebraCustomer : alphaCustomer),
+    );
+    const first = vi.fn();
+    const second = vi.fn();
+
+    const { rerender } = render(
+      <CustomerPicker
+        label="Customer"
+        value="customer-alpha"
+        onChange={vi.fn()}
+        onResolved={first}
+        companyId="company-1"
+      />,
+    );
+    await waitFor(() => expect(first).toHaveBeenCalledWith(alphaCustomer));
+
+    // New callback AND a new value, so the resolve effect re-runs on a commit
+    // in which the ref must already have been re-synced.
+    rerender(
+      <CustomerPicker
+        label="Customer"
+        value="customer-zebra"
+        onChange={vi.fn()}
+        onResolved={second}
+        companyId="company-1"
+      />,
+    );
+
+    await waitFor(() => expect(second).toHaveBeenCalledWith(zebraCustomer));
+    expect(first).not.toHaveBeenCalledWith(zebraCustomer);
+  });
+
+  /**
+   * Clearing the value is the one branch that calls onResolved *synchronously*
+   * inside the resolve effect, so it is the only place the re-sync's position
+   * is load-bearing: declared above, the ref already holds this render's
+   * callback; declared below, the effect fires the previous render's one.
+   * Nothing else in the suite distinguishes the two, which is why this exists.
+   */
+  it('clears through the latest onResolved, which requires the ref re-sync to run first', async () => {
+    backendGet.mockResolvedValue(alphaCustomer);
+    const first = vi.fn();
+    const second = vi.fn();
+
+    const { rerender } = render(
+      <CustomerPicker
+        label="Customer"
+        value="customer-alpha"
+        onChange={vi.fn()}
+        onResolved={first}
+        companyId="company-1"
+      />,
+    );
+    await waitFor(() => expect(first).toHaveBeenCalledWith(alphaCustomer));
+    first.mockClear();
+
+    // value -> '' takes the synchronous branch, on the same commit that
+    // swaps the callback.
+    rerender(
+      <CustomerPicker
+        label="Customer"
+        value=""
+        onChange={vi.fn()}
+        onResolved={second}
+        companyId="company-1"
+      />,
+    );
+
+    await waitFor(() => expect(second).toHaveBeenCalledWith(null));
+    expect(first).not.toHaveBeenCalled();
+  });
 });
