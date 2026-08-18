@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   ForbiddenException,
+  Get,
   Headers,
   Post,
   Res,
@@ -24,7 +25,7 @@ import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator'
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { MsaidiziConfig } from './msaidizi.config';
-import { MsaidiziService, RunResult } from './msaidizi.service';
+import { MsaidiziCapabilities, MsaidiziService, RunResult } from './msaidizi.service';
 import { ModelMessage } from './model-client';
 
 /**
@@ -91,6 +92,27 @@ export class MsaidiziController {
     private readonly service: MsaidiziService,
     private readonly config: MsaidiziConfig,
   ) {}
+
+  /**
+   * What this caller's agent can reach, and under what ceilings.
+   *
+   * A GET, and deliberately NOT gated on `enabled`: a client has to be able to
+   * learn the feature is switched off without firing a run and reading a 503.
+   * `capabilitiesFor` reports, it does not act — there is no bearer-token
+   * requirement here because nothing is invoked on the caller's behalf.
+   *
+   * The UI needs this for two things it cannot otherwise know: which mode
+   * banner to show (read-only vs a write tier), and whether narrowing is
+   * active — because a caller whose permitted set exceeds the per-run tool
+   * budget is being served a subset chosen by relevance, and a manager
+   * wondering why the assistant "did not think of" something deserves to be
+   * told that rather than left guessing.
+   */
+  @Get('capabilities')
+  @RequirePermissions('msaidizi.use')
+  capabilities(@CurrentUser() user: AuthUser): MsaidiziCapabilities {
+    return this.service.capabilitiesFor(user);
+  }
 
   @Post('ask')
   @RequirePermissions('msaidizi.use')

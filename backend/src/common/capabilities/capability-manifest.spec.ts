@@ -55,6 +55,33 @@ beforeAll(() => {
   manifest = extractCapabilities(loadAllControllers());
 });
 
+/**
+ * A capability that exists only for a test, so an assertion about what
+ * capabilitiesFor() *must* do does not depend on the routing table happening to
+ * contain a specimen of the right shape. Defaults are the permissive case —
+ * admitted whenever its codes are held — so each test overrides only the field
+ * it is actually about.
+ */
+function synthetic(overrides: Partial<Capability> = {}): Capability {
+  return {
+    id: 'X.y',
+    controller: 'X',
+    handler: 'y',
+    verb: 'POST',
+    path: 'x/y',
+    permissions: [],
+    anyPermissions: [],
+    roles: [],
+    apiScopes: [],
+    guard: 'permission',
+    tier: 'amber',
+    tierReason: 'write-verb',
+    params: { path: [], query: [], freeFormQuery: false, hasBody: false },
+    agentExcluded: false,
+    ...overrides,
+  };
+}
+
 describe('capability manifest', () => {
   it('discovers the routing table', () => {
     expect(manifest.length).toBeGreaterThan(1000);
@@ -162,17 +189,44 @@ describe('capabilitiesFor — the agent envelope', () => {
     expect(admitted.filter((c) => c.guard === 'public')).toEqual([]);
   });
 
+  /**
+   * Asserted against a synthetic capability rather than one found in the
+   * manifest. A fixture picked by searching live routes is silently vacuous
+   * whenever no route happens to match — which was the case here until the
+   * first multi-code route existed, so this half of the check had never once
+   * run. The synthetic pair always runs, and says what the function must do
+   * rather than what today's routing table happens to contain.
+   */
   it('requires ALL codes for @RequirePermissions and ANY for @RequireAnyPermissions', () => {
-    const andCap = manifest.find((c) => c.guard === 'permission' && c.permissions.length > 1);
+    const andCap = synthetic({ permissions: ['a.view', 'b.view'], guard: 'permission' });
+    // Holding only the first code is not enough for AND semantics.
+    expect(capabilitiesFor([andCap], ['a.view'])).toEqual([]);
+    expect(capabilitiesFor([andCap], ['a.view', 'b.view'])).toHaveLength(1);
+
+    // Holding any single code is enough for OR semantics.
+    const orCap = synthetic({ anyPermissions: ['a.view', 'b.view'], guard: 'permission-any' });
+    expect(capabilitiesFor([orCap], ['b.view'])).toHaveLength(1);
+  });
+
+  /**
+   * The same two semantics against whatever real routes exist, so the synthetic
+   * check above cannot drift away from the routing table. Agent-excluded routes
+   * are skipped when choosing a specimen: capabilitiesFor() drops those before
+   * it reasons about permissions at all, so one would fail this for a reason
+   * that has nothing to do with AND/OR. Both searches may find nothing, which
+   * is why they are a supplement to the synthetic pair and not a replacement.
+   */
+  it('applies those same semantics to real routes', () => {
+    const eligible = manifest.filter((c) => !c.agentExcluded);
+
+    const andCap = eligible.find((c) => c.guard === 'permission' && c.permissions.length > 1);
     if (andCap) {
-      // Holding only the first code is not enough for AND semantics.
       expect(capabilitiesFor([andCap], [andCap.permissions[0]])).toEqual([]);
       expect(capabilitiesFor([andCap], andCap.permissions)).toHaveLength(1);
     }
 
-    const orCap = manifest.find((c) => c.guard === 'permission-any' && c.anyPermissions.length > 1);
+    const orCap = eligible.find((c) => c.guard === 'permission-any' && c.anyPermissions.length > 1);
     if (orCap) {
-      // Holding any single code is enough for OR semantics.
       expect(capabilitiesFor([orCap], [orCap.anyPermissions[0]])).toHaveLength(1);
     }
   });
@@ -181,22 +235,7 @@ describe('capabilitiesFor — the agent envelope', () => {
     // No route does this today. The check exists because if one ever did, the
     // envelope would silently become wider than PermissionsGuard — which is the
     // single failure mode this module must not have.
-    const both: Capability = {
-      id: 'X.y',
-      controller: 'X',
-      handler: 'y',
-      verb: 'POST',
-      path: 'x/y',
-      permissions: ['a.create'],
-      anyPermissions: ['b.view', 'c.view'],
-      roles: [],
-      apiScopes: [],
-      guard: 'permission',
-      tier: 'amber',
-      tierReason: 'write-verb',
-      params: { path: [], query: [], freeFormQuery: false, hasBody: false },
-      agentExcluded: false,
-    };
+    const both = synthetic({ permissions: ['a.create'], anyPermissions: ['b.view', 'c.view'] });
 
     expect(capabilitiesFor([both], ['a.create'])).toEqual([]); // AND met, OR unmet
     expect(capabilitiesFor([both], ['b.view'])).toEqual([]); // OR met, AND unmet
@@ -204,7 +243,12 @@ describe('capabilitiesFor — the agent envelope', () => {
   });
 
   it('mirrors PermissionsGuard: a granted code admits its capability', () => {
-    const sample = manifest.find((c) => c.guard === 'permission' && c.permissions.length === 1);
+    // Skip agent-excluded routes: they are dropped ahead of any permission
+    // reasoning, so one picked as the specimen here would fail for the wrong
+    // reason. toBeDefined() keeps the search from quietly finding nothing.
+    const sample = manifest.find(
+      (c) => c.guard === 'permission' && c.permissions.length === 1 && !c.agentExcluded,
+    );
     expect(sample).toBeDefined();
     const admitted = capabilitiesFor(manifest, [sample!.permissions[0]]);
     expect(admitted.map((c) => c.id)).toContain(sample!.id);
