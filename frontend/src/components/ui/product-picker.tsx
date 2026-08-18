@@ -283,7 +283,9 @@ export function ProductPicker({
         maxHeight: popupPosition.maxHeight,
         top: popupPosition.top,
         bottom: popupPosition.bottom,
-        zIndex: 120,
+        // App modals and drawers use 1200-1300. The portalled list must sit
+        // above them or suggestions are present in the DOM but invisible.
+        zIndex: 1600,
       }
     : undefined;
 

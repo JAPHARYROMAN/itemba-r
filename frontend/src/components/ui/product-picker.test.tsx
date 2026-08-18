@@ -57,7 +57,9 @@ describe('ProductPicker', () => {
     const input = screen.getByRole('combobox', { name: 'Search products' });
     await user.click(input);
 
-    expect(await screen.findByRole('listbox', { name: 'Products' })).toBeInTheDocument();
+    const listbox = await screen.findByRole('listbox', { name: 'Products' });
+    expect(listbox).toBeInTheDocument();
+    expect(listbox).toHaveStyle({ zIndex: '1600' });
     await waitFor(() => expect(screen.getByText('Portland Cement 42.5kg')).toBeInTheDocument());
     expect(screen.getByText(/CEM-425/)).toBeInTheDocument();
     expect(screen.getByText('12 bag available')).toBeInTheDocument();
