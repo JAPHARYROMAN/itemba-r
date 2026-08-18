@@ -36,10 +36,16 @@ interface Company {
   name: string;
   code: string;
 }
+interface Division {
+  id: string;
+  name: string;
+  code?: string | null;
+}
 interface Branch {
   id: string;
   name: string;
   code?: string | null;
+  divisionId?: string | null;
 }
 interface Unit {
   id: string;
@@ -148,21 +154,23 @@ function CreateAdjustmentModal({
   onSaved: () => void;
 }) {
   const workspace = useInventoryWorkspace();
+  const workspaceScope = workspace?.scope;
   const [form, setForm] = useState<AdjustmentForm>({ ...BLANK_FORM });
+  const [divisions, setDivisions] = useState<Division[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!workspace) return;
+    if (!workspaceScope) return;
     setForm((current) => ({
       ...current,
-      companyId: workspace.scope.companyId,
-      divisionId: workspace.scope.divisionId,
-      branchId: workspace.scope.branchId,
+      companyId: workspaceScope.companyId,
+      divisionId: workspaceScope.divisionId,
+      branchId: workspaceScope.branchId,
     }));
-  }, [workspace?.scope.branchId, workspace?.scope.companyId, workspace?.scope.divisionId]);
+  }, [workspaceScope]);
 
   useEffect(() => {
     let cancelled = false;
@@ -180,12 +188,37 @@ function CreateAdjustmentModal({
 
   useEffect(() => {
     if (!form.companyId) {
+      setDivisions([]);
+      return;
+    }
+    let cancelled = false;
+    backendList<Division>('/divisions', {
+      query: { companyId: form.companyId, limit: 200 },
+    })
+      .then((rows) => {
+        if (!cancelled) setDivisions(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setDivisions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
+
+  useEffect(() => {
+    if (!form.companyId) {
       setBranches([]);
       return;
     }
     let cancelled = false;
     backendList<Branch>('/branches', {
-      query: { companyId: form.companyId, activeOnly: true, limit: 200 },
+      query: {
+        companyId: form.companyId,
+        divisionId: form.divisionId || undefined,
+        activeOnly: true,
+        limit: 200,
+      },
     })
       .then((rows) => {
         if (!cancelled) setBranches(rows);
@@ -196,7 +229,7 @@ function CreateAdjustmentModal({
     return () => {
       cancelled = true;
     };
-  }, [form.companyId]);
+  }, [form.companyId, form.divisionId]);
 
   const setField = <K extends keyof AdjustmentForm>(k: K, v: AdjustmentForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
@@ -320,18 +353,35 @@ function CreateAdjustmentModal({
           {error}
         </div>
       )}
+      {workspace && !workspace.scope.branchId && (
+        <div
+          className="mb-3 rounded-lg border px-3 py-2 text-sm"
+          style={{
+            borderColor: 'var(--aurora-primary)',
+            background: 'var(--aurora-primary-subtle)',
+            color: 'var(--aurora-text)',
+          }}
+        >
+          Choose the division and branch for this adjustment.
+        </div>
+      )}
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <FormSelect
             label="Company"
             required
             value={form.companyId}
             onChange={(e) => {
-              setField('companyId', e.target.value);
-              setField('branchId', '');
+              setForm((current) => ({
+                ...current,
+                companyId: e.target.value,
+                divisionId: '',
+                branchId: '',
+                lines: [BLANK_LINE()],
+              }));
             }}
             placeholder="Select company"
-            disabled={Boolean(workspace)}
+            disabled={Boolean(workspace?.scope.companyId)}
           >
             {companies.map((c) => (
               <option key={c.id} value={c.id}>
@@ -340,12 +390,37 @@ function CreateAdjustmentModal({
             ))}
           </FormSelect>
           <FormSelect
+            label="Division"
+            value={form.divisionId}
+            onChange={(e) => {
+              setField('divisionId', e.target.value);
+              setField('branchId', '');
+            }}
+            placeholder={form.companyId ? 'All divisions' : 'Select company first'}
+            disabled={!form.companyId || Boolean(workspace?.scope.divisionId)}
+          >
+            {divisions.map((division) => (
+              <option key={division.id} value={division.id}>
+                {division.code ? `${division.code} - ` : ''}
+                {division.name}
+              </option>
+            ))}
+          </FormSelect>
+          <FormSelect
             label="Branch / Location"
             required
             value={form.branchId}
-            onChange={(e) => setField('branchId', e.target.value)}
+            onChange={(e) => {
+              const branchId = e.target.value;
+              const branch = branches.find((candidate) => candidate.id === branchId);
+              setForm((current) => ({
+                ...current,
+                branchId,
+                divisionId: current.divisionId || branch?.divisionId || '',
+              }));
+            }}
             placeholder={form.companyId ? 'Select branch/location' : 'Select company first'}
-            disabled={!form.companyId || Boolean(workspace)}
+            disabled={!form.companyId || Boolean(workspace?.scope.branchId)}
           >
             {branches.map((branch) => (
               <option key={branch.id} value={branch.id}>
@@ -672,6 +747,7 @@ function DeleteConfirm({
 export default function StockAdjustmentsPage() {
   const { hasPermission } = useAuth();
   const workspace = useInventoryWorkspace();
+  const workspaceScope = workspace?.scope;
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<StockAdjustment> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -697,10 +773,10 @@ export default function StockAdjustmentsPage() {
   const canPost = hasPermission('inventory.adjustments.post');
 
   useEffect(() => {
-    if (!workspace) return;
-    setCompanyId(workspace.scope.companyId);
+    if (!workspaceScope) return;
+    setCompanyId(workspaceScope.companyId);
     setPage(1);
-  }, [workspace?.scope.companyId]);
+  }, [workspaceScope]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1110,10 +1186,9 @@ export default function StockAdjustmentsPage() {
               <Btn
                 variant="primary"
                 onClick={() => setCreating(true)}
-                disabled={Boolean(workspace && (!workspace.scope.companyId || !workspace.scope.branchId))}
                 title={
                   workspace && (!workspace.scope.companyId || !workspace.scope.branchId)
-                    ? 'Select a company and branch above before creating an adjustment'
+                    ? 'Choose the company and branch in the adjustment form'
                     : undefined
                 }
               >
