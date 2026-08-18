@@ -223,6 +223,9 @@ export default function WestsidesCustomersPage() {
     <div className="p-6">
       <PageHeader title="Customers" subtitle="Click a customer to open their 360° profile." />
       <PageToolbar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search name, code, contact, phone, TIN or VRN..."
         filters={
           <>
             <div className="w-64">
@@ -245,19 +248,6 @@ export default function WestsidesCustomersPage() {
                 disabled={!companyId}
               />
             </div>
-            <input
-              type="text"
-              placeholder="Search name / code / phone…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              disabled={!companyId}
-              className="text-sm border rounded-lg px-3 py-1.5 w-64 focus:outline-none focus:ring-2 focus:ring-brand-500"
-              style={{
-                borderColor: 'var(--aurora-border)',
-                background: 'var(--aurora-card)',
-                color: 'var(--aurora-text)',
-              }}
-            />
           </>
         }
         actions={

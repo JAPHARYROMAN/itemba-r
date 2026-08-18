@@ -129,6 +129,7 @@ export default function SuppliersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [divisionId, setDivisionId] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -143,6 +144,11 @@ export default function SuppliersPage() {
   const canCreate = hasPermission('suppliers.create');
   const canUpdate = hasPermission('suppliers.update') || canCreate;
   const canDelete = hasPermission('suppliers.delete');
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   useEffect(() => {
     if (!canView) return;
@@ -181,14 +187,14 @@ export default function SuppliersPage() {
 
   const query = useMemo(
     () => ({
-      search: search.trim() || undefined,
+      search: debouncedSearch || undefined,
       companyId: companyId || undefined,
       divisionId: divisionId || undefined,
       productCategoryId: categoryId || undefined,
       supplierType: supplierType || undefined,
       status: status || undefined,
     }),
-    [categoryId, companyId, divisionId, search, status, supplierType],
+    [categoryId, companyId, debouncedSearch, divisionId, status, supplierType],
   );
 
   const load = useCallback(async () => {
@@ -305,7 +311,7 @@ export default function SuppliersPage() {
           setSearch(value);
           setPage(1);
         }}
-        searchPlaceholder="Search supplier, code, phone, email, TIN..."
+        searchPlaceholder="Search name, code, contact, phone, TIN or VRN..."
         filters={
           <>
             <select

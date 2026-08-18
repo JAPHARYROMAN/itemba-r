@@ -786,11 +786,14 @@ export class CustomersService {
     if (search) {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
+        { legalName: { contains: search, mode: 'insensitive' } },
         { customerCode: { contains: search, mode: 'insensitive' } },
         { phone: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
         { tin: { contains: search, mode: 'insensitive' } },
         { vrn: { contains: search, mode: 'insensitive' } },
+        { contactPerson: { contains: search, mode: 'insensitive' } },
+        { address: { contains: search, mode: 'insensitive' } },
       ];
     }
     return where;

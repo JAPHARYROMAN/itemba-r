@@ -55,10 +55,14 @@ export class SuppliersService {
     if (search) {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
+        { legalName: { contains: search, mode: 'insensitive' } },
         { supplierCode: { contains: search, mode: 'insensitive' } },
         { phone: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
         { tin: { contains: search, mode: 'insensitive' } },
+        { vrn: { contains: search, mode: 'insensitive' } },
+        { contactPerson: { contains: search, mode: 'insensitive' } },
+        { address: { contains: search, mode: 'insensitive' } },
       ];
     }
 
@@ -108,10 +112,14 @@ export class SuppliersService {
     if (search) {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
+        { legalName: { contains: search, mode: 'insensitive' } },
         { supplierCode: { contains: search, mode: 'insensitive' } },
         { phone: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
         { tin: { contains: search, mode: 'insensitive' } },
+        { vrn: { contains: search, mode: 'insensitive' } },
+        { contactPerson: { contains: search, mode: 'insensitive' } },
+        { address: { contains: search, mode: 'insensitive' } },
       ];
     }
 

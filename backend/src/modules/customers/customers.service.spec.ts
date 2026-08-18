@@ -56,6 +56,31 @@ describe('CustomersService profile', () => {
     );
   });
 
+  it('searches customer identity and contact fields', async () => {
+    const prisma = makePrisma();
+    const service = new CustomersService(
+      prisma,
+      { log: jest.fn() } as any,
+      { companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-1' }) } as any,
+    );
+
+    await service.findAll({ search: 'Juma' }, { id: 'user-1' } as any);
+
+    expect(prisma.customer.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            { name: { contains: 'Juma', mode: 'insensitive' } },
+            { legalName: { contains: 'Juma', mode: 'insensitive' } },
+            { contactPerson: { contains: 'Juma', mode: 'insensitive' } },
+            { address: { contains: 'Juma', mode: 'insensitive' } },
+            { vrn: { contains: 'Juma', mode: 'insensitive' } },
+          ]),
+        }),
+      }),
+    );
+  });
+
   it('uses PAID receivables for recent payments', async () => {
     const prisma = makePrisma();
     const service = new CustomersService(
