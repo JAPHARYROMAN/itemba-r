@@ -81,5 +81,18 @@ describe('StockAdjustmentsPage in the inventory workspace', () => {
     );
     await user.selectOptions(branchSelect, 'branch-1');
     expect(branchSelect).toHaveValue('branch-1');
+
+    await user.click(screen.getByRole('combobox', { name: 'Search product, line 1' }));
+    await waitFor(() =>
+      expect(backendList).toHaveBeenCalledWith('/products', {
+        query: {
+          search: undefined,
+          companyId: 'company-1',
+          divisionId: 'division-1',
+          branchId: 'branch-1',
+          limit: 20,
+        },
+      }),
+    );
   });
 });
