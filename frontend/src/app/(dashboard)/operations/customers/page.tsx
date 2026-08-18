@@ -547,6 +547,7 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [divisionId, setDivisionId] = useState('');
   const [branchId, setBranchId] = useState('');
@@ -561,6 +562,11 @@ export default function CustomersPage() {
   const canCreate = hasPermission('customers.create');
   const canUpdate = hasPermission('customers.update') || canCreate;
   const canDelete = hasPermission('customers.delete');
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   useEffect(() => {
     if (!canView) return;
@@ -606,14 +612,14 @@ export default function CustomersPage() {
 
   const query = useMemo(
     () => ({
-      search: search.trim() || undefined,
+      search: debouncedSearch || undefined,
       companyId: companyId || undefined,
       divisionId: divisionId || undefined,
       branchId: branchId || undefined,
       customerType: customerType || undefined,
       status: status || undefined,
     }),
-    [branchId, companyId, customerType, divisionId, search, status],
+    [branchId, companyId, customerType, debouncedSearch, divisionId, status],
   );
 
   const load = useCallback(async () => {
@@ -730,7 +736,7 @@ export default function CustomersPage() {
           setSearch(value);
           setPage(1);
         }}
-        searchPlaceholder="Search customer, code, phone, email, TIN, VRN..."
+        searchPlaceholder="Search name, code, contact, phone, TIN or VRN..."
         filters={
           <>
             <select

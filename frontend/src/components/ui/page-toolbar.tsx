@@ -1,4 +1,5 @@
 'use client';
+import { Search, X } from 'lucide-react';
 import React from 'react';
 
 interface PageToolbarProps {
@@ -28,20 +29,20 @@ export function PageToolbar({
       {/* Search */}
       {onSearch !== undefined && (
         <div className="relative flex-1 min-w-[160px] max-w-xs">
-          <svg
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none"
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
             style={{ color: 'var(--aurora-text-muted)' }}
-            fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
-          >
-            <circle cx="11" cy="11" r="8" /><path strokeLinecap="round" d="M21 21l-4.35-4.35" />
-          </svg>
+          />
           <input
-            type="text"
-            value={search}
+            type="search"
+            aria-label={searchPlaceholder}
+            value={search ?? ''}
             onChange={(e) => onSearch(e.target.value)}
             placeholder={searchPlaceholder}
             className="
-              w-full pl-8 pr-3 py-1.5 text-[13px] rounded-lg border transition-colors
+              w-full rounded-lg border py-1.5 pl-8 pr-8 text-[13px] transition-colors
+              [&::-webkit-search-cancel-button]:hidden
               focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500
             "
             style={{
@@ -50,6 +51,18 @@ export function PageToolbar({
               background: 'var(--aurora-card)',
             }}
           />
+          {search ? (
+            <button
+              type="button"
+              aria-label="Clear search"
+              title="Clear search"
+              onClick={() => onSearch('')}
+              className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md transition-colors hover:bg-[var(--aurora-bg-subtle)] focus:outline-none focus:ring-2 focus:ring-brand-500"
+              style={{ color: 'var(--aurora-text-muted)' }}
+            >
+              <X aria-hidden="true" className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
         </div>
       )}
 
