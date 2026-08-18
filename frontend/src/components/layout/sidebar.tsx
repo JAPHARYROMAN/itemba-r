@@ -1030,7 +1030,11 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     for (const item of NAV) {
       if (isGroup(item)) {
         const child = item.children.find((c) => c.href === href);
-        if (child) return { permission: child.permission ?? item.permission, permissionsAny: child.permissionsAny };
+        if (child)
+          return {
+            permission: child.permission ?? item.permission,
+            permissionsAny: child.permissionsAny,
+          };
       } else if (item.href === href) {
         return { permission: item.permission, permissionsAny: item.permissionsAny };
       }
@@ -1158,7 +1162,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               }
 
               // Group
-              const visibleChildren = item.children.filter((c) => canSee(c.permission, c.permissionsAny));
+              const visibleChildren = item.children.filter((c) =>
+                canSee(c.permission, c.permissionsAny),
+              );
               // A group whose every child is permission-filtered is dead weight
               // even when the group itself has no permission gate — hide it.
               if (visibleChildren.length === 0) return null;

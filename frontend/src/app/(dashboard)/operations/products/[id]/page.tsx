@@ -592,7 +592,9 @@ export default function ProductDetailPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             {hasPermission('inventory.adjustments.create') && (
-              <Link href={`/inventory?tab=controls&view=adjustments${scopedQuery ? `&${scopedQuery.slice(1)}` : ''}`}>
+              <Link
+                href={`/inventory?tab=controls&view=adjustments${scopedQuery ? `&${scopedQuery.slice(1)}` : ''}`}
+              >
                 <Btn variant="secondary" size="sm">
                   Adjust Stock
                 </Btn>

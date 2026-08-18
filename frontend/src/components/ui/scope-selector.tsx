@@ -70,9 +70,9 @@ export function ScopeSelector({
         }
       })
       .catch(() => setCompanies([]));
-  // The company list is loaded once. The workspace opts into automatic
-  // selection only when it has exactly one permitted company.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // The company list is loaded once. The workspace opts into automatic
+    // selection only when it has exactly one permitted company.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

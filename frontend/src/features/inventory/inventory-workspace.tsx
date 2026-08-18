@@ -10,14 +10,14 @@ import { useAuth } from '@/hooks/use-auth';
 import InventorySearch from './inventory-search';
 import { InventoryWorkspaceProvider } from './inventory-workspace-context';
 
-const InventoryOverview = dynamic(
-  () => import('@/app/(dashboard)/operations/inventory/page'),
-  { ssr: false, loading: () => <PageSpinner label="Loading inventory overview" /> },
-);
-const InventoryLive = dynamic(
-  () => import('@/app/(dashboard)/westsides/inventory/live/page'),
-  { ssr: false, loading: () => <PageSpinner label="Loading live inventory" /> },
-);
+const InventoryOverview = dynamic(() => import('@/app/(dashboard)/operations/inventory/page'), {
+  ssr: false,
+  loading: () => <PageSpinner label="Loading inventory overview" />,
+});
+const InventoryLive = dynamic(() => import('@/app/(dashboard)/westsides/inventory/live/page'), {
+  ssr: false,
+  loading: () => <PageSpinner label="Loading live inventory" />,
+});
 const InventoryBalances = dynamic(
   () => import('@/app/(dashboard)/operations/inventory-balances/page'),
   { ssr: false, loading: () => <PageSpinner label="Loading inventory balances" /> },
@@ -26,10 +26,10 @@ const InventoryMovements = dynamic(
   () => import('@/app/(dashboard)/operations/inventory-movements/page'),
   { ssr: false, loading: () => <PageSpinner label="Loading inventory movements" /> },
 );
-const ProductBatches = dynamic(
-  () => import('@/app/(dashboard)/westsides/product-batches/page'),
-  { ssr: false, loading: () => <PageSpinner label="Loading product batches" /> },
-);
+const ProductBatches = dynamic(() => import('@/app/(dashboard)/westsides/product-batches/page'), {
+  ssr: false,
+  loading: () => <PageSpinner label="Loading product batches" />,
+});
 const Products = dynamic(() => import('@/app/(dashboard)/operations/products/page'), {
   ssr: false,
   loading: () => <PageSpinner label="Loading products" />,
@@ -46,10 +46,10 @@ const StockAdjustments = dynamic(
   () => import('@/app/(dashboard)/operations/stock-adjustments/page'),
   { ssr: false, loading: () => <PageSpinner label="Loading stock adjustments" /> },
 );
-const StockDamage = dynamic(
-  () => import('@/app/(dashboard)/westsides/stock-damage/page'),
-  { ssr: false, loading: () => <PageSpinner label="Loading stock damage" /> },
-);
+const StockDamage = dynamic(() => import('@/app/(dashboard)/westsides/stock-damage/page'), {
+  ssr: false,
+  loading: () => <PageSpinner label="Loading stock damage" />,
+});
 const InventoryReports = dynamic(() => import('./inventory-reports'), {
   ssr: false,
   loading: () => <PageSpinner label="Loading inventory reports" />,
@@ -289,7 +289,8 @@ export default function InventoryWorkspace() {
       : undefined;
   const selectedTab = visibleTabs.find((tab) => tab.id === activeTab) ?? visibleTabs[0];
   const requestedView = searchParams.get('view');
-  const selectedView = selectedTab?.views.find((view) => view.id === requestedView) ?? selectedTab?.views[0];
+  const selectedView =
+    selectedTab?.views.find((view) => view.id === requestedView) ?? selectedTab?.views[0];
   const inventorySearchQuery = searchParams.get('q') ?? '';
 
   const hrefFor = useCallback(
@@ -348,9 +349,15 @@ export default function InventoryWorkspace() {
 
   return (
     <div className="space-y-5 p-4 sm:p-6">
-      <header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-end sm:justify-between" style={{ borderColor: 'var(--aurora-border)' }}>
+      <header
+        className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-end sm:justify-between"
+        style={{ borderColor: 'var(--aurora-border)' }}
+      >
         <div>
-          <p className="text-xs font-semibold uppercase" style={{ color: 'var(--aurora-accent-text)' }}>
+          <p
+            className="text-xs font-semibold uppercase"
+            style={{ color: 'var(--aurora-accent-text)' }}
+          >
             Operations
           </p>
           <h1 className="mt-1 text-[22px] font-semibold" style={{ color: 'var(--aurora-text)' }}>
@@ -362,7 +369,11 @@ export default function InventoryWorkspace() {
         </div>
       </header>
 
-      <nav className="flex gap-1 overflow-x-auto border-b" aria-label="Inventory sections" style={{ borderColor: 'var(--aurora-border)' }}>
+      <nav
+        className="flex gap-1 overflow-x-auto border-b"
+        aria-label="Inventory sections"
+        style={{ borderColor: 'var(--aurora-border)' }}
+      >
         {visibleTabs.map((tab) => {
           const active = tab.id === selectedTab.id;
           return (
@@ -383,7 +394,10 @@ export default function InventoryWorkspace() {
         })}
       </nav>
 
-      <section className="rounded-lg border p-4" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)' }}>
+      <section
+        className="rounded-lg border p-4"
+        style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)' }}
+      >
         <ScopeSelector
           value={scope}
           onChange={onScopeChange}
@@ -433,7 +447,10 @@ export default function InventoryWorkspace() {
       )}
 
       <InventoryWorkspaceProvider scope={scope} searchQuery={inventorySearchQuery}>
-        <div data-inventory-embedded="true" key={`${selectedTab.id}:${selectedView.id}:${scopeKey(scope)}`}>
+        <div
+          data-inventory-embedded="true"
+          key={`${selectedTab.id}:${selectedView.id}:${scopeKey(scope)}`}
+        >
           <ActiveView />
         </div>
       </InventoryWorkspaceProvider>
