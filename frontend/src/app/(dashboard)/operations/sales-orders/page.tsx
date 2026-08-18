@@ -17,8 +17,10 @@ import {
   FormInput,
   FormSelect,
   FormTextarea,
+  CustomerPicker,
   showToast,
 } from '@/components/ui';
+import type { BusinessPartyPickerOption } from '@/components/ui';
 import {
   backendDelete,
   backendGet,
@@ -48,18 +50,6 @@ interface Company {
   id: string;
   name: string;
   code: string;
-}
-interface Customer {
-  id: string;
-  name: string;
-  customerCode?: string | null;
-  customerType: string;
-  divisionId?: string | null;
-  branchId?: string | null;
-  creditLimit?: number | string | null;
-  currentBalance?: number | string | null;
-  paymentTerms?: string | null;
-  status?: string | null;
 }
 interface Product {
   id: string;
@@ -546,7 +536,7 @@ function SalesOrderModal({
         }
       : blankForm(),
   );
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<BusinessPartyPickerOption | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [productSearchQuery, setProductSearchQuery] = useState('');
@@ -573,13 +563,10 @@ function SalesOrderModal({
     .map((line) => line.productId)
     .filter(Boolean)
     .join('|');
-  const handleProductSearch = useCallback(
-    (query: string, filters?: { categoryId?: string }) => {
-      setProductSearchQuery(query);
-      setProductSearchCategoryId(filters?.categoryId ?? '');
-    },
-    [],
-  );
+  const handleProductSearch = useCallback((query: string, filters?: { categoryId?: string }) => {
+    setProductSearchQuery(query);
+    setProductSearchCategoryId(filters?.categoryId ?? '');
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -597,7 +584,7 @@ function SalesOrderModal({
 
   useEffect(() => {
     if (!form.companyId) {
-      setCustomers([]);
+      setSelectedCustomer(null);
       setEmployees([]);
       setCashAccounts([]);
       setDivisions([]);
@@ -651,27 +638,27 @@ function SalesOrderModal({
 
   useEffect(() => {
     if (!form.companyId || !form.branchId) {
-      setCustomers([]);
       setEmployees([]);
       return;
     }
     let cancelled = false;
-    Promise.allSettled([
-      backendList<Customer>('/customers', {
-        query: { companyId: form.companyId, branchId: form.branchId, status: 'ACTIVE', limit: 200 },
-      }),
-      backendList<Employee>('/hr/employees', {
-        query: { companyId: form.companyId, branchId: form.branchId, limit: 500 },
-      }),
-    ]).then(([customerResult, employeeResult]) => {
-      if (cancelled) return;
-      setCustomers(customerResult.status === 'fulfilled' ? customerResult.value : []);
-      setEmployees(employeeResult.status === 'fulfilled' ? employeeResult.value : []);
-    });
+    backendList<Employee>('/hr/employees', {
+      query: { companyId: form.companyId, branchId: form.branchId, limit: 500 },
+    })
+      .then((rows) => {
+        if (!cancelled) setEmployees(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setEmployees([]);
+      });
     return () => {
       cancelled = true;
     };
   }, [form.companyId, form.divisionId, form.branchId]);
+
+  useEffect(() => {
+    if (!form.customerId) setSelectedCustomer(null);
+  }, [form.customerId]);
 
   useEffect(() => {
     if (!form.companyId) {
@@ -767,10 +754,6 @@ function SalesOrderModal({
     () => branches.find((branch) => branch.id === form.branchId) ?? null,
     [branches, form.branchId],
   );
-  const selectedCustomer = useMemo(
-    () => customers.find((customer) => customer.id === form.customerId) ?? null,
-    [customers, form.customerId],
-  );
   const receiptAccounts = useMemo(
     () =>
       form.paymentMethod === 'CREDIT'
@@ -815,7 +798,9 @@ function SalesOrderModal({
     if (dueDateTouched) return;
     const computed = addDaysToDate(form.orderDate, customerNetDays);
     if (computed) {
-      setForm((current) => (current.dueDate === computed ? current : { ...current, dueDate: computed }));
+      setForm((current) =>
+        current.dueDate === computed ? current : { ...current, dueDate: computed },
+      );
     }
   }, [customerNetDays, selectedCustomer?.paymentTerms, form.orderDate, dueDateTouched]);
 
@@ -1065,25 +1050,27 @@ function SalesOrderModal({
               </option>
             ))}
           </FormSelect>
-          <FormSelect
+          <CustomerPicker
             label="Customer"
             value={form.customerId}
-            onChange={(e) => {
+            onChange={(customerId, customer) => {
               // A fresh customer selection re-enables auto due-date so the newly
               // selected customer's payment terms drive the due date.
               setDueDateTouched(false);
-              setField('customerId', e.target.value);
+              setSelectedCustomer(customer ?? null);
+              setField('customerId', customerId);
             }}
-            placeholder={form.branchId ? 'Walk-in (use name)' : 'Select branch first'}
+            onResolved={setSelectedCustomer}
+            companyId={form.companyId || undefined}
+            divisionId={form.divisionId || undefined}
+            branchId={form.branchId || undefined}
+            placeholder={
+              form.branchId
+                ? 'Search customers by name, code, phone, email or TIN'
+                : 'Select branch first'
+            }
             disabled={!form.branchId}
-          >
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-                {c.customerCode ? ` (${c.customerCode})` : ''}
-              </option>
-            ))}
-          </FormSelect>
+          />
           <FormInput
             label="Walk-in Name"
             value={form.customerName}
@@ -1340,7 +1327,9 @@ export default function SalesOrdersPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState<WorkbenchSummary>(blankSummary);
   const [data, setData] = useState<Paginated<SalesOrder> | null>(null);
-  const [customerDayData, setCustomerDayData] = useState<Paginated<CustomerDaySummary> | null>(null);
+  const [customerDayData, setCustomerDayData] = useState<Paginated<CustomerDaySummary> | null>(
+    null,
+  );
   const [viewMode, setViewMode] = useState<'summary' | 'orders'>('summary');
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
@@ -1446,171 +1435,181 @@ export default function SalesOrdersPage() {
   }, [load]);
 
   // Export the FULL filtered register (not just the visible page) to CSV/PDF.
-  const exportRegister = useCallback(async (format: 'csv' | 'pdf') => {
-    if (!canView) return;
-    setExporting(format);
-    try {
-      const query: Record<string, string | number> = {};
-      if (filterSearch.trim()) query.search = filterSearch.trim();
-      if (filterCompany) query.companyId = filterCompany;
-      if (filterType) query.salesType = filterType;
-      if (filterStatus) query.status = filterStatus;
-      if (filterPayment) query.paymentStatus = filterPayment;
-      if (filterDateFrom) query.dateFrom = filterDateFrom;
-      if (filterDateTo) query.dateTo = filterDateTo;
+  const exportRegister = useCallback(
+    async (format: 'csv' | 'pdf') => {
+      if (!canView) return;
+      setExporting(format);
+      try {
+        const query: Record<string, string | number> = {};
+        if (filterSearch.trim()) query.search = filterSearch.trim();
+        if (filterCompany) query.companyId = filterCompany;
+        if (filterType) query.salesType = filterType;
+        if (filterStatus) query.status = filterStatus;
+        if (filterPayment) query.paymentStatus = filterPayment;
+        if (filterDateFrom) query.dateFrom = filterDateFrom;
+        if (filterDateTo) query.dateTo = filterDateTo;
 
-      const CAP = 5000;
-      if (viewMode === 'summary') {
-        const result = await backendPage<CustomerDaySummary>('/sales-orders/customer-day-summary', {
-          query: { ...query, page: 1, limit: CAP },
-        });
-        const groups = (result.data ?? []).slice(0, CAP);
-        if (!groups.length) {
-          showToast('info', 'Nothing to export', 'No customer summaries match the current filters.');
+        const CAP = 5000;
+        if (viewMode === 'summary') {
+          const result = await backendPage<CustomerDaySummary>(
+            '/sales-orders/customer-day-summary',
+            {
+              query: { ...query, page: 1, limit: CAP },
+            },
+          );
+          const groups = (result.data ?? []).slice(0, CAP);
+          if (!groups.length) {
+            showToast(
+              'info',
+              'Nothing to export',
+              'No customer summaries match the current filters.',
+            );
+            return;
+          }
+          const rows = groups.map((group) => ({
+            Date: group.date,
+            Customer: group.customer.name,
+            Currency: group.currency,
+            Orders: group.orderCount,
+            Total: group.totalAmount,
+            Paid: group.paidAmount,
+            Outstanding: group.outstandingAmount,
+            Statuses: compactCounts(group.statusCounts),
+            Payments: compactCounts(group.paymentStatusCounts),
+            'Order Numbers': group.orders
+              .map((order) => order.salesOrderNumber ?? order.orderNumber ?? order.id)
+              .join(', '),
+          }));
+          const columns = [
+            'Date',
+            'Customer',
+            'Currency',
+            'Orders',
+            'Total',
+            'Paid',
+            'Outstanding',
+            'Statuses',
+            'Payments',
+            'Order Numbers',
+          ];
+          if (format === 'pdf') {
+            await downloadTablePdf({
+              title: 'Sales by Customer and Day',
+              subtitle: `${filterDateFrom || 'start'} to ${filterDateTo || 'today'}`,
+              companyId: filterCompany || undefined,
+              columns,
+              rows: rows.map((r) => columns.map((c) => cellToString(r[c as keyof typeof r]))),
+              numericColumns: [3, 4, 5, 6],
+              baseName: 'sales-customer-day-summary',
+            });
+          } else {
+            downloadTextFile(
+              `sales-customer-day-summary-${new Date().toISOString().slice(0, 10)}.csv`,
+              'text/csv;charset=utf-8',
+              rowsToCsv(rows, columns),
+            );
+          }
+          if (result.total > groups.length) {
+            showToast(
+              'warning',
+              'Export truncated',
+              `Exported the first ${groups.length} of ${result.total} matching customer-day rows.`,
+            );
+          }
           return;
         }
-        const rows = groups.map((group) => ({
-          Date: group.date,
-          Customer: group.customer.name,
-          Currency: group.currency,
-          Orders: group.orderCount,
-          Total: group.totalAmount,
-          Paid: group.paidAmount,
-          Outstanding: group.outstandingAmount,
-          Statuses: compactCounts(group.statusCounts),
-          Payments: compactCounts(group.paymentStatusCounts),
-          'Order Numbers': group.orders
-            .map((order) => order.salesOrderNumber ?? order.orderNumber ?? order.id)
-            .join(', '),
+
+        const result = await backendPage<SalesOrder>('/sales-orders', {
+          query: { ...query, page: 1, limit: CAP },
+        });
+        const orders = (result.data ?? []).slice(0, CAP);
+        if (!orders.length) {
+          showToast('info', 'Nothing to export', 'No sales orders match the current filters.');
+          return;
+        }
+
+        const rows = orders.map((o) => ({
+          'Order #': o.salesOrderNumber ?? o.orderNumber ?? o.id,
+          Date: formatDateOnly(o.orderDate),
+          Customer: o.customer?.name ?? o.customerName ?? 'Walk-in customer',
+          Branch: o.branch?.name ?? '',
+          'Sales Type': o.salesType,
+          Status: o.status,
+          Payment: o.paymentStatus,
+          'Payment Method': o.paymentMethod ?? '',
+          Currency: o.currency,
+          Total: o.totalAmount,
+          Outstanding: o.outstandingAmount,
         }));
         const columns = [
+          'Order #',
           'Date',
           'Customer',
+          'Branch',
+          'Sales Type',
+          'Status',
+          'Payment',
+          'Payment Method',
           'Currency',
-          'Orders',
           'Total',
-          'Paid',
           'Outstanding',
-          'Statuses',
-          'Payments',
-          'Order Numbers',
         ];
         if (format === 'pdf') {
+          const filterParts = [
+            filterCompany ? companies.find((c) => c.id === filterCompany)?.name : '',
+            filterType.replace(/_/g, ' '),
+            filterStatus.replace(/_/g, ' '),
+            filterPayment.replace(/_/g, ' '),
+            filterDateFrom || filterDateTo
+              ? `${filterDateFrom || 'start'} to ${filterDateTo || 'today'}`
+              : '',
+          ].filter(Boolean);
           await downloadTablePdf({
-            title: 'Sales by Customer and Day',
-            subtitle: `${filterDateFrom || 'start'} to ${filterDateTo || 'today'}`,
+            title: 'Sales Orders',
+            subtitle: filterParts.length ? filterParts.join(' · ') : undefined,
             companyId: filterCompany || undefined,
             columns,
             rows: rows.map((r) => columns.map((c) => cellToString(r[c as keyof typeof r]))),
-            numericColumns: [3, 4, 5, 6],
-            baseName: 'sales-customer-day-summary',
+            numericColumns: [9, 10],
+            baseName: 'sales-orders',
           });
         } else {
           downloadTextFile(
-            `sales-customer-day-summary-${new Date().toISOString().slice(0, 10)}.csv`,
+            `sales-orders-${new Date().toISOString().slice(0, 10)}.csv`,
             'text/csv;charset=utf-8',
             rowsToCsv(rows, columns),
           );
         }
-        if (result.total > groups.length) {
+        if (result.total > orders.length) {
           showToast(
             'warning',
             'Export truncated',
-            `Exported the first ${groups.length} of ${result.total} matching customer-day rows.`,
+            `Exported the first ${orders.length} of ${result.total} matching orders.`,
           );
         }
-        return;
-      }
-
-      const result = await backendPage<SalesOrder>('/sales-orders', {
-        query: { ...query, page: 1, limit: CAP },
-      });
-      const orders = (result.data ?? []).slice(0, CAP);
-      if (!orders.length) {
-        showToast('info', 'Nothing to export', 'No sales orders match the current filters.');
-        return;
-      }
-
-      const rows = orders.map((o) => ({
-        'Order #': o.salesOrderNumber ?? o.orderNumber ?? o.id,
-        Date: formatDateOnly(o.orderDate),
-        Customer: o.customer?.name ?? o.customerName ?? 'Walk-in customer',
-        Branch: o.branch?.name ?? '',
-        'Sales Type': o.salesType,
-        Status: o.status,
-        Payment: o.paymentStatus,
-        'Payment Method': o.paymentMethod ?? '',
-        Currency: o.currency,
-        Total: o.totalAmount,
-        Outstanding: o.outstandingAmount,
-      }));
-      const columns = [
-        'Order #',
-        'Date',
-        'Customer',
-        'Branch',
-        'Sales Type',
-        'Status',
-        'Payment',
-        'Payment Method',
-        'Currency',
-        'Total',
-        'Outstanding',
-      ];
-      if (format === 'pdf') {
-        const filterParts = [
-          filterCompany ? companies.find((c) => c.id === filterCompany)?.name : '',
-          filterType.replace(/_/g, ' '),
-          filterStatus.replace(/_/g, ' '),
-          filterPayment.replace(/_/g, ' '),
-          filterDateFrom || filterDateTo
-            ? `${filterDateFrom || 'start'} to ${filterDateTo || 'today'}`
-            : '',
-        ].filter(Boolean);
-        await downloadTablePdf({
-          title: 'Sales Orders',
-          subtitle: filterParts.length ? filterParts.join(' · ') : undefined,
-          companyId: filterCompany || undefined,
-          columns,
-          rows: rows.map((r) => columns.map((c) => cellToString(r[c as keyof typeof r]))),
-          numericColumns: [9, 10],
-          baseName: 'sales-orders',
-        });
-      } else {
-        downloadTextFile(
-          `sales-orders-${new Date().toISOString().slice(0, 10)}.csv`,
-          'text/csv;charset=utf-8',
-          rowsToCsv(rows, columns),
-        );
-      }
-      if (result.total > orders.length) {
+      } catch (err) {
         showToast(
-          'warning',
-          'Export truncated',
-          `Exported the first ${orders.length} of ${result.total} matching orders.`,
+          'error',
+          'Export failed',
+          err instanceof Error ? err.message : 'Could not export sales orders.',
         );
+      } finally {
+        setExporting(false);
       }
-    } catch (err) {
-      showToast(
-        'error',
-        'Export failed',
-        err instanceof Error ? err.message : 'Could not export sales orders.',
-      );
-    } finally {
-      setExporting(false);
-    }
-  }, [
-    canView,
-    companies,
-    filterSearch,
-    filterCompany,
-    filterType,
-    filterStatus,
-    filterPayment,
-    filterDateFrom,
-    filterDateTo,
-    viewMode,
-  ]);
+    },
+    [
+      canView,
+      companies,
+      filterSearch,
+      filterCompany,
+      filterType,
+      filterStatus,
+      filterPayment,
+      filterDateFrom,
+      filterDateTo,
+      viewMode,
+    ],
+  );
 
   useEffect(() => {
     // Seed the workbench from drill-through URLs (e.g. the operations dashboard
@@ -1760,9 +1759,7 @@ export default function SalesOrdersPage() {
           currency={recordingPayment.currency}
           outstanding={recordingPaymentOutstanding}
           orderLabel={
-            recordingPayment.salesOrderNumber ??
-            recordingPayment.orderNumber ??
-            recordingPayment.id
+            recordingPayment.salesOrderNumber ?? recordingPayment.orderNumber ?? recordingPayment.id
           }
           onClose={() => setRecordingPayment(null)}
           onSaved={() => {
@@ -1789,10 +1786,7 @@ export default function SalesOrdersPage() {
         />
       )}
 
-      <PageHeader
-        title="Sales Orders"
-        subtitle="Customer orders, payments, and revenue"
-      />
+      <PageHeader title="Sales Orders" subtitle="Customer orders, payments, and revenue" />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 aurora-stagger">
         <StatCard label="Total Orders" value={summary.totalOrders} />
@@ -1985,296 +1979,350 @@ export default function SalesOrdersPage() {
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           {viewMode === 'summary' ? (
-          <table className="w-full text-sm min-w-[1100px]" aria-label="Sales by customer and day">
-            <caption className="sr-only">Sales by customer and day</caption>
-            <thead>
-              <tr
-                className="text-left text-xs uppercase bg-gray-50"
-                style={{ color: 'var(--aurora-text-muted)' }}
-              >
-                <th scope="col" className="px-4 py-3">Date</th>
-                <th scope="col" className="px-4 py-3">Customer</th>
-                <th scope="col" className="px-4 py-3 text-right">Orders</th>
-                <th scope="col" className="px-4 py-3 text-right">Total</th>
-                <th scope="col" className="px-4 py-3 text-right">Paid</th>
-                <th scope="col" className="px-4 py-3 text-right">Outstanding</th>
-                <th scope="col" className="px-4 py-3">Status Mix</th>
-                <th scope="col" className="px-4 py-3">Payment Mix</th>
-                <th scope="col" className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={9}>
-                    <SkeletonTable rows={6} cols={9} />
-                  </td>
+            <table className="w-full text-sm min-w-[1100px]" aria-label="Sales by customer and day">
+              <caption className="sr-only">Sales by customer and day</caption>
+              <thead>
+                <tr
+                  className="text-left text-xs uppercase bg-gray-50"
+                  style={{ color: 'var(--aurora-text-muted)' }}
+                >
+                  <th scope="col" className="px-4 py-3">
+                    Date
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Customer
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Orders
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Total
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Paid
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Outstanding
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Status Mix
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Payment Mix
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Actions
+                  </th>
                 </tr>
-              ) : !customerDayData?.data.length ? (
-                <tr>
-                  <td colSpan={9}>
-                    <EmptyState
-                      title="No sales for this view"
-                      description="No customer-day sales groups match the current filters."
-                    />
-                  </td>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan={9}>
+                      <SkeletonTable rows={6} cols={9} />
+                    </td>
+                  </tr>
+                ) : !customerDayData?.data.length ? (
+                  <tr>
+                    <td colSpan={9}>
+                      <EmptyState
+                        title="No sales for this view"
+                        description="No customer-day sales groups match the current filters."
+                      />
+                    </td>
+                  </tr>
+                ) : (
+                  customerDayData.data.map((group) => {
+                    const expanded = !!expandedGroups[group.id];
+                    return (
+                      <Fragment key={group.id}>
+                        <tr className="hover:bg-slate-50">
+                          <td className="px-4 py-3 text-xs">{formatDateOnly(group.date)}</td>
+                          <td className="px-4 py-3">
+                            <div className="font-medium">{group.customer.name}</div>
+                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                              {group.customer.customerCode ??
+                                (group.customer.isWalkIn ? 'Walk-in/manual' : '')}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right tabular-nums">{group.orderCount}</td>
+                          <td className="px-4 py-3 text-right tabular-nums">
+                            {fmtMoney(group.totalAmount, group.currency)}
+                          </td>
+                          <td className="px-4 py-3 text-right tabular-nums">
+                            {fmtMoney(group.paidAmount, group.currency)}
+                          </td>
+                          <td className="px-4 py-3 text-right tabular-nums">
+                            {fmtMoney(group.outstandingAmount, group.currency)}
+                          </td>
+                          <td className="px-4 py-3 text-xs">
+                            {compactCounts(group.statusCounts) || '—'}
+                          </td>
+                          <td className="px-4 py-3 text-xs">
+                            {compactCounts(group.paymentStatusCounts) || '—'}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Btn
+                              variant="secondary"
+                              size="xs"
+                              onClick={() =>
+                                setExpandedGroups((prev) => ({ ...prev, [group.id]: !expanded }))
+                              }
+                            >
+                              {expanded ? 'Hide Orders' : 'View Orders'}
+                            </Btn>
+                          </td>
+                        </tr>
+                        {expanded && (
+                          <tr key={`${group.id}:orders`}>
+                            <td colSpan={9} className="px-4 py-3 bg-slate-950/5">
+                              <div className="space-y-2">
+                                {group.orders.map((order) => {
+                                  const orderRef =
+                                    order.salesOrderNumber ??
+                                    order.orderNumber ??
+                                    order.id.slice(0, 8);
+                                  return (
+                                    <div
+                                      key={order.id}
+                                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                                      style={{ borderColor: 'var(--aurora-border)' }}
+                                    >
+                                      <div className="min-w-0">
+                                        <div className="font-mono text-xs">{orderRef}</div>
+                                        <div
+                                          className="text-xs"
+                                          style={{ color: 'var(--aurora-text-muted)' }}
+                                        >
+                                          {order.branch?.name ?? 'No branch'} ·{' '}
+                                          {order.salesType.replace(/_/g, ' ')}
+                                        </div>
+                                      </div>
+                                      <div className="text-right tabular-nums">
+                                        <div>{fmtMoney(order.totalAmount, order.currency)}</div>
+                                        <div
+                                          className="text-xs"
+                                          style={{ color: 'var(--aurora-text-muted)' }}
+                                        >
+                                          Outstanding{' '}
+                                          {fmtMoney(order.outstandingAmount, order.currency)}
+                                        </div>
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-1">
+                                        <StatusBadge value={order.status} />
+                                        <StatusBadge value={order.paymentStatus} />
+                                        {canRecordPayment &&
+                                          order.receivableId &&
+                                          Number(order.outstandingAmount ?? 0) > 0 &&
+                                          ['CONFIRMED', 'PARTIALLY_PAID'].includes(
+                                            order.status,
+                                          ) && (
+                                            <Btn
+                                              variant="primary"
+                                              size="xs"
+                                              aria-label={`Record payment for order ${orderRef}`}
+                                              onClick={() => setRecordingPayment(order)}
+                                            >
+                                              Pay
+                                            </Btn>
+                                          )}
+                                        <Btn
+                                          variant="secondary"
+                                          size="xs"
+                                          aria-label={`View order ${orderRef}`}
+                                          onClick={() =>
+                                            router.push(`/operations/sales-orders/${order.id}`)
+                                          }
+                                        >
+                                          View
+                                        </Btn>
+                                        <DocumentPreviewLink
+                                          href={`/operations/sales-orders/${order.id}/print`}
+                                          label={`View / Print / PDF order ${orderRef}`}
+                                        />
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          ) : (
+            <table className="w-full text-sm min-w-[1100px]" aria-label="Sales orders">
+              <caption className="sr-only">Sales orders</caption>
+              <thead>
+                <tr
+                  className="text-left text-xs uppercase bg-gray-50"
+                  style={{ color: 'var(--aurora-text-muted)' }}
+                >
+                  <th scope="col" className="px-4 py-3">
+                    Number
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Date
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Customer
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Type
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Total
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Outstanding
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Status
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Payment
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Actions
+                  </th>
                 </tr>
-              ) : (
-                customerDayData.data.map((group) => {
-                  const expanded = !!expandedGroups[group.id];
-                  return (
-                    <Fragment key={group.id}>
-                      <tr className="hover:bg-slate-50">
-                        <td className="px-4 py-3 text-xs">{formatDateOnly(group.date)}</td>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan={9}>
+                      <SkeletonTable rows={6} cols={9} />
+                    </td>
+                  </tr>
+                ) : !data?.data.length ? (
+                  <tr>
+                    <td colSpan={9}>
+                      <EmptyState
+                        title="No orders"
+                        description="No sales orders match the current filters."
+                      />
+                    </td>
+                  </tr>
+                ) : (
+                  data.data.map((o) => {
+                    const orderRef = o.salesOrderNumber ?? o.orderNumber ?? o.id.slice(0, 8);
+                    return (
+                      <tr key={o.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 font-mono text-xs">{orderRef}</td>
+                        <td className="px-4 py-3 text-xs">
+                          {new Date(o.orderDate).toLocaleDateString('en-GB')}
+                        </td>
                         <td className="px-4 py-3">
-                          <div className="font-medium">{group.customer.name}</div>
-                          <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                            {group.customer.customerCode ?? (group.customer.isWalkIn ? 'Walk-in/manual' : '')}
-                          </div>
+                          {o.customer?.name ?? o.customerName ?? (
+                            <span className="italic" style={{ color: 'var(--aurora-text-muted)' }}>
+                              Walk-in
+                            </span>
+                          )}
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums">{group.orderCount}</td>
+                        <td className="px-4 py-3 text-xs">{o.salesType.replace(/_/g, ' ')}</td>
                         <td className="px-4 py-3 text-right tabular-nums">
-                          {fmtMoney(group.totalAmount, group.currency)}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {fmtMoney(group.paidAmount, group.currency)}
+                          {fmtMoney(o.totalAmount, o.currency)}
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums">
-                          {fmtMoney(group.outstandingAmount, group.currency)}
+                          {fmtMoney(o.outstandingAmount, o.currency)}
                         </td>
-                        <td className="px-4 py-3 text-xs">{compactCounts(group.statusCounts) || '—'}</td>
-                        <td className="px-4 py-3 text-xs">{compactCounts(group.paymentStatusCounts) || '—'}</td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-4 py-3">
+                          <StatusBadge value={o.status} />
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge value={o.paymentStatus} />
+                        </td>
+                        <td className="px-4 py-3 text-right space-x-1">
                           <Btn
                             variant="secondary"
                             size="xs"
-                            onClick={() =>
-                              setExpandedGroups((prev) => ({ ...prev, [group.id]: !expanded }))
-                            }
+                            aria-label={`View order ${orderRef}`}
+                            onClick={() => router.push(`/operations/sales-orders/${o.id}`)}
                           >
-                            {expanded ? 'Hide Orders' : 'View Orders'}
+                            View
                           </Btn>
+                          <DocumentPreviewLink
+                            href={`/operations/sales-orders/${o.id}/print`}
+                            label={`View / Print / PDF order ${orderRef}`}
+                          />
+                          {canRecordPayment &&
+                            (o.receivableId ?? o.receivable?.id) &&
+                            Number(o.outstandingAmount ?? 0) > 0 &&
+                            ['CONFIRMED', 'PARTIALLY_PAID'].includes(o.status) && (
+                              <Btn
+                                variant="primary"
+                                size="xs"
+                                aria-label={`Record payment for order ${orderRef}`}
+                                onClick={() =>
+                                  setRecordingPayment({
+                                    id: o.id,
+                                    salesOrderNumber: o.salesOrderNumber,
+                                    orderNumber: o.orderNumber,
+                                    receivableId: o.receivableId ?? o.receivable?.id ?? null,
+                                    companyId: o.companyId,
+                                    divisionId: o.divisionId,
+                                    branchId: o.branchId,
+                                    currency: o.currency,
+                                    outstandingAmount: o.outstandingAmount,
+                                  })
+                                }
+                              >
+                                Pay
+                              </Btn>
+                            )}
+                          {o.status === 'DRAFT' && canCreate && (
+                            <Btn
+                              variant="ghost"
+                              size="xs"
+                              aria-label={`Edit order ${orderRef}`}
+                              onClick={() => setEditing(o)}
+                            >
+                              Edit
+                            </Btn>
+                          )}
+                          {o.status === 'DRAFT' && canConfirm && (
+                            <Btn
+                              variant="primary"
+                              size="xs"
+                              aria-label={`Confirm order ${orderRef}`}
+                              loading={actionLoading === `${o.id}:confirm`}
+                              onClick={() => setPendingAction({ id: o.id, action: 'confirm' })}
+                            >
+                              Confirm
+                            </Btn>
+                          )}
+                          {o.status === 'CONFIRMED' && canCancel && (
+                            <Btn
+                              variant="danger"
+                              size="xs"
+                              aria-label={`Cancel order ${orderRef}`}
+                              loading={actionLoading === `${o.id}:cancel`}
+                              onClick={() => setPendingAction({ id: o.id, action: 'cancel' })}
+                            >
+                              Cancel
+                            </Btn>
+                          )}
+                          {o.status === 'DRAFT' && canCreate && (
+                            <Btn
+                              variant="ghost"
+                              size="xs"
+                              aria-label={`Delete order ${orderRef}`}
+                              onClick={() => setDeleting(o)}
+                            >
+                              Delete
+                            </Btn>
+                          )}
                         </td>
                       </tr>
-                      {expanded && (
-                        <tr key={`${group.id}:orders`}>
-                          <td colSpan={9} className="px-4 py-3 bg-slate-950/5">
-                            <div className="space-y-2">
-                              {group.orders.map((order) => {
-                                const orderRef =
-                                  order.salesOrderNumber ?? order.orderNumber ?? order.id.slice(0, 8);
-                                return (
-                                  <div
-                                    key={order.id}
-                                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
-                                    style={{ borderColor: 'var(--aurora-border)' }}
-                                  >
-                                    <div className="min-w-0">
-                                      <div className="font-mono text-xs">{orderRef}</div>
-                                      <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                                        {order.branch?.name ?? 'No branch'} · {order.salesType.replace(/_/g, ' ')}
-                                      </div>
-                                    </div>
-                                    <div className="text-right tabular-nums">
-                                      <div>{fmtMoney(order.totalAmount, order.currency)}</div>
-                                      <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                                        Outstanding {fmtMoney(order.outstandingAmount, order.currency)}
-                                      </div>
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-1">
-                                      <StatusBadge value={order.status} />
-                                      <StatusBadge value={order.paymentStatus} />
-                                      {canRecordPayment &&
-                                        order.receivableId &&
-                                        Number(order.outstandingAmount ?? 0) > 0 &&
-                                        ['CONFIRMED', 'PARTIALLY_PAID'].includes(order.status) && (
-                                          <Btn
-                                            variant="primary"
-                                            size="xs"
-                                            aria-label={`Record payment for order ${orderRef}`}
-                                            onClick={() => setRecordingPayment(order)}
-                                          >
-                                            Pay
-                                          </Btn>
-                                        )}
-                                      <Btn
-                                        variant="secondary"
-                                        size="xs"
-                                        aria-label={`View order ${orderRef}`}
-                                        onClick={() => router.push(`/operations/sales-orders/${order.id}`)}
-                                      >
-                                        View
-                                      </Btn>
-                                      <DocumentPreviewLink
-                                        href={`/operations/sales-orders/${order.id}/print`}
-                                        label={`View / Print / PDF order ${orderRef}`}
-                                      />
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-          ) : (
-          <table className="w-full text-sm min-w-[1100px]" aria-label="Sales orders">
-            <caption className="sr-only">Sales orders</caption>
-            <thead>
-              <tr
-                className="text-left text-xs uppercase bg-gray-50"
-                style={{ color: 'var(--aurora-text-muted)' }}
-              >
-                <th scope="col" className="px-4 py-3">Number</th>
-                <th scope="col" className="px-4 py-3">Date</th>
-                <th scope="col" className="px-4 py-3">Customer</th>
-                <th scope="col" className="px-4 py-3">Type</th>
-                <th scope="col" className="px-4 py-3 text-right">Total</th>
-                <th scope="col" className="px-4 py-3 text-right">Outstanding</th>
-                <th scope="col" className="px-4 py-3">Status</th>
-                <th scope="col" className="px-4 py-3">Payment</th>
-                <th scope="col" className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={9}>
-                    <SkeletonTable rows={6} cols={9} />
-                  </td>
-                </tr>
-              ) : !data?.data.length ? (
-                <tr>
-                  <td colSpan={9}>
-                    <EmptyState
-                      title="No orders"
-                      description="No sales orders match the current filters."
-                    />
-                  </td>
-                </tr>
-              ) : (
-                data.data.map((o) => {
-                  const orderRef =
-                    o.salesOrderNumber ?? o.orderNumber ?? o.id.slice(0, 8);
-                  return (
-                  <tr key={o.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-mono text-xs">{orderRef}</td>
-                    <td className="px-4 py-3 text-xs">
-                      {new Date(o.orderDate).toLocaleDateString('en-GB')}
-                    </td>
-                    <td className="px-4 py-3">
-                      {o.customer?.name ?? o.customerName ?? (
-                        <span className="italic" style={{ color: 'var(--aurora-text-muted)' }}>
-                          Walk-in
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-xs">{o.salesType.replace(/_/g, ' ')}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {fmtMoney(o.totalAmount, o.currency)}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {fmtMoney(o.outstandingAmount, o.currency)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge value={o.status} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge value={o.paymentStatus} />
-                    </td>
-                    <td className="px-4 py-3 text-right space-x-1">
-                      <Btn
-                        variant="secondary"
-                        size="xs"
-                        aria-label={`View order ${orderRef}`}
-                        onClick={() => router.push(`/operations/sales-orders/${o.id}`)}
-                      >
-                        View
-                      </Btn>
-                      <DocumentPreviewLink
-                        href={`/operations/sales-orders/${o.id}/print`}
-                        label={`View / Print / PDF order ${orderRef}`}
-                      />
-                      {canRecordPayment &&
-                        (o.receivableId ?? o.receivable?.id) &&
-                        Number(o.outstandingAmount ?? 0) > 0 &&
-                        ['CONFIRMED', 'PARTIALLY_PAID'].includes(o.status) && (
-                          <Btn
-                            variant="primary"
-                            size="xs"
-                            aria-label={`Record payment for order ${orderRef}`}
-                            onClick={() =>
-                              setRecordingPayment({
-                                id: o.id,
-                                salesOrderNumber: o.salesOrderNumber,
-                                orderNumber: o.orderNumber,
-                                receivableId: o.receivableId ?? o.receivable?.id ?? null,
-                                companyId: o.companyId,
-                                divisionId: o.divisionId,
-                                branchId: o.branchId,
-                                currency: o.currency,
-                                outstandingAmount: o.outstandingAmount,
-                              })
-                            }
-                          >
-                            Pay
-                          </Btn>
-                        )}
-                      {o.status === 'DRAFT' && canCreate && (
-                        <Btn
-                          variant="ghost"
-                          size="xs"
-                          aria-label={`Edit order ${orderRef}`}
-                          onClick={() => setEditing(o)}
-                        >
-                          Edit
-                        </Btn>
-                      )}
-                      {o.status === 'DRAFT' && canConfirm && (
-                        <Btn
-                          variant="primary"
-                          size="xs"
-                          aria-label={`Confirm order ${orderRef}`}
-                          loading={actionLoading === `${o.id}:confirm`}
-                          onClick={() => setPendingAction({ id: o.id, action: 'confirm' })}
-                        >
-                          Confirm
-                        </Btn>
-                      )}
-                      {o.status === 'CONFIRMED' && canCancel && (
-                        <Btn
-                          variant="danger"
-                          size="xs"
-                          aria-label={`Cancel order ${orderRef}`}
-                          loading={actionLoading === `${o.id}:cancel`}
-                          onClick={() => setPendingAction({ id: o.id, action: 'cancel' })}
-                        >
-                          Cancel
-                        </Btn>
-                      )}
-                      {o.status === 'DRAFT' && canCreate && (
-                        <Btn
-                          variant="ghost"
-                          size="xs"
-                          aria-label={`Delete order ${orderRef}`}
-                          onClick={() => setDeleting(o)}
-                        >
-                          Delete
-                        </Btn>
-                      )}
-                    </td>
-                  </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           )}
         </div>
         {activePage && activePage.totalPages > 1 && (

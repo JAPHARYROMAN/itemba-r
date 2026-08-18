@@ -17,6 +17,7 @@ import {
   FormInput,
   FormSelect,
   FormTextarea,
+  SupplierPicker,
   showToast,
 } from '@/components/ui';
 import {
@@ -48,13 +49,6 @@ interface Branch {
   name: string;
   code?: string | null;
   divisionId: string;
-}
-interface Supplier {
-  id: string;
-  name: string;
-  supplierCode?: string | null;
-  supplierType: string;
-  divisionId?: string | null;
 }
 interface Product {
   id: string;
@@ -278,7 +272,6 @@ function PurchaseOrderModal({
         }
       : blankForm(),
   );
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [productSearchQuery, setProductSearchQuery] = useState('');
@@ -316,7 +309,6 @@ function PurchaseOrderModal({
     if (!form.companyId) {
       setDivisions([]);
       setBranches([]);
-      setSuppliers([]);
       setProducts([]);
       return;
     }
@@ -335,31 +327,6 @@ function PurchaseOrderModal({
       cancelled = true;
     };
   }, [form.companyId]);
-
-  useEffect(() => {
-    if (!form.companyId || !form.divisionId) {
-      setSuppliers([]);
-      return;
-    }
-    let cancelled = false;
-    backendList<Supplier>('/suppliers', {
-      query: {
-        companyId: form.companyId,
-        divisionId: form.divisionId,
-        status: 'ACTIVE',
-        limit: 200,
-      },
-    })
-      .then((rows) => {
-        if (!cancelled) setSuppliers(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setSuppliers([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [form.companyId, form.divisionId]);
 
   useEffect(() => {
     if (!form.companyId) {
@@ -651,20 +618,19 @@ function PurchaseOrderModal({
               </option>
             ))}
           </FormSelect>
-          <FormSelect
+          <SupplierPicker
             label="Supplier"
             value={form.supplierId}
-            onChange={(e) => setField('supplierId', e.target.value)}
-            placeholder={form.divisionId ? 'Use name below' : 'Select division first'}
+            onChange={(supplierId) => setField('supplierId', supplierId)}
+            companyId={form.companyId || undefined}
+            divisionId={form.divisionId || undefined}
+            placeholder={
+              form.divisionId
+                ? 'Search suppliers by name, code, phone, email or TIN'
+                : 'Select division first'
+            }
             disabled={!form.divisionId}
-          >
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-                {s.supplierCode ? ` (${s.supplierCode})` : ''}
-              </option>
-            ))}
-          </FormSelect>
+          />
           <FormInput
             label="Supplier Name"
             value={form.supplierName}

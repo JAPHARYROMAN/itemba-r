@@ -3,6 +3,8 @@ import { CustomersService } from './customers.service';
 function makePrisma() {
   return {
     customer: {
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
       findFirst: jest.fn().mockResolvedValue({
         id: 'customer-1',
         companyId: 'company-1',
@@ -37,6 +39,23 @@ function makePrisma() {
 }
 
 describe('CustomersService profile', () => {
+  it('returns customer lists in deterministic alphabetical order', async () => {
+    const prisma = makePrisma();
+    const service = new CustomersService(
+      prisma,
+      { log: jest.fn() } as any,
+      { companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-1' }) } as any,
+    );
+
+    await service.findAll({ companyId: 'company-1' }, { id: 'user-1' } as any);
+
+    expect(prisma.customer.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ name: 'asc' }, { customerCode: 'asc' }],
+      }),
+    );
+  });
+
   it('uses PAID receivables for recent payments', async () => {
     const prisma = makePrisma();
     const service = new CustomersService(

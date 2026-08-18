@@ -46,7 +46,7 @@ export class CustomersService {
           division: { select: { id: true, name: true, code: true } },
           branch: { select: { id: true, name: true, code: true } },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ name: 'asc' }, { customerCode: 'asc' }],
         skip,
         take: limit,
       }),

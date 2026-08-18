@@ -73,7 +73,7 @@ export class SuppliersService {
             orderBy: { productCategory: { name: 'asc' } },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ name: 'asc' }, { supplierCode: 'asc' }],
         skip,
         take: limit,
       }),
