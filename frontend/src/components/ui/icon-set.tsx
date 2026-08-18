@@ -38,6 +38,7 @@ import {
   Settings,
   ShieldCheck,
   ShoppingCart,
+  Sparkles,
   Stethoscope,
   TrendingDown,
   TrendingUp,
@@ -112,6 +113,9 @@ const ICONS = {
   login: LogIn,
   signup: UserPlus,
   automation: Zap,
+  // The assistant. Sparkles rather than a robot face: Msaidizi acts as the
+  // person using it, under their own badge, and a robot icon says the opposite.
+  assistant: Sparkles,
   run: Play,
   sequence: Hash,
   commission: Percent,

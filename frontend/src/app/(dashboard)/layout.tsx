@@ -13,6 +13,7 @@ import { CsrfFetchProvider } from '@/components/security/CsrfFetchProvider';
 import { PageSpinner } from '@/components/ui';
 import { RouteProgress } from '@/components/layout/route-progress';
 import { BreadcrumbTrail } from '@/components/aurora/navigation/BreadcrumbTrail';
+import { MsaidiziLauncherProvider } from '@/components/msaidizi/msaidizi-launcher';
 
 // Routes where a breadcrumb trail is redundant (top-level landing pages that
 // would only render "Home / Dashboard").
@@ -150,20 +151,32 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 {children}
               </main>
             ) : (
-              <div className="flex h-full min-h-screen" style={{ background: 'var(--aurora-bg)' }}>
-                <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-                <div className="flex-1 flex flex-col min-w-0 lg:ml-0">
-                  <Topbar onMenuClick={() => setSidebarOpen(true)} />
-                  <main className="flex-1 overflow-auto" style={{ background: 'var(--aurora-bg)' }}>
-                    {showBreadcrumbs && (
-                      <div className="px-4 pt-4 sm:px-6 lg:px-8">
-                        <BreadcrumbTrail />
-                      </div>
-                    )}
-                    {children}
-                  </main>
+              // The Msaidizi launcher hangs HERE, inside the ERP arm only. The
+              // POS shell above never mounts it, so Kaunta has no assistant
+              // button and no Ctrl+J — the boundary is structural, not a
+              // runtime pathname check anyone can forget to write.
+              <MsaidiziLauncherProvider>
+                <div
+                  className="flex h-full min-h-screen"
+                  style={{ background: 'var(--aurora-bg)' }}
+                >
+                  <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+                  <div className="flex-1 flex flex-col min-w-0 lg:ml-0">
+                    <Topbar onMenuClick={() => setSidebarOpen(true)} />
+                    <main
+                      className="flex-1 overflow-auto"
+                      style={{ background: 'var(--aurora-bg)' }}
+                    >
+                      {showBreadcrumbs && (
+                        <div className="px-4 pt-4 sm:px-6 lg:px-8">
+                          <BreadcrumbTrail />
+                        </div>
+                      )}
+                      {children}
+                    </main>
+                  </div>
                 </div>
-              </div>
+              </MsaidiziLauncherProvider>
             )}
           </CommandPaletteProvider>
         </CsrfFetchProvider>

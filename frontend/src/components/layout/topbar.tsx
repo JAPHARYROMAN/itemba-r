@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { GlobalSearchBox } from '@/components/aurora/command';
 import { AppIcon, type AppIconName } from '@/components/ui/icon-set';
 import { ThemeSelector } from '@/components/ui/theme-selector';
+import { MsaidiziTopbarButton } from '@/components/msaidizi/msaidizi-launcher';
 
 interface TopbarProps {
   onMenuClick: () => void;
@@ -96,6 +97,11 @@ export function Topbar({ onMenuClick }: TopbarProps) {
 
       <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
         <GlobalSearchBox />
+
+        {/* Opens the assistant with the question already running. Renders null
+            for anyone without `msaidizi.use`, and cannot render at all in the
+            POS shell — its provider is mounted only in the ERP arm. */}
+        <MsaidiziTopbarButton />
 
         {/* Quick Create ("+ New") */}
         {!loading && user && quickCreateItems.length > 0 && (

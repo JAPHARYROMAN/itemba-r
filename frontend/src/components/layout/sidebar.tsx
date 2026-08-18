@@ -98,6 +98,8 @@ const ICONS = {
   docTemplate:
     'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
   automation: 'M13 10V3L4 14h7v7l9-11h-7z',
+  assistant:
+    'M11.017 2.814a1 1 0 011.966 0l1.051 5.558a2 2 0 001.594 1.594l5.558 1.051a1 1 0 010 1.966l-5.558 1.051a2 2 0 00-1.594 1.594l-1.051 5.558a1 1 0 01-1.966 0l-1.051-5.558a2 2 0 00-1.594-1.594l-5.558-1.051a1 1 0 010-1.966l5.558-1.051a2 2 0 001.594-1.594z',
   performance: 'M13 10V3L4 14h7v7l9-11h-7z',
   jobs: 'M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2',
   isolation:
@@ -137,6 +139,11 @@ export function isGroup(item: NavItem): item is NavGroup {
 
 export const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', iconKey: 'dashboard' },
+  // One leaf puts Msaidizi in the sidebar, the command palette, the tab title
+  // and the recents store at once — and makes it correctly INVISIBLE to anyone
+  // without `msaidizi.use`, which is the UI expression of the backend's rule
+  // that an unpermitted capability is invisible rather than refused.
+  { href: '/msaidizi', label: 'Msaidizi', iconKey: 'assistant', permission: 'msaidizi.use' },
   {
     label: 'Records Book',
     iconKey: 'clipboardList',
