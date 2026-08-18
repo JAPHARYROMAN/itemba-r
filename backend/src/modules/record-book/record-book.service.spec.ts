@@ -11,6 +11,8 @@ const user: any = {
 
 function makeService(overrides: Record<string, unknown> = {}) {
   const txCreate = jest.fn();
+  const txFindFirst = jest.fn().mockResolvedValue(null);
+  const txExecuteRaw = jest.fn().mockResolvedValue(1);
   const prisma: any = {
     division: { findFirst: jest.fn().mockResolvedValue({ id: 'division-1' }) },
     branch: { findFirst: jest.fn().mockResolvedValue({ id: 'branch-1' }) },
@@ -21,8 +23,9 @@ function makeService(overrides: Record<string, unknown> = {}) {
     recordBookSaleReceipt: { deleteMany: jest.fn() },
     $transaction: jest.fn(async (fn) =>
       fn({
-        recordBookDailySale: { create: txCreate },
+        recordBookDailySale: { create: txCreate, findFirst: txFindFirst },
         recordBookSaleReceipt: { deleteMany: jest.fn() },
+        $executeRaw: txExecuteRaw,
       }),
     ),
     ...overrides,
@@ -32,16 +35,88 @@ function makeService(overrides: Record<string, unknown> = {}) {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
     companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-1' }),
   };
+  const organizationScope = {
+    assertCanAccessScope: jest.fn().mockResolvedValue(undefined),
+    recordWhereFor: jest.fn().mockResolvedValue({}),
+    accessibleIds: jest.fn().mockResolvedValue({
+      unrestricted: true,
+      divisionIds: [],
+      branchIds: [],
+    }),
+  };
   return {
-    service: new RecordBookService(prisma, auditLogs as any, companyScope as any),
+    service: new RecordBookService(
+      prisma,
+      auditLogs as any,
+      companyScope as any,
+      organizationScope as any,
+    ),
     prisma,
     auditLogs,
     companyScope,
+    organizationScope,
     txCreate,
+    txFindFirst,
+    txExecuteRaw,
   };
 }
 
 describe('RecordBookService', () => {
+  it('keeps dashboard totals separate by currency and counts drafts independently', async () => {
+    const { service } = makeService({
+      recordBookDailySale: {
+        groupBy: jest.fn().mockResolvedValue([
+          {
+            currency: CurrencyCode.TZS,
+            _sum: { totalSalesAmount: 1000 },
+            _count: { _all: 1 },
+          },
+          {
+            currency: CurrencyCode.USD,
+            _sum: { totalSalesAmount: 10 },
+            _count: { _all: 1 },
+          },
+        ]),
+        count: jest.fn().mockResolvedValue(2),
+      },
+      recordBookExpense: {
+        groupBy: jest
+          .fn()
+          .mockResolvedValue([
+            { currency: CurrencyCode.TZS, _sum: { amount: 250 }, _count: { _all: 1 } },
+          ]),
+        count: jest.fn().mockResolvedValue(1),
+      },
+      recordBookSaleReceipt: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            receiptType: RecordBookReceiptType.CASH,
+            amount: 1000,
+            dailySale: { currency: CurrencyCode.TZS },
+          },
+          {
+            receiptType: RecordBookReceiptType.CASH,
+            amount: 10,
+            dailySale: { currency: CurrencyCode.USD },
+          },
+        ]),
+      },
+    });
+
+    const result = await service.summary({}, user);
+
+    expect(result.totalRecordedSales).toBeNull();
+    expect(result.netMovement).toBeNull();
+    expect(result.mixedCurrency).toBe(true);
+    expect(result.draftRecords).toBe(3);
+    expect(result.summaryByCurrency).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ currency: CurrencyCode.TZS, netMovement: 750 }),
+        expect.objectContaining({ currency: CurrencyCode.USD, netMovement: 10 }),
+      ]),
+    );
+  });
+
   it('rejects daily sales when receipt split does not equal total', async () => {
     const { service } = makeService();
 
@@ -63,8 +138,8 @@ describe('RecordBookService', () => {
   });
 
   it('rejects duplicate active daily summaries for the same branch date and currency', async () => {
-    const { service, prisma } = makeService();
-    prisma.recordBookDailySale.findFirst.mockResolvedValueOnce({ id: 'existing' });
+    const { service, txFindFirst } = makeService();
+    txFindFirst.mockResolvedValueOnce({ id: 'existing' });
 
     await expect(
       service.createDailySale(
@@ -163,24 +238,50 @@ describe('RecordBookService', () => {
   });
 
   it('rejects restoring a daily sale when its active date key is already occupied', async () => {
-    const findFirst = jest
-      .fn()
-      .mockResolvedValueOnce({
-        id: 'sale-1',
-        companyId: 'company-1',
-        branchId: 'branch-1',
-        recordDate: new Date('2026-07-09T00:00:00.000Z'),
-        currency: CurrencyCode.TZS,
-        status: RecordBookStatus.DRAFT,
-        receipts: [],
-      })
-      .mockResolvedValueOnce({ id: 'replacement-sale' });
-    const { service } = makeService({
+    const findFirst = jest.fn().mockResolvedValue({
+      id: 'sale-1',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      recordDate: new Date('2026-07-09T00:00:00.000Z'),
+      currency: CurrencyCode.TZS,
+      status: RecordBookStatus.DRAFT,
+      receipts: [],
+    });
+    const { service, txFindFirst } = makeService({
       recordBookDailySale: { findFirst, update: jest.fn() },
     });
+    txFindFirst.mockResolvedValueOnce({ id: 'replacement-sale' });
 
     await expect(service.restoreDailySale('sale-1', user)).rejects.toBeInstanceOf(
       ConflictException,
     );
+  });
+
+  it('serializes duplicate checks inside a transaction-scoped advisory lock', async () => {
+    const { service, prisma, txCreate, txExecuteRaw } = makeService();
+    txCreate.mockResolvedValue({
+      id: 'sale-1',
+      companyId: 'company-1',
+      recordDate: new Date('2026-07-09T00:00:00.000Z'),
+      currency: CurrencyCode.TZS,
+      totalSalesAmount: 1000,
+      status: RecordBookStatus.DRAFT,
+      receipts: [{ receiptType: RecordBookReceiptType.CASH, amount: 1000 }],
+    });
+
+    await service.createDailySale(
+      {
+        companyId: 'company-1',
+        recordDate: '2026-07-09',
+        currency: CurrencyCode.TZS,
+        totalSalesAmount: 1000,
+        receipts: [{ receiptType: RecordBookReceiptType.CASH, amount: 1000 }],
+      },
+      user,
+    );
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(txExecuteRaw).toHaveBeenCalledTimes(1);
   });
 });

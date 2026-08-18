@@ -1,9 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import {
-  RequireAnyPermissions,
-  RequirePermissions,
-} from '../../common/decorators/require-permissions.decorator';
+import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { RecordBookService } from './record-book.service';
 import { RecordBookReportsService } from './record-book-reports.service';
@@ -15,6 +12,7 @@ import {
   ExportRecordBookReportDto,
   QueryRecordBookDto,
   QueryRecordBookReportDto,
+  ReopenRecordBookDto,
   RecordBookExportAuditDto,
   UpdateDailySaleDto,
   UpdateRecordBookCategoryDto,
@@ -33,6 +31,12 @@ export class RecordBookController {
   @RequirePermissions('record_book.view')
   summary(@Query() query: QueryRecordBookDto, @CurrentUser() user: AuthUser) {
     return this.service.summary(query, user);
+  }
+
+  @Get('scope-options')
+  @RequirePermissions('record_book.view')
+  scopeOptions(@CurrentUser() user: AuthUser) {
+    return this.service.scopeOptions(user);
   }
 
   @Get('export')
@@ -87,7 +91,7 @@ export class RecordBookController {
   }
 
   @Patch('daily-sales/:id')
-  @RequireAnyPermissions('record_book.update', 'record_book.create')
+  @RequirePermissions('record_book.update')
   updateDailySale(
     @Param('id') id: string,
     @Body() dto: UpdateDailySaleDto,
@@ -116,8 +120,12 @@ export class RecordBookController {
 
   @Patch('daily-sales/:id/reopen')
   @RequirePermissions('record_book.admin')
-  reopenDailySale(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.reopenDailySale(id, user);
+  reopenDailySale(
+    @Param('id') id: string,
+    @Body() dto: ReopenRecordBookDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.reopenDailySale(id, dto, user);
   }
 
   @Patch('daily-sales/:id/void')
@@ -149,7 +157,7 @@ export class RecordBookController {
   }
 
   @Patch('expenses/:id')
-  @RequireAnyPermissions('record_book.update', 'record_book.create')
+  @RequirePermissions('record_book.update')
   updateExpense(
     @Param('id') id: string,
     @Body() dto: UpdateRecordBookExpenseDto,
@@ -178,8 +186,12 @@ export class RecordBookController {
 
   @Patch('expenses/:id/reopen')
   @RequirePermissions('record_book.admin')
-  reopenExpense(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.reopenExpense(id, user);
+  reopenExpense(
+    @Param('id') id: string,
+    @Body() dto: ReopenRecordBookDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.reopenExpense(id, dto, user);
   }
 
   @Patch('expenses/:id/void')
@@ -221,7 +233,7 @@ export class RecordBookController {
   }
 
   @Delete('expense-categories/:id')
-  @RequirePermissions('record_book.update')
+  @RequirePermissions('record_book.delete')
   removeCategory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.removeCategory(id, user);
   }

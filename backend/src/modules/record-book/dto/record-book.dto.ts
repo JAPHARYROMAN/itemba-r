@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
@@ -12,6 +12,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -29,7 +30,7 @@ export class QueryRecordBookDto {
   @IsOptional() @IsString() expenseCategoryId?: string;
   @IsOptional() @IsEnum(RecordBookStatus) status?: RecordBookStatus;
   @IsOptional() @IsEnum(CurrencyCode) currency?: CurrencyCode;
-  @IsOptional() @IsString() search?: string;
+  @IsOptional() @IsString() @MaxLength(200) search?: string;
   @IsOptional() @IsString() dateFrom?: string;
   @IsOptional() @IsString() dateTo?: string;
   @IsOptional() @IsIn(['ACTIVE', 'DELETED']) recordState?: 'ACTIVE' | 'DELETED';
@@ -77,6 +78,7 @@ export class RecordBookExportAuditDto {
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(50_000)
   rowCount!: number;
 
   @IsOptional() @IsString() companyId?: string;
@@ -92,6 +94,7 @@ export class RecordBookReceiptDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(120)
   label?: string;
 
   @IsNumber()
@@ -100,10 +103,12 @@ export class RecordBookReceiptDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(200)
   reference?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   notes?: string;
 }
 
@@ -114,7 +119,7 @@ export class CreateDailySaleDto {
   @IsDateString() recordDate!: string;
   @IsOptional() @IsEnum(CurrencyCode) currency?: CurrencyCode;
   @IsNumber() @Min(0.01) totalSalesAmount!: number;
-  @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsString() @MaxLength(2000) notes?: string;
 
   @IsArray()
   @ArrayMinSize(1)
@@ -129,7 +134,7 @@ export class UpdateDailySaleDto {
   @IsOptional() @IsDateString() recordDate?: string;
   @IsOptional() @IsEnum(CurrencyCode) currency?: CurrencyCode;
   @IsOptional() @IsNumber() @Min(0.01) totalSalesAmount?: number;
-  @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsString() @MaxLength(2000) notes?: string;
 
   @IsOptional()
   @IsArray()
@@ -147,12 +152,16 @@ export class CreateRecordBookExpenseDto {
   @IsDateString() recordDate!: string;
   @IsOptional() @IsEnum(CurrencyCode) currency?: CurrencyCode;
   @IsNumber() @Min(0.01) amount!: number;
-  @IsNotEmpty() @IsString() description!: string;
-  @IsOptional() @IsString() paidTo?: string;
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(500)
+  description!: string;
+  @IsOptional() @IsString() @MaxLength(200) paidTo?: string;
   @IsOptional() @IsEnum(RecordBookPaymentMethod) paymentMethod?: RecordBookPaymentMethod;
-  @IsOptional() @IsString() paymentLabel?: string;
-  @IsOptional() @IsString() reference?: string;
-  @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsString() @MaxLength(120) paymentLabel?: string;
+  @IsOptional() @IsString() @MaxLength(200) reference?: string;
+  @IsOptional() @IsString() @MaxLength(2000) notes?: string;
 }
 
 export class UpdateRecordBookExpenseDto {
@@ -162,31 +171,55 @@ export class UpdateRecordBookExpenseDto {
   @IsOptional() @IsDateString() recordDate?: string;
   @IsOptional() @IsEnum(CurrencyCode) currency?: CurrencyCode;
   @IsOptional() @IsNumber() @Min(0.01) amount?: number;
-  @IsOptional() @IsString() description?: string;
-  @IsOptional() @IsString() paidTo?: string;
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+  @IsOptional() @IsString() @MaxLength(200) paidTo?: string;
   @IsOptional() @IsEnum(RecordBookPaymentMethod) paymentMethod?: RecordBookPaymentMethod;
-  @IsOptional() @IsString() paymentLabel?: string;
-  @IsOptional() @IsString() reference?: string;
-  @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsString() @MaxLength(120) paymentLabel?: string;
+  @IsOptional() @IsString() @MaxLength(200) reference?: string;
+  @IsOptional() @IsString() @MaxLength(2000) notes?: string;
 }
 
 export class CreateRecordBookCategoryDto {
   @IsNotEmpty() @IsString() companyId!: string;
-  @IsNotEmpty() @IsString() name!: string;
-  @IsOptional() @IsString() description?: string;
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(120)
+  name!: string;
+  @IsOptional() @IsString() @MaxLength(500) description?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
 export class UpdateRecordBookCategoryDto {
-  @IsOptional() @IsString() name?: string;
-  @IsOptional() @IsString() description?: string;
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(120)
+  name?: string;
+  @IsOptional() @IsString() @MaxLength(500) description?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
 export class VoidRecordBookDto {
-  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsNotEmpty()
   @IsString()
-  reason?: string;
+  @MaxLength(500)
+  reason!: string;
+}
+
+export class ReopenRecordBookDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(500)
+  reason!: string;
 }
 
 export class ExportRecordBookDto extends QueryRecordBookDto {
@@ -195,6 +228,6 @@ export class ExportRecordBookDto extends QueryRecordBookDto {
   type?: 'sales' | 'expenses' | 'combined';
 
   @IsOptional()
-  @IsIn(['json', 'csv', 'xlsx'])
-  format?: 'json' | 'csv' | 'xlsx';
+  @IsIn(['json', 'csv', 'xlsx', 'pdf'])
+  format?: 'json' | 'csv' | 'xlsx' | 'pdf';
 }

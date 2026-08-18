@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  OnModuleDestroy,
-  OnModuleInit,
-} from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
@@ -21,6 +16,8 @@ export type CachedAuthPayload = {
   permissions: string[];
   companyId: string | null;
   companyAccess: Array<{ companyId: string; accessLevel: string }>;
+  divisionAccess?: Array<{ divisionId: string; accessLevel: string }>;
+  branchAccess?: Array<{ branchId: string; accessLevel: string }>;
 };
 
 interface LocalEntry {

@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import { AccessLevel, Prisma, RecordBookStatus } from '@prisma/client';
 import type { Response } from 'express';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { CompanyScopeService } from '../../common/services';
+import { CompanyScopeService, OrganizationScopeService } from '../../common/services';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -75,7 +75,8 @@ function toNumber(value: Prisma.Decimal | number | string | null | undefined) {
 }
 
 function csvEscape(value: unknown) {
-  const text = Array.isArray(value) ? value.join(', ') : value == null ? '' : String(value);
+  const raw = Array.isArray(value) ? value.join(', ') : value == null ? '' : String(value);
+  const text = /^[\t\r ]*[=+\-@]/.test(raw) ? `'${raw}` : raw;
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
@@ -100,12 +101,22 @@ function normalizedLabel(value: string | null | undefined, fallback: string) {
   return trimmed || fallback;
 }
 
+function safeStemPart(value: string | null | undefined) {
+  return (
+    value
+      ?.replace(/[^a-z0-9_-]+/gi, '-')
+      .replace(/^-+|-+$/g, '')
+      .toLowerCase() || ''
+  );
+}
+
 @Injectable()
 export class RecordBookReportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly organizationScope: OrganizationScopeService,
     private readonly generatedDocuments: GeneratedDocumentsService,
   ) {}
 
@@ -166,7 +177,12 @@ export class RecordBookReportsService {
   async export(reportKey: string, query: ExportRecordBookReportDto, user: AuthUser, res: Response) {
     const result = await this.run(reportKey, query, user);
     const format = query.format ?? 'json';
-    const fileStem = `record-book-${result.key}-${new Date().toISOString().slice(0, 10)}`;
+    const scopeLabels = await this.resolveScopeLabels(query, user);
+    const scopeStem = [scopeLabels.companyCode, scopeLabels.divisionCode, scopeLabels.branchCode]
+      .map(safeStemPart)
+      .filter(Boolean)
+      .join('-');
+    const fileStem = `record-book-${result.key}${scopeStem ? `-${scopeStem}` : ''}-${new Date().toISOString().slice(0, 10)}`;
     const exportRows = result.rows.map((row) =>
       Object.fromEntries(result.columns.map((column) => [column.key, row[column.key]])),
     );
@@ -193,7 +209,17 @@ export class RecordBookReportsService {
     if (format === 'csv') {
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${fileStem}.csv"`);
-      return res.send(rowsToCsv(exportRows, result.columns));
+      const metadata = [
+        ['Report', result.title],
+        ['Company', scopeLabels.companyName],
+        ['Division', scopeLabels.divisionName],
+        ['Branch', scopeLabels.branchName],
+        ['Period', `${query.dateFrom || 'First record'} to ${query.dateTo || 'Latest record'}`],
+        ['Status', result.reportStatus],
+      ]
+        .map((row) => row.map(csvEscape).join(','))
+        .join('\n');
+      return res.send(`${metadata}\n\n${rowsToCsv(exportRows, result.columns)}`);
     }
 
     if (format === 'pdf') {
@@ -245,6 +271,8 @@ export class RecordBookReportsService {
           note: 'This document contains independent manual Records Book entries. It does not post to Accounting, Sales Orders, Inventory, Receivables, Payables, or Cash Accounts.',
           meta: [
             { label: 'Reporting Period', value: periodLabel },
+            { label: 'Division', value: scopeLabels.divisionName },
+            { label: 'Branch', value: scopeLabels.branchName },
             { label: 'Currency', value: query.currency || 'Separated by currency' },
             { label: 'Source records', value: String(result.sourceRecordCount) },
             { label: 'Report rows', value: String(result.rowCount) },
@@ -262,6 +290,17 @@ export class RecordBookReportsService {
     workbook.creator = 'ITEMBA-R';
     workbook.created = new Date();
     const sheet = workbook.addWorksheet(result.title.slice(0, 31));
+    const scopeSheet = workbook.addWorksheet('Export Scope');
+    scopeSheet.addRows([
+      ['Report', result.title],
+      ['Company', scopeLabels.companyName],
+      ['Division', scopeLabels.divisionName],
+      ['Branch', scopeLabels.branchName],
+      ['Period', `${query.dateFrom || 'First record'} to ${query.dateTo || 'Latest record'}`],
+      ['Status', result.reportStatus],
+    ]);
+    scopeSheet.getColumn(1).font = { bold: true };
+    scopeSheet.columns = [{ width: 22 }, { width: 48 }];
     sheet.columns = result.columns.map((column) => ({
       header: column.label,
       key: column.key,
@@ -284,6 +323,14 @@ export class RecordBookReportsService {
   async auditExport(dto: RecordBookExportAuditDto, user: AuthUser) {
     if (dto.companyId) {
       await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.READ);
+    }
+    if (dto.divisionId || dto.branchId) {
+      await this.organizationScope.assertCanAccessScope(
+        user,
+        dto.divisionId,
+        dto.branchId,
+        AccessLevel.READ,
+      );
     }
     await this.auditLogs.log({
       action: 'RECORD_BOOK_EXPORT',
@@ -605,10 +652,12 @@ export class RecordBookReportsService {
   }
 
   private async loadSales(query: QueryRecordBookReportDto, user: AuthUser) {
+    const organizationWhere = await this.organizationScope.recordWhereFor(user);
     const where: Prisma.RecordBookDailySaleWhereInput = {
       deletedAt: null,
       ...(await this.companyScope.companyWhereFor(user, query.companyId)),
       status: this.statusFilter(query),
+      ...(Object.keys(organizationWhere).length ? { AND: [organizationWhere] } : {}),
     };
     if (query.divisionId) where.divisionId = query.divisionId;
     if (query.branchId) where.branchId = query.branchId;
@@ -620,13 +669,19 @@ export class RecordBookReportsService {
       if (query.dateTo) where.recordDate.lte = dateRangeEnd(query.dateTo);
     }
     if (query.search) {
-      where.OR = [
-        { notes: { contains: query.search, mode: 'insensitive' } },
-        { receipts: { some: { label: { contains: query.search, mode: 'insensitive' } } } },
-        { receipts: { some: { reference: { contains: query.search, mode: 'insensitive' } } } },
+      const searchWhere: Prisma.RecordBookDailySaleWhereInput = {
+        OR: [
+          { notes: { contains: query.search, mode: 'insensitive' } },
+          { receipts: { some: { label: { contains: query.search, mode: 'insensitive' } } } },
+          { receipts: { some: { reference: { contains: query.search, mode: 'insensitive' } } } },
+        ],
+      };
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        searchWhere,
       ];
     }
-    return this.prisma.recordBookDailySale.findMany({
+    const rows = await this.prisma.recordBookDailySale.findMany({
       where,
       include: {
         company: { select: { id: true, name: true, code: true } },
@@ -637,13 +692,20 @@ export class RecordBookReportsService {
       orderBy: [{ recordDate: 'asc' }, { createdAt: 'asc' }],
       take: EXPORT_LIMIT + 1,
     });
+    if (!query.receiptType) return rows;
+    return rows.map((sale) => ({
+      ...sale,
+      totalSalesAmount: sale.receipts.reduce((sum, receipt) => sum + toNumber(receipt.amount), 0),
+    }));
   }
 
   private async loadExpenses(query: QueryRecordBookReportDto, user: AuthUser) {
+    const organizationWhere = await this.organizationScope.recordWhereFor(user);
     const where: Prisma.RecordBookExpenseWhereInput = {
       deletedAt: null,
       ...(await this.companyScope.companyWhereFor(user, query.companyId)),
       status: this.statusFilter(query),
+      ...(Object.keys(organizationWhere).length ? { AND: [organizationWhere] } : {}),
     };
     if (query.divisionId) where.divisionId = query.divisionId;
     if (query.branchId) where.branchId = query.branchId;
@@ -656,12 +718,18 @@ export class RecordBookReportsService {
       if (query.dateTo) where.recordDate.lte = dateRangeEnd(query.dateTo);
     }
     if (query.search) {
-      where.OR = [
-        { description: { contains: query.search, mode: 'insensitive' } },
-        { paidTo: { contains: query.search, mode: 'insensitive' } },
-        { paymentLabel: { contains: query.search, mode: 'insensitive' } },
-        { reference: { contains: query.search, mode: 'insensitive' } },
-        { notes: { contains: query.search, mode: 'insensitive' } },
+      const searchWhere: Prisma.RecordBookExpenseWhereInput = {
+        OR: [
+          { description: { contains: query.search, mode: 'insensitive' } },
+          { paidTo: { contains: query.search, mode: 'insensitive' } },
+          { paymentLabel: { contains: query.search, mode: 'insensitive' } },
+          { reference: { contains: query.search, mode: 'insensitive' } },
+          { notes: { contains: query.search, mode: 'insensitive' } },
+        ],
+      };
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        searchWhere,
       ];
     }
     return this.prisma.recordBookExpense.findMany({
@@ -698,6 +766,65 @@ export class RecordBookReportsService {
       throw new BadRequestException('Unknown Records Book report');
     }
     return value as RecordBookReportKey;
+  }
+
+  private async resolveScopeLabels(query: QueryRecordBookReportDto, user: AuthUser) {
+    if (query.companyId) {
+      await this.companyScope.assertCanAccessCompany(user, query.companyId, AccessLevel.READ);
+    }
+    if (query.divisionId || query.branchId) {
+      await this.organizationScope.assertCanAccessScope(
+        user,
+        query.divisionId,
+        query.branchId,
+        AccessLevel.READ,
+      );
+    }
+    const [company, division, branch] = await Promise.all([
+      query.companyId
+        ? this.prisma.company.findFirst({
+            where: { id: query.companyId, deletedAt: null },
+            select: { name: true, code: true },
+          })
+        : null,
+      query.divisionId
+        ? this.prisma.division.findFirst({
+            where: {
+              id: query.divisionId,
+              deletedAt: null,
+              ...(query.companyId ? { companyId: query.companyId } : {}),
+            },
+            select: { name: true, code: true },
+          })
+        : null,
+      query.branchId
+        ? this.prisma.branch.findFirst({
+            where: {
+              id: query.branchId,
+              deletedAt: null,
+              ...(query.divisionId ? { divisionId: query.divisionId } : {}),
+              ...(query.companyId ? { division: { companyId: query.companyId } } : {}),
+            },
+            select: { name: true, code: true },
+          })
+        : null,
+    ]);
+    if (query.companyId && !company)
+      throw new BadRequestException('Selected company was not found');
+    if (query.divisionId && !division) {
+      throw new BadRequestException('Division does not belong to the selected company');
+    }
+    if (query.branchId && !branch) {
+      throw new BadRequestException('Branch does not belong to the selected organization scope');
+    }
+    return {
+      companyName: company?.name ?? 'All accessible companies',
+      companyCode: company?.code ?? '',
+      divisionName: division?.name ?? 'All accessible divisions',
+      divisionCode: division?.code ?? '',
+      branchName: branch?.name ?? 'All accessible branches',
+      branchCode: branch?.code ?? '',
+    };
   }
 
   private excelColumn(count: number) {

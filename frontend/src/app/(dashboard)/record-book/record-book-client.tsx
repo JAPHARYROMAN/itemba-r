@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Btn,
   Card,
@@ -120,17 +120,37 @@ interface RecordExpense {
 }
 
 interface Summary {
-  totalRecordedSales: number;
-  cashTotal: number;
-  mobileMoneyTotal: number;
-  bankTotal: number;
-  cardTotal: number;
-  otherReceiptTotal: number;
-  expensesTotal: number;
-  netMovement: number;
+  totalRecordedSales: number | null;
+  cashTotal: number | null;
+  mobileMoneyTotal: number | null;
+  bankTotal: number | null;
+  cardTotal: number | null;
+  otherReceiptTotal: number | null;
+  expensesTotal: number | null;
+  netMovement: number | null;
   draftRecords: number;
   salesCount: number;
   expenseCount: number;
+  mixedCurrency: boolean;
+  summaryByCurrency: Array<{
+    currency: Currency;
+    totalRecordedSales: number;
+    cashTotal: number;
+    mobileMoneyTotal: number;
+    bankTotal: number;
+    cardTotal: number;
+    otherReceiptTotal: number;
+    expensesTotal: number;
+    netMovement: number;
+    salesCount: number;
+    expenseCount: number;
+  }>;
+}
+
+interface ScopeOptions {
+  companies: Company[];
+  divisions: Division[];
+  branches: Branch[];
 }
 
 interface Filters {
@@ -140,6 +160,7 @@ interface Filters {
   dateFrom: string;
   dateTo: string;
   status: string;
+  currency: string;
   search: string;
 }
 
@@ -152,6 +173,7 @@ const BLANK_FILTERS: Filters = {
   dateFrom: today,
   dateTo: today,
   status: '',
+  currency: '',
   search: '',
 };
 
@@ -164,13 +186,7 @@ const RECEIPT_LABELS: Record<ReceiptType, string> = {
   OTHER: 'Other',
 };
 
-const DEFAULT_RECEIPTS: Receipt[] = [
-  { receiptType: 'CASH', label: 'Cash', amount: 0 },
-  { receiptType: 'MPESA', label: 'M-Pesa', amount: 0 },
-  { receiptType: 'LIPA_NAMBA', label: 'Lipa Namba', amount: 0 },
-  { receiptType: 'BANK', label: 'CRDB Bank', amount: 0 },
-  { receiptType: 'OTHER', label: 'Other', amount: 0 },
-];
+const DEFAULT_RECEIPTS: Receipt[] = [{ receiptType: 'CASH', label: 'Cash', amount: 0 }];
 
 const PAYMENT_METHODS: PaymentMethod[] = ['CASH', 'MPESA', 'LIPA_NAMBA', 'BANK', 'CARD', 'OTHER'];
 const CURRENCIES: Currency[] = ['TZS', 'USD', 'EUR', 'GBP', 'KES', 'UGX'];
@@ -187,9 +203,13 @@ function dateOnly(value: string) {
 }
 
 function statusClass(status: Status) {
-  if (status === 'FINALIZED') return 'bg-emerald-900/40 text-emerald-200 border-emerald-700';
-  if (status === 'VOIDED') return 'bg-red-900/40 text-red-200 border-red-700';
-  return 'bg-amber-900/40 text-amber-200 border-amber-700';
+  if (status === 'FINALIZED') {
+    return 'bg-[var(--aurora-success-bg)] text-[var(--aurora-success-text)] border-[var(--aurora-success)]';
+  }
+  if (status === 'VOIDED') {
+    return 'bg-[var(--aurora-danger-bg)] text-[var(--aurora-danger-text)] border-[var(--aurora-danger)]';
+  }
+  return 'bg-[var(--aurora-warning-bg)] text-[var(--aurora-warning-text)] border-[var(--aurora-warning)]';
 }
 
 function StatusPill({ status }: { status: Status }) {
@@ -210,9 +230,19 @@ function buildFilterQuery(filters: Filters, extras?: Record<string, string | num
     dateFrom: filters.dateFrom,
     dateTo: filters.dateTo,
     status: filters.status,
+    currency: filters.currency,
     search: filters.search,
     ...extras,
   };
+}
+
+function useDebouncedValue<T>(value: T, delay = 300) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [delay, value]);
+  return debounced;
 }
 
 async function downloadBlob(path: string, filename: string) {
@@ -271,8 +301,9 @@ function SaleModal({
   const scopedDivisions = divisions.filter(
     (d) => !form.companyId || d.companyId === form.companyId,
   );
-  const scopedBranches = branches.filter(
-    (b) => !form.divisionId || b.divisionId === form.divisionId,
+  const scopedDivisionIds = new Set(scopedDivisions.map((division) => division.id));
+  const scopedBranches = branches.filter((b) =>
+    form.divisionId ? b.divisionId === form.divisionId : scopedDivisionIds.has(b.divisionId),
   );
   const receiptTotal = form.receipts.reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
   const total = Number(form.totalSalesAmount || 0);
@@ -296,7 +327,7 @@ function SaleModal({
     setSaving(true);
     setError('');
     const body = {
-      companyId: form.companyId,
+      ...(!initial && { companyId: form.companyId }),
       divisionId: form.divisionId || undefined,
       branchId: form.branchId || undefined,
       recordDate: form.recordDate,
@@ -351,6 +382,7 @@ function SaleModal({
           label="Company"
           required
           value={form.companyId}
+          disabled={Boolean(initial)}
           onChange={(e) =>
             setForm((f) => ({ ...f, companyId: e.target.value, divisionId: '', branchId: '' }))
           }
@@ -426,11 +458,30 @@ function SaleModal({
             Difference: {money(difference, form.currency)}
           </span>
         </div>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <span className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+            Receipt methods
+          </span>
+          <Btn
+            type="button"
+            size="xs"
+            variant="secondary"
+            onClick={() =>
+              setForm((current) => ({
+                ...current,
+                receipts: [...current.receipts, { receiptType: 'CASH', label: 'Cash', amount: 0 }],
+              }))
+            }
+          >
+            + Add receipt
+          </Btn>
+        </div>
         <div className="space-y-2">
           {form.receipts.map((receipt, index) => (
             <div
               key={`${receipt.receiptType}-${index}`}
-              className="grid grid-cols-1 gap-2 rounded-lg border border-slate-700/80 p-3 md:grid-cols-4"
+              className="grid grid-cols-1 gap-2 rounded-lg border p-3 md:grid-cols-2 xl:grid-cols-[1fr_1.4fr_1fr_1.2fr_1.4fr_auto]"
+              style={{ borderColor: 'var(--aurora-border)' }}
             >
               <FormSelect
                 label="Method"
@@ -462,6 +513,29 @@ function SaleModal({
                 value={receipt.reference ?? ''}
                 onChange={(e) => setReceipt(index, { reference: e.target.value })}
               />
+              <FormInput
+                label="Notes"
+                value={receipt.notes ?? ''}
+                onChange={(e) => setReceipt(index, { notes: e.target.value })}
+              />
+              <div className="flex items-end">
+                <Btn
+                  type="button"
+                  size="xs"
+                  variant="danger"
+                  disabled={form.receipts.length === 1}
+                  onClick={() =>
+                    setForm((current) => ({
+                      ...current,
+                      receipts: current.receipts.filter(
+                        (_, receiptIndex) => receiptIndex !== index,
+                      ),
+                    }))
+                  }
+                >
+                  Remove
+                </Btn>
+              </div>
             </div>
           ))}
         </div>
@@ -516,8 +590,9 @@ function ExpenseModal({
   const scopedDivisions = divisions.filter(
     (d) => !form.companyId || d.companyId === form.companyId,
   );
-  const scopedBranches = branches.filter(
-    (b) => !form.divisionId || b.divisionId === form.divisionId,
+  const scopedDivisionIds = new Set(scopedDivisions.map((division) => division.id));
+  const scopedBranches = branches.filter((b) =>
+    form.divisionId ? b.divisionId === form.divisionId : scopedDivisionIds.has(b.divisionId),
   );
   const scopedCategories = categories.filter(
     (c) => c.isActive && (!form.companyId || c.companyId === form.companyId),
@@ -537,7 +612,7 @@ function ExpenseModal({
     setSaving(true);
     setError('');
     const body = {
-      companyId: form.companyId,
+      ...(!initial && { companyId: form.companyId }),
       divisionId: form.divisionId || undefined,
       branchId: form.branchId || undefined,
       expenseCategoryId: form.expenseCategoryId,
@@ -589,6 +664,7 @@ function ExpenseModal({
           label="Company"
           required
           value={form.companyId}
+          disabled={Boolean(initial)}
           onChange={(e) =>
             setForm((f) => ({
               ...f,
@@ -749,7 +825,7 @@ function CategoryModal({
     setError('');
     try {
       const body = {
-        companyId: form.companyId,
+        ...(!initial && { companyId: form.companyId }),
         name: form.name,
         description: form.description || undefined,
         isActive: form.isActive,
@@ -829,7 +905,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   const { hasPermission } = useAuth();
   const canView = hasPermission('record_book.view');
   const canCreate = hasPermission('record_book.create');
-  const canUpdate = hasPermission('record_book.update') || canCreate;
+  const canUpdate = hasPermission('record_book.update');
   const canDelete = hasPermission('record_book.delete');
   const canFinalize = hasPermission('record_book.finalize');
   const canVoid = hasPermission('record_book.void');
@@ -857,36 +933,68 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [confirmReason, setConfirmReason] = useState('');
   const [confirmBusy, setConfirmBusy] = useState(false);
+  const requestIdRef = useRef(0);
+  const debouncedSearch = useDebouncedValue(filters.search);
+  const effectiveFilters = useMemo(
+    () => ({
+      companyId: filters.companyId,
+      divisionId: filters.divisionId,
+      branchId: filters.branchId,
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+      status: filters.status,
+      currency: filters.currency,
+      search: debouncedSearch,
+    }),
+    [
+      debouncedSearch,
+      filters.branchId,
+      filters.companyId,
+      filters.currency,
+      filters.dateFrom,
+      filters.dateTo,
+      filters.divisionId,
+      filters.status,
+    ],
+  );
 
   const scopedDivisions = useMemo(
     () => divisions.filter((d) => !filters.companyId || d.companyId === filters.companyId),
     [divisions, filters.companyId],
   );
+  const scopedDivisionIds = useMemo(
+    () => new Set(scopedDivisions.map((division) => division.id)),
+    [scopedDivisions],
+  );
   const scopedBranches = useMemo(
-    () => branches.filter((b) => !filters.divisionId || b.divisionId === filters.divisionId),
-    [branches, filters.divisionId],
+    () =>
+      branches.filter((branch) =>
+        filters.divisionId
+          ? branch.divisionId === filters.divisionId
+          : scopedDivisionIds.has(branch.divisionId),
+      ),
+    [branches, filters.divisionId, scopedDivisionIds],
   );
 
   const loadRefs = useCallback(async () => {
-    const [companyRows, divisionRows, branchRows] = await Promise.all([
-      backendList<Company>('/companies', { query: { limit: 1000 } }),
-      backendList<Division>('/divisions', { query: { limit: 1000 } }),
-      backendList<Branch>('/branches', { query: { limit: 1000 } }),
-    ]);
-    setCompanies(companyRows);
-    setDivisions(divisionRows);
-    setBranches(branchRows);
+    const scope = await backendGet<ScopeOptions>('/record-book/scope-options');
+    setCompanies(scope.companies);
+    setDivisions(scope.divisions);
+    setBranches(scope.branches);
     setFilters((current) =>
-      current.companyId || !companyRows[0] ? current : { ...current, companyId: companyRows[0].id },
+      current.companyId || !scope.companies[0]
+        ? current
+        : { ...current, companyId: scope.companies[0].id },
     );
   }, []);
 
   const loadData = useCallback(async () => {
     if (!canView) return;
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError('');
     try {
-      const query = buildFilterQuery(filters);
+      const query = buildFilterQuery(effectiveFilters);
       const [summaryData, salesData, expenseData, categoryData, categoryOptions] =
         await Promise.all([
           backendGet<Summary>('/record-book/summary', { query }),
@@ -898,27 +1006,29 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
           }),
           backendPage<Category>('/record-book/expense-categories', {
             query: {
-              companyId: filters.companyId,
-              search: filters.search,
+              companyId: effectiveFilters.companyId,
+              search: effectiveFilters.search,
               page: categoryPageNumber,
               limit: 20,
             },
           }),
           backendList<Category>('/record-book/expense-categories', {
-            query: { companyId: filters.companyId, limit: 500 },
+            query: { companyId: effectiveFilters.companyId, limit: 500 },
           }),
         ]);
+      if (requestId !== requestIdRef.current) return;
       setSummary(summaryData);
       setSales(salesData);
       setExpenses(expenseData);
       setCategoryPage(categoryData);
       setCategories(categoryOptions);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Could not load Records Book');
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [canView, categoryPageNumber, expensePage, filters, salesPage]);
+  }, [canView, categoryPageNumber, effectiveFilters, expensePage, salesPage]);
 
   useEffect(() => {
     loadRefs().catch((err) =>
@@ -941,6 +1051,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
     filters.dateFrom,
     filters.dateTo,
     filters.status,
+    filters.currency,
     filters.search,
   ]);
 
@@ -974,8 +1085,8 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
     });
   };
 
-  const exportRowsForPdf = async (type: 'sales' | 'expenses' | 'combined') => {
-    const query = buildFilterQuery(filters, { type, format: 'json' });
+  const exportRows = async (type: 'sales' | 'expenses' | 'combined', format: 'json' | 'pdf') => {
+    const query = buildFilterQuery(filters, { type, format });
     const payload = await backendGet<{ type: string; rows: Record<string, unknown>[] }>(
       '/record-book/export',
       { query },
@@ -990,9 +1101,9 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
     setExporting(`${type}-${format}`);
     setError('');
     try {
-      const query = buildFilterQuery(filters, { type, format: format === 'pdf' ? 'json' : format });
+      const query = buildFilterQuery(filters, { type, format });
       if (format === 'pdf') {
-        const rows = await exportRowsForPdf(type);
+        const rows = await exportRows(type, 'pdf');
         if (!rows.length) throw new Error('No rows to export');
         await downloadTablePdf(
           buildRecordBookPdfRequest(type, rows, {
@@ -1007,18 +1118,8 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
             status: filters.status || undefined,
           }),
         );
-        await backendPost('/record-book/export-audit', {
-          scope: 'raw',
-          format: 'pdf',
-          rowCount: rows.length,
-          companyId: filters.companyId || undefined,
-          divisionId: filters.divisionId || undefined,
-          branchId: filters.branchId || undefined,
-          dateFrom: filters.dateFrom || undefined,
-          dateTo: filters.dateTo || undefined,
-        });
       } else if (format === 'json') {
-        const rows = await exportRowsForPdf(type);
+        const rows = await exportRows(type, 'json');
         downloadTextFile(
           `record-book-${type}-${today}.json`,
           'application/json',
@@ -1038,7 +1139,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
 
   if (!canView) {
     return (
-      <div className="mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
+      <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
         <PageHeader title="Records Book" subtitle="Manual daily sales and money-out records" />
         <Card>
           <EmptyState
@@ -1054,7 +1155,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
     initialTab === 'expenses' ? 'expenses' : initialTab === 'daily-sales' ? 'sales' : 'combined';
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
+    <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
       <PageHeader
         title="Records Book"
         subtitle="Manual day-end sales and money-out records. Independent from accounting and operations."
@@ -1077,7 +1178,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
       <RecordBookNav />
 
       <Card className="mb-5">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-7">
           <FormSelect
             label="Company"
             value={filters.companyId}
@@ -1134,11 +1235,23 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
             label="Status"
             value={filters.status}
             onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
-            placeholder="Active records"
+            placeholder="All statuses"
           >
             <option value="DRAFT">Draft</option>
             <option value="FINALIZED">Finalized</option>
             <option value="VOIDED">Voided</option>
+          </FormSelect>
+          <FormSelect
+            label="Currency"
+            value={filters.currency}
+            onChange={(e) => setFilters((f) => ({ ...f, currency: e.target.value }))}
+            placeholder="All currencies"
+          >
+            {CURRENCIES.map((currency) => (
+              <option key={currency} value={currency}>
+                {currency}
+              </option>
+            ))}
           </FormSelect>
         </div>
         <div className="mt-3 flex flex-col gap-3 xl:flex-row xl:items-end">
@@ -1199,21 +1312,68 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
         <>
           {(initialTab === 'dashboard' || !summary) && (
             <>
-              <div className="mb-5 grid grid-cols-1 gap-4 md:grid-cols-4">
-                <StatCard label="Recorded Sales" value={money(summary?.totalRecordedSales ?? 0)} />
-                <StatCard label="Expenses" value={money(summary?.expensesTotal ?? 0)} />
-                <StatCard label="Net Movement" value={money(summary?.netMovement ?? 0)} />
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                    {filters.status ? filters.status.replace('_', ' ') : 'FINALIZED'} money movement
+                  </h2>
+                  <p className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                    Amounts are separated by currency. With no status selected, only finalized
+                    records are included here.
+                  </p>
+                </div>
                 <StatCard label="Draft Records" value={summary?.draftRecords ?? 0} />
               </div>
-              <div className="mb-5 grid grid-cols-1 gap-4 md:grid-cols-4">
-                <StatCard label="Cash" value={money(summary?.cashTotal ?? 0)} />
-                <StatCard label="Mobile Money" value={money(summary?.mobileMoneyTotal ?? 0)} />
-                <StatCard label="Bank" value={money(summary?.bankTotal ?? 0)} />
-                <StatCard
-                  label="Card / Other"
-                  value={money((summary?.cardTotal ?? 0) + (summary?.otherReceiptTotal ?? 0))}
-                />
-              </div>
+              {(summary?.summaryByCurrency ?? []).length === 0 ? (
+                <Card className="mb-5">
+                  <EmptyState
+                    title="No money movement for this scope"
+                    description="Adjust the date, status, currency, or organization filters."
+                  />
+                </Card>
+              ) : (
+                (summary?.summaryByCurrency ?? []).map((currencySummary) => (
+                  <section key={currencySummary.currency} className="mb-5">
+                    <h3
+                      className="mb-3 text-sm font-semibold uppercase"
+                      style={{ color: 'var(--aurora-text-muted)' }}
+                    >
+                      {currencySummary.currency}
+                    </h3>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
+                      <StatCard
+                        label="Recorded Sales"
+                        value={money(currencySummary.totalRecordedSales, currencySummary.currency)}
+                      />
+                      <StatCard
+                        label="Money Out"
+                        value={money(currencySummary.expensesTotal, currencySummary.currency)}
+                      />
+                      <StatCard
+                        label="Net Movement"
+                        value={money(currencySummary.netMovement, currencySummary.currency)}
+                      />
+                      <StatCard
+                        label="Cash"
+                        value={money(currencySummary.cashTotal, currencySummary.currency)}
+                      />
+                      <StatCard
+                        label="Mobile Money"
+                        value={money(currencySummary.mobileMoneyTotal, currencySummary.currency)}
+                      />
+                      <StatCard
+                        label="Bank / Card / Other"
+                        value={money(
+                          currencySummary.bankTotal +
+                            currencySummary.cardTotal +
+                            currencySummary.otherReceiptTotal,
+                          currencySummary.currency,
+                        )}
+                      />
+                    </div>
+                  </section>
+                ))
+              )}
             </>
           )}
 
@@ -1318,14 +1478,14 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                                     requestAction({
                                       title: 'Reopen daily sales',
                                       description:
-                                        'This returns the record to Draft so it can be corrected.',
+                                        'This returns the record to Draft for correction. Explain why the finalized record must change.',
                                       confirmLabel: 'Reopen',
                                       tone: 'warning',
-                                      execute: () =>
-                                        backendPatch(
-                                          `/record-book/daily-sales/${sale.id}/reopen`,
-                                          {},
-                                        ),
+                                      requireReason: true,
+                                      execute: (reason) =>
+                                        backendPatch(`/record-book/daily-sales/${sale.id}/reopen`, {
+                                          reason,
+                                        }),
                                     })
                                   }
                                 >
@@ -1489,14 +1649,14 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                                     requestAction({
                                       title: 'Reopen money out',
                                       description:
-                                        'This returns the record to Draft so it can be corrected.',
+                                        'This returns the record to Draft for correction. Explain why the finalized record must change.',
                                       confirmLabel: 'Reopen',
                                       tone: 'warning',
-                                      execute: () =>
-                                        backendPatch(
-                                          `/record-book/expenses/${expense.id}/reopen`,
-                                          {},
-                                        ),
+                                      requireReason: true,
+                                      execute: (reason) =>
+                                        backendPatch(`/record-book/expenses/${expense.id}/reopen`, {
+                                          reason,
+                                        }),
                                     })
                                   }
                                 >

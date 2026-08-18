@@ -995,10 +995,12 @@ model User {
   recordBookSalesUpdated      RecordBookDailySale[] @relation("RecordBookSaleUpdatedBy")
   recordBookSalesFinalized    RecordBookDailySale[] @relation("RecordBookSaleFinalizedBy")
   recordBookSalesVoided       RecordBookDailySale[] @relation("RecordBookSaleVoidedBy")
+  recordBookSalesReopened     RecordBookDailySale[] @relation("RecordBookSaleReopenedBy")
   recordBookExpensesCreated   RecordBookExpense[]   @relation("RecordBookExpenseCreatedBy")
   recordBookExpensesUpdated   RecordBookExpense[]   @relation("RecordBookExpenseUpdatedBy")
   recordBookExpensesFinalized RecordBookExpense[]   @relation("RecordBookExpenseFinalizedBy")
   recordBookExpensesVoided    RecordBookExpense[]   @relation("RecordBookExpenseVoidedBy")
+  recordBookExpensesReopened  RecordBookExpense[]   @relation("RecordBookExpenseReopenedBy")
 
   // Petroleum (Milestone 5)
   fuelShiftsOpened                 FuelShift[]               @relation("ShiftOpenedBy")
@@ -2325,6 +2327,9 @@ model RecordBookDailySale {
   voidedById       String?
   voidedAt         DateTime?
   voidReason       String?
+  reopenedById     String?
+  reopenedAt       DateTime?
+  reopenReason     String?
   createdById      String
   updatedById      String?
   deletedAt        DateTime?
@@ -2338,6 +2343,7 @@ model RecordBookDailySale {
   updatedBy   User?                   @relation("RecordBookSaleUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   finalizedBy User?                   @relation("RecordBookSaleFinalizedBy", fields: [finalizedById], references: [id], onDelete: SetNull)
   voidedBy    User?                   @relation("RecordBookSaleVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
+  reopenedBy  User?                   @relation("RecordBookSaleReopenedBy", fields: [reopenedById], references: [id], onDelete: SetNull)
   receipts    RecordBookSaleReceipt[]
 
   @@index([companyId])
@@ -2345,6 +2351,7 @@ model RecordBookDailySale {
   @@index([branchId])
   @@index([recordDate])
   @@index([status])
+  @@index([reopenedAt])
   @@index([companyId, recordDate, status])
   @@map("record_book_daily_sales")
 }
@@ -2407,6 +2414,9 @@ model RecordBookExpense {
   voidedById        String?
   voidedAt          DateTime?
   voidReason        String?
+  reopenedById      String?
+  reopenedAt        DateTime?
+  reopenReason      String?
   createdById       String
   updatedById       String?
   deletedAt         DateTime?
@@ -2421,6 +2431,7 @@ model RecordBookExpense {
   updatedBy       User?                     @relation("RecordBookExpenseUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   finalizedBy     User?                     @relation("RecordBookExpenseFinalizedBy", fields: [finalizedById], references: [id], onDelete: SetNull)
   voidedBy        User?                     @relation("RecordBookExpenseVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
+  reopenedBy      User?                     @relation("RecordBookExpenseReopenedBy", fields: [reopenedById], references: [id], onDelete: SetNull)
 
   @@index([companyId])
   @@index([divisionId])
@@ -2428,6 +2439,7 @@ model RecordBookExpense {
   @@index([expenseCategoryId])
   @@index([recordDate])
   @@index([status])
+  @@index([reopenedAt])
   @@index([companyId, recordDate, status])
   @@map("record_book_expenses")
 }

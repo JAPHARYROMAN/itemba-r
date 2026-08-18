@@ -10,8 +10,22 @@ const user: any = {
 
 function makeReportsService(sales: any[] = [], expenses: any[] = []) {
   const prisma: any = {
-    recordBookDailySale: { findMany: jest.fn().mockResolvedValue(sales) },
+    recordBookDailySale: {
+      findMany: jest.fn().mockImplementation(async (args) => {
+        const receiptType = args?.include?.receipts?.where?.receiptType;
+        if (!receiptType) return sales;
+        return sales.map((row) => ({
+          ...row,
+          receipts: row.receipts.filter((receipt: any) => receipt.receiptType === receiptType),
+        }));
+      }),
+    },
     recordBookExpense: { findMany: jest.fn().mockResolvedValue(expenses) },
+    company: {
+      findFirst: jest.fn().mockResolvedValue({ name: 'Company', code: 'COMP' }),
+    },
+    division: { findFirst: jest.fn().mockResolvedValue(null) },
+    branch: { findFirst: jest.fn().mockResolvedValue(null) },
   };
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) };
   const companyScope = {
@@ -24,16 +38,22 @@ function makeReportsService(sales: any[] = [], expenses: any[] = []) {
       fileName: 'record-book-report.pdf',
     }),
   };
+  const organizationScope = {
+    recordWhereFor: jest.fn().mockResolvedValue({}),
+    assertCanAccessScope: jest.fn().mockResolvedValue(undefined),
+  };
   return {
     service: new RecordBookReportsService(
       prisma,
       auditLogs as any,
       companyScope as any,
+      organizationScope as any,
       generatedDocuments as any,
     ),
     prisma,
     auditLogs,
     generatedDocuments,
+    organizationScope,
   };
 }
 
@@ -102,6 +122,21 @@ describe('RecordBookReportsService', () => {
         expect.objectContaining({ currency: CurrencyCode.USD, recordedSales: 10 }),
       ]),
     );
+  });
+
+  it('recomputes sale totals from the selected receipt method', async () => {
+    const { service } = makeReportsService([sale('sale-1', CurrencyCode.TZS, 1000, 500)]);
+
+    const result = await service.run(
+      'daily-sales',
+      { receiptType: RecordBookReceiptType.BANK },
+      user,
+    );
+
+    expect(result.rows).toEqual([expect.objectContaining({ totalSales: 500, cash: 0, bank: 500 })]);
+    expect(result.summaryByCurrency).toEqual([
+      expect.objectContaining({ currency: CurrencyCode.TZS, recordedSales: 500 }),
+    ]);
   });
 
   it('builds daily net movement from independent sales and expenses', async () => {

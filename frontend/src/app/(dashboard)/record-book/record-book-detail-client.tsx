@@ -36,6 +36,8 @@ interface BaseRecord {
   updatedAt: string;
   finalizedAt?: string | null;
   voidedAt?: string | null;
+  reopenedAt?: string | null;
+  reopenReason?: string | null;
   company?: { name: string; code: string };
   division?: { name: string; code: string } | null;
   branch?: { name: string; code: string } | null;
@@ -43,6 +45,7 @@ interface BaseRecord {
   updatedBy?: Person | null;
   finalizedBy?: Person | null;
   voidedBy?: Person | null;
+  reopenedBy?: Person | null;
 }
 
 interface DailySale extends BaseRecord {
@@ -169,10 +172,15 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
           onClick={() =>
             request({
               title: 'Reopen record',
-              description: 'This returns the entry to Draft for correction.',
+              description:
+                'This returns the entry to Draft for correction. Explain why the finalized record must change.',
               confirmLabel: 'Reopen',
               tone: 'warning',
-              execute: () => backendPatch(`/record-book/${kind}/${record.id}/reopen`, {}),
+              requireReason: true,
+              execute: (reopenReason) =>
+                backendPatch(`/record-book/${kind}/${record.id}/reopen`, {
+                  reason: reopenReason,
+                }),
             })
           }
         >
@@ -219,7 +227,7 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
   ) : undefined;
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
+    <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
       <PageHeader
         title={isSale ? 'Daily Sales Record' : 'Money-Out Record'}
         subtitle="Complete scope, value, lifecycle, and audit details"
@@ -339,6 +347,9 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
               <Field label="Last Updated At" value={recordBookDate(record.updatedAt, true)} />
               <Field label="Finalized By" value={personLabel(record.finalizedBy)} />
               <Field label="Finalized At" value={recordBookDate(record.finalizedAt, true)} />
+              <Field label="Reopened By" value={personLabel(record.reopenedBy)} />
+              <Field label="Reopened At" value={recordBookDate(record.reopenedAt, true)} />
+              {record.reopenReason && <Field label="Reopen Reason" value={record.reopenReason} />}
               <Field label="Voided By" value={personLabel(record.voidedBy)} />
               <Field label="Voided At" value={recordBookDate(record.voidedAt, true)} />
               {record.voidReason && <Field label="Void Reason" value={record.voidReason} />}

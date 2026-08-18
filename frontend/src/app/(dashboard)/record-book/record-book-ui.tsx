@@ -82,16 +82,27 @@ export function RecordBookConfirmDialog({
         </>
       }
     >
-      <p className="text-sm text-slate-300">{action?.description}</p>
+      <p className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+        {action?.description}
+      </p>
       {action?.requireReason && (
-        <label className="mt-4 block text-sm font-medium text-slate-300">
+        <label
+          className="mt-4 block text-sm font-medium"
+          style={{ color: 'var(--aurora-text-muted)' }}
+        >
           Reason
           <textarea
             value={reason}
             onChange={(event) => onReasonChange(event.target.value)}
             rows={3}
-            className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-blue-500"
-            placeholder="Explain why this record is being voided"
+            maxLength={500}
+            className="mt-2 w-full rounded-lg border px-3 py-2 outline-none focus:border-blue-500"
+            style={{
+              borderColor: 'var(--aurora-border)',
+              background: 'var(--aurora-bg)',
+              color: 'var(--aurora-text)',
+            }}
+            placeholder="Explain why this action is required"
           />
         </label>
       )}

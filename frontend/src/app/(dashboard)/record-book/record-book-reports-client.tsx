@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Btn,
   Card,
@@ -56,6 +56,11 @@ interface Category {
   id: string;
   companyId: string;
   name: string;
+}
+interface ScopeOptions {
+  companies: Company[];
+  divisions: Division[];
+  branches: Branch[];
 }
 interface ReportColumn {
   key: string;
@@ -144,6 +149,15 @@ function sourceHref(sourceId: string | undefined) {
   return null;
 }
 
+function useDebouncedValue<T>(value: T, delay = 300) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [delay, value]);
+  return debounced;
+}
+
 async function downloadBlob(path: string, fallbackName: string) {
   const response = await fetch(`${BACKEND_PROXY_URL}${path}`, { cache: 'no-store' });
   if (!response.ok) {
@@ -198,6 +212,8 @@ export function RecordBookReportsClient({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState('');
+  const requestIdRef = useRef(0);
+  const debouncedSearch = useDebouncedValue(filters.search);
 
   const scopedDivisions = useMemo(
     () =>
@@ -206,10 +222,18 @@ export function RecordBookReportsClient({
       ),
     [divisions, filters.companyId],
   );
+  const scopedDivisionIds = useMemo(
+    () => new Set(scopedDivisions.map((division) => division.id)),
+    [scopedDivisions],
+  );
   const scopedBranches = useMemo(
     () =>
-      branches.filter((branch) => !filters.divisionId || branch.divisionId === filters.divisionId),
-    [branches, filters.divisionId],
+      branches.filter((branch) =>
+        filters.divisionId
+          ? branch.divisionId === filters.divisionId
+          : scopedDivisionIds.has(branch.divisionId),
+      ),
+    [branches, filters.divisionId, scopedDivisionIds],
   );
   const scopedCategories = useMemo(
     () =>
@@ -224,20 +248,18 @@ export function RecordBookReportsClient({
 
   useEffect(() => {
     Promise.all([
-      backendList<Company>('/companies', { query: { limit: 1000 } }),
-      backendList<Division>('/divisions', { query: { limit: 1000 } }),
-      backendList<Branch>('/branches', { query: { limit: 1000 } }),
+      backendGet<ScopeOptions>('/record-book/scope-options'),
       backendList<Category>('/record-book/expense-categories', { query: { limit: 500 } }),
     ])
-      .then(([companyRows, divisionRows, branchRows, categoryRows]) => {
-        setCompanies(companyRows);
-        setDivisions(divisionRows);
-        setBranches(branchRows);
+      .then(([scope, categoryRows]) => {
+        setCompanies(scope.companies);
+        setDivisions(scope.divisions);
+        setBranches(scope.branches);
         setCategories(categoryRows);
         setFilters((current) =>
-          current.companyId || !companyRows[0]
+          current.companyId || !scope.companies[0]
             ? current
-            : { ...current, companyId: companyRows[0].id },
+            : { ...current, companyId: scope.companies[0].id },
         );
       })
       .catch((err) =>
@@ -245,20 +267,50 @@ export function RecordBookReportsClient({
       );
   }, []);
 
-  const query = useMemo(() => ({ ...filters }), [filters]);
+  const query = useMemo(
+    () => ({
+      companyId: filters.companyId,
+      divisionId: filters.divisionId,
+      branchId: filters.branchId,
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+      currency: filters.currency,
+      reportStatus: filters.reportStatus,
+      expenseCategoryId: filters.expenseCategoryId,
+      receiptType: filters.receiptType,
+      paymentMethod: filters.paymentMethod,
+      search: debouncedSearch,
+    }),
+    [
+      debouncedSearch,
+      filters.branchId,
+      filters.companyId,
+      filters.currency,
+      filters.dateFrom,
+      filters.dateTo,
+      filters.divisionId,
+      filters.expenseCategoryId,
+      filters.paymentMethod,
+      filters.receiptType,
+      filters.reportStatus,
+    ],
+  );
 
   const loadReport = useCallback(async () => {
     if (!canView) return;
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError('');
     try {
       const data = await backendGet<ReportResult>(`/record-book/reports/${reportKey}`, { query });
+      if (requestId !== requestIdRef.current) return;
       setReport(data);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Could not run report');
       setReport(null);
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, [canView, query, reportKey]);
 
@@ -329,7 +381,7 @@ export function RecordBookReportsClient({
 
   if (!canView) {
     return (
-      <div className="mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
+      <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
         <PageHeader title="Records Book Reports" subtitle="Permission required" />
         <Card>
           <EmptyState
@@ -342,7 +394,7 @@ export function RecordBookReportsClient({
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
+    <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
       <div className="record-book-no-print">
         <PageHeader
           title="Records Book Reports"

@@ -13,6 +13,8 @@ export {
   isGroupScopedUser,
 } from './company-scope.service';
 export type { CompanyScopedWhere } from './company-scope.service';
+export { OrganizationScopeService } from './organization-scope.service';
+export type { OrganizationRecordWhere, OrganizationScopeIds } from './organization-scope.service';
 export { AccountingControlService } from './accounting-control.service';
 export { StagedImportValidationService } from './staged-import-validation.service';
 export { ObservabilityBudgetService } from './observability-budget.service';

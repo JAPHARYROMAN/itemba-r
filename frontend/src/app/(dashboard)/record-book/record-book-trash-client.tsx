@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Btn,
   Card,
@@ -12,7 +12,7 @@ import {
   StatCard,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
-import { backendList, backendPage, backendPatch, type PaginatedResult } from '@/lib/api-client';
+import { backendGet, backendPage, backendPatch, type PaginatedResult } from '@/lib/api-client';
 import {
   type ConfirmAction,
   RecordBookConfirmDialog,
@@ -26,6 +26,18 @@ interface Company {
   id: string;
   name: string;
   code: string;
+}
+interface ScopeOptions {
+  companies: Company[];
+}
+
+function useDebouncedValue<T>(value: T, delay = 300) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [delay, value]);
+  return debounced;
 }
 interface DeletedSale {
   id: string;
@@ -72,22 +84,25 @@ export function RecordBookTrashClient() {
   const [error, setError] = useState('');
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [busy, setBusy] = useState(false);
+  const requestIdRef = useRef(0);
+  const debouncedSearch = useDebouncedValue(search);
 
   useEffect(() => {
-    backendList<Company>('/companies', { query: { limit: 1000 } })
-      .then((rows) => {
-        setCompanies(rows);
-        setCompanyId((current) => current || rows[0]?.id || '');
+    backendGet<ScopeOptions>('/record-book/scope-options')
+      .then((scope) => {
+        setCompanies(scope.companies);
+        setCompanyId((current) => current || scope.companies[0]?.id || '');
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Could not load companies'));
   }, []);
 
   const load = useCallback(async () => {
     if (!canView) return;
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError('');
     try {
-      const base = { companyId, search, recordState: 'DELETED', limit: 20 };
+      const base = { companyId, search: debouncedSearch, recordState: 'DELETED', limit: 20 };
       const [saleRows, expenseRows, categoryRows] = await Promise.all([
         backendPage<DeletedSale>('/record-book/daily-sales', {
           query: { ...base, page: salesPage },
@@ -99,15 +114,17 @@ export function RecordBookTrashClient() {
           query: { ...base, page: categoryPage },
         }),
       ]);
+      if (requestId !== requestIdRef.current) return;
       setSales(saleRows);
       setExpenses(expenseRows);
       setCategories(categoryRows);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Could not load Trash');
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [canView, categoryPage, companyId, expensePage, salesPage, search]);
+  }, [canView, categoryPage, companyId, debouncedSearch, expensePage, salesPage]);
 
   useEffect(() => {
     load();
@@ -117,7 +134,7 @@ export function RecordBookTrashClient() {
     setSalesPage(1);
     setExpensePage(1);
     setCategoryPage(1);
-  }, [companyId, search]);
+  }, [companyId, debouncedSearch]);
 
   const askRestore = (
     kind: 'daily-sales' | 'expenses' | 'expense-categories',
@@ -149,7 +166,7 @@ export function RecordBookTrashClient() {
   const totalDeleted = (sales?.total ?? 0) + (expenses?.total ?? 0) + (categories?.total ?? 0);
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
+    <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
       <PageHeader
         title="Records Book Trash"
         subtitle="Recover audit-safe soft-deleted drafts and categories"

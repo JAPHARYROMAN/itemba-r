@@ -11,6 +11,8 @@ export interface AuthUser {
   permissions: string[];
   companyId?: string | null;
   companyAccess?: Array<{ companyId: string; accessLevel: string }>;
+  divisionAccess?: Array<{ divisionId: string; accessLevel: string }>;
+  branchAccess?: Array<{ branchId: string; accessLevel: string }>;
   rawRefreshToken?: string;
   /** Active session id, if the access token was issued with one (P1-01). */
   sid?: string;

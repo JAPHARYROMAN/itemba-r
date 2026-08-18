@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { CompanyScopeService, CompanyScopedWhere } from '../../common/services';
+import {
+  CompanyScopeService,
+  CompanyScopedWhere,
+  OrganizationScopeService,
+} from '../../common/services';
 
 type SearchInput = {
   q?: string;
@@ -69,6 +73,7 @@ export class GlobalSearchService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companyScope: CompanyScopeService,
+    private readonly organizationScope: OrganizationScopeService,
   ) {}
 
   async search(input: SearchInput, user: AuthUser): Promise<SearchResponse> {
@@ -952,15 +957,22 @@ export class GlobalSearchService {
       return this.empty('record-book', 'Records Book');
     }
 
+    const organizationWhere = await this.organizationScope.recordWhereFor(user);
+
     const [sales, expenses] = await Promise.all([
       this.prisma.recordBookDailySale.findMany({
         where: {
           deletedAt: null,
           ...companyWhere,
-          OR: [
-            { notes: contains(query) },
-            { receipts: { some: { label: contains(query) } } },
-            { receipts: { some: { reference: contains(query) } } },
+          AND: [
+            organizationWhere,
+            {
+              OR: [
+                { notes: contains(query) },
+                { receipts: { some: { label: contains(query) } } },
+                { receipts: { some: { reference: contains(query) } } },
+              ],
+            },
           ],
         },
         select: {
@@ -979,13 +991,18 @@ export class GlobalSearchService {
         where: {
           deletedAt: null,
           ...companyWhere,
-          OR: [
-            { description: contains(query) },
-            { paidTo: contains(query) },
-            { paymentLabel: contains(query) },
-            { reference: contains(query) },
-            { notes: contains(query) },
-            { expenseCategory: { name: contains(query) } },
+          AND: [
+            organizationWhere,
+            {
+              OR: [
+                { description: contains(query) },
+                { paidTo: contains(query) },
+                { paymentLabel: contains(query) },
+                { reference: contains(query) },
+                { notes: contains(query) },
+                { expenseCategory: { name: contains(query) } },
+              ],
+            },
           ],
         },
         select: {

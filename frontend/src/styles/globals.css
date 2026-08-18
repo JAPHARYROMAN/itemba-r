@@ -126,6 +126,71 @@
   display: none;
 }
 
+/* Records Book predates the theme selector and used dark-only utility colors.
+   Keep its dense tables while routing those utilities through Aurora tokens. */
+.record-book-workspace .bg-slate-900\/70,
+.record-book-workspace .bg-slate-900\/30,
+.record-book-workspace .bg-slate-800,
+.record-book-workspace .hover\:bg-slate-800:hover {
+  background-color: var(--aurora-bg-subtle) !important;
+}
+.record-book-workspace .border-slate-600,
+.record-book-workspace .border-slate-700,
+.record-book-workspace .border-slate-800,
+.record-book-workspace .border-slate-800\/80,
+.record-book-workspace .hover\:border-slate-600:hover {
+  border-color: var(--aurora-border-strong) !important;
+}
+.record-book-workspace .text-slate-100,
+.record-book-workspace .text-slate-200 {
+  color: var(--aurora-text) !important;
+}
+.record-book-workspace .text-slate-300 {
+  color: var(--aurora-text-secondary) !important;
+}
+.record-book-workspace .text-slate-400,
+.record-book-workspace .text-slate-500 {
+  color: var(--aurora-text-muted) !important;
+}
+.record-book-workspace .bg-blue-500,
+.record-book-workspace .bg-blue-600 {
+  background-color: var(--aurora-primary) !important;
+}
+.record-book-workspace .bg-blue-950\/40 {
+  background-color: var(--aurora-primary-subtle) !important;
+}
+.record-book-workspace .border-blue-500 {
+  border-color: var(--aurora-primary) !important;
+}
+.record-book-workspace .text-blue-200,
+.record-book-workspace .text-blue-300 {
+  color: var(--aurora-primary-text) !important;
+}
+.record-book-workspace .bg-red-950\/40 {
+  background-color: var(--aurora-danger-bg) !important;
+}
+.record-book-workspace .border-red-700 {
+  border-color: var(--aurora-danger) !important;
+}
+.record-book-workspace .text-red-200 {
+  color: var(--aurora-danger-text) !important;
+}
+.record-book-workspace .bg-amber-950\/30 {
+  background-color: var(--aurora-warning-bg) !important;
+}
+.record-book-workspace .border-amber-700 {
+  border-color: var(--aurora-warning) !important;
+}
+.record-book-workspace .text-amber-200,
+.record-book-workspace .text-amber-300 {
+  color: var(--aurora-warning-text) !important;
+}
+@media screen and (max-width: 767px) {
+  .record-book-workspace table {
+    min-width: 720px;
+  }
+}
+
 /* ─── Dark Mode Tokens ──────────────────────────────────────────────────────── */
 .dark {
   color-scheme: dark;

@@ -69,6 +69,12 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
         companyAccess: {
           select: { companyId: true, accessLevel: true },
         },
+        divisionAccess: {
+          select: { divisionId: true, accessLevel: true },
+        },
+        branchAccess: {
+          select: { branchId: true, accessLevel: true },
+        },
       },
     });
     if (!user || user.status !== 'ACTIVE') {
@@ -94,6 +100,8 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       permissions,
       companyId: user.companyId,
       companyAccess: user.companyAccess,
+      divisionAccess: user.divisionAccess,
+      branchAccess: user.branchAccess,
     };
 
     this.permissionCache.set(payload.sub, result, PERMISSION_CACHE_TTL_MS);

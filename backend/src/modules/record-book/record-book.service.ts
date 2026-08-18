@@ -17,7 +17,7 @@ import { Response } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { CompanyScopeService } from '../../common/services';
+import { CompanyScopeService, OrganizationScopeService } from '../../common/services';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import {
   CreateDailySaleDto,
@@ -25,6 +25,7 @@ import {
   CreateRecordBookExpenseDto,
   ExportRecordBookDto,
   QueryRecordBookDto,
+  ReopenRecordBookDto,
   RecordBookReceiptDto,
   UpdateDailySaleDto,
   UpdateRecordBookCategoryDto,
@@ -54,7 +55,8 @@ function dayEnd(value: string | Date) {
 }
 
 function csvEscape(value: unknown) {
-  const text = value === null || value === undefined ? '' : String(value);
+  const raw = value === null || value === undefined ? '' : String(value);
+  const text = /^[\t\r ]*[=+\-@]/.test(raw) ? `'${raw}` : raw;
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
@@ -87,57 +89,170 @@ export class RecordBookService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly organizationScope: OrganizationScopeService,
   ) {}
 
   async summary(query: QueryRecordBookDto, user: AuthUser) {
-    const saleWhere = await this.dailySaleWhere(query, user, { excludeVoidedByDefault: true });
-    const expenseWhere = await this.expenseWhere(query, user, { excludeVoidedByDefault: true });
-
-    const [sales, expenses, draftSales, draftExpenses] = await Promise.all([
-      this.prisma.recordBookDailySale.findMany({
-        where: saleWhere,
-        include: { receipts: true },
-      }),
-      this.prisma.recordBookExpense.findMany({ where: expenseWhere }),
-      this.prisma.recordBookDailySale.count({
-        where: { ...saleWhere, status: RecordBookStatus.DRAFT },
-      }),
-      this.prisma.recordBookExpense.count({
-        where: { ...expenseWhere, status: RecordBookStatus.DRAFT },
-      }),
+    const totalQuery = {
+      ...query,
+      status: query.status ?? RecordBookStatus.FINALIZED,
+    };
+    const draftQuery = { ...query, status: RecordBookStatus.DRAFT };
+    const [saleWhere, expenseWhere, draftSaleWhere, draftExpenseWhere] = await Promise.all([
+      this.dailySaleWhere(totalQuery, user),
+      this.expenseWhere(totalQuery, user),
+      this.dailySaleWhere(draftQuery, user),
+      this.expenseWhere(draftQuery, user),
     ]);
 
-    const receiptTotals: Record<RecordBookReceiptType, number> = {
-      CASH: 0,
-      MPESA: 0,
-      LIPA_NAMBA: 0,
-      BANK: 0,
-      CARD: 0,
-      OTHER: 0,
-    };
-    let totalSales = 0;
-    for (const sale of sales) {
-      totalSales += toNumber(sale.totalSalesAmount);
-      for (const receipt of sale.receipts) {
-        receiptTotals[receipt.receiptType] += toNumber(receipt.amount);
-      }
-    }
+    const [sales, expenses, receipts, draftSales, draftExpenses] = await Promise.all([
+      this.prisma.recordBookDailySale.groupBy({
+        by: ['currency'],
+        where: saleWhere,
+        _sum: { totalSalesAmount: true },
+        _count: { _all: true },
+      }),
+      this.prisma.recordBookExpense.groupBy({
+        by: ['currency'],
+        where: expenseWhere,
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+      this.prisma.recordBookSaleReceipt.findMany({
+        where: { dailySale: saleWhere },
+        select: {
+          receiptType: true,
+          amount: true,
+          dailySale: { select: { currency: true } },
+        },
+      }),
+      this.prisma.recordBookDailySale.count({ where: draftSaleWhere }),
+      this.prisma.recordBookExpense.count({ where: draftExpenseWhere }),
+    ]);
 
-    const totalExpenses = expenses.reduce((sum, row) => sum + toNumber(row.amount), 0);
-    return {
-      totalRecordedSales: totalSales,
-      cashTotal: receiptTotals.CASH,
-      mobileMoneyTotal: receiptTotals.MPESA + receiptTotals.LIPA_NAMBA,
-      bankTotal: receiptTotals.BANK,
-      cardTotal: receiptTotals.CARD,
-      otherReceiptTotal: receiptTotals.OTHER,
-      expensesTotal: totalExpenses,
-      netMovement: totalSales - totalExpenses,
-      draftRecords: draftSales + draftExpenses,
-      receiptTotals,
-      salesCount: sales.length,
-      expenseCount: expenses.length,
+    const currencyRows = new Map<
+      CurrencyCode,
+      {
+        currency: CurrencyCode;
+        totalRecordedSales: number;
+        expensesTotal: number;
+        receiptTotals: Record<RecordBookReceiptType, number>;
+        salesCount: number;
+        expenseCount: number;
+      }
+    >();
+    const rowFor = (currency: CurrencyCode) => {
+      const existing = currencyRows.get(currency);
+      if (existing) return existing;
+      const row = {
+        currency,
+        totalRecordedSales: 0,
+        expensesTotal: 0,
+        receiptTotals: this.emptyReceiptTotals(),
+        salesCount: 0,
+        expenseCount: 0,
+      };
+      currencyRows.set(currency, row);
+      return row;
     };
+    for (const sale of sales) {
+      const row = rowFor(sale.currency);
+      row.totalRecordedSales = toNumber(sale._sum.totalSalesAmount);
+      row.salesCount = sale._count._all;
+    }
+    for (const expense of expenses) {
+      const row = rowFor(expense.currency);
+      row.expensesTotal = toNumber(expense._sum.amount);
+      row.expenseCount = expense._count._all;
+    }
+    for (const receipt of receipts) {
+      rowFor(receipt.dailySale.currency).receiptTotals[receipt.receiptType] += toNumber(
+        receipt.amount,
+      );
+    }
+    const summaryByCurrency = Array.from(currencyRows.values())
+      .map((row) => ({
+        ...row,
+        cashTotal: row.receiptTotals.CASH,
+        mobileMoneyTotal: row.receiptTotals.MPESA + row.receiptTotals.LIPA_NAMBA,
+        bankTotal: row.receiptTotals.BANK,
+        cardTotal: row.receiptTotals.CARD,
+        otherReceiptTotal: row.receiptTotals.OTHER,
+        netMovement: row.totalRecordedSales - row.expensesTotal,
+      }))
+      .sort((a, b) => a.currency.localeCompare(b.currency));
+    const single = summaryByCurrency.length === 1 ? summaryByCurrency[0] : null;
+    return {
+      totalRecordedSales: single?.totalRecordedSales ?? null,
+      cashTotal: single?.cashTotal ?? null,
+      mobileMoneyTotal: single?.mobileMoneyTotal ?? null,
+      bankTotal: single?.bankTotal ?? null,
+      cardTotal: single?.cardTotal ?? null,
+      otherReceiptTotal: single?.otherReceiptTotal ?? null,
+      expensesTotal: single?.expensesTotal ?? null,
+      netMovement: single?.netMovement ?? null,
+      draftRecords: draftSales + draftExpenses,
+      receiptTotals: single?.receiptTotals ?? null,
+      salesCount: summaryByCurrency.reduce((sum, row) => sum + row.salesCount, 0),
+      expenseCount: summaryByCurrency.reduce((sum, row) => sum + row.expenseCount, 0),
+      mixedCurrency: summaryByCurrency.length > 1,
+      summaryByCurrency,
+    };
+  }
+
+  async scopeOptions(user: AuthUser) {
+    const companyWhere = await this.companyScope.companyWhereFor(user);
+    const scope = await this.organizationScope.accessibleIds(user);
+    const companies = await this.prisma.company.findMany({
+      where: { ...companyWhere, deletedAt: null },
+      select: { id: true, name: true, code: true },
+      orderBy: { name: 'asc' },
+    });
+    const companyIds = companies.map((company) => company.id);
+    const divisionWhere: Prisma.DivisionWhereInput = {
+      companyId: { in: companyIds },
+      deletedAt: null,
+    };
+    const branchWhere: Prisma.BranchWhereInput = {
+      division: { companyId: { in: companyIds } },
+      deletedAt: null,
+    };
+    if (!scope.unrestricted) {
+      const branchesFromDivisions = scope.divisionIds.length
+        ? await this.prisma.branch.findMany({
+            where: { divisionId: { in: scope.divisionIds }, deletedAt: null },
+            select: { id: true },
+          })
+        : [];
+      const branchIds = Array.from(
+        new Set([...scope.branchIds, ...branchesFromDivisions.map((branch) => branch.id)]),
+      );
+      const branchDivisions = scope.branchIds.length
+        ? await this.prisma.branch.findMany({
+            where: { id: { in: scope.branchIds }, deletedAt: null },
+            select: { divisionId: true },
+          })
+        : [];
+      divisionWhere.id = {
+        in: Array.from(
+          new Set([...scope.divisionIds, ...branchDivisions.map((branch) => branch.divisionId)]),
+        ),
+      };
+      branchWhere.id = { in: branchIds };
+    }
+    const [divisions, branches] = await Promise.all([
+      this.prisma.division.findMany({
+        where: divisionWhere,
+        select: { id: true, companyId: true, name: true, code: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.branch.findMany({
+        where: branchWhere,
+        select: { id: true, divisionId: true, name: true, code: true },
+        orderBy: { name: 'asc' },
+      }),
+    ]);
+    return { companies, divisions, branches };
   }
 
   async findDailySales(query: QueryRecordBookDto, user: AuthUser) {
@@ -177,23 +292,31 @@ export class RecordBookService {
 
   async createDailySale(dto: CreateDailySaleDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
-    await this.assertOrgScope(dto.companyId, dto.divisionId, dto.branchId);
+    const scope = await this.resolveOrgScope(
+      dto.companyId,
+      dto.divisionId,
+      dto.branchId,
+      user,
+      AccessLevel.WRITE,
+    );
     this.assertReceiptSplit(dto.totalSalesAmount, dto.receipts);
 
     const recordDate = dayStart(dto.recordDate);
-    await this.assertNoDuplicateDailySale({
-      companyId: dto.companyId,
-      branchId: dto.branchId,
-      recordDate,
-      currency: dto.currency ?? CurrencyCode.TZS,
-    });
-
     const record = await this.prisma.$transaction(async (tx) => {
+      const duplicateKey = {
+        companyId: dto.companyId,
+        divisionId: scope.divisionId,
+        branchId: scope.branchId,
+        recordDate,
+        currency: dto.currency ?? CurrencyCode.TZS,
+      };
+      await this.lockDailySaleScope(tx, duplicateKey);
+      await this.assertNoDuplicateDailySale(duplicateKey, tx);
       const sale = await tx.recordBookDailySale.create({
         data: {
           companyId: dto.companyId,
-          divisionId: dto.divisionId || null,
-          branchId: dto.branchId || null,
+          divisionId: scope.divisionId,
+          branchId: scope.branchId,
           recordDate,
           currency: dto.currency ?? CurrencyCode.TZS,
           totalSalesAmount: dto.totalSalesAmount,
@@ -240,27 +363,31 @@ export class RecordBookService {
         notes: receipt.notes ?? undefined,
       }));
 
-    await this.assertOrgScope(
+    const scope = await this.resolveOrgScope(
       nextCompanyId,
       nextDivisionId ?? undefined,
       nextBranchId ?? undefined,
+      user,
+      AccessLevel.WRITE,
     );
     this.assertReceiptSplit(nextTotal, nextReceipts);
-    await this.assertNoDuplicateDailySale({
-      companyId: nextCompanyId,
-      branchId: nextBranchId ?? undefined,
-      recordDate: nextRecordDate,
-      currency: nextCurrency,
-      ignoreId: id,
-    });
-
     const record = await this.prisma.$transaction(async (tx) => {
+      const duplicateKey = {
+        companyId: nextCompanyId,
+        divisionId: scope.divisionId,
+        branchId: scope.branchId,
+        recordDate: nextRecordDate,
+        currency: nextCurrency,
+        ignoreId: id,
+      };
+      await this.lockDailySaleScope(tx, duplicateKey);
+      await this.assertNoDuplicateDailySale(duplicateKey, tx);
       await tx.recordBookSaleReceipt.deleteMany({ where: { dailySaleId: id } });
       return tx.recordBookDailySale.update({
         where: { id },
         data: {
-          ...(dto.divisionId !== undefined && { divisionId: nextDivisionId }),
-          ...(dto.branchId !== undefined && { branchId: nextBranchId }),
+          divisionId: scope.divisionId,
+          branchId: scope.branchId,
           ...(dto.recordDate && { recordDate: nextRecordDate }),
           ...(dto.currency && { currency: dto.currency }),
           ...(dto.totalSalesAmount !== undefined && { totalSalesAmount: dto.totalSalesAmount }),
@@ -311,17 +438,22 @@ export class RecordBookService {
     if (existing.status !== RecordBookStatus.DRAFT) {
       throw new BadRequestException('Only deleted draft daily sales can be restored');
     }
-    await this.assertNoDuplicateDailySale({
-      companyId: existing.companyId,
-      branchId: existing.branchId,
-      recordDate: existing.recordDate,
-      currency: existing.currency,
-      ignoreId: existing.id,
-    });
-    const record = await this.prisma.recordBookDailySale.update({
-      where: { id },
-      data: { deletedAt: null, updatedById: user.id },
-      include: this.dailySaleInclude(),
+    const record = await this.prisma.$transaction(async (tx) => {
+      const duplicateKey = {
+        companyId: existing.companyId,
+        divisionId: existing.divisionId,
+        branchId: existing.branchId,
+        recordDate: existing.recordDate,
+        currency: existing.currency,
+        ignoreId: existing.id,
+      };
+      await this.lockDailySaleScope(tx, duplicateKey);
+      await this.assertNoDuplicateDailySale(duplicateKey, tx);
+      return tx.recordBookDailySale.update({
+        where: { id },
+        data: { deletedAt: null, updatedById: user.id },
+        include: this.dailySaleInclude(),
+      });
     });
     await this.auditLogs.log({
       action: 'RECORD_BOOK_DAILY_SALE_RESTORE',
@@ -357,7 +489,7 @@ export class RecordBookService {
     return this.serializeDailySale(record);
   }
 
-  async reopenDailySale(id: string, user: AuthUser) {
+  async reopenDailySale(id: string, dto: ReopenRecordBookDto, user: AuthUser) {
     const existing = await this.getDailySale(id, user, AccessLevel.WRITE);
     if (existing.status !== RecordBookStatus.FINALIZED) {
       throw new BadRequestException('Only finalized daily sales can be reopened');
@@ -366,8 +498,9 @@ export class RecordBookService {
       where: { id },
       data: {
         status: RecordBookStatus.DRAFT,
-        finalizedById: null,
-        finalizedAt: null,
+        reopenedById: user.id,
+        reopenedAt: new Date(),
+        reopenReason: dto.reason,
         updatedById: user.id,
       },
       include: this.dailySaleInclude(),
@@ -378,8 +511,12 @@ export class RecordBookService {
       entityId: id,
       userId: user.id,
       companyId: record.companyId,
-      oldValue: { status: existing.status } as any,
-      newValue: { status: record.status } as any,
+      oldValue: {
+        status: existing.status,
+        finalizedById: existing.finalizedById,
+        finalizedAt: existing.finalizedAt,
+      } as any,
+      newValue: { status: record.status, reason: dto.reason } as any,
     });
     return this.serializeDailySale(record);
   }
@@ -449,14 +586,20 @@ export class RecordBookService {
 
   async createExpense(dto: CreateRecordBookExpenseDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
-    await this.assertOrgScope(dto.companyId, dto.divisionId, dto.branchId);
+    const scope = await this.resolveOrgScope(
+      dto.companyId,
+      dto.divisionId,
+      dto.branchId,
+      user,
+      AccessLevel.WRITE,
+    );
     await this.assertCategory(dto.companyId, dto.expenseCategoryId);
 
     const record = await this.prisma.recordBookExpense.create({
       data: {
         companyId: dto.companyId,
-        divisionId: dto.divisionId || null,
-        branchId: dto.branchId || null,
+        divisionId: scope.divisionId,
+        branchId: scope.branchId,
         expenseCategoryId: dto.expenseCategoryId,
         recordDate: dayStart(dto.recordDate),
         currency: dto.currency ?? CurrencyCode.TZS,
@@ -492,18 +635,20 @@ export class RecordBookService {
     const nextBranchId = dto.branchId !== undefined ? dto.branchId || null : existing.branchId;
     const nextCategoryId = dto.expenseCategoryId ?? existing.expenseCategoryId;
 
-    await this.assertOrgScope(
+    const scope = await this.resolveOrgScope(
       existing.companyId,
       nextDivisionId ?? undefined,
       nextBranchId ?? undefined,
+      user,
+      AccessLevel.WRITE,
     );
     await this.assertCategory(existing.companyId, nextCategoryId);
 
     const record = await this.prisma.recordBookExpense.update({
       where: { id },
       data: {
-        ...(dto.divisionId !== undefined && { divisionId: nextDivisionId }),
-        ...(dto.branchId !== undefined && { branchId: nextBranchId }),
+        divisionId: scope.divisionId,
+        branchId: scope.branchId,
         ...(dto.expenseCategoryId && { expenseCategoryId: dto.expenseCategoryId }),
         ...(dto.recordDate && { recordDate: dayStart(dto.recordDate) }),
         ...(dto.currency && { currency: dto.currency }),
@@ -555,6 +700,9 @@ export class RecordBookService {
 
   async restoreExpense(id: string, user: AuthUser) {
     const existing = await this.getExpense(id, user, AccessLevel.WRITE, true);
+    if (existing.status !== RecordBookStatus.DRAFT) {
+      throw new BadRequestException('Only deleted draft money-out records can be restored');
+    }
     const record = await this.prisma.recordBookExpense.update({
       where: { id },
       data: { deletedAt: null, updatedById: user.id },
@@ -594,7 +742,7 @@ export class RecordBookService {
     return this.serializeExpense(record);
   }
 
-  async reopenExpense(id: string, user: AuthUser) {
+  async reopenExpense(id: string, dto: ReopenRecordBookDto, user: AuthUser) {
     const existing = await this.getExpense(id, user, AccessLevel.WRITE);
     if (existing.status !== RecordBookStatus.FINALIZED) {
       throw new BadRequestException('Only finalized expenses can be reopened');
@@ -603,8 +751,9 @@ export class RecordBookService {
       where: { id },
       data: {
         status: RecordBookStatus.DRAFT,
-        finalizedById: null,
-        finalizedAt: null,
+        reopenedById: user.id,
+        reopenedAt: new Date(),
+        reopenReason: dto.reason,
         updatedById: user.id,
       },
       include: this.expenseInclude(),
@@ -615,8 +764,12 @@ export class RecordBookService {
       entityId: id,
       userId: user.id,
       companyId: record.companyId,
-      oldValue: { status: existing.status } as any,
-      newValue: { status: record.status } as any,
+      oldValue: {
+        status: existing.status,
+        finalizedById: existing.finalizedById,
+        finalizedAt: existing.finalizedAt,
+      } as any,
+      newValue: { status: record.status, reason: dto.reason } as any,
     });
     return this.serializeExpense(record);
   }
@@ -784,8 +937,13 @@ export class RecordBookService {
     const format = query.format ?? 'json';
     const type = query.type ?? 'combined';
     const rows = await this.exportRows(type, query, user);
+    const scope = await this.resolveExportScope(query, user);
     const stamp = new Date().toISOString().slice(0, 10);
-    const fileStem = safeFileStem(`record-book-${type}-${stamp}`);
+    const fileStem = safeFileStem(
+      ['record-book', type, scope.companyCode, scope.divisionCode, scope.branchCode, stamp]
+        .filter(Boolean)
+        .join('-'),
+    );
 
     await this.auditLogs.log({
       action: 'RECORD_BOOK_EXPORT',
@@ -810,13 +968,24 @@ export class RecordBookService {
       severity: 'MEDIUM' as any,
     });
 
-    if (format === 'json') {
+    if (format === 'json' || format === 'pdf') {
       res.setHeader('Content-Type', 'application/json');
       return res.json({ success: true, data: { type, rows }, timestamp: new Date().toISOString() });
     }
 
     if (format === 'csv') {
-      const csv = rowsToCsv(rows);
+      const metadata = [
+        ['Records Book Export', type],
+        ['Company', scope.companyName],
+        ['Division', scope.divisionName],
+        ['Branch', scope.branchName],
+        ['Period', `${query.dateFrom ?? 'Beginning'} to ${query.dateTo ?? 'Today'}`],
+        ['Status', query.status ?? 'Active (excluding voided)'],
+        ['Currency', query.currency ?? 'All currencies'],
+      ]
+        .map((row) => row.map(csvEscape).join(','))
+        .join('\n');
+      const csv = `${metadata}\n\n${rowsToCsv(rows)}`;
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${fileStem}.csv"`);
       return res.send(csv);
@@ -826,6 +995,20 @@ export class RecordBookService {
     workbook.creator = 'ITEMBA-R';
     workbook.created = new Date();
     const sheet = workbook.addWorksheet(type === 'combined' ? 'Records Book' : type);
+    const scopeSheet = workbook.addWorksheet('Export Scope');
+    scopeSheet.addRows([
+      ['Export', type],
+      ['Company', scope.companyName],
+      ['Division', scope.divisionName],
+      ['Branch', scope.branchName],
+      ['Date From', query.dateFrom ?? 'Beginning'],
+      ['Date To', query.dateTo ?? 'Today'],
+      ['Status', query.status ?? 'Active (excluding voided)'],
+      ['Currency', query.currency ?? 'All currencies'],
+      ['Rows', rows.length],
+    ]);
+    scopeSheet.getColumn(1).font = { bold: true };
+    scopeSheet.columns = [{ width: 18 }, { width: 48 }];
     const columns = rows.length
       ? Array.from(
           rows.reduce((set, row) => {
@@ -882,6 +1065,65 @@ export class RecordBookService {
     ].sort((a, b) => String(b.recordDate).localeCompare(String(a.recordDate)));
     if (rows.length > EXPORT_LIMIT) this.throwExportLimit();
     return rows;
+  }
+
+  private async resolveExportScope(query: QueryRecordBookDto, user: AuthUser) {
+    if (query.companyId) {
+      await this.companyScope.assertCanAccessCompany(user, query.companyId, AccessLevel.READ);
+    }
+    if (query.divisionId || query.branchId) {
+      await this.organizationScope.assertCanAccessScope(
+        user,
+        query.divisionId,
+        query.branchId,
+        AccessLevel.READ,
+      );
+    }
+    const [company, division, branch] = await Promise.all([
+      query.companyId
+        ? this.prisma.company.findFirst({
+            where: { id: query.companyId, deletedAt: null },
+            select: { name: true, code: true },
+          })
+        : null,
+      query.divisionId
+        ? this.prisma.division.findFirst({
+            where: {
+              id: query.divisionId,
+              deletedAt: null,
+              ...(query.companyId ? { companyId: query.companyId } : {}),
+            },
+            select: { name: true, code: true },
+          })
+        : null,
+      query.branchId
+        ? this.prisma.branch.findFirst({
+            where: {
+              id: query.branchId,
+              deletedAt: null,
+              ...(query.divisionId ? { divisionId: query.divisionId } : {}),
+              ...(query.companyId ? { division: { companyId: query.companyId } } : {}),
+            },
+            select: { name: true, code: true },
+          })
+        : null,
+    ]);
+    if (query.companyId && !company)
+      throw new BadRequestException('Selected company was not found');
+    if (query.divisionId && !division) {
+      throw new BadRequestException('Division does not belong to the selected company');
+    }
+    if (query.branchId && !branch) {
+      throw new BadRequestException('Branch does not belong to the selected organization scope');
+    }
+    return {
+      companyName: company?.name ?? 'All accessible companies',
+      companyCode: company?.code ?? '',
+      divisionName: division?.name ?? 'All accessible divisions',
+      divisionCode: division?.code ?? '',
+      branchName: branch?.name ?? 'All accessible branches',
+      branchCode: branch?.code ?? '',
+    };
   }
 
   private async salesExportRows(query: QueryRecordBookDto, user: AuthUser) {
@@ -944,9 +1186,11 @@ export class RecordBookService {
     user: AuthUser,
     opts: { excludeVoidedByDefault?: boolean } = {},
   ): Promise<Prisma.RecordBookDailySaleWhereInput> {
+    const organizationWhere = await this.organizationScope.recordWhereFor(user);
     const where: Prisma.RecordBookDailySaleWhereInput = {
       deletedAt: query.recordState === 'DELETED' ? { not: null } : null,
       ...(await this.companyScope.companyWhereFor(user, query.companyId)),
+      ...(Object.keys(organizationWhere).length ? { AND: [organizationWhere] } : {}),
     };
     if (query.divisionId) where.divisionId = query.divisionId;
     if (query.branchId) where.branchId = query.branchId;
@@ -960,10 +1204,16 @@ export class RecordBookService {
     }
     if (query.receiptType) where.receipts = { some: { receiptType: query.receiptType } };
     if (query.search) {
-      where.OR = [
-        { notes: { contains: query.search, mode: 'insensitive' } },
-        { receipts: { some: { label: { contains: query.search, mode: 'insensitive' } } } },
-        { receipts: { some: { reference: { contains: query.search, mode: 'insensitive' } } } },
+      const searchWhere: Prisma.RecordBookDailySaleWhereInput = {
+        OR: [
+          { notes: { contains: query.search, mode: 'insensitive' } },
+          { receipts: { some: { label: { contains: query.search, mode: 'insensitive' } } } },
+          { receipts: { some: { reference: { contains: query.search, mode: 'insensitive' } } } },
+        ],
+      };
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        searchWhere,
       ];
     }
     return where;
@@ -974,9 +1224,11 @@ export class RecordBookService {
     user: AuthUser,
     opts: { excludeVoidedByDefault?: boolean } = {},
   ): Promise<Prisma.RecordBookExpenseWhereInput> {
+    const organizationWhere = await this.organizationScope.recordWhereFor(user);
     const where: Prisma.RecordBookExpenseWhereInput = {
       deletedAt: query.recordState === 'DELETED' ? { not: null } : null,
       ...(await this.companyScope.companyWhereFor(user, query.companyId)),
+      ...(Object.keys(organizationWhere).length ? { AND: [organizationWhere] } : {}),
     };
     if (query.divisionId) where.divisionId = query.divisionId;
     if (query.branchId) where.branchId = query.branchId;
@@ -991,12 +1243,18 @@ export class RecordBookService {
       if (query.dateTo) where.recordDate.lte = dateRangeEnd(query.dateTo);
     }
     if (query.search) {
-      where.OR = [
-        { description: { contains: query.search, mode: 'insensitive' } },
-        { paidTo: { contains: query.search, mode: 'insensitive' } },
-        { paymentLabel: { contains: query.search, mode: 'insensitive' } },
-        { reference: { contains: query.search, mode: 'insensitive' } },
-        { notes: { contains: query.search, mode: 'insensitive' } },
+      const searchWhere: Prisma.RecordBookExpenseWhereInput = {
+        OR: [
+          { description: { contains: query.search, mode: 'insensitive' } },
+          { paidTo: { contains: query.search, mode: 'insensitive' } },
+          { paymentLabel: { contains: query.search, mode: 'insensitive' } },
+          { reference: { contains: query.search, mode: 'insensitive' } },
+          { notes: { contains: query.search, mode: 'insensitive' } },
+        ],
+      };
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        searchWhere,
       ];
     }
     return where;
@@ -1011,6 +1269,7 @@ export class RecordBookService {
       updatedBy: { select: { id: true, fullName: true, email: true } },
       finalizedBy: { select: { id: true, fullName: true, email: true } },
       voidedBy: { select: { id: true, fullName: true, email: true } },
+      reopenedBy: { select: { id: true, fullName: true, email: true } },
       receipts: { orderBy: { receiptType: 'asc' as const } },
     };
   }
@@ -1025,6 +1284,7 @@ export class RecordBookService {
       updatedBy: { select: { id: true, fullName: true, email: true } },
       finalizedBy: { select: { id: true, fullName: true, email: true } },
       voidedBy: { select: { id: true, fullName: true, email: true } },
+      reopenedBy: { select: { id: true, fullName: true, email: true } },
     };
   }
 
@@ -1071,22 +1331,38 @@ export class RecordBookService {
     }
   }
 
+  private emptyReceiptTotals(): Record<RecordBookReceiptType, number> {
+    return {
+      CASH: 0,
+      MPESA: 0,
+      LIPA_NAMBA: 0,
+      BANK: 0,
+      CARD: 0,
+      OTHER: 0,
+    };
+  }
+
   private throwExportLimit(): never {
     throw new BadRequestException(
       `This export matches more than ${EXPORT_LIMIT.toLocaleString()} rows. Narrow the date or scope filters.`,
     );
   }
 
-  private async assertNoDuplicateDailySale(input: {
-    companyId: string;
-    branchId?: string | null;
-    recordDate: Date;
-    currency: CurrencyCode;
-    ignoreId?: string;
-  }) {
-    const duplicate = await this.prisma.recordBookDailySale.findFirst({
+  private async assertNoDuplicateDailySale(
+    input: {
+      companyId: string;
+      divisionId?: string | null;
+      branchId?: string | null;
+      recordDate: Date;
+      currency: CurrencyCode;
+      ignoreId?: string;
+    },
+    db: Pick<Prisma.TransactionClient, 'recordBookDailySale'> = this.prisma,
+  ) {
+    const duplicate = await db.recordBookDailySale.findFirst({
       where: {
         companyId: input.companyId,
+        divisionId: input.divisionId || null,
         branchId: input.branchId || null,
         currency: input.currency,
         recordDate: { gte: dayStart(input.recordDate), lte: dayEnd(input.recordDate) },
@@ -1098,16 +1374,40 @@ export class RecordBookService {
     });
     if (duplicate) {
       throw new ConflictException(
-        'A daily sales summary already exists for this company, branch, date, and currency',
+        'A daily sales summary already exists for this organization scope, date, and currency',
       );
     }
   }
 
-  private async assertOrgScope(
+  private async lockDailySaleScope(
+    tx: Prisma.TransactionClient,
+    input: {
+      companyId: string;
+      divisionId?: string | null;
+      branchId?: string | null;
+      recordDate: Date;
+      currency: CurrencyCode;
+    },
+  ) {
+    const key = [
+      'record-book-daily-sale',
+      input.companyId,
+      input.divisionId ?? 'all-divisions',
+      input.branchId ?? 'all-branches',
+      dayStart(input.recordDate).toISOString().slice(0, 10),
+      input.currency,
+    ].join('|');
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key})::bigint)`;
+  }
+
+  private async resolveOrgScope(
     companyId: string,
     divisionId?: string | null,
     branchId?: string | null,
+    user?: AuthUser,
+    minimum: AccessLevel = AccessLevel.READ,
   ) {
+    let normalizedDivisionId = divisionId || null;
     if (divisionId) {
       const division = await this.prisma.division.findFirst({
         where: { id: divisionId, companyId, deletedAt: null },
@@ -1124,11 +1424,21 @@ export class RecordBookService {
           division: { companyId },
           ...(divisionId ? { divisionId } : {}),
         },
-        select: { id: true },
+        select: { id: true, divisionId: true },
       });
       if (!branch)
         throw new BadRequestException('Branch does not belong to the selected company/division');
+      normalizedDivisionId = branch.divisionId;
     }
+    if (user) {
+      await this.organizationScope.assertCanAccessScope(
+        user,
+        normalizedDivisionId,
+        branchId,
+        minimum,
+      );
+    }
+    return { divisionId: normalizedDivisionId, branchId: branchId || null };
   }
 
   private async assertCategory(companyId: string, categoryId: string) {
@@ -1148,6 +1458,12 @@ export class RecordBookService {
     });
     if (!record) throw new NotFoundException('Records Book daily sale not found');
     await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
+    await this.organizationScope.assertCanAccessScope(
+      user,
+      record.divisionId,
+      record.branchId,
+      minimum,
+    );
     return record;
   }
 
@@ -1158,6 +1474,12 @@ export class RecordBookService {
     });
     if (!record) throw new NotFoundException('Records Book expense not found');
     await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
+    await this.organizationScope.assertCanAccessScope(
+      user,
+      record.divisionId,
+      record.branchId,
+      minimum,
+    );
     return record;
   }
 
