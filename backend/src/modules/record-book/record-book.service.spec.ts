@@ -62,6 +62,30 @@ function makeService(overrides: Record<string, unknown> = {}) {
 }
 
 describe('RecordBookService', () => {
+  it('queries companies by their id when loading organization scope options', async () => {
+    const companyFindMany = jest
+      .fn()
+      .mockResolvedValue([{ id: 'company-1', name: 'Company', code: 'COMP' }]);
+    const divisionFindMany = jest.fn().mockResolvedValue([]);
+    const branchFindMany = jest.fn().mockResolvedValue([]);
+    const { service } = makeService({
+      company: { findMany: companyFindMany },
+      division: { findMany: divisionFindMany },
+      branch: { findMany: branchFindMany },
+    });
+
+    await expect(service.scopeOptions(user)).resolves.toEqual({
+      companies: [{ id: 'company-1', name: 'Company', code: 'COMP' }],
+      divisions: [],
+      branches: [],
+    });
+    expect(companyFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'company-1', deletedAt: null },
+      }),
+    );
+  });
+
   it('keeps dashboard totals separate by currency and counts drafts independently', async () => {
     const { service } = makeService({
       recordBookDailySale: {

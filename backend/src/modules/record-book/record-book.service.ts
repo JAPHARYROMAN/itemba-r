@@ -201,10 +201,14 @@ export class RecordBookService {
   }
 
   async scopeOptions(user: AuthUser) {
-    const companyWhere = await this.companyScope.companyWhereFor(user);
+    const companyScopeWhere = await this.companyScope.companyWhereFor(user);
     const scope = await this.organizationScope.accessibleIds(user);
+    const companyIdFilter = companyScopeWhere.companyId ?? companyScopeWhere.id;
     const companies = await this.prisma.company.findMany({
-      where: { ...companyWhere, deletedAt: null },
+      where: {
+        ...(companyIdFilter !== undefined ? { id: companyIdFilter } : {}),
+        deletedAt: null,
+      },
       select: { id: true, name: true, code: true },
       orderBy: { name: 'asc' },
     });
