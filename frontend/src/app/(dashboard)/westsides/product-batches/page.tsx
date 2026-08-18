@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Btn, Card, FormInput, FormSelect, Modal, PageHeader, ProductPicker, showToast } from '@/components/ui';
 import type { ProductPickerOption } from '@/components/ui';
 import { ApiError, backendPost } from '@/lib/api-client';
@@ -87,6 +88,8 @@ interface ModalProps { onClose: () => void; onSaved: () => void }
 
 function BatchModal({ onClose, onSaved }: ModalProps) {
   const workspace = useInventoryWorkspace();
+  const workspaceCompanyId = workspace?.scope.companyId;
+  const workspaceBranchId = workspace?.scope.branchId;
   const [companies, setCompanies] = useState<Company[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -103,10 +106,10 @@ function BatchModal({ onClose, onSaved }: ModalProps) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!workspace) return;
-    setCompanyId(workspace.scope.companyId);
-    setBranchId(workspace.scope.branchId);
-  }, [workspace?.scope.branchId, workspace?.scope.companyId]);
+    if (workspaceCompanyId === undefined) return;
+    setCompanyId(workspaceCompanyId);
+    setBranchId(workspaceBranchId ?? '');
+  }, [workspaceBranchId, workspaceCompanyId]);
 
   useEffect(() => {
     fetch('/api/backend/companies?limit=100')
@@ -207,6 +210,10 @@ const TAB_ENDPOINT: Record<TabKey, string> = {
 
 export default function ProductBatchesPage() {
   const workspace = useInventoryWorkspace();
+  const workspaceCompanyId = workspace?.scope.companyId;
+  const workspaceBranchId = workspace?.scope.branchId;
+  const searchParams = useSearchParams();
+  const selectedProductId = searchParams.get('productId') ?? '';
   const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [items, setItems] = useState<ProductBatch[]>([]);
   const [loading, setLoading] = useState(false);
@@ -217,8 +224,9 @@ export default function ProductBatchesPage() {
     setLoading(true); setError('');
     try {
       const params = new URLSearchParams({ limit: '100' });
-      if (workspace?.scope.companyId) params.set('companyId', workspace.scope.companyId);
-      if (workspace?.scope.branchId) params.set('branchId', workspace.scope.branchId);
+      if (workspaceCompanyId) params.set('companyId', workspaceCompanyId);
+      if (workspaceBranchId) params.set('branchId', workspaceBranchId);
+      if (activeTab === 'all' && selectedProductId) params.set('productId', selectedProductId);
       const res = await fetch(`${TAB_ENDPOINT[activeTab]}?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to load batches');
       const json = await res.json();
@@ -226,7 +234,11 @@ export default function ProductBatchesPage() {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error loading data');
     } finally { setLoading(false); }
-  }, [activeTab, workspace?.scope.branchId, workspace?.scope.companyId]);
+  }, [activeTab, selectedProductId, workspaceBranchId, workspaceCompanyId]);
+
+  useEffect(() => {
+    if (selectedProductId) setActiveTab('all');
+  }, [selectedProductId]);
 
   useEffect(() => { load(); }, [load]);
 

@@ -48,6 +48,7 @@ import {
   Users,
   Wallet,
   Warehouse,
+  X,
   Zap,
 } from 'lucide-react';
 
@@ -98,6 +99,7 @@ const ICONS = {
   error: CircleAlert,
   bell: Bell,
   search: Search,
+  close: X,
   transfer: ArrowLeftRight,
   calendar: CalendarDays,
   trendUp: TrendingUp,

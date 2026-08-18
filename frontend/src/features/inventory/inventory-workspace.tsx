@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { AppIcon, EmptyState, PageSpinner, ScopeSelector } from '@/components/ui';
 import type { AppIconName, ScopeValue } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import InventorySearch from './inventory-search';
 import { InventoryWorkspaceProvider } from './inventory-workspace-context';
 
 const InventoryOverview = dynamic(
@@ -289,6 +290,7 @@ export default function InventoryWorkspace() {
   const selectedTab = visibleTabs.find((tab) => tab.id === activeTab) ?? visibleTabs[0];
   const requestedView = searchParams.get('view');
   const selectedView = selectedTab?.views.find((view) => view.id === requestedView) ?? selectedTab?.views[0];
+  const inventorySearchQuery = searchParams.get('q') ?? '';
 
   const hrefFor = useCallback(
     (tabId: WorkspaceTab, viewId?: string, nextScope = scope) => {
@@ -312,6 +314,18 @@ export default function InventoryWorkspace() {
     }
   };
 
+  const onInventorySearchChange = useCallback(
+    (query: string) => {
+      const params = new URLSearchParams(window.location.search);
+      const trimmed = query.trim();
+      if (trimmed) params.set('q', trimmed);
+      else params.delete('q');
+      const next = params.toString();
+      router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false });
+    },
+    [pathname, router],
+  );
+
   if (!selectedTab || !selectedView) {
     return (
       <div className="p-6">
@@ -324,6 +338,13 @@ export default function InventoryWorkspace() {
   }
 
   const ActiveView = selectedView.component;
+  const canSearchInventory =
+    hasPermission('products.view') ||
+    hasPermission('inventory.view') ||
+    hasPermission('inventory.adjustments.create') ||
+    hasPermission('pos.create') ||
+    hasPermission('sales.create') ||
+    hasPermission('purchases.create');
 
   return (
     <div className="space-y-5 p-4 sm:p-6">
@@ -369,6 +390,23 @@ export default function InventoryWorkspace() {
           autoSelectSingleCompany
           labels={{ company: 'Company', division: 'Division', branch: 'Branch' }}
         />
+        {canSearchInventory && (
+          <div className="mt-4 border-t pt-4" style={{ borderColor: 'var(--aurora-border)' }}>
+            <InventorySearch
+              scope={scope}
+              query={inventorySearchQuery}
+              permissions={{
+                balances: hasPermission('inventory.view'),
+                movements: hasPermission('inventory.movements.view'),
+                batches:
+                  hasPermission('product_batches.view') || hasPermission('product_batches.manage'),
+                catalog: hasPermission('products.view'),
+              }}
+              onQueryChange={onInventorySearchChange}
+              onNavigate={(href) => router.push(href, { scroll: false })}
+            />
+          </div>
+        )}
       </section>
 
       {selectedTab.views.length > 1 && (
@@ -394,7 +432,7 @@ export default function InventoryWorkspace() {
         </nav>
       )}
 
-      <InventoryWorkspaceProvider scope={scope}>
+      <InventoryWorkspaceProvider scope={scope} searchQuery={inventorySearchQuery}>
         <div data-inventory-embedded="true" key={`${selectedTab.id}:${selectedView.id}:${scopeKey(scope)}`}>
           <ActiveView />
         </div>

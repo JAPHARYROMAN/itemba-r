@@ -211,14 +211,24 @@ export default function InventoryBalancesPage() {
   const [exporting, setExporting] = useState<false | 'csv' | 'pdf'>(false);
 
   const canView = hasPermission('inventory.view');
+  const workspaceCompanyId = workspace?.scope.companyId;
+  const workspaceDivisionId = workspace?.scope.divisionId;
+  const workspaceBranchId = workspace?.scope.branchId;
+  const workspaceSearchQuery = workspace?.searchQuery;
 
   useEffect(() => {
-    if (!workspace) return;
-    setCompanyId(workspace.scope.companyId);
-    setDivisionId(workspace.scope.divisionId);
-    setBranchId(workspace.scope.branchId);
+    if (workspaceCompanyId === undefined) return;
+    setCompanyId(workspaceCompanyId);
+    setDivisionId(workspaceDivisionId ?? '');
+    setBranchId(workspaceBranchId ?? '');
     setPage(1);
-  }, [workspace?.scope.branchId, workspace?.scope.companyId, workspace?.scope.divisionId]);
+  }, [workspaceBranchId, workspaceCompanyId, workspaceDivisionId]);
+
+  useEffect(() => {
+    if (workspaceSearchQuery === undefined) return;
+    setSearchInput(workspaceSearchQuery);
+    setPage(1);
+  }, [workspaceSearchQuery]);
 
   const query = useCallback(
     (extra?: Record<string, string | number>) => ({

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import {
   Btn,
   Card,
@@ -260,10 +260,26 @@ type TabKey = 'stock' | 'movements' | 'profitability';
 
 export default function ProductDetailPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const productId = Array.isArray(params?.id) ? params.id[0] : params?.id;
   const { hasPermission } = useAuth();
+  const backToProductsHref = useMemo(() => {
+    const next = new URLSearchParams({ tab: 'catalog', view: 'products' });
+    for (const key of ['companyId', 'divisionId', 'branchId', 'q']) {
+      const value = searchParams.get(key);
+      if (value) next.set(key, value);
+    }
+    return `/inventory?${next.toString()}`;
+  }, [searchParams]);
 
-  const canView = hasPermission('products.view');
+  const canView =
+    hasPermission('products.view') ||
+    hasPermission('inventory.view') ||
+    hasPermission('inventory.adjustments.create') ||
+    hasPermission('pos.create') ||
+    hasPermission('sales.create') ||
+    hasPermission('purchases.create') ||
+    hasPermission('operations.dashboard.view');
   const canViewInventory = hasPermission('inventory.view');
   const canViewMovements = hasPermission('inventory.movements.view');
   const canViewProfit = hasPermission('profit.view') || hasPermission('operations.reports.view');
@@ -410,7 +426,7 @@ export default function ProductDetailPage() {
           title="Product"
           breadcrumbs={[
             { label: 'Operations', href: '/operations' },
-            { label: 'Products', href: '/inventory?tab=catalog&view=products' },
+            { label: 'Products', href: backToProductsHref },
             { label: 'Detail' },
           ]}
         />
@@ -457,12 +473,12 @@ export default function ProductDetailPage() {
         }
         breadcrumbs={[
           { label: 'Operations', href: '/operations' },
-          { label: 'Products', href: '/inventory?tab=catalog&view=products' },
+          { label: 'Products', href: backToProductsHref },
           { label: product.name },
         ]}
         actions={
           <>
-            <Link href="/inventory?tab=catalog&view=products">
+            <Link href={backToProductsHref}>
               <Btn variant="secondary" size="sm">
                 Back to Products
               </Btn>

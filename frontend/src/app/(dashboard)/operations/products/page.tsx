@@ -1241,6 +1241,7 @@ export default function ProductsPage() {
   const workspaceCompanyId = workspace?.scope.companyId;
   const workspaceDivisionId = workspace?.scope.divisionId;
   const workspaceBranchId = workspace?.scope.branchId;
+  const workspaceSearchQuery = workspace?.searchQuery;
 
   useEffect(() => {
     if (workspaceCompanyId === undefined) return;
@@ -1251,6 +1252,12 @@ export default function ProductsPage() {
     setProductFamilyId('');
     setPage(1);
   }, [workspaceBranchId, workspaceCompanyId, workspaceDivisionId]);
+
+  useEffect(() => {
+    if (workspaceSearchQuery === undefined) return;
+    setSearchInput(workspaceSearchQuery);
+    setPage(1);
+  }, [workspaceSearchQuery]);
 
   // Debounce the search box (~300ms) so we only refetch once typing settles.
   useEffect(() => {
