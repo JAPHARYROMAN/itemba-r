@@ -6,13 +6,7 @@ import { PageToolbar } from './page-toolbar';
 
 function SearchToolbar() {
   const [search, setSearch] = useState('');
-  return (
-    <PageToolbar
-      search={search}
-      onSearch={setSearch}
-      searchPlaceholder="Search customers"
-    />
-  );
+  return <PageToolbar search={search} onSearch={setSearch} searchPlaceholder="Search customers" />;
 }
 
 describe('PageToolbar search', () => {
