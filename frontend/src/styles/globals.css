@@ -120,7 +120,9 @@
 [data-inventory-embedded='true'] [data-page-toolbar] [aria-label='Filter by division'],
 [data-inventory-embedded='true'] [data-page-toolbar] [aria-label='Filter by branch'],
 [data-inventory-embedded='true'] [data-page-toolbar] [aria-label='Filter by branch or location'],
-[data-inventory-embedded='true'] [data-page-toolbar] [aria-label='Show stock on hand and available for a branch'] {
+[data-inventory-embedded='true']
+  [data-page-toolbar]
+  [aria-label='Show stock on hand and available for a branch'] {
   display: none;
 }
 
