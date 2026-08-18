@@ -79,7 +79,12 @@ const LINKS: Array<{ href: string; label: string; desc: string; perm: string }> 
     desc: 'Counts & corrections',
     perm: 'inventory.adjustments.create',
   },
-  { href: '/inventory?tab=catalog&view=products', label: 'Products', desc: 'Item catalog', perm: 'products.view' },
+  {
+    href: '/inventory?tab=catalog&view=products',
+    label: 'Products',
+    desc: 'Item catalog',
+    perm: 'products.view',
+  },
   {
     href: '/inventory?tab=catalog&view=categories',
     label: 'Categories',
@@ -275,9 +280,7 @@ export default function InventoryOverviewPage() {
             <Link href={withScope('/inventory?tab=stock&view=balances')}>
               <StatCard label="Stock Value" value={'TZS ' + fmtNum(totals?.totalValue ?? 0)} />
             </Link>
-            <Link
-              href={withScope('/inventory?tab=stock&view=balances&lowStock=1')}
-            >
+            <Link href={withScope('/inventory?tab=stock&view=balances&lowStock=1')}>
               <StatCard
                 label="Low Stock"
                 value={totals?.low ?? 0}

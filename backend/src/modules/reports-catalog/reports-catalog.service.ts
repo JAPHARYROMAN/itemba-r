@@ -1229,7 +1229,11 @@ export class ReportsCatalogService {
     }
     if (entry.sector === 'OPERATIONS') {
       return [
-        { name: 'Products', module: 'Operations', sourcePath: '/inventory?tab=catalog&view=products' },
+        {
+          name: 'Products',
+          module: 'Operations',
+          sourcePath: '/inventory?tab=catalog&view=products',
+        },
         {
           name: 'Inventory Movements',
           module: 'Operations',
