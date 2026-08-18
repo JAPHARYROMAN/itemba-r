@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import {
@@ -65,7 +66,15 @@ export class MobilePosLiteController {
     return this.service.issueActivation(id, user);
   }
 
+  /**
+   * `@AgentExcluded` — activation binds a device secret to a terminal and opens
+   * the terminal's custody chain. Till custody and business-day state are
+   * invariants the POS reform established by hand; an agent has no way to reason
+   * about which physical device is in which cashier's hands, so it must never be
+   * the thing that answers that question. Office roles keep the POS *reads*.
+   */
   @Post('activate')
+  @AgentExcluded()
   @RequirePermissions('mobile_pos_lite.use')
   activate(@Body() dto: ActivateMobilePosTerminalDto, @CurrentUser() user: AuthUser) {
     return this.service.activate(dto, user);
@@ -130,7 +139,16 @@ export class MobilePosLiteController {
     return this.service.customers(terminalCode, deviceSecret, query.search, user);
   }
 
+  /**
+   * `@AgentExcluded` — ringing up a sale moves business-day state and till
+   * custody, and is the one POS write with an irreversible counterpart in the
+   * cash drawer. The permission envelope says an office role *may* call this;
+   * this says an agent should not, which is a different question. Reads stay
+   * available, because "how much did Kaunta take today?" is the question a
+   * manager most wants answered.
+   */
   @Post('sales')
+  @AgentExcluded()
   @RequirePermissions('mobile_pos_lite.use')
   createSale(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,

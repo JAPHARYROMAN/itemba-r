@@ -40,10 +40,30 @@ export interface ModelRequest {
   maxTokens: number;
 }
 
+/**
+ * Token counts for one model turn, as reported by the provider.
+ *
+ * `inputTokens` is the *uncached remainder* only — the total prompt is
+ * `inputTokens + cacheReadInputTokens + cacheCreationInputTokens`. Summing only
+ * `inputTokens` under-reports a cached run badly, which is the whole reason the
+ * cache fields are carried here rather than discarded: the system prompt is
+ * deliberately split into a stable cached prefix and a volatile tail
+ * (`prompts.ts`), and until now nothing measured whether that breakpoint ever
+ * hits.
+ */
+export interface ModelUsage {
+  inputTokens: number;
+  outputTokens: number;
+  /** Prompt tokens served from the cache, billed at a fraction of input rate. */
+  cacheReadInputTokens: number;
+  /** Prompt tokens written to the cache, billed at a premium over input rate. */
+  cacheCreationInputTokens: number;
+}
+
 export interface ModelResponse {
   content: ModelContentBlock[];
   stopReason: string | null;
-  usage?: { inputTokens: number; outputTokens: number };
+  usage?: ModelUsage;
 }
 
 export abstract class ModelClient {
@@ -98,6 +118,10 @@ export class AnthropicModelClient extends ModelClient {
       usage: {
         inputTokens: message.usage?.input_tokens ?? 0,
         outputTokens: message.usage?.output_tokens ?? 0,
+        // Both are `number | null` on the SDK's Usage type — null when the
+        // request neither read nor wrote a cache entry.
+        cacheReadInputTokens: message.usage?.cache_read_input_tokens ?? 0,
+        cacheCreationInputTokens: message.usage?.cache_creation_input_tokens ?? 0,
       },
     };
   }

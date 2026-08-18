@@ -63,8 +63,13 @@ export function toolNameFor(capability: Capability, taken: Set<string>): string 
   }
 }
 
-/** Human-readable action phrase for a capability, for the tool description. */
-function describeAction(capability: Capability): string {
+/**
+ * Human-readable action phrase for a capability, for the tool description.
+ *
+ * Exported because `GET /msaidizi/capabilities` hands it to the UI: a step row
+ * must read "Looking at supplier invoices", not `SupplierInvoices_findAll`.
+ */
+export function describeAction(capability: Capability): string {
   if (capability.summary) return capability.summary;
   // Split the handler name into words: `productLedger` -> `product ledger`.
   const words = capability.handler
@@ -72,6 +77,93 @@ function describeAction(capability: Capability): string {
     .replace(/[_-]+/g, ' ')
     .toLowerCase();
   return `${words} (${capability.verb} /${capability.path})`;
+}
+
+/**
+ * Hand-written notes for capabilities whose machine-derived description is
+ * indistinguishable from a neighbour's.
+ *
+ * The system prompt's DOMAIN_PRIMER states the same distinctions once, far from
+ * the point of use. This map states them ON the tool, which matters for two
+ * reasons the primer cannot cover: a note travels with whichever tool survived
+ * narrowing, and a saved procedure sealed to a handful of tools (`restrictTo`
+ * bypasses re-narrowing entirely) may never carry the neighbour it should have
+ * been compared against. The motivating failure was exactly that shape — a
+ * credit-profile-only tool set, one plausible tool, and "0 customers on file"
+ * read off an orphan table.
+ *
+ * KEYS are either a capability id (`Controller.handler`, exact) or a controller
+ * name (applies to every route on it). Exact wins. Controller-level is the
+ * usual granularity because these are concept collisions, not route ones: the
+ * distinction is true of every route on `CustomerCreditProfilesController`.
+ *
+ * KEEP THEM SHORT. A note is appended to the description of every matching tool
+ * and up to 60 tools are sent per turn, so this is prompt budget spent on every
+ * call. One or two sentences: what it is, what it is NOT, and where to go
+ * instead, naming the tool by the name the model will actually see.
+ *
+ * KEEP THEM FEW. Past roughly thirty entries the hand-maintained approach has
+ * lost to a generated glossary, and `prompts.domain.spec.ts` fails when the map
+ * crosses that line so the decision gets made rather than deferred. Every key
+ * is also asserted to exist, be permission-gated and be agent-reachable, and
+ * every tool name quoted inside a note is asserted to be derivable from the
+ * live manifest — so a renamed controller fails CI instead of silently
+ * orphaning its note or pointing the model at a tool that no longer exists.
+ */
+export const DISAMBIGUATION: Record<string, string> = {
+  // ── The three "customers" ───────────────────────────────────────────────
+  CustomersController:
+    'This is the customer master — who the company sells to. Not credit review records (CustomerCreditProfiles_findAll) and not a POS terminal lookup.',
+  CustomerCreditProfilesController:
+    'Credit-limit review records only. NOT the customer master — use Customers_findAll for that. Keyed by customerId with no link to Customer, often empty, and the sales credit check reads Customer.creditLimit instead, so nothing recorded here is enforced.',
+  'MobilePosLiteController.customers':
+    "One counter terminal's own customer lookup, requiring that terminal's device secret. Not the customer master — use Customers_findAll for a company-wide answer.",
+  SupplierPerformanceController:
+    'Supplier review records — ratings and scores. NOT the supplier master; use Suppliers_findAll for that. Keyed by supplierId with no link to Supplier, and nothing recorded here is enforced.',
+
+  // ── The sign of the money ───────────────────────────────────────────────
+  DebtsController:
+    'Money THIS COMPANY OWES to a named creditor (free-text creditorName, no customer or supplier link). Not what customers owe us — that is Receivables_findAll.',
+  ReceivablesController:
+    'Money owed TO this company by a customer, raised from credit sales. Use this for "how much are we owed". Not Debts_findAll, which is what we owe.',
+  PayablesController:
+    'Money this company owes its suppliers, raised from supplier invoices. Not Debts_findAll (an unlinked named creditor) and not Receivables_findAll.',
+
+  // ── Stock now versus stock history ──────────────────────────────────────
+  InventoryBalancesController:
+    'What is on hand right now, per product per branch. Use this for "how much do we have". The history of how it got there is InventoryMovements_findAll.',
+  InventoryMovementsController:
+    'The typed history of every stock change (SALE_ISSUE, PURCHASE_RECEIPT, TRANSFER_IN, ADJUSTMENT_OUT and others). Use this for "why did stock change". Current quantity is InventoryBalances_findAll.',
+  'OperationsReportsController.getInventoryMovements':
+    'An aggregated report over stock movements, not the movement rows themselves. For individual movements use InventoryMovements_findAll.',
+
+  // ── Four things that all sound like "reports" ───────────────────────────
+  FinancialReportsController:
+    'Computed accounting reports — trial balance, profit and loss, balance sheet, cash flow, aging — per company or consolidated. Stored statement documents are FinancialStatements_findAll; sales, purchase and stock reporting is OperationsReports_getSalesSummary and its siblings.',
+  FinancialStatementsController:
+    'Statement documents that were generated and saved. Not the computation — to produce one now use FinancialReports_getTrialBalance, FinancialReports_getProfitAndLoss or FinancialReports_getBalanceSheet.',
+  OperationsReportsController:
+    'Operational reporting over sales, purchases and stock. Accounting reports are FinancialReports_getProfitAndLoss and its siblings; per-product margin is Profit_productSummary.',
+  ProfitController:
+    'Margin and cost analysis per product and per customer. This is not the accounting profit and loss — that is FinancialReports_getProfitAndLoss.',
+
+  // ── Documents whose stock effect is the thing people get wrong ──────────
+  DeliveryNotesController:
+    'A dispatch or collection document against a sales order. IT MOVES NO STOCK: the stock was issued when the sale was confirmed. The westsides/ path prefix is only where the single implementation lives — it serves every company.',
+  GoodsReceivedNotesController:
+    'Records what physically arrived against a purchase order. Posting one is what puts stock on hand; the purchase order alone moves nothing. The supplier bill for it is SupplierInvoices_findAll.',
+  SupplierInvoicesController:
+    "The supplier's bill to this company, matched against a purchase order and a goods received note, which becomes a payable. Not an invoice we issued to a customer.",
+};
+
+/**
+ * The disambiguation note for a capability, if one is written for it.
+ *
+ * Exact capability id first, then the controller-level note, so a single route
+ * can override the note its siblings share.
+ */
+export function disambiguationFor(capability: Capability): string | undefined {
+  return DISAMBIGUATION[capability.id] ?? DISAMBIGUATION[capability.controller];
 }
 
 export interface BuildOptions {
@@ -128,7 +220,12 @@ export function buildToolDefinition(
 
   return {
     name,
-    description: [describeAction(capability), ...notes].join(' '),
+    // The disambiguation note sits directly after the action phrase, ahead of
+    // the tier and free-form-query notes: it is the part that decides whether
+    // this is the right tool at all, and the rest only matters once it is.
+    description: [describeAction(capability), disambiguationFor(capability), ...notes]
+      .filter(Boolean)
+      .join(' '),
     input_schema: {
       type: 'object',
       properties,

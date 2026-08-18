@@ -316,6 +316,94 @@ model MsaidiziProcedure {
   @@map("msaidizi_procedures")
 }
 
+/// One chat with Msaidizi: the header, the counters, and the short-lived state
+/// that makes "continue this conversation" possible.
+///
+/// Two payloads with two lifetimes live here. `turns` is the conversation a human
+/// re-reads and is kept for the retention window. `resumeState` is the model's
+/// own message array — the only place retrieved business records are stored — and
+/// is destroyed within a day. A conversation past that window is readable and not
+/// continuable, which is what a chat app does when a session ages out.
+model MsaidiziConversation {
+  id              String    @id @default(uuid())
+  /// Mirrors audit_logs.agentSessionId. Server-owned: never taken from the client,
+  /// because confirmationIdFor() derives red-tier approval ids from it
+  /// (msaidizi.service.ts) and a client that forgets to echo it produces an
+  /// infinite approval loop that looks exactly like the server ignoring the user.
+  agentSessionId  String    @unique
+  userId          String
+  companyId       String?
+  /// Derived from the first prompt, truncated. The one plaintext field that can
+  /// name a customer — which is why the oversight projection excludes it.
+  title           String?
+
+  turnCount       Int       @default(0)
+  toolCallCount   Int       @default(0)
+  writeCallCount  Int       @default(0)
+  /// Highest reversibility tier this conversation has touched. Denormalised so
+  /// oversight can rank conversations without decrypting anything. Raised only
+  /// by a conditional UPDATE, never by read-then-write.
+  highestTier     String    @default("green")
+
+  /// AES-256-GCM ciphertext of JSON.stringify(messages). NOT jsonb: opaque by
+  /// intent, and the only column in this schema holding retrieved records.
+  resumeState     String?
+  resumeBytes     Int       @default(0)
+  resumeExpiresAt DateTime?
+  /// False when the run's messages exceeded MSAIDIZI_RESUME_MAX_BYTES. A truncated
+  /// array would break tool_use/tool_result pairing, so we store nothing and say so.
+  resumable       Boolean   @default(true)
+
+  lastTurnAt      DateTime?
+  /// Sliding: recomputed as lastTurnAt + retention window on every turn.
+  expiresAt       DateTime
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  /// Cascade, deliberately unlike audit_logs' SetNull. A conversation is private
+  /// to its author; when the author is gone nobody may read it, and what it *did*
+  /// survives independently in the audit trail.
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  turns   MsaidiziConversationTurn[]
+
+  @@index([userId, deletedAt, lastTurnAt])
+  @@index([companyId, createdAt])
+  @@index([expiresAt])
+  @@index([resumeExpiresAt])
+  @@map("msaidizi_conversations")
+}
+
+/// One user question and the run it produced. Append-only within a conversation.
+model MsaidiziConversationTurn {
+  id             String    @id @default(uuid())
+  conversationId String
+  sequence       Int
+  /// The user's own words, plaintext — searchable, and free of retrieved data.
+  prompt         String
+  /// AES-256-GCM ciphertext of the MsaidiziEvent[] as returned to the client,
+  /// with tool arguments passed through redactSensitiveFields first. Carries no
+  /// tool-result bodies by construction (msaidizi.service.ts).
+  events         String
+  /// A DoneReason, or "running" for a turn whose row was opened before the loop
+  /// and never closed — a crashed or dropped run, which is exactly the trace
+  /// that was missing before this table existed. String rather than an enum so
+  /// DoneReason can grow without a migration.
+  reason         String
+  toolCallCount  Int       @default(0)
+  writeCallCount Int       @default(0)
+  procedureId    String?
+  startedAt      DateTime  @default(now())
+  endedAt        DateTime?
+
+  conversation MsaidiziConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, sequence])
+  @@index([conversationId, sequence])
+  @@map("msaidizi_conversation_turns")
+}
+
 /// How an audited action reached the system.
 ///
 /// Distinct from severity, which rates how interesting an action is. This rates
@@ -662,6 +750,7 @@ model Company {
   documentNumberSequences     DocumentNumberSequence[]
   automationRules             AutomationRule[]
   msaidiziProcedures          MsaidiziProcedure[]
+  msaidiziConversations       MsaidiziConversation[]
 
   backgroundJobs         BackgroundJob[]
   cacheEntries           CacheEntry[]
@@ -1262,6 +1351,7 @@ model User {
   automationRulesApproved       AutomationRule[]             @relation("AutoRuleApprovedBy")
   msaidiziProceduresAuthored    MsaidiziProcedure[]          @relation("MsaidiziProcedureAuthor")
   msaidiziProceduresApproved    MsaidiziProcedure[]          @relation("MsaidiziProcedureApprover")
+  msaidiziConversations         MsaidiziConversation[]
   automationRunsStarted         AutomationRun[]              @relation("AutoRunStartedBy")
   backgroundJobsRequested       BackgroundJob[]              @relation("BackgroundJobRequestedBy")
   performanceTraces             PerformanceTrace[]           @relation("PerformanceTraceUser")
