@@ -24,7 +24,17 @@ const REPORTS: ReportDefinition[] = [
     description: 'Stock on hand, availability, average cost, and total stock value.',
     endpoint: '/operations-reports/stock-valuation',
     source: 'operations',
-    columns: ['productCode', 'product', 'category', 'branch', 'quantityOnHand', 'availableQuantity', 'averageCost', 'totalValue', 'stockStatus'],
+    columns: [
+      'productCode',
+      'product',
+      'category',
+      'branch',
+      'quantityOnHand',
+      'availableQuantity',
+      'averageCost',
+      'totalValue',
+      'stockStatus',
+    ],
   },
   {
     key: 'low-stock',
@@ -32,7 +42,17 @@ const REPORTS: ReportDefinition[] = [
     description: 'Products at or below their reorder or minimum stock level.',
     endpoint: '/operations-reports/low-stock',
     source: 'operations',
-    columns: ['productCode', 'product', 'category', 'branch', 'quantityOnHand', 'availableQuantity', 'reorderLevel', 'shortageQuantity', 'totalValue'],
+    columns: [
+      'productCode',
+      'product',
+      'category',
+      'branch',
+      'quantityOnHand',
+      'availableQuantity',
+      'reorderLevel',
+      'shortageQuantity',
+      'totalValue',
+    ],
   },
   {
     key: 'stock-ageing',
@@ -40,7 +60,15 @@ const REPORTS: ReportDefinition[] = [
     description: 'Slow-moving stock and value exposure by product and branch.',
     endpoint: '/operations-reports/stock-ageing',
     source: 'operations',
-    columns: ['productCode', 'product', 'category', 'branch', 'quantityOnHand', 'totalValue', 'daysSinceMovement'],
+    columns: [
+      'productCode',
+      'product',
+      'category',
+      'branch',
+      'quantityOnHand',
+      'totalValue',
+      'daysSinceMovement',
+    ],
   },
   {
     key: 'inventory-movements',
@@ -48,7 +76,19 @@ const REPORTS: ReportDefinition[] = [
     description: 'Stock receipts, issues, transfers, adjustments, costs, and references.',
     endpoint: '/operations-reports/inventory-movements',
     source: 'operations',
-    columns: ['movementNumber', 'movementDate', 'movementType', 'branch', 'productCode', 'product', 'quantity', 'unit', 'unitCost', 'totalCost', 'referenceType'],
+    columns: [
+      'movementNumber',
+      'movementDate',
+      'movementType',
+      'branch',
+      'productCode',
+      'product',
+      'quantity',
+      'unit',
+      'unitCost',
+      'totalCost',
+      'referenceType',
+    ],
   },
   {
     key: 'stock-adjustments',
@@ -56,7 +96,18 @@ const REPORTS: ReportDefinition[] = [
     description: 'Count evidence showing system, counted, and variance quantities.',
     endpoint: '/operations-reports/stock-adjustments',
     source: 'operations',
-    columns: ['adjustmentNumber', 'date', 'branch', 'status', 'productCode', 'product', 'systemQuantity', 'countedQuantity', 'varianceQuantity', 'unit'],
+    columns: [
+      'adjustmentNumber',
+      'date',
+      'branch',
+      'status',
+      'productCode',
+      'product',
+      'systemQuantity',
+      'countedQuantity',
+      'varianceQuantity',
+      'unit',
+    ],
   },
   {
     key: 'batch-status',
@@ -64,7 +115,15 @@ const REPORTS: ReportDefinition[] = [
     description: 'Batch quantity, cost, expiry exposure, and current status.',
     endpoint: '/westsides/reports/batch-status',
     source: 'westsides',
-    columns: ['batchNumber', 'productName', 'sku', 'remainingQuantity', 'unitCost', 'expiryDate', 'status'],
+    columns: [
+      'batchNumber',
+      'productName',
+      'sku',
+      'remainingQuantity',
+      'unitCost',
+      'expiryDate',
+      'status',
+    ],
   },
   {
     key: 'stock-damage',
@@ -145,10 +204,18 @@ export default function InventoryReports() {
     if (activeReport && activeReport.key !== activeKey) setActiveKey(activeReport.key);
   }, [activeKey, activeReport]);
 
+  // Read the scope out of the workspace ONCE, into plain locals. An optional
+  // chain in a dependency array is not something the React Compiler can track,
+  // so `[workspace?.scope.companyId]` makes it skip the memoization it would
+  // otherwise preserve — which is the lint error, not a style preference.
+  const scopeCompanyId = workspace?.scope.companyId;
+  const scopeDivisionId = workspace?.scope.divisionId;
+  const scopeBranchId = workspace?.scope.branchId;
+
   const load = useCallback(async () => {
     // Inventory reports are company-scoped. Do not issue an accidental
     // unscoped request while the operator is still choosing a workspace scope.
-    if (!activeReport || !workspace?.scope.companyId) {
+    if (!activeReport || !scopeCompanyId) {
       setRows([]);
       setError('');
       return;
@@ -158,10 +225,10 @@ export default function InventoryReports() {
     try {
       const payload = await backendGet<unknown>(activeReport.endpoint, {
         query: {
-          companyId: workspace?.scope.companyId || undefined,
-          divisionId: workspace?.scope.divisionId || undefined,
-          branchId: workspace?.scope.branchId || undefined,
-          locationId: workspace?.scope.branchId || undefined,
+          companyId: scopeCompanyId || undefined,
+          divisionId: scopeDivisionId || undefined,
+          branchId: scopeBranchId || undefined,
+          locationId: scopeBranchId || undefined,
         },
       });
       setRows(normalizeRows(payload));
@@ -171,14 +238,19 @@ export default function InventoryReports() {
     } finally {
       setLoading(false);
     }
-  }, [activeReport, workspace?.scope.branchId, workspace?.scope.companyId, workspace?.scope.divisionId]);
+  }, [activeReport, scopeBranchId, scopeCompanyId, scopeDivisionId]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   if (!activeReport) {
-    return <EmptyState title="Reports unavailable" description="Your role does not include inventory report access." />;
+    return (
+      <EmptyState
+        title="Reports unavailable"
+        description="Your role does not include inventory report access."
+      />
+    );
   }
 
   if (!workspace?.scope.companyId) {
@@ -205,7 +277,9 @@ export default function InventoryReports() {
     try {
       if (format === 'csv') {
         const exportRows = rows.map((row) =>
-          Object.fromEntries(columns.map((column) => [heading(column), printableValue(column, row[column])])),
+          Object.fromEntries(
+            columns.map((column) => [heading(column), printableValue(column, row[column])]),
+          ),
         );
         downloadTextFile(
           `${activeReport.key}-${new Date().toISOString().slice(0, 10)}.csv`,
@@ -223,7 +297,11 @@ export default function InventoryReports() {
         });
       }
     } catch (reason) {
-      showToast('error', 'Could not export report', reason instanceof Error ? reason.message : undefined);
+      showToast(
+        'error',
+        'Could not export report',
+        reason instanceof Error ? reason.message : undefined,
+      );
     } finally {
       setExporting(false);
     }
@@ -248,7 +326,10 @@ export default function InventoryReports() {
               <span className="block text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
                 {report.title}
               </span>
-              <span className="mt-1 block text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
+              <span
+                className="mt-1 block text-xs"
+                style={{ color: 'var(--aurora-text-secondary)' }}
+              >
                 {report.description}
               </span>
             </button>
@@ -257,38 +338,83 @@ export default function InventoryReports() {
       </div>
 
       <Card className="overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3" style={{ borderColor: 'var(--aurora-border)' }}>
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3"
+          style={{ borderColor: 'var(--aurora-border)' }}
+        >
           <div>
             <h2 className="text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
               {activeReport.title}
             </h2>
-            <p className="text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>{scopeLabel}</p>
+            <p className="text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
+              {scopeLabel}
+            </p>
           </div>
           <div className="flex gap-2">
-            <Btn variant="secondary" size="sm" onClick={() => void load()} loading={loading}>Refresh</Btn>
-            <Btn variant="secondary" size="sm" onClick={() => void exportReport('csv')} disabled={!rows.length || exporting !== false}>Export CSV</Btn>
-            <Btn variant="secondary" size="sm" onClick={() => void exportReport('pdf')} disabled={!rows.length || exporting !== false} loading={exporting === 'pdf'}>Export PDF</Btn>
+            <Btn variant="secondary" size="sm" onClick={() => void load()} loading={loading}>
+              Refresh
+            </Btn>
+            <Btn
+              variant="secondary"
+              size="sm"
+              onClick={() => void exportReport('csv')}
+              disabled={!rows.length || exporting !== false}
+            >
+              Export CSV
+            </Btn>
+            <Btn
+              variant="secondary"
+              size="sm"
+              onClick={() => void exportReport('pdf')}
+              disabled={!rows.length || exporting !== false}
+              loading={exporting === 'pdf'}
+            >
+              Export PDF
+            </Btn>
           </div>
         </div>
 
         {error ? (
-          <div role="alert" className="m-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+          <div
+            role="alert"
+            className="m-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          >
+            {error}
+          </div>
         ) : loading ? (
           <PageSpinner label="Running report" />
         ) : !rows.length ? (
-          <EmptyState title="No report rows" description="No records match the selected inventory scope." />
+          <EmptyState
+            title="No report rows"
+            description="No records match the selected inventory scope."
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
-                <tr className="border-b text-left text-xs uppercase" style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}>
-                  {columns.map((column) => <th key={column} className="whitespace-nowrap px-4 py-3 font-medium">{heading(column)}</th>)}
+                <tr
+                  className="border-b text-left text-xs uppercase"
+                  style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}
+                >
+                  {columns.map((column) => (
+                    <th key={column} className="whitespace-nowrap px-4 py-3 font-medium">
+                      {heading(column)}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, rowIndex) => (
-                  <tr key={`${activeReport.key}-${rowIndex}`} className="border-b" style={{ borderColor: 'var(--aurora-border-subtle)' }}>
-                    {columns.map((column) => <td key={column} className="whitespace-nowrap px-4 py-3">{printableValue(column, row[column])}</td>)}
+                  <tr
+                    key={`${activeReport.key}-${rowIndex}`}
+                    className="border-b"
+                    style={{ borderColor: 'var(--aurora-border-subtle)' }}
+                  >
+                    {columns.map((column) => (
+                      <td key={column} className="whitespace-nowrap px-4 py-3">
+                        {printableValue(column, row[column])}
+                      </td>
+                    ))}
                   </tr>
                 ))}
               </tbody>

@@ -36,10 +36,16 @@ interface Company {
   name: string;
   code: string;
 }
+interface Division {
+  id: string;
+  name: string;
+  code?: string | null;
+}
 interface Branch {
   id: string;
   name: string;
   code?: string | null;
+  divisionId?: string | null;
 }
 interface Unit {
   id: string;
@@ -148,21 +154,23 @@ function CreateAdjustmentModal({
   onSaved: () => void;
 }) {
   const workspace = useInventoryWorkspace();
+  const workspaceScope = workspace?.scope;
   const [form, setForm] = useState<AdjustmentForm>({ ...BLANK_FORM });
+  const [divisions, setDivisions] = useState<Division[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!workspace) return;
+    if (!workspaceScope) return;
     setForm((current) => ({
       ...current,
-      companyId: workspace.scope.companyId,
-      divisionId: workspace.scope.divisionId,
-      branchId: workspace.scope.branchId,
+      companyId: workspaceScope.companyId,
+      divisionId: workspaceScope.divisionId,
+      branchId: workspaceScope.branchId,
     }));
-  }, [workspace?.scope.branchId, workspace?.scope.companyId, workspace?.scope.divisionId]);
+  }, [workspaceScope]);
 
   useEffect(() => {
     let cancelled = false;
@@ -180,12 +188,37 @@ function CreateAdjustmentModal({
 
   useEffect(() => {
     if (!form.companyId) {
+      setDivisions([]);
+      return;
+    }
+    let cancelled = false;
+    backendList<Division>('/divisions', {
+      query: { companyId: form.companyId, limit: 200 },
+    })
+      .then((rows) => {
+        if (!cancelled) setDivisions(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setDivisions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
+
+  useEffect(() => {
+    if (!form.companyId) {
       setBranches([]);
       return;
     }
     let cancelled = false;
     backendList<Branch>('/branches', {
-      query: { companyId: form.companyId, activeOnly: true, limit: 200 },
+      query: {
+        companyId: form.companyId,
+        divisionId: form.divisionId || undefined,
+        activeOnly: true,
+        limit: 200,
+      },
     })
       .then((rows) => {
         if (!cancelled) setBranches(rows);
@@ -196,7 +229,7 @@ function CreateAdjustmentModal({
     return () => {
       cancelled = true;
     };
-  }, [form.companyId]);
+  }, [form.companyId, form.divisionId]);
 
   const setField = <K extends keyof AdjustmentForm>(k: K, v: AdjustmentForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
@@ -320,18 +353,35 @@ function CreateAdjustmentModal({
           {error}
         </div>
       )}
+      {workspace && !workspace.scope.branchId && (
+        <div
+          className="mb-3 rounded-lg border px-3 py-2 text-sm"
+          style={{
+            borderColor: 'var(--aurora-primary)',
+            background: 'var(--aurora-primary-subtle)',
+            color: 'var(--aurora-text)',
+          }}
+        >
+          Choose the division and branch for this adjustment.
+        </div>
+      )}
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <FormSelect
             label="Company"
             required
             value={form.companyId}
             onChange={(e) => {
-              setField('companyId', e.target.value);
-              setField('branchId', '');
+              setForm((current) => ({
+                ...current,
+                companyId: e.target.value,
+                divisionId: '',
+                branchId: '',
+                lines: [BLANK_LINE()],
+              }));
             }}
             placeholder="Select company"
-            disabled={Boolean(workspace)}
+            disabled={Boolean(workspace?.scope.companyId)}
           >
             {companies.map((c) => (
               <option key={c.id} value={c.id}>
@@ -340,12 +390,37 @@ function CreateAdjustmentModal({
             ))}
           </FormSelect>
           <FormSelect
+            label="Division"
+            value={form.divisionId}
+            onChange={(e) => {
+              setField('divisionId', e.target.value);
+              setField('branchId', '');
+            }}
+            placeholder={form.companyId ? 'All divisions' : 'Select company first'}
+            disabled={!form.companyId || Boolean(workspace?.scope.divisionId)}
+          >
+            {divisions.map((division) => (
+              <option key={division.id} value={division.id}>
+                {division.code ? `${division.code} - ` : ''}
+                {division.name}
+              </option>
+            ))}
+          </FormSelect>
+          <FormSelect
             label="Branch / Location"
             required
             value={form.branchId}
-            onChange={(e) => setField('branchId', e.target.value)}
+            onChange={(e) => {
+              const branchId = e.target.value;
+              const branch = branches.find((candidate) => candidate.id === branchId);
+              setForm((current) => ({
+                ...current,
+                branchId,
+                divisionId: current.divisionId || branch?.divisionId || '',
+              }));
+            }}
             placeholder={form.companyId ? 'Select branch/location' : 'Select company first'}
-            disabled={!form.companyId || Boolean(workspace)}
+            disabled={!form.companyId || Boolean(workspace?.scope.branchId)}
           >
             {branches.map((branch) => (
               <option key={branch.id} value={branch.id}>
@@ -370,187 +445,266 @@ function CreateAdjustmentModal({
           onChange={(e) => setField('notes', e.target.value)}
         />
 
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <h4 className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+        <section aria-labelledby="adjustment-lines-heading">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h4
+              id="adjustment-lines-heading"
+              className="text-sm font-semibold"
+              style={{ color: 'var(--aurora-text)' }}
+            >
               Line Items
             </h4>
             <Btn variant="secondary" size="xs" onClick={addLine}>
               + Add Line
             </Btn>
           </div>
-          <div
-            className="overflow-x-auto rounded-lg border"
-            style={{ borderColor: 'var(--aurora-border)' }}
-          >
-            <table className="w-full text-sm">
-              <caption className="sr-only">Stock adjustment line items</caption>
-              <thead>
-                <tr
-                  className="text-left text-xs uppercase bg-gray-50"
-                  style={{ color: 'var(--aurora-text-muted)' }}
+          <div className="space-y-3">
+            {form.lines.map((line, i) => {
+              const variance = (Number(line.countedQty) || 0) - (Number(line.systemQty) || 0);
+              const varianceColor =
+                variance > 0
+                  ? 'var(--aurora-success)'
+                  : variance < 0
+                    ? 'var(--aurora-danger)'
+                    : 'var(--aurora-text-secondary)';
+              const fieldStyle = {
+                borderColor: 'var(--aurora-border)',
+                background: 'var(--aurora-card)',
+                color: 'var(--aurora-text)',
+              } as const;
+              const fieldClass =
+                'h-10 w-full rounded-md border px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--aurora-primary)] disabled:cursor-not-allowed disabled:opacity-60';
+              const labelClass = 'mb-1 block text-xs font-medium';
+
+              return (
+                <article
+                  key={i}
+                  className="rounded-lg border p-3"
+                  style={{ borderColor: 'var(--aurora-border)' }}
                 >
-                  <th scope="col" className="px-3 py-2">Product</th>
-                  <th scope="col" className="px-3 py-2">System Qty</th>
-                  <th scope="col" className="px-3 py-2">Counted Qty</th>
-                  <th scope="col" className="px-3 py-2">Variance</th>
-                  <th scope="col" className="px-3 py-2">Unit</th>
-                  <th scope="col" className="px-3 py-2">Unit Cost</th>
-                  <th scope="col" className="px-3 py-2">Reason</th>
-                  <th scope="col" className="px-3 py-2">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {form.lines.map((line, i) => {
-                  const variance = (Number(line.countedQty) || 0) - (Number(line.systemQty) || 0);
-                  const varColor =
-                    variance > 0
-                      ? 'text-emerald-600'
-                      : variance < 0
-                        ? 'text-red-600'
-                        : 'text-slate-500';
-                  return (
-                    <tr key={i}>
-                      <td className="px-2 py-1 min-w-[200px]">
-                        <ProductPicker
-                          value={line.productId}
-                          onChange={(pid, product) => {
-                            const effectivePurchasePrice = Number(product?.effectivePurchasePrice ?? 0);
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <span
+                      className="text-xs font-semibold uppercase"
+                      style={{ color: 'var(--aurora-text-muted)' }}
+                    >
+                      Item {i + 1}
+                    </span>
+                    {form.lines.length > 1 && (
+                      <Btn
+                        variant="ghost"
+                        size="xs"
+                        aria-label={`Remove line ${i + 1}`}
+                        onClick={() => removeLine(i)}
+                      >
+                        Remove
+                      </Btn>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-12">
+                    <div className="sm:col-span-2 lg:col-span-8">
+                      <label
+                        className={labelClass}
+                        style={{ color: 'var(--aurora-text-secondary)' }}
+                      >
+                        Product <span style={{ color: 'var(--aurora-danger)' }}>*</span>
+                      </label>
+                      <ProductPicker
+                        value={line.productId}
+                        onChange={(productId, product) => {
+                          if (!productId) {
                             setLine(i, {
-                              productId: pid,
-                              unitId: product?.defaultUnitId ?? line.unitId,
-                              unitCost:
-                                Number.isFinite(effectivePurchasePrice) && effectivePurchasePrice > 0
-                                  ? effectivePurchasePrice
-                                  : line.unitCost,
+                              productId: '',
+                              systemQty: 0,
+                              systemQtyLocked: false,
+                              unitId: '',
+                              unitCost: '',
                             });
-                            void prefillSystemQty(i, pid);
-                          }}
-                          companyId={form.companyId}
-                          placeholder="Search product…"
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <input
-                          type="number"
-                          aria-label={`System quantity, line ${i + 1}`}
-                          value={line.systemQty}
-                          onChange={(e) => setLine(i, { systemQty: Number(e.target.value) })}
-                          readOnly={line.systemQtyLocked}
-                          title={
-                            line.systemQtyLocked
-                              ? 'Prefilled from live stock on hand at this branch'
-                              : undefined
+                            return;
                           }
-                          className={`w-24 text-xs border rounded px-2 py-1 ${
-                            line.systemQtyLocked ? 'opacity-70 cursor-not-allowed' : ''
-                          }`}
-                          style={{
-                            borderColor: 'var(--aurora-border)',
-                            background: line.systemQtyLocked
-                              ? 'var(--aurora-bg-subtle)'
-                              : 'var(--aurora-card)',
-                            color: 'var(--aurora-text)',
-                          }}
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <input
-                          type="number"
-                          aria-label={`Counted quantity, line ${i + 1}`}
-                          value={line.countedQty}
-                          onChange={(e) => setLine(i, { countedQty: Number(e.target.value) })}
-                          className="w-24 text-xs border rounded px-2 py-1"
-                          style={{
-                            borderColor: 'var(--aurora-border)',
-                            background: 'var(--aurora-card)',
-                            color: 'var(--aurora-text)',
-                          }}
-                        />
-                      </td>
-                      <td className={`px-3 py-1 text-xs tabular-nums font-medium ${varColor}`}>
+                          const effectivePurchasePrice = Number(
+                            product?.effectivePurchasePrice ?? 0,
+                          );
+                          setLine(i, {
+                            productId,
+                            unitId: product?.defaultUnitId ?? line.unitId,
+                            unitCost:
+                              Number.isFinite(effectivePurchasePrice) &&
+                              effectivePurchasePrice > 0
+                                ? effectivePurchasePrice
+                                : line.unitCost,
+                          });
+                          void prefillSystemQty(i, productId);
+                        }}
+                        companyId={form.companyId}
+                        divisionId={form.divisionId}
+                        branchId={form.branchId}
+                        ariaLabel={`Search product, line ${i + 1}`}
+                        placeholder={
+                          form.branchId
+                            ? 'Search product name, code, SKU or barcode'
+                            : 'Select a branch before choosing a product'
+                        }
+                        disabled={!form.companyId || !form.branchId}
+                      />
+                    </div>
+
+                    <div className="lg:col-span-4">
+                      <label
+                        htmlFor={`adjustment-unit-${i}`}
+                        className={labelClass}
+                        style={{ color: 'var(--aurora-text-secondary)' }}
+                      >
+                        Unit <span style={{ color: 'var(--aurora-danger)' }}>*</span>
+                      </label>
+                      <select
+                        id={`adjustment-unit-${i}`}
+                        aria-label={`Unit, line ${i + 1}`}
+                        value={line.unitId}
+                        onChange={(e) => setLine(i, { unitId: e.target.value })}
+                        className={fieldClass}
+                        style={fieldStyle}
+                      >
+                        <option value="">Select unit</option>
+                        {units.map((unit) => (
+                          <option key={unit.id} value={unit.id}>
+                            {unit.symbol ? `${unit.name} (${unit.symbol})` : unit.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="lg:col-span-2">
+                      <label
+                        htmlFor={`adjustment-system-qty-${i}`}
+                        className={labelClass}
+                        style={{ color: 'var(--aurora-text-secondary)' }}
+                      >
+                        System Qty
+                      </label>
+                      <input
+                        id={`adjustment-system-qty-${i}`}
+                        type="number"
+                        aria-label={`System quantity, line ${i + 1}`}
+                        value={line.systemQty}
+                        onChange={(e) => setLine(i, { systemQty: Number(e.target.value) })}
+                        readOnly={line.systemQtyLocked}
+                        title={
+                          line.systemQtyLocked
+                            ? 'Prefilled from live stock on hand at this branch'
+                            : undefined
+                        }
+                        className={fieldClass}
+                        style={{
+                          ...fieldStyle,
+                          background: line.systemQtyLocked
+                            ? 'var(--aurora-bg-subtle)'
+                            : 'var(--aurora-card)',
+                        }}
+                      />
+                    </div>
+
+                    <div className="lg:col-span-2">
+                      <label
+                        htmlFor={`adjustment-counted-qty-${i}`}
+                        className={labelClass}
+                        style={{ color: 'var(--aurora-text-secondary)' }}
+                      >
+                        Counted Qty
+                      </label>
+                      <input
+                        id={`adjustment-counted-qty-${i}`}
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        aria-label={`Counted quantity, line ${i + 1}`}
+                        value={line.countedQty}
+                        onChange={(e) => setLine(i, { countedQty: Number(e.target.value) })}
+                        className={fieldClass}
+                        style={fieldStyle}
+                      />
+                    </div>
+
+                    <div className="lg:col-span-2">
+                      <span
+                        className={labelClass}
+                        style={{ color: 'var(--aurora-text-secondary)' }}
+                      >
+                        Variance
+                      </span>
+                      <div
+                        aria-label={`Variance, line ${i + 1}`}
+                        aria-live="polite"
+                        className="flex h-10 items-center rounded-md border px-3 text-sm font-semibold tabular-nums"
+                        style={{
+                          borderColor: varianceColor,
+                          background: 'var(--aurora-bg-subtle)',
+                          color: varianceColor,
+                        }}
+                      >
                         {variance > 0 ? '+' : ''}
                         {variance}
-                      </td>
-                      <td className="px-2 py-1">
-                        <select
-                          aria-label={`Unit, line ${i + 1}`}
-                          value={line.unitId}
-                          onChange={(e) => setLine(i, { unitId: e.target.value })}
-                          className="w-full text-xs border rounded px-2 py-1"
-                          style={{
-                            borderColor: 'var(--aurora-border)',
-                            background: 'var(--aurora-card)',
-                            color: 'var(--aurora-text)',
-                          }}
-                        >
-                          <option value="">Unit…</option>
-                          {units.map((u) => (
-                            <option key={u.id} value={u.id}>
-                              {u.symbol}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-1">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          aria-label={`Unit cost, line ${i + 1}`}
-                          value={line.unitCost}
-                          onChange={(e) =>
-                            setLine(i, {
-                              unitCost: e.target.value === '' ? '' : Number(e.target.value),
-                            })
-                          }
-                          className="w-28 text-xs border rounded px-2 py-1"
-                          style={{
-                            borderColor: variance > 0 && !line.unitCost
-                              ? 'var(--aurora-danger, #ef4444)'
+                      </div>
+                    </div>
+
+                    <div className="lg:col-span-3">
+                      <label
+                        htmlFor={`adjustment-unit-cost-${i}`}
+                        className={labelClass}
+                        style={{ color: 'var(--aurora-text-secondary)' }}
+                      >
+                        Unit Cost
+                      </label>
+                      <input
+                        id={`adjustment-unit-cost-${i}`}
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        aria-label={`Unit cost, line ${i + 1}`}
+                        value={line.unitCost}
+                        onChange={(e) =>
+                          setLine(i, {
+                            unitCost: e.target.value === '' ? '' : Number(e.target.value),
+                          })
+                        }
+                        className={fieldClass}
+                        style={{
+                          ...fieldStyle,
+                          borderColor:
+                            variance > 0 && !line.unitCost
+                              ? 'var(--aurora-danger)'
                               : 'var(--aurora-border)',
-                            background: 'var(--aurora-card)',
-                            color: 'var(--aurora-text)',
-                          }}
-                          placeholder={variance > 0 ? 'Required' : 'N/A'}
-                          disabled={variance <= 0}
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <input
-                          type="text"
-                          aria-label={`Reason, line ${i + 1}`}
-                          value={line.reason}
-                          onChange={(e) => setLine(i, { reason: e.target.value })}
-                          className="w-full text-xs border rounded px-2 py-1"
-                          style={{
-                            borderColor: 'var(--aurora-border)',
-                            background: 'var(--aurora-card)',
-                            color: 'var(--aurora-text)',
-                          }}
-                        />
-                      </td>
-                      <td className="px-2 py-1 text-right">
-                        {form.lines.length > 1 && (
-                          <Btn
-                            variant="ghost"
-                            size="xs"
-                            aria-label={`Remove line ${i + 1}`}
-                            onClick={() => removeLine(i)}
-                          >
-                            ×
-                          </Btn>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        }}
+                        placeholder={variance > 0 ? 'Required' : 'Not required'}
+                        disabled={variance <= 0}
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2 lg:col-span-3">
+                      <label
+                        htmlFor={`adjustment-line-reason-${i}`}
+                        className={labelClass}
+                        style={{ color: 'var(--aurora-text-secondary)' }}
+                      >
+                        Line Reason
+                      </label>
+                      <input
+                        id={`adjustment-line-reason-${i}`}
+                        type="text"
+                        aria-label={`Reason, line ${i + 1}`}
+                        value={line.reason}
+                        onChange={(e) => setLine(i, { reason: e.target.value })}
+                        className={fieldClass}
+                        style={fieldStyle}
+                        placeholder="Optional note"
+                      />
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
           </div>
-        </div>
+        </section>
       </div>
     </Modal>
   );
@@ -672,6 +826,7 @@ function DeleteConfirm({
 export default function StockAdjustmentsPage() {
   const { hasPermission } = useAuth();
   const workspace = useInventoryWorkspace();
+  const workspaceScope = workspace?.scope;
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<StockAdjustment> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -697,10 +852,10 @@ export default function StockAdjustmentsPage() {
   const canPost = hasPermission('inventory.adjustments.post');
 
   useEffect(() => {
-    if (!workspace) return;
-    setCompanyId(workspace.scope.companyId);
+    if (!workspaceScope) return;
+    setCompanyId(workspaceScope.companyId);
     setPage(1);
-  }, [workspace?.scope.companyId]);
+  }, [workspaceScope]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1110,10 +1265,9 @@ export default function StockAdjustmentsPage() {
               <Btn
                 variant="primary"
                 onClick={() => setCreating(true)}
-                disabled={Boolean(workspace && (!workspace.scope.companyId || !workspace.scope.branchId))}
                 title={
                   workspace && (!workspace.scope.companyId || !workspace.scope.branchId)
-                    ? 'Select a company and branch above before creating an adjustment'
+                    ? 'Choose the company and branch in the adjustment form'
                     : undefined
                 }
               >

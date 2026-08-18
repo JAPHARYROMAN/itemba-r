@@ -1,47 +1,94 @@
 'use client';
-import { useEffect, useId, useRef, useState } from 'react';
+
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { backendGet, backendList } from '@/lib/api-client';
+import { AppIcon } from './icon-set';
 
 export interface ProductPickerOption {
   id: string;
   name: string;
   productCode?: string | null;
   sku?: string | null;
+  barcode?: string | null;
+  status?: string | null;
   defaultUnitId?: string | null;
   effectivePurchasePrice?: number | string | null;
+  availableQuantity?: number | string | null;
+  inventoryBalance?: {
+    availableQuantity?: number | string | null;
+    quantityOnHand?: number | string | null;
+  } | null;
+  category?: { name?: string | null } | null;
+  productFamily?: { name?: string | null; brand?: string | null } | null;
+  baseUnit?: { name?: string | null; symbol?: string | null } | null;
+  unitName?: string | null;
+  unitSymbol?: string | null;
 }
 
 interface ProductPickerProps {
   value: string;
   onChange: (productId: string, product?: ProductPickerOption) => void;
-  /** Company scope for the search (and the backend availability join). */
   companyId?: string;
   divisionId?: string;
   branchId?: string;
   placeholder?: string;
+  ariaLabel?: string;
   disabled?: boolean;
   allowClear?: boolean;
-  /** Pre-known label for the current value, to skip the lookup-by-id. */
   initialLabel?: string;
   className?: string;
 }
 
-function labelFor(p: ProductPickerOption) {
-  const code = p.productCode || p.sku;
-  return code ? `${code} — ${p.name}` : p.name;
+interface PopupPosition {
+  left: number;
+  width: number;
+  maxHeight: number;
+  top?: number;
+  bottom?: number;
 }
 
-const INPUT_STYLE = {
+function productIdentifier(product: ProductPickerOption) {
+  return product.productCode || product.sku || product.barcode || '';
+}
+
+function labelFor(product: ProductPickerOption) {
+  const identifier = productIdentifier(product);
+  return identifier ? `${product.name} - ${identifier}` : product.name;
+}
+
+function productMeta(product: ProductPickerOption) {
+  const family = [product.productFamily?.brand, product.productFamily?.name]
+    .filter(Boolean)
+    .join(' ');
+  return [product.category?.name, family].filter(Boolean).join(' / ');
+}
+
+function availabilityFor(product: ProductPickerOption, branchSelected: boolean) {
+  if (!branchSelected) return '';
+  const raw =
+    product.inventoryBalance?.availableQuantity ??
+    product.availableQuantity ??
+    product.inventoryBalance?.quantityOnHand;
+  const quantity = Number(raw);
+  if (!Number.isFinite(quantity)) return '';
+  const unit = product.unitSymbol || product.baseUnit?.symbol;
+  return `${new Intl.NumberFormat('en-TZ', { maximumFractionDigits: 2 }).format(quantity)}${
+    unit ? ` ${unit}` : ''
+  } available`;
+}
+
+const FIELD_STYLE = {
   borderColor: 'var(--aurora-border)',
   background: 'var(--aurora-card)',
   color: 'var(--aurora-text)',
 } as const;
 
 /**
- * Server-side, company-scoped product search combobox. Replaces the capped
- * native `<select>`s (which rendered hundreds of options) with a debounced
- * `/products?search=` lookup. Keyboard-operable (Arrow/Enter/Escape) with
- * combobox/listbox ARIA roles.
+ * Company-scoped product search that can safely open inside modals, tables and
+ * overflow containers. Results are portalled to the viewport so they remain
+ * visible and include enough product context to make a reliable selection.
  */
 export function ProductPicker({
   value,
@@ -49,59 +96,62 @@ export function ProductPicker({
   companyId,
   divisionId,
   branchId,
-  placeholder = 'Search products…',
+  placeholder = 'Search by product name, code, SKU or barcode',
+  ariaLabel = 'Search products',
   disabled,
   allowClear = true,
   initialLabel,
   className,
 }: ProductPickerProps) {
   const listId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const resolvedForRef = useRef<string>(value && initialLabel ? value : '');
   const [query, setQuery] = useState(initialLabel ?? '');
+  const [selectedLabel, setSelectedLabel] = useState(initialLabel ?? '');
   const [open, setOpen] = useState(false);
   const [results, setResults] = useState<ProductPickerOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [highlight, setHighlight] = useState(0);
-  const [selectedLabel, setSelectedLabel] = useState(initialLabel ?? '');
-  const rootRef = useRef<HTMLDivElement>(null);
-  // The product id that `selectedLabel` currently describes. We re-resolve the label
-  // when `value` is externally changed to a *different* id (e.g. an edit form swapping
-  // the selected product) instead of keeping the previous product's name on screen.
-  const resolvedForRef = useRef<string>(value && initialLabel ? value : '');
+  const [popupPosition, setPopupPosition] = useState<PopupPosition | null>(null);
 
-  // Resolve a label for an externally-set value we don't already know.
   useEffect(() => {
     if (!value) {
       setSelectedLabel('');
-      setQuery('');
+      if (!open) setQuery('');
       resolvedForRef.current = '';
       return;
     }
     if (resolvedForRef.current === value) return;
+
     let cancelled = false;
     backendGet<ProductPickerOption>(`/products/${value}`)
-      .then((p) => {
-        if (cancelled || !p) return;
-        const label = labelFor(p);
+      .then((product) => {
+        if (cancelled || !product) return;
+        const label = labelFor(product);
         setSelectedLabel(label);
         setQuery(label);
         resolvedForRef.current = value;
       })
-      // Leave the field blank if the product can't be resolved.
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [value]);
+  }, [open, value]);
 
-  // Debounced search while the dropdown is open.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    const search = value && query === selectedLabel ? '' : query.trim();
     setLoading(true);
+    setFailed(false);
+
     const timer = window.setTimeout(() => {
       backendList<ProductPickerOption>('/products', {
         query: {
-          search: query.trim() || undefined,
+          search: search || undefined,
           companyId: companyId || undefined,
           divisionId: divisionId || undefined,
           branchId: branchId || undefined,
@@ -114,143 +164,291 @@ export function ProductPicker({
           setHighlight(0);
         })
         .catch(() => {
-          if (!cancelled) setResults([]);
+          if (cancelled) return;
+          setResults([]);
+          setFailed(true);
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
         });
-    }, 250);
+    }, 200);
+
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query, open, companyId, divisionId, branchId]);
+  }, [branchId, companyId, divisionId, open, query, selectedLabel, value]);
 
-  // Close on outside click.
+  const updatePopupPosition = useCallback(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const rect = root.getBoundingClientRect();
+    const viewportPadding = 8;
+    const availableBelow = window.innerHeight - rect.bottom;
+    const availableAbove = rect.top;
+    const openAbove = availableBelow < 260 && availableAbove > availableBelow;
+    const width = Math.min(
+      Math.max(rect.width, 420),
+      Math.max(240, window.innerWidth - viewportPadding * 2),
+    );
+    const left = Math.min(
+      Math.max(viewportPadding, rect.left),
+      Math.max(viewportPadding, window.innerWidth - width - viewportPadding),
+    );
+    const availableHeight = openAbove ? availableAbove : availableBelow;
+
+    setPopupPosition({
+      left,
+      width,
+      maxHeight: Math.max(160, Math.min(384, availableHeight - 12)),
+      ...(openAbove ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 }),
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePopupPosition();
+    window.addEventListener('resize', updatePopupPosition);
+    window.addEventListener('scroll', updatePopupPosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePopupPosition);
+      window.removeEventListener('scroll', updatePopupPosition, true);
+    };
+  }, [open, updatePopupPosition]);
+
   useEffect(() => {
     if (!open) return;
-    const onDocMouseDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!rootRef.current?.contains(target) && !popupRef.current?.contains(target)) {
         setOpen(false);
         setQuery(selectedLabel);
       }
     };
-    document.addEventListener('mousedown', onDocMouseDown);
-    return () => document.removeEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick);
   }, [open, selectedLabel]);
 
-  const select = (p: ProductPickerOption) => {
-    const label = labelFor(p);
+  const selectProduct = (product: ProductPickerOption) => {
+    const label = labelFor(product);
     setSelectedLabel(label);
     setQuery(label);
     setOpen(false);
-    resolvedForRef.current = p.id;
-    onChange(p.id, p);
+    resolvedForRef.current = product.id;
+    onChange(product.id, product);
   };
 
   const clear = () => {
     setSelectedLabel('');
     setQuery('');
     setResults([]);
+    setOpen(false);
     resolvedForRef.current = '';
     onChange('');
+    inputRef.current?.focus();
   };
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (!open) setOpen(true);
-      setHighlight((h) => Math.min(h + 1, results.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setHighlight((h) => Math.max(h - 1, 0));
-    } else if (e.key === 'Enter') {
-      if (open && results[highlight]) {
-        e.preventDefault();
-        select(results[highlight]);
-      }
-    } else if (e.key === 'Escape') {
+  const onInputChange = (nextQuery: string) => {
+    if (value && nextQuery !== selectedLabel) {
+      setSelectedLabel('');
+      resolvedForRef.current = '';
+      onChange('');
+    }
+    setQuery(nextQuery);
+    setOpen(true);
+  };
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setOpen(true);
+      setHighlight((current) => Math.min(current + 1, Math.max(results.length - 1, 0)));
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setHighlight((current) => Math.max(current - 1, 0));
+    } else if (event.key === 'Enter' && open && results[highlight]) {
+      event.preventDefault();
+      selectProduct(results[highlight]);
+    } else if (event.key === 'Escape') {
       setOpen(false);
       setQuery(selectedLabel);
     }
   };
 
+  const popupStyle: CSSProperties | undefined = popupPosition
+    ? {
+        position: 'fixed',
+        left: popupPosition.left,
+        width: popupPosition.width,
+        maxHeight: popupPosition.maxHeight,
+        top: popupPosition.top,
+        bottom: popupPosition.bottom,
+        // App modals and drawers use 1200-1300. The portalled list must sit
+        // above them or suggestions are present in the DOM but invisible.
+        zIndex: 1600,
+      }
+    : undefined;
+
+  const popup =
+    open && popupStyle
+      ? createPortal(
+          <div
+            ref={popupRef}
+            id={listId}
+            role="listbox"
+            aria-label="Products"
+            style={{
+              ...popupStyle,
+              background: 'var(--aurora-card)',
+              borderColor: 'var(--aurora-border)',
+            }}
+            className="overflow-y-auto rounded-lg border shadow-[var(--aurora-shadow-lg)]"
+          >
+            {loading ? (
+              <div
+                className="flex items-center gap-2 px-4 py-5 text-sm"
+                style={{ color: 'var(--aurora-text-secondary)' }}
+              >
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--aurora-border)] border-t-[var(--aurora-primary)]" />
+                Searching products...
+              </div>
+            ) : failed ? (
+              <div className="px-4 py-5 text-sm" style={{ color: 'var(--aurora-danger)' }}>
+                Product search is temporarily unavailable.
+              </div>
+            ) : results.length === 0 ? (
+              <div className="px-4 py-5 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+                No matching products found.
+              </div>
+            ) : (
+              <ul className="divide-y divide-[var(--aurora-border)]">
+                {results.map((product, index) => {
+                  const identifier = productIdentifier(product);
+                  const meta = productMeta(product);
+                  const availability = availabilityFor(product, Boolean(branchId));
+                  const unit = product.unitSymbol || product.baseUnit?.symbol || product.unitName;
+                  return (
+                    <li
+                      key={product.id}
+                      id={`${listId}-${index}`}
+                      role="option"
+                      aria-selected={product.id === value}
+                      className={index === highlight ? 'bg-[var(--aurora-bg-subtle)]' : ''}
+                      onMouseEnter={() => setHighlight(index)}
+                    >
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => selectProduct(product)}
+                        className="flex w-full items-start justify-between gap-4 px-4 py-3 text-left"
+                      >
+                        <span className="min-w-0">
+                          <span
+                            className="block truncate text-sm font-semibold"
+                            style={{ color: 'var(--aurora-text)' }}
+                          >
+                            {product.name}
+                          </span>
+                          <span
+                            className="mt-0.5 block truncate text-xs"
+                            style={{ color: 'var(--aurora-text-secondary)' }}
+                          >
+                            {[identifier, meta].filter(Boolean).join(' / ')}
+                          </span>
+                        </span>
+                        <span className="shrink-0 text-right">
+                          {availability && (
+                            <span
+                              className="block text-xs font-semibold"
+                              style={{ color: 'var(--aurora-success)' }}
+                            >
+                              {availability}
+                            </span>
+                          )}
+                          {unit && (
+                            <span
+                              className="block text-[11px]"
+                              style={{ color: 'var(--aurora-text-muted)' }}
+                            >
+                              Unit: {unit}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>,
+          document.body,
+        )
+      : null;
+
   return (
-    <div ref={rootRef} className={`relative ${className ?? ''}`}>
-      <div className="flex items-center">
+    <div ref={rootRef} className={`relative min-w-0 ${className ?? ''}`}>
+      <div
+        className="flex h-10 items-center rounded-md border transition-colors focus-within:ring-2 focus-within:ring-[var(--aurora-primary)]"
+        style={FIELD_STYLE}
+      >
+        <AppIcon
+          name="search"
+          size={16}
+          className="ml-3 shrink-0 text-[var(--aurora-text-muted)]"
+        />
         <input
-          type="text"
+          ref={inputRef}
+          type="search"
           role="combobox"
+          aria-label={ariaLabel}
           aria-expanded={open}
-          aria-controls={listId}
+          aria-controls={open ? listId : undefined}
           aria-autocomplete="list"
           aria-activedescendant={open && results[highlight] ? `${listId}-${highlight}` : undefined}
           value={query}
           disabled={disabled}
           placeholder={placeholder}
-          onChange={(e) => {
-            setQuery(e.target.value);
+          onChange={(event) => onInputChange(event.target.value)}
+          onFocus={(event) => {
             setOpen(true);
+            if (value) event.currentTarget.select();
           }}
-          onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
-          className="w-full text-sm border rounded-md px-3 py-1.5 focus:outline-none disabled:opacity-50"
-          style={INPUT_STYLE}
+          className="min-w-0 flex-1 bg-transparent px-2 text-sm outline-none placeholder:text-[var(--aurora-text-muted)] disabled:cursor-not-allowed disabled:opacity-50"
         />
         {allowClear && value && !disabled && (
           <button
             type="button"
             onClick={clear}
             aria-label="Clear product"
-            className="-ml-6 text-slate-400 hover:text-slate-600"
+            title="Clear product"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--aurora-text-muted)] hover:bg-[var(--aurora-bg-subtle)] hover:text-[var(--aurora-text)]"
           >
-            ×
+            <AppIcon name="close" size={15} />
           </button>
         )}
-      </div>
-
-      {open && (
-        <ul
-          id={listId}
-          role="listbox"
-          className="absolute z-30 mt-1 max-h-64 w-full overflow-auto rounded-md border shadow-lg"
-          style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
+        <button
+          type="button"
+          disabled={disabled}
+          aria-label={open ? 'Close product list' : 'Show products'}
+          title={open ? 'Close product list' : 'Show products'}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            const nextOpen = !open;
+            inputRef.current?.focus();
+            setOpen(nextOpen);
+          }}
+          className="mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--aurora-text-muted)] hover:bg-[var(--aurora-bg-subtle)] hover:text-[var(--aurora-text)] disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading ? (
-            <li className="px-3 py-2 text-xs text-slate-400">Searching…</li>
-          ) : results.length === 0 ? (
-            <li className="px-3 py-2 text-xs text-slate-400">No products found</li>
-          ) : (
-            results.map((p, i) => (
-              <li
-                key={p.id}
-                id={`${listId}-${i}`}
-                role="option"
-                aria-selected={p.id === value}
-                // preventDefault keeps the input focused so the click registers
-                // before blur; selection itself happens on click (keyboard uses Enter).
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => select(p)}
-                onMouseEnter={() => setHighlight(i)}
-                className={`cursor-pointer px-3 py-1.5 text-sm ${
-                  i === highlight ? 'bg-[var(--aurora-bg-subtle)]' : ''
-                }`}
-              >
-                {p.productCode || p.sku ? (
-                  <>
-                    <span className="font-mono text-xs text-slate-500">
-                      {p.productCode || p.sku}
-                    </span>{' '}
-                    {p.name}
-                  </>
-                ) : (
-                  p.name
-                )}
-              </li>
-            ))
-          )}
-        </ul>
-      )}
+          <AppIcon
+            name="chevronDown"
+            size={16}
+            className={`transition-transform ${open ? 'rotate-180' : ''}`}
+          />
+        </button>
+      </div>
+      {popup}
     </div>
   );
 }
