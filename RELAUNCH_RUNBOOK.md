@@ -117,3 +117,64 @@ git pull && bash deploy/relaunch/deploy.sh     # update to latest main + rebuild
 /usr/local/bin/itemba-backup.sh                # backup on demand
 ```
 Full reference: `docs/admin/deployment-operations-guide.md`.
+
+---
+
+## 7. Deploying from GitHub (CD workflow)
+
+`.github/workflows/deploy-production.yml` — **Actions → Deploy — Production → Run
+workflow**. Manual only: a merge to `main` cannot reach the live app on its own.
+
+### One-time setup
+
+Repo **Settings → Secrets and variables → Actions**:
+
+| Secret | What it is |
+|---|---|
+| `DEPLOY_HOST` | Droplet IP or hostname |
+| `DEPLOY_USER` | SSH user on the droplet |
+| `DEPLOY_SSH_KEY` | Private key, full PEM including header/footer lines |
+| `DEPLOY_KNOWN_HOSTS` | Output of `ssh-keyscan <DROPLET_IP>` |
+| `DEPLOY_DOMAIN` | e.g. `itembagrouptz.com` |
+
+Generate a key **for this purpose only**, so it can be revoked without touching
+your own access:
+
+```bash
+ssh-keygen -t ed25519 -f itemba-deploy -C "github-actions-deploy" -N ""
+ssh-copy-id -i itemba-deploy.pub <user>@<droplet-ip>
+ssh-keyscan <droplet-ip>            # paste into DEPLOY_KNOWN_HOSTS
+```
+
+`DEPLOY_KNOWN_HOSTS` is required rather than optional. The alternative,
+`ssh-keyscan` at deploy time, trusts whatever answers on the night — on a channel
+that carries a key with write access to production, that hands a
+man-in-the-middle a shell.
+
+Then **Settings → Environments → production** and add yourself as a required
+reviewer. That is the real approval gate; the typed confirmation phrase in the
+workflow only stops an accidental click, and anything enforced inside the
+workflow file can be edited in a branch.
+
+### What it refuses to do
+
+- Deploy a commit that is not an ancestor of `origin/main` — production never runs
+  code no PR gated.
+- Deploy a commit whose CI run is anything other than `success`. Queued, running,
+  cancelled and failed are all refused.
+- Run at all without both `DEPLOY_SSH_KEY` and `DEPLOY_KNOWN_HOSTS`.
+- Run concurrently with itself.
+
+### What it does not decide for you
+
+**It re-runs the seed**, because `deploy.sh` does. The seed full-replaces role
+permissions, so any hand-tuned production role is reset on every deploy. If that
+becomes a problem, the fix is a `SKIP_SEED` guard in `deploy.sh`, not a change
+here.
+
+**It does not enable Msaidizi.** The verify step prints `MSAIDIZI_ENABLED` and
+`MSAIDIZI_WRITE_MODE` so a drift toward "on" is visible in the run log, but
+turning the agent on stays a deliberate edit to `/opt/itemba-r/.env.production`
+followed by `docker compose --env-file .env.production -f
+docker-compose.production.yml up -d backend`. A plain `docker restart` does not
+re-read env.
