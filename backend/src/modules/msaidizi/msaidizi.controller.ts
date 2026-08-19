@@ -12,164 +12,25 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import {
-  IsArray,
-  IsDefined,
-  IsIn,
-  IsInt,
-  IsOptional,
-  IsString,
-  Matches,
-  MaxLength,
-  Min,
-  MinLength,
-  ValidateNested,
-} from 'class-validator';
 import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { MsaidiziConversationsService, mintSessionId, OpenedTurn } from './conversations.service';
+import { AskDto, AskResult } from './dto/ask.dto';
 import { MsaidiziConfig } from './msaidizi.config';
-import { MsaidiziCapabilities, MsaidiziService, RunResult } from './msaidizi.service';
+import { MsaidiziCapabilities, MsaidiziService, RunRequest, RunResult } from './msaidizi.service';
 import { ModelMessage } from './model-client';
 
 /**
- * One prior turn, echoed back from the previous response's `messages`.
- *
- * This has to be a class with real decorators, not the `ModelMessage` interface.
- * The global ValidationPipe runs `whitelist: true`, which strips any property it
- * cannot see a decorator for — and an interface carries no metadata at runtime,
- * so an undecorated `history` arrives as an array of empty objects and the model
- * request fails with "messages.0: Input does not match the expected shape".
- *
- * `content` is deliberately only `@IsDefined()`. It is a string on user turns and
- * an array of provider content blocks on assistant turns, and those blocks must
- * survive the round trip byte-for-byte. Declaring a nested type here would make
- * the pipe recurse and strip fields inside them — including the ones the API
- * requires echoed back unchanged.
+ * The wire types moved to `./dto`, and are re-exported here so that every
+ * importer — the specs, the swagger metadata, anything reaching for the shape of
+ * this endpoint — keeps naming the controller that serves them. They live in
+ * their own directory because `AskDto.confirmed` and `RunProcedureDto.confirmed`
+ * now share a grant-id pattern with the mint that produces it, and a constant
+ * shared between two controllers has nowhere honest to live inside either.
  */
-export class ConversationMessageDto {
-  @IsIn(['user', 'assistant'])
-  role!: 'user' | 'assistant';
-
-  @IsDefined()
-  content!: unknown;
-}
-
-/**
- * The shape `mintSessionId()` mints: `ms_` and a UUID with its dashes removed.
- * `procedures.controller.ts` pins its own session id field to a copy of this.
- */
-const SESSION_ID = /^ms_[0-9a-f]{32}$/;
-
-export class AskDto {
-  @IsString()
-  @MinLength(1)
-  @MaxLength(8000)
-  message!: string;
-
-  /** Conversation state returned by the previous turn, echoed back verbatim. */
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => ConversationMessageDto)
-  history?: ConversationMessageDto[];
-
-  /**
-   * The session id of the run being continued, echoed back from the previous
-   * turn's `AskResult` or `session` frame.
-   *
-   * An AUDIT key rather than an opaque string, which is why it is constrained at
-   * all: `open()` settles on whatever arrives here when it resolves to nothing
-   * of this caller's, the run then executes under it, and `capability-invoker`
-   * sends it as the agent-session header every `audit_logs` row the run writes
-   * is stamped with.
-   *
-   * The pattern checks SHAPE, and stating that plainly is the point. It is the
-   * alphabet and length `mintSessionId()` produces, so a hand-written or copied
-   * string is rejected — but any client with a random-hex generator satisfies
-   * it, and no validator on this field can tell an id this server issued from
-   * one a caller invented that looks the same.
-   *
-   * The threat the shape check cannot reach — a caller filing its own actions
-   * under a session id it read SOMEWHERE ELSE, so that an overseer reading the
-   * trail by session id sees them under another user's run — is closed a layer
-   * down, by the unique index on the column: an id that already names a
-   * conversation is rejected on insert and the run is given a freshly minted one
-   * instead. See `conversations.service.ts`, `startConversation`.
-   */
-  @IsOptional()
-  @IsString()
-  @Matches(SESSION_ID)
-  sessionId?: string;
-
-  /** Confirmation ids the user has explicitly approved for this turn. */
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  confirmed?: string[];
-
-  /**
-   * Continue a stored conversation, by id.
-   *
-   * Sending this moves the client onto the stored-state path, which is what lets
-   * a conversation be picked up from a second tab or a different device rather
-   * than only from the tab that started it. Author-only — someone else's id is a
-   * 404, not a 403, because there is nothing to tell a non-author about a
-   * conversation that is not theirs, including that it exists.
-   *
-   * It does NOT replace `history`, and sending both is the normal case. The
-   * server keeps the copy that holds more of the conversation, so the stored
-   * state wins the case this field exists for (a tab that has none, or one a
-   * turn behind) while a client that is holding a turn the store failed to
-   * record keeps it. `continueById` states the rule.
-   */
-  @IsOptional()
-  @IsString()
-  @MaxLength(64)
-  conversationId?: string;
-
-  /**
-   * The turn sequence this client last saw, sent alongside `conversationId`.
-   *
-   * When the conversation has moved on in another window the request is a 409
-   * rather than a silent divergence between two tabs writing alternate futures
-   * into one thread.
-   *
-   * Sequences are 1-based, so only a positive value is a claim about stored
-   * state; `open()` ignores anything else rather than reading it as a tab that
-   * has fallen behind by every turn. `@Min(0)` rather than `@Min(1)` because a
-   * client already in the field can still send the `0` this server used to
-   * report for an unpersisted turn, and answering that with a 400 would be a
-   * harder failure than the one being removed.
-   */
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  sequence?: number;
-}
-
-/**
- * What `POST /msaidizi/ask` answers with: the run, plus where it landed.
- *
- * The two extra fields are the non-streaming half of the `session` frame. This
- * DTO accepts `conversationId` and `sequence`, and a caller that is never told
- * which conversation the server filed its turn under, or which turn number it
- * got, can never send either of them back — which leaves `continueById`, the
- * two-tab 409 and both 410 sentences reachable only from the stream. Accepting
- * input a caller has no way to follow up is the asymmetry this closes.
- *
- * Both are optional, and ABSENT rather than zero when the turn was not
- * persisted, exactly as the `session` frame is: `JSON.stringify` drops an
- * undefined field, so a client holds its last known-good values through an
- * answer that omits them. See `OpenedTurn.sequence` for why a zero would be
- * worse than silence.
- */
-export interface AskResult extends RunResult {
-  conversationId?: string;
-  sequence?: number;
-}
+export { AskDto, ConversationMessageDto } from './dto/ask.dto';
+export type { AskResult } from './dto/ask.dto';
 
 /**
  * Msaidizi's own surface.
@@ -219,6 +80,12 @@ export class MsaidiziController {
    * and turn sequence the store settled on ride back with the answer, because
    * this path has no `session` frame to carry them and this DTO accepts both on
    * the way in.
+   *
+   * That covers everything a follow-up needs, approvals included. A suspended
+   * red-tier action arrives as a `confirmation_required` entry in `events`, and
+   * the `grantId` on it is what the next request sends back in `confirmed` — so
+   * a non-streaming caller reads its approvals out of the same array a streaming
+   * one reads them out of, rather than out of frames it never sees.
    */
   @Post('ask')
   @RequirePermissions('msaidizi.use')
@@ -240,17 +107,7 @@ export class MsaidiziController {
     }
 
     const opened = await this.openTurn(dto, user);
-    const result = await this.service.run({
-      user,
-      authorization,
-      // The session id the store settled on, never `dto.sessionId` directly.
-      // `open()` honours a client's own id and mints one otherwise, and red-tier
-      // confirmation ids are derived from whichever it chose — a second id in
-      // play here is the infinite approval loop.
-      sessionId: opened.sessionId,
-      confirmed: dto.confirmed,
-      messages: this.messagesFor(dto, opened),
-    });
+    const result = await this.service.run(this.runRequestFor(dto, opened, user, authorization));
     await this.recordQuietly(opened, result);
     // Spread rather than mutated: `close()` was handed `result` itself, and the
     // run result is not this controller's object to rewrite after the fact.
@@ -335,13 +192,7 @@ export class MsaidiziController {
 
     try {
       const result = await this.service.run(
-        {
-          user,
-          authorization,
-          sessionId: opened.sessionId,
-          confirmed: dto.confirmed,
-          messages: this.messagesFor(dto, opened),
-        },
+        this.runRequestFor(dto, opened, user, authorization),
         (event) => send(event.type, event),
       );
 
@@ -350,9 +201,17 @@ export class MsaidiziController {
       // action — a confirmation click on a suspended red-tier action — can
       // arrive within a second and resumes by conversation id. If it read the
       // store before this transaction committed it would resume from the
-      // PREVIOUS turn's message array, the approved confirmation id would not
-      // match anything in it, and the run would suspend again: the approval loop
-      // this whole design is arranged to prevent.
+      // PREVIOUS turn's message array, the model would have no proposal to
+      // re-issue, and the run would suspend again: the approval loop this whole
+      // design is arranged to prevent.
+      //
+      // The grant itself is not written here — `run()` records one at the moment
+      // it proposes, several hundred milliseconds before this line — so an
+      // approval that arrives this fast finds its grant already committed. What
+      // this ordering still protects is the conversation the grant is bound to:
+      // spending one requires resuming into the same conversation, and a client
+      // that read the store a transaction too early would be resuming into the
+      // wrong turn of it.
       await this.recordQuietly(opened, result);
       send('result', result);
     } catch {
@@ -368,6 +227,50 @@ export class MsaidiziController {
     } finally {
       res.end();
     }
+  }
+
+  /**
+   * The run, as both ask paths ask for it.
+   *
+   * One builder rather than two object literals, because the two paths must not
+   * be able to disagree about what the loop is given — and three of these five
+   * fields now decide whether a red-tier action can be approved at all.
+   *
+   * `sessionId` is the store's, never `dto.sessionId` directly: `open()` resolves
+   * the client's id against this caller's own conversations and mints a fresh one
+   * when it resolves to nothing of theirs, and the audit rows are stamped with
+   * whichever it chose.
+   *
+   * `conversationId` and `turnSequence` are the grant ledger's coordinates. A
+   * grant is issued against the conversation a proposal was made in and
+   * spendable only from that same conversation, by that same user, so the loop
+   * cannot issue or spend one without being told where it is. Both are absent
+   * for an unpersisted turn, and the consequence is deliberate rather than a gap
+   * to route around: no conversation means no grant, so a red-tier action in an
+   * unpersisted run is not offered for approval at all. Reads and amber writes
+   * still work.
+   *
+   * `opened`, not `dto`, for every one of them. The client sends a conversation
+   * id and a sequence too, and they are a CLAIM the store checks — 404 if the
+   * conversation is not theirs, 409 if the thread moved on. Binding a grant to
+   * the claimed conversation rather than the resolved one would let a caller
+   * name someone else's thread as the scope of its own approvals.
+   */
+  private runRequestFor(
+    dto: AskDto,
+    opened: OpenedTurn,
+    user: AuthUser,
+    authorization: string,
+  ): RunRequest {
+    return {
+      user,
+      authorization,
+      sessionId: opened.sessionId,
+      conversationId: opened.conversationId,
+      turnSequence: opened.sequence,
+      confirmed: dto.confirmed,
+      messages: this.messagesFor(dto, opened),
+    };
   }
 
   /**
@@ -398,21 +301,29 @@ export class MsaidiziController {
       this.logger.error(
         `Could not open a conversation turn; running unpersisted: ${(err as Error)?.message}`,
       );
-      // The caller's own session id is adopted here with nothing having checked
-      // it — the same residual `conversations.service.ts` routes through
-      // `unverifiedSessionId()`, reached by a second door. `open()` threw before
-      // any row could be read, so there is no `agentSessionId` to compare
-      // against, and minting a fresh one instead would recompute every red-tier
-      // confirmation id (they are derived from the session id) and leave the
-      // user approving the same action forever without it running. So the id is
-      // taken, and the fact that it was never verified is stated rather than
-      // left silent: this run's `audit_logs` rows carry a well-formed id that
-      // arrived in the request body.
+      // A FRESH id, never `dto.sessionId`. This is the provenance rule, at the
+      // one door that used to route around it: an id the client sent is honoured
+      // only where it can be RESOLVED to a conversation this caller owns, and
+      // `open()` threw before any row could be read, so there is nothing to
+      // resolve it against. Adopting it here would stamp this run's `audit_logs`
+      // rows with a well-formed string nothing checked — including, during a read
+      // outage, one naming another user's conversation, so that an overseer
+      // reading the trail by session id would see two people's work under one
+      // key.
+      //
+      // This used to adopt it, and the reason was real at the time: red-tier
+      // confirmation ids were DERIVED from the session id, so minting recomputed
+      // every id the user had just approved and left them approving the same
+      // action forever. Approvals are server-issued grants now and are not
+      // derived from this value, so the cost that made adoption the lesser evil
+      // is gone. What an approval loses here it loses anyway — an unpersisted
+      // turn has no conversation to bind a grant to, so a red-tier action in this
+      // run re-proposes rather than running, which is the fail-closed outcome.
       if (dto.sessionId) {
         this.logger.warn(
           `Session id ${dto.sessionId} could not be checked against this caller's conversations ` +
-            `(the turn could not be opened); this run is unpersisted and its audit rows will ` +
-            `carry an id supplied by the request rather than one this server resolved or minted.`,
+            `(the turn could not be opened), so it was ignored and a fresh one minted; this run ` +
+            `is unpersisted and any red-tier action in it will be proposed again rather than run.`,
         );
       }
       // No `sequence`, for the same reason `degraded()` reports none: this turn
@@ -420,7 +331,7 @@ export class MsaidiziController {
       // `0` from here would send it back and be told its conversation continued
       // in another window for the rest of its life.
       return {
-        sessionId: dto.sessionId ?? mintSessionId(),
+        sessionId: mintSessionId(),
         history: (dto.history ?? []) as ModelMessage[],
         fromServer: false,
         priorTier: 'green',

@@ -222,26 +222,98 @@ describe('msaidizi conversation state', () => {
     expect(buildAskRequest(createConversationState(), 'Hello')).toEqual({ message: 'Hello' });
   });
 
-  it('never carries confirmed ids into a later turn', () => {
+  /**
+   * Opaque here on purpose. The real value is whatever
+   * `actionSignature(tool, args)` produces in the gate — this file is the lib
+   * half and does not reach into a component for it — and the reducer's whole
+   * contract is that it stores the string it was handed without reading it.
+   */
+  const SIGNATURE = 'Invoices_remove\u0000{\"id\":\"41\"}';
+
+  it('never carries an approved grant into a later turn', () => {
     let state = reduceAll(createConversationState(), [
       { type: 'turn_started', turnId: 't1', prompt: 'Delete invoice 41.', at: 0 },
       { type: 'result', turnId: 't1', result: RESULT },
       { type: 'settled', turnId: 't1', outcome: outcome({ result: RESULT }), at: 1 },
     ]);
 
-    const approving = buildAskRequest(state, 'Yes — go ahead.', { confirmed: ['cnf_a'] });
-    expect(approving.confirmed).toEqual(['cnf_a']);
+    const approving = buildAskRequest(state, 'Yes — go ahead.', {
+      confirmed: ['grt_9e41c0b7d2'],
+    });
+    expect(approving.confirmed).toEqual(['grt_9e41c0b7d2']);
 
     state = reduceAll(state, [
-      { type: 'turn_started', turnId: 't2', prompt: 'Yes — go ahead.', at: 2 },
+      {
+        type: 'turn_started',
+        turnId: 't2',
+        prompt: 'Yes — go ahead.',
+        at: 2,
+        // What the page DOES record about the approval: the action, as text.
+        // The turn carrying an approval has to be knowable — a refused grant
+        // comes back as a fresh proposal and the screen must be able to say the
+        // earlier approval went unused — and this is the shape that fact is
+        // allowed to take.
+        approvedSignatures: [SIGNATURE],
+      },
       { type: 'result', turnId: 't2', result: RESULT },
       { type: 'settled', turnId: 't2', outcome: outcome({ result: RESULT }), at: 3 },
     ]);
 
-    // A standing grant is exactly what must not happen: the approval was spent
-    // on the turn that carried it.
+    // A standing approval is exactly what must not happen: it was spent on the
+    // turn that carried it, and no field added since may smuggle it forward.
     expect(buildAskRequest(state, 'What else is unpaid?').confirmed).toBeUndefined();
-    expect(JSON.stringify(state)).not.toContain('cnf_a');
+    const serialised = JSON.stringify(state);
+    expect(serialised).not.toContain('grt_9e41c0b7d2');
+    // The recorded signature IS present, and asserting it beside the line
+    // above is the point: the rule is not "nothing about the approval is kept",
+    // it is "nothing re-sendable is kept". A signature names the tool and the
+    // arguments — text already in `events` several times over — and authorises
+    // nothing.
+    expect(serialised).toContain(JSON.stringify(SIGNATURE).slice(1, -1));
+    expect(latestTurn(state)?.approvedSignatures).toEqual([SIGNATURE]);
+  });
+
+  it('records no approval for a turn that carried none, or for a stored one', () => {
+    const asked = reduceAll(createConversationState(), [
+      { type: 'turn_started', turnId: 't1', prompt: 'How much do we owe?', at: 0 },
+      { type: 'result', turnId: 't1', result: RESULT },
+      { type: 'settled', turnId: 't1', outcome: outcome({ result: RESULT }), at: 1 },
+    ]);
+    expect(latestTurn(asked)?.approvedSignatures).toEqual([]);
+
+    // A stored transcript records what the RUN did, never what a browser sent.
+    // Claiming an approval here would put a sentence about the reader's own
+    // click on a screen where nobody clicked.
+    const hydrated = hydrateFromConversation({
+      id: 'conv_1',
+      agentSessionId: 'ms_stored',
+      title: 'Overdue invoices',
+      companyId: 'c1',
+      turnCount: 1,
+      toolCallCount: 0,
+      writeCallCount: 0,
+      highestTier: 'red',
+      resumable: true,
+      continuable: true,
+      lastTurnAt: '2026-08-18T09:00:00.000Z',
+      createdAt: '2026-08-18T09:00:00.000Z',
+      expiresAt: '2026-11-16T09:00:00.000Z',
+      turns: [
+        {
+          id: 'stored_1',
+          sequence: 1,
+          prompt: 'Yes — go ahead: Delete invoice with id 41',
+          reason: 'awaiting_confirmation',
+          toolCallCount: 0,
+          writeCallCount: 0,
+          procedureId: null,
+          startedAt: '2026-08-18T09:00:00.000Z',
+          endedAt: '2026-08-18T09:00:04.000Z',
+          events: [{ type: 'done', reason: 'awaiting_confirmation' }],
+        },
+      ],
+    });
+    expect(hydrated.turns.every((turn) => turn.approvedSignatures.length === 0)).toBe(true);
   });
 
   it('lists the pending confirmations only while the run is suspended on them', () => {

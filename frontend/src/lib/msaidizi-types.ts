@@ -108,6 +108,29 @@ export type MsaidiziEvent =
     }
   | {
       type: 'confirmation_required';
+      /**
+       * The server's RECEIPT for this proposal: a fresh random nonce it minted
+       * when it recorded the grant, derived from nothing and reconstructible by
+       * nobody. It is the only value that may ever appear in `confirmed`.
+       *
+       * Optional, and the optionality is the honest shape rather than a hedge.
+       * Nothing validates this object on the way in — `decodeFrame` casts the
+       * frame's JSON — and a conversation stored before grants existed replays
+       * its `confirmation_required` events out of the transcript with no
+       * `grantId` on them at all. So a reader has to handle its absence, and the
+       * only correct handling is that the proposal CANNOT BE APPROVED: there is
+       * no id to send, and `confirmationId` is not a substitute for one. Read it
+       * through `grantIdOf`, never off the object.
+       */
+      grantId?: string;
+      /**
+       * The derived id: session, tool and arguments hashed together. Belt and
+       * braces beside the grant — it binds an id to the exact action — and NOT
+       * an approval token. It is deterministic, so a client could compute it,
+       * which is precisely why the server stopped accepting it: an id anyone can
+       * derive is a pre-authorisation channel, not a receipt. Nothing on this
+       * side sends it.
+       */
       confirmationId: string;
       tool: string;
       capabilityId: string;
@@ -121,6 +144,27 @@ export type MsaidiziEventType = MsaidiziEvent['type'];
 
 /** Narrowing helper for the variant the confirmation gate is built from. */
 export type ConfirmationRequest = Extract<MsaidiziEvent, { type: 'confirmation_required' }>;
+
+/**
+ * The grant this proposal can be approved with, or null when it has none.
+ *
+ * The one place on this side that decides whether a proposal is approvable, and
+ * it is a READ, not a computation. There is deliberately no fallback: a
+ * proposal whose grant did not arrive is not approvable, and the screen has to
+ * say so. Substituting `confirmationId` — or anything else this client could
+ * work out — would put a value the server never issued into `confirmed`, which
+ * is the exact channel the grant ledger exists to close.
+ *
+ * The string check is not ceremony. `decodeFrame` casts the frame's JSON
+ * unvalidated, so `grantId` is whatever turned up: a number, a null, an object,
+ * an empty string from a truncated write. Each of those is "no grant", and
+ * every one of them would otherwise reach `confirmed` as a value the ledger
+ * cannot match — refused, with the user told nothing about why.
+ */
+export function grantIdOf(request: ConfirmationRequest): string | null {
+  const grant = request.grantId;
+  return typeof grant === 'string' && grant.length > 0 ? grant : null;
+}
 
 /** Narrowing helper for a step row. */
 export type ToolCallEvent = Extract<MsaidiziEvent, { type: 'tool_call' }>;
@@ -187,19 +231,30 @@ export interface MsaidiziRunResult {
  *
  * `history` is the previous response's `messages`, echoed back unchanged.
  *
- * `confirmed` is a ONE-SHOT, and the reason is the shape of THIS REQUEST rather
- * than any server policy: the array names confirmation ids and has no way to name
- * a row or a turn, so a client that keeps it in state puts a standing "yes" for
- * that action on every later turn of the run. Send an approval on exactly the
- * request it answers, and forget it.
+ * `confirmed` carries GRANT IDS — the nonces the server minted when it proposed,
+ * read off `confirmation_required` through `grantIdOf` and passed back
+ * untouched. Nothing on this side may compute, guess, derive or reconstruct a
+ * value that goes in here. That is the whole point of the field: the server
+ * issues a grant when it proposes and spends it when it dispatches, so an entry
+ * in this array is a receipt for a proposal that demonstrably happened rather
+ * than a claim that one did. The derived `confirmationId` is no longer accepted
+ * and there is no compatibility form.
  *
- * What the server currently does with an id is a narrower guarantee than that
- * rule, and it has changed before. `run()` spends each id on the dispatch that id
- * authorises, so within one request an id buys one execution and a second
- * identical proposal in the same run suspends again. It does not span requests:
- * `confirmationIdFor` is deterministic and nothing is remembered between runs, so
- * an id re-sent on a LATER request is indistinguishable from a fresh approval and
- * buys one more execution. Build on the rule above, not on either half of this.
+ * It is still a ONE-SHOT, and now for two independent reasons. The shape of the
+ * request is the first and is unchanged: the array names ids and has no way to
+ * name a row or a turn, so a client that keeps it in state puts a standing "yes"
+ * for that action on every later turn of the run. The second is the server's,
+ * and unlike the policy that used to sit here it does not evaporate at the
+ * request boundary — the grant is a durable row, spent by an atomic conditional
+ * update on `usedAt IS NULL`, so re-sending the same grant on a later request
+ * buys nothing at all. Neither reason is a licence to relax the other: send an
+ * approval on exactly the request it answers, and forget it.
+ *
+ * A grant that cannot be spent — used, expired, belonging to another
+ * conversation or another user, recording a different action, never issued, or
+ * simply unreachable because the ledger is down — does not fail the run. The
+ * action re-proposes with a FRESH grant, which is a new decision for the user
+ * rather than an error, and the screen has to say so.
  */
 export interface MsaidiziAskRequest {
   message: string;
@@ -212,9 +267,15 @@ export interface MsaidiziAskRequest {
    * This is the only path that reads server-held resume state. Sending it moves
    * the thread off the client's own array and onto the server's, which is what
    * makes a conversation reopened from the rail continue from what actually
-   * happened in it rather than from whatever this tab still has — and, on a live
-   * thread, makes the SERVER the authority on which session id the red-tier
-   * confirmation ids were derived from.
+   * happened in it rather than from whatever this tab still has.
+   *
+   * It is also what names the conversation a grant belongs to. A grant is bound
+   * to the conversation it was issued in, so an approval sent without this id is
+   * an approval offered against a different thread and is refused — which is a
+   * re-proposal, not an error, but it is a decision asked of the user twice for
+   * no reason. This used to be phrased as the server being "the authority on
+   * which session id the confirmation ids were derived from"; that sentence
+   * described derivation and derivation is no longer what an approval rests on.
    *
    * Author-only: someone else's id is a 404, not a 403.
    */

@@ -9,8 +9,9 @@
  *   1. The tool set never exceeds the caller's permissions.
  *   2. A tier the deployment disabled cannot be invoked, even if a tool for it
  *      somehow reaches dispatch.
- *   3. A red-tier action never runs without confirmation of that exact action,
- *      and one confirmation buys exactly one execution of it.
+ *   3. A red-tier action never runs without an approval this server ISSUED for
+ *      that exact action, and that approval buys exactly one execution of it —
+ *      once, and once for ever, not once per request.
  *   4. Tool calls are bounded, so one permission cannot become fifty actions.
  *   5. Tool output re-enters the conversation as data, never as instruction.
  *   6. Every call carries the caller's own credential and the run's session id.
@@ -22,7 +23,15 @@ import { CapabilityInvoker, InvocationRequest, InvocationResult } from './capabi
 import { ManifestProvider } from './manifest.provider';
 import { ModelClient, ModelMessage, ModelRequest, ModelResponse } from './model-client';
 import { MsaidiziConfig, WriteMode } from './msaidizi.config';
-import { confirmationIdFor, MsaidiziService } from './msaidizi.service';
+import {
+  ApprovalGrant,
+  ApprovalGrantClaim,
+  ApprovalGrantStore,
+  argumentDigestFor,
+  confirmationIdFor,
+  MsaidiziEvent,
+  MsaidiziService,
+} from './msaidizi.service';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -109,8 +118,12 @@ function toolUse(name: string, input: Record<string, unknown> = {}, id = 'tu_1')
  * shape is what let `confirmed` work as a pre-authorisation channel for the
  * whole life of the project without a single test noticing: an id computed from
  * public inputs executed a red action on a first turn, with no proposal above it
- * and no `confirmation_required` event in the run. The service now requires the
- * proposal to exist, so these tests carry one.
+ * and no `confirmation_required` event in the run.
+ *
+ * The history is no longer what authorises anything — a grant in the ledger is —
+ * so this is now realism rather than the mechanism: these tests resume a
+ * conversation shaped like one this server would actually have produced, and the
+ * approval they send is a grant issued for that proposal.
  */
 function proposalTurn(
   name: string,
@@ -144,15 +157,86 @@ class RecordingInvoker extends CapabilityInvoker {
   }
 }
 
+/** The conversation these runs are filed under: the scope every grant carries. */
+const CONVERSATION = 'conv-A';
+
+/**
+ * The grant ledger, in memory.
+ *
+ * `spend` awaits before deciding and then decides in one synchronous step, which
+ * is what a conditional `UPDATE … WHERE used_at IS NULL` gives you: latency in
+ * front of an indivisible decision. The whole match predicate lives here for the
+ * same reason it lives in the database — the service supplies a claim and obeys
+ * the answer. `msaidizi.write-path.spec.ts` carries the fuller double, with
+ * failure injection and expiry.
+ */
+class FakeGrantStore implements ApprovalGrantStore {
+  private readonly rows = new Map<string, ApprovalGrant & { usedAt: Date | null }>();
+
+  async issue(grant: ApprovalGrant): Promise<void> {
+    await Promise.resolve();
+    this.rows.set(grant.grantId, { ...grant, usedAt: null });
+  }
+
+  async spend(claim: ApprovalGrantClaim): Promise<boolean> {
+    await Promise.resolve();
+    const row = this.rows.get(claim.grantId);
+    if (!row) return false;
+    if (row.usedAt) return false;
+    if (row.conversationId !== claim.conversationId) return false;
+    if (row.userId !== claim.userId) return false;
+    if (row.toolName !== claim.toolName) return false;
+    if (row.argumentDigest !== claim.argumentDigest) return false;
+    if (row.expiresAt.getTime() <= claim.now.getTime()) return false;
+    row.usedAt = claim.now;
+    return true;
+  }
+}
+
+/**
+ * A grant this server issued for a proposal, written straight into the ledger.
+ *
+ * Stands in for the proposing turn, which these tests hand-write as `messages`
+ * rather than running. The propose-then-resume flow — where the grant id comes
+ * off the service's own `confirmation_required` event — is exercised at length
+ * in `msaidizi.write-path.spec.ts`.
+ */
+async function issueGrantFor(
+  grants: FakeGrantStore,
+  toolName: string,
+  args: Record<string, unknown>,
+  grantId = `grt_${toolName}_${Math.random().toString(16).slice(2)}`,
+): Promise<string> {
+  const now = new Date();
+  await grants.issue({
+    grantId,
+    conversationId: CONVERSATION,
+    userId: 'user-A',
+    toolName,
+    argumentDigest: argumentDigestFor(args),
+    createdAt: now,
+    expiresAt: new Date(now.getTime() + 30 * 60 * 1000),
+  });
+  return grantId;
+}
+
+function gatesIn(events: readonly MsaidiziEvent[]) {
+  return events.filter(
+    (event): event is Extract<MsaidiziEvent, { type: 'confirmation_required' }> =>
+      event.type === 'confirmation_required',
+  );
+}
+
 function makeService(
   manifestCaps: Capability[],
   model: ModelClient,
   invoker: CapabilityInvoker,
   config: MsaidiziConfig,
+  grants: ApprovalGrantStore = new FakeGrantStore(),
 ) {
   const manifest = new ManifestProvider();
   manifest.setForTesting(manifestCaps);
-  return new MsaidiziService(config, manifest, model, invoker);
+  return new MsaidiziService(config, manifest, model, invoker, grants);
 }
 
 // ─── 1. The envelope ──────────────────────────────────────────────────────────
@@ -326,6 +410,7 @@ describe('red-tier actions require confirmation of that exact action', () => {
     const result = await service.run({
       user: authUser(['invoices.delete']),
       authorization: 'Bearer t',
+      conversationId: CONVERSATION,
       messages: [{ role: 'user', content: 'delete invoice 41' }],
     });
 
@@ -337,15 +422,17 @@ describe('red-tier actions require confirmation of that exact action', () => {
   it('executes once that exact action is confirmed', async () => {
     const invoker = new RecordingInvoker();
     const sessionId = 'ms_fixed_session_id';
-    const confirmationId = confirmationIdFor(sessionId, 'Invoices_remove', { id: '41' });
+    const grants = new FakeGrantStore();
+    const grantId = await issueGrantFor(grants, 'Invoices_remove', { id: '41' });
     const model = new ScriptedModel([toolUse('Invoices_remove', { id: '41' })]);
-    const service = makeService([redCap], model, invoker, configFor('red'));
+    const service = makeService([redCap], model, invoker, configFor('red'), grants);
 
     await service.run({
       user: authUser(['invoices.delete']),
       authorization: 'Bearer t',
       sessionId,
-      confirmed: [confirmationId],
+      conversationId: CONVERSATION,
+      confirmed: [grantId],
       messages: [
         { role: 'user', content: 'delete invoice 41' },
         ...proposalTurn('Invoices_remove', { id: '41' }),
@@ -360,21 +447,22 @@ describe('red-tier actions require confirmation of that exact action', () => {
   it('does not let approval of one action authorise a different one', async () => {
     const invoker = new RecordingInvoker();
     const sessionId = 'ms_fixed_session_id';
+    const grants = new FakeGrantStore();
     // The user approved deleting invoice 41...
-    const approved = confirmationIdFor(sessionId, 'Invoices_remove', { id: '41' });
+    const approved = await issueGrantFor(grants, 'Invoices_remove', { id: '41' });
     // ...but the model proposes deleting 42.
     const model = new ScriptedModel([toolUse('Invoices_remove', { id: '42' })]);
-    const service = makeService([redCap], model, invoker, configFor('red'));
+    const service = makeService([redCap], model, invoker, configFor('red'), grants);
 
-    // The history carries the proposal for 41, so the approval is genuinely
-    // BOUND and the only thing that can refuse the dispatch is the argument
-    // binding. Without it this test would pass on the wrong mechanism — an id
-    // naming no proposal at all is discarded before the loop starts, and the
-    // suspension below would prove nothing about arguments.
+    // The grant is real and it is for 41, so the only thing that can refuse the
+    // dispatch of 42 is the argument digest. Without a real grant this test
+    // would pass on the wrong mechanism — an unknown id is refused before the
+    // arguments are ever compared, and the suspension would prove nothing.
     const result = await service.run({
       user: authUser(['invoices.delete']),
       authorization: 'Bearer t',
       sessionId,
+      conversationId: CONVERSATION,
       confirmed: [approved],
       messages: [
         { role: 'user', content: 'delete invoice 41' },
@@ -398,7 +486,8 @@ describe('red-tier actions require confirmation of that exact action', () => {
     // shown once to hide a defect from each other.
     const invoker = new RecordingInvoker();
     const sessionId = 'ms_fixed_session_id';
-    const approved = confirmationIdFor(sessionId, 'Invoices_remove', { id: '41' });
+    const grants = new FakeGrantStore();
+    const approved = await issueGrantFor(grants, 'Invoices_remove', { id: '41' });
     const model = new ScriptedModel([
       {
         content: [
@@ -408,12 +497,13 @@ describe('red-tier actions require confirmation of that exact action', () => {
         stopReason: 'tool_use',
       },
     ]);
-    const service = makeService([redCap], model, invoker, configFor('red'));
+    const service = makeService([redCap], model, invoker, configFor('red'), grants);
 
     const result = await service.run({
       user: authUser(['invoices.delete']),
       authorization: 'Bearer t',
       sessionId,
+      conversationId: CONVERSATION,
       confirmed: [approved],
       messages: [
         { role: 'user', content: 'delete invoice 41' },
@@ -425,7 +515,85 @@ describe('red-tier actions require confirmation of that exact action', () => {
     // Deleted once, and the repeat came back as its own proposal rather than
     // riding the approval that the first one spent.
     expect(invoker.calls).toHaveLength(1);
-    expect(result.events.filter((e) => e.type === 'confirmation_required')).toHaveLength(1);
+    expect(gatesIn(result.events)).toHaveLength(1);
+    expect(result.reason).toBe('awaiting_confirmation');
+  });
+
+  it('does not let one approval authorise the same action on a SECOND REQUEST', async () => {
+    // The durable half, in the flat-argument shape. Two separate `run()` calls —
+    // two HTTP requests — sending the identical approval for the identical
+    // deletion. The spent-Set that this file's previous version tested lived
+    // inside one run and could not see this shape at all: it passed while a kept
+    // approval bought one deletion per request sent.
+    const sessionId = 'ms_fixed_session_id';
+    const grants = new FakeGrantStore();
+    const approved = await issueGrantFor(grants, 'Invoices_remove', { id: '41' });
+
+    const request = (invoker: RecordingInvoker) => {
+      const model = new ScriptedModel([toolUse('Invoices_remove', { id: '41' })]);
+      const service = makeService([redCap], model, invoker, configFor('red'), grants);
+      return service.run({
+        user: authUser(['invoices.delete']),
+        authorization: 'Bearer t',
+        sessionId,
+        conversationId: CONVERSATION,
+        confirmed: [approved],
+        messages: [
+          { role: 'user', content: 'delete invoice 41' },
+          ...proposalTurn('Invoices_remove', { id: '41' }),
+          { role: 'user', content: 'yes' },
+        ],
+      });
+    };
+
+    const firstInvoker = new RecordingInvoker();
+    const first = await request(firstInvoker);
+    expect(firstInvoker.calls).toHaveLength(1);
+    expect(first.reason).toBe('end_turn');
+
+    const secondInvoker = new RecordingInvoker();
+    const second = await request(secondInvoker);
+
+    // Invoice 41 was deleted once, by one approval, across both requests.
+    expect(secondInvoker.calls).toEqual([]);
+    expect(gatesIn(second.events)).toHaveLength(1);
+    expect(second.reason).toBe('awaiting_confirmation');
+  });
+
+  it('does not let a grant from another conversation authorise this one', async () => {
+    // A grant is scoped to the thread it was issued in, so an approval lifted
+    // from another conversation's response — or from another user's, since the
+    // user is scoped the same way — spends nothing here.
+    const invoker = new RecordingInvoker();
+    const grants = new FakeGrantStore();
+    const elsewhere = `grt_from_another_thread`;
+    await grants.issue({
+      grantId: elsewhere,
+      conversationId: 'conv-somewhere-else',
+      userId: 'user-A',
+      toolName: 'Invoices_remove',
+      argumentDigest: argumentDigestFor({ id: '41' }),
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    });
+
+    const model = new ScriptedModel([toolUse('Invoices_remove', { id: '41' })]);
+    const service = makeService([redCap], model, invoker, configFor('red'), grants);
+
+    const result = await service.run({
+      user: authUser(['invoices.delete']),
+      authorization: 'Bearer t',
+      sessionId: 'ms_fixed_session_id',
+      conversationId: CONVERSATION,
+      confirmed: [elsewhere],
+      messages: [
+        { role: 'user', content: 'delete invoice 41' },
+        ...proposalTurn('Invoices_remove', { id: '41' }),
+        { role: 'user', content: 'yes' },
+      ],
+    });
+
+    expect(invoker.calls).toEqual([]);
     expect(result.reason).toBe('awaiting_confirmation');
   });
 
@@ -459,18 +627,20 @@ describe('red-tier actions require confirmation of that exact action', () => {
     it('does not let an approved entry authorise a different entry of the same tool', async () => {
       const invoker = new RecordingInvoker();
       const sessionId = 'ms_fixed_session_id';
+      const grants = new FakeGrantStore();
       // The user approved a TZS 50,000 rent entry...
-      const approved = confirmationIdFor(sessionId, 'JournalEntries_post', rent);
+      const approved = await issueGrantFor(grants, 'JournalEntries_post', rent);
       // ...and the model came back with a TZS 9,000,000 payroll entry.
       const model = new ScriptedModel([toolUse('JournalEntries_post', payroll)]);
-      const service = makeService([journalCap], model, invoker, configFor('red'));
+      const service = makeService([journalCap], model, invoker, configFor('red'), grants);
 
-      // Rent is proposed in the history, so the rent approval is bound and the
-      // argument binding is the only thing left that can refuse payroll.
+      // The rent grant is genuine, so the argument digest is the only thing left
+      // that can refuse payroll.
       const result = await service.run({
         user: authUser(['journal.create']),
         authorization: 'Bearer t',
         sessionId,
+        conversationId: CONVERSATION,
         confirmed: [approved],
         messages: [
           { role: 'user', content: 'post the August rent entry' },
@@ -486,21 +656,22 @@ describe('red-tier actions require confirmation of that exact action', () => {
     it('executes the approved entry however the model ordered its keys', async () => {
       const invoker = new RecordingInvoker();
       const sessionId = 'ms_fixed_session_id';
-      const approved = confirmationIdFor(sessionId, 'JournalEntries_post', rent);
+      const grants = new FakeGrantStore();
+      const approved = await issueGrantFor(grants, 'JournalEntries_post', rent);
       // The same entry, re-emitted with the keys in another order — which the
       // provider is free to do, and which must still match the approval.
       const reordered = { body: { lines: [{ debit: 50000, account: '6000' }], memo: 'Rent Aug' } };
       const model = new ScriptedModel([toolUse('JournalEntries_post', reordered)]);
-      const service = makeService([journalCap], model, invoker, configFor('red'));
+      const service = makeService([journalCap], model, invoker, configFor('red'), grants);
 
-      // The PROPOSAL carries the original key order and the re-emission carries
-      // the other one, so the run has to reach the same id from both — which is
-      // now asserted twice over: once to bind the approval to a proposal, and
-      // once to match it at the gate.
+      // The grant's stored digest was taken from the original key order and the
+      // re-emission carries another, so the canonical form has to reach the same
+      // digest from both or a legitimate approval would be refused.
       const result = await service.run({
         user: authUser(['journal.create']),
         authorization: 'Bearer t',
         sessionId,
+        conversationId: CONVERSATION,
         confirmed: [approved],
         messages: [
           { role: 'user', content: 'post the August rent entry' },

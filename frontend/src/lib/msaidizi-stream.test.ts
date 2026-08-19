@@ -624,6 +624,63 @@ describe('streamMsaidiziAsk', () => {
     expect(second).toEqual({ message: 'And the next one?' });
   });
 
+  /**
+   * The grant ids, on the wire, through the real serialiser.
+   *
+   * `confirmed` is the field that authorises irreversible change, and
+   * `serialiseAsk` is an ALLOWLIST: a value that never reaches this function's
+   * body is a value that never leaves the browser, whatever the request object
+   * says. The version of this suite that mocked the transport and asserted the
+   * request OBJECT is how `conversationId` and `sequence` shipped absent while
+   * every gate was green, so this one drives the real `streamMsaidiziAsk` with an
+   * injected fetch and reads `init.body` — the actual JSON string that would go
+   * up the socket.
+   *
+   * Two grants, not one, because a single-element array cannot show order or
+   * show that a second entry survives; and byte-checked against the string
+   * rather than the parsed object, because a serialiser that dropped one of them
+   * would still parse into a perfectly valid request.
+   */
+  it('puts every server-issued grant on the wire, in order, as sent', async () => {
+    const bodies: string[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(String(init.body));
+      return sseResponse([frame('done', { type: 'done', reason: 'end_turn' })]);
+    });
+
+    await streamMsaidiziAsk(
+      {
+        message: 'Yes — go ahead with these 2 actions: …',
+        conversationId: 'conv_7',
+        sequence: 4,
+        sessionId: 'ms_7f3c',
+        confirmed: ['grt_9e41c0b7d2', 'grt_5c2d1f80aa'],
+      },
+      {},
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    );
+
+    expect(bodies[0]).toContain('"grt_9e41c0b7d2"');
+    expect(bodies[0]).toContain('"grt_5c2d1f80aa"');
+    expect(JSON.parse(bodies[0])).toEqual({
+      message: 'Yes — go ahead with these 2 actions: …',
+      conversationId: 'conv_7',
+      sequence: 4,
+      sessionId: 'ms_7f3c',
+      confirmed: ['grt_9e41c0b7d2', 'grt_5c2d1f80aa'],
+    });
+
+    // An empty array is not an approval and must not become one on the wire: a
+    // decline is a turn like any other, and `confirmed: []` beside it would be a
+    // field the server has to interpret rather than a question it never asked.
+    await streamMsaidiziAsk(
+      { message: 'No — do not go ahead with that.', confirmed: [] },
+      {},
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    );
+    expect(bodies[1]).not.toContain('confirmed');
+  });
+
   it('puts the conversation id and sequence on the wire, and never a sequence of zero', async () => {
     // Read off the body STRING, through the real `streamMsaidiziAsk`, and that
     // is the point of the test rather than an implementation detail of it.
