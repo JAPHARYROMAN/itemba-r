@@ -326,10 +326,41 @@ model MsaidiziProcedure {
 /// continuable, which is what a chat app does when a session ages out.
 model MsaidiziConversation {
   id              String    @id @default(uuid())
-  /// Mirrors audit_logs.agentSessionId. Server-owned: never taken from the client,
-  /// because confirmationIdFor() derives red-tier approval ids from it
-  /// (msaidizi.service.ts) and a client that forgets to echo it produces an
-  /// infinite approval loop that looks exactly like the server ignoring the user.
+  /// Mirrors audit_logs.agentSessionId. Minted by this server on a conversation's
+  /// first turn and echoed back by the client on every later one.
+  ///
+  /// The echo is required, and that is the point: confirmationIdFor() derives
+  /// red-tier approval ids from this value (msaidizi.service.ts), so a client
+  /// that forgets produces an infinite approval loop that looks exactly like the
+  /// server ignoring the user. Both surfaces that accept it — POST /msaidizi/ask
+  /// and POST /msaidizi/procedures/:id/run — pin it to /^ms_[0-9a-f]{32}$/, the
+  /// alphabet and length mintSessionId() produces.
+  ///
+  /// That pattern is a check on SHAPE and not on provenance, and this column is
+  /// documented as what it holds rather than as what would be nicer. Any client
+  /// with a random-hex generator satisfies the pattern, so the value here can
+  /// also be one a caller invented for a conversation of its own — reached
+  /// whenever an id arrives naming no stored conversation, which is exactly what
+  /// a client holds after a first turn whose row could not be written.
+  ///
+  /// WHOSE run the id names is the property the oversight trail depends on, and
+  /// it holds for every value that reaches THIS COLUMN. It is unique, so a
+  /// caller sending one that already names another user's conversation — or its
+  /// own, deleted — collides on insert, and conversations.service.ts runs that
+  /// turn unpersisted under a freshly minted id rather than adopting it. No row
+  /// stored here carries one user's session id over another user's conversation.
+  ///
+  /// The audit trail is wider than this column, and that is where the claim
+  /// stops. A run whose conversation could not be READ is never offered to this
+  /// index at all: conversations.service.ts degrades to the id the request
+  /// carried, writes no row here, and audit_logs rows are stamped with a value
+  /// nothing checked — including, during such an outage, an id naming somebody
+  /// else's conversation. Those rows still carry their own userId and were
+  /// written by the caller's own token, so the trail can always say who acted;
+  /// what a session id cannot promise while the store is unreadable is that it
+  /// groups one person's work. Filter by userId when that distinction matters.
+  /// See OpenedTurn.sessionId and unverifiedSessionId() in
+  /// conversations.service.ts.
   agentSessionId  String    @unique
   userId          String
   companyId       String?

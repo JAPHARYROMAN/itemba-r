@@ -21,14 +21,20 @@
  * ─── What `confirmed` is, and what it must never become ─────────────────────
  *
  * It is not in this state. A red-tier proposal suspends the run and the client
- * resumes it by sending `confirmed: [id]` on a LATER request; the server checks
- * that array as a plain set against every red proposal for the whole run and
- * keeps no pending state of its own. A client that parks the ids in state and
- * re-sends them has converted one approval into a standing grant for that action
- * for the rest of the session. So `buildAskRequest` takes them as an argument
- * and forgets them, and there is no action that stores them.
+ * resumes it by sending `confirmed: [id]` on a LATER request; the server keeps no
+ * pending state of its own between requests, so that array is the whole of what
+ * it knows about what the user agreed to. Inside a single request it now spends
+ * each id on the dispatch that id authorises — but that is a server policy which
+ * has already changed once, and nothing here rests on it.
+ *
+ * What does not move is the shape of the request: the array names ids and cannot
+ * name a turn, so a client that parks the ids in state and re-sends them puts a
+ * standing "yes" for that action on every later turn of the run. So
+ * `buildAskRequest` takes them as an argument and forgets them, and there is no
+ * action that stores them.
  */
 
+import { MSAIDIZI_MESSAGE_LIMIT, asDoneReason, asSequence } from './msaidizi-types';
 import type {
   ConfirmationRequest,
   MsaidiziAskRequest,
@@ -41,6 +47,7 @@ import type {
 } from './msaidizi-types';
 import { streamMsaidiziAsk } from './msaidizi-stream';
 import type {
+  MsaidiziFrame,
   MsaidiziStreamOptions,
   MsaidiziStreamOutcome,
   MsaidiziTermination,
@@ -54,7 +61,7 @@ export interface MsaidiziTurn {
   /** The trace, in arrival order, `done` included. Carries no result bodies. */
   events: MsaidiziEvent[];
   status: 'running' | 'settled';
-  /** Null while running. Branch on `kind`, then on `reason` for the six states. */
+  /** Null while running. Branch on `kind`, then on `reason` for the seven states. */
   termination: MsaidiziTermination | null;
   usage: RunUsage | null;
   startedAt: number;
@@ -64,17 +71,47 @@ export interface MsaidiziTurn {
    * screen but the transport state behind it is not — see `historyComplete`.
    */
   resultReceived: boolean;
+  /**
+   * Whether the SERVER opened a row for THIS turn.
+   *
+   * True once this turn's own `session` frame reported a `conversationId`, which
+   * the backend sends only when the turn's row was written and omits for a turn
+   * that ran unpersisted — a store that was unavailable, a transaction that
+   * rolled back. It is deliberately per-turn and not read back off
+   * `state.conversationId`, because a degraded turn does not clear the id this
+   * tab already holds: the state-level id says this THREAD is filed somewhere,
+   * this flag says this EXCHANGE is, and only the second licenses continuing
+   * after the `result` frame was lost. See the `settled` case.
+   */
+  serverRecorded: boolean;
   /** Frames that arrived and could not be read. Show the count; do not hide it. */
   malformedFrames: number;
+  /**
+   * Frames this build does not know the name of. Carried through the transport
+   * and counted here for the same reason as the line above: an update that went
+   * unread is a gap in the trace whether it was unreadable or merely unknown.
+   */
+  unknownFrames: number;
 }
 
 export interface MsaidiziConversationState {
   /**
-   * The server-side conversation, once the stream carries a `session` frame.
-   * Null today: the backend has the persistence surface but `POST /ask` does not
-   * yet mint or return a conversation id.
+   * The server-side conversation this thread is filed under.
+   *
+   * Arrives on the `session` frame, before the first model turn. Null until one
+   * lands, and null for the life of a run the store could not persist — that run
+   * still answers the question, it is simply not a place the user can return to.
    */
   conversationId: string | null;
+  /**
+   * The highest turn sequence this tab has seen on `conversationId`.
+   *
+   * Sent back on the next turn so the server can answer 409 when the thread has
+   * moved on in another window. Null means this tab has no claim to make about
+   * where the conversation is, and the server does not check — which is the only
+   * correct reading of an unpersisted turn, and never `0`. See `asSequence`.
+   */
+  sequence: number | null;
   /**
    * Correlates every audit row this conversation produces, and — on the path
    * without server-side resume — the value the red-tier confirmation ids are
@@ -87,10 +124,21 @@ export interface MsaidiziConversationState {
   history: ModelMessage[];
   turns: MsaidiziTurn[];
   /**
+   * Whether the memory the NEXT turn would be answered from still holds every
+   * exchange in this thread.
+   *
    * False once a run has ended without returning its `messages` after doing some
-   * work. The thread stays readable; it can no longer be continued in this tab,
-   * because the next request would echo a history missing that exchange and the
-   * model would answer as though it never happened.
+   * work AND without the server having a record of that same run — no `result`
+   * frame, so this tab's `history` is missing the exchange, and no committed
+   * server-side turn either, so there is nowhere left the model's account of it
+   * survives. The thread stays readable; it can no longer be continued, because
+   * the next request would put the model in front of a question about work it
+   * has no record of doing.
+   *
+   * A lost `result` frame on a turn the server did commit is NOT that case: the
+   * server holds the messages and answers the next turn from them. See the
+   * `settled` case for the two facts that decide it and for why the pairing is
+   * safe against the approval loop.
    */
   historyComplete: boolean;
 }
@@ -100,6 +148,7 @@ export function createConversationState(
 ): MsaidiziConversationState {
   return {
     conversationId: init.conversationId ?? null,
+    sequence: init.sequence ?? null,
     sessionId: init.sessionId ?? null,
     history: init.history ?? [],
     turns: init.turns ?? [],
@@ -110,7 +159,15 @@ export function createConversationState(
 export type MsaidiziConversationAction =
   | { type: 'turn_started'; turnId: string; prompt: string; at: number }
   | { type: 'event'; turnId: string; event: MsaidiziEvent }
-  | { type: 'session'; session: MsaidiziSessionFrame }
+  /**
+   * The `session` frame, with the turn it was written for.
+   *
+   * `turnId` is not decoration: the frame's `conversationId` reports whether the
+   * store opened a row for THAT turn, and a frame that omits it leaves the
+   * conversation-level id standing. Without the turn to attach it to there is no
+   * way left to tell "this thread is persisted" from "this exchange is".
+   */
+  | { type: 'session'; turnId: string; session: MsaidiziSessionFrame }
   | { type: 'result'; turnId: string; result: MsaidiziRunResult }
   | { type: 'settled'; turnId: string; outcome: MsaidiziStreamOutcome; at: number }
   /** Load a stored conversation for reading. See `hydrateFromConversation`. */
@@ -137,7 +194,9 @@ export function msaidiziConversationReducer(
             startedAt: action.at,
             endedAt: null,
             resultReceived: false,
+            serverRecorded: false,
             malformedFrames: 0,
+            unknownFrames: 0,
           },
         ],
       };
@@ -155,8 +214,30 @@ export function msaidiziConversationReducer(
       return {
         ...state,
         conversationId: action.session.conversationId ?? state.conversationId,
+        // The frame carries the sequence the server just assigned this turn, so
+        // after a persisted turn this tab's claim is current.
+        //
+        // Anything that is not a real sequence is HELD, not taken, and the case
+        // that matters is `0`. A turn the store could not persist reports no
+        // sequence — but it does not clear `conversationId` either, because the
+        // id is still true. Take a `0` here and this tab ends up claiming turn
+        // zero of a conversation that is on turn five, which the server reads as
+        // a second window having moved the thread on: a 409 on every later turn,
+        // non-retryable, blaming a window that does not exist, until the user
+        // reloads the page. `asSequence` is where "not a real sequence" is
+        // decided, and `??` alone is not it — `0 ?? x` is `0`.
+        sequence: asSequence(action.session.sequence) ?? state.sequence,
         sessionId:
           action.session.agentSessionId ?? action.session.sessionId ?? state.sessionId ?? null,
+        // A conversation id on this frame is the server saying it wrote a row
+        // for this turn before the first model turn ran, so it is recorded on
+        // the turn and not only on the conversation. A frame without one leaves
+        // every turn exactly as it was — including this one, which is the whole
+        // point: an unpersisted turn inside a persisted conversation must not
+        // inherit the conversation's standing. See `MsaidiziTurn.serverRecorded`.
+        turns: action.session.conversationId
+          ? mapTurn(state.turns, action.turnId, (turn) => ({ ...turn, serverRecorded: true }))
+          : state.turns,
       };
 
     case 'result':
@@ -173,8 +254,12 @@ export function msaidiziConversationReducer(
           usage: action.result.usage ?? turn.usage,
           resultReceived: true,
         })),
-        // A result arrived, so this turn is represented in `history`. It does not
-        // repair an earlier gap: once a turn is missing, it stays missing.
+        // A result arrived, so this turn is represented in `history` — and when
+        // the server answered this turn from its own resume state, so is the
+        // exchange this tab lost the frame for, because `messages` comes back
+        // whole. What a result cannot do is repair the case the flag is false
+        // for: that one is a run NEITHER party kept, and no later turn can
+        // recover an account of it. So the flag is carried, never re-raised.
         historyComplete: state.historyComplete,
       };
 
@@ -185,17 +270,86 @@ export function msaidiziConversationReducer(
         termination: action.outcome.termination,
         endedAt: action.at,
         malformedFrames: action.outcome.malformedFrames,
+        unknownFrames: action.outcome.unknownFrames,
       }));
       const turn = turns.find((candidate) => candidate.id === action.turnId);
       // A run that produced events and never reported its `messages` has left a
-      // hole: the model did work this thread can no longer describe to it. A run
-      // that produced nothing (a 503, an instant refusal to start) left the
-      // prefix exactly as it was, so continuing is still honest.
+      // hole in THIS TAB's history: the model did work this array can no longer
+      // describe to it. A run that produced nothing (a 503, an instant refusal
+      // to start) left the prefix exactly as it was, so continuing is still
+      // honest.
       const lostTurn = Boolean(turn && !turn.resultReceived && turn.events.length > 0);
+      // ...but this tab's array stopped being the only copy when the server
+      // started keeping one. Whether the SERVER can still be told what happened
+      // in that run is a different question from whether this tab can, and it
+      // takes two facts, both of them about this turn rather than the thread:
+      //
+      //   1. `serverRecorded` — this turn's own `session` frame carried a
+      //      conversation id, so a row was opened for this exchange. A turn that
+      //      ran unpersisted inside an otherwise-persisted conversation fails
+      //      here: the id this tab holds is true, but the server's stored state
+      //      stops one turn short of the run that was lost.
+      //
+      //      This one is now CONSERVATIVE rather than necessary, and the
+      //      distinction is worth keeping straight because the file that made it
+      //      so reasons about the same failure from the other end. It used to be
+      //      necessary — resuming into a state one turn short would hand the
+      //      model an approval for a proposal it never made — but
+      //      `continueById` no longer takes the server's copy on sight: it keeps
+      //      whichever copy holds more of the conversation. An unpersisted turn
+      //      leaves this tab holding the LONGER array, proposal included, so
+      //      sending it would in fact recover the run. We do not, because the
+      //      recovery is only as good as this tab's array being whole, and that
+      //      is precisely what a lost run puts in doubt. Declining a turn we
+      //      could probably have run costs one retyped question; running one on
+      //      an array we cannot vouch for costs an approval the user did not
+      //      give. Relaxing it is a real option, not a bug fix.
+      //   2. The run reported its verdict, so it is over. The backend awaits the
+      //      transaction that stores the run's `messages` BEFORE it writes the
+      //      `result` frame, so a socket that died between those two died after
+      //      the server had committed. Without this, an abort and a mid-loop
+      //      disconnect would qualify while the run is still executing, and a
+      //      second turn opened against a conversation whose first run has not
+      //      finished writing is two runs racing to be its stored memory.
+      //
+      // Both true is exactly "only the last frame was lost", and there the
+      // approve path stays live. That does NOT reopen the infinite approval
+      // loop. What the loop takes is an approval arriving at a model with no
+      // record of the proposal it answers: the messages carrying the suspended
+      // `tool_use` are missing from whatever the next request is answered from,
+      // the approved id therefore matches nothing, and the run proposes the same
+      // action over again. This condition is precisely the case where those
+      // messages demonstrably survive somewhere. The next request carries
+      // `conversationId`, so the server answers it from the conversation's own
+      // stored messages — the ones holding the proposal — and runs it on that
+      // conversation's own `agentSessionId`, which is the id this turn's
+      // `session` frame already reported to this tab before the first model
+      // turn, so the ids the user approved are the ids recomputed. Where the
+      // server cannot honour the id it says so in a status code with written
+      // copy — 404, 409, 410 — instead of suspending again.
+      const serverHoldsTurn = Boolean(lostTurn && turn?.serverRecorded && verdictReported(turn));
       return {
         ...state,
         turns,
-        historyComplete: state.historyComplete && !lostTurn,
+        // The holed array goes with the turn that holed it. It is not sent on
+        // the recovered path — the server's copy is the memory now.
+        //
+        // The server would reach the same answer on its own: it keeps whichever
+        // copy is longer, and `serverHoldsTurn` is exactly the case where the
+        // server recorded the turn this array is missing, so the array would
+        // lose the comparison. Withholding it is therefore belt-and-braces, and
+        // it is kept because it is the honest statement of what this tab knows —
+        // this array is not a description of the conversation any more, and
+        // offering it as one and relying on a length comparison to reject it is
+        // a worse arrangement than not offering it.
+        //
+        // It also decides the one case the comparison cannot help with. If the
+        // server's copy has gone (an expired clock, a failed write), sending the
+        // holed array would put the approval in front of a model that never made
+        // the proposal, because there is nothing longer for it to lose to.
+        // Withheld, that case is a written 410 instead.
+        history: serverHoldsTurn ? [] : state.history,
+        historyComplete: state.historyComplete && !(lostTurn && !serverHoldsTurn),
       };
     }
 
@@ -203,6 +357,22 @@ export function msaidiziConversationReducer(
       const conversation = action.conversation;
       return {
         conversationId: conversation.id,
+        // The last sequence this client actually received, not the conversation's
+        // reported `turnCount`. They are the same today — the detail endpoint
+        // returns every turn — but if it ever returned fewer, claiming the count
+        // would assert this tab had seen turns it never got, and the 409 that
+        // exists to catch exactly that would be the thing suppressed.
+        //
+        // Through `asSequence` because the fold's seed is `0` and a detail that
+        // carried no turns would otherwise leave this tab claiming turn zero,
+        // which is the false-409 poisoning by another door. No turns means no
+        // claim, which is `null`.
+        sequence: asSequence(
+          conversation.turns.reduce(
+            (highest, turn) => (turn.sequence > highest ? turn.sequence : highest),
+            0,
+          ),
+        ),
         // Reusing the stored session id keeps this conversation's audit rows
         // under one key. It does NOT restore the model's memory.
         sessionId: conversation.agentSessionId,
@@ -212,7 +382,19 @@ export function msaidiziConversationReducer(
         // history from the transcript would hand the model invented data to
         // answer from, sounding exactly as confident as before.
         history: [],
-        historyComplete: false,
+        // Empty history no longer means "cannot continue". The next turn sends
+        // `conversationId`, and the server answers it from its own stored resume
+        // state — the client never needed `messages` for this, which is why the
+        // endpoint does not return them. So the question is not whether THIS tab
+        // holds the memory, it is whether the SERVER still does, and
+        // `continuable` is the server's own answer to exactly that.
+        //
+        // It is a snapshot taken when the detail was fetched, so a tab left open
+        // across the resume window holds a stale `true`. That is survivable
+        // because the server refuses a continuation past the clock with a
+        // written 410 sentence rather than a generic failure — this moves the
+        // message earlier, it does not replace it.
+        historyComplete: conversation.continuable,
         turns: conversation.turns.map((turn) => ({
           id: turn.id,
           prompt: turn.prompt,
@@ -223,7 +405,17 @@ export function msaidiziConversationReducer(
           startedAt: Date.parse(turn.startedAt),
           endedAt: turn.endedAt ? Date.parse(turn.endedAt) : null,
           resultReceived: false,
+          // It came out of the store, so the store has it. Inert for the rule in
+          // the `settled` case — a hydrated turn arrives already settled and is
+          // never settled again — and recorded truthfully anyway, because a flag
+          // that means "the server has this exchange" must not read false on the
+          // turns the server read it out of.
+          serverRecorded: true,
+          // A stored transcript is what the server wrote down, not what this tab
+          // read off a socket: there were no frames here to lose or to fail to
+          // recognise, so both counts are zero rather than unknown.
           malformedFrames: 0,
+          unknownFrames: 0,
         })),
       };
     }
@@ -245,23 +437,32 @@ function mapTurn(
 }
 
 /**
+ * Whether the RUN said how it ended, as opposed to the transport saying the run
+ * stopped being visible.
+ *
+ * `done` is the only verdict the server itself reports, and the transport reads
+ * it off the trace even when the socket then died — a connection lost between
+ * `done` and `result` still knows how the run ended. So this is the client's one
+ * honest signal that the server-side run is finished rather than still going,
+ * which is what the `settled` case needs before it treats the server as holding
+ * this turn. Every other kind — `stream_failed`, `disconnected`, `aborted`,
+ * `unavailable` — is the transport's own account of a run whose state on the
+ * server is either unwritten or still being written.
+ */
+function verdictReported(turn: MsaidiziTurn): boolean {
+  return turn.termination?.kind === 'done';
+}
+
+/**
  * A stored turn records only its `reason` string, so a rehydrated turn can say
  * how the run ended and nothing about how the connection behaved. Anything the
  * backend adds to `DoneReason` later arrives here as an unrecognised string, and
- * `failed` is the honest reading of a verdict this build cannot name.
+ * `asDoneReason` maps it to `failed` — the same coercion the live path applies
+ * to the `done` frame, from the same list, so the two halves cannot disagree
+ * about what this build knows how to render.
  */
 function storedTermination(reason: string): MsaidiziTermination {
-  const known: ReadonlySet<string> = new Set([
-    'end_turn',
-    'awaiting_confirmation',
-    'tool_budget_exhausted',
-    'write_budget_exhausted',
-    'refused',
-    'failed',
-  ]);
-  return known.has(reason)
-    ? { kind: 'done', reason: reason as MsaidiziRunResult['reason'] }
-    : { kind: 'done', reason: 'failed' };
+  return { kind: 'done', reason: asDoneReason(reason) };
 }
 
 // ─── Selectors ────────────────────────────────────────────────────────────────
@@ -293,7 +494,14 @@ export function pendingConfirmations(state: MsaidiziConversationState): Confirma
   );
 }
 
-/** Whether a next turn in this tab would carry the thread's real memory. */
+/**
+ * Whether a next turn would be answered from the thread's real memory.
+ *
+ * Not "whether this tab holds it": the memory can be here, in `history`, or on
+ * the server under `conversationId`, and the next turn carries both. What is
+ * refused is a turn asked against a run neither party has an account of — see
+ * `historyComplete`.
+ */
 export function canContinue(state: MsaidiziConversationState): boolean {
   return state.historyComplete && !isRunning(state);
 }
@@ -310,6 +518,44 @@ export function buildAskRequest(
   options: { confirmed?: string[] } = {},
 ): MsaidiziAskRequest {
   const request: MsaidiziAskRequest = { message };
+  // Once there is a conversation id, it goes on every turn. It is what puts the
+  // server's own stored resume state into the running: the server compares its
+  // copy against whatever this tab sends and keeps whichever holds more of the
+  // conversation, winning ties (conversations.service.ts:continueById). That is
+  // the only way a conversation reopened from the rail continues from what
+  // actually happened in it — such a tab has no history at all (see the
+  // `hydrated` case), so the server's copy is the only copy — and the only way
+  // the server, rather than this tab, decides which session id the confirmation
+  // ids came from.
+  if (state.conversationId) {
+    request.conversationId = state.conversationId;
+    // Null here is this tab having no claim to make, not a value being dropped:
+    // every sequence is read through `asSequence` on the way INTO state (the
+    // `session` and `hydrated` cases), so what survives to here is either a real
+    // turn number or nothing.
+    if (state.sequence !== null) request.sequence = state.sequence;
+  }
+  // Still sent, and NOT an alternative to the line above. This is a real second
+  // copy of the conversation, not a fallback that the server discards on sight:
+  // it keeps the LONGER of the two arrays and wins ties, so sending ours costs
+  // nothing when the server is current and is the whole recovery when it is not.
+  //
+  // Both halves of that matter, and dropping this line would lose both. The
+  // obvious half is the three cases where the server holds nothing at all — an
+  // expired resume clock, a conversation too large to store, a write that failed
+  // — where withholding turns a recoverable turn into a 410 on a tab holding a
+  // perfectly good history. The less obvious half is the one that made the
+  // server stop preferring itself unconditionally: `close()` swallows its own
+  // transaction failures, so the store can end a turn BEHIND a run that really
+  // happened and really handed this tab its `messages`. A server that ignored
+  // this array would resume that conversation from a state that never saw the
+  // last turn — on the run that matters most, a red-tier proposal the user is
+  // about to approve. Sending it is what makes that survivable.
+  //
+  // "Perfectly good" is the load-bearing half, and it is not checked here: an
+  // array with a turn missing from it never reaches this line, because the
+  // `settled` case drops it at the moment the hole appears rather than leaving a
+  // holed history to be picked up as somebody's second copy.
   if (state.history.length > 0) request.history = state.history;
   if (state.sessionId) request.sessionId = state.sessionId;
   if (options.confirmed && options.confirmed.length > 0) request.confirmed = options.confirmed;
@@ -327,24 +573,59 @@ export function buildAskRequest(
  * "yes" has been measured to narrow the confirmed tool straight back out of the
  * registry — a defect the backend fixes by unioning the prior turn's tools, and
  * which nothing here may rely on being fixed.
+ *
+ * It is also the one message on the page nobody typed, so nothing has already
+ * stopped it at `MSAIDIZI_MESSAGE_LIMIT` the way the composer stops the user.
+ * The descriptions come from `describeForConfirmation`, which inlines every
+ * argument through `JSON.stringify` — one posted journal entry carries its whole
+ * line array — and a message over the cap is a 400 from the pipe that reads on
+ * screen as a transient network fault. The user retries, gets the identical 400,
+ * and the action they approved can never run. So the length is bounded here.
  */
 export function composeConfirmationMessage(approved: ConfirmationRequest[]): string {
   if (approved.length === 0) return 'No — do not go ahead with that.';
-  if (approved.length === 1) return `Yes — go ahead: ${approved[0].description}`;
-  return `Yes — go ahead with these ${approved.length} actions: ${approved
-    .map((request) => request.description)
-    .join('; ')}`;
+
+  const prefix =
+    approved.length === 1
+      ? 'Yes — go ahead: '
+      : `Yes — go ahead with these ${approved.length} actions: `;
+  const joiner = '; ';
+  const room = MSAIDIZI_MESSAGE_LIMIT - prefix.length - joiner.length * (approved.length - 1);
+  // An equal share each, rather than first-come-first-served: every approved
+  // action has to stay named in the record, and one action whose arguments run
+  // to thousands of characters would otherwise spend the whole budget and leave
+  // the ones after it unnamed. Descriptions are cut from the end, which is where
+  // the inlined arguments are — the action phrase and the route survive.
+  const share = Math.floor(room / approved.length);
+  const described = approved.map((request) => truncate(request.description, share));
+
+  // The final clamp is a backstop, not the mechanism: it is what holds if the
+  // share arithmetic is ever handed a batch large enough to make it meaningless.
+  return truncate(prefix + described.join(joiner), MSAIDIZI_MESSAGE_LIMIT);
+}
+
+/** Cut to `limit` characters, marking the cut so nobody reads it as the whole thing. */
+function truncate(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  if (limit < 1) return '';
+  let cut = text.slice(0, limit - 1);
+  // Descriptions carry user data — a supplier name with an emoji in it — and a
+  // cut between the two halves of one leaves a lone surrogate that does not
+  // survive the round trip to the model as the character it came from.
+  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
+  return `${cut}…`;
 }
 
 /** Mechanics of a termination. The wording belongs to the renderer, not here. */
 export interface TerminationTraits {
-  /** Stable switch key: the six verdicts, plus the four the server never saw. */
+  /** Stable switch key: the seven verdicts, plus the four the server never saw. */
   key:
     | 'end_turn'
     | 'awaiting_confirmation'
     | 'tool_budget_exhausted'
     | 'write_budget_exhausted'
     | 'refused'
+    | 'truncated'
     | 'failed'
     | 'stream_failed'
     | 'disconnected'
@@ -422,6 +703,15 @@ export interface RunTurnOptions extends MsaidiziStreamOptions {
   turnId?: string;
   /** Injection point for tests. Defaults to the real transport. */
   stream?: typeof streamMsaidiziAsk;
+  /**
+   * Every decoded frame, in arrival order — unknown and malformed ones included.
+   *
+   * The transport carries a frame it does not recognise rather than dropping it,
+   * and this is the hook that keeps that true above the transport: without it
+   * the orchestrator subscribes to the three frame kinds it knows and a frame
+   * the backend added is silently discarded here instead of there.
+   */
+  onFrame?: (frame: MsaidiziFrame) => void;
 }
 
 /**
@@ -439,7 +729,7 @@ export async function runMsaidiziTurn(
   dispatch: (action: MsaidiziConversationAction) => void,
   options: RunTurnOptions = {},
 ): Promise<MsaidiziStreamOutcome> {
-  const { turnId: providedId, stream, now, ...streamOptions } = options;
+  const { turnId: providedId, stream, now, onFrame, ...streamOptions } = options;
   const clock = now ?? (() => Date.now());
   const turnId = providedId ?? createTurnId();
   const run = stream ?? streamMsaidiziAsk;
@@ -449,8 +739,9 @@ export async function runMsaidiziTurn(
   const outcome = await run(
     request,
     {
+      onFrame,
       onEvent: (event) => dispatch({ type: 'event', turnId, event }),
-      onSession: (session) => dispatch({ type: 'session', session }),
+      onSession: (session) => dispatch({ type: 'session', turnId, session }),
       onResult: (result) => dispatch({ type: 'result', turnId, result }),
     },
     { ...streamOptions, now: clock },
@@ -460,7 +751,10 @@ export async function runMsaidiziTurn(
   return outcome;
 }
 
-/** Load a stored conversation for reading. Readable, not continuable — see the reducer. */
+/**
+ * Load a stored conversation. Always readable; continuable when the SERVER says
+ * its resume state is still there — `continuable`, see the `hydrated` case.
+ */
 export function hydrateFromConversation(
   conversation: MsaidiziConversationDetail,
 ): MsaidiziConversationState {

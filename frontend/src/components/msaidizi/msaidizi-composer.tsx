@@ -21,9 +21,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { SendHorizontal } from 'lucide-react';
-
-/** `AskDto.message` is `@MaxLength(8000)`. Stopping here beats a 400 from the pipe. */
-const MAX_MESSAGE = 8000;
+// `AskDto.message` is `@MaxLength(8000)`. Stopping here beats a 400 from the
+// pipe. Imported rather than repeated: two copies of the number is how one of
+// them stops matching the pipe.
+import { MSAIDIZI_MESSAGE_LIMIT } from '@/lib/msaidizi-types';
 
 export interface MsaidiziComposerProps {
   onSubmit: (message: string) => void;
@@ -89,7 +90,7 @@ export function MsaidiziComposer({
           ref={inputRef}
           rows={1}
           value={value}
-          maxLength={MAX_MESSAGE}
+          maxLength={MSAIDIZI_MESSAGE_LIMIT}
           disabled={disabled}
           placeholder={placeholder}
           onChange={(event) => setValue(event.target.value)}

@@ -45,6 +45,8 @@
  */
 
 import { MANAGED_401_HEADER, SESSION_EXPIRED_EVENT } from './api-client';
+import { asDoneReason, asSequence } from './msaidizi-types';
+import type { MsaidiziConflictCode } from './msaidizi-types';
 import type {
   DoneReason,
   MsaidiziAskRequest,
@@ -83,10 +85,13 @@ export interface SseFrame {
 /**
  * A decoded Msaidizi frame.
  *
- * Decoding keys off the SSE `event:` NAME, never `data.type`. Three frames break
- * the `data.type` pattern — the controller's catch-all `error`, the `result`
- * frame, and the `session` frame the plan adds — so a client that sniffs the
- * payload gets those three wrong.
+ * Decoding keys off the SSE `event:` NAME, never `data.type`. Two of the frames
+ * this stream writes have no `data.type` at all — the controller's catch-all
+ * `error`, which is a bare `{ message }`, and the `result` frame, which is the
+ * `RunResult` — so a client that sniffs the payload gets both of them wrong. The
+ * `session` frame does carry a matching `type`, and is decoded by name anyway:
+ * one rule for every frame is what keeps the next one that arrives without a
+ * `type` from being a special case.
  */
 export type MsaidiziFrame =
   | { kind: 'event'; event: MsaidiziEvent }
@@ -251,13 +256,13 @@ export function decodeFrame(frame: SseFrame): MsaidiziFrame {
 /**
  * How a run ended, from the client's point of view.
  *
- * `done` is the server's own verdict and fans out into the six reasons the plan
+ * `done` is the server's own verdict and fans out into the seven reasons the plan
  * names. The other four are transport facts the server never got to comment on,
  * and each needs its own sentence on screen — a stall that renders identically
  * to a slow run is the failure this whole type exists to prevent.
  */
 export type MsaidiziTermination =
-  /** The run reported itself finished. Branch on `reason` for the six states. */
+  /** The run reported itself finished. Branch on `reason` for the seven states. */
   | { kind: 'done'; reason: DoneReason }
   /**
    * The server wrote its catch-all `error` frame and stopped without a verdict.
@@ -282,6 +287,16 @@ export type MsaidiziTermination =
       status: number | null;
       cause: 'network' | 'http' | 'session_expired' | 'not_a_stream';
       message: string;
+      /**
+       * The server's own discriminator for this refusal, when it sent one.
+       *
+       * Only the 409s carry one today. It is what lets the UI tell a conflict
+       * that clears by itself from one that never will WITHOUT reading the
+       * server's prose — see `MsaidiziConflictCode`. Absent on every other
+       * status, and absent from an older backend, so a reader must branch on
+       * its presence rather than assume it.
+       */
+      code?: MsaidiziConflictCode;
     };
 
 export interface MsaidiziStreamOutcome {
@@ -291,15 +306,33 @@ export interface MsaidiziStreamOutcome {
   /**
    * The final `result` frame, or `null` when the run never reported one.
    *
-   * Null is the case that matters: without it there is no `messages` to echo, so
-   * the conversation cannot be continued in this tab without silently dropping
-   * the turn from the model's view of it.
+   * Null is the case that matters: there is no `messages` to echo, so this tab's
+   * own history now has a hole where that exchange was, and continuing on it
+   * alone would drop the turn from the model's view of the conversation.
+   *
+   * Whether that ends the thread is decided a layer up rather than here, and it
+   * is no longer automatic: the `session` frame beside this one says whether the
+   * server opened a row for the same turn, and a run the server committed is one
+   * it can still be asked to continue from. See `historyComplete` in
+   * msaidizi-conversation.ts.
    */
   result: MsaidiziRunResult | null;
-  /** The `session` frame, once the backend emits one. Null until then. */
+  /**
+   * The `session` frame. Null when the stream died before it arrived — it is
+   * written before the first model turn, so that is a very short window.
+   */
   session: MsaidiziSessionFrame | null;
   /** Frames that arrived but could not be read. Surface a count, not silence. */
   malformedFrames: number;
+  /**
+   * Frames whose event name this build does not know.
+   *
+   * Not an error — the backend may ship a frame before the frontend learns to
+   * use it, and that is the point of carrying them. But an update that went
+   * unread is the same fact as one that could not be read, and without a count
+   * beside `malformedFrames` the only honest signal is a number nobody kept.
+   */
+  unknownFrames: number;
   /** Wall clock from request to termination. */
   durationMs: number;
 }
@@ -351,6 +384,7 @@ export async function streamMsaidiziAsk(
   let result: MsaidiziRunResult | null = null;
   let session: MsaidiziSessionFrame | null = null;
   let malformedFrames = 0;
+  let unknownFrames = 0;
 
   const settle = (termination: MsaidiziTermination): MsaidiziStreamOutcome => ({
     termination,
@@ -358,6 +392,7 @@ export async function streamMsaidiziAsk(
     result,
     session,
     malformedFrames,
+    unknownFrames,
     durationMs: Math.max(0, now() - startedAt),
   });
 
@@ -392,7 +427,9 @@ export async function streamMsaidiziAsk(
         case 'unknown':
           // A frame this build does not know about is not an error — the
           // backend may ship one before the frontend learns to use it. It is
-          // handed to `onFrame` above and otherwise left alone.
+          // handed to `onFrame` above and left alone otherwise, but it is
+          // counted: silence is how a whole class of update goes unnoticed.
+          unknownFrames += 1;
           break;
       }
     }
@@ -446,7 +483,17 @@ export async function streamMsaidiziAsk(
  */
 function verdictFrom(events: MsaidiziEvent[]): MsaidiziTermination | null {
   const done = events.find((event) => event.type === 'done');
-  if (done) return { kind: 'done', reason: done.reason };
+  // `done.reason` is typed as the union but sourced from an unvalidated wire
+  // string, so it is read through `asDoneReason` HERE, at the transport
+  // boundary. What that buys is narrow and worth stating exactly: no
+  // `MsaidiziTermination` built on this path carries a reason outside the seven,
+  // so a verdict this build cannot name arrives downstream as `failed` and draws
+  // the `failed` copy. It is the same reading the stored path applies to a
+  // stored `reason`, from the same list, so the two halves cannot disagree about
+  // what this build knows how to render. A renderer that also defends itself
+  // against an unrecognised key is defending against a termination built
+  // somewhere other than here — not against this one.
+  if (done) return { kind: 'done', reason: asDoneReason(done.reason) };
   const failure = events.find((event) => event.type === 'error');
   if (failure) return { kind: 'stream_failed', message: failure.message };
   return null;
@@ -517,12 +564,14 @@ async function openStream(
   }
 
   if (!response.ok) {
+    const refusal = await refusalFromErrorResponse(response);
     return {
       termination: {
         kind: 'unavailable',
         status: response.status,
         cause: 'http',
-        message: await messageFromErrorResponse(response),
+        message: refusal.message,
+        ...(refusal.code ? { code: refusal.code } : {}),
       },
     };
   }
@@ -570,13 +619,31 @@ function unreachable(): MsaidiziTermination {
  * not filtered, not sorted, not re-typed. The backend's own DTO leaves
  * `content` undecorated for the same reason, with a comment recording that
  * typing it stripped provider fields and broke multi-turn outright. This is the
- * client-side half of that contract and it is the whole job of this function.
+ * client-side half of that contract.
+ *
+ * The other half of the job is the part that fails silently: this is an
+ * ALLOWLIST, and it is the only body builder on this path, so a field of
+ * `MsaidiziAskRequest` not named below does not leave the browser at all. It
+ * shipped once without `conversationId` and `sequence`, which took the whole
+ * server-authoritative continuation path — the 409 two-tab guard, both 410
+ * sentences, and resuming a reopened thread from server-held state — out of the
+ * product while every type checked and every test passed. Adding a field to
+ * that interface means adding a line here, and the test that holds it has to
+ * read the serialised body string: one that reads the request OBJECT cannot see
+ * a field this function drops.
  */
 function serialiseAsk(request: MsaidiziAskRequest): string {
   const body: MsaidiziAskRequest = { message: request.message };
   if (request.history && request.history.length > 0) body.history = request.history;
   if (request.sessionId) body.sessionId = request.sessionId;
   if (request.confirmed && request.confirmed.length > 0) body.confirmed = request.confirmed;
+  if (request.conversationId) body.conversationId = request.conversationId;
+  // The wire boundary for the sequence check: whatever the caller is holding, a
+  // non-positive one is not a claim about where the conversation is and the
+  // server would read it as this tab being behind. Absent says "unknown", which
+  // is what an unpersisted turn leaves behind and the only honest thing to send.
+  const sequence = asSequence(request.sequence);
+  if (sequence !== null) body.sequence = sequence;
   return JSON.stringify(body);
 }
 
@@ -592,7 +659,19 @@ function requestHeaders(options: MsaidiziStreamOptions): Record<string, string> 
   };
 }
 
-async function messageFromErrorResponse(response: Response): Promise<string> {
+/**
+ * The server's sentence, and its discriminator when it sent one.
+ *
+ * The sentence is what the user reads and is extracted exactly as before —
+ * class-validator's array form, the `error` field, a status-carrying fallback
+ * for a gateway's HTML page. The `code` is what a branch may be built on, and
+ * it is deliberately read separately: a body may carry a perfectly good sentence
+ * and no code at all (every non-409, and any backend older than the code), so
+ * the two are never made to depend on each other.
+ */
+async function refusalFromErrorResponse(
+  response: Response,
+): Promise<{ message: string; code?: MsaidiziConflictCode }> {
   const fallback = `The assistant is unavailable (${response.status}).`;
   let payload: unknown;
   try {
@@ -600,14 +679,34 @@ async function messageFromErrorResponse(response: Response): Promise<string> {
   } catch {
     // A non-JSON error body — a gateway's HTML page, most likely. The status is
     // the only honest thing we have, and the fallback already carries it.
-    return fallback;
+    return { message: fallback };
   }
-  if (typeof payload !== 'object' || payload === null) return fallback;
+  if (typeof payload !== 'object' || payload === null) return { message: fallback };
+  return { message: messageFrom(payload, fallback), code: conflictCodeFrom(payload) };
+}
+
+function messageFrom(payload: object, fallback: string): string {
   const message = (payload as { message?: unknown }).message;
   if (Array.isArray(message)) return message.join(', ');
   if (typeof message === 'string' && message.trim()) return message;
   const error = (payload as { error?: unknown }).error;
   return typeof error === 'string' && error.trim() ? error : fallback;
+}
+
+/**
+ * Narrowed against the closed vocabulary rather than passed through, for the
+ * same reason `asDoneReason` narrows: a code this build does not know must not
+ * reach a branch that only understands two values and be treated as whichever
+ * one the comparison happens to miss. An unknown code reads as no code, and the
+ * caller's unrecognised-conflict default takes over.
+ */
+const CONFLICT_CODES: ReadonlySet<string> = new Set(['unfinished_turn', 'continued_elsewhere']);
+
+function conflictCodeFrom(payload: object): MsaidiziConflictCode | undefined {
+  const code = (payload as { code?: unknown }).code;
+  return typeof code === 'string' && CONFLICT_CODES.has(code)
+    ? (code as MsaidiziConflictCode)
+    : undefined;
 }
 
 async function refreshSession(): Promise<boolean> {

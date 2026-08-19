@@ -90,4 +90,28 @@ describe('the session handle', () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
+
+  // The id is minted server-side the moment `run()` starts. On the path without
+  // an early `session` frame it reaches this page only on the final `result`, so
+  // a dropped connection takes the handle and leaves the run — which may have
+  // called four tools and written four audit rows — with no key on screen. The
+  // thread directly above is saying "anything it changes will still be
+  // recorded"; saying "one is minted when the first question runs" underneath
+  // that denies the existence of the one thing that finds them.
+  it('does not claim no id exists once a run has been through', () => {
+    render(<MsaidiziSessionHandle sessionId={null} hasRun />);
+
+    expect(screen.getByText(/did not reach this page/i)).toBeInTheDocument();
+    expect(screen.getByText(/search the audit log/i)).toBeInTheDocument();
+    expect(screen.queryByText(/one is minted when the first question runs/i)).toBeNull();
+  });
+
+  it('shows the id normally when a run reported one before dropping', () => {
+    // The early `session` frame case: the run went wrong, the handle did not.
+    render(<MsaidiziSessionHandle sessionId={SESSION} hasRun />);
+
+    expect(screen.getByText(SESSION)).toBeInTheDocument();
+    expect(screen.getByText(/survives the conversation being removed/)).toBeInTheDocument();
+    expect(screen.queryByText(/did not reach this page/i)).toBeNull();
+  });
 });

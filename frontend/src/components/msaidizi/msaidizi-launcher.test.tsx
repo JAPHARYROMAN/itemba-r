@@ -21,11 +21,17 @@
  *           and no shortcut. Ctrl+J in Kaunta navigates nowhere.
  * LAUNCH-4  Without `msaidizi.use` the whole surface is ABSENT, not disabled —
  *           an unpermitted capability is invisible, never refused.
+ * LAUNCH-5  ══ THE OTHER HALF OF THE HANDOVER ══ the page takes the question out
+ *           of the URL. A question left in `?ask=` re-runs itself on F5 and on a
+ *           browser Back, and a run is billed, long, and — under amber — a change.
+ *           So the launcher's push and the page's replace are tested together:
+ *           they are one contract, and only one of them was written.
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import DashboardLayout from '@/app/(dashboard)/layout';
+import MsaidiziPage from '@/app/(dashboard)/msaidizi/page';
 
 /* ------------------------------------------------------------------------ *
  * Doubles — only the two boundaries that reach outside the tree.
@@ -33,7 +39,10 @@ import DashboardLayout from '@/app/(dashboard)/layout';
 const h = vi.hoisted(() => ({
   push: vi.fn(),
   replace: vi.fn(),
+  stream: vi.fn(),
   pathname: { current: '/dashboard' },
+  /** The URL the page is entered on. LAUNCH-5 is entirely about this. */
+  searchParams: { current: new URLSearchParams() },
   permissions: { current: ['msaidizi.use', 'sales.view'] },
 }));
 
@@ -46,8 +55,39 @@ vi.mock('next/navigation', () => ({
     refresh: vi.fn(),
   }),
   usePathname: () => h.pathname.current,
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => h.searchParams.current,
 }));
+
+// The page mounts the whole chat, which loads twice before it can say anything
+// honest. Neither load is what LAUNCH-5 is about, and both would otherwise reach
+// for the network.
+vi.mock('@/lib/msaidizi-client', async () => {
+  const actual =
+    await vi.importActual<typeof import('@/lib/msaidizi-client')>('@/lib/msaidizi-client');
+  return {
+    ...actual,
+    fetchMsaidiziCapabilities: vi.fn().mockResolvedValue({
+      enabled: true,
+      writeMode: 'read-only',
+      allowedTiers: ['green'],
+      budgets: { maxToolCalls: 40, maxWrites: 10, toolBudget: 60 },
+      narrowing: { active: false, permitted: 12, perRun: 12 },
+      capabilities: [],
+    }),
+    listMsaidiziConversations: vi
+      .fn()
+      .mockResolvedValue({ data: [], meta: { page: 1, limit: 30, total: 0 } }),
+  };
+});
+
+// The seam between "what the browser sends" and "what the network does". Counted
+// rather than stubbed away: the whole point of LAUNCH-5 is HOW MANY runs an
+// arrival starts.
+vi.mock('@/lib/msaidizi-stream', async () => {
+  const actual =
+    await vi.importActual<typeof import('@/lib/msaidizi-stream')>('@/lib/msaidizi-stream');
+  return { ...actual, streamMsaidiziAsk: h.stream };
+});
 
 vi.mock('@/contexts/auth-context', () => ({
   AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -106,7 +146,25 @@ function renderShell() {
 
 beforeEach(() => {
   h.push.mockClear();
+  h.replace.mockReset();
+  // A `replace` that actually navigates: it changes what `useSearchParams`
+  // answers from here on. Without that the refresh case below cannot be told
+  // apart from the arrival case, since the whole hazard is what a SECOND entry
+  // on the address bar's current contents does.
+  h.replace.mockImplementation((href: string) => {
+    h.searchParams.current = new URLSearchParams(new URL(href, 'http://localhost').search);
+  });
+  h.stream.mockReset();
+  h.stream.mockResolvedValue({
+    termination: { kind: 'done', reason: 'end_turn' },
+    events: [],
+    result: null,
+    session: null,
+    malformedFrames: 0,
+    durationMs: 5,
+  });
   h.pathname.current = '/dashboard';
+  h.searchParams.current = new URLSearchParams();
   h.permissions.current = ['msaidizi.use', 'sales.view'];
 });
 
@@ -242,5 +300,67 @@ describe('LAUNCH-4 · without msaidizi.use the surface is absent', () => {
   it('keeps the nav leaf out of the sidebar', () => {
     renderShell();
     expect(screen.queryByRole('link', { name: /msaidizi/i })).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------------ *
+ * LAUNCH-5 · The page takes the question out of the URL
+ * ------------------------------------------------------------------------ */
+
+describe('LAUNCH-5 · the question is spent on arrival, not parked in the URL', () => {
+  it('runs it once and strips it from the address', async () => {
+    h.searchParams.current = new URLSearchParams([['ask', 'Post journal entry 41']]);
+
+    render(<MsaidiziPage />);
+
+    await waitFor(() => expect(h.stream).toHaveBeenCalledTimes(1));
+    expect(h.stream.mock.calls[0][0].message).toBe('Post journal entry 41');
+    // `replace`, not `push`: the URL carrying the question must not survive as a
+    // history entry either, or Back walks straight into a second billed run.
+    await waitFor(() => expect(h.replace).toHaveBeenCalledWith('/msaidizi', { scroll: false }));
+    expect(h.push).not.toHaveBeenCalled();
+  });
+
+  it('keeps running the question it took after the address has lost it', async () => {
+    h.searchParams.current = new URLSearchParams([['ask', 'Post journal entry 41']]);
+
+    const { rerender } = render(<MsaidiziPage />);
+    await waitFor(() => expect(h.stream).toHaveBeenCalledTimes(1));
+
+    // The replace has landed: this is the render that follows it. Reading the
+    // parameter fresh here rather than holding what arrived would hand the chat
+    // a null mid-run.
+    h.searchParams.current = new URLSearchParams();
+    rerender(<MsaidiziPage />);
+
+    expect(await screen.findByText('Post journal entry 41')).toBeInTheDocument();
+    expect(h.stream).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts no second run when the page is entered again on the address it left', async () => {
+    h.searchParams.current = new URLSearchParams([['ask', 'Post journal entry 41']]);
+
+    const arrival = render(<MsaidiziPage />);
+    await waitFor(() => expect(h.stream).toHaveBeenCalledTimes(1));
+    arrival.unmount();
+
+    // F5 — the obvious thing to do on a run that looks stuck, since there is no
+    // heartbeat and a 60s first model turn emits nothing — or Back into this
+    // entry, or a colleague opening the link that was pasted to them.
+    render(<MsaidiziPage />);
+    const box = await screen.findByRole('textbox', { name: 'Ask Msaidizi' });
+    await waitFor(() => expect(box).toBeEnabled());
+
+    expect(h.stream).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves an address without a question alone', async () => {
+    render(<MsaidiziPage />);
+
+    const box = await screen.findByRole('textbox', { name: 'Ask Msaidizi' });
+    await waitFor(() => expect(box).toBeEnabled());
+    expect(h.stream).not.toHaveBeenCalled();
+    // Nothing to strip, so no history entry is spent rewriting the URL.
+    expect(h.replace).not.toHaveBeenCalled();
   });
 });

@@ -123,6 +123,22 @@ describe('SseFrameParser', () => {
     expect(frames).toEqual([{ event: 'text', data: '{"type":"text","text":"hi"}', id: undefined }]);
   });
 
+  it('keeps one frame whole when a chunk ends on the CR of a line break inside it', () => {
+    // What the trailing-CR hold-back is actually for. The case above passes
+    // either way — the orphaned `\n` it would leave behind is swallowed by the
+    // frame's own terminator — so it is this one that pins the behaviour: a CR
+    // ending a chunk at a NON-terminating break, here between the `event:` line
+    // and its `data:` line. Treat that CR as a break and the following `\n`
+    // completes a blank line, splitting one event into two: a name with no
+    // payload, then a payload the parser can no longer tell you the name of.
+    const parser = new SseFrameParser();
+    expect(parser.push('event: text\r')).toEqual([]);
+    const frames = parser.push('\ndata: {"type":"text","text":"hi"}\r\n\r\n');
+
+    expect(frames).toEqual([{ event: 'text', data: '{"type":"text","text":"hi"}', id: undefined }]);
+    expect(parser.pending).toBe(0);
+  });
+
   it('ignores comment lines and joins multi-line data with newlines', () => {
     const parser = new SseFrameParser();
     const frames = parser.push(': heartbeat\nevent: text\ndata: one\ndata: two\nid: 7\n\n');
@@ -203,6 +219,80 @@ describe('streamMsaidiziAsk', () => {
     expect(outcome.result?.sessionId).toBe('ms_abc');
     expect(seen.map((f) => f.kind)).toEqual(['event', 'event', 'event', 'event', 'result']);
     expect(outcome.malformedFrames).toBe(0);
+    expect(outcome.unknownFrames).toBe(0);
+  });
+
+  it('counts a frame whose name this build does not know instead of losing it', async () => {
+    // The transport's contract is that an unrecognised frame is carried, not
+    // dropped. Carrying it is only half of that: a run that read an update it
+    // could not use has to be able to say so, the same way it says how many
+    // frames it could not read at all.
+    const seen: MsaidiziFrame[] = [];
+    const outcome = await streamMsaidiziAsk(
+      ASK,
+      { onFrame: (f) => seen.push(f) },
+      {
+        fetchImpl: async () =>
+          sseResponse([
+            frame('heartbeat', { at: 1 }),
+            frame('done', { type: 'done', reason: 'end_turn' }),
+          ]),
+      },
+    );
+
+    expect(outcome.unknownFrames).toBe(1);
+    expect(outcome.malformedFrames).toBe(0);
+    expect(seen.filter((f) => f.kind === 'unknown')).toHaveLength(1);
+    // It is not a trace event and must not be rendered as one.
+    expect(outcome.events.map((event) => event.type)).toEqual(['done']);
+  });
+
+  it('reports a verdict this build cannot name as failed rather than passing it through', async () => {
+    // The reason is an unvalidated wire string, and this is where it stops being
+    // one: nothing downstream of the transport sees a reason outside the seven, so
+    // a verdict this build cannot name draws the `failed` notice rather than
+    // whatever a renderer does with a key it has no arm for. The stored path has
+    // always read a stored reason the same way; this is the live half of it.
+    const unknownReason = await streamMsaidiziAsk(
+      ASK,
+      {},
+      {
+        fetchImpl: async () => sseResponse([frame('done', { type: 'done', reason: 'cancelled' })]),
+      },
+    );
+    expect(unknownReason.termination).toEqual({ kind: 'done', reason: 'failed' });
+
+    const noReason = await streamMsaidiziAsk(
+      ASK,
+      {},
+      { fetchImpl: async () => sseResponse([frame('done', {})]) },
+    );
+    expect(noReason.termination).toEqual({ kind: 'done', reason: 'failed' });
+  });
+
+  it('carries a truncated verdict through rather than flattening it to failed', async () => {
+    // The other side of the same coercion, and the reason it has to be a list
+    // rather than a shrug. A turn cut off at the token ceiling streams prose and
+    // no tool calls — byte for byte what a finished turn streams — so `reason`
+    // is the ONLY thing that says the answer stops mid-sentence. If `truncated`
+    // is not on the known list `asDoneReason` reads it as `failed`, and the
+    // thread tells the user the model was unreachable about a run that answered.
+    const outcome = await streamMsaidiziAsk(
+      ASK,
+      {},
+      {
+        fetchImpl: async () =>
+          sseResponse([
+            frame('text', {
+              type: 'text',
+              text: 'Three suppliers have unpaid invoices totalling TZS 4,18',
+            }),
+            frame('done', { type: 'done', reason: 'truncated' }),
+          ]),
+      },
+    );
+
+    expect(outcome.termination).toEqual({ kind: 'done', reason: 'truncated' });
   });
 
   it('reassembles frames that straddle chunk boundaries in the real transport', async () => {
@@ -257,6 +347,56 @@ describe('streamMsaidiziAsk', () => {
 
     expect(outcome.termination).toEqual({ kind: 'done', reason: 'awaiting_confirmation' });
     expect(outcome.result).toBeNull();
+  });
+
+  it('keeps the session frame when the socket dies before the result frame', async () => {
+    // The same drop, with the frame that decides whether it is recoverable. The
+    // `session` frame is written before the first model turn, and its
+    // `conversationId` is the server saying it opened a row for THIS turn — so a
+    // run that got as far as `done` and then lost the socket is a run the server
+    // has, and a suspended approval on it can still be answered by conversation
+    // id. That only holds if the frame survives decoding: read off the frame
+    // NAME like every other, handed to `onSession` as it arrives, and left on
+    // the outcome for a caller that was not listening. Lose it here and every
+    // dropped run reads as unrecoverable, which is the state this whole shape
+    // exists to distinguish from.
+    const seen: unknown[] = [];
+    const outcome = await streamMsaidiziAsk(
+      ASK,
+      { onSession: (session) => seen.push(session) },
+      {
+        fetchImpl: async () =>
+          droppedResponse([
+            frame('session', {
+              type: 'session',
+              conversationId: 'conv_1',
+              agentSessionId: 'ms_A',
+              sequence: 2,
+            }),
+            frame('confirmation_required', {
+              type: 'confirmation_required',
+              confirmationId: 'cnf_Invoices_remove_x1',
+              tool: 'Invoices_remove',
+              capabilityId: 'cap_del',
+              description: 'Delete invoice — DELETE /invoices/:id with id=41',
+              args: { id: '41' },
+            }),
+            frame('done', { type: 'done', reason: 'awaiting_confirmation' }),
+            'event: result\ndata: {"sessionId":"ms_A","messages":[{"role"',
+          ]),
+      },
+    );
+
+    expect(seen).toEqual([
+      { type: 'session', conversationId: 'conv_1', agentSessionId: 'ms_A', sequence: 2 },
+    ]);
+    expect(outcome.session?.conversationId).toBe('conv_1');
+    expect(outcome.session?.sequence).toBe(2);
+    expect(outcome.result).toBeNull();
+    expect(outcome.termination).toEqual({ kind: 'done', reason: 'awaiting_confirmation' });
+    // Not a trace event: the thread renders `events`, and a session handle drawn
+    // as a step is a step nobody took.
+    expect(outcome.events.map((event) => event.type)).toEqual(['confirmation_required', 'done']);
   });
 
   it('reports a clean close with no verdict as disconnected, not as success', async () => {
@@ -482,5 +622,162 @@ describe('streamMsaidiziAsk', () => {
 
     const second = JSON.parse(bodies[1]) as MsaidiziAskRequest;
     expect(second).toEqual({ message: 'And the next one?' });
+  });
+
+  it('puts the conversation id and sequence on the wire, and never a sequence of zero', async () => {
+    // Read off the body STRING, through the real `streamMsaidiziAsk`, and that
+    // is the point of the test rather than an implementation detail of it.
+    // `serialiseAsk` is an allowlist: it shipped copying only `message`,
+    // `history`, `sessionId` and `confirmed`, so `conversationId` and `sequence`
+    // never left the browser and the entire server-authoritative continuation
+    // path — `continueById`, the 409 two-tab guard, both 410 sentences — was
+    // unreachable in the product. Every test covering it mocked this module and
+    // asserted the request OBJECT, which cannot see a field the serialiser
+    // drops. So: real transport, injected fetch, assert what was posted.
+    const bodies: string[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(String(init.body));
+      return sseResponse([frame('done', { type: 'done', reason: 'end_turn' })]);
+    });
+
+    await streamMsaidiziAsk(
+      { message: 'And which of those are overdue?', conversationId: 'conv_1', sequence: 3 },
+      {},
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    );
+    // A turn the store could not persist reports no sequence. Zero is not turn
+    // zero, it is the absence of a turn, and sending it beside a real
+    // conversation id is read by the server as this tab being behind — a 409
+    // reading "continued in another window" for the rest of the conversation.
+    await streamMsaidiziAsk(
+      { message: 'And the supplier after that?', conversationId: 'conv_1', sequence: 0 },
+      {},
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    );
+
+    expect(JSON.parse(bodies[0])).toEqual({
+      message: 'And which of those are overdue?',
+      conversationId: 'conv_1',
+      sequence: 3,
+    });
+    expect(bodies[1]).not.toContain('sequence');
+    expect(JSON.parse(bodies[1])).toEqual({
+      message: 'And the supplier after that?',
+      conversationId: 'conv_1',
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ *
+ * The 409 discriminator
+ * ------------------------------------------------------------------------ *
+ *
+ * Two 409s come out of the conversations service and they are opposite answers:
+ * one clears by itself, one never will. They used to be told apart by the
+ * English in `message`, which meant a copy edit on the server silently flipped
+ * the client's retry decision. `code` is the fix, and this is the half of it
+ * that lives in the transport: if the field is dropped here, every branch
+ * downstream quietly falls back to reading prose again and no test above would
+ * notice.
+ */
+describe('MSAIDIZI-STREAM · the refusal code the server sends', () => {
+  it('carries a recognised conflict code onto the termination', async () => {
+    const outcome = await streamMsaidiziAsk(
+      { message: 'and the second supplier?' },
+      {},
+      {
+        fetchImpl: async () =>
+          jsonResponse(
+            {
+              statusCode: 409,
+              error: 'Conflict',
+              code: 'unfinished_turn',
+              message: 'The last thing you asked has not finished being saved.',
+            },
+            409,
+          ),
+      },
+    );
+
+    expect(outcome.termination).toEqual({
+      kind: 'unavailable',
+      status: 409,
+      cause: 'http',
+      code: 'unfinished_turn',
+      message: 'The last thing you asked has not finished being saved.',
+    });
+  });
+
+  it('carries the other code too, so the two are distinguishable', async () => {
+    const outcome = await streamMsaidiziAsk(
+      { message: 'and the second supplier?' },
+      {},
+      {
+        fetchImpl: async () =>
+          jsonResponse(
+            { code: 'continued_elsewhere', message: 'This conversation continued elsewhere.' },
+            409,
+          ),
+      },
+    );
+
+    expect(outcome.termination).toMatchObject({ status: 409, code: 'continued_elsewhere' });
+  });
+
+  // Narrowed rather than passed through, for the same reason `asDoneReason`
+  // narrows: a value this build does not know must not reach a branch that
+  // understands two of them and be treated as whichever one the comparison
+  // happens to miss. An unknown code reads as no code at all.
+  it('drops a code this build does not know', async () => {
+    const outcome = await streamMsaidiziAsk(
+      { message: 'and the second supplier?' },
+      {},
+      {
+        fetchImpl: async () =>
+          jsonResponse({ code: 'some_future_conflict', message: 'Refused.' }, 409),
+      },
+    );
+
+    expect(outcome.termination).toEqual({
+      kind: 'unavailable',
+      status: 409,
+      cause: 'http',
+      message: 'Refused.',
+    });
+  });
+
+  // A backend older than the code, and every status that never carries one. The
+  // key must be absent rather than present-and-undefined.
+  it('omits the field entirely when the server sent no code', async () => {
+    const outcome = await streamMsaidiziAsk(
+      { message: 'and the second supplier?' },
+      {},
+      {
+        fetchImpl: async () =>
+          jsonResponse({ message: 'This conversation continued in another window.' }, 409),
+      },
+    );
+
+    expect(outcome.termination).not.toHaveProperty('code');
+    expect(outcome.termination).toMatchObject({ status: 409 });
+  });
+
+  // The sentence and the code are read independently: a body may carry a
+  // perfectly good message and no code, or — as the validation pipe does — an
+  // array of messages. Neither may disturb the other.
+  it('still joins an array message when a code is present', async () => {
+    const outcome = await streamMsaidiziAsk(
+      { message: 'and the second supplier?' },
+      {},
+      {
+        fetchImpl: async () =>
+          jsonResponse({ code: 'unfinished_turn', message: ['first fault', 'second fault'] }, 409),
+      },
+    );
+
+    expect(outcome.termination).toMatchObject({
+      code: 'unfinished_turn',
+      message: 'first fault, second fault',
+    });
   });
 });

@@ -38,6 +38,11 @@
  * the resume window will hold a stale `true`. That is survivable precisely
  * because the server refuses with a written sentence rather than a generic
  * failure — this component moves the message earlier, it does not replace it.
+ * When the refusal does arrive, `msaidizi-thread.tsx` renders that sentence as
+ * the body of the notice, under a heading that says the server answered rather
+ * than that it could not be reached; the two screens have to agree, because a
+ * user who was told this page was continuable is owed the real reason it was
+ * not.
  *
  * ─── And the other clock, which lives in the state model ─────────────────────
  *

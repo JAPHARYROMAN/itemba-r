@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MsaidiziCapabilities } from '@/lib/msaidizi-types';
 import { useMsaidiziCapabilities, useMsaidiziConversations } from './hooks';
@@ -49,6 +49,23 @@ describe('useMsaidiziCapabilities', () => {
 
     expect(result.current.capabilities).toBeNull();
     expect(result.current.error).toBe('Service Unavailable');
+  });
+
+  // The page's only recovery from a dropped capabilities call: the composer is
+  // blocked until this answers, so a `reload` nothing exercises is a page that
+  // one transient blip leaves usable only after a browser refresh.
+  it('re-attempts the check on reload, and clears the failure it reported', async () => {
+    fetchCapabilities.mockRejectedValueOnce(new Error('Service Unavailable'));
+    fetchCapabilities.mockResolvedValue({ ...OFF, enabled: true });
+
+    const { result } = renderHook(() => useMsaidiziCapabilities());
+    await waitFor(() => expect(result.current.error).toBe('Service Unavailable'));
+
+    act(() => result.current.reload());
+
+    await waitFor(() => expect(result.current.capabilities).not.toBeNull());
+    expect(result.current.error).toBeNull();
+    expect(fetchCapabilities).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -9,7 +9,8 @@
  *   1. The tool set never exceeds the caller's permissions.
  *   2. A tier the deployment disabled cannot be invoked, even if a tool for it
  *      somehow reaches dispatch.
- *   3. A red-tier action never runs without confirmation of that exact action.
+ *   3. A red-tier action never runs without confirmation of that exact action,
+ *      and one confirmation buys exactly one execution of it.
  *   4. Tool calls are bounded, so one permission cannot become fifty actions.
  *   5. Tool output re-enters the conversation as data, never as instruction.
  *   6. Every call carries the caller's own credential and the run's session id.
@@ -19,7 +20,7 @@ import { Capability } from '../../common/capabilities/capability-manifest';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CapabilityInvoker, InvocationRequest, InvocationResult } from './capability-invoker';
 import { ManifestProvider } from './manifest.provider';
-import { ModelClient, ModelRequest, ModelResponse } from './model-client';
+import { ModelClient, ModelMessage, ModelRequest, ModelResponse } from './model-client';
 import { MsaidiziConfig, WriteMode } from './msaidizi.config';
 import { confirmationIdFor, MsaidiziService } from './msaidizi.service';
 
@@ -71,8 +72,8 @@ function configFor(writeMode: WriteMode, overrides: Partial<Record<string, unkno
         : writeMode === 'amber'
           ? ['green', 'amber']
           : ['green', 'amber', 'red'],
-    maxWritesPerSession: 10,
-    maxToolCallsPerSession: 40,
+    maxWritesPerRun: 10,
+    maxToolCallsPerRun: 40,
     maxTokens: 32000,
     invokeTimeoutMs: 30000,
     loopbackBaseUrl: 'http://127.0.0.1:3001/api/v1',
@@ -96,6 +97,40 @@ class ScriptedModel extends ModelClient {
 
 function toolUse(name: string, input: Record<string, unknown> = {}, id = 'tu_1'): ModelResponse {
   return { content: [{ type: 'tool_use', id, name, input }], stopReason: 'tool_use' };
+}
+
+/**
+ * The two messages a suspended red-tier turn leaves behind: the assistant turn
+ * that proposed the action, and the user turn carrying the gate's own refusal.
+ *
+ * Every confirmation test below used to send `confirmed` against a history of
+ * `[{ role: 'user', content: 'yes' }]` — an approval to a question that was
+ * never asked, which is a conversation this system cannot produce. That fixture
+ * shape is what let `confirmed` work as a pre-authorisation channel for the
+ * whole life of the project without a single test noticing: an id computed from
+ * public inputs executed a red action on a first turn, with no proposal above it
+ * and no `confirmation_required` event in the run. The service now requires the
+ * proposal to exist, so these tests carry one.
+ */
+function proposalTurn(
+  name: string,
+  input: Record<string, unknown> = {},
+  id = 'tu_0',
+): ModelMessage[] {
+  return [
+    { role: 'assistant', content: [{ type: 'tool_use', id, name, input }] },
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: id,
+          is_error: true,
+          content: 'This action needs the user to confirm it before it can run.',
+        },
+      ],
+    },
+  ];
 }
 
 class RecordingInvoker extends CapabilityInvoker {
@@ -311,7 +346,11 @@ describe('red-tier actions require confirmation of that exact action', () => {
       authorization: 'Bearer t',
       sessionId,
       confirmed: [confirmationId],
-      messages: [{ role: 'user', content: 'yes, delete invoice 41' }],
+      messages: [
+        { role: 'user', content: 'delete invoice 41' },
+        ...proposalTurn('Invoices_remove', { id: '41' }),
+        { role: 'user', content: 'yes, delete invoice 41' },
+      ],
     });
 
     expect(invoker.calls).toHaveLength(1);
@@ -327,16 +366,153 @@ describe('red-tier actions require confirmation of that exact action', () => {
     const model = new ScriptedModel([toolUse('Invoices_remove', { id: '42' })]);
     const service = makeService([redCap], model, invoker, configFor('red'));
 
+    // The history carries the proposal for 41, so the approval is genuinely
+    // BOUND and the only thing that can refuse the dispatch is the argument
+    // binding. Without it this test would pass on the wrong mechanism — an id
+    // naming no proposal at all is discarded before the loop starts, and the
+    // suspension below would prove nothing about arguments.
     const result = await service.run({
       user: authUser(['invoices.delete']),
       authorization: 'Bearer t',
       sessionId,
       confirmed: [approved],
-      messages: [{ role: 'user', content: 'delete it' }],
+      messages: [
+        { role: 'user', content: 'delete invoice 41' },
+        ...proposalTurn('Invoices_remove', { id: '41' }),
+        { role: 'user', content: 'yes, delete it' },
+      ],
     });
 
     expect(invoker.calls).toEqual([]);
     expect(result.reason).toBe('awaiting_confirmation');
+  });
+
+  it('does not let one approval authorise the same action a second time', async () => {
+    // "Confirmation of that exact action" has a second half — ONCE — and it was
+    // absent for three waves because every replay test above is a test about a
+    // DIFFERENT action. Here the model asks for the very same deletion twice in
+    // one assistant turn, off one approval and one click.
+    //
+    // Flat arguments on purpose: the nested-body version of this lives in
+    // msaidizi.write-path.spec.ts, and the two argument shapes have already been
+    // shown once to hide a defect from each other.
+    const invoker = new RecordingInvoker();
+    const sessionId = 'ms_fixed_session_id';
+    const approved = confirmationIdFor(sessionId, 'Invoices_remove', { id: '41' });
+    const model = new ScriptedModel([
+      {
+        content: [
+          { type: 'tool_use', id: 'tu_1', name: 'Invoices_remove', input: { id: '41' } },
+          { type: 'tool_use', id: 'tu_2', name: 'Invoices_remove', input: { id: '41' } },
+        ],
+        stopReason: 'tool_use',
+      },
+    ]);
+    const service = makeService([redCap], model, invoker, configFor('red'));
+
+    const result = await service.run({
+      user: authUser(['invoices.delete']),
+      authorization: 'Bearer t',
+      sessionId,
+      confirmed: [approved],
+      messages: [
+        { role: 'user', content: 'delete invoice 41' },
+        ...proposalTurn('Invoices_remove', { id: '41' }),
+        { role: 'user', content: 'yes' },
+      ],
+    });
+
+    // Deleted once, and the repeat came back as its own proposal rather than
+    // riding the approval that the first one spent.
+    expect(invoker.calls).toHaveLength(1);
+    expect(result.events.filter((e) => e.type === 'confirmation_required')).toHaveLength(1);
+    expect(result.reason).toBe('awaiting_confirmation');
+  });
+
+  /**
+   * The same claim, in the shape the red tier actually has.
+   *
+   * Every test above uses `{ id: '41' }` — one key, one scalar, no nesting.
+   * `buildToolDefinition` puts a request body under a single `body` property
+   * whenever `capability.params.hasBody`, and `reversibility.ts` makes every
+   * write to journal entries, payments, bank accounts, credit notes and roles
+   * red, so nested arguments are the normal case for this tier and flat ones the
+   * exception. "Confirmation of that exact action" has to hold one level down or
+   * it does not hold where it matters.
+   */
+  describe('when the action carries a request body', () => {
+    const journalCap = capability({
+      id: 'JournalEntriesController.post',
+      controller: 'JournalEntriesController',
+      handler: 'post',
+      verb: 'POST',
+      path: 'journal-entries',
+      permissions: ['journal.create'],
+      tier: 'red',
+      tierReason: 'money-movement',
+      params: { path: [], query: [], freeFormQuery: false, hasBody: true },
+    });
+
+    const rent = { body: { memo: 'Rent Aug', lines: [{ account: '6000', debit: 50000 }] } };
+    const payroll = { body: { memo: 'Payroll', lines: [{ account: '7000', debit: 9000000 }] } };
+
+    it('does not let an approved entry authorise a different entry of the same tool', async () => {
+      const invoker = new RecordingInvoker();
+      const sessionId = 'ms_fixed_session_id';
+      // The user approved a TZS 50,000 rent entry...
+      const approved = confirmationIdFor(sessionId, 'JournalEntries_post', rent);
+      // ...and the model came back with a TZS 9,000,000 payroll entry.
+      const model = new ScriptedModel([toolUse('JournalEntries_post', payroll)]);
+      const service = makeService([journalCap], model, invoker, configFor('red'));
+
+      // Rent is proposed in the history, so the rent approval is bound and the
+      // argument binding is the only thing left that can refuse payroll.
+      const result = await service.run({
+        user: authUser(['journal.create']),
+        authorization: 'Bearer t',
+        sessionId,
+        confirmed: [approved],
+        messages: [
+          { role: 'user', content: 'post the August rent entry' },
+          ...proposalTurn('JournalEntries_post', rent),
+          { role: 'user', content: 'yes' },
+        ],
+      });
+
+      expect(invoker.calls).toEqual([]);
+      expect(result.reason).toBe('awaiting_confirmation');
+    });
+
+    it('executes the approved entry however the model ordered its keys', async () => {
+      const invoker = new RecordingInvoker();
+      const sessionId = 'ms_fixed_session_id';
+      const approved = confirmationIdFor(sessionId, 'JournalEntries_post', rent);
+      // The same entry, re-emitted with the keys in another order — which the
+      // provider is free to do, and which must still match the approval.
+      const reordered = { body: { lines: [{ debit: 50000, account: '6000' }], memo: 'Rent Aug' } };
+      const model = new ScriptedModel([toolUse('JournalEntries_post', reordered)]);
+      const service = makeService([journalCap], model, invoker, configFor('red'));
+
+      // The PROPOSAL carries the original key order and the re-emission carries
+      // the other one, so the run has to reach the same id from both — which is
+      // now asserted twice over: once to bind the approval to a proposal, and
+      // once to match it at the gate.
+      const result = await service.run({
+        user: authUser(['journal.create']),
+        authorization: 'Bearer t',
+        sessionId,
+        confirmed: [approved],
+        messages: [
+          { role: 'user', content: 'post the August rent entry' },
+          ...proposalTurn('JournalEntries_post', rent),
+          { role: 'user', content: 'yes' },
+        ],
+      });
+
+      expect(invoker.calls).toHaveLength(1);
+      expect(invoker.calls[0].args).toEqual(reordered);
+      expect(result.reason).toBe('end_turn');
+    });
   });
 
   it('amber actions run without confirmation but are still reported', async () => {
@@ -381,7 +557,7 @@ describe('a permission does not become an unbounded number of actions', () => {
       [capability()],
       model,
       invoker,
-      configFor('read-only', { maxToolCallsPerSession: 3 }),
+      configFor('read-only', { maxToolCallsPerRun: 3 }),
     );
 
     const result = await service.run({
@@ -412,7 +588,7 @@ describe('a permission does not become an unbounded number of actions', () => {
       [amberCap],
       model,
       invoker,
-      configFor('amber', { maxWritesPerSession: 2, maxToolCallsPerSession: 40 }),
+      configFor('amber', { maxWritesPerRun: 2, maxToolCallsPerRun: 40 }),
     );
 
     const result = await service.run({

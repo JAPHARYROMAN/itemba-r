@@ -77,16 +77,40 @@ export class MsaidiziConfig {
   }
 
   /**
-   * Hard ceiling on write-tier calls in one session. A permission that allows
-   * an action does not allow it fifty times; this is the loop backstop that the
-   * permission system cannot express.
+   * Hard ceiling on write-tier calls in ONE RUN — one HTTP request through
+   * `MsaidiziService.run()`. Not one session, and the name used to say session.
+   *
+   * The counter this feeds (`writeCalls`) is a local declared inside `run()`, so
+   * it is reinitialised on every request. Three requests carrying the same
+   * session id therefore each spend the full allowance: measured at 10 + 10 + 10
+   * red-tier postings under one session id against a configured ceiling of 10.
+   * Nothing in this system holds a session-level count of irreversible actions,
+   * and this is not it.
+   *
+   * What it does buy is the runaway-loop backstop it was written for, and that
+   * threat is genuinely per-run: a permission that allows an action does not
+   * allow the model to emit it fifty times inside one turn, and a model cannot
+   * open a new HTTP request. What it does not buy is a bound on what one
+   * conversation can post over its life — a deployment that needs that has to
+   * bound requests, upstream of this file.
+   *
+   * `MSAIDIZI_MAX_WRITES_PER_RUN` is the name that says so, and it wins when
+   * both are set. `MSAIDIZI_MAX_WRITES_PER_SESSION` is still read because it is
+   * the spelling already in `.env.example` and `docker-compose.production.yml`,
+   * and silently ignoring a ceiling a deployment configured would be a worse
+   * failure than a misleading variable name.
    */
-  get maxWritesPerSession(): number {
-    return Number(this.config.get<string>('MSAIDIZI_MAX_WRITES_PER_SESSION', '10'));
+  get maxWritesPerRun(): number {
+    const perRun = this.config.get<string>('MSAIDIZI_MAX_WRITES_PER_RUN');
+    return Number(perRun ?? this.config.get<string>('MSAIDIZI_MAX_WRITES_PER_SESSION', '10'));
   }
 
-  /** Ceiling on tool calls in one session, to bound a runaway loop. */
-  get maxToolCallsPerSession(): number {
+  /**
+   * Ceiling on tool calls in ONE RUN, on exactly the same footing as
+   * `maxWritesPerRun`: `toolCalls` is a `run()` local too. It bounds a runaway
+   * loop inside one request and bounds nothing across requests.
+   */
+  get maxToolCallsPerRun(): number {
     return Number(this.config.get<string>('MSAIDIZI_MAX_TOOL_CALLS', '40'));
   }
 

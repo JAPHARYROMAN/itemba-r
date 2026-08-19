@@ -38,8 +38,22 @@ import type { MsaidiziWriteMode } from '@/lib/msaidizi-types';
 type CopyState = 'idle' | 'copied' | 'failed';
 
 export interface MsaidiziSessionHandleProps {
-  /** Null until the first question runs and the server mints one. */
+  /** Null until a run reports one — see `hasRun` for why that is two cases. */
   sessionId: string | null;
+  /**
+   * Whether a question has already been asked in this conversation.
+   *
+   * Without it, no id and no id are the same thing here, and they are not. Before
+   * the first question there is genuinely nothing to show. After one, the id was
+   * minted server-side the moment `run()` started and the run may have called
+   * four tools and written four audit rows — this page simply never received it,
+   * because on the path without an early `session` frame the id arrives only on
+   * the final `result`, and a dropped connection takes that frame with it. Saying
+   * "one is minted when the first question runs" at that point sits directly
+   * under a notice promising the run's changes are still being recorded, and
+   * denies the existence of the one key that finds them.
+   */
+  hasRun?: boolean;
   /**
    * Drives the honest caveat about there being no rows to find. Omit it and the
    * caveat is left out rather than guessed — an unqualified promise that the
@@ -52,6 +66,7 @@ export interface MsaidiziSessionHandleProps {
 
 export function MsaidiziSessionHandle({
   sessionId,
+  hasRun = false,
   writeMode = null,
   className = '',
 }: MsaidiziSessionHandleProps) {
@@ -85,9 +100,25 @@ export function MsaidiziSessionHandle({
   }, [sessionId, flash]);
 
   if (!sessionId) {
+    // Once a run has been attempted, the honest sentence is about this page and
+    // not about the server. Which run it was — one that did four tool calls and
+    // lost its `result`, or one a 503 refused before it started — is not knowable
+    // from here, so the sentence is conditional on the only thing that is: if it
+    // got far enough to change anything, that is on record under an id this page
+    // never saw.
+    //
+    // That frame now exists: the stream writes `session` before the first model
+    // turn, and this component's only caller is on the streaming path. So this
+    // branch is no longer the ordinary end of a dropped run — it is what remains
+    // when the stream died BEFORE its first frame (an unreachable proxy, a 503,
+    // a 200 that was not an event stream). A run that reached the model has an
+    // id on screen. Narrower than it was, and still not empty, which is why the
+    // sentence stays conditional rather than becoming a promise either way.
     return (
       <p className={`text-[11px] ${className}`} style={{ color: 'var(--aurora-text-muted)' }}>
-        No session id yet — one is minted when the first question runs.
+        {hasRun
+          ? 'This run’s session id did not reach this page. If it got far enough to change anything, that is still recorded under an id nobody here received — search the audit log by the time of the run and your own name.'
+          : 'No session id yet — one is minted when the first question runs.'}
       </p>
     );
   }

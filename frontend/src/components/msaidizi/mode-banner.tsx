@@ -210,12 +210,25 @@ export interface MsaidiziAvailability {
  * question fail. `canAsk` is false while capabilities are still unknown too —
  * optimistically firing into an unknown deployment is the same mistake one beat
  * earlier.
+ *
+ * `error` is the second argument because null capabilities is TWO facts, and on
+ * its own this function cannot tell them apart: the check has not answered yet,
+ * or it answered with a failure. Without it the confident reading is "still
+ * checking", which on the failure path describes a request that will never
+ * arrive and leaves the reader waiting for it. Callers that do not track the
+ * failure may omit it and get the old answer; callers that do should pass it.
  */
 export function msaidiziAvailability(
   capabilities: MsaidiziCapabilities | null,
+  error?: string | null,
 ): MsaidiziAvailability {
   if (!capabilities) {
-    return { canAsk: false, reason: 'Still checking whether Msaidizi is available here.' };
+    return {
+      canAsk: false,
+      reason: error
+        ? 'Msaidizi could not be asked what it is allowed to do here, so nothing can be sent yet.'
+        : 'Still checking whether Msaidizi is available here.',
+    };
   }
   if (!capabilities.enabled) {
     return { canAsk: false, reason: 'Msaidizi is switched off in this deployment.' };
