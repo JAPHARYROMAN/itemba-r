@@ -164,7 +164,12 @@ services:
       MSAIDIZI_CLASSIFIER_MODEL: ${MSAIDIZI_CLASSIFIER_MODEL:-claude-haiku-4-5}
       MSAIDIZI_EFFORT: ${MSAIDIZI_EFFORT:-medium}
       # Per-run ceilings. A permission that allows an action does not allow it
-      # fifty times; these bound a runaway loop.
+      # fifty times; these bound a runaway loop. "Run" is ONE HTTP request, not
+      # one conversation — the write counter is a local of the run loop — which
+      # is why the _PER_RUN spelling exists and wins when both are set. The old
+      # _PER_SESSION name is still forwarded so a deployment that already set it
+      # keeps its ceiling instead of silently reverting to the default.
+      MSAIDIZI_MAX_WRITES_PER_RUN: ${MSAIDIZI_MAX_WRITES_PER_RUN:-${MSAIDIZI_MAX_WRITES_PER_SESSION:-10}}
       MSAIDIZI_MAX_WRITES_PER_SESSION: ${MSAIDIZI_MAX_WRITES_PER_SESSION:-10}
       MSAIDIZI_MAX_TOOL_CALLS: ${MSAIDIZI_MAX_TOOL_CALLS:-40}
       MSAIDIZI_MAX_TOKENS: ${MSAIDIZI_MAX_TOKENS:-32000}

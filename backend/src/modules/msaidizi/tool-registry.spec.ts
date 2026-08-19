@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { Capability } from '../../common/capabilities/capability-manifest';
 import { narrowCapabilities, tokenize } from './domain-filter';
 import { buildRegistry, buildToolDefinition, toolNameFor } from './tool-registry';
@@ -154,5 +156,22 @@ describe('domain narrowing', () => {
   it('respects the limit', () => {
     const picked = narrowCapabilities(manifest, 'customers suppliers payroll', { limit: 2 });
     expect(picked).toHaveLength(2);
+  });
+});
+
+/**
+ * The gate behind this module's doc comments, asserted to exist.
+ *
+ * `prompts.domain.spec.ts` is what makes the enforcement claims in `prompts.ts`
+ * and in this file's own `DISAMBIGUATION` comment true. That suite guards its
+ * own RENAME — its pointer test reads `path.basename(__filename)` and requires
+ * both files to name it — but it cannot guard its own DELETION: a deleted spec
+ * runs nothing, and the two doc comments would go quietly back to citing a gate
+ * that does not exist, which is the precise defect it was written for. A file
+ * cannot notice its own absence, so a neighbouring committed spec does it.
+ */
+describe('domain drift gate', () => {
+  it('still exists, because the doc comments in this module promise it does', () => {
+    expect(existsSync(join(__dirname, 'prompts.domain.spec.ts'))).toBe(true);
   });
 });

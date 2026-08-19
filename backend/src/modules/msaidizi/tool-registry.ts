@@ -98,18 +98,49 @@ export function describeAction(capability: Capability): string {
  * distinction is true of every route on `CustomerCreditProfilesController`.
  *
  * KEEP THEM SHORT. A note is appended to the description of every matching tool
- * and up to 60 tools are sent per turn, so this is prompt budget spent on every
- * call. One or two sentences: what it is, what it is NOT, and where to go
- * instead, naming the tool by the name the model will actually see.
+ * and up to 60 tools are sent per turn (`TOOL_BUDGET` in `msaidizi.service.ts`),
+ * so this is prompt budget spent on every call. One or two sentences: what it
+ * is, what it is NOT, and where to go instead, naming the tool by the name the
+ * model will actually see. `DISAMBIGUATION_MAX_NOTE_CHARS` is the ceiling.
  *
  * KEEP THEM FEW. Past roughly thirty entries the hand-maintained approach has
- * lost to a generated glossary, and `prompts.domain.spec.ts` fails when the map
- * crosses that line so the decision gets made rather than deferred. Every key
- * is also asserted to exist, be permission-gated and be agent-reachable, and
- * every tool name quoted inside a note is asserted to be derivable from the
- * live manifest — so a renamed controller fails CI instead of silently
- * orphaning its note or pointing the model at a tool that no longer exists.
+ * lost to a generated glossary, so `DISAMBIGUATION_MAX_ENTRIES` makes that a
+ * decision somebody takes rather than a line the map drifts across.
+ *
+ * WHAT CI ACTUALLY CHECKS — `prompts.domain.spec.ts`, and only this much: every
+ * KEY resolves to at least one capability in the live manifest; every
+ * capability it resolves to is permission-gated; at least one of them is
+ * agent-reachable (`capabilitiesFor` admits it); every tool name quoted inside
+ * a note is derivable from the live manifest; every SCREAMING_SNAKE token in a
+ * note — one carrying an underscore, since bare capitals here are prose
+ * emphasis like NOT — is a real Prisma enum value; every `Model.field` in a
+ * note is a real field; both caps hold; an exact-id key beats the
+ * controller-level one; and the note lands directly after the action phrase.
+ * So a renamed controller fails CI instead of silently orphaning its note, and
+ * a note cannot point the model at a tool that no longer exists. What CI cannot
+ * check is whether the SENTENCE is true — the English between the identifiers
+ * is maintained by hand, and a note can be wrong while every identifier in it
+ * resolves.
  */
+
+/**
+ * Cap on the number of entries, enforced by `prompts.domain.spec.ts`.
+ *
+ * Not a style preference: past roughly this many, curating notes by hand has
+ * lost to generating a glossary from the manifest, and the integration plan
+ * names crossing it as the trigger for that rewrite. Failing here forces the
+ * decision instead of letting the map grow past the point where it was the
+ * right shape.
+ */
+export const DISAMBIGUATION_MAX_ENTRIES = 30;
+
+/**
+ * Cap on one note, in characters, enforced by `prompts.domain.spec.ts`.
+ *
+ * A note rides on the description of every matching tool, and up to 60 tools go
+ * out per turn, so a note is paid many times over. Roughly two sentences.
+ */
+export const DISAMBIGUATION_MAX_NOTE_CHARS = 340;
 export const DISAMBIGUATION: Record<string, string> = {
   // ── The three "customers" ───────────────────────────────────────────────
   CustomersController:
