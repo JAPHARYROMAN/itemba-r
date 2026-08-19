@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { downloadTablePdf } from '@/lib/export-download';
 
 interface Company { id: string; name: string; code: string }
 interface ExpenseCategory { id: string; name: string }
@@ -26,14 +27,48 @@ interface Expense {
   description: string;
   amount: number;
   currency: string;
-  status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'PAID';
+  status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'PAID' | 'VOIDED';
   paymentMethod?: string | null;
   companyId: string;
   expenseCategoryId: string;
   cashAccountId?: string | null;
   company?: { name: string } | null;
   expenseCategory?: { name: string } | null;
+  cashAccount?: { id: string; accountName: string } | null;
   createdAt: string;
+  updatedAt?: string;
+}
+
+interface ExpenseDetail extends Expense {
+  divisionId?: string | null;
+  branchId?: string | null;
+  approvedAt?: string | null;
+  paidAt?: string | null;
+  rejectedReason?: string | null;
+  company?: { id: string; name: string; code: string } | null;
+  division?: { id: string; name: string; code: string } | null;
+  branch?: { id: string; name: string; code: string } | null;
+  expenseCategory?: { id: string; name: string; description?: string | null } | null;
+  cashAccount?: {
+    id: string;
+    accountName: string;
+    accountType?: string;
+    currency?: string;
+    currentBalance?: number;
+  } | null;
+  createdBy?: { id: string; fullName: string; email?: string } | null;
+  approvedBy?: { id: string; fullName: string; email?: string } | null;
+  paidBy?: { id: string; fullName: string; email?: string } | null;
+  journalEntry?: {
+    id: string;
+    journalNumber: string;
+    transactionDate: string;
+    description: string;
+    status: string;
+    totalDebit: number;
+    totalCredit: number;
+    postedAt?: string | null;
+  } | null;
 }
 
 interface Paginated<T> { data: T[]; total: number; page: number; totalPages: number }
@@ -61,6 +96,17 @@ const CURRENCIES = ['TZS', 'USD', 'EUR', 'KES', 'UGX', 'GBP'];
 function fmtDate(d?: string | null) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function fmtDateTime(d?: string | null) {
+  if (!d) return '—';
+  return new Date(d).toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function fmtMoney(currency: string, amount: number | string) {
+  return `${currency} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(Number(amount))}`;
 }
 
 function RejectDialog({ expense, onClose, onDone }: { expense: Expense; onClose: () => void; onDone: () => void }) {
@@ -265,6 +311,180 @@ function PayExpenseDialog({
   );
 }
 
+function DetailField({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs font-medium uppercase" style={{ color: 'var(--aurora-text-muted)' }}>{label}</p>
+      <p className="mt-1 break-words text-sm font-medium" style={{ color: 'var(--aurora-text)' }}>{value || '—'}</p>
+    </div>
+  );
+}
+
+function ExpenseDetailDialog({
+  expenseId,
+  canEdit,
+  onClose,
+  onEdit,
+  onDelete,
+}: {
+  expenseId: string;
+  canEdit: boolean;
+  onClose: () => void;
+  onEdit: (expense: Expense) => void;
+  onDelete: (expense: Expense) => void;
+}) {
+  const [expense, setExpense] = useState<ExpenseDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/backend/expenses/${expenseId}`, { cache: 'no-store' })
+      .then(async (response) => {
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(json.message ?? 'Could not load expense details');
+        return json.data as ExpenseDetail;
+      })
+      .then((detail) => {
+        if (!cancelled) setExpense(detail);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load expense details');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [expenseId]);
+
+  const exportPdf = async () => {
+    if (!expense) return;
+    setExporting(true);
+    setError('');
+    try {
+      await downloadTablePdf({
+        title: 'Expense Voucher',
+        subtitle: `${expense.company?.name ?? 'Company expense'} · ${fmtDate(expense.expenseDate)}`,
+        status: expense.status.replace(/_/g, ' '),
+        orientation: 'portrait',
+        companyId: expense.companyId,
+        columns: ['Field', 'Recorded detail'],
+        rows: [
+          ['Expense number', expense.expenseNumber ?? expense.id],
+          ['Expense date', fmtDate(expense.expenseDate)],
+          ['Vendor / payee', expense.vendorName ?? 'Not specified'],
+          ['Category', expense.expenseCategory?.name ?? 'Not specified'],
+          ['Description', expense.description],
+          ['Company', expense.company ? `${expense.company.name} (${expense.company.code})` : '—'],
+          ['Division', expense.division ? `${expense.division.name} (${expense.division.code})` : 'All divisions'],
+          ['Branch', expense.branch ? `${expense.branch.name} (${expense.branch.code})` : 'All branches'],
+          ['Payment method', expense.paymentMethod?.replace(/_/g, ' ') ?? 'Not recorded'],
+          ['Cash / bank account', expense.cashAccount?.accountName ?? 'Not paid'],
+          ['Journal entry', expense.journalEntry?.journalNumber ?? 'Not posted'],
+          ['Created by', expense.createdBy?.fullName ?? '—'],
+          ['Created at', fmtDateTime(expense.createdAt)],
+          ['Approved by', expense.approvedBy?.fullName ?? '—'],
+          ['Approved at', fmtDateTime(expense.approvedAt)],
+          ['Paid by', expense.paidBy?.fullName ?? '—'],
+          ['Paid at', fmtDateTime(expense.paidAt)],
+          ...(expense.rejectedReason ? [['Rejection reason', expense.rejectedReason]] : []),
+        ],
+        columnWeights: [1, 2.4],
+        stripedRows: true,
+        sectionTitle: 'Expense details',
+        summary: [{ label: 'Amount', value: fmtMoney(expense.currency, expense.amount) }],
+        note: 'Generated from the ITEMBA-R expense register. The status above reflects the record at export time.',
+        baseName: `expense-${expense.expenseNumber ?? expense.id.slice(0, 8)}`,
+      });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not export expense PDF');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Expense Details"
+      subtitle={expense?.expenseNumber ?? 'Loading expense record…'}
+      size="xl"
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>Close</Btn>
+          {expense?.status === 'DRAFT' && canEdit && (
+            <Btn variant="danger" onClick={() => onDelete(expense)}>Delete</Btn>
+          )}
+          {expense && ['DRAFT', 'PENDING_APPROVAL'].includes(expense.status) && canEdit && (
+            <Btn variant="secondary" onClick={() => onEdit(expense)}>Edit</Btn>
+          )}
+          <Btn variant="primary" onClick={exportPdf} loading={exporting} disabled={!expense}>Export PDF</Btn>
+        </>
+      }
+    >
+      {loading ? <PageSpinner /> : error && !expense ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      ) : expense ? (
+        <div className="space-y-5">
+          {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+          <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--aurora-border)' }}>
+            <div>
+              <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>Recorded amount</p>
+              <p className="mt-1 text-2xl font-semibold">{fmtMoney(expense.currency, expense.amount)}</p>
+            </div>
+            <StatusBadge status={expense.status} />
+          </div>
+
+          <section>
+            <h3 className="mb-3 text-sm font-semibold">Expense</h3>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <DetailField label="Expense number" value={expense.expenseNumber ?? expense.id} />
+              <DetailField label="Expense date" value={fmtDate(expense.expenseDate)} />
+              <DetailField label="Category" value={expense.expenseCategory?.name} />
+              <DetailField label="Vendor / payee" value={expense.vendorName} />
+              <div className="sm:col-span-2"><DetailField label="Description" value={expense.description} /></div>
+            </div>
+          </section>
+
+          <section className="border-t pt-4" style={{ borderColor: 'var(--aurora-border)' }}>
+            <h3 className="mb-3 text-sm font-semibold">Scope</h3>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <DetailField label="Company" value={expense.company ? `${expense.company.name} (${expense.company.code})` : null} />
+              <DetailField label="Division" value={expense.division ? `${expense.division.name} (${expense.division.code})` : 'All divisions'} />
+              <DetailField label="Branch" value={expense.branch ? `${expense.branch.name} (${expense.branch.code})` : 'All branches'} />
+            </div>
+          </section>
+
+          <section className="border-t pt-4" style={{ borderColor: 'var(--aurora-border)' }}>
+            <h3 className="mb-3 text-sm font-semibold">Payment & Accounting</h3>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <DetailField label="Payment method" value={expense.paymentMethod?.replace(/_/g, ' ')} />
+              <DetailField label="Payment account" value={expense.cashAccount?.accountName} />
+              <DetailField label="Journal entry" value={expense.journalEntry?.journalNumber} />
+              <DetailField label="Journal status" value={expense.journalEntry?.status?.replace(/_/g, ' ')} />
+            </div>
+          </section>
+
+          <section className="border-t pt-4" style={{ borderColor: 'var(--aurora-border)' }}>
+            <h3 className="mb-3 text-sm font-semibold">Lifecycle</h3>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <DetailField label="Created by" value={expense.createdBy?.fullName} />
+              <DetailField label="Created at" value={fmtDateTime(expense.createdAt)} />
+              <DetailField label="Last updated" value={fmtDateTime(expense.updatedAt)} />
+              <DetailField label="Approved by" value={expense.approvedBy?.fullName} />
+              <DetailField label="Approved at" value={fmtDateTime(expense.approvedAt)} />
+              <DetailField label="Paid by / at" value={expense.paidBy ? `${expense.paidBy.fullName} · ${fmtDateTime(expense.paidAt)}` : null} />
+              {expense.rejectedReason && <div className="sm:col-span-2 lg:col-span-3"><DetailField label="Rejection reason" value={expense.rejectedReason} /></div>}
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
 function ExpenseModal({
   mode, initial, companies, onClose, onSaved,
 }: {
@@ -378,10 +598,20 @@ function ExpenseModal({
 
 function DeleteConfirm({ expense, onClose, onDeleted }: { expense: Expense; onClose: () => void; onDeleted: () => void }) {
   const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState('');
   const confirm = async () => {
     setDeleting(true);
-    await fetch(`/api/backend/expenses/${expense.id}`, { method: 'DELETE' });
-    onDeleted();
+    setError('');
+    try {
+      const response = await fetch(`/api/backend/expenses/${expense.id}`, { method: 'DELETE' });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.message ?? 'Could not delete expense');
+      onDeleted();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not delete expense');
+    } finally {
+      setDeleting(false);
+    }
   };
   return (
     <Modal
@@ -391,7 +621,9 @@ function DeleteConfirm({ expense, onClose, onDeleted }: { expense: Expense; onCl
       size="md"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="danger" onClick={confirm} loading={deleting}>Delete</Btn></>}
     >
+      {error && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       <p className="text-sm" style={{ color: 'var(--aurora-text)' }}>Delete expense <span className="font-medium">{expense.expenseNumber ?? expense.id.slice(0, 8)}</span>?</p>
+      <p className="mt-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>Only draft expenses can be deleted. Submitted, approved, and paid records remain in the audit trail.</p>
     </Modal>
   );
 }
@@ -409,12 +641,14 @@ export default function ExpensesPage() {
   const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [viewingId, setViewingId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [deleting, setDeleting] = useState<Expense | null>(null);
   const [rejecting, setRejecting] = useState<Expense | null>(null);
   const [paying, setPaying] = useState<Expense | null>(null);
   const [actionMsg, setActionMsg] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const canView = hasPermission('expenses.view');
   const canCreate = hasPermission('expenses.create');
@@ -459,6 +693,76 @@ export default function ExpensesPage() {
     } finally { setActionLoading(null); }
   };
 
+  const exportRegisterPdf = async () => {
+    setExportingPdf(true);
+    setActionMsg('');
+    try {
+      const params = new URLSearchParams({ page: '1', limit: '5000' });
+      if (companyId) params.set('companyId', companyId);
+      if (status) params.set('status', status);
+      if (categoryId) params.set('expenseCategoryId', categoryId);
+      if (dateFrom) params.set('dateFrom', dateFrom);
+      if (dateTo) params.set('dateTo', dateTo);
+      const response = await fetch(`/api/backend/expenses?${params}`, { cache: 'no-store' });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.message ?? 'Could not load expenses for export');
+      const result = json.data as Paginated<Expense> | undefined;
+      const expenses = result?.data ?? [];
+      if (!expenses.length) throw new Error('No expenses match the active filters');
+
+      const company = companies.find((item) => item.id === companyId);
+      const category = categories.find((item) => item.id === categoryId);
+      const filterParts = [
+        company?.name ?? 'All companies',
+        category?.name ?? 'All categories',
+        status ? status.replace(/_/g, ' ') : 'All statuses',
+        dateFrom || dateTo ? `${dateFrom || 'Beginning'} to ${dateTo || 'Today'}` : 'All dates',
+      ];
+      const currencyTotals = new Map<string, number>();
+      expenses.forEach((expense) => {
+        currencyTotals.set(
+          expense.currency,
+          (currencyTotals.get(expense.currency) ?? 0) + Number(expense.amount),
+        );
+      });
+
+      await downloadTablePdf({
+        title: 'Expense Register',
+        subtitle: filterParts.join(' · '),
+        orientation: 'portrait',
+        companyId: companyId || undefined,
+        columns: ['Expense #', 'Date', 'Vendor', 'Category', 'Amount', 'Status', 'Method', 'Account'],
+        rows: expenses.map((expense) => [
+          expense.expenseNumber ?? expense.id.slice(0, 8),
+          fmtDate(expense.expenseDate),
+          expense.vendorName ?? '—',
+          expense.expenseCategory?.name ?? '—',
+          fmtMoney(expense.currency, expense.amount),
+          expense.status.replace(/_/g, ' '),
+          expense.paymentMethod?.replace(/_/g, ' ') ?? '—',
+          expense.cashAccount?.accountName ?? '—',
+        ]),
+        numericColumns: [4],
+        columnWeights: [1.15, 0.85, 1.2, 1.15, 1.15, 0.9, 1, 1.2],
+        stripedRows: true,
+        sectionTitle: 'Filtered expenses',
+        summary: [
+          { label: 'Records', value: String(expenses.length) },
+          ...Array.from(currencyTotals, ([currency, total]) => ({
+            label: `${currency} total`,
+            value: fmtMoney(currency, total),
+          })),
+        ],
+        note: 'This register reflects the active filters and the expense statuses recorded at export time.',
+        baseName: 'expense-register',
+      });
+    } catch (err: unknown) {
+      setActionMsg(err instanceof Error ? err.message : 'Could not export expense register');
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
   const reset = (setter: (v: string) => void) => (v: string) => { setter(v); setPage(1); };
 
   if (!canView) {
@@ -476,6 +780,15 @@ export default function ExpensesPage() {
   return (
     <div className="p-6 space-y-6">
       {creating && <ExpenseModal mode="create" companies={companies} onClose={() => setCreating(false)} onSaved={() => { setCreating(false); load(); }} />}
+      {viewingId && (
+        <ExpenseDetailDialog
+          expenseId={viewingId}
+          canEdit={canCreate}
+          onClose={() => setViewingId(null)}
+          onEdit={(expense) => { setViewingId(null); setEditing(expense); }}
+          onDelete={(expense) => { setViewingId(null); setDeleting(expense); }}
+        />
+      )}
       {editing && <ExpenseModal mode="edit" initial={editing} companies={companies} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
       {deleting && <DeleteConfirm expense={deleting} onClose={() => setDeleting(null)} onDeleted={() => { setDeleting(null); load(); }} />}
       {rejecting && <RejectDialog expense={rejecting} onClose={() => setRejecting(null)} onDone={() => { setRejecting(null); load(); }} />}
@@ -516,7 +829,12 @@ export default function ExpensesPage() {
             <input type="date" value={dateTo} onChange={(e) => reset(setDateTo)(e.target.value)} className={filterSelectCls} style={filterStyle} title="To date" />
           </>
         }
-        actions={canCreate ? <Btn variant="primary" onClick={() => setCreating(true)}>+ New Expense</Btn> : null}
+        actions={
+          <div className="flex items-center gap-2">
+            <Btn variant="secondary" onClick={exportRegisterPdf} loading={exportingPdf}>Export PDF</Btn>
+            {canCreate && <Btn variant="primary" onClick={() => setCreating(true)}>+ New Expense</Btn>}
+          </div>
+        }
       />
 
       <Card className="overflow-hidden">
@@ -548,6 +866,7 @@ export default function ExpensesPage() {
                   <td className="px-4 py-3"><StatusBadge status={exp.status} /></td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1.5">
+                      <Btn variant="secondary" size="xs" onClick={() => setViewingId(exp.id)}>View</Btn>
                       {exp.status === 'DRAFT' && canCreate && (
                         <>
                           <Btn variant="primary" size="xs" onClick={() => handleAction(exp.id, 'submit')} loading={actionLoading === exp.id + 'submit'}>Submit</Btn>
@@ -560,6 +879,9 @@ export default function ExpensesPage() {
                           <Btn variant="success" size="xs" onClick={() => handleAction(exp.id, 'approve')} loading={actionLoading === exp.id + 'approve'}>Approve</Btn>
                           <Btn variant="danger" size="xs" onClick={() => setRejecting(exp)}>Reject</Btn>
                         </>
+                      )}
+                      {exp.status === 'PENDING_APPROVAL' && canCreate && (
+                        <Btn variant="ghost" size="xs" onClick={() => setEditing(exp)}>Edit</Btn>
                       )}
                       {exp.status === 'APPROVED' && canPay && (
                         <Btn variant="primary" size="xs" onClick={() => setPaying(exp)}>Pay</Btn>

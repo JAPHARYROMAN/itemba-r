@@ -49,13 +49,16 @@ function makeHarness() {
     },
   };
   const prisma = {
+    expense: { findFirst: jest.fn() },
+    division: { findFirst: jest.fn() },
+    branch: { findFirst: jest.fn() },
     cashAccount: { findMany: jest.fn() },
     $transaction: jest.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
   } as any;
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const accountingControl = { assertPostingAllowed: jest.fn().mockResolvedValue(undefined) } as any;
   const codes = { next: jest.fn().mockResolvedValue('JE-2026-000001') } as any;
-  const companyScope = {} as any;
+  const companyScope = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) } as any;
   const postingEngine = { postLines: jest.fn().mockResolvedValue({ id: 'journal-1' }) } as any;
   const service = new ExpensesService(
     prisma,
@@ -66,8 +69,76 @@ function makeHarness() {
     postingEngine,
   );
 
-  return { service, prisma, tx, auditLogs, accountingControl, codes, postingEngine };
+  return {
+    service,
+    prisma,
+    tx,
+    auditLogs,
+    accountingControl,
+    codes,
+    companyScope,
+    postingEngine,
+  };
 }
+
+describe('ExpensesService detail', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('returns scoped lifecycle, accounting, division, and branch context', async () => {
+    const { service, prisma, companyScope } = makeHarness();
+    prisma.expense.findFirst.mockResolvedValue({
+      ...approvedExpense({ divisionId: 'division-1', branchId: 'branch-1' }),
+      company: { id: 'company-1', name: 'Westsides Company Ltd', code: '001' },
+      createdBy: { id: 'user-1', fullName: 'Accountant', email: 'accountant@itemba.local' },
+      approvedBy: null,
+      paidBy: null,
+      cashAccount: null,
+      journalEntry: null,
+    });
+    prisma.division.findFirst.mockResolvedValue({
+      id: 'division-1',
+      name: 'Hardware',
+      code: 'HWB',
+    });
+    prisma.branch.findFirst.mockResolvedValue({
+      id: 'branch-1',
+      name: 'Kisimani Main Branch',
+      code: 'TDM-001',
+    });
+
+    const result = await service.findOne('expense-1', authUser());
+
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+      authUser(),
+      'company-1',
+      AccessLevel.READ,
+    );
+    expect(prisma.expense.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'expense-1', deletedAt: null },
+        include: expect.objectContaining({ journalEntry: expect.any(Object) }),
+      }),
+    );
+    expect(prisma.division.findFirst).toHaveBeenCalledWith({
+      where: { id: 'division-1', companyId: 'company-1', deletedAt: null },
+      select: { id: true, name: true, code: true },
+    });
+    expect(prisma.branch.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'branch-1',
+        deletedAt: null,
+        division: { companyId: 'company-1' },
+      },
+      select: { id: true, name: true, code: true },
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        division: expect.objectContaining({ id: 'division-1' }),
+        branch: expect.objectContaining({ id: 'branch-1' }),
+      }),
+    );
+  });
+});
 
 describe('ExpensesService payment account selection', () => {
   beforeEach(() => jest.clearAllMocks());

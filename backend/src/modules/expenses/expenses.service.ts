@@ -108,15 +108,55 @@ export class ExpensesService {
       include: {
         company: { select: { id: true, name: true, code: true } },
         expenseCategory: true,
-        cashAccount: { select: { id: true, accountName: true, currentBalance: true } },
-        createdBy: { select: { id: true, fullName: true } },
-        approvedBy: { select: { id: true, fullName: true } },
-        paidBy: { select: { id: true, fullName: true } },
+        cashAccount: {
+          select: {
+            id: true,
+            accountName: true,
+            accountType: true,
+            currency: true,
+            currentBalance: true,
+          },
+        },
+        createdBy: { select: { id: true, fullName: true, email: true } },
+        approvedBy: { select: { id: true, fullName: true, email: true } },
+        paidBy: { select: { id: true, fullName: true, email: true } },
+        journalEntry: {
+          select: {
+            id: true,
+            journalNumber: true,
+            transactionDate: true,
+            description: true,
+            status: true,
+            totalDebit: true,
+            totalCredit: true,
+            postedAt: true,
+          },
+        },
       },
     });
     if (!record) throw new NotFoundException('Expense not found');
     if (user) await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
-    return record;
+
+    const [division, branch] = await Promise.all([
+      record.divisionId
+        ? this.prisma.division.findFirst({
+            where: { id: record.divisionId, companyId: record.companyId, deletedAt: null },
+            select: { id: true, name: true, code: true },
+          })
+        : null,
+      record.branchId
+        ? this.prisma.branch.findFirst({
+            where: {
+              id: record.branchId,
+              deletedAt: null,
+              division: { companyId: record.companyId },
+            },
+            select: { id: true, name: true, code: true },
+          })
+        : null,
+    ]);
+
+    return { ...record, division, branch };
   }
 
   async create(dto: CreateExpenseDto, user: AuthUser) {
