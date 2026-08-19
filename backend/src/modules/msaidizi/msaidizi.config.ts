@@ -77,6 +77,27 @@ export class MsaidiziConfig {
   }
 
   /**
+   * Declare a tool-search tool and defer the bulk of the registry, instead of
+   * sending a lexically narrowed slice of it.
+   *
+   * Off by default so both paths can be run against the same questions before
+   * either is trusted. It grants no authority either way: search selects from
+   * the set `buildRegistry` already filtered by permission ∩ write mode, so the
+   * reachable surface is identical — only what the model can SEE at once moves.
+   *
+   * Worth knowing what switching this on removes as a class rather than as a
+   * bug. Narrowing has produced two defects on its own (see `registryFor`): a
+   * confirmation turn narrowing away the tool it was approving, and a
+   * fall-through that handed over the entire permitted set. Both exist because
+   * the declared set is re-derived per turn from the user's words. With search
+   * on, every permitted tool is declared on every turn — deferred, not absent —
+   * so dispatch always resolves and that class of defect cannot recur.
+   */
+  get searchEnabled(): boolean {
+    return this.config.get<string>('MSAIDIZI_TOOL_SEARCH', 'false') === 'true';
+  }
+
+  /**
    * Hard ceiling on write-tier calls in ONE RUN — one HTTP request through
    * `MsaidiziService.run()`. Not one session, and the name used to say session.
    *
