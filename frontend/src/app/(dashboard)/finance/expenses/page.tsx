@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { downloadTablePdf } from '@/lib/export-download';
+import { DocumentArtifactButton } from '@/components/documents/DocumentArtifactButton';
 
 interface Company { id: string; name: string; code: string }
 interface ExpenseCategory { id: string; name: string }
@@ -335,7 +336,6 @@ function ExpenseDetailDialog({
 }) {
   const [expense, setExpense] = useState<ExpenseDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -358,52 +358,6 @@ function ExpenseDetailDialog({
     return () => { cancelled = true; };
   }, [expenseId]);
 
-  const exportPdf = async () => {
-    if (!expense) return;
-    setExporting(true);
-    setError('');
-    try {
-      await downloadTablePdf({
-        title: 'Expense Voucher',
-        subtitle: `${expense.company?.name ?? 'Company expense'} · ${fmtDate(expense.expenseDate)}`,
-        status: expense.status.replace(/_/g, ' '),
-        orientation: 'portrait',
-        companyId: expense.companyId,
-        columns: ['Field', 'Recorded detail'],
-        rows: [
-          ['Expense number', expense.expenseNumber ?? expense.id],
-          ['Expense date', fmtDate(expense.expenseDate)],
-          ['Vendor / payee', expense.vendorName ?? 'Not specified'],
-          ['Category', expense.expenseCategory?.name ?? 'Not specified'],
-          ['Description', expense.description],
-          ['Company', expense.company ? `${expense.company.name} (${expense.company.code})` : '—'],
-          ['Division', expense.division ? `${expense.division.name} (${expense.division.code})` : 'All divisions'],
-          ['Branch', expense.branch ? `${expense.branch.name} (${expense.branch.code})` : 'All branches'],
-          ['Payment method', expense.paymentMethod?.replace(/_/g, ' ') ?? 'Not recorded'],
-          ['Cash / bank account', expense.cashAccount?.accountName ?? 'Not paid'],
-          ['Journal entry', expense.journalEntry?.journalNumber ?? 'Not posted'],
-          ['Created by', expense.createdBy?.fullName ?? '—'],
-          ['Created at', fmtDateTime(expense.createdAt)],
-          ['Approved by', expense.approvedBy?.fullName ?? '—'],
-          ['Approved at', fmtDateTime(expense.approvedAt)],
-          ['Paid by', expense.paidBy?.fullName ?? '—'],
-          ['Paid at', fmtDateTime(expense.paidAt)],
-          ...(expense.rejectedReason ? [['Rejection reason', expense.rejectedReason]] : []),
-        ],
-        columnWeights: [1, 2.4],
-        stripedRows: true,
-        sectionTitle: 'Expense details',
-        summary: [{ label: 'Amount', value: fmtMoney(expense.currency, expense.amount) }],
-        note: 'Generated from the ITEMBA-R expense register. The status above reflects the record at export time.',
-        baseName: `expense-${expense.expenseNumber ?? expense.id.slice(0, 8)}`,
-      });
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Could not export expense PDF');
-    } finally {
-      setExporting(false);
-    }
-  };
-
   return (
     <Modal
       open
@@ -420,7 +374,13 @@ function ExpenseDetailDialog({
           {expense && ['DRAFT', 'PENDING_APPROVAL'].includes(expense.status) && canEdit && (
             <Btn variant="secondary" onClick={() => onEdit(expense)}>Edit</Btn>
           )}
-          <Btn variant="primary" onClick={exportPdf} loading={exporting} disabled={!expense}>Export PDF</Btn>
+          {expense && (
+            <DocumentArtifactButton
+              entityType="EXPENSE_VOUCHER"
+              entityId={expense.id}
+              buttonLabel="Generate Voucher PDF"
+            />
+          )}
         </>
       }
     >

@@ -23,6 +23,7 @@ const BUSINESS_PDF_SOURCE_PERMISSIONS = [
   'payroll.view',
   'receivables.view',
   'customer-payments.view',
+  'expenses.view',
 ];
 
 const INLINE_SAFE_MIME_TYPES = new Set([

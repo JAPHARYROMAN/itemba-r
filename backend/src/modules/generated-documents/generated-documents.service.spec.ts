@@ -31,6 +31,7 @@ function makeService() {
     creditNote: { findFirst: jest.fn(async () => null) },
     customer: { findFirst: jest.fn(async () => null) },
     customerPayment: { findFirst: jest.fn(async () => null) },
+    expense: { findFirst: jest.fn(async () => null) },
     receivable: { findMany: jest.fn(async () => []) },
     journalEntry: { findMany: jest.fn(async () => []) },
     supplier: { findFirst: jest.fn(async () => null) },
@@ -563,6 +564,83 @@ describe('GeneratedDocumentsService.generateBusinessPdf (document-type builders)
     });
   });
 
+  it('EXPENSE_VOUCHER: builds a compact audit voucher without internal metadata', async () => {
+    const { service, prisma } = makeService();
+    prisma.expense.findFirst.mockResolvedValue({
+      id: 'expense-1',
+      expenseNumber: 'EXP-2026-000005',
+      companyId: 'company-1',
+      branchId: null,
+      vendorName: 'Asha Catering',
+      amount: 22500,
+      currency: 'TZS',
+      expenseDate: new Date('2026-08-05'),
+      description: 'Staff meals for warehouse count',
+      paymentMethod: 'CASH',
+      status: 'PAID',
+      company: null,
+      expenseCategory: { name: 'Food' },
+      createdBy: { fullName: 'Accounts Clerk', email: 'private@example.com' },
+      approvedBy: { fullName: 'Finance Controller', email: 'controller@example.com' },
+      paidBy: { fullName: 'Cashier', email: 'cashier@example.com' },
+      journalEntry: { journalNumber: 'JE-2026-000100' },
+      createdAt: new Date('2026-08-05T08:00:00Z'),
+      approvedAt: new Date('2026-08-05T09:00:00Z'),
+      paidAt: new Date('2026-08-05T09:30:00Z'),
+      cashAccount: { accountName: 'Sensitive Cash Account', currentBalance: 999999 },
+    });
+
+    const model = await generateModel(
+      service,
+      'EXPENSE_VOUCHER',
+      'expense-1',
+      user({ permissions: ['expenses.view'] }),
+    );
+
+    expect(prisma.expense.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'expense-1',
+          companyId: { in: ['company-1'] },
+          deletedAt: null,
+        }),
+      }),
+    );
+    expect(model.title).toBe('Expense Voucher');
+    expect(model.reference).toBe('EXP-2026-000005');
+    expect(model.status).toBe('PAID');
+    expect(model.meta).toEqual([
+      { label: 'Voucher Date', value: '05/08/2026' },
+      { label: 'Category', value: 'Food' },
+      { label: 'Currency', value: 'TZS' },
+    ]);
+    expect(sectionByTitle(model, 'Expense Details').items).toEqual([
+      { label: 'Paid To / Payee', value: 'Asha Catering' },
+      { label: 'Payment Method', value: 'CASH' },
+      { label: 'Purpose', value: 'Staff meals for warehouse count' },
+    ]);
+    expect(sectionByTitle(model, 'Amount').paragraphs).toEqual([
+      'Amount in words: Twenty Two Thousand Five Hundred Tanzanian Shillings Only.',
+    ]);
+    expect(sectionByTitle(model, 'Amount').totals).toEqual([
+      { label: 'Total Expense', value: 'TZS 22,500.00', emphasis: true },
+    ]);
+    expect(sectionByTitle(model, 'Accounting Reference').items).toEqual([
+      { label: 'Journal Entry', value: 'JE-2026-000100' },
+    ]);
+    expect(sectionByTitle(model, 'Authorization').signatures).toEqual([
+      'Prepared By / Date',
+      'Approved By / Date',
+      'Received By / Date',
+    ]);
+
+    const rendered = JSON.stringify(model);
+    expect(rendered).not.toContain('private@example.com');
+    expect(rendered).not.toContain('Sensitive Cash Account');
+    expect(rendered).not.toContain('999999');
+    expect(rendered).not.toContain('2026-08-05T09:30:00');
+  });
+
   it('CUSTOMER_DEBT_STATEMENT: consolidates all active debts with products and payments', async () => {
     const { service, prisma, companyScope } = makeService();
     prisma.company.findFirst.mockResolvedValue({
@@ -821,6 +899,7 @@ describe('GeneratedDocumentsService.generateBusinessPdf (document-type builders)
     ['PAYSLIP', 'payroll.view', 'payrollEntry'],
     ['CREDIT_NOTE', 'receivables.view', 'creditNote'],
     ['CUSTOMER_PAYMENT_RECEIPT', 'customer-payments.view', 'customerPayment'],
+    ['EXPENSE_VOUCHER', 'expenses.view', 'expense'],
   ];
 
   it.each(NOT_FOUND_CASES)(

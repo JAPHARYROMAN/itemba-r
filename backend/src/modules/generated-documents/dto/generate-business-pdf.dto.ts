@@ -14,6 +14,7 @@ export const BUSINESS_PDF_ENTITY_TYPES = [
   'PAYSLIP',
   'CREDIT_NOTE',
   'CUSTOMER_PAYMENT_RECEIPT',
+  'EXPENSE_VOUCHER',
 ] as const;
 
 export type BusinessPdfEntityType = (typeof BUSINESS_PDF_ENTITY_TYPES)[number];

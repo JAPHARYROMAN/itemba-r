@@ -16,7 +16,8 @@ export type DocumentEntityType =
   | 'SUPPLIER_INVOICE'
   | 'PAYSLIP'
   | 'CREDIT_NOTE'
-  | 'CUSTOMER_PAYMENT_RECEIPT';
+  | 'CUSTOMER_PAYMENT_RECEIPT'
+  | 'EXPENSE_VOUCHER';
 
 interface GeneratedDocumentResponse {
   generatedDocument?: {

@@ -395,9 +395,81 @@ export class GeneratedDocumentsService {
         return this.creditNotePdf(entityId, user);
       case 'CUSTOMER_PAYMENT_RECEIPT':
         return this.customerPaymentReceiptPdf(entityId, user);
+      case 'EXPENSE_VOUCHER':
+        return this.expenseVoucherPdf(entityId, user);
       default:
         throw new BadRequestException('Unsupported document entity type');
     }
+  }
+
+  private async expenseVoucherPdf(id: string, user: AuthUser): Promise<ResolvedBusinessPdfModel> {
+    const where: any = { id, deletedAt: null };
+    applyCompanyScopeWhere(where, user);
+    const record = await this.prisma.expense.findFirst({
+      where,
+      include: {
+        company: companySelect(),
+        expenseCategory: { select: { name: true } },
+        createdBy: { select: { fullName: true } },
+        approvedBy: { select: { fullName: true } },
+        paidBy: { select: { fullName: true } },
+        journalEntry: { select: { journalNumber: true } },
+      },
+    });
+    if (!record) throw new NotFoundException('Expense not found');
+
+    const reference = record.expenseNumber ?? record.id.slice(0, 8);
+    const authorizationItems = [
+      kv('Prepared By', record.createdBy?.fullName),
+      kv('Approved By', record.approvedBy?.fullName),
+      kv('Payment Processed By', record.paidBy?.fullName),
+    ];
+    const accountingSection = record.journalEntry?.journalNumber
+      ? [
+          {
+            title: 'Accounting Reference',
+            items: [kv('Journal Entry', record.journalEntry.journalNumber)],
+          },
+        ]
+      : [];
+
+    return this.wrapPdf(record.companyId, record.branchId, reference, DocumentCategory.AUDIT_FILE, {
+      title: 'Expense Voucher',
+      subtitle: record.vendorName || 'Company Expense',
+      reference,
+      status: label(record.status),
+      organization: organization(record.company),
+      generatedAt: new Date(),
+      meta: [
+        kv('Voucher Date', date(record.expenseDate)),
+        kv('Category', record.expenseCategory?.name),
+        kv('Currency', record.currency),
+      ],
+      sections: [
+        {
+          title: 'Expense Details',
+          items: [
+            kv('Paid To / Payee', record.vendorName || 'Not specified'),
+            kv(
+              'Payment Method',
+              record.paymentMethod ? label(record.paymentMethod) : 'Not recorded',
+            ),
+            kv('Purpose', record.description),
+          ],
+        },
+        {
+          title: 'Amount',
+          paragraphs: [amountInWords(record.amount, record.currency)],
+          totals: [total('Total Expense', record.amount, record.currency, true)],
+        },
+        ...accountingSection,
+        {
+          title: 'Authorization',
+          items: authorizationItems,
+          signatures: ['Prepared By / Date', 'Approved By / Date', 'Received By / Date'],
+        },
+      ],
+    });
   }
 
   private async salesOrderPdf(id: string, user: AuthUser): Promise<ResolvedBusinessPdfModel> {
@@ -2370,6 +2442,8 @@ function permissionForBusinessPdfEntity(entityType: BusinessPdfEntityType) {
       return 'receivables.view';
     case 'CUSTOMER_PAYMENT_RECEIPT':
       return 'customer-payments.view';
+    case 'EXPENSE_VOUCHER':
+      return 'expenses.view';
     default:
       return 'documents.manage';
   }
@@ -2478,6 +2552,111 @@ function money(amount: unknown, currency = 'TZS') {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(Number(amount ?? 0))}`;
+}
+
+const CURRENCY_WORDS: Record<string, [string, string, string, string]> = {
+  TZS: ['Tanzanian Shilling', 'Tanzanian Shillings', 'Cent', 'Cents'],
+  USD: ['US Dollar', 'US Dollars', 'Cent', 'Cents'],
+  EUR: ['Euro', 'Euros', 'Cent', 'Cents'],
+  KES: ['Kenyan Shilling', 'Kenyan Shillings', 'Cent', 'Cents'],
+  UGX: ['Ugandan Shilling', 'Ugandan Shillings', 'Cent', 'Cents'],
+  GBP: ['British Pound', 'British Pounds', 'Penny', 'Pence'],
+};
+
+function amountInWords(rawAmount: unknown, rawCurrency: unknown) {
+  const amount = Number(rawAmount ?? 0);
+  const currency = value(rawCurrency).toUpperCase();
+  if (!Number.isFinite(amount) || amount < 0 || !Number.isSafeInteger(Math.floor(amount))) {
+    return `Amount in words: ${money(rawAmount, currency)}.`;
+  }
+
+  const minorUnits = Math.round(amount * 100);
+  const whole = Math.floor(minorUnits / 100);
+  const fraction = minorUnits % 100;
+  const labels = CURRENCY_WORDS[currency] ?? [currency, currency, 'Cent', 'Cents'];
+  const majorLabel = whole === 1 ? labels[0] : labels[1];
+  const fractionText = fraction
+    ? ` and ${capitalizeWords(integerToEnglishWords(fraction))} ${fraction === 1 ? labels[2] : labels[3]}`
+    : '';
+
+  return `Amount in words: ${capitalizeWords(integerToEnglishWords(whole))} ${majorLabel}${fractionText} Only.`;
+}
+
+function integerToEnglishWords(value: number): string {
+  if (value === 0) return 'zero';
+
+  const scales: Array<[number, string]> = [
+    [1_000_000_000_000, 'trillion'],
+    [1_000_000_000, 'billion'],
+    [1_000_000, 'million'],
+    [1_000, 'thousand'],
+  ];
+  const parts: string[] = [];
+  let remaining = value;
+
+  for (const [size, name] of scales) {
+    if (remaining < size) continue;
+    const count = Math.floor(remaining / size);
+    parts.push(`${integerToEnglishWords(count)} ${name}`);
+    remaining %= size;
+  }
+  if (remaining) parts.push(numberBelowOneThousandInWords(remaining));
+  return parts.join(' ');
+}
+
+function numberBelowOneThousandInWords(value: number) {
+  const small = [
+    'zero',
+    'one',
+    'two',
+    'three',
+    'four',
+    'five',
+    'six',
+    'seven',
+    'eight',
+    'nine',
+    'ten',
+    'eleven',
+    'twelve',
+    'thirteen',
+    'fourteen',
+    'fifteen',
+    'sixteen',
+    'seventeen',
+    'eighteen',
+    'nineteen',
+  ];
+  const tens = [
+    '',
+    '',
+    'twenty',
+    'thirty',
+    'forty',
+    'fifty',
+    'sixty',
+    'seventy',
+    'eighty',
+    'ninety',
+  ];
+  const parts: string[] = [];
+  let remaining = value;
+
+  if (remaining >= 100) {
+    parts.push(`${small[Math.floor(remaining / 100)]} hundred`);
+    remaining %= 100;
+  }
+  if (remaining >= 20) {
+    parts.push(tens[Math.floor(remaining / 10)]);
+    if (remaining % 10) parts.push(small[remaining % 10]);
+  } else if (remaining > 0) {
+    parts.push(small[remaining]);
+  }
+  return parts.join(' ');
+}
+
+function capitalizeWords(text: string) {
+  return text.replace(/\b[a-z]/g, (character) => character.toUpperCase());
 }
 
 function qty(amount: unknown) {
