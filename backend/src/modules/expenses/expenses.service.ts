@@ -11,6 +11,7 @@ import { AccountingControlService, CompanyScopeService } from '../../common/serv
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
+import { PayExpenseDto } from './dto/pay-expense.dto';
 
 @Injectable()
 export class ExpensesService {
@@ -269,13 +270,40 @@ export class ExpensesService {
     return record;
   }
 
-  async pay(id: string, user: AuthUser) {
+  async paymentOptions(id: string, user: AuthUser) {
+    const expense = await this.findOne(id, user, AccessLevel.WRITE);
+    if (expense.status !== 'APPROVED') {
+      throw new BadRequestException('Only APPROVED expenses can be paid');
+    }
+
+    return this.prisma.cashAccount.findMany({
+      where: {
+        companyId: expense.companyId,
+        currency: expense.currency,
+        deletedAt: null,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        accountName: true,
+        accountType: true,
+        currency: true,
+        currentBalance: true,
+        division: { select: { id: true, name: true, code: true } },
+        branch: { select: { id: true, name: true, code: true } },
+      },
+      orderBy: [{ accountType: 'asc' }, { accountName: 'asc' }],
+    });
+  }
+
+  async pay(id: string, dto: PayExpenseDto, user: AuthUser) {
     const userId = user.id;
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status !== 'APPROVED') {
       throw new BadRequestException('Only APPROVED expenses can be paid');
     }
-    if (!existing.cashAccountId || !existing.cashAccount) {
+    const cashAccountId = dto.cashAccountId?.trim() || existing.cashAccountId;
+    if (!cashAccountId) {
       throw new BadRequestException('Cash account is required before an expense can be paid');
     }
     if (!existing.expenseCategory?.linkedAccountId) {
@@ -295,15 +323,18 @@ export class ExpensesService {
     const result = await this.prisma.$transaction(async (tx) => {
       const cashAccount = await tx.cashAccount.findFirst({
         where: {
-          id: existing.cashAccountId!,
+          id: cashAccountId,
           companyId: existing.companyId,
+          currency: existing.currency,
           deletedAt: null,
           isActive: true,
         },
       });
 
       if (!cashAccount) {
-        throw new BadRequestException('Active cash account not found for this expense company');
+        throw new BadRequestException(
+          `Select an active ${existing.currency} cash or bank account for this expense company`,
+        );
       }
 
       const cashLedgerAccountId = await this.resolveCashLedgerAccountId(
@@ -363,6 +394,8 @@ export class ExpensesService {
           paidById: userId,
           paidAt: new Date(),
           journalEntryId: je.id,
+          cashAccountId: cashAccount.id,
+          ...(dto.paymentMethod?.trim() && { paymentMethod: dto.paymentMethod.trim() }),
         },
       });
     });
@@ -374,7 +407,11 @@ export class ExpensesService {
       userId,
       companyId: result.companyId,
       oldValue: { status: 'APPROVED' } as any,
-      newValue: { status: 'PAID' } as any,
+      newValue: {
+        status: 'PAID',
+        cashAccountId,
+        paymentMethod: dto.paymentMethod?.trim() || existing.paymentMethod,
+      } as any,
       severity: AuditSeverity.HIGH,
     });
 

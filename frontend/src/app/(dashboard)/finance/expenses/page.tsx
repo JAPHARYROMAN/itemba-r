@@ -1,12 +1,22 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 
 interface Company { id: string; name: string; code: string }
 interface ExpenseCategory { id: string; name: string }
-interface CashAccount { id: string; accountName: string; companyId: string }
+interface CashAccount {
+  id: string;
+  accountName: string;
+  companyId?: string;
+  accountType?: string;
+  currency?: string;
+  currentBalance?: number;
+  division?: { name: string; code: string } | null;
+  branch?: { name: string; code: string } | null;
+}
 
 interface Expense {
   id: string;
@@ -85,6 +95,172 @@ function RejectDialog({ expense, onClose, onDone }: { expense: Expense; onClose:
     >
       {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <FormTextarea label="Rejection Reason" required rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for rejection…" />
+    </Modal>
+  );
+}
+
+function PayExpenseDialog({
+  expense,
+  onClose,
+  onPaid,
+}: {
+  expense: Expense;
+  onClose: () => void;
+  onPaid: () => void;
+}) {
+  const [accounts, setAccounts] = useState<CashAccount[]>([]);
+  const [cashAccountId, setCashAccountId] = useState(expense.cashAccountId ?? '');
+  const [paymentMethod, setPaymentMethod] = useState(expense.paymentMethod ?? 'CASH');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/backend/expenses/${expense.id}/payment-options`)
+      .then(async (response) => {
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(json.message ?? 'Could not load payment accounts');
+        return Array.isArray(json.data) ? json.data : [];
+      })
+      .then((items: CashAccount[]) => {
+        if (cancelled) return;
+        setAccounts(items);
+        setCashAccountId((current) => {
+          if (items.some((account) => account.id === current)) return current;
+          return items.length === 1 ? items[0].id : '';
+        });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load accounts');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expense.id]);
+
+  const selectedAccount = accounts.find((account) => account.id === cashAccountId);
+
+  const submit = async () => {
+    if (!cashAccountId) {
+      setError('Select the cash or bank account used to pay this expense');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/backend/expenses/${expense.id}/pay`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cashAccountId, paymentMethod }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.message ?? 'Expense payment failed');
+      onPaid();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Expense payment failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Pay Expense"
+      subtitle={`${expense.expenseNumber ?? expense.id.slice(0, 8)} · ${expense.currency} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(expense.amount)}`}
+      size="md"
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn
+            variant="primary"
+            onClick={submit}
+            loading={saving}
+            disabled={loading || !cashAccountId}
+          >
+            Confirm Payment
+          </Btn>
+        </>
+      }
+    >
+      {error && (
+        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+      <div className="space-y-4">
+        <FormSelect
+          label="Cash / Bank Account"
+          required
+          value={cashAccountId}
+          onChange={(event) => setCashAccountId(event.target.value)}
+          placeholder={loading ? 'Loading accounts…' : 'Select account…'}
+          disabled={loading}
+        >
+          {accounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.accountName} · {account.accountType?.replace(/_/g, ' ')} · {account.currency}
+            </option>
+          ))}
+        </FormSelect>
+        <FormSelect
+          label="Payment Method"
+          required
+          value={paymentMethod}
+          onChange={(event) => setPaymentMethod(event.target.value)}
+        >
+          {PAYMENT_METHODS.map((method) => (
+            <option key={method} value={method}>
+              {method.replace(/_/g, ' ')}
+            </option>
+          ))}
+        </FormSelect>
+        {selectedAccount && (
+          <div
+            className="rounded-lg border px-3 py-3 text-sm"
+            style={{ borderColor: 'var(--aurora-border)' }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span style={{ color: 'var(--aurora-text-muted)' }}>Available balance</span>
+              <span className="font-mono font-semibold">
+                {selectedAccount.currency}{' '}
+                {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(
+                  Number(selectedAccount.currentBalance ?? 0),
+                )}
+              </span>
+            </div>
+            {(selectedAccount.branch || selectedAccount.division) && (
+              <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                {[selectedAccount.division?.name, selectedAccount.branch?.name]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+            )}
+          </div>
+        )}
+        {!loading && accounts.length === 0 && !error && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+            No active {expense.currency} payment account is configured for this company.{' '}
+            <Link
+              href={`/finance/cash-accounts?companyId=${encodeURIComponent(expense.companyId)}`}
+              className="font-semibold underline"
+            >
+              Open Cash Accounts
+            </Link>
+          </div>
+        )}
+        <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+          Confirming posts the expense journal and deducts the amount from the selected account.
+        </p>
+      </div>
     </Modal>
   );
 }
@@ -236,6 +412,7 @@ export default function ExpensesPage() {
   const [editing, setEditing] = useState<Expense | null>(null);
   const [deleting, setDeleting] = useState<Expense | null>(null);
   const [rejecting, setRejecting] = useState<Expense | null>(null);
+  const [paying, setPaying] = useState<Expense | null>(null);
   const [actionMsg, setActionMsg] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -302,6 +479,7 @@ export default function ExpensesPage() {
       {editing && <ExpenseModal mode="edit" initial={editing} companies={companies} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
       {deleting && <DeleteConfirm expense={deleting} onClose={() => setDeleting(null)} onDeleted={() => { setDeleting(null); load(); }} />}
       {rejecting && <RejectDialog expense={rejecting} onClose={() => setRejecting(null)} onDone={() => { setRejecting(null); load(); }} />}
+      {paying && <PayExpenseDialog expense={paying} onClose={() => setPaying(null)} onPaid={() => { setPaying(null); load(); }} />}
 
       <PageHeader title="Expenses" subtitle="Track and manage company expenses" />
 
@@ -384,7 +562,7 @@ export default function ExpensesPage() {
                         </>
                       )}
                       {exp.status === 'APPROVED' && canPay && (
-                        <Btn variant="primary" size="xs" onClick={() => handleAction(exp.id, 'pay')} loading={actionLoading === exp.id + 'pay'}>Pay</Btn>
+                        <Btn variant="primary" size="xs" onClick={() => setPaying(exp)}>Pay</Btn>
                       )}
                     </div>
                   </td>

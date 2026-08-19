@@ -1,18 +1,10 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Body,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { ExpensesService } from './expenses.service';
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { QueryExpenseDto } from './dto/query-expense.dto';
 import { RejectExpenseDto } from './dto/reject-expense.dto';
+import { PayExpenseDto } from './dto/pay-expense.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
@@ -64,8 +56,14 @@ export class ExpensesController {
 
   @Patch(':id/pay')
   @RequirePermissions('expenses.pay')
-  pay(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.pay(id, user);
+  pay(@Param('id') id: string, @Body() dto: PayExpenseDto, @CurrentUser() user: AuthUser) {
+    return this.service.pay(id, dto, user);
+  }
+
+  @Get(':id/payment-options')
+  @RequirePermissions('expenses.pay')
+  paymentOptions(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.paymentOptions(id, user);
   }
 
   @Delete(':id')
