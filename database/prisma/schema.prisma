@@ -326,41 +326,34 @@ model MsaidiziProcedure {
 /// continuable, which is what a chat app does when a session ages out.
 model MsaidiziConversation {
   id              String    @id @default(uuid())
-  /// Mirrors audit_logs.agentSessionId. Minted by this server on a conversation's
-  /// first turn and echoed back by the client on every later one.
+  /// Mirrors audit_logs.agentSessionId. MINTED BY THIS SERVER, on every path,
+  /// and echoed back by the client on every later turn.
   ///
-  /// The echo is required, and that is the point: confirmationIdFor() derives
-  /// red-tier approval ids from this value (msaidizi.service.ts), so a client
-  /// that forgets produces an infinite approval loop that looks exactly like the
-  /// server ignoring the user. Both surfaces that accept it — POST /msaidizi/ask
-  /// and POST /msaidizi/procedures/:id/run — pin it to /^ms_[0-9a-f]{32}$/, the
-  /// alphabet and length mintSessionId() produces.
+  /// That sentence used to be aspirational and is now enforced. A client may
+  /// send an id, and conversations.service.ts honours it in exactly one case:
+  /// it resolves, through the same author-and-company scope every other read
+  /// here uses, to a conversation this caller owns — in which case the value is
+  /// this column's own, server-issued on some earlier turn. Anything else is
+  /// IGNORED and a fresh id is minted: an id naming nothing, an id naming
+  /// somebody else's conversation, an id naming one the author deleted, and an
+  /// id that arrived while the store could not be read at all. Never rejected,
+  /// because failing a run over a stale id is a worse outcome than
+  /// re-identifying it.
   ///
-  /// That pattern is a check on SHAPE and not on provenance, and this column is
-  /// documented as what it holds rather than as what would be nicer. Any client
-  /// with a random-hex generator satisfies the pattern, so the value here can
-  /// also be one a caller invented for a conversation of its own — reached
-  /// whenever an id arrives naming no stored conversation, which is exactly what
-  /// a client holds after a first turn whose row could not be written.
+  /// So no value that reaches this column, and no value stamped onto an
+  /// audit_logs row, is one a caller invented. Both surfaces that accept an id —
+  /// POST /msaidizi/ask and POST /msaidizi/procedures/:id/run — still pin it to
+  /// /^ms_[0-9a-f]{32}$/, but that pattern is now a cheap early reject rather
+  /// than the only check: it constrains SHAPE, and provenance is settled by the
+  /// resolution above.
   ///
-  /// WHOSE run the id names is the property the oversight trail depends on, and
-  /// it holds for every value that reaches THIS COLUMN. It is unique, so a
-  /// caller sending one that already names another user's conversation — or its
-  /// own, deleted — collides on insert, and conversations.service.ts runs that
-  /// turn unpersisted under a freshly minted id rather than adopting it. No row
-  /// stored here carries one user's session id over another user's conversation.
-  ///
-  /// The audit trail is wider than this column, and that is where the claim
-  /// stops. A run whose conversation could not be READ is never offered to this
-  /// index at all: conversations.service.ts degrades to the id the request
-  /// carried, writes no row here, and audit_logs rows are stamped with a value
-  /// nothing checked — including, during such an outage, an id naming somebody
-  /// else's conversation. Those rows still carry their own userId and were
-  /// written by the caller's own token, so the trail can always say who acted;
-  /// what a session id cannot promise while the store is unreadable is that it
-  /// groups one person's work. Filter by userId when that distinction matters.
-  /// See OpenedTurn.sessionId and unverifiedSessionId() in
-  /// conversations.service.ts.
+  /// What minting a fresh id no longer costs: an approval loop. Red-tier
+  /// approvals are msaidizi_approval_grants rows — server-issued nonces bound to
+  /// a conversation and to an argument digest — not values derived from this
+  /// column, so re-identifying a run cannot invalidate an approval the user has
+  /// already been shown. Before that ledger existed, confirmationIdFor() derived
+  /// approval ids from this value and a fresh id mid-approval re-asked the user
+  /// for ever, which is why a caller-supplied id was adopted on its own word.
   agentSessionId  String    @unique
   userId          String
   companyId       String?
@@ -398,6 +391,7 @@ model MsaidiziConversation {
   user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
   turns   MsaidiziConversationTurn[]
+  approvalGrants MsaidiziApprovalGrant[]
 
   @@index([userId, deletedAt, lastTurnAt])
   @@index([companyId, createdAt])
@@ -433,6 +427,76 @@ model MsaidiziConversationTurn {
   @@unique([conversationId, sequence])
   @@index([conversationId, sequence])
   @@map("msaidizi_conversation_turns")
+}
+
+/// One server-issued approval for one proposed red-tier action: issued when the
+/// agent PROPOSES it, spent when the agent DISPATCHES it, and good for exactly
+/// one dispatch.
+///
+/// This table exists because the thing it replaced was not a receipt. A red-tier
+/// approval used to be confirmationIdFor(sessionId, toolName, args) — a value
+/// DERIVED from three things the caller supplies on the same request that claims
+/// them approved, so it named an action rather than recording that one had been
+/// offered, and it was spendable again on every request that re-sent it. Two
+/// halves were missing and both are rows here: the grant is issued by the server
+/// (so an approval cannot run ahead of a proposal) and it is spent durably (so
+/// it cannot be re-sent tomorrow for a second execution).
+///
+/// Why a ledger rather than a list of spent ids. The derived id is
+/// deterministic, so the same weekly journal posted again next week produces the
+/// same id: remembering ids as permanently spent would make a legitimately
+/// repeated identical action permanently unapprovable. A grant is a nonce, so
+/// the repeat gets a new one and is approvable exactly as the first was.
+///
+/// Deliberately NO deletedAt. Every other Msaidizi table carries one, and here
+/// it would be actively wrong twice over: an expired approval must be destroyed
+/// rather than stamped, and PrismaService's soft-delete middleware keys off that
+/// very column — its presence would silently rewrite the retention sweep's
+/// DELETE into an UPDATE and leave every spent grant in place for ever.
+model MsaidiziApprovalGrant {
+  /// The grant id, and the only thing a client sends back in `confirmed`.
+  ///
+  /// A fresh 128-bit random nonce minted per proposal, never derived from the
+  /// session, the tool, the arguments or anything else a caller holds — which is
+  /// the whole difference from the derived id it replaced. Unguessable, so it
+  /// can only have come from a confirmation_required event this server emitted.
+  id             String   @id
+  conversationId String
+  /// Copied from the conversation at issue, so the spend's WHERE clause can name
+  /// both boundaries — this conversation AND this user — in the same conditional
+  /// UPDATE that decides the race, without a join.
+  userId         String
+  /// The turn the proposal was made on. Read off the conversation's own
+  /// turnCount at issue: audit context, not part of the spend predicate, because
+  /// an approval answered a turn later is still an answer to that proposal.
+  turnSequence   Int
+  toolName       String
+  /// A digest of the exact arguments proposed, produced by the same canonical
+  /// encoding and SHA-256 that confirmationIdFor() uses (msaidizi.service.ts).
+  /// The spend requires it to equal the digest of the action about to run, so a
+  /// grant issued for "delete invoice 41" cannot dispatch "delete invoice 42" —
+  /// including when both are approved in one batch.
+  argsDigest     String
+  createdAt      DateTime @default(now())
+  /// Unspent past this point. Enforced in the spend's own WHERE clause, not by
+  /// the sweep — the sweep only reclaims space, so a sweep that never runs
+  /// cannot resurrect an expired approval.
+  expiresAt      DateTime
+  /// Null until spent. The single conditional UPDATE that sets it — "... WHERE
+  /// usedAt IS NULL", reporting whether it matched a row — is what makes one
+  /// approval buy exactly one dispatch, including for two concurrent requests
+  /// naming the same grant. Never read-then-write: both racers would read null.
+  usedAt         DateTime?
+
+  /// Cascade: a grant is meaningless without the conversation that proposed it,
+  /// and deleting a conversation must not leave a spendable approval behind.
+  conversation MsaidiziConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The spend's own lookup, and the sweep's.
+  @@index([conversationId, usedAt])
+  @@index([expiresAt])
+  @@map("msaidizi_approval_grants")
 }
 
 /// How an audited action reached the system.
@@ -1383,6 +1447,7 @@ model User {
   msaidiziProceduresAuthored    MsaidiziProcedure[]          @relation("MsaidiziProcedureAuthor")
   msaidiziProceduresApproved    MsaidiziProcedure[]          @relation("MsaidiziProcedureApprover")
   msaidiziConversations         MsaidiziConversation[]
+  msaidiziApprovalGrants        MsaidiziApprovalGrant[]
   automationRunsStarted         AutomationRun[]              @relation("AutoRunStartedBy")
   backgroundJobsRequested       BackgroundJob[]              @relation("BackgroundJobRequestedBy")
   performanceTraces             PerformanceTrace[]           @relation("PerformanceTraceUser")

@@ -10,12 +10,14 @@
  *   - a tier the deployment has not enabled cannot be invoked even if a tool for
  *     it somehow reached the model;
  *   - a red-tier action suspends the run and returns to the user rather than
- *     executing on the model's say-so; the approval that comes back must NAME an
- *     action this conversation actually contains a proposal for, and it is spent
- *     on one dispatch — the same action proposed again inside the run suspends
- *     again rather than riding the first approval. What no check in this file
- *     can establish is that a human answered the proposal; `RunRequest.confirmed`
- *     states exactly what the gate proves and what it does not;
+ *     executing on the model's say-so. The approval that comes back is a GRANT
+ *     this server issued when it proposed — a random nonce written to the grant
+ *     ledger, not a name the caller can compute — and it is SPENT in the ledger
+ *     at dispatch, so it authorises one execution and one only, whether the
+ *     action comes back inside this run or on a request next week. What no check
+ *     in this file can establish is that a human answered the proposal;
+ *     `RunRequest.confirmed` states exactly what the gate proves and what it
+ *     does not;
  *   - every call is bounded, so a permission that allows an action once does not
  *     allow it in a loop — bounded per RUN, though, not per session, and
  *     `msaidizi.config.ts` says what that does and does not cap;
@@ -23,8 +25,12 @@
  *
  * Elsewhere, and not to be looked for here: the author-only read gate and the
  * encryption of retrieved records (`conversations.service.ts`), the permission
- * guard and the shape pin on the session id (`msaidizi.controller.ts`,
- * `procedures.controller.ts`), and the audit stamping every tool call produces
+ * guard on the routes (`msaidizi.controller.ts`, `procedures.controller.ts`),
+ * the minting and ownership resolution of the session id
+ * (`conversations.service.ts`, `open()` — a client-supplied id is honoured only
+ * where it resolves to a conversation that caller owns, and otherwise ignored in
+ * favour of a fresh one), the row-level shape of the grant ledger this file
+ * spends against, and the audit stamping every tool call produces
  * (`capability-invoker.ts`). A reader auditing "can user A read user B's
  * conversation" will find nothing in this file, because the answer is not here.
  *
@@ -34,12 +40,13 @@
  * machine, not a hook.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { ReversibilityTier } from '../../common/capabilities/reversibility';
 import { CapabilityInvoker } from './capability-invoker';
 import { narrowCapabilities } from './domain-filter';
+import { mintGrantId } from './dto/approval-grants';
 import { ManifestProvider } from './manifest.provider';
 import { ModelClient, ModelMessage, ModelToolUseBlock, ModelUsage } from './model-client';
 import { MsaidiziConfig, WriteMode } from './msaidizi.config';
@@ -70,6 +77,25 @@ export type MsaidiziEvent =
   | { type: 'tool_result'; tool: string; ok: boolean; status: number; error?: string }
   | {
       type: 'confirmation_required';
+      /**
+       * The approval itself: a nonce this server minted and wrote to the grant
+       * ledger when it proposed this action. THIS is what a client sends back in
+       * `confirmed`, and it is the only thing that can authorise the dispatch —
+       * it is unguessable, it is bound in the ledger to this conversation, this
+       * caller, this tool and these exact arguments, and it can be spent once.
+       *
+       * A fresh nonce per proposal, so the same action proposed twice carries two
+       * different grant ids and a client keying its checkbox rows by this value
+       * gets one row per proposal rather than two rows sharing one tick.
+       */
+      grantId: string;
+      /**
+       * A NAME for the action, derived from the session, the tool and the
+       * arguments — stable, reproducible by anyone, and deliberately not an
+       * authorisation. It is here so the same action always renders under the
+       * same label and so a proposal can be recognised across turns.
+       * `confirmationIdFor` says why it cannot be the approval.
+       */
       confirmationId: string;
       tool: string;
       capabilityId: string;
@@ -105,54 +131,79 @@ export interface RunRequest {
   authorization: string;
   /** Prior turns plus the new user message. */
   messages: ModelMessage[];
-  /** Correlates this run in the audit trail. Generated per run if absent. */
+  /**
+   * The audit correlation key: every `audit_logs` row this run produces is
+   * stamped with it, and it is the conversation's own `agentSessionId`.
+   *
+   * SERVER-MINTED, and that sentence is now true rather than aspirational. The
+   * id is resolved before this service is reached: `open()` returns the
+   * `agentSessionId` of a conversation this caller owns, or mints a fresh one.
+   * A client-supplied id that resolves to no conversation of theirs is IGNORED —
+   * never rejected, because failing a run over a stale id from a reopened tab is
+   * a worse outcome than quietly re-identifying it. Minted here only when a
+   * caller reaches `run()` directly with no id at all, which no route does.
+   *
+   * Approvals no longer hang off this value: a grant is bound to the
+   * conversation row and to the caller, so a run that gets re-identified does
+   * not strand approvals the way a session-derived id once did.
+   */
   sessionId?: string;
   /**
-   * Confirmation ids the CALLER is sending as approved for this request.
+   * The conversation this run belongs to — the row `open()` settled on.
    *
-   * Not "ids the user approved", which is what this said and which nothing on
-   * this path can establish. What the field IS: a list of names for actions,
-   * each computable by anyone holding `confirmationIdFor`'s three public inputs.
-   * `run()` checks every one of them against the proposals the conversation
-   * actually contains before any of them can authorise a dispatch.
+   * Required for any RED-tier action, and only for that: it is the scope a
+   * grant is issued and spent under. A run given none (the store was unreachable
+   * and the controller degraded to an unpersisted turn) can still read and still
+   * write at amber, but cannot offer a red action for approval — there is
+   * nowhere to record the grant, and an approval that cannot be recorded is one
+   * that could never be proved when it came back. See the gate in `run()`.
+   */
+  conversationId?: string;
+  /** The turn sequence this run was opened at, recorded on any grant it issues. */
+  turnSequence?: number;
+  /**
+   * Grant ids the CALLER is sending as approved for this request.
+   *
+   * NOT ids the caller computed — that is the whole change. Each one is a nonce
+   * this server minted when it proposed a red-tier action and wrote to the grant
+   * ledger with the conversation, the caller, the tool, a digest of the exact
+   * arguments, and an expiry. The client's only job is to hand back the ones it
+   * was given, for the proposals the user actually ticked.
    *
    * What the gate PROVES when a red-tier call runs:
    *
-   *   - the conversation this run was given contains an assistant turn
-   *     proposing that exact tool with those exact arguments under this session
-   *     id — so a request can no longer authorise an action the model never
-   *     asked for and the user was never shown. Before that check, `confirmed`
-   *     was a pre-authorisation channel: a first-turn request could carry a
-   *     computed id and execute a red action with zero `confirmation_required`
-   *     events anywhere in the run;
-   *   - the id bought exactly ONE dispatch within this run. It is spent at
-   *     dispatch, so a second proposal of the same action suspends for its own
-   *     confirmation and listing the same id twice does not buy two executions.
+   *   - this server PROPOSED that action. A grant exists only because `run()`
+   *     wrote one while emitting a `confirmation_required` event, so an approval
+   *     can no longer run ahead of the proposal it claims to answer, and — unlike
+   *     the derived-id scheme this replaced — a fabricated conversation history
+   *     buys nothing, because the ledger is the server's own record rather than
+   *     a re-reading of the caller's array;
+   *   - it is THIS action. The stored argument digest is compared against the
+   *     digest of the action about to be dispatched, so an approval for a
+   *     TZS 50,000 rent journal cannot dispatch a TZS 9,000,000 payroll one;
+   *   - it is this conversation and this caller. A grant is scoped to both, so
+   *     one lifted from another thread or another user's response is refused;
+   *   - it bought exactly ONE dispatch, ever. The spend is a conditional update
+   *     in the ledger, so the second attempt loses — whether it comes from the
+   *     same turn, a later turn, a LATER REQUEST, or a concurrent request racing
+   *     this one. Re-sending a spent grant re-proposes rather than re-executing;
+   *   - it has not gone stale. Grants expire (`GRANT_TTL_MS`).
    *
    * What it does NOT prove, said plainly because the field's name invites the
    * opposite reading — this is not a receipt:
    *
-   *   - that a human saw the proposal, or answered it. This server keeps no
-   *     pending-approval record to consult; a matching proposal is evidence the
-   *     action was OFFERED, never that anyone accepted it.
-   *   - that the proposal came from this server. `messages` is whatever
-   *     `MsaidiziConversationsService.open()` settled on, and that is the
-   *     store's own resume state only on the paths where the store's copy wins.
-   *     The CALLER's array is used whenever it holds more of the conversation
-   *     than the store does, whenever a turn is continued by session id with a
-   *     history attached, on a conversation's first turn, and whenever the store
-   *     could not be read at all. On any of those a caller that fabricates the
-   *     proposal turn satisfies this check. See `continueById` for the rule.
-   *   - anything across requests. `confirmationIdFor` is deterministic and the
-   *     spent set dies with the request, so an id kept and re-sent on a later
-   *     request is a fresh grant against a proposal that is still standing in
-   *     the history. Send only the ids approved for this request.
+   *   - that a human saw the proposal, or answered it. The grant proves the
+   *     server OFFERED the action and that this request is holding the token it
+   *     handed out; who clicked is outside anything this process can see. A
+   *     client holding the run's own response can send the grant back
+   *     unattended, which is why the frontend's confirmation gate — not this
+   *     file — is where "a person ticked a box" is established.
    *
-   * The boundary all three share: exploiting any of them needs the caller's own
-   * bearer token, which already reaches the underlying route directly, so no
-   * privilege boundary moves. The threat this gate was built against — the MODEL
-   * approving its own action — cannot reach this field at all, because nothing
-   * derives it from model output or from tool results.
+   * The boundary: exploiting that needs the caller's own bearer token, which
+   * already reaches the underlying route directly, so no privilege boundary
+   * moves. The threat this gate was built against — the MODEL approving its own
+   * action — cannot reach this field at all, because nothing derives it from
+   * model output or from tool results.
    */
   confirmed?: string[];
   /**
@@ -250,6 +301,116 @@ export interface MsaidiziCapabilities {
   capabilities: ReachableCapability[];
 }
 
+/**
+ * How long an issued approval stays spendable.
+ *
+ * An approval is an answer to a question the user is looking at, not a standing
+ * permission, so it ages out rather than waiting forever for a tab to be
+ * reopened. Thirty minutes is deliberately the same order as
+ * `ABANDONED_TURN_MS` in `conversations.service.ts` — past any run this service
+ * can produce, and short enough that a grant left in a browser overnight is
+ * dead by morning.
+ *
+ * Expiry costs the user a second ask and nothing else: an expired grant is
+ * refused, and the action is proposed again under a fresh one.
+ */
+const GRANT_TTL_MS = 30 * 60 * 1000;
+
+/**
+ * One issued approval — the server's own record that it proposed an action and
+ * will execute it ONCE if the grant comes back.
+ *
+ * Every field is written by this service at proposal time. None of it is
+ * caller-supplied except by way of what the model asked for.
+ */
+export interface ApprovalGrant {
+  /**
+   * A fresh random nonce, minted per proposal. Never derived from the action,
+   * the session or anything else a caller holds — deriving it is exactly what
+   * made the id it replaced computable, and therefore forgeable.
+   */
+  grantId: string;
+  /** The conversation the proposal was made in. A grant does not travel. */
+  conversationId: string;
+  /** The caller it was issued to. A grant is not transferable between users. */
+  userId: string;
+  toolName: string;
+  /** `argumentDigestFor(args)` over the exact arguments proposed. */
+  argumentDigest: string;
+  /** The turn the proposal was made on, where the turn has a sequence. */
+  proposedOnTurn?: number;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
+/**
+ * The claim a dispatch makes against the ledger.
+ *
+ * Every field must match the stored grant for the spend to win, and
+ * `argumentDigest` is computed from the arguments ACTUALLY being dispatched —
+ * never from the ones that were proposed — which is what makes a grant for
+ * action A unable to run action B.
+ */
+export interface ApprovalGrantClaim {
+  grantId: string;
+  conversationId: string;
+  userId: string;
+  toolName: string;
+  argumentDigest: string;
+  /** The clock the stored `expiresAt` is judged against. */
+  now: Date;
+}
+
+/**
+ * The grant ledger.
+ *
+ * Two methods and no read, deliberately. There is no `find` here because a
+ * spend must not be a read followed by a write: two concurrent requests holding
+ * one grant would both read it unused and both dispatch, which is the duplicate
+ * payment the red tier exists to prevent. `spend` is a single conditional
+ * update — `usedAt IS NULL` and every scope field matching — that reports
+ * whether THIS call won it.
+ *
+ * A narrow interface rather than the concrete store, so this service can be
+ * tested against a double and so the persistence details (Prisma, the table,
+ * the sweep) stay in the file that owns them.
+ *
+ * FAILURE SEMANTICS, and they are the opposite of the rest of this module:
+ * both methods MUST reject rather than resolve when the store cannot be
+ * reached. `spend` resolving `false` means "there was no such spendable grant",
+ * which is a fact about the ledger; it must never mean "the ledger could not be
+ * asked". `run()` treats those two differently and only one of them is safe to
+ * re-propose on.
+ */
+export interface ApprovalGrantStore {
+  /** Records a fresh, unused grant. Rejects if it could not be persisted. */
+  issue(grant: ApprovalGrant): Promise<void>;
+  /**
+   * Atomically marks the named grant used, if and only if it matches the claim
+   * in full and is neither used nor expired. Resolves whether this call won it.
+   */
+  spend(claim: ApprovalGrantClaim): Promise<boolean>;
+}
+
+/** DI token for {@link ApprovalGrantStore}. Wired in `msaidizi.module.ts`. */
+export const APPROVAL_GRANT_STORE = 'MSAIDIZI_APPROVAL_GRANT_STORE';
+
+/** Where a grant is issued and spent: one conversation, one caller, one turn. */
+interface GrantScope {
+  conversationId: string;
+  userId: string;
+  turn?: number;
+}
+
+/** What asking the ledger to spend an approval came back with. */
+type SpendOutcome =
+  /** A grant matched in full and this dispatch owns it. */
+  | 'spent'
+  /** The ledger answered, and holds no spendable grant for this action. */
+  | 'refused'
+  /** The ledger could not be asked. Not the same answer, and not safe to treat as one. */
+  | 'unavailable';
+
 @Injectable()
 export class MsaidiziService {
   private readonly logger = new Logger(MsaidiziService.name);
@@ -259,6 +420,16 @@ export class MsaidiziService {
     private readonly manifest: ManifestProvider,
     private readonly model: ModelClient,
     private readonly invoker: CapabilityInvoker,
+    /**
+     * Optional to CONSTRUCT, never optional to USE: a deployment that forgets to
+     * wire it cannot approve a red-tier action at all, because there is nowhere
+     * to record a grant and nothing to spend one against. That is the fail-closed
+     * direction, and it is logged loudly at the gate rather than silently at boot,
+     * because the gate is where it becomes visible to a user.
+     */
+    @Optional()
+    @Inject(APPROVAL_GRANT_STORE)
+    private readonly grants?: ApprovalGrantStore,
   ) {}
 
   async run(request: RunRequest, emit?: (event: MsaidiziEvent) => void): Promise<RunResult> {
@@ -273,45 +444,44 @@ export class MsaidiziService {
     const byName = indexByToolName(registry);
 
     /**
-     * The approvals this request may spend, and what is left of them.
+     * The grants this request offers, and which of them are still in hand.
      *
-     * TWO reductions of `request.confirmed`, answering different questions, and
-     * both are load-bearing.
+     * A candidate list, NOT a set of approvals: nothing here has been checked.
+     * Every id in it is a string the caller sent, and the only thing that turns
+     * one into an authorisation is winning a conditional update in the ledger at
+     * the moment of dispatch. Which is why this reduction no longer tries to
+     * decide anything on its own — the version it replaced filtered ids against
+     * the proposals in `request.messages`, because the ids were derived and the
+     * message array was the only record that a proposal had ever been made. It
+     * was reading the caller's own array for evidence about the caller's own
+     * claim. The ledger is the server's record, so that check has nothing left
+     * to add and has gone.
      *
-     * BOUND: an id survives only if this conversation contains an assistant
-     * turn proposing that exact tool with those exact arguments. Without it,
-     * `confirmed` was a pre-authorisation channel rather than an answer to
-     * anything: all three inputs to `confirmationIdFor` — session, tool, args —
-     * are supplied by the same caller on the same request, so a first-turn
-     * request could carry a computed id and a red-tier action would execute with
-     * no `confirmation_required` event anywhere in the run. Read
-     * `approvalsForProposals` for what the check does and does not establish;
-     * `RunRequest.confirmed` states the residual in full.
+     * A SET, so a client that lists the same grant twice offers it once. That is
+     * tidiness rather than protection now: the ledger would refuse the second
+     * spend of one grant anyway.
      *
-     * A SET, so an id repeated inside `request.confirmed` collapses to one
-     * grant: the gate raised one row for that id and the user ticked one box, so
-     * a client listing it twice must not buy two executions. And a set that is
-     * DRAINED rather than consulted — see the block at the red gate for why
-     * "this exact action was approved" needs the word "once" in it.
+     * Entries are removed as they are spent, so a grant cannot be offered again
+     * to a later action in the same run without a second round trip proving it
+     * is gone — the ledger is still the authority, this just avoids asking it
+     * something it has already answered.
      */
-    const { bound: unspentApprovals, unbound } = approvalsForProposals(
-      sessionId,
-      request.confirmed,
-      request.messages,
-    );
+    const offeredGrants = new Set(request.confirmed ?? []);
 
-    if (unbound.length > 0) {
-      // Warn rather than fail the request. A discarded id costs nothing but a
-      // second ask: the action it named is proposed again and the user answers
-      // it, which is the correct outcome for both an attempt to pre-authorise
-      // and the ordinary case of a stale id from a tab whose conversation moved
-      // on. Failing the whole turn would take the rest of the question with it.
-      this.logger.warn(
-        `Run ${sessionId}: ${unbound.length} confirmation id(s) named no proposal in this ` +
-          `conversation and cannot authorise anything: ${unbound.join(', ')}. Any red-tier ` +
-          `action they matched will be proposed again rather than run.`,
-      );
-    }
+    /**
+     * The scope every grant in this run is issued and spent under.
+     *
+     * Undefined when the turn is unpersisted — the store was unreachable and the
+     * controller degraded rather than failing the question. Red-tier actions
+     * cannot be offered at all in that state; see the gate below.
+     */
+    const grantScope: GrantScope | undefined = request.conversationId
+      ? {
+          conversationId: request.conversationId,
+          userId: request.user.id,
+          turn: request.turnSequence,
+        }
+      : undefined;
 
     const messages: ModelMessage[] = [...request.messages];
     const system = buildSystemPrompt({
@@ -404,6 +574,17 @@ export class MsaidiziService {
 
       const results: unknown[] = [];
       let suspended = false;
+      /**
+       * A red-tier action met the gate and the grant ledger could not be reached
+       * — so it was neither dispatched nor offered for approval.
+       *
+       * Separate from `suspended` because they are different answers: a
+       * suspended run is waiting for the user and its next request continues it,
+       * while this one has nothing for the user to answer and needs the run
+       * reported as failed. Both may happen in one turn, and the failure wins;
+       * see below.
+       */
+      let ledgerUnavailable = false;
 
       for (const toolUse of toolUses) {
         const entry = byName.get(toolUse.name);
@@ -460,11 +641,15 @@ export class MsaidiziService {
 
         if (entry.capability.tier === 'red') {
           const confirmationId = confirmationIdFor(sessionId, toolUse.name, args);
+          // Computed from the arguments about to be DISPATCHED, never from the
+          // ones that were proposed — the two are the same only when the model
+          // asked for the same thing twice, and the whole point of the digest is
+          // to catch the case where it did not.
+          const argumentDigest = argumentDigestFor(args);
 
           // The approval is SPENT here, at the moment of dispatch, not merely
-          // consulted. `Set.delete` reports whether the id was there and removes
-          // it in one step, so the check and the spend cannot come apart: past
-          // this line the id is gone and this dispatch owns it.
+          // consulted — and it is spent in the LEDGER, which is what makes the
+          // one-shot survive the request boundary.
           //
           // "This exact action was approved" has two halves. Binding the id to
           // the exact arguments is the first; ONCE is the second, and without it
@@ -491,34 +676,97 @@ export class MsaidiziService {
           //
           // SCOPE, stated plainly because it is easy to read as more than it is.
           //
-          // What this line establishes: the id names an action this conversation
-          // contains a proposal for (`approvalsForProposals` filtered the set
-          // before the loop), it names THIS action rather than a neighbouring
-          // one, and it has not already been spent in this run. What it does not
-          // establish is that a person answered the proposal — there is no
-          // stored approval to compare against, and this file could not
-          // manufacture one. It is a check that the action was OFFERED, not a
-          // receipt that it was ACCEPTED.
+          // What winning a spend establishes: this server proposed that exact
+          // action, in this conversation, to this caller, and wrote a grant for
+          // it; the grant came back; it had not been used; it had not expired;
+          // and this dispatch is the one that took it. What it does not
+          // establish is that a PERSON answered the proposal. The grant proves
+          // the offer and proves possession of the token the offer handed out —
+          // a client holding the run's own response can send it back unattended.
+          // "A human ticked a box" lives in the confirmation gate in the
+          // frontend, and no check in this file can stand in for it.
           //
-          // The spend lives in this Set, which lives for this one `run()`. It
-          // does not outlive the request. `confirmed` arrives from the client on
-          // every request and `confirmationIdFor` is deterministic, so a client
-          // that keeps an id and sends it again on a later request buys one more
-          // execution per request it sends — the proposal it binds to is still
-          // sitting in the history, so the binding above does not close that.
-          // Inside a run the approval is one-shot; across runs the one-shot is
-          // still only the client's discipline, and no code here enforces it.
-          // Making it durable needs a store this service is not given and, more
-          // importantly, a design decision this file cannot make alone: because
-          // ids are deterministic, an id marked spent FOREVER would make a
+          // Why a ledger rather than remembering the derived id. The derived id
+          // is deterministic, so an id marked spent forever would make a
           // legitimately repeated identical action — the same weekly journal,
-          // posted again next week in the same session — permanently
-          // unapprovable, since re-approving it can only ever produce the same
-          // id. A durable ledger therefore has to count grants against spends
-          // rather than remember ids. Per-run is what is built here.
-          if (!unspentApprovals.delete(confirmationId)) {
+          // posted again next week — permanently unapprovable, since approving
+          // it again can only ever produce the same id. Grants invert that: the
+          // server issues a NEW nonce every time it proposes, so the same action
+          // is approvable as many times as it is genuinely offered, and each
+          // offer is answerable exactly once.
+          //
+          // What the ledger closed that the per-run Set could not: the Set died
+          // at the request boundary, so a client that kept an approval and sent
+          // it again on a LATER request bought one more execution per request —
+          // the proposal it bound to was still sitting in the history, and
+          // nothing anywhere had a record that the approval had already been
+          // used. Measured before this: one approved TZS 9,000,000 payroll
+          // journal, the same request replayed five times, TZS 45,000,000
+          // posted, five clean transcripts each showing one approval and one
+          // execution.
+          //
+          // The ordinary case, with no attacker in it, is a failed write.
+          // `invoke` returning `{ok:false, status:0}` means the call could not be
+          // reached — which is exactly the state in which the write MAY ALREADY
+          // HAVE COMMITTED on the other side. A model retrying it is doing the
+          // obvious thing, and a duplicate payment is the specific harm the red
+          // tier exists to prevent. Nothing in this process can tell whether the
+          // first one landed; a human looking at the record can. So a repeat
+          // re-proposes and the human decides again. `prompts.ts` also tells the
+          // model not to retry a failed irreversible call, but prompt text is
+          // advice to a model, not a control — this branch is the control.
+          const outcome = await this.spendApproval(
+            grantScope,
+            offeredGrants,
+            toolUse.name,
+            argumentDigest,
+            sessionId,
+          );
+
+          if (outcome !== 'spent') {
+            // FAIL CLOSED, and this is the one place in this module that does.
+            //
+            // `conversations.service.ts` and `msaidizi.controller.ts` swallow
+            // every persistence failure on purpose: by the time they write, the
+            // model turn and the tool calls have already happened, so refusing
+            // to answer would cost the user work that is already done and
+            // already in `audit_logs`. Reading that rule and applying it here
+            // would be exactly backwards. This write happens BEFORE the action,
+            // and it is the only thing standing between an approval and an
+            // irreversible dispatch. An unspendable grant is an unproven
+            // approval — so when the ledger cannot be reached, nothing runs.
+            // A future reader tempted to make this "consistent" with the file
+            // two doors down would be turning the gate off during exactly the
+            // outage in which nobody can check what it did.
+            //
+            // 'unavailable' is not re-proposed on: issuing the replacement grant
+            // needs the same ledger that just failed, and offering an approval
+            // that cannot be recorded would put a button in front of the user
+            // that does nothing. The run reports the failure instead.
+            const grantId =
+              outcome === 'refused'
+                ? await this.issueGrant(grantScope, toolUse.name, argumentDigest, sessionId)
+                : null;
+
+            if (!grantId) {
+              record({
+                type: 'error',
+                message:
+                  'That action could not be offered for approval just now, so nothing was done. Please try again in a moment.',
+              });
+              results.push(
+                errorResult(
+                  toolUse.id,
+                  'This action needs the user to confirm it, and the approval could not be recorded. It has not run. Do not retry it — tell the user it could not be offered for approval.',
+                ),
+              );
+              ledgerUnavailable = true;
+              continue;
+            }
+
             record({
               type: 'confirmation_required',
+              grantId,
               confirmationId,
               tool: toolUse.name,
               capabilityId: entry.capability.id,
@@ -572,10 +820,154 @@ export class MsaidiziService {
 
       messages.push({ role: 'user', content: results });
 
+      // Checked BEFORE `suspended`, and after the results have been paired onto
+      // the conversation. A turn can both propose one action successfully and
+      // fail to record a grant for another; reporting that as
+      // `awaiting_confirmation` would tell the client the run is simply waiting,
+      // and the action nobody can approve would look like one nobody answered.
+      // The `error` event above says what happened; the reason says the run did
+      // not do what it was asked.
+      if (ledgerUnavailable) {
+        return this.finish(sessionId, events, 'failed', messages, usage, record);
+      }
+
       if (suspended) {
         return this.finish(sessionId, events, 'awaiting_confirmation', messages, usage, record);
       }
     }
+  }
+
+  /**
+   * Spends one of the grants this request offered on the action about to run.
+   *
+   * The grants arrive as a flat list and nothing tells this service which id
+   * belongs to which action — the client ticked boxes, it did not build a
+   * mapping — so each candidate is offered to the ledger in turn and the ledger
+   * decides. A grant issued for another action, another conversation, another
+   * caller, or one already used or expired simply loses its conditional update,
+   * which costs a round trip and authorises nothing. The first one to win is the
+   * one this dispatch owns, and it is removed from the candidates so the same
+   * grant is not offered twice inside one run.
+   *
+   * A throw is NOT a refusal. `false` is the ledger saying "no such spendable
+   * grant"; an exception is the ledger not answering, and the two must not
+   * collapse into one outcome — collapsing them would re-propose during an
+   * outage, and re-proposing needs a write to the same ledger.
+   */
+  private async spendApproval(
+    scope: GrantScope | undefined,
+    offered: Set<string>,
+    toolName: string,
+    argumentDigest: string,
+    sessionId: string,
+  ): Promise<SpendOutcome> {
+    if (!this.grants) {
+      // Not a configuration warning to be found later in a log sample: without a
+      // ledger no red-tier action can be approved in this deployment at all.
+      this.logger.error(
+        `Run ${sessionId}: no approval grant store is wired, so the red-tier action ${toolName} ` +
+          `cannot be approved or offered for approval. Provide APPROVAL_GRANT_STORE.`,
+      );
+      return 'unavailable';
+    }
+
+    if (!scope) {
+      // The turn is unpersisted: `open()` could not write a conversation row, so
+      // there is nothing to scope a grant to. Read and amber work; red does not.
+      this.logger.error(
+        `Run ${sessionId}: this turn has no conversation row, so the red-tier action ` +
+          `${toolName} cannot be offered for approval. Nothing was dispatched.`,
+      );
+      return 'unavailable';
+    }
+
+    const now = new Date();
+
+    for (const grantId of offered) {
+      let won: boolean;
+      try {
+        won = await this.grants.spend({
+          grantId,
+          conversationId: scope.conversationId,
+          userId: scope.userId,
+          toolName,
+          argumentDigest,
+          now,
+        });
+      } catch (err) {
+        this.logger.error(
+          `Run ${sessionId}: the approval ledger could not be reached to spend a grant for ` +
+            `${toolName}; the action was NOT dispatched: ${(err as Error)?.message}`,
+        );
+        return 'unavailable';
+      }
+
+      if (won) {
+        offered.delete(grantId);
+        return 'spent';
+      }
+    }
+
+    if (offered.size > 0) {
+      // Ordinary as often as it is adversarial: a stale grant from a reopened
+      // tab, an approval already spent on an earlier request, or a model that
+      // changed the arguments after the user answered. All of them end the same
+      // way — the action is proposed again and the user answers the new one.
+      this.logger.warn(
+        `Run ${sessionId}: ${offered.size} grant(s) were offered and none of them could be ` +
+          `spent on ${toolName}; proposing it again rather than running it.`,
+      );
+    }
+
+    return 'refused';
+  }
+
+  /**
+   * Issues the grant that goes out with a `confirmation_required` event.
+   *
+   * The nonce is minted here rather than derived from anything, so it cannot be
+   * computed by a caller holding the action, and a fresh one per proposal is
+   * what lets the same action be approved again next week without the ledger
+   * having to forget anything.
+   *
+   * Returns null when the grant could not be recorded, and the caller must then
+   * NOT offer the action — an approval nobody can spend is a button that does
+   * nothing, and it would arrive looking exactly like one that works.
+   */
+  private async issueGrant(
+    scope: GrantScope | undefined,
+    toolName: string,
+    argumentDigest: string,
+    sessionId: string,
+  ): Promise<string | null> {
+    if (!this.grants || !scope) return null;
+
+    const now = new Date();
+    const grantId = mintGrantId();
+
+    try {
+      await this.grants.issue({
+        grantId,
+        conversationId: scope.conversationId,
+        userId: scope.userId,
+        toolName,
+        argumentDigest,
+        proposedOnTurn: scope.turn,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + GRANT_TTL_MS),
+      });
+    } catch (err) {
+      // Same inversion as the spend, for the same reason: this write happens
+      // before the action, so failing it closed costs a re-ask and failing it
+      // open would offer an approval the ledger has no record of.
+      this.logger.error(
+        `Run ${sessionId}: could not record an approval grant for ${toolName}; the action was ` +
+          `not offered for approval: ${(err as Error)?.message}`,
+      );
+      return null;
+    }
+
+    return grantId;
   }
 
   /**
@@ -653,14 +1045,14 @@ export class MsaidiziService {
     //
     // Note what the union is NOT gated on, since it reads like an oversight. It
     // fires on `confirmed` being non-empty without checking that a single id in
-    // it is real, so the string 'cnf_totally_made_up' re-admits the prior turn's
+    // it is real, so the string 'grt_totally_made_up' re-admits the prior turn's
     // proposed tools. That is deliberate. Widening decides what the model may
     // SEE; it authorises nothing, because every red-tier tool it re-admits still
-    // meets the gate in `run()`, where an id naming no proposal has already been
-    // discarded. Gating the union on id validity would turn an unrecognised
+    // meets the gate in `run()`, where a grant this server never issued cannot
+    // be spent. Gating the union on grant validity would turn an unrecognised
     // approval into "No such tool" — the model told the action does not exist,
     // and the user never asked again — instead of a fresh proposal they can
-    // answer. The right answer to a bad id is to ask again, not to hide the
+    // answer. The right answer to a bad grant is to ask again, not to hide the
     // action.
     if ((request.confirmed?.length ?? 0) > 0) {
       const proposed = toolNamesAwaitingConfirmation(request.messages);
@@ -802,104 +1194,6 @@ function toolNamesAwaitingConfirmation(messages: ModelMessage[]): Set<string> {
   return new Set();
 }
 
-/**
- * Splits the ids a request sent into the ones that name a proposal this
- * conversation contains and the ones that name nothing.
- *
- * The gap this closes. `confirmationIdFor(sessionId, toolName, args)` takes
- * three arguments, and on a resumed turn the caller supplies all three on the
- * same request that carries `confirmed` — so the id is a NAME the caller can
- * compute, never a token this server issued and can recognise. Nothing else
- * stood between a request and a red-tier dispatch: measured, a brand-new
- * conversation whose first user turn was "post the payroll journal entry",
- * carrying one client-computed id and no proposal of any kind, executed a
- * TZS 9,000,000 journal entry with zero `confirmation_required` events in the
- * whole run. A reader of that transcript sees an irreversible action with no
- * gate above it and nothing anywhere able to say a gate was skipped.
- *
- * What matching PROVES: the run was given a conversation in which the model
- * proposed that exact tool with those exact arguments. So an approval can no
- * longer run ahead of the proposal it claims to answer, and a run that executes
- * a red action has a proposal in its own history to point at.
- *
- * What it does NOT prove, and the distinction is the whole reason this doc is
- * long:
- *
- *   - NOT that a human answered. There is no stored approval to check against.
- *     A proposal is evidence the action was offered; acceptance is not
- *     represented anywhere in this process.
- *   - NOT that the proposal is the server's. Where the store's own resume state
- *     is what `open()` returned, the caller cannot have written it. That is the
- *     usual chat path and it is not every path: the caller's own array is used
- *     when it is the longer of the two, when a turn is continued by session id
- *     with a history attached, on a first turn, and whenever the store could not
- *     be read — and there a fabricated assistant turn matches. `RunRequest.
- *     confirmed` carries the same list; `conversations.service.ts` owns the rule.
- *   - NOT that the proposal was GATED rather than already executed. An action
- *     approved and dispatched earlier in the conversation leaves its tool_use
- *     block in the history for good, so its id stays matchable. Requiring the
- *     block to be paired with this file's own confirmation refusal would be
- *     tighter, and was rejected: a turn that ends on a budget stop returns
- *     without pairing its results, so the tighter rule would discard a genuine
- *     approval and re-ask for an action the user already answered.
- *
- * The whole history is searched rather than only the newest tool-calling turn,
- * and that is the deliberately permissive choice. The tighter scope would also
- * reject an approval arriving a turn later than expected, and the cost of a
- * wrong rejection is an approval loop the user cannot break, while the cost of
- * the wider scope is a residual already stated on `RunRequest.confirmed`: an id
- * re-sent on a later request binds to a proposal that is still standing.
- */
-function approvalsForProposals(
-  sessionId: string,
-  confirmed: string[] | undefined,
-  messages: ModelMessage[],
-): { bound: Set<string>; unbound: string[] } {
-  if (!confirmed?.length) return { bound: new Set(), unbound: [] };
-
-  const proposed = proposedConfirmationIds(sessionId, messages);
-  const bound = new Set<string>();
-  const unbound: string[] = [];
-
-  for (const id of confirmed) {
-    if (proposed.has(id)) bound.add(id);
-    else unbound.push(id);
-  }
-
-  return { bound, unbound };
-}
-
-/**
- * Every confirmation id this conversation holds a proposal for.
- *
- * Derived rather than remembered, exactly as the dispatch does it: this server
- * keeps no pending-approval state, so the only record that an action was
- * proposed is the `tool_use` block sitting in the message array, and the id is
- * recomputed from it. Green- and amber-tier blocks are hashed too — they simply
- * never produce an id anyone needs, since only the red branch consults the set.
- */
-function proposedConfirmationIds(sessionId: string, messages: ModelMessage[]): Set<string> {
-  const ids = new Set<string>();
-
-  for (const message of messages) {
-    if (message.role !== 'assistant' || !Array.isArray(message.content)) continue;
-
-    for (const block of message.content) {
-      if (blockType(block) !== 'tool_use') continue;
-      const proposal = block as { name?: unknown; input?: unknown };
-      if (typeof proposal.name !== 'string') continue;
-      // The same coercion the dispatch applies (`toolUse.input ?? {}`). If the
-      // two ever disagreed, a block carrying no input would hash here to a
-      // different id than the one the gate computes for it, and a legitimate
-      // approval of a no-argument action would be discarded.
-      const args = (proposal.input ?? {}) as Record<string, unknown>;
-      ids.add(confirmationIdFor(sessionId, proposal.name, args));
-    }
-  }
-
-  return ids;
-}
-
 function errorResult(toolUseId: string, message: string) {
   return {
     type: 'tool_result',
@@ -967,39 +1261,62 @@ function canonicalise(value: unknown): string {
 }
 
 /**
- * A confirmation id bound to the exact action proposed.
+ * The digest a grant is bound to: the exact arguments, and nothing else.
  *
- * Derived from the session, the tool and the arguments, so approving "delete
- * invoice 41" cannot be replayed to authorise "delete invoice 42" — the id for
- * a different argument set is simply a different id. That holds at every level
- * of nesting: it is `{body:{memo:'Rent',lines:[…]}}` in full that is approved,
- * not the fact that a body was present. See `canonicalise` above for how the
- * argument text is built and what it replaced.
+ * Stored on the grant when the action is proposed and recomputed from the
+ * arguments actually being DISPATCHED when it is spent, so a grant issued for a
+ * TZS 50,000 rent journal loses its conditional update against a TZS 9,000,000
+ * payroll one. `canonicalise` is shared with `confirmationIdFor` on purpose: two
+ * separate canonicalisers would be two chances to disagree about what "the same
+ * arguments" means, and only one of them would be the one guarding the money.
+ *
+ * The tool name is deliberately NOT folded in — it is its own column on the
+ * grant and its own field in the claim, so a mismatch is legible in the ledger
+ * rather than hidden inside a hash.
+ *
+ * Full digest rather than the 128 bits `confirmationIdFor` truncates to: this
+ * one is never displayed, so there is nothing to be gained by shortening it and
+ * a collision here would be an approval for one action spending on another.
+ * 'utf16le' for exactly the reason spelled out below.
+ */
+export function argumentDigestFor(args: Record<string, unknown>): string {
+  return createHash('sha256').update(canonicalise(args), 'utf16le').digest('hex');
+}
+
+/**
+ * A confirmation id bound to the exact action proposed — a NAME for an action,
+ * and deliberately not the approval.
+ *
+ * Derived from the session, the tool and the arguments, so the same action
+ * always renders under the same label and "delete invoice 41" and "delete
+ * invoice 42" are never one row. That holds at every level of nesting: it is
+ * `{body:{memo:'Rent',lines:[…]}}` in full that names the action, not the fact
+ * that a body was present. See `canonicalise` above for how the argument text is
+ * built and what it replaced.
  *
  * What the id does NOT carry is how many times it may be used, or that it was
- * ever issued: it is a name for an action, not a token, and the same action
- * always has the same name — which also means a caller holding the three public
- * inputs can compute one this server never printed. Both gaps are closed in
- * `run()` rather than here: use is counted by spending the id on dispatch, and
- * issuance by requiring the id to name a proposal the conversation actually
- * contains (`approvalsForProposals`). Deliberately, because a one-use,
- * unforgeable id would have to be unpredictable, and an unpredictable id could
- * not be recomputed from the proposal on the resumed turn, which is the whole
- * mechanism by which this server keeps no pending approval state.
+ * ever issued: the same action always has the same name, which also means a
+ * caller holding the three public inputs can compute one this server never
+ * printed. That is why it no longer authorises anything. Authorisation is the
+ * GRANT — a random nonce issued alongside this id and spent once in the ledger
+ * (`ApprovalGrantStore`) — and this id rides along as belt and braces: it labels
+ * the action, it is stable across turns, and it is what a transcript shows.
+ * Sending it in `confirmed` buys nothing, because nothing in the ledger is
+ * keyed by it.
  *
- * SHA-256 rather than the 32-bit rolling hash this used to carry. The id is not
- * a secret — it travels alongside the action it describes — but it IS the whole
- * binding between an approval and an action, and a 32-bit digest is small enough
- * to search offline for a second argument set that lands on an already-approved
- * id. Tool results re-enter this conversation as data, so "the model proposes
- * arguments an attacker chose" is inside this file's threat model, not outside
- * it. 128 bits of the digest is far past the reach of that search.
+ * SHA-256 rather than the 32-bit rolling hash this used to carry. A 32-bit
+ * digest is small enough to search offline for a second argument set landing on
+ * the same id, and while that no longer authorises anything it would still put
+ * two different actions on one label in front of a user deciding whether to
+ * approve one of them. Tool results re-enter this conversation as data, so "the
+ * model proposes arguments an attacker chose" is inside this file's threat
+ * model, not outside it.
  *
  * Ids are recomputed from the live proposal on every turn. A stored transcript
- * keeps the ones it displayed, but only to redraw what was asked — nothing is
- * ever authorised by comparing against a stored id. So a deploy that changes
- * this function corrupts nothing: an approval in flight across it simply fails
- * to match, and the action is proposed again.
+ * keeps the ones it displayed, but only to redraw what was asked. So a deploy
+ * that changes this function corrupts nothing — not even an approval in flight,
+ * because grants are keyed by nonce and by argument digest, neither of which
+ * this function produces.
  */
 export function confirmationIdFor(
   sessionId: string,

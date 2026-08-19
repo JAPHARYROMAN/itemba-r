@@ -49,6 +49,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   createConversationState,
+  hydrateFromConversation,
   msaidiziConversationReducer,
   pendingConfirmations,
   runMsaidiziTurn,
@@ -62,6 +63,7 @@ import type {
   ReachableCapability,
 } from '@/lib/msaidizi-types';
 import { DONE_REASONS } from '@/lib/msaidizi-types';
+import { actionSignature } from './msaidizi-confirmation-gate';
 import { detectSecurityFinding, MsaidiziThread } from './msaidizi-thread';
 
 /* ------------------------------------------------------------------------ *
@@ -675,6 +677,7 @@ describe('THREAD-4 · a hostile string reaches the screen as text, never as mark
       [
         {
           type: 'confirmation_required',
+          grantId: 'grt_5f0c9a1e',
           confirmationId: 'cnf_Invoices_remove_1a2b3c',
           tool: 'Invoices_remove',
           capabilityId: 'InvoicesController.remove',
@@ -750,6 +753,7 @@ describe('THREAD-4 · a hostile string reaches the screen as text, never as mark
         // 5. a proposal's description and 6. its arguments
         {
           type: 'confirmation_required',
+          grantId: 'grt_shape_9d11',
           confirmationId: 'cnf_Invoices_remove_shape',
           tool: 'Invoices_remove',
           capabilityId: 'InvoicesController.remove',
@@ -1044,6 +1048,7 @@ describe('THREAD-5 · a live run is described as live, and only as live', () => 
 
     emit({
       type: 'confirmation_required',
+      grantId: 'grt_live_7c31',
       confirmationId: 'cnf_Invoices_remove_1a2b3c',
       tool: 'Invoices_remove',
       capabilityId: 'InvoicesController.remove',
@@ -1870,6 +1875,7 @@ describe('THREAD-8 · the confirmation gate is a checklist in the thread', () =>
     { type: 'text', text: 'I can delete invoice 41. Confirm and I will.' },
     {
       type: 'confirmation_required',
+      grantId: 'grt_41_a1b2c3d4',
       confirmationId: 'cnf_Invoices_remove_1a2b3c',
       tool: 'Invoices_remove',
       capabilityId: 'InvoicesController.remove',
@@ -1878,6 +1884,7 @@ describe('THREAD-8 · the confirmation gate is a checklist in the thread', () =>
     },
     {
       type: 'confirmation_required',
+      grantId: 'grt_42_e5f6a7b8',
       confirmationId: 'cnf_Invoices_remove_9z8y7x',
       tool: 'Invoices_remove',
       capabilityId: 'InvoicesController.remove',
@@ -1910,7 +1917,7 @@ describe('THREAD-8 · the confirmation gate is a checklist in the thread', () =>
     expect(screen.queryByRole('button', { name: /approve all/i })).toBeNull();
   });
 
-  it('hands back only the ids that were actually ticked', async () => {
+  it('hands back only the proposals that were actually ticked, with their grants', async () => {
     const onApprove = vi.fn();
     renderThread(gateState(), { onApprove });
 
@@ -1919,38 +1926,79 @@ describe('THREAD-8 · the confirmation gate is a checklist in the thread', () =>
     await userEvent.click(screen.getByTestId('msaidizi-approve'));
 
     expect(onApprove).toHaveBeenCalledTimes(1);
-    expect(
-      onApprove.mock.calls[0][0].map((r: { confirmationId: string }) => r.confirmationId),
-    ).toEqual(['cnf_Invoices_remove_1a2b3c']);
+    // The grant is what the caller puts on the wire, so it is what this
+    // assertion reads. Handing back a proposal whose grant is absent, or whose
+    // grant belongs to the other row, is the failure the ledger exists to stop,
+    // and a check on the derived id could not see either.
+    expect(onApprove.mock.calls[0][0].map((r: { grantId?: string }) => r.grantId)).toEqual([
+      'grt_41_a1b2c3d4',
+    ]);
+    // And the row advertises the value it will send, so someone debugging the
+    // wire body has something on screen to compare it against.
+    expect(rows[0]).toHaveAttribute('data-grant-id', 'grt_41_a1b2c3d4');
+    expect(rows[1]).toHaveAttribute('data-grant-id', 'grt_42_e5f6a7b8');
   });
 
-  /* ── Two proposals, one confirmation id ────────────────────────────────────
+  /* ── Two proposals, one grant ──────────────────────────────────────────────
    *
    * The SHAPE the earlier tests never exercised. Every proposal above carries a
    * distinct id, and the gate keyed its tick state on that id: `checked` was a
    * `ReadonlySet<string>` of ids, the row was `key={id}`, the box was
    * `checked.has(id)` and the approval was `requests.filter(r =>
-   * checked.has(r.confirmationId))`. Two proposals on one id therefore shared a
-   * React key, a checkbox and a decision — one click ticked both boxes, the
-   * button read "Approve 2 actions and continue", and `onApprove` was handed
-   * both irreversible actions.
+   * checked.has(r.id))`. Two proposals on one id therefore shared a React key, a
+   * checkbox and a decision — one click ticked both boxes, the button read
+   * "Approve 2 actions and continue", and `onApprove` was handed both
+   * irreversible actions.
    *
-   * The id is derived on the server from the session, the tool and the
-   * arguments, so whether it is unique is a property of a different file. The
-   * shape below is what that file produced for two journal entries in one batch:
-   * `JSON.stringify(args, Object.keys(args).sort())` read its second argument as
-   * a replacer array, which filters property names RECURSIVELY, so every
-   * body-carrying red action canonicalised to `{"body":{}}` and two entirely
-   * different postings came back with one id. That has since been fixed at
-   * source — `canonicalise` in msaidizi.service.ts now walks the whole value —
-   * and this stays regardless, because the fix being in one place is what
-   * produced the defect. This gate is the last screen before an irreversible
-   * action; it may not be correct only for as long as some other file is.
+   * The id that matters is now the GRANT, because the grant is what `confirmed`
+   * names. Grants are freshly minted nonces, so two proposals should never share
+   * one and a collision here means the server issued the same nonce twice — a
+   * defect in a different file. That is exactly why the case is still pinned:
+   * this gate is the last screen before an irreversible action and may not be
+   * correct only for as long as some other file is. The bodies below carry their
+   * difference NESTED rather than at the top level, which is the shape the
+   * original derived-id collision came in — `JSON.stringify(args,
+   * Object.keys(args).sort())` filtered property names recursively, so every
+   * body-carrying action canonicalised to `{"body":{}}` — and a fixture whose
+   * arguments differ at the first level would not exercise it.
    */
   const COLLIDED_EVENTS: MsaidiziEvent[] = [
     { type: 'text', text: 'Two journal entries to post. Confirm and I will.' },
     {
       type: 'confirmation_required',
+      grantId: 'grt_collided_2f8a',
+      confirmationId: 'cnf_JournalEntries_post_rent',
+      tool: 'JournalEntries_post',
+      capabilityId: 'JournalEntriesController.post',
+      description: 'Post journal entry — rent for August, TZS 50,000',
+      args: { body: { memo: 'Rent Aug', lines: [{ account: '6000', debit: 50_000 }] } },
+    },
+    {
+      type: 'confirmation_required',
+      grantId: 'grt_collided_2f8a',
+      confirmationId: 'cnf_JournalEntries_post_payroll',
+      tool: 'JournalEntries_post',
+      capabilityId: 'JournalEntriesController.post',
+      description: 'Post journal entry — payroll, TZS 9,000,000',
+      args: { body: { memo: 'Payroll', lines: [{ account: '7000', debit: 9_000_000 }] } },
+    },
+    done('awaiting_confirmation'),
+  ];
+
+  /**
+   * The converse, and the shape that would have been silently over-restricted.
+   *
+   * Two proposals whose DERIVED ids collide — the old failure, still reachable
+   * because that id is still computed and still sent — but whose grants are
+   * distinct. `confirmed` names grants, so these two can be answered separately,
+   * and a gate that kept keying the group on `confirmationId` would tie them
+   * together, disable Approve on a half-ticked pair, and print a restriction
+   * that no longer exists.
+   */
+  const SHARED_DERIVED_ID_EVENTS: MsaidiziEvent[] = [
+    {
+      type: 'confirmation_required',
+      grantId: 'grt_rent_11aa',
       confirmationId: 'cnf_JournalEntries_post_paemgy',
       tool: 'JournalEntries_post',
       capabilityId: 'JournalEntriesController.post',
@@ -1959,6 +2007,7 @@ describe('THREAD-8 · the confirmation gate is a checklist in the thread', () =>
     },
     {
       type: 'confirmation_required',
+      grantId: 'grt_payroll_22bb',
       confirmationId: 'cnf_JournalEntries_post_paemgy',
       tool: 'JournalEntries_post',
       capabilityId: 'JournalEntriesController.post',
@@ -1974,7 +2023,7 @@ describe('THREAD-8 · the confirmation gate is a checklist in the thread', () =>
       reason: 'awaiting_confirmation',
     });
 
-  it('ticks one proposal per click even when two of them share a confirmation id', async () => {
+  it('ticks one proposal per click even when two of them share a grant', async () => {
     renderThread(collidedState());
 
     const rows = screen.getAllByTestId('msaidizi-confirmation-row');
@@ -1993,7 +2042,7 @@ describe('THREAD-8 · the confirmation gate is a checklist in the thread', () =>
   it('says two proposals share an id rather than quietly conflating them', () => {
     const view = renderThread(collidedState());
 
-    expect(view.getByTestId('msaidizi-gate-shared-ids')).toHaveTextContent(/same confirmation id/i);
+    expect(view.getByTestId('msaidizi-gate-shared-ids')).toHaveTextContent(/same approval id/i);
     expect(view.getAllByTestId('msaidizi-confirmation-row-shared')).toHaveLength(2);
     // What the collision costs is the ability to ANSWER separately — `confirmed`
     // is a list of ids with no way to name a row. It is not "approving this
@@ -2016,14 +2065,14 @@ describe('THREAD-8 · the confirmation gate is a checklist in the thread', () =>
     expect(screen.queryAllByTestId('msaidizi-confirmation-row-shared')).toHaveLength(0);
   });
 
-  // Independent boxes over a shared id would be a NEW falsehood: `confirmed` is
-  // a list of IDS with no way to name a row, so an answer about the rent entry
-  // is character-for-character an answer about the payroll one whatever this
-  // page draws. That is a property of the request shape, not of any server
-  // policy about spending ids, so it holds however that policy changes. The
+  // Independent boxes over a shared grant would be a NEW falsehood: `confirmed`
+  // is a list of IDS with no way to name a row, so an answer about the rent
+  // entry is character-for-character an answer about the payroll one whatever
+  // this page draws. That is a property of the request shape, not of any server
+  // policy about spending grants, so it holds however that policy changes. The
   // group is therefore all-or-nothing, and the reason Approve went away is said
   // next to it.
-  it('will not send half an approval for a group that shares one id', async () => {
+  it('will not send half an approval for a group that shares one grant', async () => {
     const onApprove = vi.fn();
     renderThread(collidedState(), { onApprove });
 
@@ -2048,6 +2097,146 @@ describe('THREAD-8 · the confirmation gate is a checklist in the thread', () =>
       'Post journal entry — rent for August, TZS 50,000',
       'Post journal entry — payroll, TZS 9,000,000',
     ]);
+  });
+
+  // The other half of the same rule, and the one a gate still keyed on the
+  // derived id would get wrong in the SAFE-LOOKING direction: two proposals
+  // whose `confirmationId` collides but whose grants are distinct are two
+  // separable decisions, because the message names grants. Tying them together
+  // prints a restriction that does not exist and takes away a choice the user
+  // is entitled to.
+  it('keeps two proposals separable when only their derived ids collide', async () => {
+    const onApprove = vi.fn();
+    renderThread(
+      settledState('post the rent and the payroll', SHARED_DERIVED_ID_EVENTS, {
+        kind: 'done',
+        reason: 'awaiting_confirmation',
+      }),
+      { onApprove },
+    );
+
+    // Nothing is said about a shared id, because nothing that reaches the wire
+    // is shared.
+    expect(screen.queryByTestId('msaidizi-gate-shared-ids')).toBeNull();
+    expect(screen.queryAllByTestId('msaidizi-confirmation-row-shared')).toHaveLength(0);
+
+    const rows = screen.getAllByTestId('msaidizi-confirmation-row');
+    await userEvent.click(within(rows[0]).getByRole('checkbox'));
+
+    // Half a group is a real answer here: one grant, one action.
+    expect(screen.queryByTestId('msaidizi-gate-split-group')).toBeNull();
+    const approve = screen.getByTestId('msaidizi-approve');
+    expect(approve).toBeEnabled();
+    await userEvent.click(approve);
+
+    expect(onApprove.mock.calls[0][0].map((r: { grantId?: string }) => r.grantId)).toEqual([
+      'grt_rent_11aa',
+    ]);
+  });
+
+  /* -- A proposal that arrived with no grant --------------------------------
+   *
+   * Reachable two ways that are not exotic: a conversation stored before grants
+   * existed replays its transcript, and `decodeFrame` casts the frame's JSON
+   * without validating it, so a truncated or mangled write lands here as an
+   * object with no `grantId` on it. There is nothing this page could send for
+   * such a row. The failure to avoid is not a crash — it is a tickable box that
+   * reads as consent and then sends either nothing or, worse, an id this page
+   * invented for itself.
+   */
+  const UNGRANTED_EVENTS: MsaidiziEvent[] = [
+    {
+      type: 'confirmation_required',
+      confirmationId: 'cnf_Invoices_remove_1a2b3c',
+      tool: 'Invoices_remove',
+      capabilityId: 'InvoicesController.remove',
+      description: 'Delete invoice with id 41',
+      args: { id: '41' },
+    },
+    {
+      type: 'confirmation_required',
+      grantId: 'grt_42_e5f6a7b8',
+      confirmationId: 'cnf_Invoices_remove_9z8y7x',
+      tool: 'Invoices_remove',
+      capabilityId: 'InvoicesController.remove',
+      description: 'Delete invoice with id 42',
+      args: { id: '42' },
+    },
+    done('awaiting_confirmation'),
+  ];
+
+  it('refuses to approve a proposal that arrived without a grant, and says why', async () => {
+    const onApprove = vi.fn();
+    renderThread(
+      settledState('delete invoices 41 and 42', UNGRANTED_EVENTS, {
+        kind: 'done',
+        reason: 'awaiting_confirmation',
+      }),
+      { onApprove },
+    );
+
+    const rows = screen.getAllByTestId('msaidizi-confirmation-row');
+    expect(rows[0]).toHaveAttribute('data-approvable', 'false');
+    expect(rows[0]).not.toHaveAttribute('data-grant-id');
+    expect(within(rows[0]).getByRole('checkbox')).toBeDisabled();
+    expect(within(rows[0]).getByTestId('msaidizi-confirmation-row-ungranted')).toHaveTextContent(
+      /did not arrive with an approval id/i,
+    );
+    // Said at the top too: a user works down the list and must not meet the dead
+    // checkbox without having been told it was coming.
+    expect(screen.getByTestId('msaidizi-gate-ungranted')).toHaveTextContent(
+      /cannot be approved from here/i,
+    );
+
+    // The granted row beside it still works, and the answer names its grant and
+    // nothing else — one unanswerable row does not spoil the batch.
+    expect(rows[1]).not.toHaveAttribute('data-approvable');
+    await userEvent.click(within(rows[1]).getByRole('checkbox'));
+    await userEvent.click(screen.getByTestId('msaidizi-approve'));
+    expect(onApprove.mock.calls[0][0].map((r: { grantId?: string }) => r.grantId)).toEqual([
+      'grt_42_e5f6a7b8',
+    ]);
+  });
+
+  it('leaves Approve dead when no proposal in the batch has a grant', () => {
+    renderThread(
+      settledState('delete invoice 41', [UNGRANTED_EVENTS[0], done('awaiting_confirmation')], {
+        kind: 'done',
+        reason: 'awaiting_confirmation',
+      }),
+    );
+
+    expect(screen.getByTestId('msaidizi-approve')).toBeDisabled();
+    expect(screen.getByTestId('msaidizi-gate-ungranted')).toHaveTextContent(
+      /nothing here can be approved/i,
+    );
+    // Decline is not blocked by this: saying no needs no id at all, and two dead
+    // buttons is the stuck gate in its purest form.
+    expect(screen.getByTestId('msaidizi-decline')).toBeEnabled();
+  });
+
+  // An empty string is not an id, and neither is a number. `decodeFrame` casts
+  // unvalidated JSON, so both reach this component as they arrived, and anything
+  // reading `request.grantId` directly instead of through `grantIdOf` would put
+  // both on the wire.
+  it('treats a blank or non-string grant as no grant at all', () => {
+    renderThread(
+      settledState(
+        'delete invoice 41',
+        [
+          { ...UNGRANTED_EVENTS[0], grantId: '' },
+          { ...UNGRANTED_EVENTS[1], grantId: 7 as unknown as string },
+          done('awaiting_confirmation'),
+        ],
+        { kind: 'done', reason: 'awaiting_confirmation' },
+      ),
+    );
+
+    for (const row of screen.getAllByTestId('msaidizi-confirmation-row')) {
+      expect(row).toHaveAttribute('data-approvable', 'false');
+      expect(within(row).getByRole('checkbox')).toBeDisabled();
+    }
+    expect(screen.getByTestId('msaidizi-approve')).toBeDisabled();
   });
 
   // The reassurance is scoped to the PROPOSED actions and to nothing else.
@@ -2219,8 +2408,13 @@ const postResult = (ok: boolean, status: number, error?: string): MsaidiziEvent 
   ...(error ? { error } : {}),
 });
 
-const postProposal = (body: unknown, description: string): MsaidiziEvent => ({
+const postProposal = (
+  body: unknown,
+  description: string,
+  grantId = 'grt_post_961882d1',
+): MsaidiziEvent => ({
   type: 'confirmation_required',
+  grantId,
   confirmationId: 'cnf_JournalEntries_post_961882d1',
   tool: 'JournalEntries_post',
   capabilityId: 'JournalEntriesController.post',
@@ -2238,7 +2432,17 @@ const postProposal = (body: unknown, description: string): MsaidiziEvent => ({
  * single-turn fixture structurally cannot produce.
  */
 function settledConversation(
-  script: { prompt: string; events: MsaidiziEvent[]; reason: DoneReason }[],
+  script: {
+    prompt: string;
+    events: MsaidiziEvent[];
+    reason: DoneReason;
+    /**
+     * The action signatures this turn's REQUEST approved, exactly as the page
+     * records them. Present on a turn that resumed after an approval, absent
+     * everywhere else — which is what an ordinary question looks like.
+     */
+    approvedSignatures?: string[];
+  }[],
 ): MsaidiziConversationState {
   let state = createConversationState();
   script.forEach((turn, index) => {
@@ -2249,6 +2453,7 @@ function settledConversation(
       turnId,
       prompt: turn.prompt,
       at,
+      approvedSignatures: turn.approvedSignatures,
     });
     for (const event of turn.events) {
       state = msaidiziConversationReducer(state, { type: 'event', turnId, event });
@@ -2290,6 +2495,7 @@ const firstProposalState = () =>
       { type: 'text', text: 'I can delete invoice 41. Confirm and I will.' },
       {
         type: 'confirmation_required',
+        grantId: 'grt_41_first_proposal',
         confirmationId: 'cnf_Invoices_remove_1a2b3c',
         tool: 'Invoices_remove',
         capabilityId: 'InvoicesController.remove',
@@ -2625,6 +2831,7 @@ describe('THREAD-9 · a repeat of an action already attempted says so', () => {
           postProposal(RENT_BODY, 'Post journal entry — rent for August, TZS 50,000'),
           {
             type: 'confirmation_required',
+            grantId: 'grt_post_other_4411',
             confirmationId: 'cnf_JournalEntries_post_other',
             tool: 'JournalEntries_post',
             capabilityId: 'JournalEntriesController.post',
@@ -2687,5 +2894,241 @@ describe('THREAD-9 · a repeat of an action already attempted says so', () => {
 
     expect(screen.queryByTestId('msaidizi-gate-repeat')).toBeNull();
     expect(screen.getByTestId('msaidizi-confirmation-row')).not.toHaveAttribute('data-repeats');
+  });
+});
+
+/* ------------------------------------------------------------------------ *
+ * THREAD-10 · An approval the server did not use
+ * ------------------------------------------------------------------------ *
+ *
+ * A grant is spent atomically at dispatch, so a grant that has already been
+ * used, has expired, was issued in another conversation, records different
+ * arguments, or simply cannot be reached in the ledger is REFUSED — and a
+ * refusal is not an error frame, it is a fresh proposal carrying a new grant.
+ *
+ * On screen that is the most dangerous sequence in the product to draw badly.
+ * The user clicks Approve; the next turn comes back with a decision box holding
+ * the identical action, identical figures, identical wording; nothing ran. Drawn
+ * without a word it says the click did nothing, and the only remedy the screen
+ * offers is to click again — which is how a user approves twice for one intended
+ * action.
+ *
+ * The shapes below are the ones a fixture usually excludes: the SAME action
+ * across two REQUESTS with arguments that are identical and NESTED, the same
+ * action across two requests where the approval WAS used, and an approval for a
+ * different action entirely.
+ */
+
+/** Byte-identical to `RENT_BODY`, built separately so nothing matches by reference. */
+const RENT_BODY_AGAIN = { memo: 'Rent Aug', lines: [{ account: '6000', debit: 50_000 }] };
+const RENT_SIGNATURE = actionSignature('JournalEntries_post', { body: RENT_BODY });
+
+const rentProposal = (grantId: string, body: unknown = RENT_BODY) =>
+  postProposal(body, 'Post journal entry — rent for August, TZS 50,000', grantId);
+
+const APPROVAL_PROMPT = 'Yes — go ahead: Post journal entry — rent for August, TZS 50,000';
+
+describe('THREAD-10 · an approval that was not used is named as such', () => {
+  const reproposedIdentically = () =>
+    settledConversation([
+      {
+        prompt: 'post the August rent journal',
+        events: [rentProposal('grt_first'), done('awaiting_confirmation')],
+        reason: 'awaiting_confirmation',
+      },
+      {
+        // The resumed turn. Its request carried the approval; the server would
+        // not spend the grant, so nothing was dispatched and it asked again —
+        // with a NEW grant, and with arguments that are identical rather than
+        // merely similar. An identical repeat across two REQUESTS is the case
+        // every replay fixture in this suite had previously arranged to avoid.
+        prompt: APPROVAL_PROMPT,
+        approvedSignatures: [RENT_SIGNATURE],
+        events: [rentProposal('grt_second', RENT_BODY_AGAIN), done('awaiting_confirmation')],
+        reason: 'awaiting_confirmation',
+      },
+    ]);
+
+  it('tells the user their approval was not used and this is a new decision', () => {
+    renderThread(reproposedIdentically());
+
+    const row = screen.getByTestId('msaidizi-confirmation-row');
+    expect(row).toHaveAttribute('data-unhonoured', 'true');
+    // The NEW grant, not the one already answered. A page that re-sent the first
+    // would be refused again, and again.
+    expect(row).toHaveAttribute('data-grant-id', 'grt_second');
+
+    const notice = screen.getByTestId('msaidizi-gate-unhonoured');
+    expect(notice).toHaveTextContent(
+      /approved one of these actions on your last message and Msaidizi did not use that approval/i,
+    );
+    expect(notice).toHaveTextContent(/new decision rather than the earlier one coming back/i);
+    expect(within(row).getByTestId('msaidizi-confirmation-row-unhonoured')).toHaveTextContent(
+      /that approval was not used, so nothing ran/i,
+    );
+
+    // And it is still answerable. Being told what happened is the point; being
+    // stopped is not — a second attempt at a posting that never posted is
+    // exactly what the user asked for the first time.
+    expect(within(row).getByRole('checkbox')).toBeEnabled();
+  });
+
+  it('does not call it a repeat: nothing was attempted, so there is nothing to repeat', () => {
+    renderThread(reproposedIdentically());
+
+    // `priorAttempts` is about what was DISPATCHED. The refused grant dispatched
+    // nothing, so "an action identical to this one was already carried out"
+    // would be a straightforward falsehood — and it is the sentence a naive fix
+    // reaches for, because the two situations look identical in the transcript.
+    expect(screen.queryByTestId('msaidizi-gate-repeat')).toBeNull();
+    expect(screen.getByTestId('msaidizi-confirmation-row')).not.toHaveAttribute('data-repeats');
+  });
+
+  // The distinction the whole flag turns on. Same two turns, same approval, but
+  // the grant WAS spent: the posting ran and the model asked for a second one.
+  // Marking that as an approval thrown away would tell the user nothing had
+  // happened while the step row directly above says a TZS 50,000 entry posted.
+  it('says nothing of the sort when the approval was spent and the action ran', () => {
+    renderThread(
+      settledConversation([
+        {
+          prompt: 'post the August rent journal',
+          events: [rentProposal('grt_first'), done('awaiting_confirmation')],
+          reason: 'awaiting_confirmation',
+        },
+        {
+          prompt: APPROVAL_PROMPT,
+          approvedSignatures: [RENT_SIGNATURE],
+          events: [
+            postCall(RENT_BODY_AGAIN),
+            postResult(true, 201),
+            rentProposal('grt_second', RENT_BODY_AGAIN),
+            done('awaiting_confirmation'),
+          ],
+          reason: 'awaiting_confirmation',
+        },
+      ]),
+    );
+
+    expect(screen.queryByTestId('msaidizi-gate-unhonoured')).toBeNull();
+    const row = screen.getByTestId('msaidizi-confirmation-row');
+    expect(row).not.toHaveAttribute('data-unhonoured');
+    // What it IS is the case THREAD-9 covers, and that account is unchanged.
+    expect(row).toHaveAttribute('data-repeats', 'carried-out');
+  });
+
+  // An approval names the actions it approved. A proposal for something else in
+  // the same turn is a first question about that action, and "you approved this
+  // and it was ignored" over it is simply wrong.
+  it('marks only the action the approval named, not everything in the turn', () => {
+    renderThread(
+      settledConversation([
+        {
+          prompt: 'post the rent and the payroll',
+          events: [rentProposal('grt_r1'), done('awaiting_confirmation')],
+          reason: 'awaiting_confirmation',
+        },
+        {
+          prompt: APPROVAL_PROMPT,
+          approvedSignatures: [RENT_SIGNATURE],
+          events: [
+            rentProposal('grt_r2', RENT_BODY_AGAIN),
+            postProposal(PAYROLL_BODY, 'Post journal entry — payroll, TZS 9,000,000', 'grt_p1'),
+            done('awaiting_confirmation'),
+          ],
+          reason: 'awaiting_confirmation',
+        },
+      ]),
+    );
+
+    const rows = screen.getAllByTestId('msaidizi-confirmation-row');
+    expect(rows[0]).toHaveAttribute('data-unhonoured', 'true');
+    expect(rows[1]).not.toHaveAttribute('data-unhonoured');
+    expect(screen.getByTestId('msaidizi-gate-unhonoured')).toHaveTextContent(
+      /approved one of these actions/i,
+    );
+  });
+
+  // Once the thread moves on, the proposal stops being a decision and becomes a
+  // record — and the record carries the same fact, in the past tense. A reviewer
+  // reading this conversation tomorrow sees two identical proposals in
+  // consecutive turns with no dispatch between them; without this sentence the
+  // only available reading is that the model asked twice for no reason.
+  it('keeps the fact in the transcript once the decision has moved on', () => {
+    renderThread(
+      settledConversation([
+        {
+          prompt: 'post the August rent journal',
+          events: [rentProposal('grt_first'), done('awaiting_confirmation')],
+          reason: 'awaiting_confirmation',
+        },
+        {
+          prompt: APPROVAL_PROMPT,
+          approvedSignatures: [RENT_SIGNATURE],
+          events: [rentProposal('grt_second', RENT_BODY_AGAIN), done('awaiting_confirmation')],
+          reason: 'awaiting_confirmation',
+        },
+        { prompt: 'leave it for now', events: [done('end_turn')], reason: 'end_turn' },
+      ]),
+    );
+
+    const records = screen.getAllByTestId('msaidizi-confirmation-record');
+    expect(records).toHaveLength(2);
+    // The first proposal was answered and says nothing about approvals.
+    expect(records[0]).not.toHaveAttribute('data-unhonoured');
+    expect(records[1]).toHaveAttribute('data-unhonoured', 'true');
+    expect(
+      within(records[1]).getByTestId('msaidizi-confirmation-record-unhonoured'),
+    ).toHaveTextContent(/Msaidizi did not use it/i);
+  });
+
+  // A stored conversation reopened tomorrow. The transcript records what the run
+  // did, never what a browser sent, so this page has no standing to say an
+  // approval was given at all — and claiming one would put a sentence about the
+  // reader's own click on a screen where nobody clicked.
+  it('claims nothing about approvals for a conversation read out of the store', () => {
+    const storedTurn = (id: string, sequence: number, prompt: string, events: MsaidiziEvent[]) => ({
+      id,
+      sequence,
+      prompt,
+      reason: 'awaiting_confirmation',
+      toolCallCount: 0,
+      writeCallCount: 0,
+      procedureId: null,
+      startedAt: '2026-08-18T09:00:00.000Z',
+      endedAt: '2026-08-18T09:00:04.000Z',
+      events,
+    });
+
+    const state = hydrateFromConversation({
+      id: 'conv_9',
+      agentSessionId: 'ms_stored',
+      title: 'August rent',
+      companyId: 'c1',
+      turnCount: 2,
+      toolCallCount: 0,
+      writeCallCount: 0,
+      highestTier: 'red',
+      resumable: true,
+      continuable: true,
+      lastTurnAt: '2026-08-18T09:00:00.000Z',
+      createdAt: '2026-08-18T09:00:00.000Z',
+      expiresAt: '2026-11-16T09:00:00.000Z',
+      turns: [
+        storedTurn('stored_1', 1, 'post the August rent journal', [
+          rentProposal('grt_first'),
+          done('awaiting_confirmation'),
+        ]),
+        storedTurn('stored_2', 2, APPROVAL_PROMPT, [
+          rentProposal('grt_second', RENT_BODY_AGAIN),
+          done('awaiting_confirmation'),
+        ]),
+      ],
+    });
+
+    expect(state.turns.every((turn) => turn.approvedSignatures.length === 0)).toBe(true);
+    renderThread(state);
+    expect(screen.queryByTestId('msaidizi-gate-unhonoured')).toBeNull();
+    expect(screen.queryByTestId('msaidizi-confirmation-record-unhonoured')).toBeNull();
   });
 });

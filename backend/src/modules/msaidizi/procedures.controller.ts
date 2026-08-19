@@ -13,76 +13,30 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import {
-  IsArray,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Matches,
-  MaxLength,
-  MinLength,
-} from 'class-validator';
 import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { MsaidiziConversationsService, mintSessionId, OpenedTurn } from './conversations.service';
+import {
+  CompileProcedureDto,
+  CreateProcedureDto,
+  ProcedureRunResult,
+  RunProcedureDto,
+} from './dto/procedures.dto';
 import { ModelMessage } from './model-client';
 import { MsaidiziConfig } from './msaidizi.config';
-import { MsaidiziService, RunResult } from './msaidizi.service';
+import { MsaidiziService, RunRequest, RunResult } from './msaidizi.service';
 import { ProceduresService } from './procedures.service';
 
 /**
- * The shape `mintSessionId()` mints: `ms_` and a UUID with its dashes removed.
- * Declared here rather than exported from `conversations.service` so the DTO
- * layer does not import the store, but it is the same alphabet and the same
- * length, and `msaidizi.controller.ts` pins `AskDto.sessionId` to a copy of it.
+ * The wire types moved to `./dto`, and are re-exported here so importers keep
+ * naming the controller that serves them. The session-id pattern this file used
+ * to declare for itself lives in `dto/session-id.ts` now: it was a copy of the
+ * one in `msaidizi.controller.ts`, with a comment on each copy explaining that
+ * it was a copy of the other.
  */
-const SESSION_ID = /^ms_[0-9a-f]{32}$/;
-
-export class CompileProcedureDto {
-  @IsString() @MinLength(4) @MaxLength(4000) instruction!: string;
-}
-
-export class CreateProcedureDto {
-  @IsString() @MinLength(2) @MaxLength(120) name!: string;
-  @IsString() @MinLength(4) @MaxLength(4000) instruction!: string;
-  @IsOptional() @IsUUID() companyId?: string;
-  @IsArray() @IsString({ each: true }) capabilities!: string[];
-}
-
-export class RunProcedureDto {
-  /** Extra context for this run — "for supplier X", "for March". */
-  @IsOptional() @IsString() @MaxLength(2000) context?: string;
-
-  /**
-   * The session id of the run being approved, echoed back from its `RunResult`.
-   *
-   * Sent only with `confirmed`, and it is what makes an approval possible at
-   * all. `confirmationIdFor()` derives every red-tier id from the session id, so
-   * a second run under a fresh id recomputes ids that cannot match the ones the
-   * user just approved: the run suspends again, on the same action, with the
-   * same buttons, forever. Omitting it starts a new run, which is what a plain
-   * invocation wants.
-   *
-   * Pinned to the shape `mintSessionId()` produces, and that is a constraint on
-   * an AUDIT key rather than tidiness about strings. Whatever arrives here is
-   * what `open()` settles on when it resolves to nothing of this caller's, what
-   * the agent runs under, and what `capability-invoker` sends as the
-   * agent-session header every `audit_logs` row this run writes is stamped with.
-   *
-   * The pattern constrains SHAPE only. It rejects a hand-written or copied
-   * string; it cannot tell an id this server issued from one a client invented
-   * in the same alphabet, and nothing at this layer can. The threat named above
-   * — a run filed under a session id read somewhere else — is closed by the
-   * unique index on `agentSessionId` instead: an id that already names a
-   * conversation is rejected on insert and the run is given a freshly minted one
-   * (`conversations.service.ts`, `startConversation`). Echoing back an id this
-   * server minted is always honoured; borrowing someone else's never is.
-   */
-  @IsOptional() @IsString() @Matches(SESSION_ID) sessionId?: string;
-
-  @IsOptional() @IsArray() @IsString({ each: true }) confirmed?: string[];
-}
+export { CompileProcedureDto, CreateProcedureDto, RunProcedureDto } from './dto/procedures.dto';
+export type { ProcedureRunResult } from './dto/procedures.dto';
 
 /**
  * Saved procedures.
@@ -155,8 +109,13 @@ export class ProceduresController {
    * Runs a procedure.
    *
    * Under the *invoker's* permissions, not the author's — a procedure is a saved
-   * instruction, never a grant. Bounded to the capability list it was approved
-   * with, intersected with what the invoker may actually reach.
+   * instruction, never an approval. Bounded to the capability list it was
+   * approved with, intersected with what the invoker may actually reach.
+   *
+   * Returns a `ProcedureRunResult`: the run, plus which conversation and turn it
+   * landed in. This endpoint accepts `sessionId` and `confirmed`, so it is a
+   * resumable surface, and a caller that is never told where its run was filed
+   * cannot tell an approvable red-tier proposal from one no grant was issued for.
    */
   @Post(':id/run')
   @RequirePermissions('msaidizi.use')
@@ -165,7 +124,7 @@ export class ProceduresController {
     @Body() dto: RunProcedureDto,
     @CurrentUser() user: AuthUser,
     @Headers('authorization') authorization?: string,
-  ): Promise<RunResult> {
+  ): Promise<ProcedureRunResult> {
     this.assertEnabled();
     if (!authorization) {
       throw new ForbiddenException('Msaidizi requires a bearer token to act on your behalf.');
@@ -181,20 +140,33 @@ export class ProceduresController {
     // matters most here, because this is the one a human pre-approved.
     const opened = await this.openTurn(message, id, user, dto.sessionId);
 
-    const result = await this.agent.run({
+    // `conversationId` and `turnSequence` are what let the loop issue a grant
+    // when it proposes a red-tier step and spend one when it dispatches: a grant
+    // belongs to a conversation and a user, and the loop cannot name either
+    // without being told. Both come from `opened` — the conversation the store
+    // resolved — and never from the request, so an approval's scope is never a
+    // thread the caller merely named.
+    const request: RunRequest = {
       user,
       authorization,
-      // The session id the store settled on, never one minted here. Red-tier
-      // confirmation ids are derived from it, and a second id in play is the
-      // infinite approval loop.
+      // The session id the store settled on, never one minted here — it is the
+      // audit key every `audit_logs` row this run writes is stamped with, and
+      // the store is the only thing that has resolved it against this caller's
+      // own conversations.
       sessionId: opened.sessionId,
+      conversationId: opened.conversationId,
+      turnSequence: opened.sequence,
       confirmed: dto.confirmed,
       restrictTo: entries,
       messages: this.messagesFor(message, opened),
-    });
+    };
+    const result = await this.agent.run(request);
 
     await this.recordQuietly(opened, result);
-    return result;
+    // Spread rather than mutated: `close()` was handed `result` itself, and the
+    // run result is not this controller's object to rewrite after the fact.
+    // Both fields are absent, never zero, for a turn that was not persisted.
+    return { ...result, conversationId: opened.conversationId, sequence: opened.sequence };
   }
 
   /**
@@ -202,19 +174,19 @@ export class ProceduresController {
    *
    * A plain invocation carries no session id, so `open()` mints one and the run
    * starts a conversation of its own. An APPROVAL carries the session id of the
-   * run it is approving, and that id has to survive: red-tier confirmation ids
-   * are derived from it, so a fresh one here recomputes every id and none of
-   * them match what the user approved — the run suspends on the same action
-   * again, and every attempt leaves another conversation row behind. This
-   * controller used to pass neither, which made that loop unbreakable from the
-   * API while a comment two methods up claimed the opposite.
+   * run it is approving, and that id is how the approval gets back into the
+   * conversation the proposal was made in — a grant is issued against a
+   * conversation and spendable only from it, so a run that starts a new
+   * conversation finds no grant matching what the user approved and proposes the
+   * action again. This controller used to pass no id at all, which made that
+   * loop unbreakable from the API while a comment two methods up claimed the
+   * opposite.
    *
-   * Sending an id is not sending a conversation: `open()` resolves it against
-   * the caller's own rows and starts a fresh conversation under it if it
-   * resolves to nothing they own, so an id belonging to someone else collides on
-   * the unique index — and that run then proceeds unpersisted under an id minted
-   * for it, never under the borrowed one, so a procedure run cannot be filed
-   * into another user's audit trail.
+   * Sending an id is not sending a conversation. `open()` resolves it against
+   * the caller's own rows, and an id resolving to nothing they own is IGNORED in
+   * favour of a freshly minted one — never adopted, so a procedure run cannot be
+   * filed into another user's audit trail, and never rejected, because failing a
+   * run over a stale id is a worse outcome than re-identifying it.
    *
    * No `conversationId` is accepted, so there is still no 404/409/410 to
    * propagate. The `HttpException` re-throw is kept anyway, because it costs
@@ -235,11 +207,25 @@ export class ProceduresController {
         `Could not open a conversation turn for procedure ${procedureId}; ` +
           `running unpersisted: ${(err as Error)?.message}`,
       );
-      // The client's own id when it sent one, so an approval that arrives while
-      // the store is down still recomputes the ids it approved. No `sequence`:
-      // this turn has no position in any stored conversation to report.
+      if (clientSessionId) {
+        this.logger.warn(
+          `Session id ${clientSessionId} could not be checked against this caller's conversations ` +
+            `(the turn could not be opened), so it was ignored and a fresh one minted; this ` +
+            `procedure run is unpersisted and any red-tier step will be proposed again.`,
+        );
+      }
+      // A FRESH id, never the client's. The provenance rule holds at this door
+      // too: an id from the request is honoured only where it can be RESOLVED to
+      // a conversation this caller owns, and `open()` threw before any row could
+      // be read. This used to adopt it, because red-tier ids were DERIVED from
+      // the session id and minting one broke an approval in flight; approvals are
+      // server-issued grants now, and an unpersisted run has no conversation to
+      // spend one from regardless — so the step re-proposes, which is the
+      // fail-closed outcome rather than a regression.
+      //
+      // No `sequence`: this turn has no position in any stored conversation.
       return {
-        sessionId: clientSessionId ?? mintSessionId(),
+        sessionId: mintSessionId(),
         history: [],
         fromServer: false,
         priorTier: 'green',

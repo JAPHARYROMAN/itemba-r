@@ -107,6 +107,19 @@ export type ThreadBlock =
        * ran in turn 4 must not be redrawn as having repeated itself.
        */
       repeats: PriorAttempt | null;
+      /**
+       * True when this turn's own request approved an action identical to this
+       * proposal and the action did not run — the server refused the grant and
+       * asked again with a fresh one.
+       *
+       * Derived from two facts about THIS turn only: the request carried an
+       * approval for this signature, and no red call with that signature was
+       * dispatched ahead of the proposal. Both halves matter. Without the
+       * second, the ordinary approve-run-ask-again sequence (CHAT-13) would be
+       * mislabelled as an approval that was thrown away, when in fact it was
+       * spent exactly as it should have been.
+       */
+      unhonouredApproval: boolean;
     }
   | { kind: 'error'; key: string; message: string };
 
@@ -203,23 +216,36 @@ export function detectSecurityFinding(text: string): boolean {
  * the one that created it and reading it mid-walk would report a call that
  * plainly succeeded as one that never reported back.
  *
+ * `approvedSignatures` is what this turn's own REQUEST said yes to, and it is
+ * what makes a re-proposal knowable as an approval that was not honoured rather
+ * than as the model asking twice. It is about this turn alone and is deliberately
+ * not accumulated across the thread: an approval given three turns ago was
+ * answered three turns ago, and carrying it forward would put "your approval was
+ * not used" on every later proposal of the same action forever.
+ *
  * Omitting `context` narrows what a proposal can be compared against to this
  * turn's own calls — it does NOT switch the comparison off, because the calls
  * are in the event list either way. What is lost is the account carried in from
  * earlier turns, and `live` defaults to false, which reads a call still in
  * flight as one that never reported back. Both are right for the settled,
  * single-turn use a bare call implies and wrong for anything else, so the
- * renderer passes both.
+ * renderer passes both. An omitted `approvedSignatures` reads as "this turn
+ * approved nothing", which is the right answer for a turn nobody said it did.
  */
 export function buildThreadBlocks(
   events: MsaidiziEvent[],
   turnKey: string,
-  context: { live?: boolean; priorAttempts?: PriorAttempts } = {},
+  context: {
+    live?: boolean;
+    priorAttempts?: PriorAttempts;
+    approvedSignatures?: readonly string[];
+  } = {},
 ): ThreadBlock[] {
   const blocks: ThreadBlock[] = [];
   const running: ThreadStep[] = [];
   const live = context.live ?? false;
   const priorAttempts = context.priorAttempts;
+  const approved = new Set(context.approvedSignatures ?? []);
   // This turn's own red calls, by signature, in the order they were dispatched.
   const dispatched = new Map<string, ThreadStep[]>();
   // Each proposal, with how many same-signature calls this turn had already
@@ -305,6 +331,11 @@ export function buildThreadBlocks(
           key,
           request: event,
           repeats: null,
+          // Read at the point the proposal was raised, not afterwards: a red
+          // call dispatched LATER in this turn is not something that could have
+          // spent the approval this proposal is asking for again.
+          unhonouredApproval:
+            approved.has(signature) && (dispatched.get(signature)?.length ?? 0) === 0,
         };
         blocks.push(block);
         proposals.push({
@@ -1115,10 +1146,19 @@ function ConfirmationRecord({
   request,
   live,
   repeats,
+  unhonouredApproval = false,
 }: {
   request: ConfirmationRequest;
   live: boolean;
   repeats: PriorAttempt | null;
+  /**
+   * Whether the turn this record belongs to approved this same action and the
+   * approval was not used. The one thing the transcript can say about a
+   * re-proposal that a reader could not work out for themselves: two identical
+   * proposals in consecutive turns look like the model asking twice, and only
+   * this page knows an answer was sent in between.
+   */
+  unhonouredApproval?: boolean;
 }) {
   return (
     <section
@@ -1126,6 +1166,7 @@ function ConfirmationRecord({
       data-confirmation-id={request.confirmationId}
       data-live={live ? 'true' : undefined}
       data-repeats={repeats ?? undefined}
+      data-unhonoured={unhonouredApproval ? 'true' : undefined}
       className="my-2 rounded-lg border px-3.5 py-3"
       style={{ background: 'var(--aurora-bg-subtle)', borderColor: 'var(--aurora-border)' }}
     >
@@ -1150,6 +1191,17 @@ function ConfirmationRecord({
             // is true is only where to look.
             'The run stopped here and waited. Nothing in this proposal ran in this turn; whatever came of it, if anything, is in the turn after this one.'}
       </p>
+      {unhonouredApproval && (
+        <p
+          data-testid="msaidizi-confirmation-record-unhonoured"
+          className="mt-2 text-[12px] font-medium"
+          style={{ color: 'var(--aurora-text)' }}
+        >
+          An approval for an action identical to this one was sent with the message that started
+          this turn, and Msaidizi did not use it — nothing ran on the strength of it, and this is
+          the fresh request that took its place.
+        </p>
+      )}
       {repeats && (
         <p
           data-testid="msaidizi-confirmation-record-repeat"
@@ -1266,22 +1318,31 @@ export function MsaidiziThread({
   // would then disagree with the record two inches above it, which does respect
   // it. Keyed by signature rather than by object identity so that a caller
   // passing an equal-but-distinct request still gets the right answer.
-  const { rendered, gateAttempts } = useMemo(() => {
+  const { rendered, gateAttempts, gateUnhonoured } = useMemo(() => {
     const attempts: PriorAttempts = new Map();
     const walked = turns.map((turn) => ({
       turn,
       blocks: buildThreadBlocks(turn.events, turn.id, {
         live: turn.status === 'running',
         priorAttempts: attempts,
+        // Per turn, never accumulated: an approval belongs to the request that
+        // carried it. See `buildThreadBlocks`.
+        approvedSignatures: turn.approvedSignatures,
       }),
     }));
     const newest = walked[walked.length - 1];
     const gate = new Map<string, PriorAttempt>();
+    // Same keying as `gate`, and built from the same resolved blocks for the
+    // same reason: the gate must say exactly what the record two inches above it
+    // says about the same proposal.
+    const unhonoured = new Set<string>();
     for (const block of newest?.blocks ?? []) {
-      if (block.kind !== 'confirmation' || !block.repeats) continue;
-      gate.set(actionSignature(block.request.tool, block.request.args), block.repeats);
+      if (block.kind !== 'confirmation') continue;
+      const signature = actionSignature(block.request.tool, block.request.args);
+      if (block.repeats) gate.set(signature, block.repeats);
+      if (block.unhonouredApproval) unhonoured.add(signature);
     }
-    return { rendered: walked, gateAttempts: gate };
+    return { rendered: walked, gateAttempts: gate, gateUnhonoured: unhonoured };
   }, [turns]);
 
   return (
@@ -1364,6 +1425,7 @@ export function MsaidiziThread({
                       request={block.request}
                       live={live}
                       repeats={block.repeats}
+                      unhonouredApproval={block.unhonouredApproval}
                     />
                   );
               }
@@ -1377,6 +1439,7 @@ export function MsaidiziThread({
                 busy={busy}
                 blockedReason={blockedReason}
                 priorAttempts={gateAttempts}
+                unhonouredApprovals={gateUnhonoured}
               />
             )}
 

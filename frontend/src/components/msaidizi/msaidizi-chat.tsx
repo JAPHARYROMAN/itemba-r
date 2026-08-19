@@ -78,11 +78,12 @@
  * record instead, in the past tense it belongs in.
  *
  * Not because the server would refuse it. A conversation continued by id runs on
- * its own stored `agentSessionId` (`conversations.service.ts`, `appendTurn`), so
- * yesterday's confirmation ids recompute off exactly the session that produced
- * them and an approval sent from here would very likely be honoured. That is the
- * reason the restraint has to live on this side: nothing downstream would stop
- * it. What is withheld is a live decision box for an irreversible change offered
+ * its own stored `agentSessionId` (`conversations.service.ts`, `appendTurn`), and
+ * yesterday's grants were issued in exactly that conversation, so an approval
+ * sent from here would be honoured for as long as those grants have not lapsed.
+ * That is the reason the restraint has to live on this side: nothing downstream
+ * would reliably stop it. What is withheld is a live decision box for an
+ * irreversible change offered
  * on the strength of a transcript — a run nobody in this tab watched happen, in
  * a conversation whose stored state was read once, when it was opened, and may
  * have moved since. Reopening a thread is reading; deciding is asking again. It
@@ -128,6 +129,7 @@ import {
   pendingConfirmations as selectPendingConfirmations,
   runMsaidiziTurn,
 } from '@/lib/msaidizi-conversation';
+import { grantIdOf } from '@/lib/msaidizi-types';
 import type { ConfirmationRequest } from '@/lib/msaidizi-types';
 import {
   MsaidiziConversationList,
@@ -139,6 +141,7 @@ import {
   useMsaidiziConversations,
 } from './index';
 import { MsaidiziComposer } from './msaidizi-composer';
+import { actionSignature } from './msaidizi-confirmation-gate';
 import { MsaidiziThread } from './msaidizi-thread';
 
 export interface MsaidiziChatProps {
@@ -275,8 +278,24 @@ export function MsaidiziChat({ initialQuestion = null }: MsaidiziChatProps) {
   }, [state]);
 
   const ask = useCallback(
-    (message: string, confirmed?: string[]) => {
-      const request = buildAskRequest(stateRef.current, message, { confirmed });
+    (
+      message: string,
+      /**
+       * The approval this message carries, when it carries one.
+       *
+       * `confirmed` holds SERVER-ISSUED grant ids and nothing else — see
+       * `handleApprove`, which is the only caller that fills it. `signatures`
+       * names the same actions as tool-plus-arguments text and is recorded on
+       * the turn so the thread can tell an approval that was thrown away from
+       * the model simply asking twice; it is passed separately, rather than the
+       * requests being handed over whole, so that there is no path by which a
+       * grant id reaches the reducer.
+       */
+      approval?: { confirmed: string[]; signatures: string[] },
+    ) => {
+      const request = buildAskRequest(stateRef.current, message, {
+        confirmed: approval?.confirmed,
+      });
       // The turn id is minted here rather than left to the orchestrator because
       // the page has to be able to tell which turn on screen is one it ran. That
       // is the difference between a red proposal awaiting a decision and the
@@ -295,7 +314,10 @@ export function MsaidiziChat({ initialQuestion = null }: MsaidiziChatProps) {
       // every termination rather than only on success, because a run that failed
       // partway still opened its row and still holds the session id that finds
       // whatever it managed to change.
-      void runMsaidiziTurn(request, dispatch, { turnId }).then(() => {
+      void runMsaidiziTurn(request, dispatch, {
+        turnId,
+        approvedSignatures: approval?.signatures,
+      }).then(() => {
         void reloadConversations();
       });
     },
@@ -362,14 +384,36 @@ export function MsaidiziChat({ initialQuestion = null }: MsaidiziChatProps) {
   const handleApprove = useCallback(
     (approved: ConfirmationRequest[]) => {
       if (approved.length === 0) return;
+      // The only place in the product that fills `confirmed`, and it does so by
+      // READING the grant the server issued with each proposal. Nothing here
+      // computes, guesses or reconstructs an id: `grantIdOf` returns what
+      // arrived or null, and null means the proposal is not approvable. The gate
+      // will not let such a row be ticked, so this filter should never drop
+      // anything — it is kept because the cost of it being needed once is an
+      // approval sent for a proposal nobody could authorise, and because the
+      // alternative (falling back to `confirmationId`) is precisely the derived,
+      // client-computable id the grant ledger exists to stop accepting.
+      const confirmed: string[] = [];
+      const approvable: ConfirmationRequest[] = [];
+      for (const request of approved) {
+        const grant = grantIdOf(request);
+        if (grant === null) continue;
+        confirmed.push(grant);
+        approvable.push(request);
+      }
+      // Nothing to send. Starting a turn here would post a "yes" naming actions
+      // whose approval this page had no id for.
+      if (confirmed.length === 0) return;
       // The message is composed from the actions' own descriptions, not sent as
       // a bare "yes". The click is the consent; the message is the record of
       // WHAT was consented to, and it lands in a transcript someone will read
-      // later, where "Yes, go ahead." is evidence of nothing.
-      ask(
-        composeConfirmationMessage(approved),
-        approved.map((request) => request.confirmationId),
-      );
+      // later, where "Yes, go ahead." is evidence of nothing. Composed from
+      // `approvable` rather than `approved` so the sentence names exactly the
+      // actions the ids authorise.
+      ask(composeConfirmationMessage(approvable), {
+        confirmed,
+        signatures: approvable.map((request) => actionSignature(request.tool, request.args)),
+      });
     },
     [ask],
   );

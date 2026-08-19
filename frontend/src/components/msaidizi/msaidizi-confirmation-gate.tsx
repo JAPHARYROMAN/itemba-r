@@ -7,22 +7,37 @@
  *
  * The house primitive (used in 59 files) takes one `message: string` and an
  * `onConfirm: () => void`. This gate needs a LIST of distinct actions, each with
- * its own id and its own arguments, and its "yes" is not a callback that does
- * something — it is a later HTTP request carrying `confirmed: [ids]`. One
+ * its own grant and its own arguments, and its "yes" is not a callback that does
+ * something — it is a later HTTP request carrying `confirmed: [grantIds]`. One
  * assistant turn proposing three red actions yields three `confirmation_required`
  * events and one `awaiting_confirmation` verdict, so the shape is a checklist,
  * and three destructive actions cost three deliberate clicks. There is no
  * select-all, on purpose.
  *
+ * ─── The only id this screen may send ───────────────────────────────────────
+ *
+ * `grantId`: a nonce the server minted when it recorded the proposal in its
+ * grant ledger. It is read off the event through `grantIdOf` and passed back
+ * unchanged. Nothing here computes, guesses or reconstructs one, and there is no
+ * fallback to `confirmationId` — that id is DERIVED from the session, the tool
+ * and the arguments, so anything holding those three values can produce it, and
+ * an id anyone can produce authorises an action nobody was asked about. The
+ * server stopped accepting it for exactly that reason.
+ *
+ * A proposal that arrived without a grant therefore cannot be approved from
+ * here, and the row says so plainly and cannot be ticked. Sending something
+ * hopeful in its place is the one failure this file must not have: it would be
+ * refused, the run would re-propose, and the user would have clicked Approve on
+ * a screen that had no way to mean it.
+ *
  * ─── One checkbox per PROPOSAL, never per id ────────────────────────────────
  *
- * The list is keyed and ticked by POSITION, not by `confirmationId`. Keying the
- * tick state on the id made the checklist a select-all the moment two proposals
- * carried the same one: a single click set both boxes, the button read "Approve
- * 2 actions and continue", and `onApprove` handed back both irreversible
- * actions. The ids are computed elsewhere, on the server, from the session, the
- * tool and the arguments — whether that computation is injective is a property
- * of another file, and the one screen in the product that authorises
+ * The list is keyed and ticked by POSITION, not by any id. Keying the tick state
+ * on an id made the checklist a select-all the moment two proposals carried the
+ * same one: a single click set both boxes, the button read "Approve 2 actions
+ * and continue", and `onApprove` handed back both irreversible actions. Grants
+ * are freshly minted per proposal and so should never collide — but "should" is
+ * a property of another file, and the one screen in the product that authorises
  * irreversible change must not be correct only for as long as some other file
  * is. So nothing here assumes the ids it was handed are distinct: a proposal is
  * a row because it is a row.
@@ -32,23 +47,39 @@
  * the next turn starts — which is also the moment the tick state must be
  * forgotten.
  *
- * ─── When two proposals do share an id ──────────────────────────────────────
+ * ─── When two proposals do share a grant ────────────────────────────────────
  *
  * Two independent rows are necessary but not sufficient. The answer this page
- * sends is `confirmed: [ids]` — a list of IDS, with no way to name a row — so an
- * id carried by two proposals cannot be answered for one of them and not the
- * other, whatever the boxes say. What the server then DOES with an id it has
- * honoured is the server's own business and has changed before; the thing this
- * file relies on is only that the wire cannot express the distinction, which is
- * a property of the request shape rather than of any policy. Independent rows
- * over a shared id would be a NEW falsehood — a separation the message cannot
- * make.
+ * sends is `confirmed: [grantIds]` — a list of IDS, with no way to name a row —
+ * so a grant carried by two proposals cannot be answered for one of them and not
+ * the other, whatever the boxes say. What the server then does with a grant it
+ * has honoured is the server's own business; the thing this file relies on is
+ * only that the wire cannot express the distinction, which is a property of the
+ * request shape rather than of any policy. Independent rows over a shared grant
+ * would be a NEW falsehood — a separation the message cannot make.
  *
  * The collision is therefore shown rather than absorbed: the gate says it above
- * the list, every affected row says it, and a group sharing an id is
+ * the list, every affected row says it, and a group sharing a grant is
  * all-or-nothing — ticking part of one withdraws Approve and says why. Each
  * action still costs its own deliberate click, and no click approves anything
- * the user did not tick.
+ * the user did not tick. It is keyed on the GRANT and not on `confirmationId`,
+ * because the grant is what the message names: two proposals sharing a derived
+ * id but holding distinct grants can now be answered separately, and marking
+ * them as inseparable would be a restriction with nothing behind it.
+ *
+ * ─── An approval that was not honoured ──────────────────────────────────────
+ *
+ * A grant that cannot be spent — already used, expired, issued for a different
+ * action, issued in a different conversation, or unspendable because the ledger
+ * could not be reached — does not fail the run. The action re-proposes with a
+ * FRESH grant, and what lands back on this screen is a new question that looks
+ * identical to the one just answered. Unexplained, that is the worst reading a
+ * user can be given: it says the click did nothing, and the only way the screen
+ * offers to clear it is to click again. So `unhonouredApprovals` names the rows
+ * whose action THIS TAB approved on the message that produced this turn, and
+ * those rows say what happened in plain terms — the approval was not used, this
+ * is a new decision — without guessing which of the reasons it was, because
+ * nothing on this side can tell them apart.
  *
  * ─── Why it renders inline, in sequence ─────────────────────────────────────
  *
@@ -60,9 +91,15 @@
  * ─── What is true while this is on screen ───────────────────────────────────
  *
  * None of the PROPOSALS below has run, and none will if the tab is closed.
- * Confirmation is derived, not stored: there is no row, no cache, no lock and no
- * timer. That is a genuinely reassuring true statement and those are rare, so it
- * is said — in exactly those terms, about exactly those proposals.
+ *
+ * That used to be justified by there being nothing stored at all — "confirmation
+ * is derived, no row, no cache, no lock, no timer" — and that justification is
+ * now false: the server writes a grant row when it proposes, and the row has an
+ * expiry. The CLAIM is unchanged and still exact, because a grant is an offer
+ * and not an execution. A grant nobody spends is a row that lapses; closing the
+ * tab spends nothing. Only the reasoning behind the sentence moved, and it is
+ * written out here so that a reader checking the sentence against the ledger
+ * does not conclude the sentence is stale.
  *
  * Two things it must NOT claim.
  *
@@ -95,6 +132,7 @@
  */
 
 import { useState } from 'react';
+import { grantIdOf } from '@/lib/msaidizi-types';
 import type { ConfirmationRequest } from '@/lib/msaidizi-types';
 import { SafeText } from './safe-text';
 
@@ -163,26 +201,34 @@ export function ConfirmationArgs({ args }: { args: Record<string, unknown> | und
 }
 
 /**
- * The ids carried by more than one proposal in this batch.
+ * The grants carried by more than one proposal in this batch.
  *
- * Normally empty. It is not this component's job to explain why it might not be
- * — only to stop being silently wrong when it is not. See the header.
+ * Normally empty, and now more emphatically so: grants are fresh nonces minted
+ * per proposal, so a collision is a server defect rather than a shape of the
+ * derivation. It is not this component's job to explain why it might happen —
+ * only to stop being silently wrong when it does. See the header.
+ *
+ * Reads the already-resolved grants rather than the requests, so a proposal with
+ * no grant at all cannot join a group. Two ungranted proposals share nothing:
+ * neither is approvable, and pairing them would attach an all-or-nothing rule to
+ * rows that have no "all".
  */
-function sharedConfirmationIds(requests: ConfirmationRequest[]): ReadonlySet<string> {
+function sharedGrants(grants: readonly (string | null)[]): ReadonlySet<string> {
   const seen = new Set<string>();
   const shared = new Set<string>();
-  for (const request of requests) {
-    if (seen.has(request.confirmationId)) shared.add(request.confirmationId);
-    else seen.add(request.confirmationId);
+  for (const grant of grants) {
+    if (grant === null) continue;
+    if (seen.has(grant)) shared.add(grant);
+    else seen.add(grant);
   }
   return shared;
 }
 
-/** Every position in `requests` holding this id. */
-function positionsFor(requests: ConfirmationRequest[], id: string): number[] {
+/** Every position holding this grant. */
+function positionsFor(grants: readonly (string | null)[], grant: string): number[] {
   const positions: number[] = [];
-  requests.forEach((request, position) => {
-    if (request.confirmationId === id) positions.push(position);
+  grants.forEach((candidate, position) => {
+    if (candidate === grant) positions.push(position);
   });
   return positions;
 }
@@ -239,13 +285,15 @@ export function strongerAttempt(
  * properties in another order still matches. `undefined` members are dropped
  * because they cannot survive the wire and their presence is not a difference.
  *
- * This is deliberately NOT a reimplementation of the server's confirmation-id
- * derivation and must not be read as one: the id binds an approval to an action
- * and has to be injective, whereas this decides whether to show a sentence. A
- * miss costs the sentence; there is no authority here to get wrong. The reason
- * it is computed at all is that `tool_call` carries no confirmation id — see
- * `msaidizi-types.ts` — so tool plus arguments is the only handle this page has
- * on "the same action".
+ * This is deliberately NOT a reimplementation of either of the server's own
+ * canonicalisations — the derived confirmation id, or the argument digest a
+ * grant is checked against when it is spent — and must not be read as one.
+ * Those have to be injective, because they decide whether an irreversible action
+ * runs. This decides whether to show a sentence. A miss costs the sentence;
+ * there is no authority here to get wrong, and nothing computed here ever
+ * reaches the wire. The reason it is computed at all is that `tool_call` carries
+ * no id of any kind — see `msaidizi-types.ts` — so tool plus arguments is the
+ * only handle this page has on "the same action".
  */
 function canonicalise(value: unknown): string {
   if (value === null) return 'null';
@@ -260,9 +308,24 @@ function canonicalise(value: unknown): string {
   return JSON.stringify(value) ?? 'undefined';
 }
 
-/** The handle this page has on "the same action": the tool and the arguments. */
+/**
+ * The handle this page has on "the same action": the tool and the arguments.
+ *
+ * The separator is `\u0000`, written as the ESCAPE rather than as a literal NUL
+ * byte in the source, and that is not a style preference. A raw NUL in a `.tsx`
+ * file makes the whole file binary to `grep` and invisible to `ripgrep`'s
+ * default scan — this file stopped answering `grep -rn` over the frontend
+ * entirely while it carried one — and it is a character no editor renders and
+ * several silently strip. Stripped, the separator becomes the empty string and
+ * `('ab', {})` collides with `('a', 'b…')`, which merges two distinct proposals
+ * onto one row. The escape is the same character at runtime and survives being
+ * looked at.
+ *
+ * NUL rather than a printable delimiter because a tool name cannot contain one,
+ * so the join is unambiguous without escaping either half.
+ */
 export function actionSignature(tool: string, args: Record<string, unknown> | undefined): string {
-  return `${tool} ${canonicalise(args ?? {})}`;
+  return `${tool}\u0000${canonicalise(args ?? {})}`;
 }
 
 /**
@@ -324,6 +387,17 @@ export interface MsaidiziConfirmationGateProps {
    * behaviour this gate had before and is still honest.
    */
   priorAttempts?: ReadonlyMap<string, PriorAttempt>;
+  /**
+   * `actionSignature(tool, args)` for every proposal in this batch whose action
+   * THIS TAB approved on the message that produced this turn, and which did not
+   * run — the grant was refused and the server asked again. See the header.
+   *
+   * Keyed by signature, like `priorAttempts`, and built by the thread for the
+   * same reason: whether an approval was sent is a fact about the turn, and this
+   * component sees one turn's worth of proposals with no idea what preceded
+   * them. Absent means "not looked up".
+   */
+  unhonouredApprovals?: ReadonlySet<string>;
 }
 
 export function MsaidiziConfirmationGate({
@@ -333,16 +407,32 @@ export function MsaidiziConfirmationGate({
   busy = false,
   blockedReason = null,
   priorAttempts,
+  unhonouredApprovals,
 }: MsaidiziConfirmationGateProps) {
   // Positions, not ids — see the header. Local, per-render, and never lifted
   // into conversation state: an approval is answered on exactly one request and
-  // then forgotten. Parking the ids anywhere durable would put a standing "yes"
-  // for that action on every later turn of the run — a grant this page never
-  // asked the user for, whatever the server would make of it.
+  // then forgotten. Parking the grant ids anywhere durable would put a standing
+  // "yes" for that action on every later turn of the run — a consent this page
+  // never asked the user for. That the ledger would now refuse the second send
+  // is not the reason: the rule is about what this screen may claim the user
+  // said, and it would hold against a server with no ledger at all.
   const [checked, setChecked] = useState<ReadonlySet<number>>(() => new Set());
 
-  const shared = sharedConfirmationIds(requests);
-  const approved = requests.filter((_request, position) => checked.has(position));
+  // Resolved once, by position, and every decision below reads THIS array rather
+  // than the request objects. One place asks "does this proposal have a grant",
+  // so there is one answer, and a row the checklist treats as approvable is by
+  // construction a row that has something to send.
+  const grants = requests.map((request) => grantIdOf(request));
+  const ungrantedCount = grants.filter((grant) => grant === null).length;
+
+  const shared = sharedGrants(grants);
+  // Ticked AND granted. The second half is belt and braces — an ungranted row's
+  // checkbox is disabled, so it cannot be in `checked` — and it is kept because
+  // this expression is what leaves the component, and the cost of it being wrong
+  // is an approval sent for a proposal this screen could not answer.
+  const approved = requests.filter(
+    (_request, position) => checked.has(position) && grants[position] !== null,
+  );
   const blocked = Boolean(blockedReason);
   const disabled = busy || blocked;
 
@@ -351,6 +441,12 @@ export function MsaidiziConfirmationGate({
     (request) => priorAttempts?.get(actionSignature(request.tool, request.args)) ?? null,
   );
   const repeatCount = repeats.filter((attempt) => attempt !== null).length;
+
+  // Whose approval, given on the message that produced this turn, was not used.
+  const unhonoured = requests.map((request) =>
+    Boolean(unhonouredApprovals?.has(actionSignature(request.tool, request.args))),
+  );
+  const unhonouredCount = unhonoured.filter(Boolean).length;
   // Blocked, not `disabled`: `busy` is a live run and the buttons come back when
   // it settles, so a sentence about approving is still true then. A blocked gate
   // is never going to offer one.
@@ -359,12 +455,12 @@ export function MsaidiziConfirmationGate({
       ? REPEAT_ROW_COPY[attempt].happened
       : `${REPEAT_ROW_COPY[attempt].happened} ${REPEAT_ROW_COPY[attempt].ifApproved}`;
 
-  // A group of proposals sharing one id is all-or-nothing, because the wire
+  // A group of proposals sharing one grant is all-or-nothing, because the wire
   // cannot say anything narrower. Ticking part of one is not refused at the
   // checkbox — the user is entitled to work through the group in either order —
   // it withdraws Approve until the group agrees with itself.
-  const splitGroup = [...shared].some((id) => {
-    const positions = positionsFor(requests, id);
+  const splitGroup = [...shared].some((grant) => {
+    const positions = positionsFor(grants, grant);
     const ticked = positions.filter((position) => checked.has(position)).length;
     return ticked > 0 && ticked < positions.length;
   });
@@ -428,10 +524,43 @@ export function MsaidiziConfirmationGate({
       {/* Said before the list, because it changes what the list means. */}
       {shared.size > 0 && (
         <p data-testid="msaidizi-gate-shared-ids" className="mt-2 text-[12.5px] font-medium">
-          Some of these proposals were given the same confirmation id. The answer this page sends
-          names ids, not rows, so it cannot say yes to one of them and no to another. They are
-          marked below and can only be ticked together. If they are not the same action, decline and
-          ask for them one at a time.
+          Some of these proposals were given the same approval id. The answer this page sends names
+          ids, not rows, so it cannot say yes to one of them and no to another. They are marked
+          below and can only be ticked together. If they are not the same action, decline and ask
+          for them one at a time.
+        </p>
+      )}
+
+      {/* Also before the list. A proposal with no approval id is not a proposal
+          this screen can answer, and the honest thing is to say so at the top
+          rather than let a user work down the list and find one dead checkbox
+          with no explanation for it. Nothing is offered as a workaround because
+          there is none that is not a guess: an id this page made up is exactly
+          what the server stopped accepting. */}
+      {ungrantedCount > 0 && (
+        <p data-testid="msaidizi-gate-ungranted" className="mt-2 text-[12.5px] font-medium">
+          {ungrantedCount === 1
+            ? 'One of these proposals arrived without the approval id Msaidizi issues with it, so it cannot be approved from here.'
+            : `${ungrantedCount} of these proposals arrived without the approval id Msaidizi issues with them, so they cannot be approved from here.`}{' '}
+          {ungrantedCount === requests.length
+            ? 'Nothing here can be approved. Decline, and ask for the change again — the next proposal will carry one.'
+            : 'They are marked below and cannot be ticked. Ask for those changes again and the fresh proposals will carry one.'}
+        </p>
+      )}
+
+      {/* And before the list, because without it this whole box reads as the
+          click having done nothing. Named rather than explained away: the
+          approval is gone, the action did not run, and what is on screen is a
+          fresh question. Which of the several reasons it was is not knowable
+          from here and is not guessed at. */}
+      {unhonouredCount > 0 && (
+        <p data-testid="msaidizi-gate-unhonoured" className="mt-2 text-[12.5px] font-medium">
+          {unhonouredCount === 1
+            ? 'You approved one of these actions on your last message and Msaidizi did not use that approval — the action did not run, and it is being asked again with a new approval id.'
+            : `You approved ${unhonouredCount} of these actions on your last message and Msaidizi did not use those approvals — the actions did not run, and they are being asked again with new approval ids.`}{' '}
+          {blocked
+            ? 'The earlier approval no longer stands either way.'
+            : 'This is a new decision rather than the earlier one coming back, and the earlier approval cannot be used again.'}
         </p>
       )}
 
@@ -452,29 +581,45 @@ export function MsaidiziConfirmationGate({
 
       <ul className="mt-3 list-none space-y-2.5">
         {requests.map((request, position) => {
-          const id = request.confirmationId;
-          const collides = shared.has(id);
+          const grant = grants[position];
+          const collides = grant !== null && shared.has(grant);
           const repeated = repeats[position];
+          const stale = unhonoured[position];
           return (
             <li
-              // Position first: two proposals sharing an id must not share a
+              // Position first: two proposals sharing a grant must not share a
               // React key either, on the one list in the product that
               // authorises irreversible change.
-              key={`${position}:${id}`}
+              key={`${position}:${request.confirmationId}`}
               data-testid="msaidizi-confirmation-row"
-              data-confirmation-id={id}
+              data-confirmation-id={request.confirmationId}
+              // The value the answer would name. Absent when there is none,
+              // which is also when the row cannot be ticked.
+              data-grant-id={grant ?? undefined}
+              data-approvable={grant === null ? 'false' : undefined}
               data-shared-id={collides ? 'true' : undefined}
               data-repeats={repeated ?? undefined}
+              data-unhonoured={stale ? 'true' : undefined}
               className="rounded-lg border px-3 py-2.5"
               style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
             >
-              <label className="flex cursor-pointer items-start gap-2.5">
+              <label
+                className={
+                  grant === null
+                    ? 'flex items-start gap-2.5'
+                    : 'flex cursor-pointer items-start gap-2.5'
+                }
+              >
                 <input
                   type="checkbox"
                   className="mt-[3px] h-3.5 w-3.5 flex-shrink-0"
                   checked={checked.has(position)}
                   onChange={() => toggle(position)}
-                  disabled={disabled}
+                  // A row with no grant is not a row that can be answered. It is
+                  // disabled here as well as filtered out of `approved`, because
+                  // a tickable box that contributes nothing to the message is a
+                  // click the user is entitled to read as consent.
+                  disabled={disabled || grant === null}
                 />
                 <SafeText
                   className="block text-[13px] font-medium"
@@ -484,6 +629,32 @@ export function MsaidiziConfirmationGate({
               </label>
 
               <ConfirmationArgs args={request.args} />
+
+              {grant === null && (
+                <p
+                  data-testid="msaidizi-confirmation-row-ungranted"
+                  className="mt-2 text-[12px] font-medium"
+                  style={{ color: 'var(--aurora-danger-text)' }}
+                >
+                  This proposal did not arrive with an approval id, so there is nothing this page
+                  can send to authorise it. It cannot be approved here — ask for the change again
+                  and Msaidizi will propose it with one.
+                </p>
+              )}
+
+              {stale && (
+                <p
+                  data-testid="msaidizi-confirmation-row-unhonoured"
+                  className="mt-2 text-[12px] font-medium"
+                  style={{ color: 'var(--aurora-danger-text)' }}
+                >
+                  You approved an action identical to this one on your last message and that
+                  approval was not used, so nothing ran.{' '}
+                  {blocked
+                    ? 'It is being asked again, and the earlier approval no longer stands.'
+                    : 'Msaidizi is asking again — approving now is a fresh decision, and the earlier approval cannot be used a second time.'}
+                </p>
+              )}
 
               {repeated && (
                 <p
@@ -501,8 +672,8 @@ export function MsaidiziConfirmationGate({
                   className="mt-2 text-[12px] font-medium"
                   style={{ color: 'var(--aurora-danger-text)' }}
                 >
-                  This proposal shares its confirmation id with another one in this list. There is
-                  no way to answer for one and not the other — read both before ticking either.
+                  This proposal shares its approval id with another one in this list. There is no
+                  way to answer for one and not the other — read both before ticking either.
                 </p>
               )}
             </li>
@@ -531,8 +702,8 @@ export function MsaidiziConfirmationGate({
           explanations for one disabled button is one too many. */}
       {splitGroup && !disabled && (
         <p data-testid="msaidizi-gate-split-group" className="mt-3 text-[12.5px] font-medium">
-          Proposals sharing a confirmation id have to be ticked together or left alone. Approving
-          part of a group would send an answer that approves all of it.
+          Proposals sharing an approval id have to be ticked together or left alone. Approving part
+          of a group would send an answer that approves all of it.
         </p>
       )}
 

@@ -20,18 +20,26 @@
  *
  * ─── What `confirmed` is, and what it must never become ─────────────────────
  *
- * It is not in this state. A red-tier proposal suspends the run and the client
- * resumes it by sending `confirmed: [id]` on a LATER request; the server keeps no
- * pending state of its own between requests, so that array is the whole of what
- * it knows about what the user agreed to. Inside a single request it now spends
- * each id on the dispatch that id authorises — but that is a server policy which
- * has already changed once, and nothing here rests on it.
+ * It is not in this state, and no field added later may put it there. A red-tier
+ * proposal suspends the run and the client resumes it by sending
+ * `confirmed: [grantId]` on a LATER request. Those are the server's own nonces,
+ * read off the `confirmation_required` event; the server holds the matching
+ * grants in a durable ledger and spends each one atomically at dispatch, so an
+ * approval is now a receipt for a proposal that was actually made rather than
+ * the client's word for it.
  *
- * What does not move is the shape of the request: the array names ids and cannot
- * name a turn, so a client that parks the ids in state and re-sends them puts a
- * standing "yes" for that action on every later turn of the run. So
- * `buildAskRequest` takes them as an argument and forgets them, and there is no
- * action that stores them.
+ * That the server remembers does NOT license this file to. The shape of the
+ * request is unchanged: the array names ids and cannot name a turn, so a client
+ * that parks them in state and re-sends them puts a standing "yes" for that
+ * action on every later turn of the run — and the fact that the server would now
+ * refuse the second send is a property of another module, arrived at last, and
+ * not the thing this rule rests on. So `buildAskRequest` takes them as an
+ * argument and forgets them, and there is no action that stores them.
+ *
+ * `MsaidiziTurn.approvedSignatures` is the near miss and is deliberately not a
+ * counter-example: it records tool-plus-arguments text for the actions a turn
+ * carried an approval FOR, so the screen can tell the user their approval was
+ * not honoured. It holds no grant id and cannot be turned back into one.
  */
 
 import { MSAIDIZI_MESSAGE_LIMIT, asDoneReason, asSequence } from './msaidizi-types';
@@ -92,6 +100,30 @@ export interface MsaidiziTurn {
    * unread is a gap in the trace whether it was unreadable or merely unknown.
    */
   unknownFrames: number;
+  /**
+   * `actionSignature(tool, args)` for every action this turn's REQUEST carried
+   * an approval for. Empty on an ordinary turn, and empty on every hydrated one.
+   *
+   * Why it exists: a grant that cannot be spent is not an error any more, it is
+   * a fresh proposal. Without this, the run comes back asking the identical
+   * question with no dispatch between, the screen has no way to tell that from
+   * the model simply asking twice, and the user reads a gate that ignored their
+   * click. With it the page can say the true thing — your approval was not
+   * honoured, this is a new decision — which is the only sentence that stops the
+   * user clearing the screen by approving again.
+   *
+   * Signatures, NOT grant ids, and the distinction is the file header's rule
+   * rather than a detail. A grant id parked here would be re-sendable, which is
+   * precisely the standing "yes" nothing in this file may create. Tool plus
+   * canonical arguments is text already present in `events` several times over
+   * and authorises nothing.
+   *
+   * Empty on a hydrated turn because a stored transcript records what the run
+   * did, not what a browser sent: claiming an approval this tab never watched
+   * being given would put a sentence about the reader's own click on a screen
+   * where nobody clicked.
+   */
+  approvedSignatures: string[];
 }
 
 export interface MsaidiziConversationState {
@@ -113,11 +145,20 @@ export interface MsaidiziConversationState {
    */
   sequence: number | null;
   /**
-   * Correlates every audit row this conversation produces, and — on the path
-   * without server-side resume — the value the red-tier confirmation ids are
-   * derived from. Omit it on a resuming turn and every id is recomputed
-   * differently, so the run suspends again: an infinite approval loop that looks
-   * exactly like the server ignoring the user.
+   * Correlates every audit row this conversation produces.
+   *
+   * It is the SERVER'S id, not this tab's: the server mints it and honours one
+   * sent from here only when it resolves to a conversation this caller owns —
+   * otherwise it is quietly ignored and a fresh one is minted, because failing a
+   * run over a stale id is a worse outcome than re-identifying it. So sending it
+   * keeps a thread's audit rows under one key and can never take a run down.
+   *
+   * It no longer decides whether an approval is honoured. It used to: ids were
+   * derived from it, so a resuming turn that omitted it recomputed every id
+   * differently and suspended again — an infinite approval loop that looked
+   * exactly like the server ignoring the user. Approvals now name server-issued
+   * grants bound to the CONVERSATION, so that failure mode is gone and this
+   * field must not be treated as load-bearing for one.
    */
   sessionId: string | null;
   /** OPAQUE transport state. See the file header. Never rendered, never mapped. */
@@ -157,7 +198,17 @@ export function createConversationState(
 }
 
 export type MsaidiziConversationAction =
-  | { type: 'turn_started'; turnId: string; prompt: string; at: number }
+  | {
+      type: 'turn_started';
+      turnId: string;
+      prompt: string;
+      at: number;
+      /**
+       * The action signatures this turn's request approved, if any. See
+       * `MsaidiziTurn.approvedSignatures` — signatures only, never grant ids.
+       */
+      approvedSignatures?: string[];
+    }
   | { type: 'event'; turnId: string; event: MsaidiziEvent }
   /**
    * The `session` frame, with the turn it was written for.
@@ -197,6 +248,7 @@ export function msaidiziConversationReducer(
             serverRecorded: false,
             malformedFrames: 0,
             unknownFrames: 0,
+            approvedSignatures: action.approvedSignatures ?? [],
           },
         ],
       };
@@ -317,16 +369,20 @@ export function msaidiziConversationReducer(
       // loop. What the loop takes is an approval arriving at a model with no
       // record of the proposal it answers: the messages carrying the suspended
       // `tool_use` are missing from whatever the next request is answered from,
-      // the approved id therefore matches nothing, and the run proposes the same
-      // action over again. This condition is precisely the case where those
-      // messages demonstrably survive somewhere. The next request carries
-      // `conversationId`, so the server answers it from the conversation's own
-      // stored messages — the ones holding the proposal — and runs it on that
-      // conversation's own `agentSessionId`, which is the id this turn's
-      // `session` frame already reported to this tab before the first model
-      // turn, so the ids the user approved are the ids recomputed. Where the
-      // server cannot honour the id it says so in a status code with written
-      // copy — 404, 409, 410 — instead of suspending again.
+      // the approved grant therefore authorises a call nobody re-issues, and the
+      // run proposes the same action over again. This condition is precisely the
+      // case where those messages demonstrably survive somewhere. The next
+      // request carries `conversationId`, so the server answers it from the
+      // conversation's own stored messages — the ones holding the proposal — and
+      // the grant the user approved is a row in that same conversation, so it is
+      // spendable against the call the model re-issues. Where the server cannot
+      // honour it, it says so in a status code with written copy — 404, 409, 410
+      // — or, for a grant it will not spend, by proposing again with a new one.
+      //
+      // The recomputation half of this paragraph is gone on purpose. Approvals
+      // used to hang on the session id being the same one the ids were derived
+      // from; they now hang on a grant row, which is why the argument above is
+      // about the conversation rather than about `agentSessionId`.
       const serverHoldsTurn = Boolean(lostTurn && turn?.serverRecorded && verdictReported(turn));
       return {
         ...state,
@@ -416,6 +472,11 @@ export function msaidiziConversationReducer(
           // recognise, so both counts are zero rather than unknown.
           malformedFrames: 0,
           unknownFrames: 0,
+          // Nothing was approved from HERE. The stored turn may well have
+          // carried an approval when it ran in some other tab, on some other
+          // day, and the transcript does not record that — so the honest value
+          // is "this page has no such claim", which is the empty array.
+          approvedSignatures: [],
         })),
       };
     }
@@ -479,9 +540,16 @@ export function isRunning(state: MsaidiziConversationState): boolean {
  * The red-tier actions waiting on this user, if any.
  *
  * Derived from the newest settled turn and only while that turn's verdict is
- * `awaiting_confirmation`. Once the next turn starts, the approval has been
- * spent — there is no server-side pending state, so anything still listed here
- * afterwards would be a stale copy of a decision already made.
+ * `awaiting_confirmation`. Once the next turn starts, the answer has been sent
+ * and anything still listed from the previous turn would be a stale copy of a
+ * decision already made.
+ *
+ * There IS server-side pending state now — the grant ledger — and this list is
+ * still not it. A grant is the server's record that it offered something; this
+ * is the screen's record of what it is currently asking. The two come apart in
+ * the ordinary case: a grant the server refuses to spend is re-proposed as a new
+ * `confirmation_required` on the NEXT turn, and it is that event, not the old
+ * grant, that puts a row back in front of the user.
  */
 export function pendingConfirmations(state: MsaidiziConversationState): ConfirmationRequest[] {
   const turn = latestTurn(state);
@@ -510,7 +578,11 @@ export function canContinue(state: MsaidiziConversationState): boolean {
  * The request for the next turn.
  *
  * `history` is passed by reference and never touched. `confirmed` is an
- * argument, never state — see the file header.
+ * argument, never state — see the file header. Its entries are server-issued
+ * grant ids that the caller read off a `confirmation_required` event; this
+ * function does not check them, because there is nothing here to check them
+ * against, and it does not manufacture them, because there is no rule by which
+ * it could.
  */
 export function buildAskRequest(
   state: MsaidiziConversationState,
@@ -524,9 +596,11 @@ export function buildAskRequest(
   // conversation, winning ties (conversations.service.ts:continueById). That is
   // the only way a conversation reopened from the rail continues from what
   // actually happened in it — such a tab has no history at all (see the
-  // `hydrated` case), so the server's copy is the only copy — and the only way
-  // the server, rather than this tab, decides which session id the confirmation
-  // ids came from.
+  // `hydrated` case), so the server's copy is the only copy — and it is what
+  // names the conversation an approval's grant belongs to. A grant is bound to
+  // the conversation it was issued in, so an approval sent without this id is
+  // offered against a thread it was not issued for and earns a re-proposal
+  // rather than a dispatch.
   if (state.conversationId) {
     request.conversationId = state.conversationId;
     // Null here is this tab having no claim to make, not a value being dropped:
@@ -712,6 +786,17 @@ export interface RunTurnOptions extends MsaidiziStreamOptions {
    * the backend added is silently discarded here instead of there.
    */
   onFrame?: (frame: MsaidiziFrame) => void;
+  /**
+   * `actionSignature(tool, args)` for each action this request's `confirmed`
+   * approves. Recorded on the turn so the screen can tell an approval that was
+   * not honoured from the model merely asking twice — see
+   * `MsaidiziTurn.approvedSignatures`.
+   *
+   * Signatures rather than the ids themselves, and the caller passes both
+   * separately rather than handing over the requests, so that there is no route
+   * by which a grant id reaches the reducer.
+   */
+  approvedSignatures?: string[];
 }
 
 /**
@@ -729,12 +814,25 @@ export async function runMsaidiziTurn(
   dispatch: (action: MsaidiziConversationAction) => void,
   options: RunTurnOptions = {},
 ): Promise<MsaidiziStreamOutcome> {
-  const { turnId: providedId, stream, now, onFrame, ...streamOptions } = options;
+  const {
+    turnId: providedId,
+    stream,
+    now,
+    onFrame,
+    approvedSignatures,
+    ...streamOptions
+  } = options;
   const clock = now ?? (() => Date.now());
   const turnId = providedId ?? createTurnId();
   const run = stream ?? streamMsaidiziAsk;
 
-  dispatch({ type: 'turn_started', turnId, prompt: request.message, at: clock() });
+  dispatch({
+    type: 'turn_started',
+    turnId,
+    prompt: request.message,
+    at: clock(),
+    approvedSignatures,
+  });
 
   const outcome = await run(
     request,

@@ -49,6 +49,12 @@
  *         action is proposed again in the same turn. The screen must not read as
  *         a duplicate or as a gate that ignored the click, because the only way
  *         a user clears either of those is by approving again.
+ * CHAT-14 ══ THE GRANT ══ `confirmed` carries the server's own nonce and nothing
+ *         this page could have worked out for itself. The shape that matters is
+ *         the same action across two separate REQUESTS: a refused grant comes
+ *         back as a fresh proposal with a fresh id, and re-sending the first —
+ *         by parking it, or by recomputing the derived id, which is identical on
+ *         both — is one approval buying two executions a request apart.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -353,6 +359,7 @@ describe('CHAT-3 · an approval is spent once and never carried forward', () => 
     { type: 'text', text: 'I can delete invoice 41. Confirm and I will.' },
     {
       type: 'confirmation_required',
+      grantId: 'grt_9e41c0b7d2',
       confirmationId: 'cnf_Invoices_remove_1a2b3c',
       tool: 'Invoices_remove',
       capabilityId: 'InvoicesController.remove',
@@ -392,7 +399,13 @@ describe('CHAT-3 · an approval is spent once and never carried forward', () => 
     await userEvent.click(screen.getByTestId('msaidizi-approve'));
 
     await waitFor(() => expect(h.stream).toHaveBeenCalledTimes(2));
-    expect(bodies()[1].confirmed).toEqual(['cnf_Invoices_remove_1a2b3c']);
+    // The SERVER'S grant, not the derived id sitting on the same event. The
+    // derived id is deterministic — this page could compute it from the tool and
+    // the arguments it already has — which is exactly why it is no longer what
+    // authorises anything, and why sending it would be sending something this
+    // page made up.
+    expect(bodies()[1].confirmed).toEqual(['grt_9e41c0b7d2']);
+    expect(JSON.stringify(bodies()[1])).not.toContain('cnf_Invoices_remove_1a2b3c');
     // The message records WHAT was consented to. "Yes, go ahead." in a stored
     // transcript is evidence of nothing — and a bare "yes" has been measured to
     // narrow the confirmed tool straight back out of the registry.
@@ -734,6 +747,7 @@ describe('CHAT-6 · a lost run closes every control that would start a turn', ()
     { type: 'text', text: 'I can delete invoice 41. Confirm and I will.' },
     {
       type: 'confirmation_required',
+      grantId: 'grt_lostrun_4a17',
       confirmationId: 'cnf_Invoices_remove_1a2b3c',
       tool: 'Invoices_remove',
       capabilityId: 'InvoicesController.remove',
@@ -992,6 +1006,7 @@ const REOPENED: MsaidiziConversationSummary = {
 
 const PROPOSAL: MsaidiziEvent = {
   type: 'confirmation_required',
+  grantId: 'grt_88_c30f1a94',
   confirmationId: 'cnf_Invoices_remove_9f8e7d',
   tool: 'Invoices_remove',
   capabilityId: 'InvoicesController.remove',
@@ -1081,7 +1096,12 @@ describe('CHAT-9 · a live proposal in a reopened conversation is still a decisi
     await userEvent.click(within(gate).getByTestId('msaidizi-approve'));
 
     await waitFor(() => expect(h.stream).toHaveBeenCalledTimes(2));
-    expect(bodies()[1].confirmed).toEqual(['cnf_Invoices_remove_9f8e7d']);
+    // The grant this proposal was issued with, carried through a REOPENED
+    // conversation. The grant is bound to the conversation, so an approval sent
+    // from here without `conversationId` would be offered against the wrong
+    // thread — which is why the body is checked for both.
+    expect(bodies()[1].confirmed).toEqual(['grt_88_c30f1a94']);
+    expect(bodies()[1].conversationId).toBe('conv_3');
   });
 
   it('leaves a proposal read back out of the store as a record, with no buttons', async () => {
@@ -1277,14 +1297,26 @@ const RENT_ARGS = {
   body: { memo: 'Rent Aug', lines: [{ account: '6000', debit: 50_000 }] },
 };
 
-const RENT_PROPOSAL: MsaidiziEvent = {
+/**
+ * One proposal for the August rent, with the grant the server issued for it.
+ *
+ * A function rather than a constant because a grant is minted per PROPOSAL: the
+ * same action proposed twice gets two grants, and a fixture that reused one
+ * would quietly assert the opposite of the model this page is built on — and
+ * would let a client that re-sent a spent id pass.
+ */
+const rentProposal = (grantId: string): MsaidiziEvent => ({
   type: 'confirmation_required',
+  grantId,
   confirmationId: 'cnf_JournalEntries_post_961882d1',
   tool: 'JournalEntries_post',
   capabilityId: 'JournalEntriesController.post',
   description: 'Post journal entry — rent for August, TZS 50,000',
   args: RENT_ARGS,
-};
+});
+
+const RENT_PROPOSAL = rentProposal('grt_rent_first_7b2e');
+const RENT_PROPOSAL_AGAIN = rentProposal('grt_rent_second_11d4');
 
 describe('CHAT-13 · a second ask about an action already carried out', () => {
   it('names the repeat instead of drawing what looks like a stuck gate', async () => {
@@ -1312,7 +1344,7 @@ describe('CHAT-13 · a second ask about an action already carried out', () => {
               args: RENT_ARGS,
             },
             { type: 'tool_result', tool: 'JournalEntries_post', ok: true, status: 201 },
-            RENT_PROPOSAL,
+            RENT_PROPOSAL_AGAIN,
             { type: 'done', reason: 'awaiting_confirmation' },
           ],
           'awaiting_confirmation',
@@ -1329,7 +1361,7 @@ describe('CHAT-13 · a second ask about an action already carried out', () => {
     await userEvent.click(screen.getByTestId('msaidizi-approve'));
 
     await waitFor(() => expect(h.stream).toHaveBeenCalledTimes(2));
-    expect(bodies()[1].confirmed).toEqual(['cnf_JournalEntries_post_961882d1']);
+    expect(bodies()[1].confirmed).toEqual(['grt_rent_first_7b2e']);
 
     // The posting that ran is on screen, in the past tense, with its figures.
     const step = await screen.findByTestId('msaidizi-step');
@@ -1385,7 +1417,7 @@ describe('CHAT-13 · a second ask about an action already carried out', () => {
               args: RENT_ARGS,
             },
             { type: 'tool_result', tool: 'JournalEntries_post', ok: true, status: 201 },
-            RENT_PROPOSAL,
+            RENT_PROPOSAL_AGAIN,
             { type: 'done', reason: 'awaiting_confirmation' },
           ],
           'awaiting_confirmation',
@@ -1421,8 +1453,248 @@ describe('CHAT-13 · a second ask about an action already carried out', () => {
     await userEvent.click(approve);
 
     await waitFor(() => expect(h.stream).toHaveBeenCalledTimes(3));
-    // Spent again, on exactly one request, exactly as the first approval was.
-    expect(bodies()[2].confirmed).toEqual(['cnf_JournalEntries_post_961882d1']);
+    // The SECOND proposal's own grant, on exactly one request. Re-sending the
+    // first grant here would be the durable half of the old defect in miniature:
+    // one approval, two executions, a request apart. It is a different id
+    // because the server minted a different one, and this page has no way to
+    // produce either.
+    expect(bodies()[2].confirmed).toEqual(['grt_rent_second_11d4']);
+    expect(JSON.stringify(bodies()[2])).not.toContain('grt_rent_first_7b2e');
     expect(await screen.findByText('Both entries are posted.')).toBeInTheDocument();
+  });
+});
+
+/* ------------------------------------------------------------------------ *
+ * CHAT-14 · ══ THE GRANT ══ the client sends what the server issued
+ * ------------------------------------------------------------------------ *
+ *
+ * `confirmed` used to name a DERIVED id — session, tool and arguments, hashed —
+ * which this page could have produced for itself out of values it already holds.
+ * An id anyone can produce is a pre-authorisation channel rather than a receipt,
+ * and because it was deterministic the same id re-sent on a later request bought
+ * another execution.
+ *
+ * It now names a GRANT: a nonce the server minted when it recorded the proposal,
+ * spent once, atomically, at dispatch. The client's whole share of that is to
+ * READ it and hand it back, so what these tests pin is exactly that — and the
+ * shape they pin it in is the one no fixture in this file had: the SAME action,
+ * proposed identically, across two separate REQUESTS.
+ *
+ * A refused grant is not an error. The action re-proposes with a new grant, and
+ * the screen has to make that legible: the approval was not used, nothing ran,
+ * this is a fresh decision. A user who reads that screen as a stuck gate clears
+ * it the only way it offers — by approving again.
+ */
+
+const DELETE_ARGS = { body: { id: '41', reason: 'duplicate of 40' } };
+
+const deleteProposal = (grantId: string): MsaidiziEvent => ({
+  type: 'confirmation_required',
+  grantId,
+  // Deliberately the SAME derived id on both proposals, because it is derived
+  // from the session, the tool and the arguments and none of those changed. If
+  // anything in this page still reached for it, the two turns would be
+  // indistinguishable and this suite would pass while the defect stood.
+  confirmationId: 'cnf_Invoices_remove_deadbeef',
+  tool: 'Invoices_remove',
+  capabilityId: 'InvoicesController.remove',
+  description: 'Delete invoice with id 41',
+  args: DELETE_ARGS,
+});
+
+const suspendedOn = (...events: MsaidiziEvent[]): MsaidiziEvent[] => [
+  ...events,
+  { type: 'done', reason: 'awaiting_confirmation' },
+];
+
+describe('CHAT-14 · an approval names the grant the server issued, and only that', () => {
+  it('sends the FRESH grant when a refused one comes back as a new proposal', async () => {
+    h.stream
+      .mockImplementationOnce(
+        scriptRun(
+          suspendedOn(
+            { type: 'text', text: 'I can delete invoice 41. Confirm and I will.' },
+            deleteProposal('grt_issued_first_0a1b'),
+          ),
+          'awaiting_confirmation',
+        ),
+      )
+      // The resumed turn. The server would not spend the grant — used, lapsed,
+      // or a ledger it could not reach; the client cannot tell which and must
+      // not guess — so NOTHING was dispatched and the action was proposed again
+      // under a new grant.
+      .mockImplementationOnce(
+        scriptRun(suspendedOn(deleteProposal('grt_issued_second_9f8e')), 'awaiting_confirmation'),
+      )
+      .mockImplementationOnce(
+        scriptRun(
+          [
+            {
+              type: 'tool_call',
+              tool: 'Invoices_remove',
+              capabilityId: 'InvoicesController.remove',
+              tier: 'red',
+              args: DELETE_ARGS,
+            },
+            { type: 'tool_result', tool: 'Invoices_remove', ok: true, status: 200 },
+            { type: 'text', text: 'Deleted.' },
+            { type: 'done', reason: 'end_turn' },
+          ],
+          'end_turn',
+        ),
+      );
+
+    render(<MsaidiziChat />);
+    await ask('delete invoice 41');
+
+    const first = await screen.findByTestId('msaidizi-confirmation-gate');
+    await userEvent.click(within(first).getByRole('checkbox'));
+    await userEvent.click(within(first).getByTestId('msaidizi-approve'));
+
+    await waitFor(() => expect(h.stream).toHaveBeenCalledTimes(2));
+    expect(bodies()[1].confirmed).toEqual(['grt_issued_first_0a1b']);
+
+    // The second gate. It says what happened rather than redrawing the same
+    // question in silence.
+    const second = await waitFor(() => {
+      const gate = screen.getByTestId('msaidizi-confirmation-gate');
+      expect(within(gate).getByTestId('msaidizi-gate-unhonoured')).toBeInTheDocument();
+      return gate;
+    });
+    expect(within(second).getByTestId('msaidizi-gate-unhonoured')).toHaveTextContent(
+      /did not use that approval/i,
+    );
+    // And it does NOT claim the action was carried out. Nothing was dispatched;
+    // the transcript has no step row for it at all.
+    expect(screen.queryByTestId('msaidizi-step')).toBeNull();
+    expect(within(second).queryByTestId('msaidizi-gate-repeat')).toBeNull();
+
+    await userEvent.click(within(second).getByRole('checkbox'));
+    await userEvent.click(within(second).getByTestId('msaidizi-approve'));
+
+    await waitFor(() => expect(h.stream).toHaveBeenCalledTimes(3));
+    // THE DURABLE HALF, in the shape that hid it: the second request is a
+    // separate HTTP request carrying an identical action, and the id on it is
+    // the one the SERVER issued for the second proposal. Re-sending the first —
+    // which a client parking `confirmed`, or recomputing it, would do — is the
+    // "one approval, two executions, a request apart" that the ledger exists to
+    // refuse and that this page must never attempt.
+    expect(bodies()[2].confirmed).toEqual(['grt_issued_second_9f8e']);
+    const wire = JSON.stringify(bodies()[2]);
+    expect(wire).not.toContain('grt_issued_first_0a1b');
+    // Nor the derived id, which is identical on both proposals and is therefore
+    // the one value that would make the two requests look interchangeable.
+    expect(wire).not.toContain('cnf_Invoices_remove_deadbeef');
+
+    expect(await screen.findByText('Deleted.')).toBeInTheDocument();
+  });
+
+  it('puts both grants on one request when two distinct proposals are approved together', async () => {
+    const payrollProposal: MsaidiziEvent = {
+      type: 'confirmation_required',
+      grantId: 'grt_payroll_5c2d',
+      confirmationId: 'cnf_JournalEntries_post_payroll',
+      tool: 'JournalEntries_post',
+      capabilityId: 'JournalEntriesController.post',
+      description: 'Post journal entry — payroll, TZS 9,000,000',
+      args: { body: { memo: 'Payroll Aug', lines: [{ account: '7000', debit: 9_000_000 }] } },
+    };
+
+    h.stream
+      .mockImplementationOnce(
+        scriptRun(
+          suspendedOn(deleteProposal('grt_issued_first_0a1b'), payrollProposal),
+          'awaiting_confirmation',
+        ),
+      )
+      .mockImplementationOnce(scriptRun([{ type: 'done', reason: 'end_turn' }], 'end_turn'));
+
+    render(<MsaidiziChat />);
+    await ask('delete invoice 41 and post the payroll');
+
+    const gate = await screen.findByTestId('msaidizi-confirmation-gate');
+    for (const box of within(gate).getAllByRole('checkbox')) await userEvent.click(box);
+    await userEvent.click(within(gate).getByTestId('msaidizi-approve'));
+
+    await waitFor(() => expect(h.stream).toHaveBeenCalledTimes(2));
+    // Two grants, in row order, on one request. Each authorises its own action:
+    // one array is not one approval, and the message beside it names both.
+    expect(bodies()[1].confirmed).toEqual(['grt_issued_first_0a1b', 'grt_payroll_5c2d']);
+    expect(bodies()[1].message).toContain('Delete invoice with id 41');
+    expect(bodies()[1].message).toContain('payroll');
+  });
+
+  it('never parks a grant in state, so no later turn can carry it', async () => {
+    h.stream
+      .mockImplementationOnce(
+        scriptRun(suspendedOn(deleteProposal('grt_issued_first_0a1b')), 'awaiting_confirmation'),
+      )
+      .mockImplementationOnce(
+        scriptRun(
+          [
+            { type: 'text', text: 'Deleted.' },
+            { type: 'done', reason: 'end_turn' },
+          ],
+          'end_turn',
+        ),
+      )
+      .mockImplementationOnce(
+        scriptRun(
+          [
+            { type: 'text', text: 'Nothing else.' },
+            { type: 'done', reason: 'end_turn' },
+          ],
+          'end_turn',
+        ),
+      );
+
+    render(<MsaidiziChat />);
+    await ask('delete invoice 41');
+
+    const gate = await screen.findByTestId('msaidizi-confirmation-gate');
+    await userEvent.click(within(gate).getByRole('checkbox'));
+    await userEvent.click(within(gate).getByTestId('msaidizi-approve'));
+    await waitFor(() => expect(h.stream).toHaveBeenCalledTimes(2));
+
+    await screen.findByText('Deleted.');
+    await ask('anything else outstanding?');
+    await waitFor(() => expect(h.stream).toHaveBeenCalledTimes(3));
+
+    // The one-shot, in grant form. The ledger would now refuse a second send —
+    // and that is not why this holds: the rule is about what this page may claim
+    // the user said, and it would hold against a server with no ledger at all.
+    expect(bodies()[2].confirmed).toBeUndefined();
+    expect(JSON.stringify(bodies()[2])).not.toContain('grt_issued_first_0a1b');
+  });
+
+  // The last resort, and the one that must not be papered over. A proposal
+  // without a grant cannot be approved, and this page does not fall back to the
+  // derived id, does not invent one, and does not start a turn that says yes to
+  // something it has no id for.
+  it('starts no turn at all for a proposal that arrived without a grant', async () => {
+    const ungranted: MsaidiziEvent = {
+      type: 'confirmation_required',
+      confirmationId: 'cnf_Invoices_remove_deadbeef',
+      tool: 'Invoices_remove',
+      capabilityId: 'InvoicesController.remove',
+      description: 'Delete invoice with id 41',
+      args: DELETE_ARGS,
+    };
+
+    h.stream.mockImplementationOnce(scriptRun(suspendedOn(ungranted), 'awaiting_confirmation'));
+
+    render(<MsaidiziChat />);
+    await ask('delete invoice 41');
+
+    const gate = await screen.findByTestId('msaidizi-confirmation-gate');
+    expect(within(gate).getByTestId('msaidizi-gate-ungranted')).toHaveTextContent(
+      /cannot be approved from here/i,
+    );
+    expect(within(gate).getByRole('checkbox')).toBeDisabled();
+    expect(within(gate).getByTestId('msaidizi-approve')).toBeDisabled();
+
+    // Declining still works, and is the way out of this screen.
+    expect(within(gate).getByTestId('msaidizi-decline')).toBeEnabled();
+    expect(h.stream).toHaveBeenCalledTimes(1);
   });
 });

@@ -28,17 +28,34 @@
  *      the difference between a tab that recovers from a blip and a tab that
  *      answers every later question with "this conversation continued in another
  *      window" until it is reloaded.
+ *   7. The run is told WHERE it is. A red-tier approval is a grant bound to a
+ *      conversation and a caller, so a loop that is not handed the conversation
+ *      the store resolved cannot issue one or spend one — and the failure would
+ *      be silent, because a run with no grants looks exactly like a run nobody
+ *      approved anything in.
+ *   8. A session id the store could not check is IGNORED rather than adopted.
+ *      That inverts what this controller used to do, and it could only be
+ *      inverted once approvals stopped being derived from the session id.
  */
 
 import { GoneException, ServiceUnavailableException } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
 import type { Response } from 'express';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { MsaidiziConversationsService, OpenedTurn, mintSessionId } from './conversations.service';
+import { mintGrantId } from './dto/approval-grants';
 import { AskDto, MsaidiziController } from './msaidizi.controller';
 import { MsaidiziConfig } from './msaidizi.config';
-import { MsaidiziEvent, MsaidiziService, RunRequest, RunResult } from './msaidizi.service';
+import { approvalGrantStoreProvider } from './msaidizi.module';
+import {
+  APPROVAL_GRANT_STORE,
+  MsaidiziEvent,
+  MsaidiziService,
+  RunRequest,
+  RunResult,
+} from './msaidizi.service';
 import { RunProcedureDto } from './procedures.controller';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -598,5 +615,274 @@ describe('the session id a client may send is pinned to the shape this server mi
   it('still lets a caller send none at all, which is how a run starts', async () => {
     expect(await reasons({ message: 'Hello' }, AskDto)).toEqual([]);
     expect(await reasons({ context: 'for March' }, RunProcedureDto)).toEqual([]);
+  });
+});
+
+// ─── Where the run is, so an approval can be bound to it ──────────────────────
+
+/**
+ * A red-tier approval is a GRANT: a nonce the server writes when it proposes and
+ * spends when it dispatches, bound in the ledger to a conversation, a caller, a
+ * tool and a digest of the exact arguments. The loop cannot write one or find one
+ * without being told which conversation it is running in — and being told wrong
+ * is worse than not being told, because a grant scoped to a conversation the
+ * CALLER named rather than the one the STORE resolved would let a request bind
+ * its own approvals to somebody else's thread.
+ *
+ * So this is the seam: `open()` decides where the turn landed, and the controller
+ * must carry that decision — and only that decision — into `run()`. Nothing
+ * downstream can detect the omission. A run that was never given a conversation
+ * simply issues no grants, and a run that issues no grants looks precisely like
+ * one the user did not approve anything in.
+ */
+describe('the ask paths tell the run which conversation and turn it is in', () => {
+  it('passes the conversation and sequence the store resolved', async () => {
+    const h = harness();
+
+    await h.controller.ask(askDto(), authUser(), AUTH);
+
+    expect(h.service.run.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ conversationId: 'conv-1', turnSequence: 1 }),
+    );
+  });
+
+  it('passes them on the streaming path too, not only the buffered one', async () => {
+    const h = harness();
+
+    await h.controller.askStream(askDto(), authUser(), h.res, AUTH);
+
+    // Two call sites, one builder. The streaming path is the one a real client
+    // uses, and it was the path that used to be assembled separately.
+    expect(h.service.run.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ conversationId: 'conv-1', turnSequence: 1 }),
+    );
+  });
+
+  it('uses the conversation open() resolved, never the one the request claimed', async () => {
+    // The store answered with a different conversation than the client named —
+    // which is what `continueBySession` does when a session id resolves to
+    // nothing of this caller's and a fresh conversation is started instead.
+    const h = harness({ open: async () => openedTurn({ conversationId: 'conv-resolved' }) });
+
+    await h.controller.ask(
+      askDto({ conversationId: 'conv-claimed', confirmed: [mintGrantId()] }),
+      authUser(),
+      AUTH,
+    );
+
+    // A grant is spendable only from the conversation it was issued in, so this
+    // value IS the scope of every approval in the run. Taking it from the body
+    // would make that scope caller-chosen, which is the property the ledger
+    // exists to hold.
+    expect(h.service.run.mock.calls[0][0].conversationId).toBe('conv-resolved');
+  });
+
+  it('reports no conversation and no turn when the turn was not persisted', async () => {
+    const h = harness({
+      open: async () => ({
+        sessionId: 'ms_unpersisted',
+        history: [],
+        fromServer: false,
+        priorTier: 'green',
+      }),
+    });
+
+    await h.controller.ask(askDto({ conversationId: 'conv-1', sequence: 5 }), authUser(), AUTH);
+
+    // Absent rather than invented. There is no conversation to bind a grant to,
+    // and the loop has to be able to see that: a red-tier action in this run is
+    // not offered for approval at all, which is the fail-closed answer. Passing
+    // the client's `conversationId` through here to "keep approvals working"
+    // would be offering an approval scoped to a conversation nothing verified.
+    const request = h.service.run.mock.calls[0][0];
+    expect(request.conversationId).toBeUndefined();
+    expect(request.turnSequence).toBeUndefined();
+  });
+});
+
+// ─── A session id the store could not check ───────────────────────────────────
+
+describe('a session id that could not be resolved is ignored, not adopted', () => {
+  const CLIENT_HELD = `ms_${'a'.repeat(32)}`;
+
+  it('mints a fresh one when open() could not be reached', async () => {
+    const h = harness({
+      open: async () => {
+        throw new Error('connection refused');
+      },
+    });
+
+    await h.controller.ask(askDto({ sessionId: CLIENT_HELD }), authUser(), AUTH);
+
+    // The provenance rule, at the one door that used to route around it: an id
+    // from the request is honoured only where it can be RESOLVED to a
+    // conversation this caller owns, and `open()` threw before any row could be
+    // read. Adopting it stamps this run's `audit_logs` rows with a well-formed
+    // string nothing checked — including, during a read outage, one naming
+    // another user's conversation, so that a trail read by session id shows two
+    // people's work under one key.
+    const sessionId = h.service.run.mock.calls[0][0].sessionId;
+    expect(sessionId).toMatch(/^ms_[0-9a-f]{32}$/);
+    expect(sessionId).not.toBe(CLIENT_HELD);
+  });
+
+  it('costs an approval nothing it was not already going to lose', async () => {
+    const h = harness({
+      open: async () => {
+        throw new Error('connection refused');
+      },
+    });
+
+    await h.controller.ask(
+      askDto({ sessionId: CLIENT_HELD, confirmed: [mintGrantId()] }),
+      authUser(),
+      AUTH,
+    );
+
+    // This is why the inversion is affordable now and was not before. Approvals
+    // used to be DERIVED from the session id, so minting one recomputed every id
+    // the user had just approved and left them approving the same action for
+    // ever. A grant is a nonce bound to a conversation row, and this turn has no
+    // conversation row — so the approval was unspendable the moment `open()`
+    // failed, whatever id the run adopted. Nothing was traded away.
+    const request = h.service.run.mock.calls[0][0];
+    expect(request.conversationId).toBeUndefined();
+    expect(request.confirmed).toHaveLength(1);
+  });
+
+  it('still runs on a resolved id when the store answers', async () => {
+    const h = harness();
+
+    await h.controller.ask(askDto({ sessionId: CLIENT_HELD }), authUser(), AUTH);
+
+    // The other half: ignoring an id is the DEGRADED path, not the normal one.
+    // `open()` resolving the client's id to one of its conversations is how a
+    // multi-turn thread keeps one audit key, and this must not have become a
+    // fresh id per turn.
+    expect(h.conversations.open).toHaveBeenCalledWith(
+      expect.objectContaining({ clientSessionId: CLIENT_HELD }),
+    );
+    expect(h.service.run.mock.calls[0][0].sessionId).toBe('ms_fromstore');
+  });
+});
+
+// ─── The follow-up a non-streaming caller has to be able to build ─────────────
+
+describe('POST /msaidizi/ask hands back everything its own DTO accepts', () => {
+  /**
+   * A session id of the shape this server actually mints.
+   *
+   * The shared fixture uses `ms_fromstore`, which is fine everywhere it is only
+   * compared for identity and wrong here: this describe feeds the answer back
+   * through the request DTO, and a fixture the pipe would reject cannot tell
+   * whether the round trip closes. A fixture that structurally excludes the
+   * failing case is how three earlier defects in this feature survived review.
+   */
+  const STORE_SESSION = mintSessionId();
+
+  function proposing(grantId: string) {
+    return harness({
+      open: async () => openedTurn({ sessionId: STORE_SESSION }),
+      run: async () =>
+        runResult({
+          sessionId: STORE_SESSION,
+          reason: 'awaiting_confirmation',
+          events: [
+            {
+              type: 'confirmation_required',
+              grantId,
+              confirmationId: 'a'.repeat(64),
+              tool: 'Journals_create',
+              capabilityId: 'journals.create',
+              description: 'Post a journal entry',
+              args: { amount: 9_000_000 },
+            },
+          ] as unknown as MsaidiziEvent[],
+        }),
+    });
+  }
+
+  it('gives a buffered caller the grant id, the conversation and the sequence', async () => {
+    const grantId = mintGrantId();
+    const h = proposing(grantId);
+
+    const answer = await h.controller.ask(askDto(), authUser(), AUTH);
+
+    // The whole of the follow-up, off one response. There is no `session` frame
+    // on this path, so anything the client cannot read here it cannot read at
+    // all — and this DTO accepts every one of these fields on the way in.
+    const proposal = answer.events.find((event) => event.type === 'confirmation_required');
+    expect(proposal).toBeDefined();
+    expect((proposal as unknown as { grantId: string }).grantId).toBe(grantId);
+    expect(answer.conversationId).toBe('conv-1');
+    expect(answer.sequence).toBe(1);
+    expect(answer.sessionId).toBe(STORE_SESSION);
+  });
+
+  it('builds a follow-up the production pipe accepts', async () => {
+    const grantId = mintGrantId();
+    const h = proposing(grantId);
+
+    const answer = await h.controller.ask(askDto(), authUser(), AUTH);
+    const proposal = answer.events.find(
+      (event) => event.type === 'confirmation_required',
+    ) as unknown as { grantId: string };
+
+    // Assembled the way a client would, from the answer alone. Validated rather
+    // than assumed, because the field it fills is the one that stopped accepting
+    // arbitrary strings: an answer whose grant ids the request DTO rejects would
+    // be a contract that cannot be completed.
+    const followUp = plainToInstance(AskDto, {
+      message: 'yes, post it',
+      sessionId: answer.sessionId,
+      conversationId: answer.conversationId,
+      sequence: answer.sequence,
+      confirmed: [proposal.grantId],
+    });
+
+    expect(await validate(followUp)).toEqual([]);
+  });
+
+  it('carries the approval into the run it answers, with the scope to spend it', async () => {
+    const grantId = mintGrantId();
+    const h = harness();
+
+    await h.controller.ask(askDto({ message: 'yes', confirmed: [grantId] }), authUser(), AUTH);
+
+    const request = h.service.run.mock.calls[0][0];
+    expect(request.confirmed).toEqual([grantId]);
+    // Useless without the scope: the ledger spends a grant against a
+    // conversation and a caller, so the id alone proves nothing.
+    expect(request.conversationId).toBe('conv-1');
+  });
+});
+
+// ─── The wiring the ledger depends on ─────────────────────────────────────────
+
+/**
+ * `APPROVAL_GRANT_STORE` must resolve to the SAME OBJECT the controllers hold.
+ *
+ * A `useClass` binding would compile, boot, pass every other test in this
+ * repository, and be wrong in a way nothing downstream can see: grants written
+ * into one instance, spent from another, every approval refused, every red-tier
+ * action re-proposed for ever, and no error anywhere. From the seat it is
+ * indistinguishable from the server ignoring the button.
+ *
+ * Nest does not type-check a token binding against the interface the injecting
+ * class declared, so this is also the only place the aliasing is checked at all.
+ */
+describe('the approval ledger the loop injects is the store the controllers use', () => {
+  it('resolves the token to the same instance, not a second one', async () => {
+    const store = { open: jest.fn(), close: jest.fn() };
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        { provide: MsaidiziConversationsService, useValue: store },
+        approvalGrantStoreProvider,
+      ],
+    }).compile();
+
+    expect(moduleRef.get(APPROVAL_GRANT_STORE)).toBe(moduleRef.get(MsaidiziConversationsService));
+    expect(moduleRef.get(APPROVAL_GRANT_STORE)).toBe(store);
   });
 });

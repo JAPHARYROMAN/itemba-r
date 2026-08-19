@@ -61,6 +61,25 @@
  *      codebase, and an "expired" row still holding customer records is a
  *      deletion that did not delete.
  *   4. **Turn ordering is a database guarantee**, never a read-then-write check.
+ *   5. **The approval ledger fails CLOSED, and that contradicts rule 1 on
+ *      purpose.** `issue()` and `spend()` — the two methods of the
+ *      `ApprovalGrantStore` port the agent loop injects — are the only
+ *      operations here whose unavailability stops something happening, and the
+ *      only ones that THROW rather than reporting. Rule 1 holds everywhere else
+ *      because by the time this file writes anything, the model turn and the
+ *      tool calls have already happened and swallowing costs only a record of
+ *      them. A grant is the opposite: an unspendable grant is an UNPROVEN
+ *      APPROVAL, so a store that cannot be reached means the irreversible action
+ *      is proposed again rather than dispatched. The rejection has to travel:
+ *      `spend()` resolving `false` means "the ledger holds no such grant", the
+ *      loop re-proposes on it, and re-proposing needs a write to the same
+ *      ledger — so an outage reported as `false` would ask the user to approve
+ *      what can never be recorded. Said here, and again at both methods,
+ *      because a reader who has just absorbed rule 1 will otherwise "fix" it.
+ *   6. **The server mints the session id.** A client-supplied one is honoured
+ *      only where it resolves — through `scopeFor()` — to a conversation that
+ *      caller owns; anything else is ignored and a fresh id is minted. Never
+ *      rejected: failing a run over a stale id is worse than re-identifying it.
  */
 
 import {
@@ -79,7 +98,13 @@ import { redactSensitiveFields } from '../audit-logs/audit-logs.service';
 import { ReversibilityTier, TIER_RANK } from '../../common/capabilities/reversibility';
 import { ModelMessage } from './model-client';
 import { MsaidiziConfig } from './msaidizi.config';
-import { MsaidiziEvent, RunResult } from './msaidizi.service';
+import {
+  ApprovalGrant,
+  ApprovalGrantClaim,
+  ApprovalGrantStore,
+  MsaidiziEvent,
+  RunResult,
+} from './msaidizi.service';
 
 /** Longest title we derive from a first prompt. */
 const TITLE_MAX = 120;
@@ -113,6 +138,17 @@ const TITLE_MAX = 120;
  * failure left it; only how it is READ changes with age.
  */
 const ABANDONED_TURN_MS = 30 * 60 * 1000;
+
+// There is no GRANT_TTL_MS here, and its absence is deliberate. A grant arrives
+// with its own `expiresAt`, set by the agent loop that minted it (`GRANT_TTL_MS`
+// in `msaidizi.service.ts`), because the loop is what proposes the action and
+// what the clock is measured from. This file stores that instant verbatim and
+// enforces it in `spend()`'s WHERE clause — which is the half that has to be
+// here, since an expiry nothing compares against is a comment. A second constant
+// would be a second answer to one question, agreeing with the first until the
+// day someone changed one of them, and nothing in the build would notice.
+// `ABANDONED_TURN_MS` above stays because it answers a different question — how
+// long a `running` row is read as a live run — which only this file can answer.
 
 /**
  * Machine-readable discriminators for the two 409s this file raises.
@@ -159,45 +195,35 @@ export interface OpenedTurn {
   /**
    * The audit key every `audit_logs` row this run writes is stamped with.
    *
-   * Not "server-minted on every path", which would be the easier sentence and is
-   * not true. Three things reach this field:
+   * Server-minted, on every path, with no qualifier — which this said before it
+   * was true. Exactly two things reach this field now:
    *
-   *   - an id minted here, on a conversation's first turn;
+   *   - an id `mintSessionId()` produced during this call;
    *   - a conversation's own `agentSessionId`, read back off a row this caller
-   *     owns — server-issued on some earlier turn, by definition;
-   *   - the id the REQUEST carried, when the store could not resolve it to one
-   *     of this caller's conversations, or could not be reached at all.
+   *     owns — so server-issued on some earlier turn, by definition.
    *
-   * The third is checked for SHAPE and not for provenance, and the distinction
-   * is the honest one to state here. Both DTOs pin the value to
-   * `/^ms_[0-9a-f]{32}$/`, which is the alphabet and length `mintSessionId()`
-   * produces and which any client with a random-hex generator can also produce.
-   * So a caller CAN run under an id it invented — under its own token, against
-   * its own data, correlating to rows that are its own.
+   * The id the REQUEST carried never reaches it except by being the second case.
+   * `continueBySession` resolves it through `scopeFor()`, and a value that
+   * resolves to nothing of this caller's — naming nothing, naming a stranger's
+   * conversation, naming one this author deleted, or arriving while the store
+   * could not be read at all — is IGNORED and replaced by a fresh mint. Ignored
+   * rather than rejected: a stale id is an ordinary thing for a tab to be
+   * holding, and failing the user's question over it would be a worse outcome
+   * than re-identifying the run.
    *
-   * Running under SOMEONE ELSE'S is refused WHENEVER THE STORE ANSWERS, and
-   * that qualifier is load-bearing rather than lawyerly. `agentSessionId` is
-   * unique, so an id already naming a conversation collides on insert and
-   * `startConversation` mints a fresh one rather than adopting it. Every path
-   * that reaches the database gets that check.
+   * What that costs, stated because it is a real cost and it is now affordable:
+   * during a read outage, consecutive turns a client believes are one thread are
+   * filed under different session ids, so the audit trail shows several short
+   * runs where a reader expected one. That is a correlation that is coarser than
+   * hoped. The thing it replaced was a correlation that was WRONG — two users'
+   * rows sharing a key, because the id was adopted on the caller's word.
    *
-   * The third case above is the one that does not: when `findFirst` REJECTS,
-   * the index is never consulted, `degraded()` returns the request's own string
-   * unchanged, and this run's `audit_logs` rows carry it — including when it
-   * names a conversation belonging to someone else. Measured: with `findFirst`
-   * mocked to reject and a well-formed id belonging to another user,
-   * `open().sessionId` is that id verbatim. So during a read outage two users'
-   * rows can share a correlation key.
-   *
-   * What survives that, unconditionally: every one of those rows still carries
-   * its own `userId` and was written by the caller's own token, so the trail can
-   * always say WHO acted. What a session id stops being able to promise, for the
-   * duration of an outage, is that it groups one person's work — read by
-   * `userId` when that distinction matters. `unverifiedSessionId()` logs each
-   * time this happens, and the residual is not closable in this file: minting
-   * instead would recompute every red-tier confirmation id mid-approval and
-   * re-ask the user forever, and the id the client sent cannot be proved to be
-   * its own without a provenance mark neither this schema nor either DTO has.
+   * What made adoption look necessary until now: red-tier confirmation ids were
+   * derived from this value, so re-minting mid-approval recomputed every id the
+   * user had approved and re-asked them for ever. Approvals are
+   * `msaidizi_approval_grants` rows now — server-issued nonces bound to a
+   * conversation and an argument digest, not to this string — so a fresh id
+   * cannot invalidate one. Closing the ledger is what let this be closed.
    * See `schema.prisma` on `MsaidiziConversation.agentSessionId`.
    */
   sessionId: string;
@@ -242,22 +268,25 @@ export interface OpenTurnInput {
   /**
    * The session id a client is carrying on the pre-persistence path.
    *
-   * Honoured rather than replaced, wherever it can be. Red-tier confirmation ids
-   * are derived from the session id, so minting a fresh one on a turn that
-   * carries an approval would produce ids that never match the ones the user
-   * approved — an infinite approval loop that looks exactly like the server
-   * ignoring them.
+   * A LOOKUP KEY, not a value to adopt. It is honoured — meaning the run
+   * proceeds under it — in exactly one case: it resolves through `scopeFor()` to
+   * a conversation this caller owns, in which case the id being honoured is that
+   * row's own `agentSessionId` and was minted here on some earlier turn. In
+   * every other case the run is given a fresh mint and this value is dropped: an
+   * id naming nothing, one naming another user's conversation, one naming a
+   * conversation this author has deleted, and one that arrived while the store
+   * could not be read.
    *
-   * The one thing that REPLACES it is an id already naming a conversation this
-   * caller does not own, which the unique index rejects; that turn runs
-   * unpersisted under a freshly minted id rather than stamping its audit rows
-   * with somebody else's session. See `startConversation`'s catch for why that
-   * trade is worth making, and what it costs.
+   * Dropped silently rather than 400'd. A tab holding a stale id is ordinary —
+   * the conversation aged out, or the first turn's row was never written — and
+   * answering the user's question under a new id is strictly better than
+   * refusing to answer it.
    *
-   * That rejection is the index doing it, so it only happens on a path that
-   * reaches the index. A read failure short-circuits to `degraded()` before any
-   * insert is attempted and this value is adopted unchecked — see
-   * `unverifiedSessionId()` and `OpenedTurn.sessionId`.
+   * This used to be adopted on the caller's word wherever no insert collided,
+   * because red-tier confirmation ids were derived from the session id and a
+   * fresh mint mid-approval re-asked the user for ever. Approvals no longer
+   * derive from it (see the approval ledger below), so nothing is owed to continuity
+   * of this string any more.
    */
   clientSessionId?: string;
   /**
@@ -300,8 +329,21 @@ export interface ConversationSummary {
   expiresAt: Date;
 }
 
+/**
+ * `implements ApprovalGrantStore` is the load-bearing half of this declaration.
+ *
+ * The agent loop injects the ledger behind a DI token, and a token binding is
+ * untyped — Nest resolves whatever object was bound and never checks it against
+ * the interface the injecting class declared. So this clause, and the return
+ * type on `approvalGrantStoreProvider` in `msaidizi.module.ts`, are between them
+ * the only things that make a divergence between the port and these two methods
+ * a BUILD failure rather than a `TypeError` thrown inside the red-tier gate at
+ * the moment a user clicks approve — on the one path production has never run,
+ * because `MSAIDIZI_WRITE_MODE=read-only` means no confirmation has ever fired
+ * there. Removing it would compile and would put that back.
+ */
 @Injectable()
-export class MsaidiziConversationsService {
+export class MsaidiziConversationsService implements ApprovalGrantStore {
   private readonly logger = new Logger(MsaidiziConversationsService.name);
 
   constructor(
@@ -418,6 +460,255 @@ export class MsaidiziConversationsService {
           `${(err as Error)?.message}`,
       );
     }
+  }
+
+  // ─── The approval ledger ────────────────────────────────────────────────────
+
+  /**
+   * Records that one red-tier action was PROPOSED, so the approval that comes
+   * back can be recognised as an answer to it.
+   *
+   * This and `spend()` below are `ApprovalGrantStore` (`msaidizi.service.ts`) —
+   * the two-method port the agent loop injects. The names, the payloads and the
+   * failure behaviour are the port's, not this file's, and the `implements`
+   * clause on the class is what makes that a compiler obligation.
+   *
+   * ─── Why this exists at all ─────────────────────────────────────────────────
+   *
+   * An approval used to be `confirmationIdFor(sessionId, toolName, args)` — a
+   * value DERIVED from three things the caller supplies on the same request that
+   * claims them approved. So it was a NAME for an action, not a receipt for one:
+   * nothing on this server had issued it, and nothing could recognise it. Two
+   * consequences, and this ledger closes both. It was a pre-authorisation
+   * channel — a request could name an action nobody had been shown — and the
+   * spend was an in-memory Set inside one `run()`, so re-sending the same id on
+   * a LATER request bought another execution of the same irreversible action.
+   *
+   * A grant is the other shape: issued by the server when it proposes, spent by
+   * the server when it dispatches, and useless to anyone who did not receive it.
+   *
+   * ─── Why a nonce and not a remembered id ────────────────────────────────────
+   *
+   * The tempting repair is to remember derived ids as permanently spent. It is
+   * wrong, and specifically so: the derived id is deterministic, so the same
+   * weekly payroll journal posted again next week produces the same id. Marking
+   * it spent for ever would make a legitimately repeated identical action
+   * permanently unapprovable, because re-approving it can only ever produce that
+   * same id again. A fresh nonce per proposal has no such collision: the repeat
+   * is proposed, gets its own grant, and is approvable exactly as the first was.
+   *
+   * ─── Why the grant arrives already minted ───────────────────────────────────
+   *
+   * `grant.grantId` is the loop's own nonce, and this file no longer mints one.
+   * Not a question of which module owns a helper: the loop needs the id for the
+   * `confirmation_required` event it emits in the same breath as this write, so
+   * it has to hold the value before the row exists. It is server-issued either
+   * way — a caller can no more compute the loop's `randomUUID()` than this
+   * file's — and unguessability, not authorship, is the property that makes
+   * possession of one mean anything.
+   *
+   * The clock arrives with it too (`expiresAt`, `GRANT_TTL_MS` in
+   * `msaidizi.service.ts`). This file stores it verbatim and enforces it in
+   * `spend()`'s WHERE clause, which is the half that has to be here: an expiry
+   * nothing compares against is a comment.
+   *
+   * ─── And why the digest is supplied rather than computed here ───────────────
+   *
+   * The canonical encoding and the SHA-256 over it live in `msaidizi.service.ts`
+   * (`canonicalise`, `confirmationIdFor`) and are load-bearing in their own
+   * right — the nesting collapse they were rewritten to fix is the reason the
+   * digest has to be injective at every level. Reimplementing them here would
+   * give this module two encodings that must agree for ever and no test that
+   * would notice the day they stop. The ledger needs equality, not authorship.
+   *
+   * What it therefore requires of whatever produces the digest: determinism and
+   * injectivity in `(toolName, args)` across the life of a conversation. Nothing
+   * else. It is never parsed, never compared to anything but another digest, and
+   * never shown to a user.
+   *
+   * ─── What it does NOT establish ─────────────────────────────────────────────
+   *
+   * That a human read the proposal. Nothing in this process can. What a spent
+   * grant proves is that this server proposed this exact action in this
+   * conversation, and that the id came back from the surface it was sent to —
+   * which is the whole of what a server can know, and strictly more than the
+   * derived id could say.
+   *
+   * ─── FAIL CLOSED — and it REJECTS, it does not report ───────────────────────
+   *
+   * Every other write in this file swallows its own failure (header, rule 1).
+   * This one throws, and the caller must not soften it: the loop catches, logs,
+   * and then does NOT offer the action for approval. A grant nobody can spend is
+   * an approval nobody can prove, and during a store outage the correct
+   * behaviour for an irreversible action is that it does not run.
+   *
+   * The reason this is a throw rather than the `null` it used to be is one the
+   * loop cannot reconstruct afterwards: a returned value that means "I did not
+   * record it" is indistinguishable from one that means "there was nothing to
+   * record", and the loop dispatches differently on those two. Rejecting says
+   * which without asking the caller to guess.
+   */
+  async issue(grant: ApprovalGrant): Promise<void> {
+    const conversation = await this.conversationForGrant(grant);
+    if (!conversation) {
+      // Not a store failure, and still fatal to the proposal: this conversation
+      // is not this caller's live thread, so there is nowhere to file an
+      // approval for it. Thrown rather than returned for the reason above — the
+      // loop's only correct response is the same one an outage gets, which is
+      // to propose nothing.
+      throw new Error(
+        `No approval grant can be filed on conversation ${grant.conversationId}: it is not ` +
+          `this caller's, or it has been removed. The action must not be offered for approval.`,
+      );
+    }
+
+    await this.prisma.msaidiziApprovalGrant.create({
+      data: {
+        id: grant.grantId,
+        conversationId: conversation.id,
+        // The claim's own userId, not the row's, and they are the same value:
+        // the lookup above matched on it, so a grant is never filed under an
+        // author the conversation does not have. Taking it from the claim is
+        // what keeps this column equal to the one `spend()` compares against —
+        // copying the row's instead would put a second opinion in the WHERE
+        // clause that decides every later dispatch.
+        userId: grant.userId,
+        // The turn in flight, as the loop counted it. `turnCount` is the
+        // fallback rather than the source now: `open()` has already incremented
+        // it under the conversation's row lock, so it is this turn's own
+        // sequence, and it is the honest answer for a caller that had none to
+        // give. Audit context either way — the spend does not read this column.
+        turnSequence: grant.proposedOnTurn ?? conversation.turnCount,
+        toolName: grant.toolName,
+        argsDigest: grant.argumentDigest,
+        // Both clocks from the proposal, so the row cannot say it was created
+        // after it expired.
+        createdAt: grant.createdAt,
+        expiresAt: grant.expiresAt,
+      },
+    });
+  }
+
+  /**
+   * Spends the named grant for the action about to be dispatched, and reports
+   * whether it won.
+   *
+   * `true` means this call, and no other, holds that grant: dispatch. `false`
+   * means the ledger holds no such spendable grant — the id named nothing, named
+   * another conversation's or another user's grant, named one for a DIFFERENT
+   * action, had expired, or had already been spent — and the loop's answer to
+   * that is to propose the action again under a fresh grant.
+   *
+   * `false` NEVER means the store could not be asked. That case throws, and the
+   * distance between those two answers is the whole reason this method's
+   * signature is the port's rather than this file's: the loop re-proposes on a
+   * refusal, and re-proposing needs a WRITE to the same ledger that just failed,
+   * so an outage softened into `false` asks the user to approve something that
+   * can never be recorded — for ever, once per turn.
+   *
+   * One grant per call, tried by the loop against its own candidate list. Not an
+   * economy: a request can approve several proposals at once, nothing tells the
+   * server which id belongs to which action, and the ledger deciding one at a
+   * time is what makes "approve two actions together" spend one grant each
+   * rather than draining both on the first dispatch.
+   *
+   * ─── The spend is one conditional UPDATE, and that is the whole point ───────
+   *
+   * `updateMany` on the primary key with `usedAt: null` in the WHERE clause,
+   * reading the row count it reports. Never a read followed by a write: two
+   * concurrent requests naming one grant would both read `usedAt IS NULL`, both
+   * conclude they may proceed, and both dispatch the irreversible action. This
+   * codebase has already paid for that shape once — a create race that could not
+   * be decided by reading first, because Postgres stamps `createdAt` at
+   * transaction START — and the discipline is the same one `appendTurn` uses for
+   * the turn sequence and `close()` uses for the tier raise.
+   *
+   * The count is 0 or 1 because `id` is the primary key, so "did I win" has no
+   * ambiguous middle. `> 0`, never `>= 0`: `updateMany` reports 0 when the WHERE
+   * clause matched nothing, which is the answer for every case this gate exists
+   * to refuse.
+   *
+   * ─── What the WHERE clause is carrying ──────────────────────────────────────
+   *
+   *   `conversationId` and `userId` — a grant issued in one conversation cannot
+   *   be spent in another, nor by anyone but its author. Both are compared
+   *   against the columns written at issue, so this holds whatever the caller
+   *   claims; and the conversation is resolved through `conversationForGrant()`
+   *   first, so a thread its author has removed reaches no grant of its own.
+   *
+   *   `toolName` and `argsDigest` — a grant issued for "delete invoice 41"
+   *   cannot dispatch "delete invoice 42", including when both are approved in
+   *   the same batch, where nothing else tells the two ids apart.
+   *
+   *   `usedAt IS NULL` and `expiresAt > now` — once, and not for ever. The clock
+   *   is the dispatch's own (`claim.now`), so every candidate in one run is
+   *   judged against one instant rather than against a clock that moves between
+   *   them.
+   *
+   * ─── FAIL CLOSED ────────────────────────────────────────────────────────────
+   *
+   * A store that cannot be reached rejects, and the red action does not run.
+   * This is the deliberate exception to the rule that persistence never fails a
+   * run (file header, rule 5): everywhere else the work has already happened and
+   * only its record is at stake, whereas here the work has NOT happened and an
+   * unspendable grant is an unproven approval. A future reader who makes this
+   * swallow like its neighbours turns an outage into a free pass on exactly the
+   * actions that move money.
+   */
+  async spend(claim: ApprovalGrantClaim): Promise<boolean> {
+    // Nothing named is not a store failure and needs no query: an approval
+    // nobody sent is simply absent.
+    if (!claim.grantId) return false;
+
+    const conversation = await this.conversationForGrant(claim);
+    if (!conversation) {
+      this.logger.warn(
+        `Refusing to spend an approval grant for ${claim.toolName}: conversation ` +
+          `${claim.conversationId} is not this caller's live thread.`,
+      );
+      return false;
+    }
+
+    const spent = await this.prisma.msaidiziApprovalGrant.updateMany({
+      where: {
+        id: claim.grantId,
+        conversationId: conversation.id,
+        userId: claim.userId,
+        toolName: claim.toolName,
+        argsDigest: claim.argumentDigest,
+        usedAt: null,
+        expiresAt: { gt: claim.now },
+      },
+      data: { usedAt: claim.now },
+    });
+
+    return spent.count > 0;
+  }
+
+  /**
+   * The conversation a grant is scoped to, if it is this caller's and still
+   * there.
+   *
+   * The one authorisation point both halves of the ledger share. It is NOT
+   * `scopeFor()`, and the difference is worth stating rather than reading as an
+   * omission: the port hands this file a userId, not an `AuthUser`, so the
+   * company clause cannot be evaluated here at all. It does not need to be. The
+   * conversation id the loop passes is never a caller's claim — `open()`
+   * resolved it through the whole of `scopeFor()`, company clause included,
+   * earlier in the same request, and the controller passes the RESOLVED row's id
+   * rather than the one the client sent (`MsaidiziController.runRequestFor`). So
+   * a caller who has lost the company cannot reach a conversation id to be
+   * scoped by in the first place.
+   *
+   * What is left here is what can still change between that resolution and the
+   * dispatch, and what the ledger must therefore check for itself: authorship,
+   * and a thread removed from another tab mid-run.
+   */
+  private async conversationForGrant(scope: { conversationId: string; userId: string }) {
+    return this.prisma.msaidiziConversation.findFirst({
+      where: { id: scope.conversationId, userId: scope.userId, deletedAt: null },
+      select: { id: true, turnCount: true },
+    });
   }
 
   // ─── Read path ──────────────────────────────────────────────────────────────
@@ -623,8 +914,33 @@ export class MsaidiziConversationsService {
             LIMIT ${batch}
          )`;
 
-      // 2. Conversations past the retention window, and removed ones past their
-      //    grace. A real DELETE; turns cascade.
+      // 2. Approval grants past their clock, spent or not.
+      //
+      //    THIS IS HYGIENE, NOT THE ENFORCEMENT, and the difference matters
+      //    enough to state where the statement lives. What makes an expired
+      //    grant unspendable is `expiresAt > now` in `spend()`'s own WHERE
+      //    clause; this only reclaims the rows. So a sweep that never
+      //    runs — because it is bounded, opportunistic and swallowed — cannot
+      //    resurrect an approval, which is the failure mode a ledger enforced by
+      //    a cleanup job would have.
+      //
+      //    Raw SQL for the same reason as the statements around it, with one
+      //    difference worth knowing: this table has no `deletedAt`, so the
+      //    soft-delete middleware would leave a `deleteMany` alone today. The
+      //    column is absent deliberately (see `schema.prisma`), and writing the
+      //    delete the same way as its neighbours keeps the sweep reading as one
+      //    thing rather than three shapes with an invisible rule about which is
+      //    safe where.
+      await this.prisma.$executeRaw`
+        DELETE FROM "msaidizi_approval_grants"
+         WHERE "id" IN (
+           SELECT "id" FROM "msaidizi_approval_grants"
+            WHERE "expiresAt" < now()
+            LIMIT ${batch}
+         )`;
+
+      // 3. Conversations past the retention window, and removed ones past their
+      //    grace. A real DELETE; turns and grants cascade.
       const graceMs = this.config.deletedGraceHours * 3_600_000;
       const graceCutoff = new Date(Date.now() - graceMs);
       await this.prisma.$executeRaw`
@@ -722,26 +1038,24 @@ export class MsaidiziConversationsService {
       };
     } catch (err) {
       // A session id already taken is the one failure here whose cause is known,
-      // and it is the one id that must not be run under. `continueBySession`
-      // reaches this line having found nothing THIS caller owns under that id,
-      // so the row it collided with is somebody else's — or a conversation this
-      // author has since deleted. Running under it anyway would stamp every
-      // `audit_logs` row this run writes with a session id naming a run that is
-      // not this one, which is exactly what an overseer reading the trail by
-      // session id would be misled by.
+      // and it is the one id that must not be run under.
       //
-      // The cost is paid by the author of a conversation they deleted with a
-      // suspended proposal still on screen in some tab: their approval is now
-      // recomputed against a fresh session id, matches nothing, and the run
-      // suspends again on the same action. That is a thread they removed.
-      // Filing a stranger's run under their session id is not recoverable in
-      // the same way, and no user of this system asked for it.
+      // This is now a backstop rather than a gate, and saying so is the point.
+      // Every caller reaches this method with a freshly minted id — `open()`
+      // mints when no id arrived, and `continueBySession` mints whenever the
+      // one that did resolved to nothing this caller owns — so a collision here
+      // means two `randomUUID()` calls produced the same 128 bits, which is not
+      // a thing that happens. Kept because the alternative to a defence that
+      // never fires is a `degraded()` that would hand the run the colliding id,
+      // and because the branch below is what the unique index is FOR: whatever
+      // the cause, an id already naming a conversation is one this run must not
+      // be filed under.
       if (isSessionIdTaken(err)) {
         const fresh = mintSessionId();
         this.logger.warn(
-          `Session id ${sessionId} already belongs to a conversation this caller does not own; ` +
-            `running unpersisted under a freshly minted id rather than filing this run's audit ` +
-            `rows under it.`,
+          `Session id ${sessionId} already names a conversation, so this run cannot be filed ` +
+            `under it; running unpersisted under a freshly minted id instead. This id was ` +
+            `minted, not supplied, so a collision here means two random 128-bit values matched.`,
         );
         return this.degraded(fresh, input, err);
       }
@@ -833,15 +1147,14 @@ export class MsaidiziConversationsService {
       // the user their conversation does not exist.
       //
       // The authoritative session id for this run is `conversation.agentSessionId`
-      // — a column on the row we just failed to read. So the caller's own value
-      // is adopted without any check having been possible.
-      return this.degraded(
-        input.clientSessionId
-          ? this.unverifiedSessionId(input.clientSessionId, err)
-          : mintSessionId(),
-        input,
-        err,
-      );
+      // — a column on the row we just failed to read. Nothing else can stand in
+      // for it, least of all the id the request carried: this path cannot check
+      // it against anything, and an id nothing checked is exactly what a
+      // caller-chosen correlation key looks like in the audit trail. So the run
+      // is re-identified. The turns either side of the outage land under
+      // different session ids, which is coarser correlation and honest; adopting
+      // the request's string would have been finer correlation and false.
+      return this.degraded(mintSessionId(), input, err);
     }
 
     // Author-only. A peer or an admin asking for this id gets the same answer a
@@ -946,29 +1259,43 @@ export class MsaidiziConversationsService {
       });
     } catch (err) {
       // The read that would have resolved this id to one of this caller's own
-      // conversations is the read that just failed, so the id is honoured on the
-      // caller's word alone.
-      return this.degraded(this.unverifiedSessionId(sessionId, err), input, err);
+      // conversations is the read that just failed. An id nothing could check is
+      // not honoured — it is dropped, and the run is re-identified. See
+      // `OpenedTurn.sessionId` for what that costs and why it is now the cheaper
+      // of the two.
+      return this.degraded(mintSessionId(), input, err);
     }
 
-    // A session id that resolves to nothing this user owns starts a fresh
-    // conversation under it. If it collides with someone else's row the unique
-    // index rejects the insert and the run proceeds unpersisted under an id
-    // minted for it — so on THIS path, where an insert is attempted, one user's
-    // turn is never attached to another user's conversation and this run's audit
-    // rows are never stamped with another user's session id. See
-    // `startConversation`'s catch. The catch above reaches neither the read nor
-    // the insert, and `unverifiedSessionId()` says what that costs.
+    // THE ONE PLACE A CLIENT-SUPPLIED ID IS HONOURED is the line above this
+    // one: `conversation` non-null means the id resolved, through `scopeFor()`,
+    // to a conversation this caller owns — so the id `appendTurn` runs under is
+    // that row's own `agentSessionId`, minted here on an earlier turn.
     //
-    // The same rejection is what happens when the author deleted this
-    // conversation and kept the tab open: `scopeFor()` no longer matches the
-    // soft-deleted row, the insert collides with its `agentSessionId`, and the
-    // question is answered unpersisted rather than being filed back into a
-    // thread the user has just removed. That case pays for this one: a fresh id
-    // recomputes red-tier confirmation ids, so an approval still sitting in that
-    // tab will not match. A conversation the user deleted is the right place to
-    // spend it.
-    if (!conversation) return this.startConversation(input, sessionId);
+    // Resolving to nothing starts a fresh conversation under a FRESH id, never
+    // under the one that arrived. Four cases land here and the same answer is
+    // right for all of them: the id names nothing at all (a client whose first
+    // turn was never written), it names another user's conversation (the threat
+    // the DTO's shape check cannot see), it names one this author deleted, or it
+    // names one filed under a company they have since lost. Adopting it would
+    // stamp this run's `audit_logs` rows with a correlation key this server
+    // never issued to this caller, which is precisely what an overseer reading
+    // the trail by session id would be misled by.
+    //
+    // Ignored, not rejected. A stale id in a reopened tab is ordinary, and
+    // failing the user's question over it would be a worse outcome than
+    // answering it under a new one.
+    //
+    // What this used to cost, and no longer does: red-tier confirmation ids were
+    // derived from the session id, so a fresh id here recomputed every id an
+    // approval could match and the user approved the same action for ever.
+    // Approvals are `msaidizi_approval_grants` rows now — server-issued nonces
+    // bound to a conversation and an argument digest — so re-identifying a run
+    // cannot invalidate one. What a fresh conversation does cost an approval
+    // still open in a stale tab is its grant's conversation, which no longer
+    // resolves: the action is proposed again, with a new grant, and the user
+    // answers it once. That is the correct outcome for an approval whose thread
+    // the server cannot find.
+    if (!conversation) return this.startConversation(input, mintSessionId());
 
     const sent = input.fallbackHistory ?? [];
     const resumed = sent.length > 0 ? null : this.decodeResume(conversation);
@@ -1052,38 +1379,6 @@ export class MsaidiziConversationsService {
         priorTier,
       };
     }
-  }
-
-  /**
-   * A session id taken from the request because nothing could check it.
-   *
-   * On every path that reaches the database, a caller-supplied id is dealt with
-   * one of three ways: `continueById` ignores it and takes the row's own
-   * `agentSessionId`; `continueBySession` resolves it against this caller's own
-   * conversations; and an id that resolves to none of them is offered to the
-   * unique index, which rejects it if it already names somebody else's. A read
-   * failure reaches none of the three — no row to take it from, none to resolve
-   * it against, no insert to collide — so the value is adopted on the caller's
-   * word and stamped onto every `audit_logs` row the run produces.
-   *
-   * Logged rather than replaced, and the choice is deliberate. Minting a fresh
-   * id would make the stamp trustworthy and would break the feature it is
-   * stamping: red-tier confirmation ids are derived from the session id, so a
-   * new one on every request of an outage recomputes every id an approval could
-   * match, and the user approves the same action forever without it running.
-   * Closing it properly needs an id whose provenance can be VERIFIED offline —
-   * a per-user mark inside the value, so a caller's own id is recognisable
-   * without a read — which is a change to the id format, `mintSessionId()`, both
-   * DTO patterns and every id already stored. Until then, this line is the only
-   * record that a session id in the trail was never checked.
-   */
-  private unverifiedSessionId(sessionId: string, err: unknown): string {
-    this.logger.warn(
-      `Session id ${sessionId} could not be checked against this caller's conversations ` +
-        `(${(err as Error)?.message}); this run is unpersisted and its audit rows will carry ` +
-        `an id supplied by the request rather than one this server resolved or minted.`,
-    );
-    return sessionId;
   }
 
   /**
@@ -1350,6 +1645,10 @@ export function mintSessionId(): string {
  * the store: this exact session id already names a conversation, and — since the
  * caller's own rows were searched first — not one of the caller's own. Every
  * other failure leaves the id's standing unchanged.
+ *
+ * Unreachable in practice now that every id offered to this insert is one
+ * `mintSessionId()` just produced; kept as the backstop that stops a colliding
+ * id being run under whatever the cause. See `startConversation`'s catch.
  *
  * `target` is checked rather than assumed: `id` is unique here too, and a
  * collision on a v4 UUID primary key says nothing at all about the session id.

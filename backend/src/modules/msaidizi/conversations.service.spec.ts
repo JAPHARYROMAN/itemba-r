@@ -44,10 +44,18 @@ import { Prisma } from '@prisma/client';
 import { EncryptionService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
-import { MsaidiziConversationsService } from './conversations.service';
+import { MsaidiziConversationsService, OpenedTurn } from './conversations.service';
+import { GRANT_ID, mintGrantId } from './dto/approval-grants';
 import { ModelMessage } from './model-client';
 import { MsaidiziConfig } from './msaidizi.config';
-import { MsaidiziEvent, RunResult } from './msaidizi.service';
+import {
+  ApprovalGrant,
+  ApprovalGrantClaim,
+  ApprovalGrantStore,
+  confirmationIdFor,
+  MsaidiziEvent,
+  RunResult,
+} from './msaidizi.service';
 
 // ─── The store ────────────────────────────────────────────────────────────────
 
@@ -90,6 +98,23 @@ function matches(row: Row, where: Row | undefined): boolean {
         const not = (condition as { not: unknown }).not;
         return not === null ? value !== null && value !== undefined : value !== not;
       }
+      // Range comparison, which the approval ledger's spend depends on:
+      // `expiresAt: { gt: now }` is the entire reason an expired grant cannot be
+      // spent. A double that fell through to the equality branch below would
+      // read the operator object as a value, never match, and pass the expiry
+      // test for the wrong reason — while a double that ignored it would let
+      // every expired grant through and pass nothing honestly.
+      const range = condition as Record<string, unknown>;
+      for (const [operator, bound] of Object.entries(range)) {
+        if (!['gt', 'gte', 'lt', 'lte'].includes(operator)) continue;
+        const left = time(value);
+        const right = time(bound);
+        if (operator === 'gt' && !(left > right)) return false;
+        if (operator === 'gte' && !(left >= right)) return false;
+        if (operator === 'lt' && !(left < right)) return false;
+        if (operator === 'lte' && !(left <= right)) return false;
+        return true;
+      }
     }
 
     if (condition === null) return value === null || value === undefined;
@@ -114,6 +139,7 @@ function time(value: unknown): number {
 class FakePrisma {
   conversations: Row[] = [];
   turns: Row[] = [];
+  grants: Row[] = [];
   /** Set to make the next turn update reject — the "history write failed" case. */
   failTurnUpdate = false;
   private seq = 0;
@@ -173,9 +199,23 @@ class FakePrisma {
       return include?.turns ? { ...row, turns: this.turnsFor(row.id as string) } : row;
     },
 
-    findFirst: async ({ where, include }: { where?: Row; include?: Row }) => {
+    findFirst: async ({
+      where,
+      include,
+      select,
+    }: {
+      where?: Row;
+      include?: Row;
+      select?: Record<string, boolean>;
+    }) => {
       const row = this.conversations.find((c) => matches(this.joined(c), where));
       if (!row) return null;
+      // `select` is honoured rather than ignored, for the reason the turn
+      // lookup below states: the ledger's conversation resolution asks for
+      // `turnCount` and files it on every grant as `turnSequence`, and a double
+      // that returned whole rows would keep passing the day the service stopped
+      // asking for it.
+      if (select) return Object.fromEntries(Object.keys(select).map((key) => [key, row[key]]));
       return include?.turns ? { ...row, turns: this.turnsFor(row.id as string) } : row;
     },
 
@@ -277,6 +317,62 @@ class FakePrisma {
   };
 
   /**
+   * The approval ledger, and the one model here that offers NO way to read a
+   * row.
+   *
+   * That omission is the test, not an economy. The spend has to be a single
+   * conditional UPDATE whose row count is the verdict; the shape it must never
+   * be is a read followed by a write, because two concurrent requests would both
+   * read `usedAt: null` and both dispatch an irreversible action. A double with
+   * a `findUnique` here would let that implementation exist and pass every test
+   * except the concurrency one — so there is no `findUnique`, no `findFirst` and
+   * no `findMany`, and a service that reached for one fails loudly rather than
+   * subtly.
+   *
+   * `updateMany` applies its filter and its data with no `await` in between,
+   * which is what makes it the atomic primitive the real statement is. Two
+   * overlapping `spend()` calls interleave at their own awaits, and
+   * the loser reads a row whose `usedAt` the winner has already set.
+   */
+  readonly msaidiziApprovalGrant = {
+    create: async ({ data }: { data: Row }) => {
+      // The FOREIGN KEY, modelled rather than assumed away. The store checks the
+      // conversation itself before it writes, and this is what stops that check
+      // being the only thing between a grant and a conversation that is not
+      // there: an implementation that dropped the lookup would still have to
+      // meet this, exactly as it would meet Postgres. Existence only — a
+      // soft-deleted conversation is still a row, which is why refusing one is
+      // the store's job and not the database's.
+      if (!this.conversations.some((c) => c.id === data.conversationId)) {
+        throw new Prisma.PrismaClientKnownRequestError(
+          'Foreign key constraint failed on the field: `conversationId`',
+          { code: 'P2003', clientVersion: 'test', meta: { field_name: 'conversationId' } },
+        );
+      }
+      // The primary key arrives with the data. It is not defaulted here because
+      // the id IS the grant — a nonce the agent loop mints before it emits the
+      // proposal that carries it — and a double that generated its own would be
+      // testing a different mechanism.
+      if (this.grants.some((g) => g.id === data.id)) {
+        throw new Prisma.PrismaClientKnownRequestError('Unique constraint failed on `id`', {
+          code: 'P2002',
+          clientVersion: 'test',
+          meta: { target: ['id'] },
+        });
+      }
+      const row: Row = { usedAt: null, createdAt: new Date(), ...data };
+      this.grants.push(row);
+      return row;
+    },
+
+    updateMany: async ({ where, data }: { where: Row; data: Row }) => {
+      const rows = this.grants.filter((g) => matches(g, where));
+      rows.forEach((row) => applyData(row, data));
+      return { count: rows.length };
+    },
+  };
+
+  /**
    * Both forms the service uses.
    *
    * The array form is not atomic here — every promise in it has already been
@@ -340,6 +436,20 @@ class FakePrisma {
       return due.length;
     }
 
+    if (sql.startsWith('DELETE FROM "msaidizi_approval_grants"')) {
+      // Modelled rather than left to throw, and not only so the sweep completes:
+      // an approval ledger swept by nothing is a table that grows for ever, and
+      // a double that ignored this statement would let the sweep silently stop
+      // covering it. The expiry the SPEND enforces is a separate mechanism and
+      // is tested separately — deliberately, because a ledger whose expiry lived
+      // only in a bounded, swallowed sweep would honour approvals for as long as
+      // the sweep fell behind.
+      const doomed = this.grants.filter((row) => time(row.expiresAt) < Date.now());
+      const ids = new Set(doomed.map((row) => row.id));
+      this.grants = this.grants.filter((row) => !ids.has(row.id));
+      return doomed.length;
+    }
+
     if (sql.startsWith('DELETE FROM "msaidizi_conversations"')) {
       const graceCutoff = values.find((value) => value instanceof Date) as Date | undefined;
       const doomed = this.conversations.filter(
@@ -350,6 +460,9 @@ class FakePrisma {
       const ids = new Set(doomed.map((row) => row.id));
       this.conversations = this.conversations.filter((row) => !ids.has(row.id));
       this.turns = this.turns.filter((turn) => !ids.has(turn.conversationId));
+      // Grants cascade with the conversation, exactly as the foreign key says.
+      // A deleted conversation must not leave a spendable approval behind.
+      this.grants = this.grants.filter((grant) => !ids.has(grant.conversationId));
       return doomed.length;
     }
 
@@ -438,6 +551,64 @@ function runResult(overrides: Partial<RunResult> = {}): RunResult {
 }
 
 const ASKED = 'Which suppliers have unpaid invoices?';
+
+/**
+ * A second service over the same store — a LATER REQUEST, or another process.
+ *
+ * The limit this ledger exists to close was an in-memory `Set` inside one
+ * `run()`: an approval that died at the request boundary, so re-sending the same
+ * id tomorrow bought another execution. A test that spends twice through one
+ * service instance cannot tell a durable ledger from an instance-level one, so
+ * every "later request" test below goes through a service that has never seen
+ * the first call. The store is the only thing the two share.
+ */
+function laterRequest(prisma: FakePrisma) {
+  return new MsaidiziConversationsService(
+    prisma as unknown as PrismaService,
+    configFor(),
+    encryption(),
+  );
+}
+
+/**
+ * The argument digest, produced by the real thing.
+ *
+ * `confirmationIdFor` is imported rather than stubbed because its canonical
+ * encoding is the half of this that has already failed review once: a replacer
+ * array passed to `JSON.stringify` emptied every NESTED object, so
+ * `{body:{invoiceId:41}}` and `{body:{invoiceId:42}}` hashed the same and one
+ * approval authorised any later action of the same tool. The ledger only ever
+ * compares digests for equality, so a stubbed digest would test string equality
+ * and nothing else — and the fixtures below differ only DEEP inside a body,
+ * which is exactly the shape a flat fixture would have hidden.
+ */
+function digestOf(toolName: string, args: Record<string, unknown>): string {
+  return confirmationIdFor('ms_ledger_digest', toolName, args);
+}
+
+const POST_JOURNAL = 'JournalEntries_post';
+
+/** TZS 900,000 of rent, posted. */
+const RENT_900K = {
+  body: {
+    memo: 'Rent — August',
+    lines: [
+      { account: '6000', debit: 900_000 },
+      { account: '1000', credit: 900_000 },
+    ],
+  },
+};
+
+/** The same journal with a zero added, differing nowhere but inside the lines. */
+const RENT_9M = {
+  body: {
+    memo: 'Rent — August',
+    lines: [
+      { account: '6000', debit: 9_000_000 },
+      { account: '1000', credit: 9_000_000 },
+    ],
+  },
+};
 
 /**
  * The rejection's own body, so its discriminator can be read.
@@ -826,6 +997,66 @@ describe('open() then close() leaves behind what the chat client reads', () => {
     expect(
       (withSecret[0] as unknown as { args: { body: { password: string } } }).args.body.password,
     ).toBe('hunter2');
+  });
+
+  /**
+   * A STORED PROPOSAL MUST STILL BE APPROVABLE, and nothing else asserted that.
+   *
+   * `redactEvents()` keeps `grantId` today only because it rebuilds each event
+   * as `{ ...event, args: redact(event.args) }` — a spread, which preserves
+   * every field it does not name. That is a property of how the function
+   * happens to be written, not of anything the build checks, and this codebase
+   * has already paid twice for the opposite shape: an allowlist copy that
+   * silently dropped `conversationId` and `sequence` on their way out.
+   *
+   * Rewrite this as an allowlist that forgets `grantId` and the damage is
+   * invisible here and total in the product. Every reopened suspended
+   * conversation replays its proposals with no grant id, the client's gate
+   * correctly refuses to offer an approval it cannot name, and the user is told
+   * each proposal 'cannot be approved from here' for ever. It would read as a
+   * UI bug and be a storage bug, so the assertion belongs on the storage side.
+   *
+   * The round trip is the whole path — redact, encrypt, store, decrypt, read
+   * back — because the claim is about what a later request can spend, not about
+   * one function's return value.
+   */
+  it('keeps grantId on a stored confirmation_required, so a reopened proposal is still approvable', async () => {
+    const { service } = makeService();
+    const user = authUser();
+    const grantId = mintGrantId();
+
+    const proposal: MsaidiziEvent[] = [
+      {
+        type: 'confirmation_required',
+        grantId,
+        confirmationId: 'cnf_whatever',
+        tool: 'Payments_create',
+        capabilityId: 'PaymentsController.create',
+        description: 'Pay TZS 9,000,000 to Neema Supplies',
+        args: { body: { amount: 9_000_000, password: 'hunter2' } },
+      },
+    ];
+
+    const opened = await service.open({ user, prompt: 'Pay Neema Supplies' });
+    await service.close(opened, runResult({ events: proposal }));
+
+    const stored = await service.findOne(opened.conversationId!, user);
+    const replayed = stored.turns[0].events[0] as unknown as {
+      type: string;
+      grantId?: string;
+      args: { body: Record<string, unknown> };
+    };
+
+    expect(replayed.type).toBe('confirmation_required');
+    // The grant id is the only thing a client can send back as an approval, so
+    // it must survive verbatim — not merely be present.
+    expect(replayed.grantId).toBe(grantId);
+    expect(replayed.grantId).toMatch(GRANT_ID);
+
+    // And it survives WITHOUT the redaction having been weakened to achieve it:
+    // the proposal's own body is still scrubbed on the way to rest.
+    expect(replayed.args.body.password).toBe('[REDACTED]');
+    expect(replayed.args.body.amount).toBe(9_000_000);
   });
 });
 
@@ -1548,19 +1779,69 @@ describe('the session path refuses the same stale state, and on the same clock',
  * what the agent runs under and what `capability-invoker` sends as the header
  * every `audit_logs` row of the run is stamped with.
  *
- * Both DTOs pin the field to `/^ms_[0-9a-f]{32}$/`, and that is a constraint on
- * SHAPE — any client with a random-hex generator satisfies it. So these tests do
- * not claim provenance. What they hold is the property the audit trail actually
- * needs, and the one the shape check cannot give: a caller cannot file its run
- * under an id that already names somebody else's conversation. The unique index
- * is the enforcement; a freshly minted id is the answer.
+ * Five comments in this module used to call it server-minted while the code
+ * adopted whatever a request carried, checked only against
+ * `/^ms_[0-9a-f]{32}$/` — a constraint on SHAPE that any client with a
+ * random-hex generator satisfies. These tests hold the claim the comments now
+ * make: THE SERVER MINTS IT. A client-supplied id is honoured in exactly one
+ * case, that it resolves through `scopeFor()` to a conversation this caller
+ * owns, in which case the value honoured is that row's own — minted here on an
+ * earlier turn. Every other case mints fresh.
  *
- * The index is only enforcement where an insert is attempted, and the last two
- * tests here mark the edge where none is. They are boundary markers, not
- * approvals of the behaviour: read them together with `unverifiedSessionId()`.
+ * Ignored, never rejected, and that half is tested too: a stale id in a reopened
+ * tab is ordinary, and failing a user's question over one would be worse than
+ * re-identifying the run.
+ *
+ * What made adoption look unavoidable until now was that red-tier confirmation
+ * ids were DERIVED from this value, so a fresh mint mid-approval recomputed
+ * every id an approval could match. Approvals are grants now — server-issued
+ * nonces bound to a conversation and an argument digest — so nothing is owed to
+ * continuity of this string.
  */
-describe('a session id that already names a conversation is never adopted', () => {
-  it('does not file one user’s run under another user’s session id', async () => {
+describe('the server mints the session id; a client’s is honoured only when it resolves', () => {
+  it('honours one that resolves to a conversation this caller owns, which is the round trip', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+
+    const first = await service.open({ user, prompt: ASKED });
+    await service.close(first, runResult());
+
+    // The ordinary case, and the only one where the request's id survives: it
+    // names this caller's own conversation, so the id honoured is the column's
+    // own value.
+    const second = await service.open({
+      user,
+      prompt: 'And the August one?',
+      clientSessionId: first.sessionId,
+    });
+
+    expect(second.sessionId).toBe(first.sessionId);
+    expect(second.conversationId).toBe(first.conversationId);
+    expect(prisma.conversations).toHaveLength(1);
+  });
+
+  it('ignores one that names no conversation at all, and mints instead', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+
+    // What a client holds after a first turn whose row could not be written: a
+    // well-formed id naming nothing stored. It used to be ADOPTED — the run, and
+    // every audit row it wrote, carried a string this server had not issued to
+    // this caller — because red-tier confirmation ids were derived from it and
+    // replacing it re-asked the user for ever. The ledger removed that debt.
+    const carried = 'ms_0123456789abcdef0123456789abcdef';
+
+    const opened = await service.open({ user, prompt: ASKED, clientSessionId: carried });
+
+    expect(opened.sessionId).not.toBe(carried);
+    expect(opened.sessionId).toMatch(/^ms_[0-9a-f]{32}$/);
+    // Ignored, not rejected: the question is answered, and the conversation is
+    // stored under the id this server chose.
+    expect(opened.conversationId).toBeDefined();
+    expect(prisma.conversations[0].agentSessionId).toBe(opened.sessionId);
+  });
+
+  it('ignores another user’s id rather than filing this run under it', async () => {
     const { prisma, service } = makeService();
     const owner = authUser();
     const stranger = authUser({ id: 'user-B', email: 'b@itemba.local' });
@@ -1568,8 +1849,9 @@ describe('a session id that already names a conversation is never adopted', () =
     const first = await service.open({ user: owner, prompt: ASKED });
     await service.close(first, runResult());
 
-    // The threat the DTO comments name: a well-formed id, read somewhere else.
-    // It passes the shape check by construction — this server minted it.
+    // The threat the DTO's shape check cannot see: a well-formed id, read
+    // somewhere else. It passes the pattern by construction — this server minted
+    // it, for somebody else.
     const intruding = await service.open({
       user: stranger,
       prompt: 'What did they look at?',
@@ -1578,19 +1860,24 @@ describe('a session id that already names a conversation is never adopted', () =
 
     expect(intruding.sessionId).not.toBe(first.sessionId);
     expect(intruding.sessionId).toMatch(/^ms_[0-9a-f]{32}$/);
-    // Unpersisted, because the id it asked for is taken: the run still happens,
-    // under an id of this server's choosing, correlating to nothing of the
-    // owner's.
-    expect(intruding.conversationId).toBeUndefined();
 
-    // And the owner's conversation is untouched — no turn of the stranger's was
-    // filed into it, and its own key still means what it meant.
-    expect(prisma.conversations).toHaveLength(1);
-    expect(prisma.conversations[0].agentSessionId).toBe(first.sessionId);
-    expect(prisma.conversations[0].turnCount).toBe(1);
+    // The stranger's own question is still answered and still stored — under the
+    // server's id, in a conversation of their own. Nothing of theirs was filed
+    // into the owner's thread and no audit row of theirs carries the owner's key.
+    expect(intruding.conversationId).toBeDefined();
+    expect(intruding.conversationId).not.toBe(first.conversationId);
+    expect(prisma.conversations).toHaveLength(2);
+    const theirs = prisma.conversations.find((row) => row.id === intruding.conversationId)!;
+    expect(theirs.userId).toBe(stranger.id);
+    expect(theirs.agentSessionId).toBe(intruding.sessionId);
+
+    // And the owner's conversation is untouched.
+    const owned = prisma.conversations.find((row) => row.id === first.conversationId)!;
+    expect(owned.agentSessionId).toBe(first.sessionId);
+    expect(owned.turnCount).toBe(1);
   });
 
-  it('does the same for a conversation its own author has deleted', async () => {
+  it('ignores one naming a conversation its own author has deleted', async () => {
     const { service } = makeService();
     const user = authUser();
 
@@ -1598,11 +1885,9 @@ describe('a session id that already names a conversation is never adopted', () =
     await service.close(first, runResult());
     await service.remove(first.conversationId!, user);
 
-    // The row is gone from `scopeFor()` but its `agentSessionId` still occupies
-    // the unique index, so this is the same collision. The cost is stated rather
-    // than hidden: a red-tier approval still open in a stale tab recomputes its
-    // confirmation ids off this fresh id and will not match. That is a thread
-    // the author removed.
+    // `scopeFor()` does not match the soft-deleted row, so the id resolves to
+    // nothing and a fresh conversation is started under a fresh id — rather than
+    // the question being filed back into a thread the user has just removed.
     const after = await service.open({
       user,
       prompt: 'Actually, one more thing',
@@ -1611,58 +1896,38 @@ describe('a session id that already names a conversation is never adopted', () =
 
     expect(after.sessionId).not.toBe(first.sessionId);
     expect(after.sessionId).toMatch(/^ms_[0-9a-f]{32}$/);
+    expect(after.conversationId).not.toBe(first.conversationId);
   });
 
-  it('keeps the client’s id when the insert failed for any other reason', async () => {
-    const { prisma, service } = makeService();
-    const user = authUser();
-    jest
-      .spyOn(prisma.msaidiziConversation, 'create')
-      .mockRejectedValue(new Error('connection refused'));
-
-    // The branch that must NOT be widened. A store that cannot be reached says
-    // nothing about whose id this is, and the run still has to recompute the
-    // red-tier confirmation ids the user approved — which it can only do under
-    // the id they were derived from. Only a collision is evidence about the id.
-    const carried = 'ms_0123456789abcdef0123456789abcdef';
-    const opened = await service.open({ user, prompt: ASKED, clientSessionId: carried });
-
-    expect(opened.sessionId).toBe(carried);
-    expect(opened.conversationId).toBeUndefined();
-  });
-
-  it('still adopts one that names no conversation at all, which is the round trip', async () => {
-    const { prisma, service } = makeService();
+  it('ignores one naming a conversation filed under a company the author has lost', async () => {
+    const { service } = makeService();
     const user = authUser();
 
-    // What a client holds after a first turn whose row could not be written:
-    // a session id this server handed it, naming no stored conversation. The
-    // approval that follows has to run under it — `confirmationIdFor()` derives
-    // every red-tier id from the session id, so replacing it here would recompute
-    // ids that match nothing the user approved and suspend the run again, for
-    // ever. Adopting it is also what makes the shape check the ONLY check on a
-    // fresh id, which is why the comments on this field say shape and not
-    // provenance.
-    const carried = 'ms_0123456789abcdef0123456789abcdef';
+    const first = await service.open({ user, prompt: ASKED });
+    await service.close(first, runResult());
 
-    const opened = await service.open({ user, prompt: ASKED, clientSessionId: carried });
+    // Same person, later, without access to company-A. `scopeFor()` applies the
+    // company clause in addition to authorship, so their own id resolves to
+    // nothing and the run is re-identified rather than continuing a thread they
+    // can no longer read.
+    const moved = authUser({ companyId: 'company-B', companyAccess: [] });
+    const after = await service.open({
+      user: moved,
+      prompt: 'Carry on',
+      clientSessionId: first.sessionId,
+    });
 
-    expect(opened.sessionId).toBe(carried);
-    expect(opened.conversationId).toBeDefined();
-    expect(prisma.conversations[0].agentSessionId).toBe(carried);
+    expect(after.sessionId).not.toBe(first.sessionId);
   });
 
-  it('documents the boundary: an unreadable store adopts the id with nothing checking it', async () => {
-    // Where the guarantee above stops, and the reason the comments on
-    // `OpenedTurn.sessionId` and `MsaidiziConversation.agentSessionId` are
-    // conditional rather than absolute.
-    //
-    // The unique index rejects a stranger's id at INSERT. On this path there is
-    // no insert: the read that would have resolved the id failed, so nothing is
-    // offered to the index and the caller's own string is what the run — and
-    // every `audit_logs` row it writes — is stamped with. The id below is
-    // deliberately one that DOES name another user's conversation, which is the
-    // case the absolute claimed could never happen.
+  it('mints when the store cannot be read, rather than adopting an id nothing checked', async () => {
+    // The case that used to be the acknowledged hole, and the reason the
+    // comments on `OpenedTurn.sessionId` and `MsaidiziConversation.agentSessionId`
+    // were conditional. The read that would have resolved the id is the read
+    // that failed, so nothing could check it — and it was taken anyway, which
+    // meant two users' audit rows could share a correlation key during an
+    // outage. The id below is deliberately one that DOES name another user's
+    // conversation.
     const { prisma, service } = makeService();
     const owner = authUser();
     const stranger = authUser({ id: 'user-B', email: 'b@itemba.local' });
@@ -1673,7 +1938,7 @@ describe('a session id that already names a conversation is never adopted', () =
     jest
       .spyOn(prisma.msaidiziConversation, 'findFirst')
       .mockRejectedValue(new Error('connection refused'));
-    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
     const opened = await service.open({
       user: stranger,
@@ -1681,25 +1946,20 @@ describe('a session id that already names a conversation is never adopted', () =
       clientSessionId: theirs.sessionId,
     });
 
-    // Adopted verbatim, and the turn is unpersisted — no row of user B's is
-    // written under user A's session id, because no row is written at all.
-    expect(opened.sessionId).toBe(theirs.sessionId);
+    // Re-identified. The run still happens — unpersisted, because the store is
+    // down — and its audit rows carry an id this server minted for it.
+    expect(opened.sessionId).not.toBe(theirs.sessionId);
+    expect(opened.sessionId).toMatch(/^ms_[0-9a-f]{32}$/);
     expect(opened.conversationId).toBeUndefined();
     expect(prisma.conversations).toHaveLength(1);
     expect(prisma.conversations[0].userId).toBe(owner.id);
-
-    // Not silent: this is the only record that a session id in the trail was
-    // never checked against anything.
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining(theirs.sessionId));
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not be checked'));
-    warn.mockRestore();
+    error.mockRestore();
   });
 
-  it('says so on the conversation-id path too, where the id is pure decoration', async () => {
+  it('does the same on the conversation-id path, where the id is pure decoration', async () => {
     // `continueById` normally takes the session id off the row it read, so the
     // client's copy is never consulted. When that read fails there is no row to
-    // take it from and the client's value is adopted — same adoption, same
-    // absence of any check, and it reaches the same audit header.
+    // take it from — and the answer is a mint, not the client's string.
     const { prisma, service } = makeService();
     const user = authUser();
 
@@ -1709,7 +1969,7 @@ describe('a session id that already names a conversation is never adopted', () =
     jest
       .spyOn(prisma.msaidiziConversation, 'findFirst')
       .mockRejectedValue(new Error('connection refused'));
-    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
     const carried = 'ms_0123456789abcdef0123456789abcdef';
     const opened = await service.open({
@@ -1720,10 +1980,59 @@ describe('a session id that already names a conversation is never adopted', () =
       fallbackHistory: [{ role: 'user', content: ASKED }],
     });
 
-    expect(opened.sessionId).toBe(carried);
+    expect(opened.sessionId).not.toBe(carried);
+    expect(opened.sessionId).toMatch(/^ms_[0-9a-f]{32}$/);
     expect(opened.conversationId).toBeUndefined();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining(carried));
+    error.mockRestore();
+  });
+
+  it('mints when the insert fails for any other reason', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    jest
+      .spyOn(prisma.msaidiziConversation, 'create')
+      .mockRejectedValue(new Error('connection refused'));
+
+    // A store that cannot be reached says nothing about whose id this is — and
+    // that used to be the argument for keeping it, because the run had to
+    // recompute the confirmation ids the user approved and could only do so
+    // under the id they were derived from. It no longer does.
+    const carried = 'ms_0123456789abcdef0123456789abcdef';
+    const opened = await service.open({ user, prompt: ASKED, clientSessionId: carried });
+
+    expect(opened.sessionId).not.toBe(carried);
+    expect(opened.sessionId).toMatch(/^ms_[0-9a-f]{32}$/);
+    expect(opened.conversationId).toBeUndefined();
+    error.mockRestore();
+  });
+
+  it('does not run under a minted id that already names a conversation', async () => {
+    // The backstop, exercised by forcing the collision the unique index exists
+    // for. It is unreachable in practice now — every id offered to this insert
+    // is one `randomUUID()` just produced — but the branch is what stops a
+    // colliding id being run under, whatever produced it.
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    const first = await service.open({ user, prompt: ASKED });
+    jest.spyOn(prisma.msaidiziConversation, 'create').mockImplementation(async () => {
+      throw new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed on the fields: (`agentSessionId`)',
+        { code: 'P2002', clientVersion: 'test', meta: { target: ['agentSessionId'] } },
+      );
+    });
+
+    const opened = await service.open({ user, prompt: 'A brand new thread' });
+
+    expect(opened.conversationId).toBeUndefined();
+    expect(opened.sessionId).toMatch(/^ms_[0-9a-f]{32}$/);
+    expect(opened.sessionId).not.toBe(first.sessionId);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('already names a conversation'));
     warn.mockRestore();
+    error.mockRestore();
   });
 });
 
@@ -1808,5 +2117,707 @@ describe('a procedure run is recorded, and is not a chat', () => {
     const detail = await service.findOne(procedure.conversationId!, user);
     expect(detail.turns[0].procedureId).toBe('proc-7');
     expect((await service.oversight({}, user)).meta.total).toBe(2);
+  });
+});
+
+// ─── The approval ledger ──────────────────────────────────────────────────────
+
+/**
+ * The two limits this ledger closes, and the shape of every test below.
+ *
+ * A red-tier approval used to be `confirmationIdFor(sessionId, toolName, args)`
+ * — a value DERIVED from three things the caller supplies on the same request
+ * that claims them approved. So:
+ *
+ *   (a) the spend was an in-memory `Set` inside one `run()` and died at the
+ *       request boundary. Re-sending the same id on a LATER request bought
+ *       another execution of the same irreversible action.
+ *   (b) an approval was never bound to a proposal having been made. Nothing on
+ *       the server had issued the id, so nothing could recognise one.
+ *
+ * A grant is the other shape: the server issues it when it proposes and spends
+ * it when it dispatches.
+ *
+ * ─── THREE ANSWERS, NOT TWO ──────────────────────────────────────────────────
+ *
+ * These tests are at the ledger's own level rather than `run()`'s, so they read
+ * the ledger's answers as the loop reads them:
+ *
+ *   `spend()` resolving `true`   IS "dispatch".
+ *   `spend()` resolving `false`  IS "propose it again under a fresh grant" —
+ *                                and it says the ledger ANSWERED.
+ *   either method REJECTING      IS "the ledger could not be asked", which the
+ *                                loop reports as unavailable and dispatches
+ *                                nothing on.
+ *
+ * The third answer is the one the store could not previously express: it caught
+ * its own failures and reported `false`, so an outage arrived at the loop
+ * wearing the face of a refusal — and the loop's response to a refusal is to
+ * propose the action again, which needs a WRITE to the same ledger that just
+ * failed. The user would be asked to approve something that could never be
+ * recorded, once per turn, for as long as the outage lasted. Every test in the
+ * last describe below exists to keep those two answers apart.
+ *
+ * THE FIXTURE SHAPES THAT MATTER, stated because the ones that were missing are
+ * how four earlier defects in this effort survived review:
+ *
+ *   - the same action across two REQUESTS, through a service that never saw the
+ *     first one (`laterRequest`). An instance-level spend passes every
+ *     single-instance test there is.
+ *   - a repeat that is IDENTICAL, not "different". The rule that makes a durable
+ *     deny list wrong is that the same weekly journal produces the same derived
+ *     id, and a test whose second action differs never exercises it.
+ *   - arguments differing only DEEP inside a body, so the digest is asked for
+ *     something a flat fixture would not ask of it.
+ *   - concurrency, and a grant crossing a conversation or a user boundary.
+ *   - a store that THROWS rather than answering. A double that only ever answers
+ *     cannot tell a ledger that reports its failures from one that hides them.
+ */
+
+/**
+ * How long the loop's grants stay spendable (`GRANT_TTL_MS`, msaidizi.service.ts).
+ *
+ * A stand-in for the loop's clock, not this file's own: the store no longer owns
+ * a TTL constant, and the test that issues on a deliberately odd expiry proves
+ * it stores whatever instant it is handed rather than imposing one.
+ */
+const LOOP_GRANT_TTL_MS = 30 * 60_000;
+
+/**
+ * A proposal, exactly as the agent loop hands it to the ledger.
+ *
+ * The id is minted HERE — by `mintGrantId()`, the real one off the wire DTO —
+ * because that is where it is minted in production: the loop needs the value for
+ * the `confirmation_required` event it emits in the same breath, so it holds the
+ * nonce before the row exists and the store is handed a finished grant. A
+ * fixture that let the store mint would be testing a store that does not exist,
+ * and would hide the seam this whole change is about.
+ */
+function proposal(
+  opened: OpenedTurn,
+  user: AuthUser,
+  action: { toolName?: string; args: Record<string, unknown> },
+  overrides: Partial<ApprovalGrant> = {},
+): ApprovalGrant {
+  const toolName = action.toolName ?? POST_JOURNAL;
+  const createdAt = new Date();
+  return {
+    grantId: mintGrantId(),
+    conversationId: opened.conversationId!,
+    userId: user.id,
+    toolName,
+    argumentDigest: digestOf(toolName, action.args),
+    proposedOnTurn: opened.sequence,
+    createdAt,
+    expiresAt: new Date(createdAt.getTime() + LOOP_GRANT_TTL_MS),
+    ...overrides,
+  };
+}
+
+/**
+ * The claim a dispatch makes against a grant it believes it holds.
+ *
+ * Built FROM the grant so that every honest claim matches in full and each test
+ * has to say which single field it is bending — the conversation, the user, the
+ * arguments, the clock. A claim assembled field by field per test would drift
+ * from the grant for reasons no reader could see.
+ */
+function claimOn(
+  grant: ApprovalGrant,
+  overrides: Partial<ApprovalGrantClaim> = {},
+): ApprovalGrantClaim {
+  return {
+    grantId: grant.grantId,
+    conversationId: grant.conversationId,
+    userId: grant.userId,
+    toolName: grant.toolName,
+    argumentDigest: grant.argumentDigest,
+    now: new Date(),
+    ...overrides,
+  };
+}
+
+describe('an approval grant is issued on the proposal and spent on the dispatch', () => {
+  it('is the port the agent loop injects, and answers through it', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+
+    // Typed as the PORT, not as the class. The loop reaches this object through
+    // `APPROVAL_GRANT_STORE`, which Nest resolves without checking anything, so
+    // the only things standing between a divergence and a `TypeError` inside the
+    // red-tier gate are this annotation, the `implements` clause on the service
+    // and the return type on `approvalGrantStoreProvider`. Two agents built the
+    // two halves of this contract to different names once already.
+    const ledger: ApprovalGrantStore = service;
+
+    const grant = proposal(opened, user, { args: RENT_900K });
+    await expect(ledger.issue(grant)).resolves.toBeUndefined();
+    expect(await ledger.spend(claimOn(grant))).toBe(true);
+    expect(prisma.grants[0].usedAt).toBeInstanceOf(Date);
+  });
+
+  it('records the proposal it was handed, verbatim, against this conversation and turn', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+
+    // A deliberately odd clock, and the point of it: the store has no TTL of its
+    // own any more. The instant it writes is the loop's, and a store that
+    // recomputed one — from a constant of its own, from `now()` — would silently
+    // overrule the module that proposed the action.
+    const grant = proposal(
+      opened,
+      user,
+      { args: RENT_900K },
+      { expiresAt: new Date(Date.now() + 97_000) },
+    );
+    await service.issue(grant);
+
+    expect(prisma.grants).toHaveLength(1);
+    expect(prisma.grants[0]).toEqual(
+      expect.objectContaining({
+        // The loop's nonce, not one this file minted. Unguessable, and its own
+        // prefix: the id it replaced was `cnf_<tool>_<hash of things the caller
+        // already holds>` — computable by anyone, which is why possession of one
+        // proved nothing.
+        id: grant.grantId,
+        conversationId: opened.conversationId,
+        userId: user.id,
+        // The turn in flight, as the loop counted it.
+        turnSequence: 1,
+        toolName: POST_JOURNAL,
+        argsDigest: digestOf(POST_JOURNAL, RENT_900K),
+        createdAt: grant.createdAt,
+        expiresAt: grant.expiresAt,
+        usedAt: null,
+      }),
+    );
+  });
+
+  it('falls back to the conversation’s own turn count when the loop names no turn', async () => {
+    // `proposedOnTurn` is optional on the port and the column is not. Zero would
+    // be a lie in an audit column — the conversation's own counter is the turn
+    // this proposal was made on, incremented under the row lock by `open()`.
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const first = await service.open({ user, prompt: 'Post the August rent journal' });
+    await service.close(first, runResult());
+    // The SECOND turn of the same conversation, so the fallback has a number to
+    // be wrong about: on a fresh conversation `turnCount` is 1 and so is the
+    // sequence, and the two are indistinguishable.
+    const second = await service.open({
+      user,
+      prompt: 'And the September one',
+      conversationId: first.conversationId,
+    });
+    expect(second.sequence).toBe(2);
+
+    await service.issue(proposal(second, user, { args: RENT_900K }, { proposedOnTurn: undefined }));
+
+    expect(prisma.grants[0].turnSequence).toBe(2);
+  });
+
+  it('approve once, execute once: the second spend of one grant loses', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+
+    const grant = proposal(opened, user, { args: RENT_900K });
+    await service.issue(grant);
+
+    expect(await service.spend(claimOn(grant))).toBe(true);
+    // One tick of one checkbox. Ten identical tool_use blocks against one
+    // approved TZS 900,000 journal used to post TZS 9,000,000.
+    expect(await service.spend(claimOn(grant))).toBe(false);
+    expect(await service.spend(claimOn(grant))).toBe(false);
+
+    expect(prisma.grants[0].usedAt).toBeInstanceOf(Date);
+  });
+
+  it('refuses the same grant re-sent on a LATER REQUEST — the durable half of the fix', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+
+    const grant = proposal(opened, user, { args: RENT_900K });
+    await service.issue(grant);
+    expect(await service.spend(claimOn(grant))).toBe(true);
+
+    // A second request — a service instance that has never seen the first, which
+    // is what the next HTTP request gets. The in-memory Set this replaced would
+    // be empty here, and would have said yes.
+    expect(await laterRequest(prisma).spend(claimOn(grant))).toBe(false);
+    expect(await laterRequest(prisma).spend(claimOn(grant))).toBe(false);
+  });
+
+  it('lets an IDENTICAL action later be approved again, on a new grant', async () => {
+    // The case that rules out simply remembering derived ids as spent for ever.
+    // The same weekly journal, posted again next week, produces the SAME derived
+    // id — so a deny list would make a legitimate repeat permanently
+    // unapprovable. Nothing about this action differs from the one before it.
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+
+    const first = proposal(opened, user, { args: RENT_900K });
+    await service.issue(first);
+    expect(await service.spend(claimOn(first))).toBe(true);
+
+    // A later turn proposes exactly the same thing again. Same tool, same
+    // arguments, same digest — and a fresh nonce.
+    const later = laterRequest(prisma);
+    const second = proposal(opened, user, { args: RENT_900K });
+    expect(second.grantId).not.toBe(first.grantId);
+    await later.issue(second);
+    expect(prisma.grants[1].argsDigest).toBe(prisma.grants[0].argsDigest);
+
+    expect(await later.spend(claimOn(second))).toBe(true);
+    // And the first is still spent — a new grant does not refresh an old one.
+    expect(await later.spend(claimOn(first))).toBe(false);
+  });
+
+  it('spends one grant per action when two distinct proposals are approved together', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post both journals' });
+
+    const small = proposal(opened, user, { args: RENT_900K });
+    const large = proposal(opened, user, { args: RENT_9M });
+    await service.issue(small);
+    await service.issue(large);
+
+    // One request approving both. The loop offers its candidates one at a time
+    // and each dispatch has to find its OWN grant, which is the property the
+    // ledger owns: the claim carries the digest of the action about to run.
+    expect(await service.spend(claimOn(small))).toBe(true);
+    expect(await service.spend(claimOn(large))).toBe(true);
+
+    expect(prisma.grants.every((grant) => grant.usedAt instanceof Date)).toBe(true);
+  });
+
+  it('will not let a grant for one journal dispatch another', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+
+    // TZS 900,000 is what was proposed, and what was approved.
+    const small = proposal(opened, user, { args: RENT_900K });
+    await service.issue(small);
+
+    // TZS 9,000,000 is what turns up at the dispatch, holding the approved
+    // grant's id. The two differ nowhere except inside `body.lines`, which is the
+    // nesting a collapsed canonical encoding once flattened away — leaving one
+    // approval good for any later action of the same tool.
+    expect(
+      await service.spend(claimOn(small, { argumentDigest: digestOf(POST_JOURNAL, RENT_9M) })),
+    ).toBe(false);
+    expect(prisma.grants[0].usedAt).toBeNull();
+
+    // Nor by the tool alone: a grant for one capability cannot dispatch another,
+    // and the digest is not the only field carrying that.
+    expect(
+      await service.spend(
+        claimOn(small, {
+          toolName: 'Payments_create',
+          argumentDigest: digestOf('Payments_create', RENT_900K),
+        }),
+      ),
+    ).toBe(false);
+    expect(prisma.grants[0].usedAt).toBeNull();
+
+    // The approval that WAS given still stands. Refusing the wrong action must
+    // not quietly burn the right one.
+    expect(await service.spend(claimOn(small))).toBe(true);
+  });
+
+  it('refuses a grant id the server never issued, including the derived form', async () => {
+    const { service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+    const never = proposal(opened, user, { args: RENT_900K });
+
+    // Well-formed and invented — never issued, so there is no row to win.
+    expect(await service.spend(claimOn(never))).toBe(false);
+
+    // The old wire form: an id the caller computes from the three public inputs.
+    // It was the whole of an approval once; it now names no row.
+    expect(
+      await service.spend(
+        claimOn(never, {
+          grantId: confirmationIdFor(opened.sessionId, POST_JOURNAL, RENT_900K),
+        }),
+      ),
+    ).toBe(false);
+
+    // And nothing at all is not an approval either. Answered without a query:
+    // an id nobody sent names nothing, and that is a fact about the claim rather
+    // than about the store.
+    expect(await service.spend(claimOn(never, { grantId: '' }))).toBe(false);
+  });
+});
+
+describe('a grant is spendable only inside the conversation, and by the user, it was issued to', () => {
+  it('refuses a grant issued in another conversation of the same user', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+
+    const first = await service.open({ user, prompt: 'Post the August rent journal' });
+    await service.close(first, runResult());
+    const second = await service.open({ user, prompt: 'Post the September rent journal' });
+
+    const grant = proposal(first, user, { args: RENT_900K });
+    await service.issue(grant);
+
+    // Same person, same tool, same arguments — a different thread. An approval
+    // given in one conversation is not an approval given in another, and the
+    // digest alone cannot tell the two apart.
+    expect(await service.spend(claimOn(grant, { conversationId: second.conversationId }))).toBe(
+      false,
+    );
+    expect(prisma.grants[0].usedAt).toBeNull();
+    // Still spendable where it was issued.
+    expect(await service.spend(claimOn(grant))).toBe(true);
+  });
+
+  it('refuses another user, whether they reach for their own conversation or its owner’s', async () => {
+    const { prisma, service } = makeService();
+    const asha = authUser();
+    const brian = authUser({ id: 'user-B', email: 'b@itemba.local', fullName: 'Brian' });
+
+    const hers = await service.open({ user: asha, prompt: 'Post the August rent journal' });
+    await service.close(hers, runResult());
+    const his = await service.open({ user: brian, prompt: 'What do I owe?' });
+
+    const grant = proposal(hers, asha, { args: RENT_900K });
+    await service.issue(grant);
+
+    // Under his own conversation: the grant is not filed there.
+    expect(
+      await service.spend(claimOn(grant, { conversationId: his.conversationId, userId: brian.id })),
+    ).toBe(false);
+    // Reaching into hers: that conversation is not his, so there is nothing to
+    // look in — the same answer the rest of this service gives a non-author.
+    expect(await service.spend(claimOn(grant, { userId: brian.id }))).toBe(false);
+
+    expect(prisma.grants[0].usedAt).toBeNull();
+    // And it is still hers to spend.
+    expect(await service.spend(claimOn(grant))).toBe(true);
+  });
+
+  it('files no grant on a conversation that is not the claimed author’s', async () => {
+    // The boundary held at ISSUE as well as at spend, and it has to be here to
+    // be held at all: `spend()` compares the claim against the grant's own
+    // `userId` column, so a row written under the wrong author would be spendable
+    // by that same wrong author and the comparison would agree with itself. The
+    // author is checked against the CONVERSATION, once, before the row exists.
+    const { prisma, service } = makeService();
+    const asha = authUser();
+    const brian = authUser({ id: 'user-B', email: 'b@itemba.local', fullName: 'Brian' });
+
+    const hers = await service.open({ user: asha, prompt: 'Post the August rent journal' });
+
+    await expect(service.issue(proposal(hers, brian, { args: RENT_900K }))).rejects.toThrow(
+      /not this caller's, or it has been removed/,
+    );
+    expect(prisma.grants).toHaveLength(0);
+  });
+
+  it('refuses a grant whose conversation its author has removed', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+    const grant = proposal(opened, user, { args: RENT_900K });
+    await service.issue(grant);
+
+    await service.close(opened, runResult());
+    await service.remove(opened.conversationId!, user);
+
+    // A tab left open while the thread was deleted in another. The grant row is
+    // still there — a soft delete does not cascade — so the ledger has to refuse
+    // it on the conversation's own state rather than on the row's absence.
+    expect(await service.spend(claimOn(grant))).toBe(false);
+    expect(prisma.grants[0].usedAt).toBeNull();
+
+    // And nothing new can be filed on it either.
+    await expect(service.issue(proposal(opened, user, { args: RENT_9M }))).rejects.toThrow(
+      /not this caller's, or it has been removed/,
+    );
+    expect(prisma.grants).toHaveLength(1);
+  });
+
+  it('cannot be reached at all by a caller who has lost the company', async () => {
+    // WHERE THIS GUARD MOVED, and why it is asserted here rather than inside the
+    // ledger. The port hands the store a `userId`, not an `AuthUser`, so the
+    // company half of `scopeFor()` cannot be evaluated at the spend. It does not
+    // need to be: the conversation id the loop passes is never the client's
+    // claim. `open()` resolves it through the whole of `scopeFor()` — company
+    // clause included — and the controller passes the RESOLVED row's id, so a
+    // caller who has lost the company cannot obtain the scope a grant is
+    // spendable under in the first place. This test holds THAT gate, because it
+    // is now the one carrying the property.
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+    await service.issue(proposal(opened, user, { args: RENT_900K }));
+    await service.close(opened, runResult());
+
+    const moved = authUser({ companyId: 'company-B', companyAccess: [] });
+    await expect(
+      service.open({ user: moved, prompt: 'Carry on', conversationId: opened.conversationId }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(prisma.grants[0].usedAt).toBeNull();
+  });
+});
+
+describe('the spend is one conditional update, and it decides the race', () => {
+  it('lets exactly one of three concurrent spends of the same grant win', async () => {
+    // The shape this is written against is read-then-write: every racer reads
+    // `usedAt IS NULL`, every racer concludes it may proceed, and one approved
+    // payment is made three times. This codebase has already paid for that shape
+    // once, in a create race that could not be decided by reading first.
+    //
+    // The double has no way to READ a grant at all — no findUnique, no findFirst,
+    // no findMany — so an implementation of that shape cannot even run here.
+    // What this test adds on top is the verdict: `updateMany` applies its filter
+    // and its data with no await between them, exactly as the real statement
+    // does, so the losers meet a row the winner has already stamped.
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+    const grant = proposal(opened, user, { args: RENT_900K });
+    await service.issue(grant);
+
+    // Three requests in flight at once — two tabs and a double-clicked button.
+    const verdicts = await Promise.all([
+      service.spend(claimOn(grant)),
+      laterRequest(prisma).spend(claimOn(grant)),
+      laterRequest(prisma).spend(claimOn(grant)),
+    ]);
+
+    expect(verdicts.filter(Boolean)).toHaveLength(1);
+    expect(prisma.grants[0].usedAt).toBeInstanceOf(Date);
+  });
+
+  it('spends the grant it was named, not every grant that would fit', async () => {
+    // Two grants for the SAME action, which is what a turn proposing a repeat
+    // produces. The spend is keyed on the id: a WHERE clause built from the
+    // scope and the digest alone — conversation, user, tool, args, unused — would
+    // match both rows and `updateMany` would stamp both, so one dispatch would
+    // silently burn the approval the next one needs. Identical fixtures are the
+    // only shape that can catch it.
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post both journals' });
+
+    const first = proposal(opened, user, { args: RENT_900K });
+    const second = proposal(opened, user, { args: RENT_900K });
+    await service.issue(first);
+    await service.issue(second);
+
+    expect(await service.spend(claimOn(first))).toBe(true);
+    expect(prisma.grants.filter((grant) => grant.usedAt === null)).toHaveLength(1);
+    // The second dispatch still has its own approval to spend.
+    expect(await service.spend(claimOn(second))).toBe(true);
+  });
+});
+
+describe('an expired grant cannot be spent, and the sweep is not what enforces that', () => {
+  it('refuses a grant past its clock while the row is still sitting there', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+    const grant = proposal(opened, user, { args: RENT_900K });
+    await service.issue(grant);
+
+    // Half an hour later. The row has NOT been swept, deliberately: the sweep is
+    // bounded, opportunistic and swallowed, so a ledger that depended on it
+    // would honour approvals for as long as it fell behind.
+    prisma.grants[0].expiresAt = new Date(Date.now() - 60_000);
+
+    expect(await service.spend(claimOn(grant))).toBe(false);
+    expect(prisma.grants).toHaveLength(1);
+    expect(prisma.grants[0].usedAt).toBeNull();
+  });
+
+  it('judges the expiry against the dispatch’s own clock, not the machine’s', async () => {
+    // `claim.now` is the instant the loop opened the dispatch with, and one run
+    // offers its candidates against one instant rather than against a clock that
+    // moves between them. A store reading `new Date()` here would answer a
+    // question nobody asked — and would be untestable at the boundary, which is
+    // the tell.
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+    const grant = proposal(opened, user, { args: RENT_900K });
+    await service.issue(grant);
+
+    // A clock past the grant's expiry: refused, though the row is live by the
+    // machine's own reckoning.
+    const late = new Date(grant.expiresAt.getTime() + 1_000);
+    expect(await service.spend(claimOn(grant, { now: late }))).toBe(false);
+    expect(prisma.grants[0].usedAt).toBeNull();
+
+    // And the stamp is that clock too, so the row says when it was spent rather
+    // than when the process got round to writing it.
+    const at = new Date(grant.createdAt.getTime() + 5_000);
+    expect(await service.spend(claimOn(grant, { now: at }))).toBe(true);
+    expect(prisma.grants[0].usedAt).toEqual(at);
+  });
+
+  it('sweeps expired grants on the feature’s own traffic, and leaves live ones alone', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+
+    await service.issue(proposal(opened, user, { args: RENT_900K }));
+    const live = proposal(opened, user, { args: RENT_9M });
+    await service.issue(live);
+    prisma.grants[0].expiresAt = new Date(Date.now() - 60_000);
+
+    // Any question anyone in the deployment asks runs the sweep. There is still
+    // no scheduler in this codebase.
+    await service.open({ user, prompt: 'An unrelated question' });
+
+    expect(prisma.grants.map((grant) => grant.id)).toEqual([live.grantId]);
+  });
+
+  it('destroys a conversation’s grants along with the conversation', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+    await service.issue(proposal(opened, user, { args: RENT_900K }));
+    await service.close(opened, runResult());
+
+    // Past the retention window. Grants cascade, as the foreign key says: a
+    // deleted conversation must never leave a spendable approval behind.
+    prisma.conversations[0].expiresAt = new Date(Date.now() - 60_000);
+    await service.open({ user, prompt: 'Something else entirely' });
+
+    expect(prisma.conversations.map((row) => row.id)).not.toContain(opened.conversationId);
+    expect(prisma.grants).toHaveLength(0);
+  });
+});
+
+describe('the approval ledger fails CLOSED, unlike everything else in this file', () => {
+  it('rejects rather than refusing when the spend cannot reach the store', async () => {
+    // The deliberate contradiction of this file's own first rule. Everywhere
+    // else the model turn and the tool calls have already happened, so
+    // swallowing costs only a record of them. Here the work has NOT happened,
+    // and an unspendable grant is an unproven approval.
+    //
+    // A REJECTION, not `false`. The loop dispatches on neither, but it behaves
+    // differently: `false` re-proposes, and re-proposing writes a fresh grant to
+    // the same ledger that just failed. An outage reported as a refusal asks the
+    // user to approve what cannot be recorded — every turn, until it clears.
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+    const grant = proposal(opened, user, { args: RENT_900K });
+    await service.issue(grant);
+
+    jest
+      .spyOn(prisma.msaidiziApprovalGrant, 'updateMany')
+      .mockRejectedValue(new Error('connection refused'));
+
+    await expect(service.spend(claimOn(grant))).rejects.toThrow('connection refused');
+    expect(prisma.grants[0].usedAt).toBeNull();
+  });
+
+  it('rejects when the store cannot say whose conversation this is', async () => {
+    // The other half of the same call, and it fails the same way. The scope
+    // lookup is a read of a different table, so a store that answers one and not
+    // the other is an ordinary partial outage — and reading "I could not check
+    // the author" as "this is not your grant" would put an outage back inside
+    // the refusal.
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+    const grant = proposal(opened, user, { args: RENT_900K });
+    await service.issue(grant);
+
+    jest
+      .spyOn(prisma.msaidiziConversation, 'findFirst')
+      .mockRejectedValue(new Error('connection refused'));
+
+    await expect(service.spend(claimOn(grant))).rejects.toThrow('connection refused');
+    expect(prisma.grants[0].usedAt).toBeNull();
+  });
+
+  it('tells "no such grant" and "the ledger did not answer" apart on the same claim', async () => {
+    // The distinction, made once, on one claim, with nothing else differing —
+    // because the failure this replaced was precisely that these two collapsed
+    // into one value. A store that catches its own errors passes every other
+    // test in this file.
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+    const grant = proposal(opened, user, { args: RENT_900K });
+    await service.issue(grant);
+    const claim = claimOn(grant);
+
+    // Spent: the ledger answered, and holds no spendable grant. Re-propose.
+    expect(await service.spend(claim)).toBe(true);
+    expect(await service.spend(claim)).toBe(false);
+
+    // Unreachable: the ledger did not answer. Do not re-propose.
+    const outage = jest
+      .spyOn(prisma.msaidiziApprovalGrant, 'updateMany')
+      .mockRejectedValue(new Error('connection refused'));
+    await expect(service.spend(claim)).rejects.toThrow('connection refused');
+
+    // And the answer goes back to being an answer when the store recovers.
+    outage.mockRestore();
+    expect(await service.spend(claim)).toBe(false);
+  });
+
+  it('rejects rather than returning when a grant cannot be recorded', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+
+    jest
+      .spyOn(prisma.msaidiziApprovalGrant, 'create')
+      .mockRejectedValue(new Error('connection refused'));
+
+    // The proposal still reaches the user; what cannot happen is its approval
+    // being honoured on the strength of nothing. The loop catches this, logs it,
+    // and does not offer the action — the same response it gives a grant that
+    // was refused, and reached by being TOLD rather than by inferring it from a
+    // null.
+    await expect(service.issue(proposal(opened, user, { args: RENT_900K }))).rejects.toThrow(
+      'connection refused',
+    );
+    expect(prisma.grants).toHaveLength(0);
+  });
+
+  it('files no grant for a run whose turn was never persisted', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    jest
+      .spyOn(prisma.msaidiziConversation, 'create')
+      .mockRejectedValue(new Error('connection refused'));
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    // A degraded run: it answers, unpersisted, under a minted id that names no
+    // conversation. There is nowhere to file an approval, so red-tier actions in
+    // it are proposed and cannot be approved — the correct end of that trade,
+    // not a gap in it. The loop's own gate stops before it reaches the ledger;
+    // this is the ledger refusing the same thing on its own account, so the gate
+    // is not the only thing holding it.
+    const opened = await service.open({ user, prompt: 'Post the August rent journal' });
+    expect(opened.conversationId).toBeUndefined();
+
+    await expect(
+      service.issue(
+        proposal(opened, user, { args: RENT_900K }, { conversationId: 'conv-never-written' }),
+      ),
+    ).rejects.toThrow(/No approval grant can be filed/);
+    expect(prisma.grants).toHaveLength(0);
+
+    warn.mockRestore();
+    error.mockRestore();
   });
 });
