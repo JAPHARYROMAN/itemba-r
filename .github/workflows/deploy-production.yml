@@ -105,9 +105,8 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN }}
           SHA: ${{ steps.resolve.outputs.sha }}
-        # deploy.sh is re-run safe by design: it preserves an existing
-        # .env.production rather than regenerating secrets. It DOES re-run the
-        # seed, which full-replaces role permissions — see the runbook note.
+        # deploy.sh preserves the existing .env.production and named volumes,
+        # verifies a pre-migration backup, and skips the full seed by default.
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes \

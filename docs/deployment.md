@@ -183,14 +183,14 @@ waits for backend readiness, verifies the frontend login route, and then removes
 # 2. Validate deployment contract
 npm run verify:deploy
 
-# 3. Deploy with Docker Compose. The backend-migrate service applies migrations
-# before the backend is allowed to start.
-docker compose --env-file .env.production -f docker-compose.production.yml up -d --build
-
-# 4. Run seed only when intentionally bootstrapping a fresh environment.
-# Requires SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD in .env.production.
-docker compose --env-file .env.production -f docker-compose.production.yml --profile seed run --rm backend-seed
+# 3. Deploy through the guarded production script. It verifies the persistent
+# database volume and a pre-migration backup before the migration service runs.
+DOMAIN=itembagrouptz.com bash deploy/relaunch/deploy.sh
 ```
+
+The seed full-replaces system role permissions. Do not run it during an ordinary
+deployment. See `deploy/relaunch/README.md` for the explicit first-installation
+command, maintenance confirmation, and backup/volume safety contract.
 
 ## Health Checks
 - Backend readiness: `GET /api/v1/health/ready`
