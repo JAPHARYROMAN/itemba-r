@@ -51,7 +51,13 @@ import { ManifestProvider } from './manifest.provider';
 import { ModelClient, ModelMessage, ModelToolUseBlock, ModelUsage } from './model-client';
 import { MsaidiziConfig, WriteMode } from './msaidizi.config';
 import { buildSystemPrompt, fenceToolResult } from './prompts';
-import { buildRegistry, describeAction, indexByToolName, RegistryEntry } from './tool-registry';
+import {
+  buildRegistry,
+  buildSearchToolSet,
+  describeAction,
+  indexByToolName,
+  RegistryEntry,
+} from './tool-registry';
 
 /**
  * How many capabilities relevance narrowing may keep for one run.
@@ -500,13 +506,24 @@ export class MsaidiziService {
       modelTurns: 0,
     };
 
+    // Built once, outside the loop, and reused on every turn of this run.
+    //
+    // That is not just an allocation saving: the tool block renders BEFORE the
+    // system block, and the cache breakpoint sits on the system block, so a tool
+    // list that differs between turns changes the bytes ahead of the breakpoint
+    // and nothing after it can cache. Rebuilding per turn would keep the prefix
+    // moving even when the contents happened to be identical.
+    const declaredTools = this.config.searchEnabled
+      ? buildSearchToolSet(registry).tools
+      : registry.map((entry) => entry.tool);
+
     for (;;) {
       let response;
       try {
         response = await this.model.createMessage({
           system,
           messages,
-          tools: registry.map((entry) => entry.tool),
+          tools: declaredTools,
           maxTokens: this.config.maxTokens,
         });
       } catch (err) {
@@ -985,6 +1002,17 @@ export class MsaidiziService {
       request.user.permissions ?? [],
       this.config.allowedTiers,
     );
+
+    // Search replaces narrowing rather than layering on top of it. Narrowing
+    // first would defeat the point twice over: the model could only ever find
+    // what a lexical scorer had already chosen, and the declared set would go
+    // back to varying per turn, which is what breaks the cache and produced both
+    // defects documented below.
+    //
+    // The two ceilings are untouched — this is `permitted`, so permission ∩
+    // write mode still bound it. What changes is how much of that set the model
+    // can see at once, not how much it can reach.
+    if (this.config.searchEnabled) return permitted;
 
     if (permitted.length <= TOOL_BUDGET) return permitted;
 

@@ -12,7 +12,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import { MsaidiziConfig } from './msaidizi.config';
-import { ToolDefinition } from './tool-registry';
+import { DeclaredTool } from './tool-registry';
 
 export interface ModelTextBlock {
   type: 'text';
@@ -36,7 +36,7 @@ export interface ModelMessage {
 export interface ModelRequest {
   system: Array<Record<string, unknown>>;
   messages: ModelMessage[];
-  tools: ToolDefinition[];
+  tools: DeclaredTool[];
   maxTokens: number;
 }
 

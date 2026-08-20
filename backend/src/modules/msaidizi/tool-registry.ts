@@ -36,6 +36,21 @@ export interface RegistryEntry {
   capability: Capability;
 }
 
+/**
+ * A tool Anthropic runs on its own side, declared by type and name only.
+ *
+ * It carries no `input_schema` because we do not define its arguments — the
+ * shape belongs to the API, not to this codebase, and inventing one here would
+ * be a guess that silently diverges when the API version moves.
+ */
+export interface ServerToolDefinition {
+  type: string;
+  name: string;
+}
+
+/** Anything that may appear in a request's `tools` array. */
+export type DeclaredTool = ToolDefinition | ServerToolDefinition;
+
 /** Anthropic tool names: letters, digits, underscore and hyphen, max 64. */
 const MAX_TOOL_NAME = 64;
 
@@ -297,4 +312,92 @@ export function buildRegistry(
 /** Index a registry by tool name, for dispatching a model tool call. */
 export function indexByToolName(entries: RegistryEntry[]): Map<string, RegistryEntry> {
   return new Map(entries.map((e) => [e.tool.name, e]));
+}
+
+// ─── Tool search ──────────────────────────────────────────────────────────────
+
+/**
+ * The BM25 search tool. BM25 rather than the regex variant because a user types
+ * language, not name patterns: "who owes us money" has to reach `receivables`,
+ * and no amount of literal matching gets there from those words.
+ */
+export const TOOL_SEARCH_DEFINITION = {
+  type: 'tool_search_tool_bm25_20251119',
+  name: 'tool_search_tool_bm25',
+} as const;
+
+/**
+ * How many capabilities stay resident when search is on.
+ *
+ * Small on purpose. These are the floor the model always has without spending a
+ * search round-trip, not a second narrowing pass — every other capability is one
+ * search away, so a generous resident set buys latency on the common ask at the
+ * cost of the byte-stability this whole design depends on.
+ */
+export const ENTRY_POINT_BUDGET = 15;
+
+/**
+ * Chooses the capabilities that stay resident, deterministically.
+ *
+ * Deterministic, and derived only from the caller's permitted set — NOT from the
+ * request. That distinction is the point. The API renders `tools` before
+ * `system`, and the cache breakpoint sits on the system block, so anything that
+ * varies per request changes the bytes ahead of the breakpoint and the cache
+ * never hits. A per-request resident set would preserve today's behaviour, where
+ * every turn pays full price for the system prompt and every resident schema.
+ * Keyed to the user's permissions, the block is identical across that user's
+ * turns and the prefix can finally cache.
+ *
+ * The heuristic is shallow green reads: collection-level list endpoints, which
+ * are where an agent orients itself before it knows what it is looking for.
+ * Sorted by path depth then name so the set is stable under manifest churn.
+ */
+export function selectEntryPoints(
+  entries: RegistryEntry[],
+  limit = ENTRY_POINT_BUDGET,
+): RegistryEntry[] {
+  return entries
+    .filter((e) => e.capability.tier === 'green')
+    .filter((e) => !e.capability.path.includes(':'))
+    .sort((a, b) => {
+      const depth = a.capability.path.split('/').length - b.capability.path.split('/').length;
+      return depth !== 0 ? depth : a.tool.name.localeCompare(b.tool.name);
+    })
+    .slice(0, limit);
+}
+
+export interface SearchToolSet {
+  /** Everything declared this turn, resident and deferred, in wire order. */
+  tools: DeclaredTool[];
+  /** Resident capability tools — the floor available without searching. */
+  entryPoints: RegistryEntry[];
+}
+
+/**
+ * Builds the declared tool set for a search-enabled turn.
+ *
+ * Every permitted capability is declared. The ones outside the entry set carry
+ * `defer_loading`, so their schemas are fetched on demand rather than sitting in
+ * context — the model can still reach them, it just cannot see them all at once.
+ *
+ * The search tool is always resident, which also satisfies the API's requirement
+ * that at least one tool not be deferred; a request with everything deferred is
+ * rejected outright.
+ */
+export function buildSearchToolSet(
+  permitted: RegistryEntry[],
+  limit = ENTRY_POINT_BUDGET,
+): SearchToolSet {
+  const entryPoints = selectEntryPoints(permitted, limit);
+  const resident = new Set(entryPoints.map((e) => e.tool.name));
+
+  return {
+    entryPoints,
+    tools: [
+      TOOL_SEARCH_DEFINITION,
+      ...permitted.map((entry) =>
+        resident.has(entry.tool.name) ? entry.tool : { ...entry.tool, defer_loading: true },
+      ),
+    ],
+  };
 }

@@ -837,3 +837,117 @@ describe('tool output is data, and every call carries the caller credential', ()
     expect(toolResult).toMatchObject({ ok: false, status: 403 });
   });
 });
+
+/**
+ * Tool search is a visibility change, not an authority change.
+ *
+ * Enabling it stops narrowing and declares every permitted capability, most of
+ * them deferred. The claim under test is that "every permitted" still means
+ * exactly what buildRegistry permitted — the two ceilings are untouched, and a
+ * capability the caller cannot reach is absent from the wire rather than merely
+ * hidden behind a search.
+ */
+describe('enabling tool search does not widen the envelope', () => {
+  const manifest = [
+    capability(),
+    capability({
+      id: 'PayrollController.list',
+      controller: 'PayrollController',
+      handler: 'list',
+      path: 'hr/payroll',
+      permissions: ['payroll.view'],
+    }),
+    capability({
+      id: 'CustomersController.remove',
+      handler: 'remove',
+      verb: 'DELETE',
+      path: 'customers/:id',
+      permissions: ['customers.delete'],
+      tier: 'red',
+      tierReason: 'delete-verb',
+      params: { path: ['id'], query: [], freeFormQuery: false, hasBody: false },
+    }),
+  ];
+
+  it('still offers nothing the caller lacks permission for', async () => {
+    const model = new ScriptedModel([]);
+    const service = makeService(
+      manifest,
+      model,
+      new RecordingInvoker(),
+      configFor('read-only', { searchEnabled: true }),
+    );
+
+    await service.run({
+      user: authUser(['customers.view']),
+      authorization: 'Bearer t',
+      messages: [{ role: 'user', content: 'show me payroll and customers' }],
+    });
+
+    const names = model.seen[0].tools.map((t) => t.name);
+    expect(names).not.toContain('Payroll_list');
+    expect(names).toContain('Customers_findAll');
+  });
+
+  it('still withholds a tier the deployment disabled', async () => {
+    const model = new ScriptedModel([]);
+    const service = makeService(
+      manifest,
+      model,
+      new RecordingInvoker(),
+      configFor('read-only', { searchEnabled: true }),
+    );
+
+    await service.run({
+      user: authUser(['customers.view', 'customers.delete']),
+      authorization: 'Bearer t',
+      messages: [{ role: 'user', content: 'delete a customer' }],
+    });
+
+    // Held by the user, disabled by the deployment: absent, not deferred.
+    expect(model.seen[0].tools.map((t) => t.name)).not.toContain('Customers_remove');
+  });
+
+  it('declares the search tool so a fully deferred set is never sent', async () => {
+    const model = new ScriptedModel([]);
+    const service = makeService(
+      manifest,
+      model,
+      new RecordingInvoker(),
+      configFor('read-only', { searchEnabled: true }),
+    );
+
+    await service.run({
+      user: authUser(['customers.view']),
+      authorization: 'Bearer t',
+      messages: [{ role: 'user', content: 'anything' }],
+    });
+
+    expect(model.seen[0].tools.map((t) => t.name)).toContain('tool_search_tool_bm25');
+  });
+
+  it('sends a byte-identical tool block across turns of one run', async () => {
+    // The cache property, at the level that actually reaches the API. Tools
+    // render before system, and the breakpoint is on system, so a tool block
+    // that differs between turns means nothing after it can ever cache.
+    const model = new ScriptedModel([
+      toolUse('Customers_findAll'),
+      { content: [{ type: 'text', text: 'done' }], stopReason: 'end_turn' },
+    ]);
+    const service = makeService(
+      manifest,
+      model,
+      new RecordingInvoker(),
+      configFor('read-only', { searchEnabled: true }),
+    );
+
+    await service.run({
+      user: authUser(['customers.view']),
+      authorization: 'Bearer t',
+      messages: [{ role: 'user', content: 'list customers' }],
+    });
+
+    expect(model.seen.length).toBeGreaterThan(1);
+    expect(JSON.stringify(model.seen[1].tools)).toBe(JSON.stringify(model.seen[0].tools));
+  });
+});
