@@ -11,6 +11,8 @@ services:
       API_HOST: ${API_HOST:-api.itembagrouptz.com}
       WEBSITE_HOST: ${WEBSITE_HOST:-itembagrouptz.com}
       WEBSITE_WWW_HOST: ${WEBSITE_WWW_HOST:-www.itembagrouptz.com}
+      FUELGRID_APP_HOST: ${FUELGRID_APP_HOST:-fuelgrid.itembagrouptz.com}
+      FUELGRID_API_HOST: ${FUELGRID_API_HOST:-api.fuelgrid.itembagrouptz.com}
     ports:
       - '80:80'
       - '443:443'
@@ -28,6 +30,7 @@ services:
         condition: service_healthy
     networks:
       - itemba_network
+      - shared_edge
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:2019/config/ >/dev/null']
       interval: 30s
@@ -315,3 +318,6 @@ volumes:
 networks:
   itemba_network:
     driver: bridge
+  shared_edge:
+    name: ${SHARED_EDGE_NETWORK:-itemba_shared_edge}
+    external: true

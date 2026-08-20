@@ -32,6 +32,13 @@ log() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 
 gen_secret() { openssl rand -base64 48 | tr -d '\n/+=' | cut -c1-48; }
 gen_password() { openssl rand -base64 36 | tr -d '\n/+=' | cut -c1-28; }
+ensure_env_default() {
+  local key="$1"
+  local value="$2"
+  if ! grep -q "^${key}=" "$ENV_FILE"; then
+    printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+  fi
+}
 
 # ----------------------------------------------------------------------------
 # 1. Docker + compose plugin
@@ -108,6 +115,9 @@ APP_HOST=app.${DOMAIN}
 API_HOST=api.${DOMAIN}
 WEBSITE_HOST=${DOMAIN}
 WEBSITE_WWW_HOST=www.${DOMAIN}
+FUELGRID_APP_HOST=fuelgrid.${DOMAIN}
+FUELGRID_API_HOST=api.fuelgrid.${DOMAIN}
+SHARED_EDGE_NETWORK=itemba_shared_edge
 
 # --- App URLs ---
 FRONTEND_URL=https://app.${DOMAIN}
@@ -116,6 +126,8 @@ CORS_ORIGIN=https://app.${DOMAIN}
 NEXT_PUBLIC_API_URL=https://api.${DOMAIN}/api/v1
 NEXT_PUBLIC_WEBSITE_URL=https://${DOMAIN}
 BACKEND_INTERNAL_URL=http://backend:3001/api/v1
+FUELGRID_APP_URL=https://fuelgrid.${DOMAIN}
+FUELGRID_HEALTH_URL=https://api.fuelgrid.${DOMAIN}/readyz
 
 # --- Misc ---
 JOB_WORKER_ENABLED=true
@@ -139,6 +151,21 @@ ENVEOF
 else
   log "${ENV_FILE} already exists — leaving it untouched"
 fi
+
+# These are non-secret topology defaults added after the original production
+# bootstrap. Preserve any operator override while making old .env files ready
+# for the shared ITEMBA-R/FuelGrid droplet layout.
+ensure_env_default SHARED_EDGE_NETWORK itemba_shared_edge
+ensure_env_default FUELGRID_APP_HOST "fuelgrid.${DOMAIN}"
+ensure_env_default FUELGRID_API_HOST "api.fuelgrid.${DOMAIN}"
+ensure_env_default FUELGRID_APP_URL "https://fuelgrid.${DOMAIN}"
+ensure_env_default FUELGRID_HEALTH_URL "https://api.fuelgrid.${DOMAIN}/readyz"
+
+SHARED_EDGE_NETWORK="$(sed -n 's/^SHARED_EDGE_NETWORK=//p' "$ENV_FILE" | tail -n1)"
+SHARED_EDGE_NETWORK="${SHARED_EDGE_NETWORK:-itemba_shared_edge}"
+log "Ensuring shared application edge network: ${SHARED_EDGE_NETWORK}"
+docker network inspect "$SHARED_EDGE_NETWORK" >/dev/null 2>&1 \
+  || docker network create "$SHARED_EDGE_NETWORK"
 
 # ----------------------------------------------------------------------------
 # 4. Build + start the stack (migrations run via the backend-migrate one-shot)

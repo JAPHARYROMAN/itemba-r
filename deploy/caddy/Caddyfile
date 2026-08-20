@@ -16,3 +16,26 @@
 	encode zstd gzip
 	reverse_proxy website:3001
 }
+
+{$FUELGRID_APP_HOST:fuelgrid.itembagrouptz.com} {
+	encode zstd gzip
+	reverse_proxy fuelgrid-web:3000
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+{$FUELGRID_API_HOST:api.fuelgrid.itembagrouptz.com} {
+	encode zstd gzip
+	reverse_proxy fuelgrid-api:8080
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+}
