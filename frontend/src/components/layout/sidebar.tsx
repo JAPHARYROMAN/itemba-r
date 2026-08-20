@@ -100,6 +100,8 @@ const ICONS = {
   automation: 'M13 10V3L4 14h7v7l9-11h-7z',
   assistant:
     'M11.017 2.814a1 1 0 011.966 0l1.051 5.558a2 2 0 001.594 1.594l5.558 1.051a1 1 0 010 1.966l-5.558 1.051a2 2 0 00-1.594 1.594l-1.051 5.558a1 1 0 01-1.966 0l-1.051-5.558a2 2 0 00-1.594-1.594l-5.558-1.051a1 1 0 010-1.966l5.558-1.051a2 2 0 001.594-1.594z',
+  fuelGrid:
+    'M3 22V4a2 2 0 012-2h9a2 2 0 012 2v18M3 22h15M6 6h7v5H6V6zm10 2h2l3 3v7a2 2 0 01-4 0v-5a1 1 0 00-1-1',
   performance: 'M13 10V3L4 14h7v7l9-11h-7z',
   jobs: 'M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2',
   isolation:
@@ -144,6 +146,12 @@ export const NAV: NavItem[] = [
   // without `msaidizi.use`, which is the UI expression of the backend's rule
   // that an unpermitted capability is invisible rather than refused.
   { href: '/msaidizi', label: 'Msaidizi', iconKey: 'assistant', permission: 'msaidizi.use' },
+  {
+    href: '/fuel-grid',
+    label: 'Fuel Grid',
+    iconKey: 'fuelGrid',
+    permission: 'fuel_grid.access',
+  },
   {
     label: 'Records Book',
     iconKey: 'clipboardList',

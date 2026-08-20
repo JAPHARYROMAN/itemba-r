@@ -101,6 +101,7 @@ const NAV_ICON_LABELS: Record<string, string> = {
   Activity: 'Monitoring',
   Archive: 'Archive',
   CheckBadge: 'Certified',
+  fuelGrid: 'Fuel operations',
 };
 
 const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
@@ -367,6 +368,7 @@ const NAV_ICON_KEY_TO_APP_ICON: Record<string, AppIconName> = {
   Activity: 'trendUp',
   Archive: 'inventory',
   CheckBadge: 'approved',
+  fuelGrid: 'fuel',
 };
 
 function iconForNavKey(key: unknown): React.ReactNode {

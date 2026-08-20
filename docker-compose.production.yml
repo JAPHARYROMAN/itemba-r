@@ -236,6 +236,10 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
       # Public website URL shown from login/signup as the permanent group address.
       NEXT_PUBLIC_WEBSITE_URL: ${NEXT_PUBLIC_WEBSITE_URL:?NEXT_PUBLIC_WEBSITE_URL is required}
+      # Fuel Grid stays separately deployed and authenticated; these values only
+      # configure the Itemba-R launcher and its server-side availability check.
+      FUELGRID_APP_URL: ${FUELGRID_APP_URL:-}
+      FUELGRID_HEALTH_URL: ${FUELGRID_HEALTH_URL:-}
       # Canonical origins used by the Next.js backend proxy CSRF origin guard.
       FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
       APP_URL: ${APP_URL:?APP_URL is required}
