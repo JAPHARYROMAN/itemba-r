@@ -1,0 +1,160 @@
+name: Deploy — Production
+
+# Manual only. Never on push: a merge to main should not be able to reach the
+# live app on its own, and the whole point of this workflow is that a person
+# decides when production changes.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit, tag or branch to deploy (must already be on main)'
+        required: true
+        default: 'main'
+      confirm:
+        description: 'Type deploy-production to confirm'
+        required: true
+        default: ''
+
+# One deploy at a time. Two overlapping runs would fight over the same droplet,
+# and the second would build images against a half-updated checkout.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to droplet
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Add required reviewers to this environment in repo Settings → Environments
+    # to make every production deploy need a second pair of eyes. The workflow
+    # deliberately does not implement its own approval — GitHub's is auditable
+    # and cannot be bypassed by editing this file in a branch.
+    environment:
+      name: production
+      url: https://app.itembagrouptz.com
+
+    steps:
+      - name: Check the confirmation phrase
+        # A typed phrase, not a boolean, so a deploy cannot happen by clicking
+        # through the form on autopilot.
+        run: |
+          if [ "${{ inputs.confirm }}" != "deploy-production" ]; then
+            echo "::error::Confirmation phrase did not match. Type exactly: deploy-production"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Resolve the commit and require it to be on main
+        id: resolve
+        # Deploying a commit that never landed on main means production runs code
+        # no PR gated. Refuse rather than trust the input.
+        run: |
+          SHA="$(git rev-parse HEAD)"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::$SHA is not an ancestor of origin/main. Only merged code is deployable."
+            exit 1
+          fi
+          echo "Deploying $SHA"
+
+      - name: Require CI to have passed for this exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # The bar we kept failing to hold by hand. A run that is queued, running,
+        # cancelled or failed is not a pass — only an explicit success is.
+        run: |
+          SHA="${{ steps.resolve.outputs.sha }}"
+          CONCLUSION="$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" \
+            --workflow 'ITEMBA-R CI' --limit 1 --json conclusion -q '.[0].conclusion')"
+          echo "CI conclusion for $SHA: ${CONCLUSION:-none}"
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "::error::CI for $SHA is '${CONCLUSION:-not found}', not success. Refusing to deploy."
+            exit 1
+          fi
+
+      - name: Install the deploy key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        # Raw ssh rather than a third-party action: this step handles a key that
+        # can change production, and a pinned-by-tag marketplace action is a
+        # supply-chain dependency this repo does not otherwise carry.
+        #
+        # known_hosts comes from a secret, not ssh-keyscan. Keyscan trusts
+        # whatever answers on the night, which on a deploy channel means a
+        # man-in-the-middle gets a root shell on the droplet.
+        run: |
+          if [ -z "$DEPLOY_SSH_KEY" ] || [ -z "$DEPLOY_KNOWN_HOSTS" ]; then
+            echo "::error::DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS must both be set. See the runbook."
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+        # deploy.sh is re-run safe by design: it preserves an existing
+        # .env.production rather than regenerating secrets. It DOES re-run the
+        # seed, which full-replaces role permissions — see the runbook note.
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" bash -se <<EOF
+          set -euo pipefail
+          cd /opt/itemba-r
+          git fetch --all --prune
+          git checkout --detach "${SHA}"
+          DOMAIN="${DEPLOY_DOMAIN}" bash deploy/relaunch/deploy.sh
+          EOF
+
+      - name: Verify the deployment
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+        # Deploying and confirming are different things. This asserts the commit
+        # that is actually checked out, that the API answers, and that Msaidizi
+        # is still dark — the last one because a config drift that quietly turns
+        # an agent on is exactly the failure nobody would notice.
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" bash -se <<'EOF'
+          set -euo pipefail
+          cd /opt/itemba-r
+          echo "checked out: $(git rev-parse HEAD)"
+          docker compose --env-file .env.production -f docker-compose.production.yml ps
+
+          echo "--- health ---"
+          curl -fsS http://127.0.0.1:3001/api/v1/health >/dev/null \
+            || docker compose --env-file .env.production -f docker-compose.production.yml \
+                 exec -T backend node -e "fetch('http://127.0.0.1:3001/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+          echo "--- msaidizi posture ---"
+          ENABLED="$(docker compose --env-file .env.production -f docker-compose.production.yml \
+            exec -T backend printenv MSAIDIZI_ENABLED || echo unset)"
+          MODE="$(docker compose --env-file .env.production -f docker-compose.production.yml \
+            exec -T backend printenv MSAIDIZI_WRITE_MODE || echo unset)"
+          echo "MSAIDIZI_ENABLED=${ENABLED} MSAIDIZI_WRITE_MODE=${MODE}"
+          EOF
+
+      - name: Report
+        if: always()
+        run: |
+          echo "### Production deploy" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- ref: \`${{ inputs.ref }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- commit: \`${{ steps.resolve.outputs.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- result: **${{ job.status }}**" >> "$GITHUB_STEP_SUMMARY"
