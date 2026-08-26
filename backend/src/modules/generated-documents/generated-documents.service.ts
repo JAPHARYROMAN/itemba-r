@@ -804,19 +804,35 @@ export class GeneratedDocumentsService {
           kv('Valid Until', date(record.validUntil)),
           kv('Quotation Type', label(record.quotationType)),
         ],
+        // Page 1 is always the whole quotation: the customer sees the total and
+        // has somewhere to sign without turning over. Overflow lines go to a
+        // continuation sheet instead of displacing the tail.
+        firstPageComplete: true,
+        continuationTitle: `Line Items (continued) - ${record.quotationNumber}`,
         sections: [
-          customerDetails(customerName, record.customer, [
-            kv('Approved At', date(record.approvedAt)),
-            kv('Converted Sales Order', value(record.convertedSalesOrderId)),
-          ]),
-          lineSection(standardLineRows(record.lines, record.currency), record.currency, [
-            total('Subtotal', record.subtotal, record.currency),
-            total('Discount', record.discountAmount, record.currency),
-            total('Tax', record.taxAmount, record.currency),
-            total('Total', record.totalAmount, record.currency, true),
-          ]),
+          // Deliberately no 'Approved At' or 'Converted Sales Order' here. This
+          // is the document handed to a customer, and the sales order id is a
+          // raw UUID - internal plumbing that means nothing to them and costs a
+          // key-value row that the line table can use instead.
+          customerDetails(customerName, record.customer, []),
+          {
+            title: 'Line Items',
+            table: quotationLineTable(record.lines, record.currency),
+            totals: [
+              total('Subtotal', record.subtotal, record.currency),
+              // Zero discount/tax lines are noise on a quotation; the figures
+              // that are actually zero say nothing the Total does not.
+              ...(Number(record.discountAmount ?? 0) !== 0
+                ? [total('Discount', record.discountAmount, record.currency)]
+                : []),
+              ...(Number(record.taxAmount ?? 0) !== 0
+                ? [total('Tax', record.taxAmount, record.currency)]
+                : []),
+              total('Total', record.totalAmount, record.currency, true),
+            ],
+          },
           notesSection(record.notes),
-          { title: 'Acceptance', signatures: ['Issued By', 'Customer Acceptance', 'Approved By'] },
+          { title: 'Acceptance', signatures: ['Issued By', 'Customer Acceptance'] },
         ].filter(Boolean) as BusinessPdfSection[],
       },
     );
@@ -2496,15 +2512,74 @@ function supplierDetails(
 
 function standardLineRows(lines: any[], currency: string) {
   return lines.map((line) => [
-    line.description || line.product?.name || 'N/A',
+    // itemName/unitLabel carry ad-hoc lines - items quoted before they exist in
+    // the catalogue. They are null on catalogue lines, so this changes nothing
+    // for every other document type that shares this helper.
+    line.itemName || line.description || line.product?.name || 'N/A',
     line.product?.sku ?? line.product?.productCode ?? 'N/A',
     qty(line.quantity),
-    line.unit?.symbol ?? line.unit?.name ?? 'N/A',
+    line.unit?.symbol ?? line.unit?.name ?? line.unitLabel ?? 'N/A',
     money(line.unitPrice, currency),
     money(line.discountAmount, currency),
     money(line.taxAmount, currency),
     money(line.lineTotal, currency),
   ]);
+}
+
+/**
+ * Quotation line rows, with the Discount and Tax columns dropped when every line
+ * is zero in them.
+ *
+ * Most quotations carry no per-line discount and no per-line tax, and two dead
+ * columns cost roughly a fifth of the table width - width that the item name
+ * needs, and that decides whether a row wraps to two lines and pushes the whole
+ * document onto a second page. The totals block still states discount and tax,
+ * so nothing is hidden.
+ */
+function quotationLineTable(lines: any[], currency: string) {
+  const hasDiscount = lines.some((line) => Number(line.discountAmount ?? 0) !== 0);
+  const hasTax = lines.some((line) => Number(line.taxAmount ?? 0) !== 0);
+
+  const headers = ['Item', 'Code', 'Qty', 'Unit', 'Unit Price'];
+  const weights = [3.4, 1.1, 0.7, 0.7, 1.2];
+  if (hasDiscount) {
+    headers.push('Discount');
+    weights.push(1.1);
+  }
+  if (hasTax) {
+    headers.push('Tax');
+    weights.push(1.1);
+  }
+  headers.push('Line Total');
+  weights.push(1.4);
+
+  const rows = lines.map((line) => {
+    const row = [
+      line.itemName || line.product?.name || line.description || 'N/A',
+      line.product?.sku ?? line.product?.productCode ?? '-',
+      qty(line.quantity),
+      line.unit?.symbol ?? line.unit?.name ?? line.unitLabel ?? '-',
+      money(line.unitPrice, currency),
+    ];
+    if (hasDiscount) row.push(money(line.discountAmount, currency));
+    if (hasTax) row.push(money(line.taxAmount, currency));
+    row.push(money(line.lineTotal, currency));
+    return row;
+  });
+
+  const numericColumns = headers
+    .map((header, index) =>
+      ['Qty', 'Unit Price', 'Discount', 'Tax', 'Line Total'].includes(header) ? index : -1,
+    )
+    .filter((index) => index >= 0);
+
+  return {
+    headers,
+    rows,
+    numericColumns,
+    columnWeights: weights,
+    mutedColumns: [1],
+  };
 }
 
 function purchaseLineRows(lines: any[], currency: string) {

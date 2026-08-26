@@ -253,3 +253,103 @@ describe('buildBusinessPdf rendering', () => {
     expect(occurrences(raw, '| CONTINUED')).toBe(2);
   });
 });
+
+// ─── firstPageComplete ────────────────────────────────────────────────────────
+//
+// Pages are written into the body in order, so "X appears on page 1" is provable
+// as "the offset of X precedes the offset of the first continuation marker".
+
+describe('buildBusinessPdf firstPageComplete', () => {
+  function quotationLike(rowCount: number): BusinessPdfModel {
+    const rows = Array.from({ length: rowCount }, (_, index) => [
+      `Product ${index + 1}`,
+      `SKU-${index + 1}`,
+      '1',
+      'pc',
+      '1,000.00',
+      '1,000.00',
+    ]);
+    return sampleModel({
+      title: 'Quotation',
+      reference: 'QUO-2026-0001',
+      firstPageComplete: true,
+      continuationTitle: 'Line Items (continued) - QUO-2026-0001',
+      sections: [
+        {
+          title: 'Customer Details',
+          items: [
+            { label: 'Customer', value: 'Mega Mart' },
+            { label: 'Phone', value: '+255700000000' },
+          ],
+        },
+        {
+          title: 'Line Items',
+          table: {
+            headers: ['Item', 'Code', 'Qty', 'Unit', 'Unit Price', 'Line Total'],
+            numericColumns: [2, 4, 5],
+            mutedColumns: [1],
+            rows,
+          },
+          totals: [
+            { label: 'Subtotal', value: 'TZS 1,000.00' },
+            { label: 'Total', value: 'TZS 1,000.00', emphasis: true },
+          ],
+        },
+        { title: 'Notes', paragraphs: ['Prices valid for 14 days.'] },
+        { title: 'Acceptance', signatures: ['Issued By', 'Customer Acceptance'] },
+      ],
+    });
+  }
+
+  it('keeps the total and the signature block on page 1 when the table overflows', () => {
+    const raw = buildBusinessPdf(quotationLike(60)).toString('latin1');
+
+    const breakAt = raw.indexOf('| CONTINUED');
+    expect(breakAt).toBeGreaterThan(-1);
+
+    // The two things the recipient needs must precede the page break. Without
+    // firstPageComplete the painter overflows in document order and puts both on
+    // the second sheet.
+    expect(raw.indexOf('(Total) Tj')).toBeGreaterThan(-1);
+    expect(raw.indexOf('(Total) Tj')).toBeLessThan(breakAt);
+    expect(raw.indexOf('(Customer Acceptance) Tj')).toBeLessThan(breakAt);
+    expect(raw.indexOf('(Issued By) Tj')).toBeLessThan(breakAt);
+    // Notes sit between the totals and the signatures, so they are on page 1 too.
+    expect(raw.indexOf('(Prices valid for 14 days.) Tj')).toBeLessThan(breakAt);
+  });
+
+  it('moves only the surplus rows to a continuation sheet', () => {
+    const raw = buildBusinessPdf(quotationLike(60)).toString('latin1');
+    const breakAt = raw.indexOf('| CONTINUED');
+
+    // Early rows are on page 1, late rows are past the break.
+    expect(raw.indexOf('(Product 1) Tj')).toBeLessThan(breakAt);
+    expect(raw.indexOf('(Product 60) Tj')).toBeGreaterThan(breakAt);
+    // Section titles are uppercased by the painter and '(' / ')' are escaped in
+    // PDF string literals, so the heading lands as LINE ITEMS \(CONTINUED\).
+    expect(raw).toMatch(/LINE ITEMS .{0,4}CONTINUED/);
+  });
+
+  it('stays on a single page when everything fits', () => {
+    const raw = buildBusinessPdf(quotationLike(6)).toString('latin1');
+
+    expect(raw).toContain('/Count 1');
+    expect(raw).not.toContain('| CONTINUED');
+    expect(raw).toContain('(Customer Acceptance) Tj');
+  });
+
+  it('leaves documents that do not opt in exactly as they were', () => {
+    const model = quotationLike(60);
+    const raw = buildBusinessPdf({
+      ...model,
+      firstPageComplete: false,
+      continuationTitle: undefined,
+    }).toString('latin1');
+
+    // Straight overflow: the tail follows the rows onto the second sheet. This
+    // is still correct for a GRN or a payslip, and must not change.
+    const breakAt = raw.indexOf('| CONTINUED');
+    expect(breakAt).toBeGreaterThan(-1);
+    expect(raw.indexOf('(Customer Acceptance) Tj')).toBeGreaterThan(breakAt);
+  });
+});

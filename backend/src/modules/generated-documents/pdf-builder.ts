@@ -64,6 +64,20 @@ export interface BusinessPdfModel {
     documentDetails: Array<{ label: string; value: string }>;
   };
   sections: BusinessPdfSection[];
+  /**
+   * Guarantee that page 1 is a COMPLETE document on its own: letterhead, meta,
+   * every non-table section, the totals and the signature block. Line rows that
+   * do not fit are moved to a plainer continuation sheet rather than pushing the
+   * totals onto page 2.
+   *
+   * Without this the painter simply overflows in document order, so a quotation
+   * with 30 lines puts its total and the customer's signature line on a second
+   * page — the two things the recipient actually needs. Opt-in, because for a
+   * GRN or a payslip a straight overflow is the correct behaviour.
+   */
+  firstPageComplete?: boolean;
+  /** Heading for the overflow sheet. Only read when firstPageComplete is set. */
+  continuationTitle?: string;
 }
 
 type FontName = 'F1' | 'F2';
@@ -108,7 +122,14 @@ interface RegisteredImage {
 export function buildBusinessPdf(model: BusinessPdfModel): Buffer {
   const pdf = new SimplePdf(model.orientation);
   pdf.addHeader(model);
-  for (const section of model.sections) pdf.addSection(section);
+  if (model.firstPageComplete) {
+    pdf.addSectionsKeepingFirstPageComplete(
+      model.sections,
+      model.continuationTitle ?? 'Line Items (continued)',
+    );
+  } else {
+    for (const section of model.sections) pdf.addSection(section);
+  }
   pdf.addFooter(model);
   return pdf.toBuffer();
 }
@@ -409,7 +430,66 @@ class SimplePdf {
     }
   }
 
-  addSection(section: BusinessPdfSection) {
+  /**
+   * Draw the sections, but hold back any line rows that would push the tail of
+   * the document onto page 2.
+   *
+   * The reserve is measured, not guessed: everything after the table (this
+   * section's totals and signatures, plus every following section) is estimated
+   * with the same wrap helpers the painter uses, then the table is given only
+   * the space that is left. Rows that do not fit come back as leftovers and are
+   * drawn on a continuation sheet after the rest of the document is complete.
+   */
+  addSectionsKeepingFirstPageComplete(sections: BusinessPdfSection[], continuationTitle: string) {
+    const tableIndex = sections.findIndex((section) => section.table?.rows.length);
+    if (tableIndex < 0) {
+      for (const section of sections) this.addSection(section);
+      return;
+    }
+
+    for (let i = 0; i < tableIndex; i += 1) this.addSection(sections[i]);
+
+    const lineSection = sections[tableIndex];
+    let reserve = 0;
+    if (lineSection.totals?.length) reserve += lineSection.totals.length * 18 + 5;
+    if (lineSection.signatures?.length) reserve += 42;
+    for (let i = tableIndex + 1; i < sections.length; i += 1) {
+      reserve += this.estimateSectionHeight(sections[i]);
+    }
+    // Slack absorbs the difference between the estimate and the painter, which
+    // rounds row heights up. Being a few points pessimistic costs one line of
+    // capacity; being optimistic costs the guarantee.
+    reserve += 16;
+
+    const leftover = this.addSection(lineSection, reserve);
+
+    for (let i = tableIndex + 1; i < sections.length; i += 1) this.addSection(sections[i]);
+
+    if (leftover.length && lineSection.table) {
+      this.newPage();
+      this.addSection({
+        title: continuationTitle,
+        table: { ...lineSection.table, rows: leftover },
+      });
+    }
+  }
+
+  /**
+   * Height this section will occupy, mirroring the painter closely enough to
+   * reserve space for it. Used only to decide how many rows fit on page 1.
+   */
+  private estimateSectionHeight(section: BusinessPdfSection): number {
+    let height = 26; // heading, rule and the spacing either side of them
+    if (section.items?.length) height += Math.ceil(section.items.length / 2) * 24 + 4;
+    for (const paragraph of section.paragraphs ?? []) {
+      height += wrapText(paragraph, this.contentWidth - 24, 9).length * 12 + 12;
+    }
+    if (section.totals?.length) height += section.totals.length * 18 + 5;
+    if (section.signatures?.length) height += 42;
+    return height;
+  }
+
+  addSection(section: BusinessPdfSection, reserveBelow = 0): string[][] {
     if (section.pageBreakBefore) this.newPage();
     const signatureOnly =
       !!section.signatures?.length &&
@@ -444,8 +524,9 @@ class SimplePdf {
       }
     }
 
+    let leftover: string[][] = [];
     if (section.table) {
-      this.table(section.table);
+      leftover = this.table(section.table, reserveBelow);
       this.y += 5;
     }
 
@@ -457,6 +538,7 @@ class SimplePdf {
     if (section.signatures?.length) {
       this.signatures(section.signatures);
     }
+    return leftover;
   }
 
   addFooter(model: BusinessPdfModel) {
@@ -626,7 +708,7 @@ class SimplePdf {
     }
   }
 
-  private table(table: BusinessPdfTable) {
+  private table(table: BusinessPdfTable, reserveBelow = 0): string[][] {
     const colWidths = distributeColumns(
       table.headers.length,
       this.contentWidth,
@@ -634,11 +716,19 @@ class SimplePdf {
     );
     this.tableHeader(table.headers, colWidths, table.numericColumns);
 
+    const leftover: string[][] = [];
     for (const [rowIndex, row] of table.rows.entries()) {
       const rowLines = row.map((cell, index) => wrapText(cell, colWidths[index] - 8, 8));
       const lineCount = Math.max(...rowLines.map((lines) => lines.length), 1);
       const rowHeight = Math.max(18, lineCount * 10 + 8);
-      if (!this.hasSpace(rowHeight + 4)) {
+      if (reserveBelow > 0) {
+        // Page-1-complete mode: never start a new page mid-table. Stop, hand the
+        // rest back, and let the caller place them after the document is whole.
+        if (!this.hasSpace(rowHeight + 4 + reserveBelow)) {
+          leftover.push(...table.rows.slice(rowIndex));
+          break;
+        }
+      } else if (!this.hasSpace(rowHeight + 4)) {
         this.newPageWithTableHeader(table.headers, colWidths, table.numericColumns);
       }
 
@@ -677,6 +767,7 @@ class SimplePdf {
       );
       this.y += rowHeight;
     }
+    return leftover;
   }
 
   private tableHeader(headers: string[], colWidths: number[], numericColumns?: number[]) {
