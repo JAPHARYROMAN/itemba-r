@@ -105,12 +105,12 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN }}
           SHA: ${{ steps.resolve.outputs.sha }}
-        # deploy.sh is re-run safe by design: it preserves an existing
-        # .env.production rather than regenerating secrets. It DOES re-run the
-        # seed, which full-replaces role permissions — see the runbook note.
+        # deploy.sh preserves the existing .env.production and named volumes,
+        # verifies a pre-migration backup, and skips the full seed by default.
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=120 -o TCPKeepAlive=yes \
             "${DEPLOY_USER}@${DEPLOY_HOST}" bash -se <<EOF
           set -euo pipefail
           cd /opt/itemba-r
@@ -126,28 +126,43 @@ jobs:
           SHA: ${{ steps.resolve.outputs.sha }}
         # Deploying and confirming are different things. This asserts the commit
         # that is actually checked out, that the API answers, and that Msaidizi
-        # is still dark — the last one because a config drift that quietly turns
-        # an agent on is exactly the failure nobody would notice.
+        # is still dark - a config drift that quietly turns an agent on is
+        # exactly the failure nobody would notice.
+        #
+        # EVERY `docker compose exec` below ends in `</dev/null`, and that is not
+        # decoration. This script is fed to the remote `bash -s` on STDIN, and
+        # `exec` forwards stdin to the container - so without the redirect it
+        # consumes THE REST OF THIS SCRIPT as the container's input and the
+        # remaining lines never run. On the first production deploy (run
+        # 32970113307) that silently ate the whole Msaidizi posture check: no
+        # output, no error, step exited 0. A verification step that can skip its
+        # own assertions and still pass is worse than no verification at all.
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" bash -se <<'EOF'
+          ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes             -o ServerAliveInterval=30 -o ServerAliveCountMax=120 -o TCPKeepAlive=yes             "${DEPLOY_USER}@${DEPLOY_HOST}" bash -se <<'EOF'
           set -euo pipefail
           cd /opt/itemba-r
-          echo "checked out: $(git rev-parse HEAD)"
-          docker compose --env-file .env.production -f docker-compose.production.yml ps
+          COMPOSE="docker compose --env-file .env.production -f docker-compose.production.yml"
 
+          echo "checked out: $(git rev-parse HEAD)"
+          $COMPOSE ps
+
+          # The backend's 3001 is deliberately NOT published to the host - only
+          # Caddy is exposed - so a host-side curl could never reach it and only
+          # produced a misleading "Failed to connect" line on every deploy. Ask
+          # the container itself, and print the status so a pass is legible.
           echo "--- health ---"
-          curl -fsS http://127.0.0.1:3001/api/v1/health >/dev/null \
-            || docker compose --env-file .env.production -f docker-compose.production.yml \
-                 exec -T backend node -e "fetch('http://127.0.0.1:3001/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+          $COMPOSE exec -T backend node -e "fetch('http://127.0.0.1:3001/api/v1/health').then(r=>{console.log('health HTTP',r.status);process.exit(r.ok?0:1)}).catch(e=>{console.log('health unreachable:',e.message);process.exit(1)})" </dev/null
 
           echo "--- msaidizi posture ---"
-          ENABLED="$(docker compose --env-file .env.production -f docker-compose.production.yml \
-            exec -T backend printenv MSAIDIZI_ENABLED || echo unset)"
-          MODE="$(docker compose --env-file .env.production -f docker-compose.production.yml \
-            exec -T backend printenv MSAIDIZI_WRITE_MODE || echo unset)"
+          ENABLED="$($COMPOSE exec -T backend printenv MSAIDIZI_ENABLED </dev/null || echo unset)"
+          MODE="$($COMPOSE exec -T backend printenv MSAIDIZI_WRITE_MODE </dev/null || echo unset)"
           echo "MSAIDIZI_ENABLED=${ENABLED} MSAIDIZI_WRITE_MODE=${MODE}"
+
+          # Prove the script reached its end. Without a sentinel, a future
+          # stdin-eating command truncates these checks silently instead of
+          # loudly - which is exactly the failure being fixed here.
+          echo "--- verification complete ---"
           EOF
 
       - name: Report
