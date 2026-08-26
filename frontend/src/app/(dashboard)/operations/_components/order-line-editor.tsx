@@ -69,6 +69,11 @@ export interface EditableOrderLine {
   description: string;
   qty: number;
   unitId: string;
+  // Ad-hoc ("not in the catalogue") support. Only read when the consumer passes
+  // allowManualItems, so the four editors that never opt in are unaffected.
+  isManual?: boolean;
+  itemName?: string;
+  unitLabel?: string;
   unitPrice: number;
   discount: number;
   tax: number;
@@ -97,6 +102,11 @@ interface OrderLineEditorProps<TLine extends EditableOrderLine> {
   currency: string;
   productSearchLoading?: boolean;
   enforceStockAvailability?: boolean;
+  // Lets a line be written as free text instead of a catalogue selection, for
+  // documents that may legitimately name something the catalogue does not carry
+  // (quotations). Off by default: an order that moves stock or money must not be
+  // able to reference an item that does not exist.
+  allowManualItems?: boolean;
   // When true, a per-line tax is auto-computed from the selected product's VAT
   // rate (isTaxable/taxRate) unless the line's tax was manually overridden.
   // Defaults to false so existing consumers keep the legacy manual-only
@@ -347,10 +357,16 @@ function autoLineTax(
   return roundMoney((lineTaxBase(line, variant) * rate) / 100);
 }
 
-function missingFields(line: EditableOrderLine) {
+function missingFields(line: EditableOrderLine, allowManualItems = false) {
   const missing: string[] = [];
-  if (!line.productId) missing.push('product');
-  if (!line.unitId) missing.push('unit');
+  // A manual line answers the same questions with free text, so asking it for a
+  // product id would report a gap the user has no way to fill.
+  if (allowManualItems && line.isManual) {
+    if (!line.itemName?.trim()) missing.push('item name');
+  } else {
+    if (!line.productId) missing.push('product');
+    if (!line.unitId) missing.push('unit');
+  }
   if (numberOrZero(line.qty) <= 0) missing.push('quantity');
   return missing;
 }
@@ -364,6 +380,7 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
   currency,
   productSearchLoading = false,
   enforceStockAvailability = false,
+  allowManualItems = false,
   autoTax = false,
   documentDiscount,
   onDocumentDiscountChange,
@@ -511,7 +528,8 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
   const total = roundMoney(
     totals.subtotal - totals.discount - appliedDocumentDiscount + totals.tax,
   );
-  const invalidCount = lines.filter((line) => missingFields(line).length > 0).length;
+  const invalidCount = lines.filter((line) => missingFields(line, allowManualItems).length > 0)
+    .length;
   const stockWarningCount = stockWarnings.length;
   const profitWarningCount = profitWarnings.length;
   const unitPriceLabel = variant === 'purchase' ? 'Unit Cost' : 'Unit Price';
@@ -556,6 +574,18 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
 
   function patchLine(index: number, patch: Partial<EditableOrderLine>) {
     onLineChange(index, patch as Partial<TLine>);
+  }
+
+  // Switching a line's mode clears the other mode's fields. Leaving a stale
+  // productId on a line the user has decided to type by hand is how a quotation
+  // ends up displaying one item and converting into another.
+  function handleManualToggle(index: number, manual: boolean) {
+    patchLine(
+      index,
+      manual
+        ? { isManual: true, productId: '', unitId: '', taxManual: false }
+        : { isManual: false, itemName: '', unitLabel: '' },
+    );
   }
 
   function numericFieldValue(index: number, field: NumericField, committed: number) {
@@ -726,7 +756,8 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                 ? [selectedProduct, ...filteredProducts]
                 : filteredProducts;
             const searchResults = trimmedQuery ? filteredProducts.slice(0, 8) : [];
-            const missing = missingFields(line);
+            const missing = missingFields(line, allowManualItems);
+            const isManual = allowManualItems && Boolean(line.isManual);
             const lineTracksStock =
               enforceStockAvailability &&
               variant === 'sales' &&
@@ -766,7 +797,13 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                       style={{ color: 'var(--aurora-text)' }}
                     >
                       Line {index + 1}
-                      {selectedProduct ? ` - ${productLabel(selectedProduct)}` : ''}
+                      {isManual
+                        ? line.itemName?.trim()
+                          ? ` - ${line.itemName.trim()}`
+                          : ' - Typed item'
+                        : selectedProduct
+                          ? ` - ${productLabel(selectedProduct)}`
+                          : ''}
                     </p>
                     <p className="text-[12px]" style={{ color: 'var(--aurora-text-muted)' }}>
                       {lineHasStockError
@@ -777,6 +814,37 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                             ? `Needs ${missing.join(', ')}`
                             : 'Complete'}
                     </p>
+                    {allowManualItems && (
+                      <div
+                        className="mt-2 inline-flex overflow-hidden rounded-lg border"
+                        style={{ borderColor: 'var(--aurora-border)' }}
+                        role="group"
+                        aria-label={`Line ${index + 1} item source`}
+                      >
+                        {[
+                          { manual: false, label: 'From catalogue' },
+                          { manual: true, label: 'Type it in' },
+                        ].map((mode) => {
+                          const active = isManual === mode.manual;
+                          return (
+                            <button
+                              key={mode.label}
+                              type="button"
+                              onClick={() => handleManualToggle(index, mode.manual)}
+                              aria-pressed={active}
+                              className="px-2.5 py-1 text-[11px] font-medium transition-colors"
+                              style={
+                                active
+                                  ? { background: 'var(--aurora-text)', color: 'var(--aurora-bg)' }
+                                  : { color: 'var(--aurora-text-muted)' }
+                              }
+                            >
+                              {mode.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <span
@@ -804,6 +872,39 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
 
                 <div className="grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
                   <div className="space-y-2">
+                    {isManual ? (
+                      <>
+                        <label className="block">
+                          <span
+                            className="mb-1 block text-[12px] font-medium"
+                            style={{ color: 'var(--aurora-text-secondary)' }}
+                          >
+                            Item name *
+                          </span>
+                          <input
+                            value={line.itemName ?? ''}
+                            onChange={(event) => patchLine(index, { itemName: event.target.value })}
+                            className={fieldClass}
+                            placeholder="e.g. Site clearing, 6mm plywood, transport to Mwanza"
+                            aria-label={`Line ${index + 1} item name`}
+                          />
+                        </label>
+                        <div
+                          className="rounded-lg border px-3 py-2 text-[12px]"
+                          style={{
+                            borderColor: 'var(--aurora-border)',
+                            background: 'var(--aurora-card)',
+                            color: 'var(--aurora-text-muted)',
+                          }}
+                        >
+                          Not linked to the catalogue. It prices, totals and prints like any
+                          other line, but stock and margin are unknown for it, and the
+                          quotation cannot be converted to a sales order until this item
+                          exists as a product.
+                        </div>
+                      </>
+                    ) : (
+                      <>
                     <label className="block">
                       <span
                         className="mb-1 block text-[12px] font-medium"
@@ -1024,6 +1125,8 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                           : `${productLabel(selectedProduct)} must sell above cost ${money(effectiveCost, currency)}.`}
                       </div>
                     )}
+                      </>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -1064,21 +1167,31 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                         className="mb-1 block text-[12px] font-medium"
                         style={{ color: 'var(--aurora-text-secondary)' }}
                       >
-                        Unit *
+                        {isManual ? 'Unit' : 'Unit *'}
                       </span>
-                      <select
-                        value={line.unitId}
-                        onChange={(event) => patchLine(index, { unitId: event.target.value })}
-                        className={fieldClass}
-                        aria-label={`Line ${index + 1} unit`}
-                      >
-                        <option value="">Select unit</option>
-                        {units.map((unit) => (
-                          <option key={unit.id} value={unit.id}>
-                            {unit.symbol} - {unit.name}
-                          </option>
-                        ))}
-                      </select>
+                      {isManual ? (
+                        <input
+                          value={line.unitLabel ?? ''}
+                          onChange={(event) => patchLine(index, { unitLabel: event.target.value })}
+                          className={fieldClass}
+                          placeholder="bag, roll, trip, lot"
+                          aria-label={`Line ${index + 1} unit`}
+                        />
+                      ) : (
+                        <select
+                          value={line.unitId}
+                          onChange={(event) => patchLine(index, { unitId: event.target.value })}
+                          className={fieldClass}
+                          aria-label={`Line ${index + 1} unit`}
+                        >
+                          <option value="">Select unit</option>
+                          {units.map((unit) => (
+                            <option key={unit.id} value={unit.id}>
+                              {unit.symbol} - {unit.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </label>
                     <label className="block">
                       <span

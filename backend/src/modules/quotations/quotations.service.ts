@@ -10,6 +10,54 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { SalesOrdersService } from '../sales-orders/sales-orders.service';
 
+/**
+ * Resolve each line to exactly one of two shapes: a catalogue line (productId +
+ * unitId) or an ad-hoc line (itemName, optionally unitLabel).
+ *
+ * Enforced here rather than in the DTO so the message can name the line number.
+ * A quotation is routinely ten lines long, and "Line 4: choose a product, or
+ * type an item name" is actionable in a way that "lines.3.productId must be a
+ * UUID" is not.
+ *
+ * Empty strings are normalised to null. The frontend sends '' for an untouched
+ * select, and '' would otherwise be stored as a productId that satisfies no
+ * foreign key and reads as neither set nor unset.
+ */
+function normalizeLines(lines: any[]) {
+  return lines.map((line, index) => {
+    const position = index + 1;
+    const productId = typeof line.productId === 'string' ? line.productId.trim() || null : null;
+    const itemName = typeof line.itemName === 'string' ? line.itemName.trim() || null : null;
+    const unitId = typeof line.unitId === 'string' ? line.unitId.trim() || null : null;
+    const unitLabel = typeof line.unitLabel === 'string' ? line.unitLabel.trim() || null : null;
+
+    if (!productId && !itemName) {
+      throw new BadRequestException(
+        `Line ${position}: choose a product, or type an item name for something not in the system.`,
+      );
+    }
+    if (productId && !unitId) {
+      throw new BadRequestException(`Line ${position}: a product line needs a unit.`);
+    }
+    if (!(Number(line.quantity) > 0)) {
+      throw new BadRequestException(`Line ${position}: quantity must be greater than zero.`);
+    }
+    if (!(Number(line.unitPrice) >= 0)) {
+      throw new BadRequestException(`Line ${position}: unit price must be zero or more.`);
+    }
+
+    return {
+      ...line,
+      productId,
+      unitId,
+      // Only ad-hoc lines carry the free-text pair. A catalogue line takes its
+      // name and unit from the product, so storing both would let them drift.
+      itemName: productId ? null : itemName,
+      unitLabel: unitId ? null : unitLabel,
+    };
+  });
+}
+
 function calcLines(lines: any[]) {
   let subtotal = 0, totalDiscount = 0, totalTax = 0;
   const computed = lines.map((l) => {
@@ -38,7 +86,9 @@ export class QuotationsService {
     // against the caller's access before writing into that company.
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
 
-    const { computed, subtotal, totalDiscount, totalTax, totalAmount } = calcLines(dto.lines);
+    const { computed, subtotal, totalDiscount, totalTax, totalAmount } = calcLines(
+      normalizeLines(dto.lines),
+    );
 
     const record = await this.prisma.$transaction(async (tx) => {
       const quotationNumber = await this.codes.next({
@@ -71,9 +121,11 @@ export class QuotationsService {
         data: computed.map((l) => ({
           quotationId: q.id,
           productId: l.productId,
+          itemName: l.itemName,
           description: l.description,
           quantity: l.quantity,
           unitId: l.unitId,
+          unitLabel: l.unitLabel,
           unitPrice: l.unitPrice,
           discountAmount: l.discountAmount ?? 0,
           taxAmount: l.taxAmount ?? 0,
@@ -165,7 +217,7 @@ export class QuotationsService {
 
     await this.prisma.$transaction(async (tx) => {
       if (dto.lines?.length) {
-        const calc = calcLines(dto.lines);
+        const calc = calcLines(normalizeLines(dto.lines));
         subtotal = calc.subtotal as any; discountAmount = calc.totalDiscount as any;
         taxAmount = calc.totalTax as any; totalAmount = calc.totalAmount as any;
         await tx.quotationLine.deleteMany({ where: { quotationId: id } });
@@ -173,9 +225,11 @@ export class QuotationsService {
           data: calc.computed.map((l) => ({
             quotationId: id,
             productId: l.productId,
+            itemName: l.itemName,
             description: l.description,
             quantity: l.quantity,
             unitId: l.unitId,
+            unitLabel: l.unitLabel,
             unitPrice: l.unitPrice,
             discountAmount: l.discountAmount ?? 0,
             taxAmount: l.taxAmount ?? 0,
@@ -251,6 +305,26 @@ export class QuotationsService {
     const quotation = await this.findOne(id, user);
     await this.companyScope.assertCanAccessCompany(user, quotation.companyId, AccessLevel.WRITE);
     if (quotation.status !== 'ACCEPTED') throw new BadRequestException('Only ACCEPTED quotations can be converted');
+
+    // Ad-hoc lines stop here, and this is the boundary the whole feature turns on.
+    // A quotation may name something the catalogue does not carry — that is the
+    // point of quoting. A sales order may not: sales_order_lines.productId is NOT
+    // NULL, and confirm() below issues stock (SALE_ISSUE) and posts COGS against
+    // a real product. An item that does not exist has no stock to issue and no
+    // cost to post, so there is nothing honest to convert it into.
+    //
+    // Refusing here — before the quotation is claimed CONVERTED — is deliberate.
+    // Letting it through would fail inside the transaction on a foreign key, and
+    // the caller would see a Prisma error instead of the one thing they need to
+    // know: which items to add to the catalogue first.
+    const adHocLines = (quotation.lines as any[]).filter((l) => !l.productId);
+    if (adHocLines.length > 0) {
+      const names = adHocLines.map((l) => l.itemName || l.description || 'unnamed item');
+      throw new BadRequestException(
+        `This quotation has ${adHocLines.length} item(s) that are not in the product catalogue ` +
+          `(${names.join(', ')}). Add them as products and select them on the quotation before converting.`,
+      );
+    }
 
     // Phase 1 (atomic): claim the quotation (ACCEPTED -> CONVERTED) and create
     // the resulting sales order as DRAFT. The order is DRAFT — not CONFIRMED —
