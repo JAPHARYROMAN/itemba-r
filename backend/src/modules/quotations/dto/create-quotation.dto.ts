@@ -20,16 +20,30 @@ import { QuotationType } from '@prisma/client';
  * UUID". A salesperson can act on the first message and not the second.
  */
 export class CreateQuotationLineDto {
-  @ApiPropertyOptional({ description: 'Catalogue product. Omit for an ad-hoc item and send itemName.' })
-  @IsOptional() @IsUUID() productId?: string;
+  @ApiPropertyOptional({
+    description: 'Catalogue product. Omit for an ad-hoc item and send itemName.',
+  })
+  @IsOptional()
+  @IsUUID()
+  productId?: string;
   @ApiPropertyOptional({ description: 'Free-text item name. Required when productId is omitted.' })
-  @IsOptional() @IsString() itemName?: string;
+  @IsOptional()
+  @IsString()
+  itemName?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
   @ApiProperty() @IsNumber() quantity!: number;
-  @ApiPropertyOptional({ description: 'Catalogue unit. Omit for an ad-hoc item and send unitLabel.' })
-  @IsOptional() @IsString() unitId?: string;
-  @ApiPropertyOptional({ description: 'Free-text unit such as "bag" or "trip". Used when unitId is omitted.' })
-  @IsOptional() @IsString() unitLabel?: string;
+  @ApiPropertyOptional({
+    description: 'Catalogue unit. Omit for an ad-hoc item and send unitLabel.',
+  })
+  @IsOptional()
+  @IsString()
+  unitId?: string;
+  @ApiPropertyOptional({
+    description: 'Free-text unit such as "bag" or "trip". Used when unitId is omitted.',
+  })
+  @IsOptional()
+  @IsString()
+  unitLabel?: string;
   @ApiProperty() @IsNumber() unitPrice!: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() discountAmount?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() taxAmount?: number;

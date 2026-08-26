@@ -217,7 +217,6 @@ describe('QuotationsService.convertToSalesOrder', () => {
   });
 });
 
-
 // ─── Ad-hoc (manual) lines ────────────────────────────────────────────────────
 //
 // A quotation may price something the catalogue does not carry yet. These tests
@@ -237,7 +236,10 @@ describe('QuotationsService.create - ad-hoc lines', () => {
     const { service, prisma } = makeService();
 
     await service.create(
-      { ...baseDto, lines: [{ itemName: 'Site clearing', unitLabel: 'trip', quantity: 2, unitPrice: 50000 }] },
+      {
+        ...baseDto,
+        lines: [{ itemName: 'Site clearing', unitLabel: 'trip', quantity: 2, unitPrice: 50000 }],
+      },
       user,
     );
 
@@ -282,7 +284,10 @@ describe('QuotationsService.create - ad-hoc lines', () => {
     // The line editor sends '' for an untouched <select>. '' satisfies no foreign
     // key and reads as neither set nor unset, so it must normalise to NULL.
     await service.create(
-      { ...baseDto, lines: [{ productId: '', unitId: '', itemName: 'Transport', quantity: 1, unitPrice: 5000 }] },
+      {
+        ...baseDto,
+        lines: [{ productId: '', unitId: '', itemName: 'Transport', quantity: 1, unitPrice: 5000 }],
+      },
       user,
     );
 
@@ -327,7 +332,10 @@ describe('QuotationsService.create - ad-hoc lines', () => {
     const { service } = makeService();
 
     await expect(
-      service.create({ ...baseDto, lines: [{ itemName: 'Ghost', quantity: 0, unitPrice: 10 }] }, user),
+      service.create(
+        { ...baseDto, lines: [{ itemName: 'Ghost', quantity: 0, unitPrice: 10 }] },
+        user,
+      ),
     ).rejects.toThrow(/quantity must be greater than zero/);
   });
 });

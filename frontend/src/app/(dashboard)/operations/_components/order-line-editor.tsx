@@ -528,8 +528,9 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
   const total = roundMoney(
     totals.subtotal - totals.discount - appliedDocumentDiscount + totals.tax,
   );
-  const invalidCount = lines.filter((line) => missingFields(line, allowManualItems).length > 0)
-    .length;
+  const invalidCount = lines.filter(
+    (line) => missingFields(line, allowManualItems).length > 0,
+  ).length;
   const stockWarningCount = stockWarnings.length;
   const profitWarningCount = profitWarnings.length;
   const unitPriceLabel = variant === 'purchase' ? 'Unit Cost' : 'Unit Price';
@@ -897,234 +898,244 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                             color: 'var(--aurora-text-muted)',
                           }}
                         >
-                          Not linked to the catalogue. It prices, totals and prints like any
-                          other line, but stock and margin are unknown for it, and the
-                          quotation cannot be converted to a sales order until this item
-                          exists as a product.
+                          Not linked to the catalogue. It prices, totals and prints like any other
+                          line, but stock and margin are unknown for it, and the quotation cannot be
+                          converted to a sales order until this item exists as a product.
                         </div>
                       </>
                     ) : (
                       <>
-                    <label className="block">
-                      <span
-                        className="mb-1 block text-[12px] font-medium"
-                        style={{ color: 'var(--aurora-text-secondary)' }}
-                      >
-                        Category
-                      </span>
-                      <select
-                        value={selectedCategoryId}
-                        onChange={(event) => handleCategoryFilter(index, event.target.value)}
-                        className={fieldClass}
-                        aria-label={`Line ${index + 1} category filter`}
-                      >
-                        <option value="">All categories</option>
-                        {categoryOptions.map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {category.parentCategory?.name
-                              ? `${category.parentCategory.name} / ${category.name}`
-                              : category.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="block">
-                      <span
-                        className="mb-1 block text-[12px] font-medium"
-                        style={{ color: 'var(--aurora-text-secondary)' }}
-                      >
-                        Find Product
-                      </span>
-                      <input
-                        value={query}
-                        onChange={(event) => handleProductSearch(index, event.target.value)}
-                        className={fieldClass}
-                        placeholder="Search name, category, family, supplier, code, SKU, barcode"
-                        aria-label={`Line ${index + 1} find product`}
-                      />
-                    </label>
-                    {trimmedQuery && (
-                      <div
-                        className="max-h-56 overflow-y-auto rounded-lg border"
-                        style={{
-                          borderColor: 'var(--aurora-border)',
-                          background: 'var(--aurora-card)',
-                        }}
-                        role="group"
-                        aria-label={`Line ${index + 1} product search results`}
-                      >
-                        {productSearchLoading && !searchResults.length ? (
-                          <div
-                            className="px-3 py-2 text-[12px]"
-                            style={{ color: 'var(--aurora-text-muted)' }}
+                        <label className="block">
+                          <span
+                            className="mb-1 block text-[12px] font-medium"
+                            style={{ color: 'var(--aurora-text-secondary)' }}
                           >
-                            Searching products...
-                          </div>
-                        ) : searchResults.length ? (
-                          searchResults.map((product) => (
-                            <button
-                              key={product.id}
-                              type="button"
-                              onClick={() => handleProductPick(index, product.id)}
-                              className="block w-full px-3 py-2 text-left text-[13px] transition hover:bg-brand-50 dark:hover:bg-slate-800"
-                              style={{ color: 'var(--aurora-text)' }}
-                              aria-label={`Select ${productLabel(product)} for line ${index + 1}`}
-                            >
-                              <span className="block font-medium">{productLabel(product)}</span>
-                              <span
-                                className="block text-[11px]"
+                            Category
+                          </span>
+                          <select
+                            value={selectedCategoryId}
+                            onChange={(event) => handleCategoryFilter(index, event.target.value)}
+                            className={fieldClass}
+                            aria-label={`Line ${index + 1} category filter`}
+                          >
+                            <option value="">All categories</option>
+                            {categoryOptions.map((category) => (
+                              <option key={category.id} value={category.id}>
+                                {category.parentCategory?.name
+                                  ? `${category.parentCategory.name} / ${category.name}`
+                                  : category.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="block">
+                          <span
+                            className="mb-1 block text-[12px] font-medium"
+                            style={{ color: 'var(--aurora-text-secondary)' }}
+                          >
+                            Find Product
+                          </span>
+                          <input
+                            value={query}
+                            onChange={(event) => handleProductSearch(index, event.target.value)}
+                            className={fieldClass}
+                            placeholder="Search name, category, family, supplier, code, SKU, barcode"
+                            aria-label={`Line ${index + 1} find product`}
+                          />
+                        </label>
+                        {trimmedQuery && (
+                          <div
+                            className="max-h-56 overflow-y-auto rounded-lg border"
+                            style={{
+                              borderColor: 'var(--aurora-border)',
+                              background: 'var(--aurora-card)',
+                            }}
+                            role="group"
+                            aria-label={`Line ${index + 1} product search results`}
+                          >
+                            {productSearchLoading && !searchResults.length ? (
+                              <div
+                                className="px-3 py-2 text-[12px]"
                                 style={{ color: 'var(--aurora-text-muted)' }}
                               >
-                                {product.category?.name ?? 'Uncategorized'}
-                                {product.productFamily?.name
-                                  ? ` | Family: ${
-                                      product.productFamily.brand
-                                        ? `${product.productFamily.brand} ${product.productFamily.name}`
-                                        : product.productFamily.name
-                                    }`
-                                  : ''}
-                                {productSupplierLabel(product)
-                                  ? ` | Suppliers: ${productSupplierLabel(product)}`
-                                  : ''}
-                                {product.baseUnit?.symbol
-                                  ? ` | Unit: ${product.baseUnit.symbol}`
-                                  : ''}
-                                {defaultPriceForProduct(product, variant) > 0
-                                  ? ` | ${money(defaultPriceForProduct(product, variant), currency)}`
-                                  : ''}
-                                {productTracksInventory(product) &&
-                                availableAfterLocalAllocation(product, allocatedByProductId) != null
-                                  ? ` | Available: ${quantity(
-                                      Math.max(
-                                        0,
-                                        availableAfterLocalAllocation(
-                                          product,
-                                          allocatedByProductId,
-                                        ) ?? 0,
-                                      ),
-                                    )}`
-                                  : ''}
-                              </span>
-                            </button>
-                          ))
-                        ) : (
-                          <div
-                            className="px-3 py-2 text-[12px]"
-                            style={{ color: 'var(--aurora-text-muted)' }}
-                          >
-                            No matching products
+                                Searching products...
+                              </div>
+                            ) : searchResults.length ? (
+                              searchResults.map((product) => (
+                                <button
+                                  key={product.id}
+                                  type="button"
+                                  onClick={() => handleProductPick(index, product.id)}
+                                  className="block w-full px-3 py-2 text-left text-[13px] transition hover:bg-brand-50 dark:hover:bg-slate-800"
+                                  style={{ color: 'var(--aurora-text)' }}
+                                  aria-label={`Select ${productLabel(product)} for line ${index + 1}`}
+                                >
+                                  <span className="block font-medium">{productLabel(product)}</span>
+                                  <span
+                                    className="block text-[11px]"
+                                    style={{ color: 'var(--aurora-text-muted)' }}
+                                  >
+                                    {product.category?.name ?? 'Uncategorized'}
+                                    {product.productFamily?.name
+                                      ? ` | Family: ${
+                                          product.productFamily.brand
+                                            ? `${product.productFamily.brand} ${product.productFamily.name}`
+                                            : product.productFamily.name
+                                        }`
+                                      : ''}
+                                    {productSupplierLabel(product)
+                                      ? ` | Suppliers: ${productSupplierLabel(product)}`
+                                      : ''}
+                                    {product.baseUnit?.symbol
+                                      ? ` | Unit: ${product.baseUnit.symbol}`
+                                      : ''}
+                                    {defaultPriceForProduct(product, variant) > 0
+                                      ? ` | ${money(defaultPriceForProduct(product, variant), currency)}`
+                                      : ''}
+                                    {productTracksInventory(product) &&
+                                    availableAfterLocalAllocation(product, allocatedByProductId) !=
+                                      null
+                                      ? ` | Available: ${quantity(
+                                          Math.max(
+                                            0,
+                                            availableAfterLocalAllocation(
+                                              product,
+                                              allocatedByProductId,
+                                            ) ?? 0,
+                                          ),
+                                        )}`
+                                      : ''}
+                                  </span>
+                                </button>
+                              ))
+                            ) : (
+                              <div
+                                className="px-3 py-2 text-[12px]"
+                                style={{ color: 'var(--aurora-text-muted)' }}
+                              >
+                                No matching products
+                              </div>
+                            )}
                           </div>
                         )}
-                      </div>
-                    )}
-                    <label className="block">
-                      <span
-                        className="mb-1 block text-[12px] font-medium"
-                        style={{ color: 'var(--aurora-text-secondary)' }}
-                      >
-                        Product *
-                      </span>
-                      <select
-                        value={line.productId}
-                        onChange={(event) => handleProductSelect(index, event.target.value)}
-                        className={fieldClass}
-                        disabled={!products.length}
-                        aria-label={`Line ${index + 1} product`}
-                      >
-                        <option value="">
-                          {products.length
-                            ? productOptions.length
-                              ? 'Select product'
-                              : 'No products in selected category'
-                            : 'No products loaded'}
-                        </option>
-                        {productOptions.map((product) => (
-                          <option key={product.id} value={product.id}>
-                            {productSelectLabel(product, variant, currency, allocatedByProductId)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {selectedProduct && (
-                      <div
-                        className="grid grid-cols-2 gap-2 rounded-lg border px-3 py-2 text-[12px]"
-                        style={{
-                          borderColor: 'var(--aurora-border)',
-                          background: 'var(--aurora-card)',
-                          color: 'var(--aurora-text-muted)',
-                        }}
-                      >
-                        <span>
-                          Code: {selectedProduct.productCode ?? selectedProduct.sku ?? '-'}
-                        </span>
-                        <span>Category: {selectedProduct.category?.name ?? '-'}</span>
-                        <span>
-                          Family:{' '}
-                          {selectedProduct.productFamily?.name
-                            ? selectedProduct.productFamily.brand
-                              ? `${selectedProduct.productFamily.brand} ${selectedProduct.productFamily.name}`
-                              : selectedProduct.productFamily.name
-                            : '-'}
-                        </span>
-                        <span>Suppliers: {productSupplierLabel(selectedProduct) || '-'}</span>
-                        <span>
-                          Unit:{' '}
-                          {selectedProduct.baseUnit?.symbol ??
-                            selectedProduct.baseUnit?.name ??
-                            '-'}
-                        </span>
-                        <span>
-                          Default:{' '}
-                          {defaultPriceForProduct(selectedProduct, variant)
-                            ? money(defaultPriceForProduct(selectedProduct, variant), currency)
-                            : '-'}
-                        </span>
-                        <span>
-                          Available stock:{' '}
-                          {lineTracksStock ? quantity(selectedAvailable) : 'Not tracked'}
-                        </span>
-                        <span>
-                          Cost:{' '}
-                          {lineTracksStock && effectiveCost != null
-                            ? money(effectiveCost, currency)
-                            : lineTracksStock
-                              ? 'Missing'
-                              : 'Not tracked'}
-                        </span>
-                        <span>Quantity entered: {quantity(numberOrZero(line.qty))}</span>
-                        <span
-                          className={lineHasStockError ? 'text-red-600' : ''}
-                          style={lineHasStockError ? undefined : { color: 'var(--aurora-text)' }}
-                        >
-                          Remaining after sale:{' '}
-                          {lineTracksStock ? quantity(remainingAfterSale) : 'Not tracked'}
-                        </span>
-                        <span
-                          className={lineHasProfitError ? 'text-red-600' : ''}
-                          style={lineHasProfitError ? undefined : { color: 'var(--aurora-text)' }}
-                        >
-                          Margin:{' '}
-                          {marginPreview == null
-                            ? lineTracksStock
-                              ? 'Missing'
-                              : 'Not tracked'
-                            : `${marginPreview.toFixed(2)}%`}
-                        </span>
-                      </div>
-                    )}
-                    {lineHasStockError && selectedProduct && (
-                      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
-                        {productLabel(selectedProduct)} has {quantity(selectedAvailable)} available,
-                        but this order uses {quantity(productAllocated)} across its lines.
-                      </div>
-                    )}
-                    {lineHasProfitError && selectedProduct && (
-                      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
-                        {effectiveCost == null
-                          ? `${productLabel(selectedProduct)} is missing purchase/average cost and cannot be sold.`
-                          : `${productLabel(selectedProduct)} must sell above cost ${money(effectiveCost, currency)}.`}
-                      </div>
-                    )}
+                        <label className="block">
+                          <span
+                            className="mb-1 block text-[12px] font-medium"
+                            style={{ color: 'var(--aurora-text-secondary)' }}
+                          >
+                            Product *
+                          </span>
+                          <select
+                            value={line.productId}
+                            onChange={(event) => handleProductSelect(index, event.target.value)}
+                            className={fieldClass}
+                            disabled={!products.length}
+                            aria-label={`Line ${index + 1} product`}
+                          >
+                            <option value="">
+                              {products.length
+                                ? productOptions.length
+                                  ? 'Select product'
+                                  : 'No products in selected category'
+                                : 'No products loaded'}
+                            </option>
+                            {productOptions.map((product) => (
+                              <option key={product.id} value={product.id}>
+                                {productSelectLabel(
+                                  product,
+                                  variant,
+                                  currency,
+                                  allocatedByProductId,
+                                )}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        {selectedProduct && (
+                          <div
+                            className="grid grid-cols-2 gap-2 rounded-lg border px-3 py-2 text-[12px]"
+                            style={{
+                              borderColor: 'var(--aurora-border)',
+                              background: 'var(--aurora-card)',
+                              color: 'var(--aurora-text-muted)',
+                            }}
+                          >
+                            <span>
+                              Code: {selectedProduct.productCode ?? selectedProduct.sku ?? '-'}
+                            </span>
+                            <span>Category: {selectedProduct.category?.name ?? '-'}</span>
+                            <span>
+                              Family:{' '}
+                              {selectedProduct.productFamily?.name
+                                ? selectedProduct.productFamily.brand
+                                  ? `${selectedProduct.productFamily.brand} ${selectedProduct.productFamily.name}`
+                                  : selectedProduct.productFamily.name
+                                : '-'}
+                            </span>
+                            <span>Suppliers: {productSupplierLabel(selectedProduct) || '-'}</span>
+                            <span>
+                              Unit:{' '}
+                              {selectedProduct.baseUnit?.symbol ??
+                                selectedProduct.baseUnit?.name ??
+                                '-'}
+                            </span>
+                            <span>
+                              Default:{' '}
+                              {defaultPriceForProduct(selectedProduct, variant)
+                                ? money(defaultPriceForProduct(selectedProduct, variant), currency)
+                                : '-'}
+                            </span>
+                            <span>
+                              Available stock:{' '}
+                              {lineTracksStock ? quantity(selectedAvailable) : 'Not tracked'}
+                            </span>
+                            <span>
+                              Cost:{' '}
+                              {lineTracksStock && effectiveCost != null
+                                ? money(effectiveCost, currency)
+                                : lineTracksStock
+                                  ? 'Missing'
+                                  : 'Not tracked'}
+                            </span>
+                            <span>Quantity entered: {quantity(numberOrZero(line.qty))}</span>
+                            <span
+                              className={lineHasStockError ? 'text-red-600' : ''}
+                              style={
+                                lineHasStockError ? undefined : { color: 'var(--aurora-text)' }
+                              }
+                            >
+                              Remaining after sale:{' '}
+                              {lineTracksStock ? quantity(remainingAfterSale) : 'Not tracked'}
+                            </span>
+                            <span
+                              className={lineHasProfitError ? 'text-red-600' : ''}
+                              style={
+                                lineHasProfitError ? undefined : { color: 'var(--aurora-text)' }
+                              }
+                            >
+                              Margin:{' '}
+                              {marginPreview == null
+                                ? lineTracksStock
+                                  ? 'Missing'
+                                  : 'Not tracked'
+                                : `${marginPreview.toFixed(2)}%`}
+                            </span>
+                          </div>
+                        )}
+                        {lineHasStockError && selectedProduct && (
+                          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+                            {productLabel(selectedProduct)} has {quantity(selectedAvailable)}{' '}
+                            available, but this order uses {quantity(productAllocated)} across its
+                            lines.
+                          </div>
+                        )}
+                        {lineHasProfitError && selectedProduct && (
+                          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+                            {effectiveCost == null
+                              ? `${productLabel(selectedProduct)} is missing purchase/average cost and cannot be sold.`
+                              : `${productLabel(selectedProduct)} must sell above cost ${money(effectiveCost, currency)}.`}
+                          </div>
+                        )}
                       </>
                     )}
                   </div>

@@ -14,13 +14,7 @@ import {
   StatusBadge,
   showToast,
 } from '@/components/ui';
-import {
-  backendGet,
-  backendList,
-  backendPage,
-  backendPatch,
-  backendPost,
-} from '@/lib/api-client';
+import { backendGet, backendList, backendPage, backendPatch, backendPost } from '@/lib/api-client';
 import {
   OrderLineEditor,
   mergeOrderProductOptions,
@@ -588,7 +582,9 @@ function QuotationModal({
             label="Customer"
             value={form.customerId}
             onChange={(event) => setField('customerId', event.target.value)}
-            placeholder={form.branchId ? 'Select customer (or enter name below)' : 'Select branch first'}
+            placeholder={
+              form.branchId ? 'Select customer (or enter name below)' : 'Select branch first'
+            }
             disabled={!form.branchId}
           >
             {customers.map((customer) => (
@@ -679,7 +675,11 @@ type QuotationAction = 'send' | 'accept' | 'reject' | 'convert';
 
 const STATUS_ACTIONS: Record<
   string,
-  { action: QuotationAction; label: string; variant: 'primary' | 'secondary' | 'ghost' | 'danger' }[]
+  {
+    action: QuotationAction;
+    label: string;
+    variant: 'primary' | 'secondary' | 'ghost' | 'danger';
+  }[]
 > = {
   DRAFT: [{ action: 'send', label: 'Send', variant: 'primary' }],
   SENT: [

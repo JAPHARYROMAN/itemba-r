@@ -59,15 +59,27 @@ function normalizeLines(lines: any[]) {
 }
 
 function calcLines(lines: any[]) {
-  let subtotal = 0, totalDiscount = 0, totalTax = 0;
+  let subtotal = 0,
+    totalDiscount = 0,
+    totalTax = 0;
   const computed = lines.map((l) => {
-    const qty = Number(l.quantity), price = Number(l.unitPrice);
-    const discount = Number(l.discountAmount ?? 0), tax = Number(l.taxAmount ?? 0);
+    const qty = Number(l.quantity),
+      price = Number(l.unitPrice);
+    const discount = Number(l.discountAmount ?? 0),
+      tax = Number(l.taxAmount ?? 0);
     const lineTotal = qty * price - discount + tax;
-    subtotal += qty * price; totalDiscount += discount; totalTax += tax;
+    subtotal += qty * price;
+    totalDiscount += discount;
+    totalTax += tax;
     return { ...l, lineTotal };
   });
-  return { computed, subtotal, totalDiscount, totalTax, totalAmount: subtotal - totalDiscount + totalTax };
+  return {
+    computed,
+    subtotal,
+    totalDiscount,
+    totalTax,
+    totalAmount: subtotal - totalDiscount + totalTax,
+  };
 }
 
 @Injectable()
@@ -177,7 +189,16 @@ export class QuotationsService {
             email: true,
             website: true,
             logoUrl: true,
-            group: { select: { name: true, code: true, address: true, phone: true, email: true, website: true } },
+            group: {
+              select: {
+                name: true,
+                code: true,
+                address: true,
+                phone: true,
+                email: true,
+                website: true,
+              },
+            },
             profile: {
               select: {
                 registeredName: true,
@@ -192,7 +213,17 @@ export class QuotationsService {
           },
         },
         branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
-        customer: { select: { id: true, name: true, customerCode: true, phone: true, email: true, address: true, contactPerson: true } },
+        customer: {
+          select: {
+            id: true,
+            name: true,
+            customerCode: true,
+            phone: true,
+            email: true,
+            address: true,
+            contactPerson: true,
+          },
+        },
         lines: {
           include: {
             product: { select: { id: true, name: true, sku: true, productCode: true } },
@@ -212,14 +243,18 @@ export class QuotationsService {
     if (!['DRAFT', 'SENT'].includes(existing.status as string)) {
       throw new BadRequestException('Can only update DRAFT or SENT quotations');
     }
-    let subtotal = existing.subtotal, discountAmount = existing.discountAmount,
-        taxAmount = existing.taxAmount, totalAmount = existing.totalAmount;
+    let subtotal = existing.subtotal,
+      discountAmount = existing.discountAmount,
+      taxAmount = existing.taxAmount,
+      totalAmount = existing.totalAmount;
 
     await this.prisma.$transaction(async (tx) => {
       if (dto.lines?.length) {
         const calc = calcLines(normalizeLines(dto.lines));
-        subtotal = calc.subtotal as any; discountAmount = calc.totalDiscount as any;
-        taxAmount = calc.totalTax as any; totalAmount = calc.totalAmount as any;
+        subtotal = calc.subtotal as any;
+        discountAmount = calc.totalDiscount as any;
+        taxAmount = calc.totalTax as any;
+        totalAmount = calc.totalAmount as any;
         await tx.quotationLine.deleteMany({ where: { quotationId: id } });
         await tx.quotationLine.createMany({
           data: calc.computed.map((l) => ({
@@ -243,7 +278,9 @@ export class QuotationsService {
           ...(dto.customerId !== undefined && { customerId: dto.customerId }),
           ...(dto.customerName !== undefined && { customerName: dto.customerName }),
           ...(dto.quotationDate && { quotationDate: new Date(dto.quotationDate) }),
-          ...(dto.validUntil !== undefined && { validUntil: dto.validUntil ? new Date(dto.validUntil) : null }),
+          ...(dto.validUntil !== undefined && {
+            validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
+          }),
           ...(dto.currency && { currency: dto.currency as any }),
           ...(dto.notes !== undefined && { notes: dto.notes }),
           ...(dto.lines?.length && { subtotal, discountAmount, taxAmount, totalAmount }),
@@ -261,7 +298,13 @@ export class QuotationsService {
     return this.findOne(id, user);
   }
 
-  private async changeStatus(id: string, from: string | string[], to: string, user: AuthUser, extra?: any) {
+  private async changeStatus(
+    id: string,
+    from: string | string[],
+    to: string,
+    user: AuthUser,
+    extra?: any,
+  ) {
     const userId = user.id;
     const existing = await this.findOne(id, user);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
@@ -304,7 +347,8 @@ export class QuotationsService {
     const userId = user.id;
     const quotation = await this.findOne(id, user);
     await this.companyScope.assertCanAccessCompany(user, quotation.companyId, AccessLevel.WRITE);
-    if (quotation.status !== 'ACCEPTED') throw new BadRequestException('Only ACCEPTED quotations can be converted');
+    if (quotation.status !== 'ACCEPTED')
+      throw new BadRequestException('Only ACCEPTED quotations can be converted');
 
     // Ad-hoc lines stop here, and this is the boundary the whole feature turns on.
     // A quotation may name something the catalogue does not carry — that is the
@@ -502,7 +546,8 @@ export class QuotationsService {
     const userId = user.id;
     const existing = await this.findOne(id, user);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
-    if (existing.status !== 'DRAFT') throw new BadRequestException('Only DRAFT quotations can be deleted');
+    if (existing.status !== 'DRAFT')
+      throw new BadRequestException('Only DRAFT quotations can be deleted');
     await this.prisma.quotation.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.auditLogs.log({
       action: 'QUOTATION_DELETE',
